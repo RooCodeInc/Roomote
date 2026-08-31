@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { RunStatus } from '@roomote/types';
 import {
   act,
   fireEvent,
@@ -11,6 +12,7 @@ import {
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
 import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
 import { useOpenSessionTaskPanel } from './session-task-panel-context';
+import { useSessionRunningTaskCount } from './session-task-panel-context';
 
 const {
   useMediaQueryMock,
@@ -236,6 +238,7 @@ function renderWorkspace({
 
   return {
     ...result,
+    queryClient,
     resizeToMobile() {
       mediaQuery.matches = true;
       act(() =>
@@ -253,6 +256,11 @@ function OpenNestedTask() {
       Open child
     </button>
   );
+}
+
+function RunningTaskCount() {
+  const count = useSessionRunningTaskCount();
+  return <output aria-label="Running task count">{count}</output>;
 }
 
 describe('SessionWorkspace', () => {
@@ -821,6 +829,7 @@ describe('SessionWorkspace', () => {
         {
           taskId: 'fast-task-1',
           title: 'Fast execution',
+          latestRun: null,
           artifacts: [
             {
               id: 'fast-artifact-1',
@@ -844,6 +853,55 @@ describe('SessionWorkspace', () => {
       }),
     ).toBeVisible();
     expect(screen.queryByText('No artifacts in this session yet.')).toBeNull();
+  });
+
+  it('counts only canonically running tasks and updates when they finish', async () => {
+    const task = (
+      taskId: string,
+      status: RunStatus,
+      taskPhase: string | null,
+    ): NonNullable<SessionInfo['taskCards']>[number] => ({
+      taskId,
+      title: taskId,
+      latestRun: {
+        status,
+        taskPhase,
+      },
+      artifacts: [],
+    });
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      children: <RunningTaskCount />,
+      sessionOverride: { taskSource: 'fast', taskCards: [] },
+      queriedFastTasks: [
+        task('booting', RunStatus.Pending, null),
+        task('working', RunStatus.Running, 'running'),
+        task('waiting', RunStatus.Running, 'waiting_for_user_input'),
+        task('finished', RunStatus.Completed, null),
+      ],
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('status', { name: 'Running task count' }),
+      ).toHaveTextContent('2'),
+    );
+
+    act(() => {
+      queryClient.setQueryData(
+        ['fastSessions', 'tasks', session.id],
+        [
+          task('booting', RunStatus.Completed, null),
+          task('working', RunStatus.Idle, 'waiting_for_prompt'),
+        ],
+      );
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('status', { name: 'Running task count' }),
+      ).toHaveTextContent('0'),
+    );
   });
 
   it('opens delegated tasks in the existing session side-panel slot', () => {

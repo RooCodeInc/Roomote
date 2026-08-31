@@ -11,6 +11,7 @@ import {
   FastSessionTranscript,
   pendingResponseReducer,
 } from './FastSessionTranscript';
+import { SessionRunningTaskCountContext } from './session-task-panel-context';
 
 const {
   replyMutate,
@@ -95,7 +96,8 @@ vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
   }),
 }));
 
-vi.mock('./session-task-panel-context', () => ({
+vi.mock('./session-task-panel-context', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./session-task-panel-context')>()),
   useOpenSessionTaskPanel: () => openTaskPanel,
 }));
 
@@ -340,6 +342,127 @@ describe('FastSessionTranscript', () => {
         }).pendingAfter,
       ).toBeNull();
     });
+  });
+
+  it.each([
+    [1, '1 task running'],
+    [2, '2 tasks running'],
+  ])('shows the running task count as %s', (runningTaskCount, label) => {
+    render(
+      <SessionRunningTaskCountContext.Provider value={runningTaskCount}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent(label);
+    expect(status.closest('.chat-reasoning-message')).toHaveClass(
+      'is-assistant',
+    );
+  });
+
+  it('removes the running task indicator when the count returns to zero', () => {
+    const { rerender } = render(
+      <SessionRunningTaskCountContext.Provider value={1}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    rerender(
+      <SessionRunningTaskCountContext.Provider value={0}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+
+    expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('shows the task indicator only after the session response finishes', () => {
+    render(
+      <SessionRunningTaskCountContext.Provider value={1}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+
+    expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Tasks launched',
+            ts: 2,
+          }),
+        ],
+      });
+    });
+
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
   });
 
   it('shows Thinking while the initial Fast turn is awaiting output', () => {

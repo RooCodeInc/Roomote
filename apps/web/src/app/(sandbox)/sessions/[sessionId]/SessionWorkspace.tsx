@@ -5,7 +5,12 @@ import dynamic from 'next/dynamic';
 import { useCallback, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { getReasoningEffortLabel, type ReasoningEffort } from '@roomote/types';
+import {
+  getReasoningEffortLabel,
+  isActivelyRunningTask,
+  type ReasoningEffort,
+  type RunStatus,
+} from '@roomote/types';
 
 import {
   formatInferenceCost,
@@ -65,7 +70,10 @@ import {
   useSandboxLayout,
 } from '../../use-sandbox-layout';
 import { NestedTaskSidePanel } from './NestedTaskSidePanel';
-import { OpenSessionTaskPanelContext } from './session-task-panel-context';
+import {
+  OpenSessionTaskPanelContext,
+  SessionRunningTaskCountContext,
+} from './session-task-panel-context';
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
 import { useArtifactByPath } from '../../task/[taskId]/hooks/use-artifact-by-path';
 
@@ -98,7 +106,7 @@ type SessionTaskSummary = {
   canAccessDetails?: boolean;
   latestRun: {
     id: number;
-    status: string;
+    status: RunStatus;
     taskPhase: string | null;
     error: string | null;
     result: unknown;
@@ -146,7 +154,15 @@ export type SessionInfo = {
   status: string | null;
   tasks: SessionTaskSummary[];
   taskSource?: 'unified' | 'fast';
-  taskCards?: Array<Pick<SessionTaskSummary, 'taskId' | 'title' | 'artifacts'>>;
+  taskCards?: Array<
+    Pick<SessionTaskSummary, 'taskId' | 'title' | 'artifacts'> & {
+      inferenceCostMicroUsd?: number;
+      latestRun: Pick<
+        NonNullable<SessionTaskSummary['latestRun']>,
+        'status' | 'taskPhase'
+      > | null;
+    }
+  >;
 };
 
 function SessionArtifactCard({
@@ -805,6 +821,9 @@ export function SessionWorkspace({
   const fastTasks = currentFastTasks ?? session.taskCards ?? [];
   const taskCards = isFastTaskSource ? fastTasks : sessionTasks;
   const artifactTasks = isFastTaskSource ? fastTasks : sessionTasks;
+  const runningTaskCount = taskCards.filter((task) =>
+    isActivelyRunningTask(task.latestRun?.status, task.latestRun?.taskPhase),
+  ).length;
   const selectedTaskId = searchParams.get('task');
   const selectedTask = sessionTasks.find(
     (task) => task.taskId === selectedTaskId,
@@ -914,7 +933,11 @@ export function SessionWorkspace({
       >
         <ResponsiveWorkspacePanels
           isPanelOpen={panelOpen}
-          main={children}
+          main={
+            <SessionRunningTaskCountContext.Provider value={runningTaskCount}>
+              {children}
+            </SessionRunningTaskCountContext.Provider>
+          }
           panel={panelContent}
         />
       </WorkspaceSurface>
