@@ -10,6 +10,13 @@ x-roomote-env: &roomote-env
   NODE_ENV: development
   R_APP_ENV: development
   ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
+  # Trusted local-only defaults. App ports stay bound to host loopback below;
+  # the production overlay replaces these values and disables the override.
+  ROOMOTE_ALLOW_INSECURE_LOCAL_KEYS: '1'
+  R_AUTO_GENERATE_KEYS: ${R_AUTO_GENERATE_KEYS:-true}
+  DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-roomote-local-admin}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:-local-roomote-encryption-key-0001}
+  ARTIFACT_SIGNING_KEY: ${ARTIFACT_SIGNING_KEY:-local-roomote-artifact-signing-key-1}
   HOST: 0.0.0.0
   DATABASE_URL: postgres://postgres:password@postgres:5432/roomote_development
   REDIS_URL: redis://redis:6379

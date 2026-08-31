@@ -98,36 +98,17 @@ ENV RELEASE_VERSION=${RELEASE_VERSION}
 ENV RELEASE_PRODUCT_VERSION=${RELEASE_PRODUCT_VERSION}
 
 # ---------------------------------------------------------------------------
-# web: Next.js standalone build. The placeholder env values only satisfy
-# build-time env validation; real values come from the runtime environment.
+# web: Next.js standalone build. Runtime instrumentation validates the real
+# container environment; the build itself must not need credential-shaped
+# placeholders.
 # ---------------------------------------------------------------------------
 FROM base AS build-web
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV PORT=3000
-ENV R_APP_URL=http://localhost:13000
-ENV TRPC_URL=http://api:3001
-ENV DATABASE_URL=postgres://postgres:password@postgres:5432/roomote_development
-ENV REDIS_URL=redis://redis:6379
-ENV S3_ENDPOINT=http://minio:9000
-ENV S3_PRESIGN_ENDPOINT=http://minio:9000
-ENV S3_REGION=us-east-1
-ENV S3_ACCESS_KEY_ID=roomote
-ENV S3_SECRET_ACCESS_KEY=roomote-local-artifacts-password
-ENV S3_BUCKET_ARTIFACTS=roomote-artifacts
-ENV JOB_AUTH_PRIVATE_KEY=local-self-host-build-job-auth-private-key
-ENV JOB_AUTH_PUBLIC_KEY=local-self-host-build-job-auth-public-key
-ENV PREVIEW_AUTH_PRIVATE_KEY=local-self-host-build-preview-auth-private-key
-ENV PREVIEW_AUTH_PUBLIC_KEY=local-self-host-build-preview-auth-public-key
-ENV DASHBOARD_PASSWORD=roomote-local-admin
-ENV ENCRYPTION_KEY=local-roomote-encryption-key-0001
-ENV ARTIFACT_SIGNING_KEY=local-roomote-artifact-signing-key-1
-ENV PREVIEW_PROXY_BASE_URL=http://localhost:18081
-ENV PREVIEW_DOMAINS=localhost,127.0.0.1,roomotepreview.localhost
 
 WORKDIR /roomote/apps/web
-RUN pnpm build
+RUN SKIP_ENV_VALIDATION=1 pnpm build
 
 # Strip sourcemaps from the build output that ships in the runtime image.
 # Sourcemaps embed the original source via sourcesContent, so they must never
