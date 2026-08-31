@@ -8,6 +8,10 @@ export const AUTOMATION_RESULT_ACTIONS_BLOCK_ID =
   'roomote_automation_result_actions';
 export const AUTOMATION_RESULT_HEADER_BLOCK_ID =
   'roomote_automation_result_header';
+// Kept for removing the settings accessory from messages created before the
+// Configure button returned to the actions row.
+const AUTOMATION_RESULT_SETTINGS_BLOCK_ID =
+  'roomote_automation_result_settings';
 
 const MAX_CONTAINER_CHILDREN = 10;
 const MAX_MESSAGE_BLOCKS = 50;
@@ -103,9 +107,17 @@ export function buildAutomationResultBlocks(params: {
       ? [actionElements, [configureAction]]
       : [[...actionElements, ...(configureAction ? [configureAction] : [])]];
 
-  const contentBlocks = params.contentBlocks
-    ? normalizeContentBlocks(params.contentBlocks)
-    : buildAutomationResultContentBlocks(params.contentText ?? '');
+  const contentBlocks = (
+    params.contentBlocks
+      ? normalizeContentBlocks(params.contentBlocks)
+      : buildAutomationResultContentBlocks(params.contentText ?? '')
+  ).filter(
+    (block) =>
+      !(
+        'block_id' in block &&
+        block.block_id === AUTOMATION_RESULT_SETTINGS_BLOCK_ID
+      ),
+  );
 
   if (!contentBlocks.some((block) => block.type === 'markdown')) {
     const groups: SlackBlock[][] = [];
