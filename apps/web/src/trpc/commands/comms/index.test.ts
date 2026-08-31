@@ -785,6 +785,62 @@ describe('comms commands', () => {
       );
     });
 
+    it("adopts the org's only existing inbox instead of creating a second", async () => {
+      mockAgentMailListInboxes.mockResolvedValue({
+        inboxes: [{ inbox_id: 'existing@agentmail.to' }],
+      });
+      mockAgentMailCreateWebhook.mockResolvedValue({
+        webhook_id: 'wh-1',
+        url: expectedWebhookUrl,
+        secret: 'whsec_adopted',
+      });
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+          values: { R_AGENTMAIL_API_KEY: 'am-key' },
+        }),
+      ).resolves.toMatchObject({
+        agentmail: { inboxAddress: 'existing@agentmail.to' },
+      });
+
+      expect(mockAgentMailCreateInbox).not.toHaveBeenCalled();
+    });
+
+    it('asks the operator to choose when the org has several inboxes', async () => {
+      mockAgentMailListInboxes.mockResolvedValue({
+        inboxes: [
+          { inbox_id: 'one@agentmail.to' },
+          { inbox_id: 'two@agentmail.to' },
+        ],
+      });
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+          values: { R_AGENTMAIL_API_KEY: 'am-key' },
+        }),
+      ).rejects.toThrow(/2 inboxes.*one@agentmail\.to, two@agentmail\.to/s);
+      expect(mockAgentMailCreateInbox).not.toHaveBeenCalled();
+    });
+
+    it('names the failing step when a later call is refused', async () => {
+      mockAgentMailCreateInbox.mockRejectedValue(
+        new Error(
+          'AgentMail POST /v0/inboxes failed (403): {"message":"Forbidden"}',
+        ),
+      );
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+          values: { R_AGENTMAIL_API_KEY: 'am-key' },
+        }),
+      ).rejects.toThrow(
+        /refused permission while creating an inbox \(403 Forbidden\)/,
+      );
+    });
+
     it('validates the key, provisions an inbox and webhook, and persists the result', async () => {
       mockAgentMailCreateInbox.mockResolvedValue({
         inbox_id: `${expectedUsername}@agentmail.to`,

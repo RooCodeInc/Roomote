@@ -643,7 +643,14 @@ function createAgentMailApiClient(apiKey: string) {
 }
 
 /** Map AgentMail API / network failures into admin-facing setup copy. */
-function classifyAgentMailSetupError(error: unknown): string {
+function classifyAgentMailSetupError(
+  error: unknown,
+  operation:
+    | 'validating the API key'
+    | 'reading the inbox'
+    | 'creating an inbox'
+    | 'configuring the webhook' = 'validating the API key',
+): string {
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
   const errorName = error instanceof Error ? error.name : '';
@@ -677,10 +684,12 @@ function classifyAgentMailSetupError(error: unknown): string {
     lower.includes('forbidden') ||
     lower.includes('invalid api key')
   ) {
-    return 'AgentMail rejected this API key. Copy a fresh API key from the AgentMail console and save again.';
+    return operation === 'validating the API key'
+      ? 'AgentMail rejected this API key. Copy a fresh API key from the AgentMail console and save again.'
+      : `AgentMail refused permission while ${operation} (${message.includes('(403)') ? '403 Forbidden' : '401 Unauthorized'}). The key may lack that permission or your AgentMail plan may not allow it — enter an existing inbox address of your own, or create a key with full permissions.`;
   }
 
-  return message.trim() || 'Could not connect to AgentMail.';
+  return `AgentMail failed while ${operation}: ${message.trim() || 'could not connect.'}`;
 }
 
 /**
@@ -820,10 +829,20 @@ async function reconcileAgentMailSetup(input: {
   // Prove the key authenticates with the cheapest read before touching
   // anything else, so a bad key fails with a clear message instead of a
   // confusing inbox or webhook error.
+  let orgInboxes: string[] = [];
   try {
-    await client.listInboxes();
+    const listed = await client.listInboxes();
+    orgInboxes = (listed.inboxes ?? [])
+      .map((inbox) =>
+        normalizeAgentMailInboxAddress(
+          typeof inbox.inbox_id === 'string' ? inbox.inbox_id : null,
+        ),
+      )
+      .filter((address): address is string => Boolean(address));
   } catch (error) {
-    throw new Error(classifyAgentMailSetupError(error));
+    throw new Error(
+      classifyAgentMailSetupError(error, 'validating the API key'),
+    );
   }
 
   const requestedInboxId =
@@ -844,8 +863,17 @@ async function reconcileAgentMailSetup(input: {
           `AgentMail could not find the inbox ${requestedInboxId} with this API key. Check the inbox email address, or clear it to let Roomote create one.`,
         );
       }
-      throw new Error(classifyAgentMailSetupError(error));
+      throw new Error(classifyAgentMailSetupError(error, 'reading the inbox'));
     }
+  } else if (orgInboxes.length === 1) {
+    // The org already has exactly one inbox (the console provisions one at
+    // signup): adopt it instead of trying to create a second — free-tier
+    // plans often cannot, and a surprise extra inbox helps nobody.
+    inboxAddress = orgInboxes[0]!;
+  } else if (orgInboxes.length > 1) {
+    throw new Error(
+      `This AgentMail account has ${orgInboxes.length} inboxes. Enter the one Roomote should use in the Inbox Email Address field: ${orgInboxes.join(', ')}`,
+    );
   } else {
     const proposal = buildAgentMailInboxProposal(Env.R_APP_URL);
     try {
@@ -867,7 +895,7 @@ async function reconcileAgentMailSetup(input: {
           `The email address ${proposal.username} is already taken at AgentMail. Enter an inbox email address of your own in the Inbox Email Address field and save again.`,
         );
       }
-      throw new Error(classifyAgentMailSetupError(error));
+      throw new Error(classifyAgentMailSetupError(error, 'creating an inbox'));
     }
   }
 
@@ -922,7 +950,9 @@ async function reconcileAgentMailSetup(input: {
       webhookSecret = (await createDeploymentWebhook()) ?? webhookSecret;
     }
   } catch (error) {
-    throw new Error(classifyAgentMailSetupError(error));
+    throw new Error(
+      classifyAgentMailSetupError(error, 'configuring the webhook'),
+    );
   }
 
   return { inboxAddress, webhookUrl, webhookSecret };
