@@ -174,6 +174,7 @@ export {
   SettingsIcon,
   Share2,
   Shapes,
+  SlidersHorizontal,
   Slack,
   Slash,
   Smile,

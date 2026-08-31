@@ -9,7 +9,11 @@ import {
 
 import { parseTimePeriodParam } from '@/types';
 import { authorize } from '@/lib/server/auth-context';
-import { getSessions, type SessionScope } from '@/lib/server/sessions';
+import {
+  getSessions,
+  getSessionSources,
+  type SessionScope,
+} from '@/lib/server/sessions';
 import { Empty, EmptyDescription, EmptyHeader } from '@/components/system';
 
 import { SessionsFilters } from './SessionsFilters';
@@ -53,18 +57,21 @@ export default async function SessionsPage({
   const view = params.view === 'board' ? 'board' : 'list';
 
   const timePeriod = parseTimePeriodParam(period ?? null, 'all');
-  const result = await getSessions(authorizedUser, {
-    before,
-    user,
-    period: timePeriod,
-    scope,
-    status,
-    q,
-    repository: params.repository,
-    pullRequest: params.pullRequest,
-    source: params.source,
-    model: params.model,
-  });
+  const [result, sources] = await Promise.all([
+    getSessions(authorizedUser, {
+      before,
+      user,
+      period: timePeriod,
+      scope,
+      status,
+      q,
+      repository: params.repository,
+      pullRequest: params.pullRequest,
+      source: params.source,
+      model: params.model,
+    }),
+    getSessionSources(authorizedUser),
+  ]);
   const olderParams = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
     if (value && key !== 'before') olderParams.set(key, value);
@@ -85,6 +92,7 @@ export default async function SessionsPage({
           repository={params.repository ?? null}
           pullRequest={params.pullRequest ?? null}
           source={params.source ?? 'all'}
+          sourceOptions={sources}
           model={params.model ?? null}
         />
       </div>
@@ -117,6 +125,7 @@ export default async function SessionsPage({
                       <SessionCard
                         key={session.id}
                         session={session}
+                        viewerUserId={authorizedUser.userId}
                         query={q}
                       />
                     ))}
@@ -127,7 +136,12 @@ export default async function SessionsPage({
         ) : (
           <div className="divide-y divide-card">
             {result.sessions.map((session) => (
-              <SessionCard key={session.id} session={session} query={q} />
+              <SessionCard
+                key={session.id}
+                session={session}
+                viewerUserId={authorizedUser.userId}
+                query={q}
+              />
             ))}
           </div>
         )}

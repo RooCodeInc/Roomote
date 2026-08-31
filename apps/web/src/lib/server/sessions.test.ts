@@ -30,6 +30,7 @@ import {
   getLatestExternalSessionEvent,
   getSessionById,
   getSessionForTask,
+  getSessionSources,
   getSessions,
   getSessionTimeline,
   setSessionPinned,
@@ -98,6 +99,36 @@ describe('unified Session queries', () => {
     );
 
     expect(result.sessions.map((session) => session.id)).toEqual([included.id]);
+  });
+
+  it('lists only distinct visible sources available to the current user', async () => {
+    const owner = await userFactory.create();
+    const stranger = await userFactory.create();
+    await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      sourceSurface: 'web',
+    });
+    await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      sourceSurface: 'web',
+    });
+    await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      sourceSurface: 'slack',
+      archivedAt: new Date(),
+    });
+    await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: stranger.id,
+      sourceSurface: 'discord',
+    });
+
+    await expect(
+      getSessionSources({ userId: owner.id, isAdmin: false }),
+    ).resolves.toEqual(['web']);
   });
 
   it('aggregates direct and attached-task inference costs exactly once', async () => {
