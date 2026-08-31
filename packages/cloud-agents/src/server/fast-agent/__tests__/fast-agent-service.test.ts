@@ -66,6 +66,7 @@ const nativeToolNames = vi.hoisted(
 const fastAgentSessionPermissions = vi.hoisted(() => [
   { permission: 'task', pattern: '*', action: 'allow' },
 ]);
+const fastAgentSessionToolFilter = vi.hoisted(() => ({ task: true }));
 
 vi.mock('../fast-agent-session', () => ({
   appendFastAgentVisibleMessages: mocks.appendVisibleMessages,
@@ -97,6 +98,7 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('../../non-task-provider-usage', () => ({
   FAST_AGENT_SESSION_PERMISSIONS: fastAgentSessionPermissions,
+  FAST_AGENT_SESSION_TOOL_FILTER: fastAgentSessionToolFilter,
   NON_TASK_INFERENCE_SURFACES: {
     fastAgentQuestionAnswering: 'fast_agent',
   },
@@ -508,10 +510,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         directory: '/tmp/fast-native-tools',
         permission: fastAgentSessionPermissions,
         promptOnlySubagents: true,
-        tools: expect.objectContaining({
-          send_chat_reply: true,
-          task: true,
-        }),
+        tools: fastAgentSessionToolFilter,
       }),
     );
     expect(mocks.appendVisibleMessages).toHaveBeenCalledWith({
@@ -1510,20 +1509,25 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       answerFastAgentQuestion({ ...baseParams, adapter }),
     ).resolves.toBe('Subagent review completed.');
     expect(mocks.callIntegration).toHaveBeenCalledTimes(2);
+    expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
+      'conversation-1',
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'github' }),
+        expect.objectContaining({ id: 'roomote' }),
+      ]),
+    );
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.any(Object),
       expect.any(Object),
       expect.objectContaining({
         trackSessionTreeUsage: true,
-        tools: expect.objectContaining({
-          'github_*': true,
-          'roomote_*': true,
-        }),
+        tools: fastAgentSessionToolFilter,
       }),
     );
     expect(mocks.generateText.mock.calls[0]?.[2].tools).not.toHaveProperty(
       'integration_call',
     );
+    expect(mocks.generateText.mock.calls[0]?.[2].tools).not.toHaveProperty('*');
     expect(mocks.callIntegration).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       expect.arrayContaining([expect.objectContaining({ id: 'github' })]),

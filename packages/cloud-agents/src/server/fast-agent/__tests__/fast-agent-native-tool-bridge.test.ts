@@ -647,6 +647,7 @@ describe('Fast native OpenCode tool bridge', () => {
     const config = JSON.parse(
       await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
     ) as {
+      agent: { build: { tools: Record<string, boolean> } };
       mcp: Record<string, { url: string; headers: Record<string, string> }>;
     };
     const executor = vi.fn(async ({ args }) => ({ matches: [args.query] }));
@@ -656,6 +657,25 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(config.mcp.github!.headers.Authorization).not.toContain(
       runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN,
     );
+    expect(config.agent.build.tools).toMatchObject({
+      '*': false,
+      task: true,
+      'github_*': true,
+    });
+    const serverConfig = JSON.parse(
+      buildOpenCodeCliEnv(runtime.env, {
+        preserveReasoning: true,
+        promptOnlySubagents: true,
+      }).OPENCODE_CONFIG_CONTENT ?? '{}',
+    ) as {
+      agent: Record<string, { tools: Record<string, boolean> }>;
+    };
+    expect(serverConfig.agent.advisor!.tools).toMatchObject({
+      '*': true,
+      task: false,
+      roomote_manage_custom_automations: false,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: false,
+    });
     const unbind = bindFastAgentMcpToolExecutor(
       runtime.mcpCapability,
       executor,
