@@ -994,6 +994,8 @@ export async function answerFastAgentQuestion({
   let activeHumanSteerPoll = Promise.resolve();
   const injectedHumanFollowUpIds = new Set<string>();
   const humanFollowUpTurnSeqs = new Map<string, number>();
+  const injectedHumanFollowUpMessages: ModelMessage[] = [];
+  const injectedHumanFollowUpFiles: NonTaskPromptFile[] = [];
   const integrationCallSignatures = new Set<string>();
   const completedChatReactionSignatures = new Set<string>();
   const completedChatReplySignatures = new Set<string>();
@@ -1121,6 +1123,13 @@ export async function answerFastAgentQuestion({
       });
       if (signal?.aborted) return;
       injectedHumanFollowUpIds.add(row.id);
+      const injectedMessage = buildUserTextMessage(
+        normalizeThreadText(followUp.question),
+      );
+      injectedHumanFollowUpMessages.push(injectedMessage);
+      injectedHumanFollowUpFiles.push(
+        ...getFastAgentImageFiles(followUp.images ?? []),
+      );
       // Native steering starts a new human instruction boundary inside the
       // same OpenCode run. Prior tool results remain in-session, while local
       // duplicate guards reset so the user may intentionally repeat an action.
@@ -1129,9 +1138,7 @@ export async function answerFastAgentQuestion({
       completedChatReplySignatures.clear();
       completedTaskActions.clear();
       closed = false;
-      turnVisibleMessages.push(
-        buildUserTextMessage(normalizeThreadText(followUp.question)),
-      );
+      turnVisibleMessages.push(injectedMessage);
       await markFastAgentHumanFollowUpDelivered(row.id);
     }
   };
@@ -2672,8 +2679,14 @@ export async function answerFastAgentQuestion({
                   // Before tools run, rebuild from visible history rather than
                   // append the original turn to the failed session again.
                   openCodeSession.id = undefined;
-                  promptForAttempt = serializedBootstrapPrompt;
-                  imageFilesForAttempt = imageFiles;
+                  promptForAttempt = serializeFastAgentMessages([
+                    ...bootstrapMessages,
+                    ...injectedHumanFollowUpMessages,
+                  ]);
+                  imageFilesForAttempt = [
+                    ...imageFiles,
+                    ...injectedHumanFollowUpFiles,
+                  ];
                   promptKind = 'clean_retry_bootstrap';
                   attemptSessionPath = 'cold_rebuild';
                   diagnostics.recordSessionPath(attemptSessionPath);
