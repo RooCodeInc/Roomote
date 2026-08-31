@@ -892,6 +892,33 @@ slackMcp.post('/clear_reply_quote', async (c) => {
   return c.json({ success: true });
 });
 
+async function findSlackNotifierForLateBoundChannel(
+  channelId: string,
+): Promise<{ slack: SlackNotifier; teamId: string } | null> {
+  const installations = await db.query.slackInstallations.findMany({
+    columns: { botAccessToken: true, teamId: true },
+    where: eq(slackInstallations.isActive, true),
+  });
+  const matches = await Promise.all(
+    installations.map(async (installation) => {
+      const slack = new SlackNotifier(installation.botAccessToken);
+      return (await slack.isAppInChannel(channelId)) === true
+        ? { slack, teamId: installation.teamId }
+        : null;
+    }),
+  );
+  const matchingInstallations = matches.filter(
+    (
+      match,
+    ): match is {
+      slack: SlackNotifier;
+      teamId: string;
+    } => match !== null,
+  );
+
+  return matchingInstallations.length === 1 ? matchingInstallations[0]! : null;
+}
+
 slackMcp.post('/thread_reply', async (c) => {
   const { authContext } = c.get('mcpAuth');
 
@@ -1020,24 +1047,40 @@ slackMcp.post('/thread_reply', async (c) => {
   const slackTeamId =
     activeSlackReplyTarget?.slackTeamId ??
     getSlackTeamIdFromTaskPayload(taskRun.payload);
-  const slackInstallation = await db.query.slackInstallations.findFirst({
-    columns: { botAccessToken: true, teamId: true },
-    where: slackTeamId
-      ? and(
-          eq(slackInstallations.isActive, true),
-          eq(slackInstallations.teamId, slackTeamId),
-        )
-      : eq(slackInstallations.isActive, true),
-  });
+  const needsLateBoundSlackResolution =
+    !slackTeamId && !slackReplyTarget.threadTs;
+  const lateBoundSlack = needsLateBoundSlackResolution
+    ? await findSlackNotifierForLateBoundChannel(slackReplyTarget.channel)
+    : null;
+  const slackInstallation = needsLateBoundSlackResolution
+    ? null
+    : await db.query.slackInstallations.findFirst({
+        columns: { botAccessToken: true, teamId: true },
+        where: slackTeamId
+          ? and(
+              eq(slackInstallations.isActive, true),
+              eq(slackInstallations.teamId, slackTeamId),
+            )
+          : eq(slackInstallations.isActive, true),
+      });
+  const resolvedSlack =
+    lateBoundSlack?.slack ??
+    (slackInstallation?.botAccessToken
+      ? new SlackNotifier(slackInstallation.botAccessToken)
+      : null);
+  const resolvedSlackTeamId =
+    lateBoundSlack?.teamId ?? slackInstallation?.teamId ?? null;
 
-  if (!slackInstallation?.botAccessToken) {
+  if (!resolvedSlack || !resolvedSlackTeamId) {
     return c.json(
-      { error: 'No active Slack installation found for this deployment' },
+      {
+        error: needsLateBoundSlackResolution
+          ? 'Slack report destination could not be resolved to one active installation'
+          : 'No active Slack installation found for this deployment',
+      },
       404,
     );
   }
-
-  const slack = new SlackNotifier(slackInstallation.botAccessToken);
 
   const artifactIds = [
     ...new Set(parsedBody.images.map((image) => image.artifactId)),
@@ -1155,7 +1198,7 @@ slackMcp.post('/thread_reply', async (c) => {
         })
       : blocks;
 
-    const rootPostResult = await slack.postMessageDetailed({
+    const rootPostResult = await resolvedSlack.postMessageDetailed({
       channel: slackReplyTarget.channel,
       text: getSlackFallbackText(fallbackText, imageBlocks.length),
       unfurl_links: false,
@@ -1328,7 +1371,7 @@ slackMcp.post('/thread_reply', async (c) => {
           );
         }
 
-        const replyPostResult = await slack.postMessageDetailed({
+        const replyPostResult = await resolvedSlack.postMessageDetailed({
           channel: slackReplyTarget.channel,
           thread_ts: existingThreadTs,
           text: getSlackFallbackText(fallbackText, imageBlocks.length),
@@ -1414,7 +1457,7 @@ slackMcp.post('/thread_reply', async (c) => {
         ) {
           try {
             await removeSlackThreadReplyFooter({
-              slack,
+              slack: resolvedSlack,
               channel: slackReplyTarget.channel,
               threadTs: existingThreadTs,
               messageTs: previousFooterMessageTs,
@@ -1443,7 +1486,7 @@ slackMcp.post('/thread_reply', async (c) => {
             );
             try {
               await removeSlackThreadReplyFooter({
-                slack,
+                slack: resolvedSlack,
                 channel: slackReplyTarget.channel,
                 threadTs: existingThreadTs,
                 messageTs: nextMessageTs,
@@ -1475,8 +1518,8 @@ slackMcp.post('/thread_reply', async (c) => {
 
         try {
           await refreshTrackedAutomationThreadRootFooter({
-            slack,
-            slackTeamId: slackInstallation.teamId,
+            slack: resolvedSlack,
+            slackTeamId: resolvedSlackTeamId,
             channel: slackReplyTarget.channel,
             threadTs: existingThreadTs,
             taskId: taskRun.taskId,
@@ -1581,7 +1624,7 @@ slackMcp.post('/thread_reply', async (c) => {
   const subject = hasRealTaskRunUser(taskRun.actingUserId)
     ? await findSlackConversationSubjectByUserId({
         userId: taskRun.actingUserId,
-        slackTeamId: slackInstallation.teamId,
+        slackTeamId: resolvedSlackTeamId,
       })
     : null;
 
