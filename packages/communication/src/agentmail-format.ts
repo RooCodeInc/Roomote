@@ -304,3 +304,58 @@ export function buildAgentMailEmailBody(markdown: string): {
     text: renderAgentMailPlainText(truncated),
   };
 }
+
+export type AgentMailEmailButton = {
+  text: string;
+  url: string;
+};
+
+const AGENTMAIL_BUTTON_STYLE = [
+  'display:inline-block',
+  'padding:8px 16px',
+  'margin:4px 8px 4px 0',
+  'border:1px solid #c4c9d4',
+  'border-radius:6px',
+  'text-decoration:none',
+  'color:#1b2430',
+  'background:#f4f6f9',
+  'font-family:inherit',
+].join(';');
+
+/**
+ * Render action buttons for an outbound email: button-styled anchors in the
+ * HTML body and a `label: url` list in the plain-text alternative. Email has
+ * no callback intake, so only URL buttons render; callback-only buttons are
+ * the caller's mistake and are skipped.
+ */
+export function buildAgentMailButtonSections(rows: AgentMailEmailButton[][]): {
+  html: string;
+  text: string;
+} {
+  const usableRows = rows
+    .map((row) => row.filter((button) => button.text.trim() && button.url))
+    .filter((row) => row.length > 0);
+
+  if (usableRows.length === 0) {
+    return { html: '', text: '' };
+  }
+
+  const html = usableRows
+    .map(
+      (row) =>
+        `<div>${row
+          .map(
+            (button) =>
+              `<a href="${escapeAgentMailHtml(button.url)}" style="${AGENTMAIL_BUTTON_STYLE}">${escapeAgentMailHtml(button.text)}</a>`,
+          )
+          .join('')}</div>`,
+    )
+    .join('');
+
+  const text = usableRows
+    .flat()
+    .map((button) => `${button.text}: ${button.url}`)
+    .join('\n');
+
+  return { html, text };
+}

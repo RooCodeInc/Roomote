@@ -78,6 +78,9 @@ const SELF_AUTHENTICATING_WEBHOOK_PATHS = new Set([
   '/api/webhooks/teams',
   '/api/webhooks/telegram',
   '/api/webhooks/agentmail',
+  // Signed one-click answer links from question emails authenticate via
+  // their own token; see handlers/agentmail.
+  '/api/webhooks/agentmail/answer',
   '/api/internal/discord/events',
   '/api/internal/discord/events/process',
   '/api/internal/cloud/deployment-access',

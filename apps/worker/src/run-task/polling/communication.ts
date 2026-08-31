@@ -79,13 +79,14 @@ export function createCommunicationMessageInterval({
     }
 
     try {
-      // AgentMail (email) is deliberately excluded: email cannot render
-      // interactive request_user_input prompts, so no answers are ever
-      // queued for it (clarifications go through send_chat_reply instead).
+      // AgentMail (email) answers arrive from one-click answer links or
+      // parsed reply emails; they queue through the same pending-input state
+      // as the chat providers.
       if (
         provider === 'discord' ||
         provider === 'telegram' ||
-        provider === 'teams'
+        provider === 'teams' ||
+        provider === 'agentmail'
       ) {
         const queuedAnswers = await runPollingSdkCall({
           execute: () =>

@@ -9,7 +9,10 @@ import type {
 import { UnsupportedCommunicationOperationError } from './provider';
 import { readBoundedResponseBody } from './bounded-response-body';
 import { getAgentMailApiBaseUrl } from './agentmail-api-base-url';
-import { buildAgentMailEmailBody } from './agentmail-format';
+import {
+  buildAgentMailButtonSections,
+  buildAgentMailEmailBody,
+} from './agentmail-format';
 
 const DEFAULT_AGENTMAIL_TIMEOUT_MS = 10_000;
 const DEFAULT_AGENTMAIL_MAX_RETRIES = 2;
@@ -124,6 +127,19 @@ export class AgentMailCommunicationProvider implements CommunicationProviderAdap
           text,
           html: `<div>${escapeAgentMailPlainHtml(text).replaceAll('\n', '<br />')}</div>`,
         };
+
+    // Email has no callback intake, so only URL buttons render (one-click
+    // answer links); callback-data buttons are silently skipped.
+    const buttonRows = (input.buttons ?? []).map((row) =>
+      row
+        .filter((button) => button.url)
+        .map((button) => ({ text: button.text, url: button.url! })),
+    );
+    const buttonSections = buildAgentMailButtonSections(buttonRows);
+    if (buttonSections.html) {
+      body.html = `${body.html}${buttonSections.html}`;
+      body.text = `${body.text}\n\n${buttonSections.text}`;
+    }
 
     const response = await this.request<AgentMailSendResponse>(
       'POST',

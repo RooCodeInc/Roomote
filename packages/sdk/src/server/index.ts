@@ -233,6 +233,12 @@ export {
 } from './lib/agentmail/conversation-store';
 
 export {
+  buildAgentMailRuiAnswerToken,
+  buildAgentMailRuiAnswerUrl,
+  verifyAgentMailRuiAnswerToken,
+} from './lib/agentmail/rui-answer-links';
+
+export {
   AGENTMAIL_WEBHOOK_EVENT_QUEUE_NAME,
   AgentMailConversationBusyError,
   drainAgentMailInboundTurns,
