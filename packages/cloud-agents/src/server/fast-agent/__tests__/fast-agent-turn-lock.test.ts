@@ -12,6 +12,7 @@ import {
   buildFastAgentTurnLockKey,
   FastAgentProcessShutdownError,
   FastAgentTurnLockLostError,
+  markFastAgentShutdownCloseoutSettled,
 } from '../fast-agent-turn-lock';
 
 describe('Fast conversation turn locking', () => {
@@ -237,11 +238,22 @@ describe('Fast conversation turn locking', () => {
     });
     const shutdown = new FastAgentProcessShutdownError('SIGTERM');
 
-    await expect(abortActiveFastAgentTurns(shutdown)).resolves.toBe(1);
+    let shutdownSettled = false;
+    const aborting = abortActiveFastAgentTurns(shutdown).finally(() => {
+      shutdownSettled = true;
+    });
+    await vi.waitFor(() => {
+      expect(firstLock?.signal.reason).toBe(shutdown);
+    });
+    expect(shutdownSettled).toBe(false);
+    expect(releaseRedisLocks[0]).not.toHaveBeenCalled();
+    markFastAgentShutdownCloseoutSettled(firstLock!.signal);
+    await expect(aborting).resolves.toBe(1);
+    expect(releaseRedisLocks[0]).toHaveBeenCalledOnce();
+    await firstLock?.();
     finishSecondAcquisition?.(releaseRedisLocks[1]);
 
     await expect(queuedAcquisition).resolves.toBeNull();
-    expect(firstLock?.signal.reason).toBe(shutdown);
     for (const releaseRedisLock of releaseRedisLocks) {
       expect(releaseRedisLock).toHaveBeenCalledOnce();
     }

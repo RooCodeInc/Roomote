@@ -7,6 +7,7 @@ const FAST_AGENT_TURN_LOCK_RENEW_MS =
   (FAST_AGENT_TURN_LOCK_TTL_SECONDS * 1_000) / 3;
 const FAST_AGENT_TURN_LOCK_RETRY_MS = 500;
 const activeFastAgentTurnLocks = new Set<FastAgentTurnLockHandle>();
+const shutdownCloseoutResolvers = new WeakMap<AbortSignal, () => void>();
 let processShutdownReason: FastAgentProcessShutdownError | null = null;
 
 export class FastAgentTurnLockLostError extends Error {
@@ -26,7 +27,19 @@ export class FastAgentProcessShutdownError extends Error {
 export type FastAgentTurnLockHandle = (() => Promise<void>) & {
   signal: AbortSignal;
   abort: (reason?: unknown) => Promise<void>;
+  abortForShutdown: (reason: FastAgentProcessShutdownError) => Promise<void>;
+  /** Resolves after shutdown closeout delivery settles, without waiting for
+   * unrelated inference cleanup that may itself be stuck. */
+  shutdownCloseoutSettled: Promise<void>;
 };
+
+/** Mark the user-visible shutdown closeout as posted and persisted (or as
+ * attempted when the provider rejects delivery). */
+export function markFastAgentShutdownCloseoutSettled(
+  signal: AbortSignal,
+): void {
+  shutdownCloseoutResolvers.get(signal)?.();
+}
 
 export async function abortActiveFastAgentTurns(
   reason: FastAgentProcessShutdownError,
@@ -34,7 +47,7 @@ export async function abortActiveFastAgentTurns(
   processShutdownReason ??= reason;
   const activeLocks = [...activeFastAgentTurnLocks];
   await Promise.allSettled(
-    activeLocks.map((lock) => lock.abort(processShutdownReason!)),
+    activeLocks.map((lock) => lock.abortForShutdown(processShutdownReason!)),
   );
   return activeLocks.length;
 }
@@ -70,7 +83,8 @@ export async function acquireFastAgentTurnLock(params: {
     });
     if (release) {
       const ownership = new AbortController();
-      let released = false;
+      let redisReleased = false;
+      let turnSettled = false;
       let renewalPending = false;
       const renewalTimer = setInterval(() => {
         if (renewalPending) return;
@@ -78,7 +92,7 @@ export async function acquireFastAgentTurnLock(params: {
         void release
           .renewDetailed()
           .then((result) => {
-            if (!released && result === 'lost') {
+            if (!redisReleased && result === 'lost') {
               ownership.abort(new FastAgentTurnLockLostError());
               clearInterval(renewalTimer);
               console.error(
@@ -92,21 +106,55 @@ export async function acquireFastAgentTurnLock(params: {
       }, FAST_AGENT_TURN_LOCK_RENEW_MS);
       renewalTimer.unref();
 
-      const releaseTurnLock = (async () => {
-        if (released) return;
-        released = true;
-        activeFastAgentTurnLocks.delete(releaseTurnLock);
+      const releaseRedisTurnLock = async () => {
+        if (redisReleased) return;
+        redisReleased = true;
         clearInterval(renewalTimer);
         await release();
+      };
+      let shutdownCloseoutSettled = false;
+      let resolveShutdownCloseout: (() => void) | undefined;
+      const shutdownCloseoutPromise = new Promise<void>((resolve) => {
+        resolveShutdownCloseout = resolve;
+      });
+      const settleShutdownCloseout = () => {
+        if (shutdownCloseoutSettled) return;
+        shutdownCloseoutSettled = true;
+        shutdownCloseoutResolvers.delete(ownership.signal);
+        resolveShutdownCloseout?.();
+      };
+      shutdownCloseoutResolvers.set(ownership.signal, settleShutdownCloseout);
+      const releaseTurnLock = (async () => {
+        if (turnSettled) return;
+        turnSettled = true;
+        activeFastAgentTurnLocks.delete(releaseTurnLock);
+        try {
+          if (
+            ownership.signal.reason instanceof FastAgentProcessShutdownError
+          ) {
+            settleShutdownCloseout();
+            await shutdownCloseoutPromise;
+          }
+          await releaseRedisTurnLock();
+        } finally {
+          settleShutdownCloseout();
+        }
       }) as FastAgentTurnLockHandle;
       releaseTurnLock.signal = ownership.signal;
       releaseTurnLock.abort = async (reason) => {
         ownership.abort(reason);
-        await releaseTurnLock();
+        await releaseRedisTurnLock();
       };
+      releaseTurnLock.abortForShutdown = async (reason) => {
+        ownership.abort(reason);
+        await shutdownCloseoutPromise;
+        await releaseRedisTurnLock();
+      };
+      releaseTurnLock.shutdownCloseoutSettled = shutdownCloseoutPromise;
       activeFastAgentTurnLocks.add(releaseTurnLock);
       if (processShutdownReason) {
-        await releaseTurnLock.abort(processShutdownReason);
+        ownership.abort(processShutdownReason);
+        await releaseTurnLock();
         return null;
       }
       return releaseTurnLock;
