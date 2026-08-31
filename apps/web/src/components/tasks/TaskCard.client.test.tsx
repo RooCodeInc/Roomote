@@ -10,13 +10,9 @@ vi.mock('next/link', () => ({
   default: ({
     children,
     href,
-    className,
-  }: {
-    children: React.ReactNode;
-    href: string;
-    className?: string;
-  }) => (
-    <a href={href} className={className}>
+    ...props
+  }: React.ComponentProps<'a'> & { href: string }) => (
+    <a href={href} {...props}>
       {children}
     </a>
   ),
@@ -344,6 +340,25 @@ describe('TaskCard', () => {
     );
 
     fireEvent.click(container.firstChild as HTMLElement);
+
+    expect(routerPushMock).toHaveBeenCalledWith('/task/task-1');
+
+    routerPushMock.mockClear();
+    const rowLink = screen.getByRole('link', {
+      name: 'Open task: Refine task copy',
+    });
+    expect(rowLink).toHaveAttribute('href', '/task/task-1');
+  });
+
+  it('opens the task when a non-interactive SVG inside the row is clicked', () => {
+    const { container } = render(
+      <TaskCard
+        task={createTask({ user: null })}
+        filterState={{ hasSpecificUserFilter: false }}
+      />,
+    );
+
+    fireEvent.click(container.querySelector('svg')!);
 
     expect(routerPushMock).toHaveBeenCalledWith('/task/task-1');
   });

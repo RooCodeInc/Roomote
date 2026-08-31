@@ -14,6 +14,7 @@ import {
   TooltipTrigger,
 } from '@/components/system';
 import { PullRequestBadge, WorkspaceBadge } from '@/components/sandbox';
+import { WorkListBoard, WorkListBoardColumn } from '@/components/work-list';
 
 import { TaskAutomationIcon } from './TaskAutomationIcon';
 import { getTaskBoardColumn, type TaskBoardColumn } from './task-board';
@@ -182,7 +183,7 @@ export function TaskBoard({ tasks }: { tasks: Task[] }) {
   const hiddenDoneCount = Math.max(doneTasks.length - DONE_TASK_LIMIT, 0);
 
   return (
-    <div className="grid min-w-0 grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 lg:px-2">
+    <WorkListBoard>
       {COLUMN_CONFIG.map((column) => {
         const columnTasks = groupedTasks.get(column.id) ?? [];
         const visibleTasks =
@@ -191,56 +192,30 @@ export function TaskBoard({ tasks }: { tasks: Task[] }) {
             : columnTasks;
 
         return (
-          <section
+          <WorkListBoardColumn
             key={column.id}
-            aria-labelledby={`task-board-${column.id}`}
-            className="min-w-0 py-2"
-          >
-            <header className="mb-3 flex items-start justify-between gap-3">
-              <div className="space-y-0 pl-1">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`size-2 rounded-full ${column.dotClassName}`}
-                  />
-                  <h2
-                    id={`task-board-${column.id}`}
-                    className="text-sm font-semibold"
-                  >
-                    {column.label}
-                    <span className="text-sm text-muted-foreground/50 ml-1">
-                      {columnTasks.length}
-                    </span>
-                  </h2>
-                </div>
-                <p className="text-xs text-muted-foreground pl-4">
-                  {column.description}
+            id={`task-${column.id}`}
+            label={column.label}
+            description={column.description}
+            count={columnTasks.length}
+            dotClassName={column.dotClassName}
+            empty={visibleTasks.length === 0}
+            footer={
+              column.id === 'done' && hiddenDoneCount > 0 ? (
+                <p className="mt-3 text-center text-xs text-muted-foreground">
+                  {hiddenDoneCount} older completed task
+                  {hiddenDoneCount === 1 ? '' : 's'} hidden
                 </p>
-              </div>
-              <span className="rounded-full text-xs text-muted-foreground"></span>
-            </header>
-
-            <div className="divide-y-2 divide-background px-1 [&>div]:first:rounded-t-xl [&>div]:last:rounded-b-xl">
-              {visibleTasks.length > 0 ? (
-                visibleTasks.map((task) => (
-                  <BoardTaskCard key={task.id} task={task} />
-                ))
-              ) : (
-                <div className="pl-4 text-xs text-muted-foreground/50">
-                  Empty
-                </div>
-              )}
-            </div>
-
-            {column.id === 'done' && hiddenDoneCount > 0 && (
-              <p className="mt-3 text-center text-xs text-muted-foreground">
-                {hiddenDoneCount} older completed task
-                {hiddenDoneCount === 1 ? '' : 's'} hidden
-              </p>
-            )}
-          </section>
+              ) : undefined
+            }
+          >
+            {visibleTasks.map((task) => (
+              <BoardTaskCard key={task.id} task={task} />
+            ))}
+          </WorkListBoardColumn>
         );
       })}
-    </div>
+    </WorkListBoard>
   );
 }
 
