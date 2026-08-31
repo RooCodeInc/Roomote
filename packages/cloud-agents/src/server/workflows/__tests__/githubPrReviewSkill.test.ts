@@ -130,7 +130,7 @@ describe('review-code GitHub workflow paths', () => {
     );
   });
 
-  it('keeps every GitHub PR review path focused on code findings instead of CI state', () => {
+  it('keeps every GitHub PR review path focused on code findings without owning CI orchestration', () => {
     for (const appendixName of [
       'review-github-pr',
       'review-github-pr-with-approval',
@@ -154,6 +154,30 @@ describe('review-code GitHub workflow paths', () => {
         'For each net-new finding, check the fetched review threads for an existing thread anchored on the same file and overlapping lines.',
       );
     }
+  });
+
+  it('uses the diff and existing CI as primary evidence without rerunning broad validation', () => {
+    expect(skillContent).toContain(
+      'Use the diff, surrounding code, and existing CI results for the reviewed commit as the primary evidence.',
+    );
+    expect(skillContent).toContain(
+      'If CI is pending, continue the review in parallel and leave broad validation to CI.',
+    );
+    expect(skillContent).toContain(
+      'If CI has passed for the current commit, trust it by default.',
+    );
+    expect(skillContent).toContain(
+      'Do not run the full test suite by default.',
+    );
+    expect(skillContent).toContain(
+      'Run only small targeted tests when needed to validate a suspected behavioral bug, when existing CI does not cover the relevant behavior, or when concrete evidence shows an environment or coverage gap.',
+    );
+    expect(skillContent).toContain(
+      'Still identify weak coverage, suspicious caching, stale expectations, or other concrete reasons the current CI result may not be trustworthy.',
+    );
+    expect(skillContent).toContain(
+      'do not respond by routinely rerunning broad validation.',
+    );
   });
 
   it('keeps code-only summary inventory, task handoff, and sync anchor recovery in the shared skill', () => {
