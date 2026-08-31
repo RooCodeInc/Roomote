@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { useReducedMotion } from 'motion/react';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   getImageUrisFromContentBlocks,
@@ -37,7 +38,10 @@ import {
   type SessionPromptSubmission,
 } from './SessionPromptInput';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
-import { useOpenSessionTaskPanel } from './session-task-panel-context';
+import {
+  useOpenSessionTaskPanel,
+  useSessionRunningTaskCount,
+} from './session-task-panel-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { truncatePageTitle } from '@/lib/page-title';
@@ -188,6 +192,34 @@ function ThinkingMessage() {
   );
 }
 
+function RunningTasksMessage({ count }: { count: number }) {
+  const shouldReduceMotion = useReducedMotion();
+  const label = `${count} ${count === 1 ? 'task' : 'tasks'} running`;
+
+  return (
+    <Message from="assistant" className="chat-reasoning-message">
+      <MessageContent>
+        <span role="status" aria-live="polite">
+          {shouldReduceMotion ? (
+            <span className="text-sm font-light text-muted-foreground">
+              {label}
+            </span>
+          ) : (
+            <Shimmer
+              as="span"
+              className="text-sm font-light"
+              duration={3}
+              spread={1}
+            >
+              {label}
+            </Shimmer>
+          )}
+        </span>
+      </MessageContent>
+    </Message>
+  );
+}
+
 export function FastSessionTranscript({
   sessionId,
   initialMessages,
@@ -217,6 +249,7 @@ export function FastSessionTranscript({
 }) {
   const trpcClient = useTRPCClient();
   const openTaskPanel = useOpenSessionTaskPanel();
+  const runningTaskCount = useSessionRunningTaskCount();
   const { enabled: narrationModeEnabled } = useNarrationMode();
   const displayMode = narrationModeEnabled ? 'narration' : 'default';
   const [serverMessages, setServerMessages] = useState<
@@ -485,6 +518,8 @@ export function FastSessionTranscript({
           />
           {pendingResponseState.pendingAfter !== null ? (
             <ThinkingMessage />
+          ) : !isSending && runningTaskCount > 0 ? (
+            <RunningTasksMessage count={runningTaskCount} />
           ) : null}
           {reviewOffers.map((offer) => (
             <PrReviewActionOffer
