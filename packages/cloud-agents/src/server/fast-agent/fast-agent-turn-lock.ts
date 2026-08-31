@@ -6,6 +6,8 @@ const FAST_AGENT_TURN_LOCK_TTL_SECONDS = 600;
 const FAST_AGENT_TURN_LOCK_RENEW_MS =
   (FAST_AGENT_TURN_LOCK_TTL_SECONDS * 1_000) / 3;
 const FAST_AGENT_TURN_LOCK_RETRY_MS = 500;
+const activeFastAgentTurnLocks = new Set<FastAgentTurnLockHandle>();
+let processShutdownReason: FastAgentProcessShutdownError | null = null;
 
 export class FastAgentTurnLockLostError extends Error {
   constructor() {
@@ -14,10 +16,28 @@ export class FastAgentTurnLockLostError extends Error {
   }
 }
 
+export class FastAgentProcessShutdownError extends Error {
+  constructor(signal: NodeJS.Signals) {
+    super(`Fast turn interrupted by API shutdown (${signal}).`);
+    this.name = 'FastAgentProcessShutdownError';
+  }
+}
+
 export type FastAgentTurnLockHandle = (() => Promise<void>) & {
   signal: AbortSignal;
   abort: (reason?: unknown) => Promise<void>;
 };
+
+export async function abortActiveFastAgentTurns(
+  reason: FastAgentProcessShutdownError,
+): Promise<number> {
+  processShutdownReason ??= reason;
+  const activeLocks = [...activeFastAgentTurnLocks];
+  await Promise.allSettled(
+    activeLocks.map((lock) => lock.abort(processShutdownReason!)),
+  );
+  return activeLocks.length;
+}
 
 /** Serialize every human and platform-generated Fast turn for one chat. */
 export function buildFastAgentTurnLockKey(
@@ -32,6 +52,8 @@ export async function acquireFastAgentTurnLock(params: {
    * user-feedback path can fail fast instead of blocking their context. */
   maxWaitMs?: number;
 }) {
+  if (processShutdownReason) return null;
+
   const key = buildFastAgentTurnLockKey(params.conversation);
   const maxAttempts =
     params.maxWaitMs === undefined
@@ -42,6 +64,7 @@ export async function acquireFastAgentTurnLock(params: {
         );
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (processShutdownReason) return null;
     const release = await acquireRedisLock(key, {
       ttlSeconds: FAST_AGENT_TURN_LOCK_TTL_SECONDS,
     });
@@ -72,6 +95,7 @@ export async function acquireFastAgentTurnLock(params: {
       const releaseTurnLock = (async () => {
         if (released) return;
         released = true;
+        activeFastAgentTurnLocks.delete(releaseTurnLock);
         clearInterval(renewalTimer);
         await release();
       }) as FastAgentTurnLockHandle;
@@ -80,6 +104,11 @@ export async function acquireFastAgentTurnLock(params: {
         ownership.abort(reason);
         await releaseTurnLock();
       };
+      activeFastAgentTurnLocks.add(releaseTurnLock);
+      if (processShutdownReason) {
+        await releaseTurnLock.abort(processShutdownReason);
+        return null;
+      }
       return releaseTurnLock;
     }
 

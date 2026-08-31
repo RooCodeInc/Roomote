@@ -183,6 +183,7 @@ import {
   type FastAgentTurnAdapter,
   type LaunchFastAgentTask,
 } from '../fast-agent-conversation';
+import { FastAgentProcessShutdownError } from '../fast-agent-turn-lock';
 
 const baseParams = {
   question: 'What does this service do?',
@@ -1805,6 +1806,53 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       // retry notice to close after the lock is lost.
       expect(postReply).not.toHaveBeenCalled();
       expect(replaceReply).not.toHaveBeenCalled();
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('posts a terminal closeout when API shutdown interrupts silent retry backoff', async () => {
+    const controller = new AbortController();
+    const shutdown = new FastAgentProcessShutdownError('SIGTERM');
+    const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
+    const originalSetTimeout = globalThis.setTimeout;
+    let shouldAbort = true;
+    const timeout = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      callback: () => void,
+    ) => {
+      return originalSetTimeout(() => {
+        callback();
+        if (shouldAbort) {
+          shouldAbort = false;
+          controller.abort(shutdown);
+        }
+      }, 0);
+    }) as typeof setTimeout);
+    mocks.generateText.mockRejectedValue(new Error('TypeError: fetch failed'));
+
+    try {
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ postReply }),
+          signal: controller.signal,
+        }),
+      ).rejects.toBe(shutdown);
+
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(postReply).toHaveBeenCalledOnce();
+      expect(postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message:
+          'The inference retry was interrupted before it completed. Please send the request again.',
+      });
+      expect(mocks.upsertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({
+            metadata: expect.objectContaining({ purpose: 'closeout' }),
+          }),
+        }),
+      );
     } finally {
       timeout.mockRestore();
     }

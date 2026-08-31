@@ -102,6 +102,7 @@ import {
 } from './fast-agent-tasks';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
+import { FastAgentProcessShutdownError } from './fast-agent-turn-lock';
 import {
   captureFastAgentInferenceAttemptOutcome,
   captureFastAgentInferenceContext,
@@ -2551,6 +2552,29 @@ export async function answerFastAgentQuestion({
           },
           true,
         );
+      } else if (
+        terminalError instanceof FastAgentProcessShutdownError &&
+        !closed
+      ) {
+        const reply = {
+          purpose: 'closeout' as const,
+          message: INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+        };
+        try {
+          const posted = await adapter.postReply(reply);
+          diagnostics.recordVisibleReply();
+          await persistAssistantReply({
+            reply,
+            event: allocateCanonicalEvent(
+              `assistant:${nextAssistantOrdinal++}`,
+            ),
+            platformMessageId: posted?.messageId,
+          });
+        } catch (postError) {
+          console.error(
+            `[Fast Agent] Failed to post shutdown closeout: ${formatErrorForLog(postError)}`,
+          );
+        }
       }
       throw signal.reason instanceof Error ? signal.reason : error;
     }
