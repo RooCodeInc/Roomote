@@ -1115,6 +1115,48 @@ describe('Teams webhook handler', () => {
     );
   });
 
+  it('does not acknowledge a Teams Fast reply when durable admission fails', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    findFastReplySessionMock.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'teams',
+        workspaceId: 'tenant-1',
+        conversationId: 'automation-run-1',
+        replyTarget: {
+          channelId: '19:conversation@thread.v2',
+          threadId: 'activity-root',
+        },
+      },
+    });
+    continueFastReplyMock.mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          conversation: {
+            id: '19:conversation@thread.v2;messageid=activity-root',
+            tenantId: 'tenant-1',
+            conversationType: 'channel',
+          },
+          replyToId: 'fast-report-1',
+        }),
+      ),
+    });
+
+    expect(response.status).toBe(500);
+  });
+
   it('queues image-only Teams attachments for matching active task runs', async () => {
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',

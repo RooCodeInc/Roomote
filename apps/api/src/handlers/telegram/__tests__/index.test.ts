@@ -709,6 +709,39 @@ describe('Telegram webhook handler', () => {
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
+  it('does not acknowledge a Telegram Fast reply when durable admission fails', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    findFastReplySessionMock.mockResolvedValueOnce({
+      id: '22222222-2222-4222-8222-222222222222',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '222',
+        conversationId: '222:user:mapped-user-1',
+        replyTarget: { channelId: '222' },
+      },
+    });
+    continueFastReplyMock.mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          reply_to_message: {
+            message_id: 400,
+            date: 1,
+            text: 'Fast answer',
+            chat: { id: 222, type: 'private' },
+          },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(addReactionMock).not.toHaveBeenCalled();
+  });
+
   it('fails closed when a Telegram reply targets a Fast message on another route', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     isFastProviderMessageMock.mockResolvedValueOnce(true);
