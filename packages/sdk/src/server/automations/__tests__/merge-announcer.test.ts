@@ -64,8 +64,9 @@ function createDependencies() {
       }),
       generateAnnouncement: vi.fn().mockResolvedValue({
         summary: 'Adds exports and strengthens widget validation.',
-        imageCandidateId: null,
+        imageUrl: null,
       }),
+      getAnonymousMediaType: vi.fn().mockResolvedValue('image/png'),
       getAdapter: vi.fn().mockResolvedValue({ postMessage }),
       getRuntime: vi.fn().mockResolvedValue(runtime),
       listConnectedProviders: vi.fn().mockResolvedValue(['slack']),
@@ -228,11 +229,13 @@ describe('handleMergeAnnouncerPush', () => {
     );
   });
 
-  it('includes one representative PR image in the Slack announcement', async () => {
+  it('includes the model-selected Markdown image after origin and MIME validation', async () => {
     const { dependencies, postMessage } = createDependencies();
+    const imageUrl =
+      'https://github.com/user-attachments/assets/product-preview';
     dependencies.generateAnnouncement.mockResolvedValue({
       summary: 'Updates the saved settings experience.',
-      imageCandidateId: 'unknown-candidate',
+      imageUrl,
     });
 
     await handleMergeAnnouncerPush(
@@ -241,17 +244,12 @@ describe('handleMergeAnnouncerPush', () => {
           number: 7,
           url: 'https://github.com/acme/widgets/pull/7',
           title: 'Ship widget export',
+          body: `Updates the settings experience.
+
+![Product screenshot after save](${imageUrl})`,
           changedFileCount: 2,
           additions: 20,
           deletions: 4,
-          imageCandidates: [
-            {
-              id: 'image-1',
-              url: 'https://github.com/user-attachments/assets/product-preview',
-              altText: 'Product screenshot after save',
-              surroundingText: 'The refreshed settings screen after save.',
-            },
-          ],
         },
       }),
       dependencies,
@@ -264,8 +262,7 @@ describe('handleMergeAnnouncerPush', () => {
         child_blocks: expect.arrayContaining([
           {
             type: 'image',
-            image_url:
-              'https://github.com/user-attachments/assets/product-preview',
+            image_url: imageUrl,
             alt_text: 'Product screenshot after save',
           },
         ]),
@@ -277,13 +274,15 @@ describe('handleMergeAnnouncerPush', () => {
         (block: { type?: string }) => block.type === 'image',
       ),
     ).toHaveLength(1);
+    expect(dependencies.getAnonymousMediaType).toHaveBeenCalledWith(imageUrl);
   });
 
-  it('uses the merge-summary model candidate choice when it is valid', async () => {
+  it('accepts a model-selected HTML image reference', async () => {
     const { dependencies, postMessage } = createDependencies();
+    const imageUrl = 'https://cdn.example.com/settings.png';
     dependencies.generateAnnouncement.mockResolvedValue({
       summary: 'Updates the saved settings experience.',
-      imageCandidateId: 'image-2',
+      imageUrl,
     });
 
     await handleMergeAnnouncerPush(
@@ -292,23 +291,11 @@ describe('handleMergeAnnouncerPush', () => {
           number: 7,
           url: 'https://github.com/acme/widgets/pull/7',
           title: 'Update settings',
+          body: `<p>Updated settings after save.</p>
+<img alt="Settings screenshot" src="${imageUrl}">`,
           changedFileCount: 2,
           additions: 20,
           deletions: 4,
-          imageCandidates: [
-            {
-              id: 'image-1',
-              url: 'https://cdn.example.com/architecture.png',
-              altText: 'Architecture',
-              surroundingText: 'Internal architecture diagram.',
-            },
-            {
-              id: 'image-2',
-              url: 'https://cdn.example.com/settings.png',
-              altText: 'Settings screenshot',
-              surroundingText: 'Updated settings after save.',
-            },
-          ],
         },
       }),
       dependencies,
@@ -321,7 +308,8 @@ describe('handleMergeAnnouncerPush', () => {
             child_blocks: expect.arrayContaining([
               expect.objectContaining({
                 type: 'image',
-                image_url: 'https://cdn.example.com/settings.png',
+                image_url: imageUrl,
+                alt_text: 'Settings screenshot',
               }),
             ]),
           }),
@@ -330,8 +318,119 @@ describe('handleMergeAnnouncerPush', () => {
     );
   });
 
+  it('omits a URL that is not an image reference without fetching it', async () => {
+    const { dependencies, postMessage } = createDependencies();
+    const selectedUrl = 'https://attacker.example.com/not-an-image.png';
+    dependencies.generateAnnouncement.mockResolvedValue({
+      summary: 'Updates the saved settings experience.',
+      imageUrl: selectedUrl,
+    });
+
+    await handleMergeAnnouncerPush(
+      createPayload({
+        pullRequest: {
+          number: 7,
+          url: 'https://github.com/acme/widgets/pull/7',
+          title: 'Update settings',
+          body: `[Related docs](${selectedUrl})
+![Real screenshot](https://cdn.example.com/real.png)`,
+          changedFileCount: 1,
+          additions: 10,
+          deletions: 2,
+        },
+      }),
+      dependencies,
+    );
+
+    expect(dependencies.getAnonymousMediaType).not.toHaveBeenCalled();
+    const container = postMessage.mock.calls[0]?.[0]?.blocks?.[0];
+    expect(
+      container?.child_blocks?.some(
+        (block: { type?: string }) => block.type === 'image',
+      ),
+    ).toBe(false);
+  });
+
+  it('omits the selected image when anonymous MIME validation fails', async () => {
+    const { dependencies, postMessage } = createDependencies();
+    const imageUrl = 'https://cdn.example.com/walkthrough';
+    dependencies.generateAnnouncement.mockResolvedValue({
+      summary: 'Updates the saved settings experience.',
+      imageUrl,
+    });
+    dependencies.getAnonymousMediaType.mockResolvedValue('video/mp4');
+
+    await handleMergeAnnouncerPush(
+      createPayload({
+        pullRequest: {
+          number: 7,
+          url: 'https://github.com/acme/widgets/pull/7',
+          title: 'Update settings',
+          body: `![Walkthrough](${imageUrl})\n![Other](https://cdn.example.com/other.png)`,
+          changedFileCount: 1,
+          additions: 10,
+          deletions: 2,
+        },
+      }),
+      dependencies,
+    );
+
+    expect(dependencies.getAnonymousMediaType).toHaveBeenCalledOnce();
+    expect(dependencies.getAnonymousMediaType).toHaveBeenCalledWith(imageUrl);
+    const container = postMessage.mock.calls[0]?.[0]?.blocks?.[0];
+    expect(
+      container?.child_blocks?.some(
+        (block: { type?: string }) => block.type === 'image',
+      ),
+    ).toBe(false);
+  });
+
+  it('keeps the model summary when selected-image fetching fails', async () => {
+    const { dependencies, postMessage } = createDependencies();
+    const imageUrl = 'https://cdn.example.com/settings.png';
+    dependencies.generateAnnouncement.mockResolvedValue({
+      summary: 'Updates the saved settings experience.',
+      imageUrl,
+    });
+    dependencies.getAnonymousMediaType.mockRejectedValue(
+      new Error('image unavailable'),
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const result = await handleMergeAnnouncerPush(
+      createPayload({
+        pullRequest: {
+          number: 7,
+          url: 'https://github.com/acme/widgets/pull/7',
+          title: 'Update settings',
+          body: `![Settings screenshot](${imageUrl})`,
+          changedFileCount: 1,
+          additions: 10,
+          deletions: 2,
+        },
+      }),
+      dependencies,
+    );
+
+    expect(result.status).toBe('ok');
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('Updates the saved settings experience.'),
+      }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Selected PR image validation failed'),
+    );
+    warn.mockRestore();
+  });
+
   it('retries a rejected Slack image announcement without the image', async () => {
     const { dependencies, postMessage } = createDependencies();
+    const imageUrl = 'https://cdn.example.com/settings.png';
+    dependencies.generateAnnouncement.mockResolvedValue({
+      summary: 'Updates the saved settings experience.',
+      imageUrl,
+    });
     postMessage
       .mockRejectedValueOnce(
         new SlackPostDeliveryError({ slackErrorCode: 'invalid_blocks' }),
@@ -344,17 +443,10 @@ describe('handleMergeAnnouncerPush', () => {
           number: 7,
           url: 'https://github.com/acme/widgets/pull/7',
           title: 'Update settings',
+          body: `![Settings screenshot](${imageUrl})`,
           changedFileCount: 1,
           additions: 10,
           deletions: 2,
-          imageCandidates: [
-            {
-              id: 'image-1',
-              url: 'https://cdn.example.com/settings.png',
-              altText: 'Settings screenshot',
-              surroundingText: 'Updated settings after save.',
-            },
-          ],
         },
       }),
       dependencies,
@@ -378,6 +470,11 @@ describe('handleMergeAnnouncerPush', () => {
 
   it('does not retry an ambiguous Slack transport failure', async () => {
     const { dependencies, postMessage } = createDependencies();
+    const imageUrl = 'https://cdn.example.com/settings.png';
+    dependencies.generateAnnouncement.mockResolvedValue({
+      summary: 'Updates the saved settings experience.',
+      imageUrl,
+    });
     postMessage.mockRejectedValueOnce(
       new SlackPostDeliveryError({ transportError: true }),
     );
@@ -388,17 +485,10 @@ describe('handleMergeAnnouncerPush', () => {
           number: 7,
           url: 'https://github.com/acme/widgets/pull/7',
           title: 'Update settings',
+          body: `![Settings screenshot](${imageUrl})`,
           changedFileCount: 1,
           additions: 10,
           deletions: 2,
-          imageCandidates: [
-            {
-              id: 'image-1',
-              url: 'https://cdn.example.com/settings.png',
-              altText: 'Settings screenshot',
-              surroundingText: 'Updated settings after save.',
-            },
-          ],
         },
       }),
       dependencies,
@@ -530,19 +620,13 @@ describe('handleMergeAnnouncerPush', () => {
           number: 7,
           url: 'https://github.com/acme/widgets/pull/7',
           title: 'Ship widget export',
-          body: `API_TOKEN=supersecretvalue\n${'supporting context '.repeat(300)}`,
+          body: `API_TOKEN=supersecretvalue
+![Settings screenshot](https://cdn.example.com/settings.png)
+${'supporting context '.repeat(300)}`,
           changedFileCount: 21,
           additions: 231,
           deletions: 210,
           changedFiles,
-          imageCandidates: [
-            {
-              id: 'image-1',
-              url: 'https://cdn.example.com/settings.png',
-              altText: 'Settings screenshot',
-              surroundingText: 'The updated settings screen after save.',
-            },
-          ],
         },
       }),
       dependencies,
@@ -575,10 +659,10 @@ describe('handleMergeAnnouncerPush', () => {
     expect(prompt).toContain('modified src/file-20.ts (+20/-19)');
     expect(prompt).not.toContain('src/file-21.ts');
     expect(prompt).not.toContain('supersecretvalue');
-    expect(prompt).toContain('Eligible image candidates');
-    expect(prompt).toContain('"id":"image-1"');
-    expect(prompt).toContain('The updated settings screen after save.');
-    expect(prompt).toContain('set imageCandidateId');
+    expect(prompt).toContain(
+      '![Settings screenshot](https://cdn.example.com/settings.png)',
+    );
+    expect(prompt).toContain('set imageUrl');
   });
 
   it('excludes pushes to non-default branches before generating a summary', async () => {
@@ -635,14 +719,6 @@ describe('handleMergeAnnouncerPush', () => {
           changedFileCount: 2,
           additions: 20,
           deletions: 4,
-          imageCandidates: [
-            {
-              id: 'image-1',
-              url: 'https://cdn.example.com/fallback.png',
-              altText: 'Fallback screenshot',
-              surroundingText: 'Detailed rationale',
-            },
-          ],
         },
       }),
       dependencies,
@@ -663,11 +739,6 @@ describe('handleMergeAnnouncerPush', () => {
                   text: 'Merged pull request: &lt;!channel&gt; Ship widget &amp; &lt;export&gt;.',
                 },
               }),
-              {
-                type: 'image',
-                image_url: 'https://cdn.example.com/fallback.png',
-                alt_text: 'Fallback screenshot',
-              },
             ]),
           }),
         ],

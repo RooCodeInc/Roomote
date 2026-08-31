@@ -3,7 +3,6 @@ import type {
   MergeAnnouncerPullRequestContext,
   MergeAnnouncerPushEvent,
 } from '@roomote/sdk/server';
-import { safeHeadFollowingRedirects } from '@roomote/sdk/server/safe-fetch';
 
 import { toHostFromUrl } from './utils';
 import type { AdoPushWebhook } from './ado/types';
@@ -14,193 +13,6 @@ import type { GitLabPushWebhook } from './gitlab/types';
 const MAX_GITHUB_ASSOCIATED_PULL_REQUESTS = 10;
 const MAX_GITHUB_PULL_REQUEST_CANDIDATES = 3;
 const MAX_GITHUB_CHANGED_FILES = 20;
-const MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES = 5;
-const MAX_GITHUB_PULL_REQUEST_IMAGE_PROBES = 20;
-const GITHUB_PULL_REQUEST_IMAGE_PROBE_BATCH_SIZE = 5;
-const MAX_GITHUB_PULL_REQUEST_IMAGE_ALT_CHARS = 200;
-const MAX_GITHUB_PULL_REQUEST_IMAGE_CONTEXT_CHARS = 300;
-const MAX_GITHUB_IMAGE_REDIRECTS = 3;
-const GITHUB_IMAGE_MEDIA_TYPE_TIMEOUT_MS = 3_000;
-const MARKDOWN_IMAGE_PATTERN =
-  /!\[([^\]]*)\]\(\s*(?:<([^>\n]+)>|([^\s)\n]+))(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/gu;
-const HTML_IMAGE_PATTERN = /<img\b[^>]*>/giu;
-const HTML_ATTRIBUTE_PATTERN =
-  /\b(src|alt)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/giu;
-const SCREENSHOT_LIKE_IMAGE_TEXT =
-  /\b(?:after|before|demo|desktop|mobile|preview|screen(?:[ -]?shot)?|ui)\b/iu;
-const REJECTED_IMAGE_TEXT = /\b(?:avatar|badge|coverage|icon|logo|shield)\b/iu;
-const SUPPORTED_SLACK_IMAGE_MEDIA_TYPES = new Set([
-  'image/gif',
-  'image/jpeg',
-  'image/png',
-]);
-
-type PullRequestImageCandidate = {
-  url: string;
-  altText: string;
-  surroundingText: string;
-  position: number;
-};
-
-function getHtmlImageAttribute(tag: string, name: 'src' | 'alt'): string {
-  for (const match of tag.matchAll(HTML_ATTRIBUTE_PATTERN)) {
-    if (match[1]?.toLowerCase() !== name) continue;
-    return match[2] ?? match[3] ?? match[4] ?? '';
-  }
-  return '';
-}
-
-function normalizeAnonymousImageUrl(value: string): string | null {
-  try {
-    const url = new URL(value.trim());
-    if (url.protocol !== 'https:' || url.username || url.password) return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
-async function getAnonymousImageMediaType(
-  value: string,
-): Promise<string | null> {
-  const response = await safeHeadFollowingRedirects(value, {
-    maxRedirects: MAX_GITHUB_IMAGE_REDIRECTS,
-    requireHttps: true,
-    signal: AbortSignal.timeout(GITHUB_IMAGE_MEDIA_TYPE_TIMEOUT_MS),
-  });
-  if (!response.ok) return null;
-
-  return (
-    response.headers
-      .get('content-type')
-      ?.split(';', 1)[0]
-      ?.trim()
-      .toLowerCase() ?? null
-  );
-}
-
-function getImageSurroundingText(
-  body: string,
-  position: number,
-  sourceLength: number,
-): string {
-  const contextRadius = Math.floor(
-    MAX_GITHUB_PULL_REQUEST_IMAGE_CONTEXT_CHARS / 2,
-  );
-  return `${body.slice(Math.max(0, position - contextRadius), position)} ${body.slice(position + sourceLength, position + sourceLength + contextRadius)}`
-    .replaceAll(/\s+/gu, ' ')
-    .trim()
-    .slice(0, MAX_GITHUB_PULL_REQUEST_IMAGE_CONTEXT_CHARS);
-}
-
-function normalizePullRequestImageCandidate(
-  candidate: PullRequestImageCandidate,
-): PullRequestImageCandidate | null {
-  const altText = candidate.altText.trim().replaceAll(/\s+/gu, ' ');
-  const url = normalizeAnonymousImageUrl(
-    candidate.url.trim().replaceAll('&amp;', '&'),
-  );
-  if (!url) return null;
-  if (REJECTED_IMAGE_TEXT.test(`${altText} ${url}`)) return null;
-
-  return {
-    url,
-    altText:
-      altText.slice(0, MAX_GITHUB_PULL_REQUEST_IMAGE_ALT_CHARS) ||
-      'Pull request image',
-    surroundingText: candidate.surroundingText,
-    position: candidate.position,
-  };
-}
-
-export async function extractEligiblePullRequestImages(
-  body: string | null | undefined,
-  resolveMediaType: (
-    url: string,
-  ) => Promise<string | null> = getAnonymousImageMediaType,
-): Promise<MergeAnnouncerPullRequestContext['imageCandidates']> {
-  if (!body?.trim()) return [];
-
-  const candidates: PullRequestImageCandidate[] = [];
-  for (const match of body.matchAll(MARKDOWN_IMAGE_PATTERN)) {
-    candidates.push({
-      altText: match[1] ?? '',
-      url: match[2] ?? match[3] ?? '',
-      surroundingText: getImageSurroundingText(
-        body,
-        match.index,
-        match[0].length,
-      ),
-      position: match.index,
-    });
-  }
-  for (const match of body.matchAll(HTML_IMAGE_PATTERN)) {
-    const tag = match[0];
-    candidates.push({
-      altText: getHtmlImageAttribute(tag, 'alt'),
-      url: getHtmlImageAttribute(tag, 'src'),
-      surroundingText: getImageSurroundingText(
-        body,
-        match.index,
-        match[0].length,
-      ),
-      position: match.index,
-    });
-  }
-
-  const rankedCandidates = candidates
-    .sort((a, b) => a.position - b.position)
-    .map(normalizePullRequestImageCandidate)
-    .filter((candidate): candidate is PullRequestImageCandidate => !!candidate)
-    .sort((a, b) => {
-      const screenshotScoreDifference =
-        Number(SCREENSHOT_LIKE_IMAGE_TEXT.test(b.altText)) -
-        Number(SCREENSHOT_LIKE_IMAGE_TEXT.test(a.altText));
-      return screenshotScoreDifference || a.position - b.position;
-    })
-    .slice(0, MAX_GITHUB_PULL_REQUEST_IMAGE_PROBES);
-
-  const eligibleCandidates: PullRequestImageCandidate[] = [];
-  for (
-    let offset = 0;
-    offset < rankedCandidates.length &&
-    eligibleCandidates.length < MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES;
-  ) {
-    const batchSize = Math.min(
-      GITHUB_PULL_REQUEST_IMAGE_PROBE_BATCH_SIZE,
-      MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES - eligibleCandidates.length,
-    );
-    const mediaTypeResults = await Promise.allSettled(
-      rankedCandidates
-        .slice(offset, offset + batchSize)
-        .map(async (candidate) => ({
-          candidate,
-          mediaType: await resolveMediaType(candidate.url),
-        })),
-    );
-    offset += batchSize;
-    eligibleCandidates.push(
-      ...mediaTypeResults.flatMap((result) =>
-        result.status === 'fulfilled' &&
-        result.value.mediaType &&
-        SUPPORTED_SLACK_IMAGE_MEDIA_TYPES.has(
-          result.value.mediaType.toLowerCase(),
-        )
-          ? [result.value.candidate]
-          : [],
-      ),
-    );
-  }
-
-  return eligibleCandidates
-    .slice(0, MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES)
-    .map((candidate, index) => ({
-      id: `image-${index + 1}`,
-      url: candidate.url,
-      altText: candidate.altText,
-      surroundingText: candidate.surroundingText,
-    }));
-}
 
 function getPullRequestNumberFromCommitMessage(
   message: string | undefined,
@@ -246,14 +58,10 @@ type GitHubPushWebhook = {
 
 type GitHubMergeAnnouncerDependencies = {
   getInstallationOctokit: typeof getInstallationOctokit;
-  getAnonymousMediaType: typeof getAnonymousImageMediaType;
-  extractEligibleImages: typeof extractEligiblePullRequestImages;
 };
 
 const githubMergeAnnouncerDependencies: GitHubMergeAnnouncerDependencies = {
   getInstallationOctokit,
-  getAnonymousMediaType: getAnonymousImageMediaType,
-  extractEligibleImages: extractEligiblePullRequestImages,
 };
 
 export function normalizeGitHubPush(
@@ -359,18 +167,6 @@ export async function enrichGitHubMergeAnnouncerEvent(
       return event;
     }
 
-    let imageCandidates: MergeAnnouncerPullRequestContext['imageCandidates'];
-    try {
-      imageCandidates = await dependencies.extractEligibleImages(
-        pullRequest.body,
-        dependencies.getAnonymousMediaType,
-      );
-    } catch (error) {
-      console.warn(
-        `[mergeAnnouncer] Failed to extract pull request images for ${payload.repository?.full_name}#${pullRequest.number}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-
     let changedFiles: MergeAnnouncerPullRequestContext['changedFiles'];
     try {
       const { data: files } = await octokit.rest.pulls.listFiles({
@@ -402,7 +198,6 @@ export async function enrichGitHubMergeAnnouncerEvent(
         changedFileCount: pullRequest.changed_files,
         additions: pullRequest.additions,
         deletions: pullRequest.deletions,
-        ...(imageCandidates?.length ? { imageCandidates } : {}),
         ...(changedFiles ? { changedFiles } : {}),
       },
     };

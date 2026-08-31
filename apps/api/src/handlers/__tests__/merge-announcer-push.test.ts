@@ -5,7 +5,6 @@ import {
   normalizeGiteaPush,
   normalizeGitHubPush,
   normalizeGitLabPush,
-  extractEligiblePullRequestImages,
 } from '../merge-announcer-push';
 import { adoPushWebhookSchema } from '../ado/types';
 import { bitbucketPushWebhookSchema } from '../bitbucket/types';
@@ -43,191 +42,6 @@ describe('Merge announcer push normalization', () => {
     });
   });
 
-  it('extracts Markdown and HTML images in deterministic fallback order', async () => {
-    await expect(
-      extractEligiblePullRequestImages(
-        `
-![Architecture](https://user-images.githubusercontent.com/1/architecture.png)
-<img src="https://github.com/user-attachments/assets/product-preview" alt="Product screenshot after save">
-`,
-        async () => 'image/png',
-      ),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        id: 'image-1',
-        url: 'https://github.com/user-attachments/assets/product-preview',
-        altText: 'Product screenshot after save',
-        surroundingText: expect.stringContaining('Architecture'),
-      }),
-      expect.objectContaining({
-        id: 'image-2',
-        url: 'https://user-images.githubusercontent.com/1/architecture.png',
-        altText: 'Architecture',
-      }),
-    ]);
-  });
-
-  it('extracts an anonymously fetchable Markdown image', async () => {
-    await expect(
-      extractEligiblePullRequestImages(
-        '![Updated settings](https://user-images.githubusercontent.com/1/settings.png)',
-        async () => 'image/png',
-      ),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        id: 'image-1',
-        url: 'https://user-images.githubusercontent.com/1/settings.png',
-        altText: 'Updated settings',
-      }),
-    ]);
-  });
-
-  it.each(['png', 'jpg', 'jpeg', 'gif'])(
-    'accepts Slack-supported .%s images',
-    async (extension) => {
-      const url = `https://raw.githubusercontent.com/acme/widgets/main/screenshot.${extension}`;
-      await expect(
-        extractEligiblePullRequestImages(
-          `![Product screenshot](${url})`,
-          async () =>
-            extension === 'gif'
-              ? 'image/gif'
-              : extension === 'png'
-                ? 'image/png'
-                : 'image/jpeg',
-        ),
-      ).resolves.toEqual([
-        expect.objectContaining({ url, altText: 'Product screenshot' }),
-      ]);
-    },
-  );
-
-  it('accepts a supported external HTTPS image by anonymous media type', async () => {
-    await expect(
-      extractEligiblePullRequestImages(
-        '![Release preview](https://cdn.example.com/release-preview)',
-        async () => 'image/jpeg',
-      ),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        url: 'https://cdn.example.com/release-preview',
-        altText: 'Release preview',
-      }),
-    ]);
-  });
-
-  it('rejects badges, icons, unsafe URLs, and unsupported media', async () => {
-    await expect(
-      extractEligiblePullRequestImages(
-        `
-![Build badge](https://user-images.githubusercontent.com/1/build.png)
-<img alt="App icon" src="https://github.com/user-attachments/assets/icon">
-![Screenshot](http://user-images.githubusercontent.com/1/screenshot.png)
-![UI screenshot](https://raw.githubusercontent.com/acme/widgets/main/screenshot.svg)
-![Walkthrough screenshot](https://raw.githubusercontent.com/acme/widgets/main/walkthrough.mp4)
-![Uploaded video screenshot](https://github.com/user-attachments/assets/walkthrough.mp4)
-`,
-        async (url) => (url.endsWith('.svg') ? 'image/svg+xml' : 'video/mp4'),
-      ),
-    ).resolves.toEqual([]);
-  });
-
-  it('rejects extensionless GitHub attachment videos by media type', async () => {
-    await expect(
-      extractEligiblePullRequestImages(
-        '![Walkthrough screenshot](https://github.com/user-attachments/assets/opaque-video)',
-        vi.fn().mockResolvedValue('video/mp4'),
-      ),
-    ).resolves.toEqual([]);
-  });
-
-  it('keeps a later candidate after an attachment has an unsupported media type', async () => {
-    await expect(
-      extractEligiblePullRequestImages(
-        `![Product screenshot](https://github.com/user-attachments/assets/opaque-video)
-![Updated settings](https://raw.githubusercontent.com/acme/widgets/main/settings.png)`,
-        vi
-          .fn()
-          .mockResolvedValueOnce('video/mp4')
-          .mockResolvedValueOnce('image/png'),
-      ),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        id: 'image-1',
-        url: 'https://raw.githubusercontent.com/acme/widgets/main/settings.png',
-        altText: 'Updated settings',
-      }),
-    ]);
-  });
-
-  it('does not let rejected images consume the anonymous probe limit', async () => {
-    const rejectedImages = Array.from(
-      { length: 5 },
-      (_, index) =>
-        `![Build badge ${index + 1}](https://cdn.example.com/badge-${index + 1}.png)`,
-    ).join('\n');
-    const screenshotUrl = 'https://cdn.example.com/settings.png';
-    const resolveMediaType = vi.fn().mockResolvedValue('image/png');
-
-    await expect(
-      extractEligiblePullRequestImages(
-        `${rejectedImages}\n![Settings screenshot](${screenshotUrl})`,
-        resolveMediaType,
-      ),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        url: screenshotUrl,
-        altText: 'Settings screenshot',
-      }),
-    ]);
-    expect(resolveMediaType).toHaveBeenCalledOnce();
-    expect(resolveMediaType).toHaveBeenCalledWith(screenshotUrl);
-  });
-
-  it('continues bounded probes after earlier images have unsupported media types', async () => {
-    const unsupportedImages = Array.from(
-      { length: 5 },
-      (_, index) =>
-        `![Preview ${index + 1}](https://cdn.example.com/video-${index + 1})`,
-    ).join('\n');
-    const screenshotUrl = 'https://cdn.example.com/settings-screenshot';
-    const resolveMediaType = vi.fn(async (url: string) =>
-      url === screenshotUrl ? 'image/png' : 'video/mp4',
-    );
-
-    await expect(
-      extractEligiblePullRequestImages(
-        `${unsupportedImages}\n![Settings screenshot](${screenshotUrl})`,
-        resolveMediaType,
-      ),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        url: screenshotUrl,
-        altText: 'Settings screenshot',
-      }),
-    ]);
-    expect(resolveMediaType).toHaveBeenCalledTimes(6);
-  });
-
-  it('does not probe beyond the remaining supported-image capacity', async () => {
-    const imageUrls = Array.from(
-      { length: 10 },
-      (_, index) => `https://cdn.example.com/preview-${index + 1}`,
-    );
-    const resolveMediaType = vi.fn(async (url: string) =>
-      imageUrls.indexOf(url) === 4 ? 'video/mp4' : 'image/png',
-    );
-    const candidates = imageUrls
-      .map((url, index) => `![Preview ${index + 1}](${url})`)
-      .join('\n');
-
-    await expect(
-      extractEligiblePullRequestImages(candidates, resolveMediaType),
-    ).resolves.toHaveLength(5);
-    expect(resolveMediaType).toHaveBeenCalledTimes(6);
-    expect(resolveMediaType).not.toHaveBeenCalledWith(imageUrls[6]);
-  });
-
   it('enriches GitHub merge pushes with bounded PR metadata and file stats', async () => {
     const payload = {
       ref: 'refs/heads/main',
@@ -237,7 +51,6 @@ describe('Merge announcer push normalization', () => {
         id: 1,
         full_name: 'acme/widgets',
         html_url: 'https://github.com/acme/widgets',
-        private: true,
       },
       commits: [{ id: 'abcdef1234567890', message: 'Merge pull request #7' }],
     };
@@ -281,17 +94,11 @@ describe('Merge announcer push normalization', () => {
         pulls: { get, listFiles },
       },
     });
-    const getAnonymousMediaType = vi.fn().mockResolvedValue('image/png');
-
     const enriched = await enrichGitHubMergeAnnouncerEvent(payload, event, {
       getInstallationOctokit: getInstallationOctokit as never,
-      getAnonymousMediaType,
     });
 
     expect(getInstallationOctokit).toHaveBeenCalledWith({ installationId: 99 });
-    expect(getAnonymousMediaType).toHaveBeenCalledWith(
-      'https://github.com/user-attachments/assets/product-preview',
-    );
     expect(listPullRequestsAssociatedWithCommit).toHaveBeenCalledWith({
       owner: 'acme',
       repo: 'widgets',
@@ -320,13 +127,6 @@ describe('Merge announcer push normalization', () => {
       changedFileCount: 24,
       additions: 120,
       deletions: 15,
-      imageCandidates: [
-        expect.objectContaining({
-          id: 'image-1',
-          url: 'https://github.com/user-attachments/assets/product-preview',
-          altText: 'Product screenshot',
-        }),
-      ],
       changedFiles: [
         {
           path: 'src/widget.ts',
@@ -671,129 +471,6 @@ describe('Merge announcer push normalization', () => {
       expect.stringContaining('Failed to fetch changed files'),
     );
     warn.mockRestore();
-  });
-
-  it('keeps verified PR context when image extraction fails', async () => {
-    const payload = {
-      ref: 'refs/heads/main',
-      after: 'abcdef1234567890',
-      installation: { id: 99 },
-      repository: {
-        id: 1,
-        full_name: 'acme/widgets',
-        private: true,
-      },
-      commits: [{ id: 'abcdef1234567890', message: 'Merge pull request #7' }],
-    };
-    const event = normalizeGitHubPush(payload)!;
-    const extractEligibleImages = vi.fn(() => {
-      throw new Error('image parser unavailable');
-    });
-    const getInstallationOctokit = vi.fn().mockResolvedValue({
-      rest: {
-        repos: {
-          listPullRequestsAssociatedWithCommit: vi.fn().mockResolvedValue({
-            data: [{ number: 7, base: { ref: 'main' } }],
-          }),
-        },
-        pulls: {
-          get: vi.fn().mockResolvedValue({
-            data: {
-              number: 7,
-              html_url: 'https://github.com/acme/widgets/pull/7',
-              title: 'Ship widget export',
-              body: '![Screenshot](https://github.com/user-attachments/assets/demo)',
-              merge_commit_sha: payload.after,
-              base: { ref: 'main' },
-              changed_files: 1,
-              additions: 20,
-              deletions: 4,
-            },
-          }),
-          listFiles: vi.fn().mockResolvedValue({ data: [] }),
-        },
-      },
-    });
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-
-    const enriched = await enrichGitHubMergeAnnouncerEvent(payload, event, {
-      getInstallationOctokit: getInstallationOctokit as never,
-      extractEligibleImages,
-    });
-
-    expect(extractEligibleImages).toHaveBeenCalledOnce();
-    expect(enriched.pullRequest).toMatchObject({
-      number: 7,
-      title: 'Ship widget export',
-    });
-    expect(enriched.pullRequest).not.toHaveProperty('imageCandidates');
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to extract pull request images'),
-    );
-    warn.mockRestore();
-  });
-
-  it('uses anonymously fetchable images from private PR bodies', async () => {
-    const payload = {
-      ref: 'refs/heads/main',
-      after: 'abcdef1234567890',
-      installation: { id: 99 },
-      repository: {
-        id: 1,
-        full_name: 'acme/widgets',
-        private: true,
-      },
-      commits: [{ id: 'abcdef1234567890', message: 'Merge pull request #7' }],
-    };
-    const event = normalizeGitHubPush(payload)!;
-    const extractEligibleImages = vi.fn().mockResolvedValue([
-      {
-        id: 'image-1',
-        url: 'https://github.com/user-attachments/assets/demo',
-        altText: 'Screenshot',
-        surroundingText: '',
-      },
-    ]);
-    const getInstallationOctokit = vi.fn().mockResolvedValue({
-      rest: {
-        repos: {
-          listPullRequestsAssociatedWithCommit: vi.fn().mockResolvedValue({
-            data: [{ number: 7, base: { ref: 'main' } }],
-          }),
-        },
-        pulls: {
-          get: vi.fn().mockResolvedValue({
-            data: {
-              number: 7,
-              html_url: 'https://github.com/acme/widgets/pull/7',
-              title: 'Ship widget export',
-              body: '![Screenshot](https://github.com/user-attachments/assets/demo)',
-              merge_commit_sha: payload.after,
-              base: { ref: 'main' },
-              changed_files: 1,
-              additions: 20,
-              deletions: 4,
-            },
-          }),
-          listFiles: vi.fn().mockResolvedValue({ data: [] }),
-        },
-      },
-    });
-
-    const enriched = await enrichGitHubMergeAnnouncerEvent(payload, event, {
-      getInstallationOctokit: getInstallationOctokit as never,
-      extractEligibleImages,
-    });
-
-    expect(extractEligibleImages).toHaveBeenCalledOnce();
-    expect(enriched.pullRequest).toMatchObject({
-      imageCandidates: [
-        {
-          id: 'image-1',
-          url: 'https://github.com/user-attachments/assets/demo',
-        },
-      ],
-    });
   });
 
   it('rejects associated PRs whose merge SHA is not the pushed tip', async () => {
