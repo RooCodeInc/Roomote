@@ -2,6 +2,7 @@ import {
   ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
   ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
   ROOMOTE_SESSION_DEFAULT_ACTIONS,
+  getRoomoteSearchStatusError,
   resolveRoomoteCommunicationTarget,
   roomoteManagementFieldSchemas,
   shouldSearchTasks,
@@ -63,5 +64,17 @@ describe('Roomote MCP management contract', () => {
       true,
     );
     expect(shouldSearchTasks({ action: 'search', status: 'all' })).toBe(true);
+    expect(
+      getRoomoteSearchStatusError({
+        action: 'search_tasks',
+        status: 'needs_input',
+      }),
+    ).toBe('status must be one of: active, completed, all for search_tasks');
+    expect(
+      getRoomoteSearchStatusError({
+        action: 'search_tasks',
+        status: 'active',
+      }),
+    ).toBeNull();
   });
 });

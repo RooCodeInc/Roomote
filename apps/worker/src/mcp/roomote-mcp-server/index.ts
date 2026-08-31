@@ -17,6 +17,7 @@ import {
   ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
   ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION,
   ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
+  getRoomoteSearchStatusError,
   resolveRoomoteCommunicationTarget,
   roomoteManagementFieldSchemas,
   shouldSearchTasks,
@@ -647,6 +648,11 @@ roomoteMcpServer.registerTool(
         );
       }
       case 'search_tasks': {
+        const statusError = getRoomoteSearchStatusError({
+          action: 'search_tasks',
+          status: params.status,
+        });
+        if (statusError) return errorResult(statusError);
         return handleSearchTasks(
           {
             query: params.query,

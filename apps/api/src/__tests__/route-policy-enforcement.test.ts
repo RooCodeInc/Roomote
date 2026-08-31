@@ -378,6 +378,33 @@ describe('route policy enforcement', () => {
         tasks: expect.any(Array),
       });
 
+      const invalidTaskSearchResponse = await createApiApp().request(
+        'http://localhost/mcp',
+        {
+          ...request,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 5,
+            method: 'tools/call',
+            params: {
+              name: 'manage_tasks',
+              arguments: {
+                action: 'search_tasks',
+                status: 'needs_input',
+              },
+            },
+          }),
+        },
+      );
+      const invalidTaskSearchBody =
+        (await invalidTaskSearchResponse.json()) as {
+          result?: { isError?: boolean; structuredContent?: unknown };
+        };
+      expect(invalidTaskSearchBody.result?.isError).toBe(true);
+      expect(invalidTaskSearchBody.result?.structuredContent).toMatchObject({
+        error: 'status must be one of: active, completed, all for search_tasks',
+      });
+
       const callResponse = await createApiApp().request(
         'http://localhost/mcp',
         {

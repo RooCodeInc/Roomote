@@ -361,6 +361,21 @@ describe('roomote MCP tool descriptions', () => {
     ).toBe(false);
   });
 
+  it('rejects Session-only statuses before task search reaches the API', async () => {
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'test-token',
+    });
+    const tool = getRegisteredTool(registeredTools, 'manage_tasks');
+    const result = (await tool.handler?.({
+      action: 'search_tasks',
+      status: 'needs_input',
+    })) as { content?: Array<{ text?: string }> };
+
+    expect(result.content?.[0]?.text).toContain(
+      'status must be one of: active, completed, all for search_tasks',
+    );
+  });
+
   it('registers show_widget for presentational HTML in the task transcript', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const tool = getRegisteredTool(registeredTools, 'show_widget');

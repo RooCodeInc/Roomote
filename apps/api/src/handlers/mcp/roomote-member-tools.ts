@@ -6,6 +6,7 @@ import {
   ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
   ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION,
   ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
+  getRoomoteSearchStatusError,
   resolveRoomoteCommunicationTarget,
   roomoteManagementFieldSchemas,
   shouldSearchTasks,
@@ -115,6 +116,11 @@ export function registerRoomoteMemberTools(
           );
         }
         case 'search_tasks': {
+          const statusError = getRoomoteSearchStatusError({
+            action: 'search_tasks',
+            status: params.status,
+          });
+          if (statusError) return toolError({ error: statusError });
           const query = new URLSearchParams();
           if (params.query) query.set('query', params.query);
           if (params.status) query.set('status', params.status);
