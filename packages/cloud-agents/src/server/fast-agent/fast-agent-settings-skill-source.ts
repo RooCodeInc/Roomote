@@ -482,33 +482,43 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
           Number(hasExplicitSelection(left[1]))
         );
       });
-    const selectedSources = sourceCandidates.slice(
-      0,
-      SETTINGS_SKILL_MAX_SOURCES,
-    );
-    if (sourceCandidates.length > selectedSources.length) {
+    const selectedSources = query.name
+      ? sourceCandidates
+      : sourceCandidates.slice(0, SETTINGS_SKILL_MAX_SOURCES);
+    if (!query.name && sourceCandidates.length > selectedSources.length) {
       warnings.push(
         `Settings skill discovery omitted ${sourceCandidates.length - selectedSources.length} marketplace sources after reaching the limit of ${SETTINGS_SKILL_MAX_SOURCES}.`,
       );
     }
-    const marketplaceResults = await Promise.all(
-      selectedSources.map(async ([source, selectionsByEnvironment]) => {
-        let snapshotPromise = this.marketplaceSnapshots.get(source);
-        if (!snapshotPromise) {
-          snapshotPromise = this.loadMarketplaceSnapshot(source);
-          this.marketplaceSnapshots.set(source, snapshotPromise);
-        }
-        try {
-          return {
-            selectionsByEnvironment,
-            snapshot: await snapshotPromise,
-            source,
-          };
-        } catch {
-          return { selectionsByEnvironment, snapshot: null, source };
-        }
-      }),
-    );
+    const marketplaceResults = [];
+    for (
+      let start = 0;
+      start < selectedSources.length;
+      start += SETTINGS_SKILL_MAX_SOURCES
+    ) {
+      marketplaceResults.push(
+        ...(await Promise.all(
+          selectedSources
+            .slice(start, start + SETTINGS_SKILL_MAX_SOURCES)
+            .map(async ([source, selectionsByEnvironment]) => {
+              let snapshotPromise = this.marketplaceSnapshots.get(source);
+              if (!snapshotPromise) {
+                snapshotPromise = this.loadMarketplaceSnapshot(source);
+                this.marketplaceSnapshots.set(source, snapshotPromise);
+              }
+              try {
+                return {
+                  selectionsByEnvironment,
+                  snapshot: await snapshotPromise,
+                  source,
+                };
+              } catch {
+                return { selectionsByEnvironment, snapshot: null, source };
+              }
+            }),
+        )),
+      );
+    }
     for (const result of marketplaceResults) {
       const { selectionsByEnvironment, snapshot, source } = result;
       if (!snapshot) {

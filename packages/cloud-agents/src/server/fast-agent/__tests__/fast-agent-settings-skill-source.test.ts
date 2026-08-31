@@ -189,6 +189,51 @@ describe('RemoteFastAgentSettingsSkillSource', () => {
     expect(catalog.warnings).toEqual([]);
   });
 
+  it('searches all authorized all-selection sources for an exact name in bounded batches', async () => {
+    const skills = Object.fromEntries(
+      Array.from({ length: 9 }, (_, index) => [
+        `owner/source-${index + 1}`,
+        'all',
+      ]),
+    );
+    let activeLoads = 0;
+    let maxActiveLoads = 0;
+    const loadMarketplaceSnapshot = vi
+      .fn()
+      .mockImplementation(async (source: string) => {
+        activeLoads += 1;
+        maxActiveLoads = Math.max(maxActiveLoads, activeLoads);
+        await Promise.resolve();
+        activeLoads -= 1;
+        return marketplaceSnapshot({
+          name: source === 'owner/source-9' ? 'target-skill' : 'other-skill',
+          source,
+        });
+      });
+    const source = new RemoteFastAgentSettingsSkillSource({
+      allowedEnvironmentIds: ['environment-1'],
+      loadMarketplaceSnapshot,
+      resolveEnvironments: vi.fn().mockResolvedValue([
+        {
+          id: 'environment-1',
+          config: environmentConfig({ skills }),
+        },
+      ]),
+    });
+
+    const catalog = await source.list({ name: 'target-skill' });
+
+    expect(loadMarketplaceSnapshot).toHaveBeenCalledTimes(9);
+    expect(maxActiveLoads).toBeLessThanOrEqual(8);
+    expect(catalog.skills).toEqual([
+      expect.objectContaining({
+        name: 'target-skill',
+        settingsSource: 'owner/source-9',
+      }),
+    ]);
+    expect(catalog.warnings).toEqual([]);
+  });
+
   it('uses targeted sized tree metadata to exclude oversized Markdown resources', async () => {
     const objectId = 'a'.repeat(40);
     const metadataTree = [
