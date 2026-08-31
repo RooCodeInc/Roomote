@@ -48,6 +48,12 @@ async function processFastAgentReaction(params: {
     return;
   }
 
+  const threadTs = conversation.replyTarget.threadId;
+  if (!threadTs) {
+    params.onRejected();
+    return;
+  }
+
   const releaseTurnLock = await acquireFastAgentTurnLock({ conversation });
   if (!releaseTurnLock) {
     params.onRejected();
@@ -57,7 +63,6 @@ async function processFastAgentReaction(params: {
     releaseTurnLock.abort(new Error('Slack reaction turn was canceled.')),
   );
 
-  const threadTs = conversation.replyTarget.threadId;
   const reactionInput: FastAgentReactionExternalInput = {
     type: 'reaction_added',
     provider: 'slack',

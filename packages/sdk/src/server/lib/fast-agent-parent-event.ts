@@ -19,6 +19,7 @@ import {
   db,
   customAutomations,
   eq,
+  getCustomAutomationById,
   inArray,
   slackInstallations,
   taskArtifacts,
@@ -27,6 +28,7 @@ import {
 } from '@roomote/db/server';
 import { Env, getArtifactSigningKey } from '@roomote/env';
 import {
+  acquireSlackFastRootBindingLock,
   buildSlackPrReviewActionBlocks,
   createFastAgentSlackLiveTaskLauncher,
   createFastAgentSlackSessionActivity,
@@ -157,6 +159,7 @@ export type FastAgentParentEvent =
       type: 'task_settled';
       taskId: string;
       runId: number;
+      customAutomationId?: string;
       title?: string;
       status: string;
       error?: string;
@@ -357,14 +360,11 @@ type FastAgentParentTurnParams = {
 
 function createFastAgentAutomationTaskLauncher(params: {
   userId: string;
-  conversation: Extract<FastAgentConversation, { surface: 'automation' }>;
+  conversation: FastAgentConversation;
+  automationId: string;
+  automationName: string;
   event: FastAgentParentEvent;
 }): LaunchFastAgentTask {
-  const automationName =
-    params.event.type === 'automation_triggered'
-      ? params.event.automationName
-      : 'Custom automation';
-
   return createFastAgentTaskLauncher({
     userId: params.userId,
     surface: 'system',
@@ -377,15 +377,15 @@ function createFastAgentAutomationTaskLauncher(params: {
       kind: 'automation',
       key: 'custom_automation',
       actor: {
-        externalId: params.conversation.workspaceId,
-        displayName: automationName,
+        externalId: params.automationId,
+        displayName: params.automationName,
       },
     },
     afterKickoff: async (taskRun) => {
       await db
         .update(customAutomations)
         .set({ lastLaunchedTaskId: taskRun.taskId })
-        .where(eq(customAutomations.id, params.conversation.workspaceId));
+        .where(eq(customAutomations.id, params.automationId));
     },
     onQueueFailure: async (taskRun) => {
       await db
@@ -393,7 +393,7 @@ function createFastAgentAutomationTaskLauncher(params: {
         .set({ lastLaunchedTaskId: null })
         .where(
           and(
-            eq(customAutomations.id, params.conversation.workspaceId),
+            eq(customAutomations.id, params.automationId),
             eq(customAutomations.lastLaunchedTaskId, taskRun.taskId),
           ),
         );
@@ -403,6 +403,7 @@ function createFastAgentAutomationTaskLauncher(params: {
       payload: {
         repo: ALL_REPOSITORIES,
         description: prompt,
+        customAutomationId: params.automationId,
         ...buildFastAgentChildTaskMetadata({
           sessionId: parentSessionId,
           conversation: params.conversation,
@@ -446,6 +447,11 @@ async function createAutomationFastAgentParentTurn(params: {
       launchTask: createFastAgentAutomationTaskLauncher({
         userId: session.userId,
         conversation: session.conversation,
+        automationId: session.conversation.workspaceId,
+        automationName:
+          params.event.type === 'automation_triggered'
+            ? params.event.automationName
+            : 'Custom automation',
         event: params.event,
       }),
       postReply: async () => {
@@ -528,8 +534,26 @@ async function createSlackFastAgentParentTurn(
 
   const conversation = session.conversation;
   const slack = new SlackNotifier(installation.botAccessToken);
+  const threadId = conversation.replyTarget.threadId;
+  const pendingAutomationRoot = !threadId;
+  const customAutomationId =
+    params.event.type === 'automation_triggered'
+      ? params.event.automationId
+      : params.event.type === 'task_settled'
+        ? params.event.customAutomationId
+        : pendingAutomationRoot
+          ? conversation.conversationId.split(':', 1)[0]
+          : undefined;
+  const customAutomation = customAutomationId
+    ? await getCustomAutomationById(customAutomationId)
+    : null;
+  const automationName =
+    params.event.type === 'automation_triggered'
+      ? params.event.automationName
+      : (customAutomation?.name ?? 'Custom automation');
 
   if (
+    conversation.replyTarget.threadId &&
     params.event.type === 'pull_request_status_changed' &&
     params.event.status === 'merged'
   ) {
@@ -545,31 +569,47 @@ async function createSlackFastAgentParentTurn(
     userId: session.userId,
     conversation,
     adapter: {
-      activity: createFastAgentSlackSessionActivity({
-        slack,
-        workspaceId: conversation.workspaceId,
-        channel: conversation.replyTarget.channelId,
-        threadTs: conversation.replyTarget.threadId,
-        title: session.title,
-        resolveTitle: async () =>
-          (await fastAgentConversationRepository.findById({ id: session.id }))
-            ?.title,
-      }),
-      launchTask: createFastAgentSlackLiveTaskLauncher({
-        slack,
-        userId: session.userId,
-        teamId: conversation.workspaceId,
-        ...(installation.teamDomain
-          ? { teamDomain: installation.teamDomain }
-          : {}),
-        channelId: conversation.replyTarget.channelId,
-        threadTs: conversation.replyTarget.threadId,
-      }),
+      ...(pendingAutomationRoot
+        ? {}
+        : {
+            activity: createFastAgentSlackSessionActivity({
+              slack,
+              workspaceId: conversation.workspaceId,
+              channel: conversation.replyTarget.channelId,
+              threadTs: threadId!,
+              title: session.title,
+              resolveTitle: async () =>
+                (
+                  await fastAgentConversationRepository.findById({
+                    id: session.id,
+                  })
+                )?.title,
+            }),
+          }),
+      launchTask: pendingAutomationRoot
+        ? createFastAgentAutomationTaskLauncher({
+            userId: session.userId,
+            conversation,
+            automationId: customAutomationId ?? conversation.conversationId,
+            automationName,
+            event: params.event,
+          })
+        : createFastAgentSlackLiveTaskLauncher({
+            slack,
+            userId: session.userId,
+            teamId: conversation.workspaceId,
+            ...(installation.teamDomain
+              ? { teamDomain: installation.teamDomain }
+              : {}),
+            channelId: conversation.replyTarget.channelId,
+            threadTs: threadId!,
+          }),
       postReply: async ({
         message,
         imageArtifactIds = [],
         suggestions = [],
         kickoff,
+        purpose,
       }) => {
         const images = await buildSelectedImages({
           artifactIds: imageArtifactIds,
@@ -592,40 +632,141 @@ async function createSlackFastAgentParentTurn(
               }
             : null;
 
-        if (params.event.type === 'automation_triggered' && !kickoff) {
-          const reportMessage = appendFastAutomationSuggestionInstruction(
-            message,
-            'slack',
-            suggestions.length > 0,
-          );
-          const contentBlocks = [
-            { type: 'markdown' as const, text: reportMessage },
-            ...images.map((image) => ({
-              type: 'image' as const,
-              image_url: image.url,
-              alt_text: image.altText,
-            })),
-          ];
+        const reportMessage =
+          params.event.type === 'automation_triggered' && !kickoff
+            ? appendFastAutomationSuggestionInstruction(
+                message,
+                'slack',
+                suggestions.length > 0,
+              )
+            : message;
+        const contentBlocks = [
+          { type: 'markdown' as const, text: reportMessage },
+          ...images.map((image) => ({
+            type: 'image' as const,
+            image_url: image.url,
+            alt_text: image.altText,
+          })),
+        ];
+        if (
+          params.event.type === 'task_settled' &&
+          customAutomationId &&
+          params.event.status !== 'completed'
+        ) {
+          return;
+        }
+
+        if (pendingAutomationRoot) {
+          const shouldPostResult =
+            !kickoff && (purpose === 'closeout' || purpose === 'clarification');
+          if (!shouldPostResult || !customAutomationId) {
+            return;
+          }
+
+          const releaseRootBindingLock = await acquireSlackFastRootBindingLock({
+            teamId: conversation.workspaceId,
+            channelId: conversation.replyTarget.channelId,
+          });
+          let messageTs: string | undefined;
+          try {
+            messageTs = await slack.postMessage({
+              channel: conversation.replyTarget.channelId,
+              ...buildCustomAutomationSlackMessage({
+                automationId: customAutomationId,
+                automationName,
+                text: reportMessage,
+                contentBlocks,
+                sessionId: params.parent.sessionId,
+                ...(params.event.type === 'task_settled'
+                  ? { taskUrl: params.event.taskUrl }
+                  : {}),
+              }),
+              unfurl_links: false,
+              unfurl_media: false,
+              client_msg_id: buildSlackClientMessageId(
+                `fast-automation-root:${conversation.conversationId}`,
+              ),
+            });
+            if (!messageTs) {
+              throw new Error(
+                'Slack did not create the Fast automation result.',
+              );
+            }
+            await fastAgentConversationRepository.getOrCreate({
+              userId: session.userId,
+              conversation: {
+                ...conversation,
+                replyTarget: {
+                  ...conversation.replyTarget,
+                  threadId: messageTs,
+                },
+              },
+            });
+            await recordFastAgentConversationMessageBestEffort({
+              sessionId: session.id,
+              conversation: {
+                ...conversation,
+                replyTarget: {
+                  ...conversation.replyTarget,
+                  threadId: messageTs,
+                },
+              },
+              messageId: messageTs,
+            });
+          } finally {
+            await releaseRootBindingLock().catch(() => {});
+          }
+          if (
+            params.event.type === 'automation_triggered' &&
+            suggestions.length > 0
+          ) {
+            await postFastAutomationSuggestionsToSlack({
+              slack,
+              channelId: conversation.replyTarget.channelId,
+              threadTs: messageTs,
+              eventId: params.event.eventId,
+              createdByUserId: session.userId,
+              suggestions,
+            });
+          }
+          params.onReplyPosted();
+          return { messageId: messageTs };
+        }
+
+        if (
+          !kickoff &&
+          (params.event.type === 'automation_triggered' ||
+            (params.event.type === 'task_settled' && customAutomationId))
+        ) {
+          const rootMessageId =
+            params.event.type === 'automation_triggered'
+              ? (params.event.rootMessageId ?? threadId!)
+              : threadId!;
           const updated = await slack.updateMessage({
             channel: conversation.replyTarget.channelId,
-            ts: params.event.rootMessageId ?? conversation.replyTarget.threadId,
+            ts: rootMessageId,
             message: buildCustomAutomationSlackMessage({
-              automationId: params.event.automationId,
-              automationName: params.event.automationName,
+              automationId: customAutomationId!,
+              automationName,
               text: reportMessage,
               contentBlocks,
               sessionId: params.parent.sessionId,
+              ...(params.event.type === 'task_settled'
+                ? { taskUrl: params.event.taskUrl }
+                : {}),
             }),
           });
           if (!updated) {
             throw new Error('Slack did not update the Fast automation root.');
           }
-          if (suggestions.length > 0) {
+          if (
+            params.event.type === 'automation_triggered' &&
+            suggestions.length > 0
+          ) {
             await postFastAutomationSuggestionsToSlack({
               slack,
               channelId: conversation.replyTarget.channelId,
-              threadTs:
-                params.event.rootMessageId ?? conversation.replyTarget.threadId,
+              threadTs: rootMessageId,
               eventId: params.event.eventId,
               createdByUserId: session.userId,
               suggestions,
@@ -634,8 +775,7 @@ async function createSlackFastAgentParentTurn(
           await recordFastAgentConversationMessageBestEffort({
             sessionId: session.id,
             conversation,
-            messageId:
-              params.event.rootMessageId ?? conversation.replyTarget.threadId,
+            messageId: rootMessageId,
           });
           params.onReplyPosted();
           return;
@@ -651,14 +791,14 @@ async function createSlackFastAgentParentTurn(
             prNumber: action.prNumber,
             prUrl: action.prUrl,
             channelId: conversation.replyTarget.channelId,
-            threadId: conversation.replyTarget.threadId,
+            threadId: threadId ?? null,
             followUpPrompt: action.followUpPrompt,
           });
         }
         const messageTs = await postSlackThreadMessageWithFooterText({
           slack,
           channel: conversation.replyTarget.channelId,
-          threadTs: conversation.replyTarget.threadId,
+          threadTs: threadId!,
           text: action ? `${message}\n${action.question}` : message,
           bodyBlocks: action
             ? buildSlackPrReviewActionBlocks({
