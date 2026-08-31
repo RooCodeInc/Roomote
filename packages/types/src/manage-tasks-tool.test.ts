@@ -48,10 +48,23 @@ describe('Roomote MCP management contract', () => {
     expect(
       resolveRoomoteCommunicationTarget({
         sessionId: crypto.randomUUID(),
-        taskId: 'task-123',
+        taskId: '0abc123def456',
       }),
-    ).toEqual({ kind: 'task', id: 'task-123' });
+    ).toEqual({ kind: 'task', id: '0abc123def456' });
+    expect(
+      resolveRoomoteCommunicationTarget({
+        sessionId: crypto.randomUUID(),
+        taskId: crypto.randomUUID(),
+      }),
+    ).toBeNull();
     expect(resolveRoomoteCommunicationTarget({})).toBeNull();
+    expect(
+      roomoteManagementFieldSchemas.taskId.safeParse(crypto.randomUUID())
+        .success,
+    ).toBe(false);
+    expect(
+      roomoteManagementFieldSchemas.taskId.safeParse('0abc123def456').success,
+    ).toBe(true);
   });
 
   it('defaults search to Sessions while preserving concrete task-search calls', () => {

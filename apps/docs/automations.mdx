@@ -96,6 +96,9 @@ and commit authors. Feature-branch pushes and branch deletions are ignored.
 GitHub, GitLab, Azure DevOps, Bitbucket, and Gitea are supported.
 For GitHub merge commits that Roomote can match to a pull request, the summary
 uses that pull request's context and **View changes** opens the pull request.
+When the pull request body contains a suitable image, the Slack announcement
+can also show one representative screenshot after Roomote validates its URL and
+image type. Announcements continue without an image when validation fails.
 Other announcements link to the provider's compare view.
 
 ## Custom automations
@@ -142,11 +145,9 @@ when repository or workspace execution is required.
 Fast runs deliver to every custom-automation report destination: Slack,
 Discord, Microsoft Teams, or Telegram, as either a channel/chat or a direct
 message to the automation owner. Each run keeps a distinct Fast session, and
-the report links back to that session in the web app. Slack, Discord, and
-Microsoft Teams replies continue the Fast session directly in chat. Teams only
-resumes after verifying the active tenant installation, conversation, and
-linked user. Telegram can deliver the same reports and continue them from the
-web app, but inbound Telegram replies still use its normal task-routing flow.
+the report links back to that session in the web app. Replies on all four
+providers continue the Fast session directly in chat. Roomote verifies the
+active provider installation, conversation, and linked user before resuming.
 Runs with no report destination remain stored Fast sessions and do not post to
 chat.
 

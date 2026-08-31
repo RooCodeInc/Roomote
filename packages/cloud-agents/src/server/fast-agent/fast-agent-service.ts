@@ -72,6 +72,7 @@ import { refreshFastAgentSessionTitle } from './fast-agent-title';
 import {
   classifyNonTaskInferenceError,
   FAST_AGENT_SESSION_PERMISSIONS,
+  FAST_AGENT_SESSION_TOOL_FILTER,
   generateTrackedNonTaskTextInOpenCodeSession,
   isNonTaskOpenCodePromptTimeoutError,
   isNonTaskOpenCodeSessionNotFoundError,
@@ -99,10 +100,7 @@ import {
   type FastAgentMcpToolCall,
   type FastAgentNativeToolCall,
 } from './fast-agent-native-tool-bridge';
-import {
-  buildFastAgentToolFilter,
-  getFastAgentNativeAcpKind,
-} from './fast-agent-tool-policy';
+import { getFastAgentNativeAcpKind } from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
   listFastAgentIntegrations,
@@ -2512,11 +2510,11 @@ export async function answerFastAgentQuestion({
                       promptOnlySubagents: true,
                       trackSessionTreeUsage: true,
                       validateSession,
-                      tools: buildFastAgentToolFilter(
-                        availableIntegrations.map(
-                          (integration) => integration.id,
-                        ),
-                      ),
+                      // The generated build-agent config owns the parent tool
+                      // allowlist. Persist only explicit built-in restrictions
+                      // so warm sessions shed the old wildcard deny and child
+                      // sessions do not inherit it.
+                      tools: FAST_AGENT_SESSION_TOOL_FILTER,
                       onModelResolved: (model) => {
                         resolvedInferenceModel = model;
                         diagnostics.recordModelResolved(model);
