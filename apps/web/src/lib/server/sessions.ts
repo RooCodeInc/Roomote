@@ -663,6 +663,22 @@ export async function getSessions(auth: SessionAuth, input: SessionListInput) {
   };
 }
 
+export async function getSessionSources(auth: SessionAuth) {
+  const rows = await db
+    .selectDistinct({ source: sessions.sourceSurface })
+    .from(sessions)
+    .where(
+      and(
+        sessionScope(auth),
+        eq(sessions.visibility, 'visible'),
+        isNull(sessions.archivedAt),
+      ),
+    )
+    .orderBy(asc(sessions.sourceSurface));
+
+  return rows.map(({ source }) => source);
+}
+
 export async function findAccessibleSession(
   auth: SessionAuth,
   sessionId: string,
