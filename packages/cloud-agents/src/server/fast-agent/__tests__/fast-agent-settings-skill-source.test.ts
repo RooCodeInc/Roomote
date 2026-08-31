@@ -190,9 +190,15 @@ describe('RemoteFastAgentSettingsSkillSource', () => {
   });
 
   it('paginates all-selection sources for an exact name within the source bound', async () => {
-    const skills = Object.fromEntries(
-      Array.from({ length: 9 }, (_, index) => [
+    const firstSkills = Object.fromEntries(
+      Array.from({ length: 4 }, (_, index) => [
         `owner/source-${index + 1}`,
+        'all',
+      ]),
+    );
+    const secondSkills = Object.fromEntries(
+      Array.from({ length: 5 }, (_, index) => [
+        `owner/source-${index + 5}`,
         'all',
       ]),
     );
@@ -213,12 +219,28 @@ describe('RemoteFastAgentSettingsSkillSource', () => {
     const source = new RemoteFastAgentSettingsSkillSource({
       allowedEnvironmentIds: ['environment-1'],
       loadMarketplaceSnapshot,
-      resolveEnvironments: vi.fn().mockResolvedValue([
-        {
-          id: 'environment-1',
-          config: environmentConfig({ skills }),
-        },
-      ]),
+      resolveEnvironments: vi
+        .fn()
+        .mockResolvedValueOnce([
+          {
+            id: 'environment-1',
+            config: environmentConfig({ skills: secondSkills }),
+          },
+          {
+            id: 'environment-1',
+            config: environmentConfig({ skills: firstSkills }),
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            id: 'environment-1',
+            config: environmentConfig({ skills: firstSkills }),
+          },
+          {
+            id: 'environment-1',
+            config: environmentConfig({ skills: secondSkills }),
+          },
+        ]),
     });
 
     const firstPage = await source.list({ name: 'target-skill' });

@@ -479,17 +479,17 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
           : true,
       )
       .sort((left, right) => {
-        if (!query.name) return 0;
+        if (!query.name) return left[0].localeCompare(right[0]);
         const hasExplicitSelection = (
           selectionsByEnvironment: Map<string, 'all' | Set<string>>,
         ) =>
           [...selectionsByEnvironment.values()].some(
             (selection) => selection !== 'all' && selection.has(query.name!),
           );
-        return (
+        const priorityDifference =
           Number(hasExplicitSelection(right[1])) -
-          Number(hasExplicitSelection(left[1]))
-        );
+          Number(hasExplicitSelection(left[1]));
+        return priorityDifference || left[0].localeCompare(right[0]);
       });
     const selectedSources = sourceCandidates.slice(
       sourceOffset,
