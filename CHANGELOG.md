@@ -58,6 +58,7 @@ Roomote 1.0 makes Fast the default entry point for conversations, enables Memory
 - Include authorized Settings skills in Fast mode's unscoped skill inventory.
 - Keep running nested-task activity visible when a Session is loaded directly or reconnects, while still hiding it during genuine new parent responses.
 - Restore authorized deployment MCP tools in Fast advisor and judge consultations while keeping Fast-native orchestration and custom automation tools confined to the parent Session.
+- Keep Fast conversations responsive through API restarts by closing out in-flight turns gracefully during shutdown, so replies no longer disappear and sessions no longer get stuck waiting on an abandoned turn.
 
 ## 0.45.1 (2026-08-29)
 
