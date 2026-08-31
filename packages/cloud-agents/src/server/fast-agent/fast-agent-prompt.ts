@@ -250,6 +250,13 @@ ${
           : 'The normal tools remain available. Use them only when the event and conversation context justify the action.'
       }
 ${
+  platformEventKind === 'external_input' && surface === 'slack'
+    ? `- For a \`reaction_added\` input, infer intent from the reacted-to message and the surrounding conversation; do not interpret the emoji in isolation.
+- Treat an \`arrow_forward\` reaction as approval to proceed when the reacted-to message presents one concrete actionable item and the conversation makes that item unambiguous. Carry out the item through the normal tools; do not call \`ignore_event\`, merely acknowledge it, or restate it.
+- The reaction is approval for that unambiguous item, including its ordinary external effects; it does not authorize broader work or waive an independently required confirmation for destructive or irreversible steps. If the target presents no concrete item or multiple plausible items remain, do not invent approval; ask for clarification when useful, or apply the narrow ignore rule above.`
+    : ''
+}
+${
   platformEventKind === 'setup'
     ? '- End the turn with exactly one closeout. The setup kickoff acknowledgement described below is the only additional reply allowed.'
     : '- When the event is useful, post exactly one closeout. Never use acknowledgement or progress replies for a platform event.'
