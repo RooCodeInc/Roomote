@@ -24,7 +24,7 @@ function readAppendix(skillContent: string, appendixName: string) {
   return skillContent.slice(startIndex, endIndex);
 }
 
-function expectAppendixIgnoresCi(
+function expectAppendixAvoidsCiBookkeeping(
   appendix: string,
   summaryTitleMarker: string,
   reviewInstruction: string,
@@ -33,9 +33,6 @@ function expectAppendixIgnoresCi(
   expect(appendix).toContain(summaryTitleMarker);
   expect(appendix).toContain(reviewInstruction);
   expect(appendix).toContain(commentInstruction);
-  expect(appendix).not.toContain(
-    'gh pr checks [PR_NUMBER] --repo [owner]/[repo]',
-  );
   expect(appendix).not.toContain('latest fetched CI state');
   expect(appendix).not.toContain('Do not wait for CI');
   expect(appendix).not.toContain('pending_check');
@@ -135,7 +132,7 @@ describe('review-code GitHub workflow paths', () => {
       'review-github-pr',
       'review-github-pr-with-approval',
     ]) {
-      expectAppendixIgnoresCi(
+      expectAppendixAvoidsCiBookkeeping(
         readAppendix(skillContent, appendixName),
         '<title>Update the canonical summary comment</title>',
         'Review the diff in context first before publishing the review findings.',
@@ -147,7 +144,7 @@ describe('review-code GitHub workflow paths', () => {
       'sync-github-pr-review',
       'sync-github-pr-review-with-approval',
     ]) {
-      expectAppendixIgnoresCi(
+      expectAppendixAvoidsCiBookkeeping(
         readAppendix(skillContent, appendixName),
         '<title>Refresh the canonical summary comment</title>',
         'Review the delta in context first before publishing the review findings.',
@@ -161,10 +158,16 @@ describe('review-code GitHub workflow paths', () => {
       'Use the diff, surrounding code, and existing CI results for the reviewed commit as the primary evidence.',
     );
     expect(skillContent).toContain(
+      "When CI state matters, actively inspect the current commit's checks with available repository or provider commands; do not require CI status to be injected into task context.",
+    );
+    expect(skillContent).toContain(
       'If CI is pending, continue the review in parallel and leave broad validation to CI.',
     );
     expect(skillContent).toContain(
       'If CI has passed for the current commit, trust it by default.',
+    );
+    expect(skillContent).toContain(
+      'Treat CI failure alerts received after the review begins as new evidence: inspect the reported failure and incorporate any actionable issue into the review.',
     );
     expect(skillContent).toContain(
       'Do not run the full test suite by default.',
@@ -439,7 +442,7 @@ describe('review-code GitHub workflow paths', () => {
     expect(skillContent).not.toContain('summary-carried on all providers');
   });
 
-  it('removes CI and check-state language from the shared skill contract', () => {
+  it('keeps CI results out of the review finding inventory and summary bookkeeping', () => {
     expect(skillContent).not.toContain(
       'If unresolved findings remain after combining the published code findings with the latest fetched CI state',
     );
@@ -472,9 +475,6 @@ describe('review-code GitHub workflow paths', () => {
     );
     expect(skillContent).not.toContain(
       '<finding_kind>code_finding|check|pending_check</finding_kind>',
-    );
-    expect(skillContent).not.toContain(
-      'gh pr checks [PR_NUMBER] --repo [owner]/[repo]',
     );
     expect(skillContent).not.toContain('latest fetched CI state');
     expect(skillContent).not.toContain('Do not wait for CI');
