@@ -3525,6 +3525,31 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         'It coordinates incoming requests.',
       );
       expect(mocks.generateText).toHaveBeenCalledTimes(2);
+      expect(mocks.upsertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({
+            eventId: '100.2:retry-notice:0',
+            metadata: expect.objectContaining({
+              visibleInTranscript: false,
+              purpose: 'progress',
+              inferenceRetryNotice: true,
+              inferenceRetryActive: true,
+            }),
+          }),
+        }),
+      );
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites.at(-1)?.contentBlocks).toEqual([
+        { type: 'text', text: 'It coordinates incoming requests.' },
+      ]);
+      expect(retryWrites.at(-1)?.metadata).toMatchObject({
+        visibleInTranscript: false,
+        purpose: 'closeout',
+        inferenceRetryNotice: true,
+        inferenceRetryActive: false,
+      });
       expect(mocks.captureInferenceContext).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({

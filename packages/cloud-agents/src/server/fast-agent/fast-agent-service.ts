@@ -1415,9 +1415,24 @@ export async function answerFastAgentQuestion({
       notice: FastAgentInferenceRetryNotice,
     ) => {
       inferenceRetryAttempted = true;
-      if (platformEvent) {
-        return;
-      }
+      const message = formatFastAgentInferenceRetryNotice(notice);
+      const reply = { purpose: 'progress' as const, message };
+
+      // Silence is a presentation choice, not permission to keep recovery
+      // entirely in memory. Persist the first retry immediately so an owner
+      // crash during quiet backoff leaves a durable marker for the expired-
+      // lease reconciler to turn into a terminal interruption.
+      inferenceRetryCanonicalEvent ??= allocateCanonicalEvent(
+        `retry-notice:${nextRetryNoticeOrdinal++}`,
+      );
+      await persistAssistantReply({
+        reply,
+        event: inferenceRetryCanonicalEvent,
+        inferenceRetryNotice: true,
+        visibleInTranscript: false,
+      });
+
+      if (platformEvent) return;
 
       // Stay silent while recovery is short enough that a standard task
       // would absorb it invisibly. A notice is only worth interrupting the
@@ -1431,7 +1446,6 @@ export async function answerFastAgentQuestion({
         return;
       }
 
-      const message = formatFastAgentInferenceRetryNotice(notice);
       if (reportedInferenceNotices.has(message)) {
         return;
       }
@@ -1439,16 +1453,10 @@ export async function answerFastAgentQuestion({
       reportedInferenceNotices.add(message);
       // Deliberately not the postReply closure: a system retry notice must
       // not satisfy the model's acknowledgement gate or close the turn.
-      const reply = { purpose: 'progress' as const, message };
       if (!(await replaceInferenceRetryReply(reply))) {
         inferenceRetryReply = (await adapter.postReply(reply)) || undefined;
         inferenceRetryMessageIndex = turnVisibleMessages.length;
         turnVisibleMessages.push(buildAssistantTextMessage(message));
-        // Ordinal-suffixed so a second retry episode in the same turn gets
-        // its own row instead of overwriting the first notice's upsert slot.
-        inferenceRetryCanonicalEvent ??= allocateCanonicalEvent(
-          `retry-notice:${nextRetryNoticeOrdinal++}`,
-        );
         await persistAssistantReply({
           reply,
           event: inferenceRetryCanonicalEvent,
