@@ -845,6 +845,58 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('reuses a root bound by request_user_input while waiting for the lock', async () => {
+    const pendingConversation = {
+      surface: 'slack' as const,
+      workspaceId: 'T123',
+      conversationId: 'automation-1:occurrence-1',
+      replyTarget: { channelId: 'C123' },
+    };
+    const pendingParent = {
+      sessionId: parent.sessionId,
+      conversation: pendingConversation,
+    };
+    const pendingSession = {
+      id: parent.sessionId,
+      userId: 'u1',
+      conversation: pendingConversation,
+      messages: [],
+    };
+    mocks.findSession
+      .mockResolvedValueOnce(pendingSession)
+      .mockResolvedValueOnce({
+        ...pendingSession,
+        conversation: {
+          ...pendingConversation,
+          replyTarget: { channelId: 'C123', threadId: '100.001' },
+        },
+      });
+
+    await deliverFastAgentParentEvent({
+      parent: pendingParent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.updateMessage).toHaveBeenCalledWith({
+      channel: 'C123',
+      ts: '100.001',
+      message: expect.objectContaining({ text: 'The proof is ready.' }),
+    });
+    expect(mocks.bindConversation).not.toHaveBeenCalled();
+    expect(
+      mocks.acquireRootBindingLock.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.findSession.mock.invocationCallOrder[1]!);
+  });
+
   it('keeps a failed pending Fast automation silent in Slack', async () => {
     const pendingParent = {
       sessionId: parent.sessionId,
