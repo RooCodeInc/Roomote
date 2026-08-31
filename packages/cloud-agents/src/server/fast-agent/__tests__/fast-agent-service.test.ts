@@ -711,6 +711,68 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('keeps injected follow-ups in a session-manager fallback rebuild', async () => {
+    vi.useFakeTimers();
+    try {
+      const { FastAgentOpenCodeSessionManager } = await vi.importActual<
+        typeof import('../fast-agent-opencode-session')
+      >('../fast-agent-opencode-session');
+      const manager = new FastAgentOpenCodeSessionManager();
+      mocks.runSession.mockImplementation((input) => manager.run(input));
+      mocks.getSession.mockResolvedValue({
+        id: 'conversation-1',
+        compatibilityMessages: [],
+        openCodeSessionId: 'missing-session',
+      });
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce({
+          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+          createdAt: new Date('2026-08-31T12:00:00.000Z'),
+          parent: { sessionId: 'conversation-1' },
+          event: {
+            type: 'human_follow_up',
+            eventId: '100.3',
+            currentMessageId: '100.3',
+            userId: 'user-1',
+            question: 'Preserve this fallback correction.',
+          },
+        })
+        .mockResolvedValue(undefined);
+      let failHeldSession: ((error: Error) => void) | undefined;
+      let attempt = 0;
+      mocks.generateText.mockImplementation(
+        async (params, _session, options) => {
+          attempt += 1;
+          await options.onSessionReady(`opencode-session-${attempt}`);
+          options.onPromptStarted?.();
+          if (attempt === 1) {
+            options.onNativeSteerReady?.(mocks.nativeSteer);
+            return await new Promise<string>((_resolve, reject) => {
+              failHeldSession = reject;
+            });
+          }
+          expect(params.prompt).toContain('Preserve this fallback correction.');
+          return 'Fallback recovered';
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      const missingSession = new Error('Session not found');
+      missingSession.name = 'NonTaskOpenCodeSessionNotFoundError';
+      failHeldSession?.(missingSession);
+
+      await expect(resultPromise).resolves.toBe('Fallback recovered');
+      expect(mocks.generateText).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('starts and settles surface activity around a successful turn', async () => {
     const activity = {
       start: vi.fn(),
@@ -913,7 +975,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ({ prompt, bootstrapPrompt, execute }) =>
           execute(
             hasNativeSession ? { id: 'opencode-session-1' } : {},
-            hasNativeSession ? prompt : bootstrapPrompt,
+            hasNativeSession
+              ? prompt
+              : typeof bootstrapPrompt === 'function'
+                ? bootstrapPrompt()
+                : bootstrapPrompt,
             { path, validateSession: path === 'cold_resume' },
           ),
       );
@@ -1067,10 +1133,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       openCodeSessionId: null,
     });
     mocks.runSession.mockImplementationOnce(({ bootstrapPrompt, execute }) =>
-      execute({}, bootstrapPrompt, {
-        path: 'cold_rebuild',
-        validateSession: false,
-      }),
+      execute(
+        {},
+        typeof bootstrapPrompt === 'function'
+          ? bootstrapPrompt()
+          : bootstrapPrompt,
+        {
+          path: 'cold_rebuild',
+          validateSession: false,
+        },
+      ),
     );
 
     await answerFastAgentQuestion({
@@ -1125,10 +1197,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       openCodeSessionId: null,
     });
     mocks.runSession.mockImplementationOnce(({ bootstrapPrompt, execute }) =>
-      execute({}, bootstrapPrompt, {
-        path: 'cold_rebuild',
-        validateSession: false,
-      }),
+      execute(
+        {},
+        typeof bootstrapPrompt === 'function'
+          ? bootstrapPrompt()
+          : bootstrapPrompt,
+        {
+          path: 'cold_rebuild',
+          validateSession: false,
+        },
+      ),
     );
 
     await answerFastAgentQuestion({

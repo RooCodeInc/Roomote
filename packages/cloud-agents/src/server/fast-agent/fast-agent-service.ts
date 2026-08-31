@@ -2319,8 +2319,6 @@ export async function answerFastAgentQuestion({
 
     const imageFiles = getFastAgentImageFiles(images);
     const serializedTurnPrompt = serializeFastAgentMessages(turnMessages);
-    const serializedBootstrapPrompt =
-      serializeFastAgentMessages(bootstrapMessages);
     let inferenceAttemptNumber = 0;
     const persistOpenCodeSession = async (openCodeSessionId: string) => {
       if (durableOpenCodeSessionId === openCodeSessionId) return;
@@ -2336,7 +2334,11 @@ export async function answerFastAgentQuestion({
       conversationId: session.id,
       persistedSessionId: session.openCodeSessionId,
       prompt: serializedTurnPrompt,
-      bootstrapPrompt: serializedBootstrapPrompt,
+      bootstrapPrompt: () =>
+        serializeFastAgentMessages([
+          ...bootstrapMessages,
+          ...injectedHumanFollowUpMessages,
+        ]),
       onPathSelected: (path) => {
         diagnostics.recordSessionPath(path);
         console.info(`[Fast Agent] OpenCode session path=${path}.`);
