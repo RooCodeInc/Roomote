@@ -213,6 +213,12 @@ export type NonTaskOpenCodeCompletedMessage = {
   completedAtMs: number | null;
 };
 
+export type NonTaskOpenCodeNativeSteer = (input: {
+  messageId: string;
+  text: string;
+  files?: NonTaskPromptFile[];
+}) => Promise<void>;
+
 export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
   env?: Partial<Record<string, string>>;
@@ -221,6 +227,8 @@ export type NonTaskOpenCodeNativeSessionOptions = {
     message: NonTaskOpenCodeCompletedMessage,
   ) => Promise<void> | void;
   onPromptStarted?: () => void;
+  onNativeSteerReady?: (steer: NonTaskOpenCodeNativeSteer) => void;
+  onNativeSteerClosed?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
   permission?: PermissionRuleset;
@@ -784,6 +792,8 @@ async function runNonTaskSdkPrompt(
     ephemeral?: boolean;
     env?: Partial<Record<string, string>>;
     onPromptStarted?: () => void;
+    onNativeSteerReady?: (steer: NonTaskOpenCodeNativeSteer) => void;
+    onNativeSteerClosed?: () => void;
     onMessageCompleted?: (
       message: NonTaskOpenCodeCompletedMessage,
     ) => Promise<void> | void;
@@ -1090,9 +1100,39 @@ async function runNonTaskSdkPrompt(
         },
         { signal: abortController.signal },
       );
-      const promptResult = needsEventMonitor
-        ? await Promise.race([promptRequest, sessionError])
-        : await promptRequest;
+      options.onNativeSteerReady?.(async (input) => {
+        const result = await client.session.promptAsync(
+          {
+            sessionID: sessionId,
+            directory: sessionDirectory,
+            messageID: input.messageId,
+            parts: [
+              { type: 'text', text: input.text },
+              ...(input.files ?? []).map((file) => ({
+                type: 'file' as const,
+                mime: file.mime,
+                ...(file.filename ? { filename: file.filename } : {}),
+                url: file.url,
+              })),
+            ],
+          },
+          { signal: abortController.signal },
+        );
+        if (result.error) {
+          throw new NonTaskOpenCodePromptError(
+            result.error,
+            'OpenCode native Fast steer failed',
+          );
+        }
+      });
+      let promptResult: Awaited<typeof promptRequest>;
+      try {
+        promptResult = needsEventMonitor
+          ? await Promise.race([promptRequest, sessionError])
+          : await promptRequest;
+      } finally {
+        options.onNativeSteerClosed?.();
+      }
 
       if (promptResult.error || !promptResult.data) {
         if (isOpenCodeSessionMissing(promptResult.error)) {
@@ -1385,6 +1425,8 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       directory: options.directory,
       env: options.env,
       onPromptStarted: options.onPromptStarted,
+      onNativeSteerReady: options.onNativeSteerReady,
+      onNativeSteerClosed: options.onNativeSteerClosed,
       onMessageCompleted: options.onMessageCompleted,
       onSessionReady: options.onSessionReady,
       onSubagentSessionReady: options.onSubagentSessionReady,

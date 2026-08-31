@@ -3121,10 +3121,10 @@ export const fastAgentConversations = pgTable(
 /**
  * fast_agent_parent_events
  *
- * Durable admission queue for lifecycle events returning from delegated tasks
- * to their Fast parent conversation. Producers persist and acknowledge these
- * rows without waiting for the parent turn lock; the BullMQ drainer later
- * processes each conversation in creation order under one active-turn lock.
+ * Durable admission queue for events entering a Fast conversation while its
+ * turn lock is busy. Human follow-ups may be injected into the lock owner's
+ * native OpenCode generation; ambient and recovery events are drained later
+ * in creation order under one active-turn lock.
  */
 export const fastAgentParentEvents = pgTable(
   'fast_agent_parent_events',

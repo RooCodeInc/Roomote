@@ -6,12 +6,14 @@ import {
   ALL_REPOSITORIES,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
+  FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   ROOMOTE_MCP_ID,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
+  fastAgentHumanFollowUpEventSchema,
   formatErrorForLog,
   resolveInferenceProviderRetryDelayMs,
   isMemoryMcpServer,
@@ -21,12 +23,18 @@ import {
   type TaskMessageContentBlock,
 } from '@roomote/types';
 import {
+  and,
   appendFastAgentMemory,
+  asc,
   db,
+  eq,
+  fastAgentParentEvents,
   getDeploymentTaskModelOptions,
   getSessionForFastConversation,
   getSessionForTask,
   isBrainEnabled,
+  isNull,
+  sql,
   touchSessionActivity,
 } from '@roomote/db/server';
 import {
@@ -73,6 +81,7 @@ import {
   type NonTaskPromptFile,
   type NonTaskProviderRetryEvent,
   type NonTaskOpenCodeCompletedMessage,
+  type NonTaskOpenCodeNativeSteer,
 } from '../non-task-provider-usage';
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import { RemoteFastAgentSettingsSkillSource } from './fast-agent-settings-skill-source';
@@ -155,6 +164,54 @@ const showWidgetArgsSchema = z.object({
 });
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS = 50_000;
+const FAST_AGENT_HUMAN_STEER_POLL_INTERVAL_MS = 250;
+
+function buildFastAgentNativeSteerMessageId(
+  rowId: string,
+  createdAt: Date,
+): string {
+  const sortable =
+    (BigInt(createdAt.getTime()) * BigInt(0x1000)) &
+    ((BigInt(1) << BigInt(48)) - BigInt(1));
+  const suffix = rowId.replaceAll('-', '').slice(0, 14);
+  return `msg_${sortable.toString(16).padStart(12, '0')}${suffix}`;
+}
+
+async function getNextPendingFastAgentHumanFollowUp(
+  sessionId: string,
+  excludedEventId?: string,
+) {
+  return db.query.fastAgentParentEvents.findFirst({
+    where: and(
+      eq(fastAgentParentEvents.conversationId, sessionId),
+      isNull(fastAgentParentEvents.deliveredAt),
+      isNull(fastAgentParentEvents.discardedAt),
+      sql`${fastAgentParentEvents.event} ->> 'type' = ${FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE}`,
+      ...(excludedEventId
+        ? [
+            sql`${fastAgentParentEvents.event} ->> 'eventId' <> ${excludedEventId}`,
+          ]
+        : []),
+    ),
+    orderBy: [
+      asc(fastAgentParentEvents.createdAt),
+      asc(fastAgentParentEvents.id),
+    ],
+  });
+}
+
+async function markFastAgentHumanFollowUpDelivered(id: string): Promise<void> {
+  await db
+    .update(fastAgentParentEvents)
+    .set({ deliveredAt: new Date(), lastError: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(fastAgentParentEvents.id, id),
+        isNull(fastAgentParentEvents.deliveredAt),
+        isNull(fastAgentParentEvents.discardedAt),
+      ),
+    );
+}
 
 async function setFastSessionResponding(
   fastConversationId: string,
@@ -836,6 +893,7 @@ export async function answerFastAgentQuestion({
   allowSilentAmbientReply = false,
   platformEventTranscriptPayload,
   slackRoomoteUserId,
+  currentDurableHumanFollowUpEventId,
 }: {
   question: string;
   images?: string[];
@@ -864,6 +922,9 @@ export async function answerFastAgentQuestion({
   allowSilentAmbientReply?: boolean;
   platformEventTranscriptPayload?: Record<string, unknown>;
   slackRoomoteUserId?: string;
+  /** The durable row currently running as a fallback whole turn. Excluding it
+   * keeps this turn's native steer poller from injecting its own prompt. */
+  currentDurableHumanFollowUpEventId?: string;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
     currentMessageId,
@@ -927,6 +988,22 @@ export async function answerFastAgentQuestion({
   let nextRetryNoticeOrdinal = 0;
   let nextTurnSeq = 0;
   const degradedContextComponents = new Set<string>();
+  let nativeSteer: NonTaskOpenCodeNativeSteer | undefined;
+  let activeToolExecutions = 0;
+  let humanSteerPollTimer: ReturnType<typeof setInterval> | undefined;
+  let activeHumanSteerPoll = Promise.resolve();
+  const injectedHumanFollowUpIds = new Set<string>();
+  const humanFollowUpTurnSeqs = new Map<string, number>();
+  const integrationCallSignatures = new Set<string>();
+  const completedChatReactionSignatures = new Set<string>();
+  const completedChatReplySignatures = new Set<string>();
+  const completedTaskActions = new Set<string>();
+  const stopHumanSteerPolling = () => {
+    if (humanSteerPollTimer) clearInterval(humanSteerPollTimer);
+    humanSteerPollTimer = undefined;
+    nativeSteer = undefined;
+  };
+  signal?.addEventListener('abort', stopHumanSteerPolling, { once: true });
 
   const allocateCanonicalEvent = (slot: string) => ({
     eventId: `${turnId}:${slot}`,
@@ -956,6 +1033,116 @@ export async function answerFastAgentQuestion({
         `[Fast Agent] Failed to persist canonical message conversation=${canonicalConversationId} event=${message.eventId}: ${formatErrorForLog(error)}`,
       );
     }
+  };
+  const drainPendingHumanSteers = async () => {
+    if (
+      signal?.aborted ||
+      !canonicalConversationId ||
+      !nativeSteer ||
+      activeToolExecutions > 0
+    ) {
+      return;
+    }
+
+    for (;;) {
+      const row = await getNextPendingFastAgentHumanFollowUp(
+        canonicalConversationId,
+        currentDurableHumanFollowUpEventId,
+      );
+      if (signal?.aborted || !row || !nativeSteer || activeToolExecutions > 0) {
+        return;
+      }
+
+      const parsed = fastAgentHumanFollowUpEventSchema.safeParse(row.event);
+      if (!parsed.success || row.parent.sessionId !== canonicalConversationId) {
+        await db
+          .update(fastAgentParentEvents)
+          .set({
+            discardedAt: new Date(),
+            lastError: 'Queued Fast human follow-up was invalid.',
+            updatedAt: new Date(),
+          })
+          .where(eq(fastAgentParentEvents.id, row.id));
+        continue;
+      }
+
+      if (injectedHumanFollowUpIds.has(row.id)) {
+        await markFastAgentHumanFollowUpDelivered(row.id);
+        continue;
+      }
+
+      const followUp = parsed.data;
+      const followUpTurnId = buildFastAgentTurnId({
+        currentMessageId: followUp.currentMessageId,
+        conversation,
+        question: followUp.question,
+      });
+      if (signal?.aborted) return;
+      await persistCanonicalMessage({
+        eventId: `${followUpTurnId}:user`,
+        turnId: followUpTurnId,
+        turnSeq:
+          humanFollowUpTurnSeqs.get(row.id) ??
+          (() => {
+            const turnSeq = nextTurnSeq++;
+            humanFollowUpTurnSeqs.set(row.id, turnSeq);
+            return turnSeq;
+          })(),
+        ts: row.createdAt.getTime(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: buildFastAgentUserContentBlocks(
+          normalizeThreadText(followUp.question),
+          followUp.images ?? [],
+        ),
+        metadata: {
+          visibleInTranscript: true,
+          turnSource: 'human',
+          userId: followUp.userId,
+          ...(followUp.senderDisplayName
+            ? {
+                userName: followUp.senderDisplayName,
+                senderDisplayName: followUp.senderDisplayName,
+              }
+            : {}),
+          ...(followUp.senderExternalId
+            ? { senderExternalId: followUp.senderExternalId }
+            : {}),
+        },
+        payload: {},
+        source: conversation.surface,
+        nativeSessionId: activeOpenCodeSessionId,
+      });
+      if (signal?.aborted || !nativeSteer) return;
+      await nativeSteer({
+        messageId: buildFastAgentNativeSteerMessageId(row.id, row.createdAt),
+        text: normalizeThreadText(followUp.question),
+        files: getFastAgentImageFiles(followUp.images ?? []),
+      });
+      if (signal?.aborted) return;
+      injectedHumanFollowUpIds.add(row.id);
+      // Native steering starts a new human instruction boundary inside the
+      // same OpenCode run. Prior tool results remain in-session, while local
+      // duplicate guards reset so the user may intentionally repeat an action.
+      integrationCallSignatures.clear();
+      completedChatReactionSignatures.clear();
+      completedChatReplySignatures.clear();
+      completedTaskActions.clear();
+      closed = false;
+      turnVisibleMessages.push(
+        buildUserTextMessage(normalizeThreadText(followUp.question)),
+      );
+      await markFastAgentHumanFollowUpDelivered(row.id);
+    }
+  };
+  const schedulePendingHumanSteerDrain = () => {
+    activeHumanSteerPoll = activeHumanSteerPoll
+      .then(drainPendingHumanSteers)
+      .catch((error) => {
+        console.error(
+          `[Fast Agent] Failed to inject a native human steer: ${formatErrorForLog(error)}`,
+        );
+      });
   };
   const persistAssistantReply = async ({
     reply,
@@ -1238,6 +1425,11 @@ export async function answerFastAgentQuestion({
           }),
     ]);
     canonicalConversationId = session.id;
+    humanSteerPollTimer = setInterval(
+      schedulePendingHumanSteerDrain,
+      FAST_AGENT_HUMAN_STEER_POLL_INTERVAL_MS,
+    );
+    humanSteerPollTimer.unref();
     await reconcileFastAgentInferenceRetryNotices(session.id).catch((error) => {
       console.warn(
         `[Fast Agent] Failed to reconcile interrupted inference retry notices: ${formatErrorForLog(error)}`,
@@ -1351,10 +1543,6 @@ export async function answerFastAgentQuestion({
       allowSilentAmbientReply,
       releaseVersion,
     });
-    const integrationCallSignatures = new Set<string>();
-    const completedChatReactionSignatures = new Set<string>();
-    const completedChatReplySignatures = new Set<string>();
-    const completedTaskActions = new Set<string>();
     let visibleUpdatePosted = false;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
@@ -1509,6 +1697,7 @@ export async function answerFastAgentQuestion({
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
     ): Promise<unknown> => {
+      activeToolExecutions += 1;
       let canonicalToolEvent:
         | Awaited<ReturnType<typeof beginCanonicalToolEvent>>
         | undefined;
@@ -1621,6 +1810,9 @@ export async function answerFastAgentQuestion({
           await finishCanonicalToolEvent(canonicalToolEvent, failure);
         }
         return failure;
+      } finally {
+        activeToolExecutions -= 1;
+        schedulePendingHumanSteerDrain();
       }
     };
 
@@ -2088,27 +2280,33 @@ export async function answerFastAgentQuestion({
     const executeNativeTool = async (
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
-      const canonicalToolEvent = await beginCanonicalToolEvent({
-        title: call.name,
-        args: call.args,
-        nativeSessionId: call.sessionId,
-        kind: getFastAgentNativeAcpKind(call.name),
-      });
+      activeToolExecutions += 1;
       try {
-        const result = await executeNativeToolInner(call);
-        await finishCanonicalToolEvent(
-          canonicalToolEvent,
-          result,
-          call.sessionId,
-        );
-        return result;
-      } catch (error) {
-        await finishCanonicalToolEvent(
-          canonicalToolEvent,
-          toolFailure(error),
-          call.sessionId,
-        );
-        throw error;
+        const canonicalToolEvent = await beginCanonicalToolEvent({
+          title: call.name,
+          args: call.args,
+          nativeSessionId: call.sessionId,
+          kind: getFastAgentNativeAcpKind(call.name),
+        });
+        try {
+          const result = await executeNativeToolInner(call);
+          await finishCanonicalToolEvent(
+            canonicalToolEvent,
+            result,
+            call.sessionId,
+          );
+          return result;
+        } catch (error) {
+          await finishCanonicalToolEvent(
+            canonicalToolEvent,
+            toolFailure(error),
+            call.sessionId,
+          );
+          throw error;
+        }
+      } finally {
+        activeToolExecutions -= 1;
+        schedulePendingHumanSteerDrain();
       }
     };
 
@@ -2322,6 +2520,13 @@ export async function answerFastAgentQuestion({
                       onPromptStarted: () => {
                         promptStarted = true;
                         diagnostics.markInferenceStarted();
+                      },
+                      onNativeSteerReady: (steer) => {
+                        nativeSteer = steer;
+                        schedulePendingHumanSteerDrain();
+                      },
+                      onNativeSteerClosed: () => {
+                        nativeSteer = undefined;
                       },
                       onSessionReady: async (openCodeSessionID) => {
                         activeOpenCodeSessionId = openCodeSessionID;
@@ -2614,6 +2819,9 @@ export async function answerFastAgentQuestion({
     }
     return lastVisibleMessage || message;
   } finally {
+    signal?.removeEventListener('abort', stopHumanSteerPolling);
+    stopHumanSteerPolling();
+    await activeHumanSteerPoll;
     if (canonicalConversationId) {
       await setFastSessionResponding(canonicalConversationId, false).catch(
         (error) => {

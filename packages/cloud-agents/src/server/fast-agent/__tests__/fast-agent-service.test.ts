@@ -27,6 +27,9 @@ const mocks = vi.hoisted(() => ({
   revokeMcpCapabilities: vi.fn(),
   reconcileRetryNotices: vi.fn(),
   getSessionForTask: vi.fn(),
+  getPendingHumanFollowUp: vi.fn(),
+  updateParentEventWhere: vi.fn(),
+  nativeSteer: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
         agent?: string;
@@ -86,10 +89,30 @@ vi.mock('../../router', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  and: vi.fn((...values) => values),
+  asc: vi.fn((value) => value),
+  eq: vi.fn((...values) => values),
+  isNull: vi.fn((value) => value),
+  sql: vi.fn(),
+  fastAgentParentEvents: {
+    conversationId: 'conversationId',
+    createdAt: 'createdAt',
+    deliveredAt: 'deliveredAt',
+    discardedAt: 'discardedAt',
+    event: 'event',
+    id: 'id',
+  },
   getDeploymentTaskModelOptions: mocks.getTaskModelOptions,
   appendFastAgentMemory: mocks.appendMemory,
   isBrainEnabled: mocks.isBrainEnabled,
-  db: {},
+  db: {
+    query: {
+      fastAgentParentEvents: { findFirst: mocks.getPendingHumanFollowUp },
+    },
+    update: vi.fn(() => ({
+      set: vi.fn(() => ({ where: mocks.updateParentEventWhere })),
+    })),
+  },
   getSessionForFastConversation: vi.fn().mockResolvedValue(null),
   getSessionForTask: mocks.getSessionForTask,
   touchSessionActivity: vi.fn().mockResolvedValue(undefined),
@@ -254,6 +277,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.mcpExecutor = undefined;
     mocks.mcpCapabilityAvailable = false;
     mocks.getSessionForTask.mockResolvedValue(null);
+    mocks.getPendingHumanFollowUp.mockResolvedValue(undefined);
+    mocks.updateParentEventWhere.mockResolvedValue(undefined);
+    mocks.nativeSteer.mockResolvedValue(undefined);
     mocks.getNativeRuntime.mockImplementation(async () => {
       mocks.mcpCapabilityAvailable = true;
       return {
@@ -525,6 +551,95 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       sessionId: 'conversation-1',
       openCodeSessionId: 'opencode-session-1',
     });
+  });
+
+  it('injects durable human follow-ups with native steering between tool calls', async () => {
+    vi.useFakeTimers();
+    try {
+      const createdAt = new Date('2026-08-31T12:00:00.000Z');
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce({
+          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+          createdAt,
+          parent: { sessionId: 'conversation-1' },
+          event: {
+            type: 'human_follow_up',
+            eventId: '100.3',
+            currentMessageId: '100.3',
+            userId: 'user-1',
+            question: 'Use the corrected requirement.',
+            senderDisplayName: 'Matt',
+            senderExternalId: 'U123',
+          },
+        })
+        .mockResolvedValue(undefined);
+      let finishTool:
+        | ((value: { success: true; taskId: string }) => void)
+        | undefined;
+      const adapter = callbacks({
+        launchTask: vi.fn(
+          async () =>
+            await new Promise<{ success: true; taskId: string }>((resolve) => {
+              finishTool = resolve;
+            }),
+        ),
+      });
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          options.onModelResolved?.('openrouter/openai/gpt-5.4');
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Inspect the current state.',
+            environmentId: 'env-1',
+            model: null,
+            includeAttachments: false,
+            kickoffMessage: 'I’m checking the current state.',
+          });
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+      });
+      await vi.waitFor(() => expect(finishTool).toBeTypeOf('function'));
+      await vi.advanceTimersByTimeAsync(250);
+      expect(mocks.nativeSteer).not.toHaveBeenCalled();
+      finishTool?.({ success: true, taskId: 'task-1' });
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+
+      expect(mocks.nativeSteer).toHaveBeenCalledWith({
+        messageId: expect.stringMatching(/^msg_[a-f0-9]{26}$/u),
+        text: 'Use the corrected requirement.',
+        files: [],
+      });
+      expect(mocks.upsertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'conversation-1',
+          message: expect.objectContaining({
+            eventId: '100.3:user',
+            eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+            metadata: expect.objectContaining({
+              turnSource: 'human',
+              userId: 'user-1',
+            }),
+          }),
+        }),
+      );
+      expect(mocks.updateParentEventWhere).toHaveBeenCalled();
+
+      finishGeneration?.('Steered answer');
+      await expect(resultPromise).resolves.toBe('Steered answer');
+      expect(mocks.invalidateSession).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('starts and settles surface activity around a successful turn', async () => {
