@@ -41,6 +41,7 @@ import {
   Globe,
   Image,
   Info,
+  LayoutGrid,
   Loader2Icon,
   Popover,
   PopoverContent,
@@ -892,14 +893,6 @@ export function SessionWorkspace({
             <SandboxSideActions isPanelOpen={panelOpen} onShowMain={closePanel}>
               <SideNavItem
                 side="right"
-                label="Session info"
-                tooltip="Session info"
-                active={panel?.kind === 'info' && !selectedTask}
-                icon={Info}
-                onClick={() => togglePanel('info')}
-              />
-              <SideNavItem
-                side="right"
                 label="Tasks"
                 tooltip="Tasks"
                 active={panel?.kind === 'tasks' && !selectedTask}
@@ -912,8 +905,16 @@ export function SessionWorkspace({
                 label="Artifacts"
                 tooltip="Artifacts"
                 active={panel?.kind === 'artifacts' && !selectedTask}
-                icon={FileText}
+                icon={LayoutGrid}
                 onClick={() => togglePanel('artifacts')}
+              />
+              <SideNavItem
+                side="right"
+                label="Session info"
+                tooltip="Session info"
+                active={panel?.kind === 'info' && !selectedTask}
+                icon={Info}
+                onClick={() => togglePanel('info')}
               />
             </SandboxSideActions>
             {!isSidebarVisible && !panelOpen ? (

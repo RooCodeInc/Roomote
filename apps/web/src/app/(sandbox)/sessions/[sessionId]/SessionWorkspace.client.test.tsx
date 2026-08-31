@@ -305,6 +305,25 @@ describe('SessionWorkspace', () => {
     };
   });
 
+  it('orders panel controls as tasks, artifacts, then session info', () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    const tasks = screen.getByRole('button', { name: 'Tasks' });
+    const artifacts = screen.getByRole('button', { name: 'Artifacts' });
+    const sessionInfo = screen.getByRole('button', { name: 'Session info' });
+
+    expect(tasks.compareDocumentPosition(artifacts)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(artifacts.compareDocumentPosition(sessionInfo)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(artifacts.querySelector('svg')).toHaveClass('lucide-layout-grid');
+  });
+
   it('matches the task sidebar replacement behavior and controls on mobile', () => {
     renderWorkspace({ isMobile: true });
 

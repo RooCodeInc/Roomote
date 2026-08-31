@@ -104,6 +104,7 @@ export {
   KeyboardIcon,
   KeyRound,
   Layers,
+  LayoutGrid,
   LifeBuoyIcon,
   ListChevronsUpDown,
   Lightbulb,
