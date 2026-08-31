@@ -86,6 +86,7 @@ export * from './task-events';
 export * from './task-artifacts';
 export * from './task-launch-api';
 export * from './task-inspection-tool';
+export * from './manage-tasks-tool';
 export * from './task-models';
 export * from './task-messages';
 export * from './timeout-observability';

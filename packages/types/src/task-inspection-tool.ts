@@ -12,7 +12,7 @@ export const roomoteTaskInspectionFieldSchemas = {
     .string()
     .optional()
     .describe(
-      'The task ID; get_messages and send_message also accept a canonical Fast session ID when those actions are available',
+      'The task ID; get_messages and send_message also accept a canonical Roomote session or Fast conversation ID when those actions are available',
     ),
   query: z
     .string()

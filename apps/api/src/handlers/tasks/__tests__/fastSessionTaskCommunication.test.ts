@@ -20,6 +20,10 @@ import {
   db,
   fastAgentConversations,
   fastAgentMessages,
+  ensureSessionForFastConversation,
+  runFactory,
+  taskFactory,
+  taskMessages,
   userFactory,
 } from '@roomote/db/server';
 
@@ -135,17 +139,71 @@ describe('Fast session communication through task routes', () => {
         messages: [
           {
             taskId: session.id,
-            text: 'Newest text',
+            text: 'Participant text',
             visibleInTranscript: true,
           },
           {
             taskId: session.id,
-            text: 'Participant text',
+            text: 'Newest text',
             visibleInTranscript: true,
           },
         ],
       });
     }
+  });
+
+  it('continues past hidden rows to satisfy a limited task transcript', async () => {
+    const owner = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    const run = await runFactory.create({
+      taskId: task.id,
+      actingUserId: owner.id,
+    });
+    const messages: Array<typeof taskMessages.$inferInsert> = [
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 1,
+        eventType: 'roomote_runtime.assistant_text',
+        protocol: 'roomote_runtime',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Oldest visible' }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+      },
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 2,
+        eventType: 'roomote_runtime.assistant_text',
+        protocol: 'roomote_runtime',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Newest visible' }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+      },
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 3,
+        eventType: 'roomote_runtime.user_prompt',
+        protocol: 'roomote_runtime',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'Hidden prompt' }],
+        metadata: { visibleInTranscript: false },
+        payload: {},
+      },
+    ];
+    await db.insert(taskMessages).values(messages);
+
+    const response = await createApp(userAuth(owner.id)).request(
+      `/tasks/${task.id}/messages?limit=2&order=desc`,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      returned: 2,
+      messages: [{ text: 'Newest visible' }, { text: 'Oldest visible' }],
+    });
   });
 
   it('hides Fast sessions from bystanders and rejects absent or invalid IDs', async () => {
@@ -194,6 +252,32 @@ describe('Fast session communication through task routes', () => {
         images: ['https://example.com/member.png'],
       }),
     );
+  });
+
+  it('requires canonical unified Session IDs to use Session routes', async () => {
+    const owner = await userFactory.create();
+    const fastSession = await createSession(owner.id);
+    const session = await ensureSessionForFastConversation(db, fastSession.id);
+    await addMessage({
+      sessionId: fastSession.id,
+      eventId: 'unified-session-message',
+      text: 'Unified session text',
+    });
+
+    const app = createApp(userAuth(owner.id));
+    const messagesResponse = await app.request(`/tasks/${session.id}/messages`);
+    expect(messagesResponse.status).toBe(404);
+
+    const sendResponse = await app.request(
+      `/tasks/${session.id}/send_message`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'Continue unified session' }),
+      },
+    );
+    expect(sendResponse.status).toBe(404);
+    expect(mocks.queueReply).not.toHaveBeenCalled();
   });
 
   it('uses the same Fast fallback for the worker steering route', async () => {
