@@ -22,10 +22,13 @@ import {
 } from '@/lib/server/fast-sessions';
 import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { WorkspaceHeader } from '@/components/layout';
-import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
-import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
+import {
+  SessionHeaderExtras,
+  SessionWorkspace,
+  type SessionInfo,
+} from './SessionWorkspace';
 import { SessionReadTracker } from './SessionReadTracker';
 
 const getSessionPageData = cache(async (sessionId: string) => {
@@ -142,18 +145,18 @@ export default async function SessionDetailPage({
               defaultModelId={defaultModelId}
               defaultReasoningEffort={defaultReasoningEffort}
               headerExtras={
-                <SessionStatusBadge status={unifiedSession.status} />
+                <SessionHeaderExtras status={unifiedSession.status} />
               }
             />
           ) : (
             <WorkspaceHeader
               className="py-4"
-              contentClassName="flex-row items-center gap-3"
+              contentClassName="items-stretch gap-2 pr-12 @[600px]:items-center @[600px]:gap-3 @[600px]:pr-4"
             >
-              <h1 className="min-w-0 flex-1 truncate text-sm font-medium">
+              <h1 className="min-w-0 flex-1 break-words text-sm font-medium @[600px]:truncate">
                 {unifiedSession.title}
               </h1>
-              <SessionStatusBadge status={unifiedSession.status} />
+              <SessionHeaderExtras status={unifiedSession.status} />
             </WorkspaceHeader>
           )}
         </div>

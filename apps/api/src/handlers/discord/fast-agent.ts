@@ -177,7 +177,7 @@ export async function processDiscordFastAgentMessage(
       conversation,
     });
     const footerContext = await resolveFastSessionReplyFooterContext({
-      taskIds: (input.activeTasks ?? []).map((task) => task.taskId),
+      sessionId: session.id,
     });
     input.onAccepted?.(() =>
       releaseFastAgentLock.abort(

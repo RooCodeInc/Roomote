@@ -527,9 +527,9 @@ export function FastSessionTranscript({
     >
       <WorkspaceHeader
         className="py-4.25"
-        contentClassName="flex-row items-center gap-3"
+        contentClassName="items-stretch gap-2 pr-12 @[600px]:items-center @[600px]:gap-3 @[600px]:pr-4"
       >
-        <h1 className="ph-no-capture min-w-0 flex-1 truncate text-sm font-medium">
+        <h1 className="ph-no-capture min-w-0 flex-1 break-words text-sm font-medium @[600px]:truncate">
           {title ?? fallbackTitle}
         </h1>
         {headerExtras}
