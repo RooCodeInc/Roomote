@@ -817,6 +817,36 @@ describe('customAutomationsJob', () => {
     );
   });
 
+  it('defers Slack channel resolution for sandbox automations until delivery', async () => {
+    vi.mocked(db.query.slackInstallationChannels.findFirst).mockResolvedValue(
+      undefined,
+    );
+
+    const result = await customAutomationsJob();
+
+    expect(result.launchedTaskId).toBe('task_abc');
+    expect(db.query.slackInstallationChannels.findFirst).not.toHaveBeenCalled();
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            customAutomationId: automation.id,
+            channel: 'C123',
+            slackChannel: 'C123',
+          }),
+        }),
+        channels: { slackChannelId: 'C123' },
+      }),
+    );
+    expect(recordCustomAutomationRunOutcome).not.toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        status: 'failed',
+        error: 'Report destination could not be resolved.',
+      }),
+    );
+  });
+
   it('launches all-repositories automations without a named environment', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {
