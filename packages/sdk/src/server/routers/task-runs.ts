@@ -954,7 +954,8 @@ export const taskRunsRouter = router({
     if (
       provider !== 'discord' &&
       provider !== 'telegram' &&
-      provider !== 'teams'
+      provider !== 'teams' &&
+      provider !== 'agentmail'
     ) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -1014,7 +1015,8 @@ export const taskRunsRouter = router({
     if (
       provider !== 'discord' &&
       provider !== 'telegram' &&
-      provider !== 'teams'
+      provider !== 'teams' &&
+      provider !== 'agentmail'
     ) {
       throw new TRPCError({
         code: 'BAD_REQUEST',

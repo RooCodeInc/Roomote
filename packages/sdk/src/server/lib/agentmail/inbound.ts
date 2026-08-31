@@ -26,7 +26,6 @@ import {
   asc,
   db,
   eq,
-  inArray,
   resolveAgentMailRuntimeCredentials,
   setTrustedRunActingUserOnSuccess,
   sql,
@@ -51,6 +50,8 @@ export const AGENTMAIL_WEBHOOK_EVENT_QUEUE_NAME = 'agentmail-webhook-events';
 
 const LOG_PREFIX = '[agentmail]';
 const STRANGER_REFUSAL_TTL_SECONDS = 30 * 24 * 60 * 60;
+const FAILED_EVENT_ATTEMPT_CAP = 10;
+const RECOVERY_SWEEP_BATCH_SIZE = 500;
 
 export type AgentMailWebhookEventJob =
   | { kind: 'process'; deliveryId: string }
@@ -253,9 +254,16 @@ async function maybeSendStrangerRefusal(input: {
   }
 
   try {
-    await input.client.replyToMessage(input.inboxId, input.message.message_id, {
-      text: `This address isn't linked to a Roomote account, so I can't act on this email. If you have a Roomote account, verify this email address on it (or ask your admin to invite you), then send your request again.`,
-    });
+    await input.client.replyToMessage(
+      input.inboxId,
+      input.message.message_id,
+      {
+        text: `This address isn't linked to a Roomote account, so I can't act on this email. If you have a Roomote account, verify this email address on it (or ask your admin to invite you), then send your request again.`,
+      },
+      {
+        idempotencyKey: `agentmail:refusal:${input.message.message_id}`,
+      },
+    );
   } catch (error) {
     console.warn(
       `${LOG_PREFIX} Failed to send stranger refusal for thread ${input.message.thread_id}: ${error instanceof Error ? error.message : String(error)}`,
@@ -277,6 +285,11 @@ export async function processAgentMailWebhookEvent(
     where: eq(agentmailWebhookEvents.deliveryId, deliveryId),
   });
   if (!row || row.state === 'processed') {
+    return;
+  }
+  if (row.state === 'failed' && row.attempts >= FAILED_EVENT_ATTEMPT_CAP) {
+    // True dead letter: the sweep stops re-dispatching past the cap, and a
+    // late duplicate delivery must not resurrect it either.
     return;
   }
 
@@ -357,7 +370,10 @@ export async function processAgentMailWebhookEvent(
     });
 
     // Admission: inserting this row IS the durable handoff. The webhook
-    // event may be marked processed only after this commits.
+    // event may be marked processed only after this commits. The turn row
+    // captures everything the drain needs (including the re-fetched body of
+    // oversize deliveries), so consuming it never re-parses the raw payload
+    // or re-resolves the sender against state that may have changed.
     await db
       .insert(agentmailInboundTurns)
       .values({
@@ -365,6 +381,9 @@ export async function processAgentMailWebhookEvent(
         webhookEventId: row.id,
         providerMessageId: message.message_id,
         providerTimestamp,
+        senderEmail: senderAddress,
+        senderUserId,
+        bodyText: getAgentMailMessageBodyText(message).trim(),
       })
       .onConflictDoNothing({ target: agentmailInboundTurns.webhookEventId });
 
@@ -378,10 +397,10 @@ export async function processAgentMailWebhookEvent(
 
 type DrainableTurn = {
   turnId: string;
-  conversation: AgentMailConversationRow;
-  message: AgentMailMessage;
+  providerMessageId: string;
   senderUserId: string;
-  senderAddress: string;
+  senderEmail: string;
+  bodyText: string;
 };
 
 async function getNextPendingTurn(
@@ -399,42 +418,12 @@ async function getNextPendingTurn(
   });
   if (!turn) return null;
 
-  const [conversation, eventRow] = await Promise.all([
-    db.query.agentmailConversations.findFirst({
-      where: eq(agentmailConversations.id, conversationId),
-    }),
-    db.query.agentmailWebhookEvents.findFirst({
-      where: eq(agentmailWebhookEvents.id, turn.webhookEventId),
-      columns: { payload: true },
-    }),
-  ]);
-  if (!conversation || !eventRow) {
-    await markTurnConsumed(turn.id);
-    return getNextPendingTurn(conversationId);
-  }
-
-  const event = parseAgentMailWebhookEvent(eventRow.payload);
-  const message = event?.message;
-  if (!message) {
-    await markTurnConsumed(turn.id);
-    return getNextPendingTurn(conversationId);
-  }
-
-  const senderAddress = getAgentMailSenderAddress(message);
-  const senderUserId = senderAddress
-    ? await resolveAgentMailSenderUserId(senderAddress)
-    : null;
-  if (!senderAddress || !senderUserId) {
-    await markTurnConsumed(turn.id);
-    return getNextPendingTurn(conversationId);
-  }
-
   return {
     turnId: turn.id,
-    conversation,
-    message,
-    senderUserId,
-    senderAddress,
+    providerMessageId: turn.providerMessageId,
+    senderUserId: turn.senderUserId,
+    senderEmail: turn.senderEmail,
+    bodyText: turn.bodyText,
   };
 }
 
@@ -447,7 +436,6 @@ async function markTurnConsumed(turnId: string) {
 
 async function tryClaimPendingInputAnswer(input: {
   conversation: AgentMailConversationRow;
-  message: AgentMailMessage;
   senderUserId: string;
   bodyText: string;
   activeRunId: number;
@@ -489,24 +477,26 @@ async function tryClaimPendingInputAnswer(input: {
   });
 }
 
-async function deliverTurn(turn: DrainableTurn, turnSignal: AbortSignal) {
-  const bodyText = getAgentMailMessageBodyText(turn.message).trim();
-  if (!bodyText) {
+async function deliverTurn(
+  turn: DrainableTurn,
+  conversation: AgentMailConversationRow,
+  turnSignal: AbortSignal,
+) {
+  if (!turn.bodyText) {
     return;
   }
 
   const activeRun = await findActiveCommunicationTaskRun({
     provider: 'agentmail',
-    channelId: turn.conversation.inboxId,
-    threadId: turn.conversation.id,
+    channelId: conversation.inboxId,
+    threadId: conversation.id,
   });
 
   if (activeRun) {
     const claimed = await tryClaimPendingInputAnswer({
-      conversation: turn.conversation,
-      message: turn.message,
+      conversation,
       senderUserId: turn.senderUserId,
-      bodyText,
+      bodyText: turn.bodyText,
       activeRunId: activeRun.id,
     });
     if (claimed) {
@@ -518,25 +508,25 @@ async function deliverTurn(turn: DrainableTurn, turnSignal: AbortSignal) {
     // so a crash-and-retry of this turn cannot double-queue.
     await queueCommunicationMessageOnce('agentmail', activeRun.id, {
       provider: 'agentmail',
-      text: bodyText,
-      user: turn.senderAddress,
+      text: turn.bodyText,
+      user: turn.senderEmail,
       userId: turn.senderUserId,
-      ts: turn.message.message_id,
-      channel: turn.conversation.inboxId,
-      threadTs: turn.conversation.id,
+      ts: turn.providerMessageId,
+      channel: conversation.inboxId,
+      threadTs: conversation.id,
       turnPolicy: { reactionsAllowed: false },
     });
     await setLatestInboundMessageId(
       'agentmail',
       activeRun.id,
-      turn.message.message_id,
+      turn.providerMessageId,
     ).catch(() => undefined);
     return;
   }
 
-  const fastConversation = buildAgentMailFastConversation(turn.conversation);
+  const fastConversation = buildAgentMailFastConversation(conversation);
   const session = await getOrCreateFastAgentSession({
-    userId: turn.conversation.ownerUserId,
+    userId: conversation.ownerUserId,
     conversation: fastConversation,
   });
 
@@ -544,15 +534,15 @@ async function deliverTurn(turn: DrainableTurn, turnSignal: AbortSignal) {
     {
       sessionId: session.id,
       userId: turn.senderUserId,
-      senderDisplayName: turn.senderAddress,
-      question: bodyText,
-      currentMessageId: turn.message.message_id,
+      senderDisplayName: turn.senderEmail,
+      question: turn.bodyText,
+      currentMessageId: turn.providerMessageId,
     },
     turnSignal,
   );
   if (!continued) {
     console.warn(
-      `${LOG_PREFIX} Fast session ${session.id} could not resolve a delivery route for conversation ${turn.conversation.id}`,
+      `${LOG_PREFIX} Fast session ${session.id} could not resolve a delivery route for conversation ${conversation.id}`,
     );
   }
 }
@@ -571,8 +561,15 @@ export async function drainAgentMailInboundTurns(
   const first = await getNextPendingTurn(conversationId);
   if (!first) return;
 
+  const conversation = await db.query.agentmailConversations.findFirst({
+    where: eq(agentmailConversations.id, conversationId),
+  });
+  if (!conversation) {
+    return;
+  }
+
   const turnLock = await acquireFastAgentTurnLock({
-    conversation: buildAgentMailFastConversation(first.conversation),
+    conversation: buildAgentMailFastConversation(conversation),
     maxWaitMs: 0,
   });
   if (!turnLock) {
@@ -580,15 +577,14 @@ export async function drainAgentMailInboundTurns(
   }
 
   try {
-    for (;;) {
-      const turn = await getNextPendingTurn(conversationId);
-      if (!turn) return;
-
-      await deliverTurn(turn, turnLock.signal);
+    let turn: DrainableTurn | null = first;
+    while (turn) {
+      await deliverTurn(turn, conversation, turnLock.signal);
       // Consumed only after delivery: a crash mid-turn leaves the row
       // pending and the sweeper re-triggers the drain. Delivery is
       // idempotent (queueCommunicationMessageOnce; Fast turns re-run).
       await markTurnConsumed(turn.turnId);
+      turn = await getNextPendingTurn(conversationId);
     }
   } finally {
     await turnLock().catch(() => {});
@@ -598,26 +594,29 @@ export async function drainAgentMailInboundTurns(
 /**
  * Recovery sweep: re-dispatch webhook events stranded between insert and
  * enqueue (`received`), events whose queued job was pruned before starting
- * (`queued`), and conversations with pending turns whose drain wakeup was
- * lost. Runs on BullMQ startup and on a schedule.
+ * (`queued`/`processing`), events whose processing failed transiently
+ * (`failed`, until the attempt cap — only then is a row a true dead letter),
+ * and conversations with pending turns whose drain wakeup was lost. Runs on
+ * BullMQ startup and on a schedule. Staleness compares database time against
+ * database time (`now() - interval`), never a Node-side ISO string, so a
+ * non-UTC database timezone cannot skew the window.
  */
 export async function recoverPendingAgentMailWork(): Promise<number> {
-  const staleBefore = new Date(Date.now() - 60_000);
-
   const staleEvents = await db
     .select({ deliveryId: agentmailWebhookEvents.deliveryId })
     .from(agentmailWebhookEvents)
     .where(
       and(
-        inArray(agentmailWebhookEvents.state, [
-          'received',
-          'queued',
-          'processing',
-        ]),
-        sql`${agentmailWebhookEvents.updatedAt} < ${staleBefore.toISOString()}::timestamp`,
+        sql`(
+          ${agentmailWebhookEvents.state} in ('received', 'queued', 'processing')
+          or (${agentmailWebhookEvents.state} = 'failed'
+              and ${agentmailWebhookEvents.attempts} < ${FAILED_EVENT_ATTEMPT_CAP})
+        )`,
+        sql`${agentmailWebhookEvents.updatedAt} < now() - interval '60 seconds'`,
       ),
     )
-    .orderBy(asc(agentmailWebhookEvents.receivedAt));
+    .orderBy(asc(agentmailWebhookEvents.receivedAt))
+    .limit(RECOVERY_SWEEP_BATCH_SIZE);
 
   for (const event of staleEvents) {
     await addProcessJob(event.deliveryId);
@@ -629,12 +628,16 @@ export async function recoverPendingAgentMailWork(): Promise<number> {
     .where(
       and(
         eq(agentmailInboundTurns.state, 'pending'),
-        sql`${agentmailInboundTurns.createdAt} < ${staleBefore.toISOString()}::timestamp`,
+        sql`${agentmailInboundTurns.createdAt} < now() - interval '60 seconds'`,
       ),
-    );
+    )
+    .limit(RECOVERY_SWEEP_BATCH_SIZE);
 
   for (const row of pendingTurnConversations) {
-    await addDrainJob(row.conversationId, `sweep-${Date.now()}`);
+    // Stable per-conversation sweep id: while a conversation stays pending
+    // (e.g. busy in a long Fast turn) repeated sweeps must not mint a new
+    // job each minute; the next sweep re-arms after the previous job ends.
+    await addDrainJob(row.conversationId, 'sweep');
   }
 
   return staleEvents.length + pendingTurnConversations.length;

@@ -97,7 +97,31 @@ describe('agentmail one-click request_user_input answers', () => {
       ),
     );
 
-    const first = await agentmail.request(`/answer${url.search}`);
+    // The GET is read-only (mail link scanners follow every URL in an
+    // email): it renders a confirmation form and must not claim anything.
+    const preview = await agentmail.request(`/answer${url.search}`);
+    expect(preview.status).toBe(200);
+    expect(await preview.text()).toContain(
+      'Confirm your answer: Full refactor',
+    );
+    expect(
+      (
+        await getPendingCommunicationRequestUserInput(
+          'agentmail',
+          conversationId,
+        )
+      )?.status,
+    ).toBe('pending');
+
+    const token = url.searchParams.get('token')!;
+    const submit = () =>
+      agentmail.request('/answer', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ token }).toString(),
+      });
+
+    const first = await submit();
     expect(first.status).toBe(200);
     expect(await first.text()).toContain('Answer recorded: Full refactor');
 
@@ -107,7 +131,7 @@ describe('agentmail one-click request_user_input answers', () => {
     );
     expect(pending?.status).toBe('submitted');
 
-    const second = await agentmail.request(`/answer${url.search}`);
+    const second = await submit();
     expect(await second.text()).toContain('Already answered');
   });
 

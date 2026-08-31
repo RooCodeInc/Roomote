@@ -169,6 +169,13 @@ export async function publishCommunicationRequestUserInput(params: {
       ...(provider === 'teams' || provider === 'agentmail'
         ? { textFormat: 'markdown' as const }
         : {}),
+      // A re-publish of the same question (worker restart, snapshot resume)
+      // must not send the recipient a second question email.
+      ...(provider === 'agentmail'
+        ? {
+            idempotencyKey: `agentmail:${conversationId}:rui:${params.request.requestId}:${currentQuestionIndex}`,
+          }
+        : {}),
       ...(buttons ? { buttons } : {}),
     });
     promptMessageId = posted.messageId;

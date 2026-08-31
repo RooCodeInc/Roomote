@@ -220,7 +220,7 @@ describe('maybeSendCommunicationThreadReply (AgentMail)', () => {
       text: 'done',
       textFormat: 'markdown',
       idempotencyKey: expect.stringMatching(
-        /^agentmail:conversation-1:45-[0-9a-f]{16}:thread-reply$/,
+        /^agentmail:conversation-1:45-[0-9a-f-]{36}:thread-reply$/,
       ),
     });
     // Email is not live: no typing heartbeat is triggered.
@@ -228,7 +228,9 @@ describe('maybeSendCommunicationThreadReply (AgentMail)', () => {
     await expect(response!.json()).resolves.toEqual({ messageTs: 'msg-1' });
   });
 
-  it('derives the same Idempotency-Key for a retried identical reply and a new one otherwise', async () => {
+  it('mints a distinct Idempotency-Key per reply so identical texts both deliver', async () => {
+    // Two intentional identical-text replies in one run are distinct sends;
+    // the key only makes the provider's own HTTP retries of one send safe.
     await maybeSendCommunicationThreadReply({
       taskRun: agentmailTaskRun,
       parsedBody: { text: 'same reply', images: [] },
@@ -236,17 +238,18 @@ describe('maybeSendCommunicationThreadReply (AgentMail)', () => {
     await maybeSendCommunicationThreadReply({
       taskRun: agentmailTaskRun,
       parsedBody: { text: 'same reply', images: [] },
-    });
-    await maybeSendCommunicationThreadReply({
-      taskRun: agentmailTaskRun,
-      parsedBody: { text: 'different reply', images: [] },
     });
 
     const keys = agentmailPostMessageMock.mock.calls.map(
       ([input]) => input.idempotencyKey,
     );
-    expect(keys[0]).toBe(keys[1]);
-    expect(keys[2]).not.toBe(keys[0]);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+    for (const key of keys) {
+      expect(key).toMatch(
+        /^agentmail:conversation-1:45-[0-9a-f-]{36}:thread-reply$/,
+      );
+    }
   });
 
   it('requires an email conversation context', async () => {

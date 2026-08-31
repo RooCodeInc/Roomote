@@ -623,7 +623,12 @@ export async function repairTelegramWebhookCommand(auth: UserAuthSuccess) {
 }
 
 const AGENTMAIL_API_TIMEOUT_MS = 5_000;
-const AGENTMAIL_WEBHOOK_CLIENT_ID = 'roomote-agentmail-webhook';
+/**
+ * Client id used before webhook ids became deployment-specific. Still matched
+ * on lookup so existing registrations are adopted and converged instead of
+ * orphaned.
+ */
+const AGENTMAIL_LEGACY_WEBHOOK_CLIENT_ID = 'roomote-agentmail-webhook';
 const AGENTMAIL_INBOX_HASH_LENGTH = 6;
 
 function buildExpectedAgentMailWebhookUrl(): string {
@@ -678,13 +683,36 @@ function classifyAgentMailSetupError(error: unknown): string {
   return message.trim() || 'Could not connect to AgentMail.';
 }
 
+/**
+ * Short stable hash of the deployment's public hostname. Keys both the inbox
+ * proposal and the webhook client id, so two deployments sharing one
+ * AgentMail account never adopt (or delete) each other's resources.
+ */
+function buildAgentMailHostHash(publicAppUrl: string): string {
+  return createHash('sha256')
+    .update(new URL(publicAppUrl).hostname)
+    .digest('hex')
+    .slice(0, AGENTMAIL_INBOX_HASH_LENGTH);
+}
+
+function buildAgentMailWebhookClientId(publicAppUrl: string): string {
+  return `${AGENTMAIL_LEGACY_WEBHOOK_CLIENT_ID}-${buildAgentMailHostHash(publicAppUrl)}`;
+}
+
+function readAgentMailWebhookInboxIds(webhook: AgentMailWebhook): string[] {
+  return Array.isArray(webhook.inbox_ids) ? webhook.inbox_ids.map(String) : [];
+}
+
 function findRoomoteAgentMailWebhook(
   webhooks: readonly AgentMailWebhook[] | undefined,
 ): AgentMailWebhook | null {
+  const deploymentClientId = buildAgentMailWebhookClientId(Env.R_APP_URL);
   return (
+    webhooks?.find((webhook) => webhook['client_id'] === deploymentClientId) ??
     webhooks?.find(
-      (webhook) => webhook['client_id'] === AGENTMAIL_WEBHOOK_CLIENT_ID,
-    ) ?? null
+      (webhook) => webhook['client_id'] === AGENTMAIL_LEGACY_WEBHOOK_CLIENT_ID,
+    ) ??
+    null
   );
 }
 
@@ -699,11 +727,7 @@ function buildAgentMailInboxProposal(publicAppUrl: string): {
   username: string;
   clientId: string;
 } {
-  const hostname = new URL(publicAppUrl).hostname;
-  const hostHash = createHash('sha256')
-    .update(hostname)
-    .digest('hex')
-    .slice(0, AGENTMAIL_INBOX_HASH_LENGTH);
+  const hostHash = buildAgentMailHostHash(publicAppUrl);
   const username = `${buildDeploymentAppName(publicAppUrl).toLowerCase()}-${hostHash}`;
 
   return { username, clientId: `roomote-${hostHash}` };
@@ -727,13 +751,22 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
     const { webhooks } = await client.listWebhooks();
     const webhook = findRoomoteAgentMailWebhook(webhooks);
     const registeredUrl = webhook?.url ?? null;
+    // A webhook without inbox_ids receives every inbox's events, so only an
+    // explicit scope that omits the configured inbox counts as drift.
+    const registeredInboxIds = webhook
+      ? readAgentMailWebhookInboxIds(webhook)
+      : [];
+    const inboxScopeMatches =
+      !credentials.inboxId ||
+      registeredInboxIds.length === 0 ||
+      registeredInboxIds.includes(credentials.inboxId);
 
     return {
       inboxAddress: credentials.inboxId,
       webhook: {
         status: !webhook
           ? 'unregistered'
-          : registeredUrl === expectedUrl
+          : registeredUrl === expectedUrl && inboxScopeMatches
             ? 'connected'
             : 'mismatch',
         registeredUrl,
@@ -839,19 +872,38 @@ async function reconcileAgentMailSetup(input: {
   }
 
   // Converge the deployment's webhook (found by client id) on the current
-  // URL. The webhook secret only exists where AgentMail returns it, so a
-  // registration we can no longer verify deliveries for is recreated.
+  // URL and inbox scope, so pointing the config at a different inbox re-scopes
+  // delivery instead of silently keeping the old inbox. The webhook secret
+  // only exists where AgentMail returns it, so a registration we can no
+  // longer verify deliveries for is recreated.
   const webhookUrl = buildExpectedAgentMailWebhookUrl();
+  const desiredInboxIds = [inboxAddress];
   let webhookSecret = existing.webhookSecret;
 
   try {
     const { webhooks } = await client.listWebhooks();
     const existingWebhook = findRoomoteAgentMailWebhook(webhooks);
+    const createDeploymentWebhook = async (): Promise<string | null> => {
+      const created = await client.createWebhook({
+        url: webhookUrl,
+        clientId: buildAgentMailWebhookClientId(Env.R_APP_URL),
+        inboxIds: desiredInboxIds,
+        eventTypes: ['message.received'],
+      });
+      return typeof created.secret === 'string' && created.secret.trim()
+        ? created.secret.trim()
+        : null;
+    };
 
     if (existingWebhook) {
-      if (existingWebhook.url !== webhookUrl) {
+      const registeredInboxIds = readAgentMailWebhookInboxIds(existingWebhook);
+      const inboxScopeMatches =
+        registeredInboxIds.length === desiredInboxIds.length &&
+        desiredInboxIds.every((id) => registeredInboxIds.includes(id));
+      if (existingWebhook.url !== webhookUrl || !inboxScopeMatches) {
         await client.updateWebhook(existingWebhook.webhook_id, {
           url: webhookUrl,
+          inboxIds: desiredInboxIds,
         });
       }
       const apiSecret =
@@ -864,28 +916,10 @@ async function reconcileAgentMailSetup(input: {
       }
       if (!webhookSecret) {
         await client.deleteWebhook(existingWebhook.webhook_id);
-        const created = await client.createWebhook({
-          url: webhookUrl,
-          clientId: AGENTMAIL_WEBHOOK_CLIENT_ID,
-          inboxIds: [inboxAddress],
-          eventTypes: ['message.received'],
-        });
-        webhookSecret =
-          typeof created.secret === 'string' && created.secret.trim()
-            ? created.secret.trim()
-            : null;
+        webhookSecret = await createDeploymentWebhook();
       }
     } else {
-      const created = await client.createWebhook({
-        url: webhookUrl,
-        clientId: AGENTMAIL_WEBHOOK_CLIENT_ID,
-        inboxIds: [inboxAddress],
-        eventTypes: ['message.received'],
-      });
-      webhookSecret =
-        typeof created.secret === 'string' && created.secret.trim()
-          ? created.secret.trim()
-          : webhookSecret;
+      webhookSecret = (await createDeploymentWebhook()) ?? webhookSecret;
     }
   } catch (error) {
     throw new Error(classifyAgentMailSetupError(error));

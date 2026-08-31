@@ -2878,10 +2878,6 @@ export const agentmailConversations = pgTable(
     ),
     latestOutboundMessageId: text('latest_outbound_message_id'),
     version: integer('version').notNull().default(0),
-    boundTaskRunId: integer('bound_task_run_id').references(() => taskRuns.id, {
-      onDelete: 'set null',
-    }),
-    fastSessionId: uuid('fast_session_id'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -3027,6 +3023,15 @@ export const agentmailInboundTurns = pgTable(
       .references(() => agentmailWebhookEvents.id, { onDelete: 'cascade' }),
     providerMessageId: text('provider_message_id').notNull(),
     providerTimestamp: timestamp('provider_timestamp').notNull(),
+    // Everything the drain needs is captured at admission (including the
+    // re-fetched body of oversize deliveries), so consuming a turn never
+    // depends on re-parsing the raw webhook payload or re-resolving the
+    // sender against state that may have changed since admission.
+    senderEmail: text('sender_email').notNull(),
+    senderUserId: text('sender_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    bodyText: text('body_text').notNull().default(''),
     state: text('state')
       .notNull()
       .default('pending')
@@ -3047,60 +3052,6 @@ export const agentmailInboundTurns = pgTable(
     check(
       'agentmail_inbound_turns_state_check',
       sql`${table.state} in ('pending', 'consumed')`,
-    ),
-  ],
-);
-
-/**
- * agentmail_pending_inputs
- *
- * request_user_input over email as an explicit state machine: one pending
- * question per conversation (partial unique index), answered by an atomic
- * pending → claimed transition, delivered to the waiting worker through the
- * Redis answer queue and marked `delivered` (a sweeper re-pushes claimed but
- * undelivered rows). History is preserved; rows are never mutated back.
- */
-export const agentmailPendingInputs = pgTable(
-  'agentmail_pending_inputs',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    conversationId: uuid('conversation_id')
-      .notNull()
-      .references(() => agentmailConversations.id, { onDelete: 'cascade' }),
-    taskRunId: integer('task_run_id').references(() => taskRuns.id, {
-      onDelete: 'set null',
-    }),
-    prompt: text('prompt').notNull(),
-    expectedResponderUserIds: jsonb('expected_responder_user_ids')
-      .notNull()
-      .$type<string[]>()
-      .default([]),
-    answerText: text('answer_text'),
-    answeredByUserId: text('answered_by_user_id').references(() => users.id, {
-      onDelete: 'set null',
-    }),
-    state: text('state')
-      .notNull()
-      .default('pending')
-      .$type<'pending' | 'claimed' | 'delivered' | 'expired'>(),
-    deliveryAttempts: integer('delivery_attempts').notNull().default(0),
-    lastError: text('last_error'),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    expiresAt: timestamp('expires_at').notNull(),
-    claimedAt: timestamp('claimed_at'),
-    deliveredAt: timestamp('delivered_at'),
-  },
-  (table) => [
-    uniqueIndex('agentmail_pending_inputs_one_pending_per_conversation')
-      .on(table.conversationId)
-      .where(sql`${table.state} = 'pending'`),
-    index('agentmail_pending_inputs_state_idx').on(
-      table.state,
-      table.createdAt,
-    ),
-    check(
-      'agentmail_pending_inputs_state_check',
-      sql`${table.state} in ('pending', 'claimed', 'delivered', 'expired')`,
     ),
   ],
 );
@@ -3519,7 +3470,7 @@ export const fastAgentProviderMessages = pgTable(
       .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
     provider: text('provider')
       .notNull()
-      .$type<'discord' | 'slack' | 'teams' | 'telegram'>(),
+      .$type<'discord' | 'slack' | 'teams' | 'telegram' | 'agentmail'>(),
     workspaceId: text('workspace_id').notNull(),
     channelId: text('channel_id').notNull(),
     threadId: text('thread_id'),

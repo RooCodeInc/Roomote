@@ -26,7 +26,7 @@ function truncateAgentMailMarkdown(markdown: string): string {
   );
 }
 
-function escapeAgentMailHtml(text: string): string {
+export function escapeAgentMailHtml(text: string): string {
   return text
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')

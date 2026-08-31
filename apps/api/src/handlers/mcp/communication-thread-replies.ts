@@ -29,7 +29,7 @@ import {
   createTelegramCommunicationProviderFromRuntimeCredentials as createTelegramCommunicationProvider,
   getCommunicationProviderAdapter,
 } from '@roomote/sdk/server';
-import { createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 import { THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE } from './chat-reply-helpers';
 import {
@@ -566,14 +566,12 @@ async function sendTelegramThreadReply(params: {
 function buildAgentMailThreadReplyIdempotencyKey(params: {
   conversationId: string;
   runId: number;
-  text: string;
 }): string {
-  const logicalEventId = `${params.runId}-${createHash('sha256')
-    .update(params.text)
-    .digest('hex')
-    .slice(0, 16)}`;
-
-  return `agentmail:${params.conversationId}:${logicalEventId}:thread-reply`;
+  // Unique per handler invocation: two intentional identical-text replies in
+  // one run are distinct sends and must both deliver. The key's job is only
+  // to make the provider's own HTTP retries of THIS send replay-safe, so a
+  // per-call nonce is exactly the right identity.
+  return `agentmail:${params.conversationId}:${params.runId}-${randomUUID()}:thread-reply`;
 }
 
 async function sendAgentMailThreadReply(params: {
@@ -633,7 +631,6 @@ async function sendAgentMailThreadReply(params: {
     idempotencyKey: buildAgentMailThreadReplyIdempotencyKey({
       conversationId,
       runId: params.taskRun.id,
-      text,
     }),
   });
 

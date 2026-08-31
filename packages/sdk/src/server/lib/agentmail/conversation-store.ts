@@ -61,6 +61,26 @@ export async function resolveAgentMailSenderUserId(
   return mapping?.userId ?? null;
 }
 
+/** Authorization check: is this user a member of the conversation? */
+export async function isAgentMailConversationParticipant(input: {
+  conversationId: string;
+  userId: string;
+}): Promise<boolean> {
+  const membership = await db.query.agentmailConversationParticipants.findFirst(
+    {
+      where: and(
+        eq(
+          agentmailConversationParticipants.conversationId,
+          input.conversationId,
+        ),
+        eq(agentmailConversationParticipants.userId, input.userId),
+      ),
+      columns: { id: true },
+    },
+  );
+  return Boolean(membership);
+}
+
 /**
  * The durable reply route for a conversation. Replies target the latest
  * inbound message and address the latest authorized sender only; the adapter

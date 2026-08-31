@@ -814,7 +814,9 @@ describe('comms commands', () => {
       });
       expect(mockAgentMailCreateWebhook).toHaveBeenCalledWith({
         url: expectedWebhookUrl,
-        clientId: 'roomote-agentmail-webhook',
+        // The client id embeds the deployment host hash so deployments
+        // sharing one AgentMail account never adopt each other's webhook.
+        clientId: `roomote-agentmail-webhook-${hostHash}`,
         inboxIds: [`${expectedUsername}@agentmail.to`],
         eventTypes: ['message.received'],
       });
@@ -899,7 +901,7 @@ describe('comms commands', () => {
       );
     });
 
-    it('re-points a drifted webhook without recreating it when a secret is stored', async () => {
+    it('adopts a legacy client-id webhook and re-points it without recreating when a secret is stored', async () => {
       mockResolveAgentMailRuntimeCredentials.mockResolvedValue({
         apiKey: 'am-key',
         webhookSecret: 'whsec_existing',
@@ -918,7 +920,9 @@ describe('comms commands', () => {
           {
             webhook_id: 'wh-1',
             url: 'https://old-deployment.example.com/api/webhooks/agentmail',
+            // Pre-hash client id from an earlier release.
             client_id: 'roomote-agentmail-webhook',
+            inbox_ids: ['support@agentmail.to'],
           },
         ],
       });
@@ -930,9 +934,122 @@ describe('comms commands', () => {
 
       expect(mockAgentMailUpdateWebhook).toHaveBeenCalledWith('wh-1', {
         url: expectedWebhookUrl,
+        inboxIds: ['support@agentmail.to'],
       });
       expect(mockAgentMailCreateWebhook).not.toHaveBeenCalled();
       expect(mockAgentMailDeleteWebhook).not.toHaveBeenCalled();
+    });
+
+    it('re-scopes the webhook inbox_ids when the configured inbox changes', async () => {
+      mockResolveAgentMailRuntimeCredentials.mockResolvedValue({
+        apiKey: 'am-key',
+        webhookSecret: 'whsec_existing',
+        inboxId: 'old-inbox@agentmail.to',
+      });
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        'R_AGENTMAIL_API_KEY',
+        'R_AGENTMAIL_INBOX_ID',
+        'R_AGENTMAIL_WEBHOOK_SECRET',
+      ]);
+      mockAgentMailGetInbox.mockResolvedValue({
+        inbox_id: 'new-inbox@agentmail.to',
+      });
+      mockAgentMailListWebhooks.mockResolvedValue({
+        webhooks: [
+          {
+            webhook_id: 'wh-1',
+            // URL already matches; only the inbox scoping drifted.
+            url: expectedWebhookUrl,
+            client_id: `roomote-agentmail-webhook-${hostHash}`,
+            inbox_ids: ['old-inbox@agentmail.to'],
+          },
+        ],
+      });
+
+      await saveCommsAuthConfigCommand(buildMockAuth(), {
+        provider: 'agentmail',
+        values: { R_AGENTMAIL_INBOX_ID: 'new-inbox@agentmail.to' },
+      });
+
+      expect(mockAgentMailUpdateWebhook).toHaveBeenCalledWith('wh-1', {
+        url: expectedWebhookUrl,
+        inboxIds: ['new-inbox@agentmail.to'],
+      });
+      expect(mockAgentMailCreateWebhook).not.toHaveBeenCalled();
+      expect(mockAgentMailDeleteWebhook).not.toHaveBeenCalled();
+    });
+
+    it('leaves a fully converged webhook untouched', async () => {
+      mockResolveAgentMailRuntimeCredentials.mockResolvedValue({
+        apiKey: 'am-key',
+        webhookSecret: 'whsec_existing',
+        inboxId: 'support@agentmail.to',
+      });
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        'R_AGENTMAIL_API_KEY',
+        'R_AGENTMAIL_INBOX_ID',
+        'R_AGENTMAIL_WEBHOOK_SECRET',
+      ]);
+      mockAgentMailGetInbox.mockResolvedValue({
+        inbox_id: 'support@agentmail.to',
+      });
+      mockAgentMailListWebhooks.mockResolvedValue({
+        webhooks: [
+          {
+            webhook_id: 'wh-1',
+            url: expectedWebhookUrl,
+            client_id: `roomote-agentmail-webhook-${hostHash}`,
+            inbox_ids: ['support@agentmail.to'],
+          },
+        ],
+      });
+
+      await saveCommsAuthConfigCommand(buildMockAuth(), {
+        provider: 'agentmail',
+        values: { R_AGENTMAIL_INBOX_ID: 'support@agentmail.to' },
+      });
+
+      expect(mockAgentMailUpdateWebhook).not.toHaveBeenCalled();
+      expect(mockAgentMailCreateWebhook).not.toHaveBeenCalled();
+      expect(mockAgentMailDeleteWebhook).not.toHaveBeenCalled();
+    });
+
+    it("never adopts another deployment's webhook with a different host hash", async () => {
+      mockAgentMailGetInbox.mockResolvedValue({
+        inbox_id: 'support@agentmail.to',
+      });
+      mockAgentMailListWebhooks.mockResolvedValue({
+        webhooks: [
+          {
+            webhook_id: 'wh-other',
+            url: 'https://other-deployment.example.com/api/webhooks/agentmail',
+            client_id: 'roomote-agentmail-webhook-ffffff',
+            inbox_ids: ['other@agentmail.to'],
+          },
+        ],
+      });
+      mockAgentMailCreateWebhook.mockResolvedValue({
+        webhook_id: 'wh-mine',
+        url: expectedWebhookUrl,
+        secret: 'whsec_mine',
+      });
+
+      await saveCommsAuthConfigCommand(buildMockAuth(), {
+        provider: 'agentmail',
+        values: {
+          R_AGENTMAIL_API_KEY: 'am-key',
+          R_AGENTMAIL_INBOX_ID: 'support@agentmail.to',
+        },
+      });
+
+      expect(mockAgentMailUpdateWebhook).not.toHaveBeenCalled();
+      expect(mockAgentMailDeleteWebhook).not.toHaveBeenCalled();
+      expect(mockAgentMailCreateWebhook).toHaveBeenCalledWith({
+        url: expectedWebhookUrl,
+        clientId: `roomote-agentmail-webhook-${hostHash}`,
+        inboxIds: ['support@agentmail.to'],
+        eventTypes: ['message.received'],
+      });
     });
 
     it('surfaces a taken username inline with guidance to pick an address', async () => {
@@ -1014,6 +1131,54 @@ describe('comms commands', () => {
         }),
       ).resolves.toBeUndefined();
       expect(txDelete).toHaveBeenCalled();
+    });
+  });
+
+  describe('agentmail status', () => {
+    const expectedWebhookUrl = 'https://app.example.com/api/webhooks/agentmail';
+
+    beforeEach(() => {
+      mockResolveAgentMailRuntimeCredentials.mockResolvedValue({
+        apiKey: 'am-key',
+        webhookSecret: 'whsec_existing',
+        inboxId: 'support@agentmail.to',
+      });
+    });
+
+    it('reports connected when the webhook covers the configured inbox', async () => {
+      mockAgentMailListWebhooks.mockResolvedValue({
+        webhooks: [
+          {
+            webhook_id: 'wh-1',
+            url: expectedWebhookUrl,
+            client_id: 'roomote-agentmail-webhook',
+            inbox_ids: ['support@agentmail.to'],
+          },
+        ],
+      });
+
+      const status = await getCommsStatusCommand(buildMockAuth());
+      const agentmail = status.providers.find((p) => p.id === 'agentmail');
+
+      expect(agentmail?.agentmail?.webhook.status).toBe('connected');
+    });
+
+    it('reports mismatch when the webhook is scoped to a different inbox', async () => {
+      mockAgentMailListWebhooks.mockResolvedValue({
+        webhooks: [
+          {
+            webhook_id: 'wh-1',
+            url: expectedWebhookUrl,
+            client_id: 'roomote-agentmail-webhook',
+            inbox_ids: ['someone-else@agentmail.to'],
+          },
+        ],
+      });
+
+      const status = await getCommsStatusCommand(buildMockAuth());
+      const agentmail = status.providers.find((p) => p.id === 'agentmail');
+
+      expect(agentmail?.agentmail?.webhook.status).toBe('mismatch');
     });
   });
 

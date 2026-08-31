@@ -12,6 +12,7 @@ import { getAgentMailApiBaseUrl } from './agentmail-api-base-url';
 import {
   buildAgentMailButtonSections,
   buildAgentMailEmailBody,
+  escapeAgentMailHtml,
 } from './agentmail-format';
 
 const DEFAULT_AGENTMAIL_TIMEOUT_MS = 10_000;
@@ -57,14 +58,6 @@ type AgentMailSendResponse = {
   message_id?: string;
   thread_id?: string;
 };
-
-function escapeAgentMailPlainHtml(text: string): string {
-  return text
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
-}
 
 export class AgentMailCommunicationProvider implements CommunicationProviderAdapter {
   readonly provider = 'agentmail' as const;
@@ -125,7 +118,7 @@ export class AgentMailCommunicationProvider implements CommunicationProviderAdap
       ? buildAgentMailEmailBody(text)
       : {
           text,
-          html: `<div>${escapeAgentMailPlainHtml(text).replaceAll('\n', '<br />')}</div>`,
+          html: `<div>${escapeAgentMailHtml(text).replaceAll('\n', '<br />')}</div>`,
         };
 
     // Email has no callback intake, so only URL buttons render (one-click
@@ -308,10 +301,16 @@ async function callAgentMailApi<T>(params: {
       continue;
     }
 
-    if (
-      attempt < params.maxRetries &&
-      (response.status === 429 || response.status >= 500)
-    ) {
+    // 429 means the request was rejected before processing, so it is always
+    // safe to retry. A 5xx is ambiguous — the provider may have sent the
+    // email before failing — so mutating calls retry it only when the caller
+    // supplied an Idempotency-Key that makes the replay a no-op.
+    const retryableStatus =
+      response.status === 429 ||
+      (response.status >= 500 &&
+        (params.method === 'GET' || Boolean(params.idempotencyKey)));
+
+    if (attempt < params.maxRetries && retryableStatus) {
       const retryAfterSeconds = Number.parseFloat(
         response.headers.get('retry-after') ?? '',
       );
@@ -365,6 +364,7 @@ export type AgentMailWebhook = {
   webhook_id: string;
   url: string;
   secret?: string;
+  inbox_ids?: string[];
 } & Record<string, unknown>;
 
 export type AgentMailApiClientOptions = {
@@ -451,12 +451,15 @@ export class AgentMailApiClient {
 
   updateWebhook(
     webhookId: string,
-    input: { url?: string },
+    input: { url?: string; inboxIds?: string[] },
   ): Promise<AgentMailWebhook> {
     return this.request(
       'PATCH',
       `/v0/webhooks/${encodeURIComponent(webhookId)}`,
-      { ...(input.url ? { url: input.url } : {}) },
+      {
+        ...(input.url ? { url: input.url } : {}),
+        ...(input.inboxIds ? { inbox_ids: input.inboxIds } : {}),
+      },
     );
   }
 

@@ -1,5 +1,5 @@
 {
-  "id": "fecff990-71f2-4bf5-a74d-77804d2b91bb",
+  "id": "448b3f4b-af0b-452c-8c8c-e8c8ce7408f1",
   "prevId": "6a2acb2b-02f4-4a18-88fa-0a56e33481c0",
   "version": "7",
   "dialect": "postgresql",
@@ -194,18 +194,6 @@
           "notNull": true,
           "default": 0
         },
-        "bound_task_run_id": {
-          "name": "bound_task_run_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "fast_session_id": {
-          "name": "fast_session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -277,15 +265,6 @@
           "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
-        },
-        "agentmail_conversations_bound_task_run_id_task_runs_id_fk": {
-          "name": "agentmail_conversations_bound_task_run_id_task_runs_id_fk",
-          "tableFrom": "agentmail_conversations",
-          "tableTo": "task_runs",
-          "columnsFrom": ["bound_task_run_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -334,6 +313,25 @@
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true
+        },
+        "sender_email": {
+          "name": "sender_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sender_user_id": {
+          "name": "sender_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body_text": {
+          "name": "body_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
         },
         "state": {
           "name": "state",
@@ -409,6 +407,15 @@
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "agentmail_inbound_turns_sender_user_id_users_id_fk": {
+          "name": "agentmail_inbound_turns_sender_user_id_users_id_fk",
+          "tableFrom": "agentmail_inbound_turns",
+          "tableTo": "users",
+          "columnsFrom": ["sender_user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -424,179 +431,6 @@
         "agentmail_inbound_turns_state_check": {
           "name": "agentmail_inbound_turns_state_check",
           "value": "\"agentmail_inbound_turns\".\"state\" in ('pending', 'consumed')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.agentmail_pending_inputs": {
-      "name": "agentmail_pending_inputs",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "conversation_id": {
-          "name": "conversation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "task_run_id": {
-          "name": "task_run_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "prompt": {
-          "name": "prompt",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expected_responder_user_ids": {
-          "name": "expected_responder_user_ids",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "answer_text": {
-          "name": "answer_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "answered_by_user_id": {
-          "name": "answered_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "delivery_attempts": {
-          "name": "delivery_attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "claimed_at": {
-          "name": "claimed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "delivered_at": {
-          "name": "delivered_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "agentmail_pending_inputs_one_pending_per_conversation": {
-          "name": "agentmail_pending_inputs_one_pending_per_conversation",
-          "columns": [
-            {
-              "expression": "conversation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"agentmail_pending_inputs\".\"state\" = 'pending'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "agentmail_pending_inputs_state_idx": {
-          "name": "agentmail_pending_inputs_state_idx",
-          "columns": [
-            {
-              "expression": "state",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "agentmail_pending_inputs_conversation_id_agentmail_conversations_id_fk": {
-          "name": "agentmail_pending_inputs_conversation_id_agentmail_conversations_id_fk",
-          "tableFrom": "agentmail_pending_inputs",
-          "tableTo": "agentmail_conversations",
-          "columnsFrom": ["conversation_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "agentmail_pending_inputs_task_run_id_task_runs_id_fk": {
-          "name": "agentmail_pending_inputs_task_run_id_task_runs_id_fk",
-          "tableFrom": "agentmail_pending_inputs",
-          "tableTo": "task_runs",
-          "columnsFrom": ["task_run_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "agentmail_pending_inputs_answered_by_user_id_users_id_fk": {
-          "name": "agentmail_pending_inputs_answered_by_user_id_users_id_fk",
-          "tableFrom": "agentmail_pending_inputs",
-          "tableTo": "users",
-          "columnsFrom": ["answered_by_user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "agentmail_pending_inputs_state_check": {
-          "name": "agentmail_pending_inputs_state_check",
-          "value": "\"agentmail_pending_inputs\".\"state\" in ('pending', 'claimed', 'delivered', 'expired')"
         }
       },
       "isRLSEnabled": false
