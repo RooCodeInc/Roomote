@@ -8,6 +8,14 @@ import {
 } from '@roomote/types';
 import { z } from 'zod';
 import {
+  ADO_API_VERSION,
+  adoCreatedCommentSchema,
+  adoThreadSchema,
+  createAdoCommentThread,
+  getFirstAdoCommentId,
+} from './source-control-pull-request-ado-writes';
+import { SourceControlWriteError } from './source-control-pull-request-write-errors';
+import {
   buildSourceControlRequestFailureMessage,
   performSourceControlRequest as performRequest,
   requestSourceControlJson as requestJson,
@@ -18,6 +26,14 @@ import {
   resolveGiteaProviderContext,
   resolveGitLabProviderContext,
 } from './source-control-pull-request-provider-context';
+import {
+  assertReviewCommentInputFields,
+  createAdoPullRequestReviewComment,
+  createBitbucketPullRequestReviewComment,
+  createGiteaPullRequestReviewComment,
+  createGitHubPullRequestReviewComment,
+  createGitLabPullRequestReviewComment,
+} from './source-control-pull-request-review-comments';
 import {
   assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
@@ -33,7 +49,6 @@ import {
   type RepositoryRow,
 } from './source-control-pull-request-shared';
 
-const ADO_API_VERSION = '7.1';
 // `/_apis/connectionData` is a preview-only resource: Azure DevOps answers
 // plain `7.1` (and `7.0`) with a 400 demanding the `-preview` suffix.
 const ADO_CONNECTION_DATA_API_VERSION = '7.1-preview';
@@ -139,20 +154,7 @@ export type SourceControlPullRequestWriteResult = {
   warnings: string[];
 };
 
-/**
- * Mirrors SourceControlReadError in source-control-pull-request-reads.ts so
- * write callers can map client-addressable failures to HTTP statuses the same
- * way the read and mutation surfaces do.
- */
-export class SourceControlWriteError extends Error {
-  constructor(
-    public readonly httpStatus: number,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'SourceControlWriteError';
-  }
-}
+export { SourceControlWriteError } from './source-control-pull-request-write-errors';
 
 const GITHUB_REVIEW_EVENTS = {
   approve: 'APPROVE',
@@ -198,33 +200,6 @@ const gitLabNoteSchema = z
   .object({ id: z.union([z.number(), z.string()]) })
   .passthrough();
 
-const gitLabMergeRequestDiffRefsSchema = z
-  .object({
-    diff_refs: z
-      .object({
-        base_sha: z.string().nullable().optional(),
-        start_sha: z.string().nullable().optional(),
-        head_sha: z.string().nullable().optional(),
-      })
-      .nullable()
-      .optional(),
-  })
-  .passthrough();
-
-const gitLabDiscussionSchema = z
-  .object({
-    id: z.union([z.string(), z.number()]),
-    notes: z.array(gitLabNoteSchema).optional(),
-  })
-  .passthrough();
-
-const gitLabMergeRequestDiffEntrySchema = z
-  .object({
-    old_path: z.string().optional(),
-    new_path: z.string().optional(),
-  })
-  .passthrough();
-
 const giteaCreatedCommentSchema = z
   .object({
     id: z.number().int(),
@@ -247,18 +222,6 @@ const bitbucketCreatedCommentSchema = z
         html: z.object({ href: z.string().optional() }).optional(),
       })
       .optional(),
-  })
-  .passthrough();
-
-const adoCreatedCommentSchema = z
-  .object({ id: z.number().int().optional() })
-  .passthrough();
-
-const adoThreadSchema = z
-  .object({
-    id: z.number().int(),
-    status: z.string().nullable().optional(),
-    comments: z.array(adoCreatedCommentSchema).optional(),
   })
   .passthrough();
 
@@ -370,9 +333,7 @@ function assertWriteInputFields(
       requireBody(input);
       break;
     case 'create_pull_request_review_comment':
-      requirePath(input);
-      requireLine(input);
-      requireBody(input);
+      assertReviewCommentInputFields(input);
       break;
     case 'update_pull_request_comment':
       requireCommentId(input);
@@ -434,84 +395,6 @@ function requireBody(input: SourceControlPullRequestWriteInput): string {
   }
 
   return input.body;
-}
-
-function requirePath(input: SourceControlPullRequestWriteInput): string {
-  if (!input.path) {
-    throw new SourceControlWriteError(
-      400,
-      `path is required for ${input.action}.`,
-    );
-  }
-
-  return input.path;
-}
-
-function requireLine(input: SourceControlPullRequestWriteInput): number {
-  if (input.line === undefined) {
-    throw new SourceControlWriteError(
-      400,
-      `line is required for ${input.action}.`,
-    );
-  }
-
-  if (input.startLine !== undefined && input.startLine > input.line) {
-    throw new SourceControlWriteError(
-      400,
-      `startLine must not be greater than line (got startLine=${input.startLine}, line=${input.line}); line is the end of the range.`,
-    );
-  }
-
-  return input.line;
-}
-
-function resolveSide(
-  input: SourceControlPullRequestWriteInput,
-): 'LEFT' | 'RIGHT' {
-  return input.side ?? 'RIGHT';
-}
-
-/**
- * The provider could not map the requested anchor onto the current PR diff.
- * Surfaced as a 422 error (not an applied:false capability gap) so the agent
- * can correct the anchor and retry, or fall back to the summary comment.
- */
-function anchorRejectionError(
-  provider: SourceControlProvider,
-  input: SourceControlPullRequestWriteInput,
-  detail: string,
-): SourceControlWriteError {
-  return new SourceControlWriteError(
-    422,
-    `${getSourceControlProviderLabel(provider)} rejected the inline comment anchor (path=${input.path}, line=${input.line}, side=${resolveSide(input)}): ${detail}. The anchor must target a line in the current pull request diff; re-check the hunk and retry once with a corrected anchor, or carry the finding in the review summary comment instead.`,
-  );
-}
-
-/** Reads the HTTP status carried by errors such as octokit's RequestError. */
-function getHttpErrorStatus(error: unknown): number | undefined {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'status' in error &&
-    typeof (error as { status: unknown }).status === 'number'
-  ) {
-    return (error as { status: number }).status;
-  }
-
-  return undefined;
-}
-
-function multiLineRangeWarnings(
-  provider: SourceControlProvider,
-  input: SourceControlPullRequestWriteInput,
-): string[] {
-  if (input.startLine === undefined) {
-    return [];
-  }
-
-  return [
-    `${getSourceControlProviderLabel(provider)} does not support multi-line comment positions through this surface; the comment is anchored to line ${input.line}.`,
-  ];
 }
 
 function requireResolved(input: SourceControlPullRequestWriteInput): boolean {
@@ -629,55 +512,13 @@ async function writeGitHubPullRequest({
       });
     }
     case 'create_pull_request_review_comment': {
-      const path = requirePath(input);
-      const line = requireLine(input);
-      const side = resolveSide(input);
-      const body = requireBody(input);
-      // Anchor against the head SHA resolved at call time: a caller-supplied
-      // SHA that has since moved would only produce an "outdated" comment or
-      // a hard 422 with no useful recovery.
-      const { data: pullRequest } = await octokit.rest.pulls.get({
+      return createGitHubPullRequestReviewComment({
+        input,
+        repository,
+        octokit,
         owner,
         repo,
-        pull_number: input.prNumber,
       });
-
-      try {
-        const { data } = await octokit.rest.pulls.createReviewComment({
-          owner,
-          repo,
-          pull_number: input.prNumber,
-          commit_id: pullRequest.head.sha,
-          path,
-          line,
-          side,
-          ...(input.startLine !== undefined
-            ? {
-                start_line: input.startLine,
-                start_side: input.startSide ?? side,
-              }
-            : {}),
-          body,
-        });
-
-        return buildWriteResult({
-          input,
-          provider,
-          repository,
-          commentId: String(data.id),
-          url: data.html_url ?? null,
-        });
-      } catch (error) {
-        if (getHttpErrorStatus(error) === 422) {
-          throw anchorRejectionError(
-            provider,
-            input,
-            error instanceof Error ? error.message : String(error),
-          );
-        }
-
-        throw error;
-      }
     }
     case 'update_pull_request_comment': {
       const commentId = requireCommentId(input);
@@ -885,88 +726,13 @@ async function writeGitLabMergeRequest({
       });
     }
     case 'create_pull_request_review_comment': {
-      const path = requirePath(input);
-      const line = requireLine(input);
-      const side = resolveSide(input);
-      const body = requireBody(input);
-      // Diff positions must carry the merge request's diff_refs SHA triple.
-      const mergeRequest = await requestJson({
-        fetchImpl,
-        url: buildApiUrl(apiBaseUrl, mergeRequestPath, {}),
-        tokenHeader,
-        schema: gitLabMergeRequestDiffRefsSchema,
-        acceptedStatuses: [200],
-      });
-      const diffRefs = mergeRequest.diff_refs;
-
-      if (!diffRefs?.base_sha || !diffRefs.start_sha || !diffRefs.head_sha) {
-        throw new SourceControlWriteError(
-          409,
-          'GitLab has not computed diff refs for this merge request yet; retry shortly or carry the finding in the review summary comment instead.',
-        );
-      }
-
-      const positionPaths = await resolveGitLabPositionPaths({
+      return createGitLabPullRequestReviewComment({
+        input,
+        repository,
         fetchImpl,
         apiBaseUrl,
         tokenHeader,
         mergeRequestPath,
-        path,
-      });
-
-      const response = await performRequest({
-        fetchImpl,
-        method: 'POST',
-        url: buildApiUrl(apiBaseUrl, `${mergeRequestPath}/discussions`, {}),
-        tokenHeader,
-        body: {
-          body,
-          position: {
-            position_type: 'text',
-            base_sha: diffRefs.base_sha,
-            start_sha: diffRefs.start_sha,
-            head_sha: diffRefs.head_sha,
-            new_path: positionPaths.newPath,
-            old_path: positionPaths.oldPath,
-            ...(side === 'RIGHT' ? { new_line: line } : { old_line: line }),
-          },
-        },
-      });
-
-      // GitLab answers 400 for positions it cannot map onto the current diff
-      // (including unchanged context lines, which need both old and new line
-      // numbers to anchor).
-      if (response.status === 400) {
-        throw anchorRejectionError(
-          provider,
-          input,
-          `GitLab could not map the position onto the merge request diff${await formatResponseBody(response)}; target a line changed in this merge request${
-            positionPaths.warnings.length
-              ? `. ${positionPaths.warnings.join(' ')}`
-              : ''
-          }`,
-        );
-      }
-
-      if (![200, 201].includes(response.status)) {
-        throw new Error(
-          await buildSourceControlRequestFailureMessage(response),
-        );
-      }
-
-      const discussion = gitLabDiscussionSchema.parse(await response.json());
-      const firstNote = discussion.notes?.[0];
-
-      return buildWriteResult({
-        input,
-        provider,
-        repository,
-        threadId: String(discussion.id),
-        commentId: firstNote ? String(firstNote.id) : null,
-        warnings: [
-          ...positionPaths.warnings,
-          ...multiLineRangeWarnings(provider, input),
-        ],
       });
     }
     case 'update_pull_request_comment': {
@@ -1172,81 +938,6 @@ async function submitGitLabReview({
   });
 }
 
-/**
- * GitLab positions must carry the file's real old_path and new_path; for
- * renamed files they differ and a same-path position is rejected. Scan the
- * merge request diff list for the entry matching the requested path by either
- * name, falling back to the same-path pair when the file cannot be found.
- * When the runaway backstop ends the scan before the listing does, the
- * fallback is surfaced explicitly through `warnings`.
- */
-async function resolveGitLabPositionPaths({
-  fetchImpl,
-  apiBaseUrl,
-  tokenHeader,
-  mergeRequestPath,
-  path,
-}: {
-  fetchImpl: FetchImpl;
-  apiBaseUrl: string;
-  tokenHeader: { name: string; value: string };
-  mergeRequestPath: string;
-  path: string;
-}): Promise<{ oldPath: string; newPath: string; warnings: string[] }> {
-  // Scan the complete diff listing (a page shorter than per_page ends it).
-  // GitLab's own diff rendering hard-caps merge requests around 3,000
-  // changed files, so this backstop is unreachable in practice and exists
-  // only as a runaway guard against a misbehaving server.
-  const maxPages = 50;
-  const perPage = 100;
-
-  for (let page = 1; page <= maxPages; page++) {
-    const response = await performRequest({
-      fetchImpl,
-      url: buildApiUrl(apiBaseUrl, `${mergeRequestPath}/diffs`, {
-        page,
-        per_page: perPage,
-      }),
-      tokenHeader,
-    });
-
-    if (response.status !== 200) {
-      break;
-    }
-
-    const entries = z
-      .array(gitLabMergeRequestDiffEntrySchema)
-      .parse(await response.json());
-    const entry = entries.find(
-      (candidate) => candidate.new_path === path || candidate.old_path === path,
-    );
-
-    if (entry) {
-      return {
-        oldPath: entry.old_path ?? path,
-        newPath: entry.new_path ?? path,
-        warnings: [],
-      };
-    }
-
-    if (page === maxPages && entries.length === perPage) {
-      return {
-        oldPath: path,
-        newPath: path,
-        warnings: [
-          `The merge request diff listing exceeded ${maxPages * perPage} files before ${path} was found; rename resolution fell back to the request path, so an anchor on a renamed file may be rejected.`,
-        ],
-      };
-    }
-
-    if (entries.length < perPage) {
-      break;
-    }
-  }
-
-  return { oldPath: path, newPath: path, warnings: [] };
-}
-
 async function createGitLabNote({
   fetchImpl,
   apiBaseUrl,
@@ -1339,60 +1030,14 @@ async function writeGiteaPullRequest({
       });
     }
     case 'create_pull_request_review_comment': {
-      const path = requirePath(input);
-      const line = requireLine(input);
-      const side = resolveSide(input);
-      const body = requireBody(input);
-      // Gitea's review API is GitHub-shaped: one review with a single
-      // positioned comment. commit_id is omitted so Gitea anchors against
-      // the latest diff.
-      const response = await performRequest({
-        fetchImpl,
-        method: 'POST',
-        url: buildApiUrl(
-          apiBaseUrl,
-          `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${input.prNumber}/reviews`,
-          {},
-        ),
-        tokenHeader,
-        body: {
-          event: 'COMMENT',
-          body: '',
-          comments: [
-            {
-              path,
-              body,
-              ...(side === 'RIGHT'
-                ? { new_position: line }
-                : { old_position: line }),
-            },
-          ],
-        },
-      });
-
-      if (response.status === 422) {
-        throw anchorRejectionError(
-          provider,
-          input,
-          `Gitea rejected the review position${await formatResponseBody(response)}`,
-        );
-      }
-
-      if (![200, 201].includes(response.status)) {
-        throw new Error(
-          await buildSourceControlRequestFailureMessage(response),
-        );
-      }
-
-      const review = giteaCreatedReviewSchema.parse(await response.json());
-
-      return buildWriteResult({
+      return createGiteaPullRequestReviewComment({
         input,
-        provider,
         repository,
-        threadId: String(review.id),
-        url: review.html_url ?? null,
-        warnings: multiLineRangeWarnings(provider, input),
+        fetchImpl,
+        apiBaseUrl,
+        owner,
+        repo,
+        tokenHeader,
       });
     }
     case 'update_pull_request_comment': {
@@ -1541,40 +1186,12 @@ async function writeBitbucketPullRequest({
       });
     }
     case 'create_pull_request_review_comment': {
-      const path = requirePath(input);
-      const line = requireLine(input);
-      const side = resolveSide(input);
-      // Bitbucket anchors inline comments by destination (`to`) or source
-      // (`from`) line and does not validate the anchor against the diff;
-      // out-of-diff anchors render under "Other comments" instead of erroring.
-      const comment = await requestJson({
-        fetchImpl,
-        method: 'POST',
-        url: commentsUrl,
-        tokenHeader,
-        body: {
-          content: { raw: requireBody(input) },
-          inline: {
-            path,
-            ...(side === 'RIGHT' ? { to: line } : { from: line }),
-          },
-        },
-        schema: bitbucketCreatedCommentSchema,
-      });
-      const commentId =
-        comment.id === undefined || comment.id === null
-          ? null
-          : String(comment.id);
-
-      return buildWriteResult({
+      return createBitbucketPullRequestReviewComment({
         input,
-        provider,
         repository,
-        // The read surface keys Bitbucket threads by the top comment id.
-        threadId: commentId,
-        commentId,
-        url: comment.links?.html?.href ?? null,
-        warnings: multiLineRangeWarnings(provider, input),
+        fetchImpl,
+        commentsUrl,
+        tokenHeader,
       });
     }
     case 'update_pull_request_comment': {
@@ -1796,34 +1413,13 @@ async function writeAdoPullRequest({
       });
     }
     case 'create_pull_request_review_comment': {
-      const path = requirePath(input);
-      const line = requireLine(input);
-      const side = resolveSide(input);
-      const startLine = input.startLine ?? line;
-      const start = { line: startLine, offset: 1 };
-      const end = { line, offset: 1 };
-      // ADO does not validate threadContext against the diff; anchors outside
-      // the diff render as file-level comments instead of erroring.
-      const thread = await createAdoCommentThread({
+      return createAdoPullRequestReviewComment({
+        input,
+        repository,
         fetchImpl,
         tokenHeader,
         organizationApiBaseUrl,
         threadsPath,
-        content: requireBody(input),
-        threadContext: {
-          filePath: path.startsWith('/') ? path : `/${path}`,
-          ...(side === 'RIGHT'
-            ? { rightFileStart: start, rightFileEnd: end }
-            : { leftFileStart: start, leftFileEnd: end }),
-        },
-      });
-
-      return buildWriteResult({
-        input,
-        provider,
-        repository,
-        threadId: String(thread.id),
-        commentId: getFirstAdoCommentId(thread),
       });
     }
     case 'update_pull_request_comment': {
@@ -1968,43 +1564,4 @@ async function writeAdoPullRequest({
         warnings: ['Azure DevOps does not expose review dismissal.'],
       });
   }
-}
-
-async function createAdoCommentThread({
-  fetchImpl,
-  tokenHeader,
-  organizationApiBaseUrl,
-  threadsPath,
-  content,
-  threadContext,
-}: {
-  fetchImpl: FetchImpl;
-  tokenHeader: { name: string; value: string };
-  organizationApiBaseUrl: string;
-  threadsPath: string;
-  content: string;
-  /** File/line anchor for inline review comments; omit for PR-level threads. */
-  threadContext?: Record<string, unknown>;
-}): Promise<z.infer<typeof adoThreadSchema>> {
-  return requestJson({
-    fetchImpl,
-    method: 'POST',
-    url: buildApiUrl(organizationApiBaseUrl, threadsPath, {
-      'api-version': ADO_API_VERSION,
-    }),
-    tokenHeader,
-    body: {
-      comments: [{ content, commentType: 'text' }],
-      status: 'active',
-      ...(threadContext ? { threadContext } : {}),
-    },
-    schema: adoThreadSchema,
-  });
-}
-
-function getFirstAdoCommentId(
-  thread: z.infer<typeof adoThreadSchema>,
-): string | null {
-  const id = thread.comments?.[0]?.id;
-  return id != null ? String(id) : null;
 }
