@@ -88,6 +88,11 @@ vi.mock('@/trpc/client', () => ({
         queryOptions: () => ({ queryKey: ['setupNew.status'] }),
       },
     },
+    setup: {
+      sessionStatus: {
+        queryKey: () => ['setup.sessionStatus'],
+      },
+    },
     sourceControl: {
       saveConfig: {
         mutationOptions: (options: unknown) => options,

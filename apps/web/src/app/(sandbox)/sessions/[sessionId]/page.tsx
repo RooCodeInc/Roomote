@@ -164,7 +164,9 @@ export default async function SessionDetailPage({
                   headerExtras={
                     <SessionHeaderExtras status={unifiedSession.status} />
                   }
-                  timelineExtras={setupRecommendations}
+                  {...(setupRecommendations
+                    ? { timelineExtras: setupRecommendations }
+                    : {})}
                 />
               </div>
               {isSetupSession && setupSessionStatus?.completed === false ? (

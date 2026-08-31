@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useUser } from '@/hooks/useUser';
 import { useTRPC } from '@/trpc/client';
@@ -22,6 +22,7 @@ import {
  */
 export function SetupConversationalSetup() {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const { isSignedIn, user } = useUser();
   const isAdmin = user?.isAdmin === true;
   const enabled = isSignedIn && isAdmin;
@@ -30,7 +31,13 @@ export function SetupConversationalSetup() {
     trpc.setup.sessionStatus.queryOptions(undefined, { enabled }),
   );
   const createSession = useMutation(
-    trpc.setup.getOrCreateSession.mutationOptions(),
+    trpc.setup.getOrCreateSession.mutationOptions({
+      onSuccess: async () => {
+        await queryClient.invalidateQueries({
+          queryKey: trpc.setup.sessionStatus.queryKey(),
+        });
+      },
+    }),
   );
 
   useEffect(() => {

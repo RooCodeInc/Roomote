@@ -1,5 +1,6 @@
 import {
   parseAcpRequestUserInputAnswers,
+  parseAcpRequestUserInputPayload,
   parseAcpRequestUserInputQuestion,
   parseAcpRequestUserInputRequestParams,
   parseAcpRequestUserInputResponsePayload,
@@ -57,6 +58,27 @@ describe('request_user_input multi-select payloads', () => {
     });
 
     expect(params?.questions[0]?.multiple).toBe(true);
+  });
+
+  it('preserves only trusted setup presets on request payloads', () => {
+    const payload = {
+      requestId: 'r',
+      sessionId: 's',
+      turnId: 't',
+      callId: 'c',
+      questions: [singleQuestion],
+    };
+
+    expect(
+      parseAcpRequestUserInputPayload({
+        ...payload,
+        preset: 'setup_starter_tasks',
+      })?.preset,
+    ).toBe('setup_starter_tasks');
+    expect(
+      parseAcpRequestUserInputPayload({ ...payload, preset: 'untrusted' })
+        ?.preset,
+    ).toBeUndefined();
   });
 
   it('parses answers and response payloads without multi-select changes', () => {

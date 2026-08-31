@@ -97,10 +97,6 @@ export function StepSourceControlConnect({
       onError: (error) => toast.error(error.message),
     }),
   );
-  const startRecommendations = useMutation(
-    trpc.automations.startRecommendations.mutationOptions(),
-  );
-
   const createInstallation = useCreateGitHubInstallation({
     onSuccess: (result) => {
       if (result.success) {
@@ -156,7 +152,6 @@ export function StepSourceControlConnect({
         );
 
         if (refreshedProvider?.connected) {
-          startRecommendations.mutate();
           onContinue();
         } else {
           setSyncedWithZeroRepos(true);

@@ -360,6 +360,11 @@ export function parseAcpRequestUserInputPayload(
 ): AcpRequestUserInputPayload | null {
   const requestId = asStringOrNull(payload?.requestId);
   const request = parseAcpRequestUserInputRequestParams(payload);
+  const preset =
+    payload?.preset === 'setup_source_control_provider' ||
+    payload?.preset === 'setup_starter_tasks'
+      ? payload.preset
+      : undefined;
 
   if (!requestId || !request) {
     return null;
@@ -369,6 +374,7 @@ export function parseAcpRequestUserInputPayload(
     requestId,
     ...request,
     status: 'pending',
+    ...(preset ? { preset } : {}),
   };
 }
 
