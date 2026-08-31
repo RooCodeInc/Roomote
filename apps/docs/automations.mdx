@@ -96,6 +96,9 @@ and commit authors. Feature-branch pushes and branch deletions are ignored.
 GitHub, GitLab, Azure DevOps, Bitbucket, and Gitea are supported.
 For GitHub merge commits that Roomote can match to a pull request, the summary
 uses that pull request's context and **View changes** opens the pull request.
+When the pull request body contains a suitable image, the Slack announcement
+can also show one representative screenshot after Roomote validates its URL and
+image type. Announcements continue without an image when validation fails.
 Other announcements link to the provider's compare view.
 
 ## Custom automations

@@ -25,7 +25,6 @@ Roomote 1.0 makes Fast the default entry point for conversations, enables Memory
 - Open Analytics on Costs by default and break out Session orchestration and Memory synthesis so teams can understand where inference spend comes from.
 - Let Fast launch multiple independent coding tasks from one turn, forward image and supported file context into delegated work, and show nested startup progress without losing retries or results.
 - Let Fast inspect GitHub Actions runs, jobs, and logs to explain CI failures while keeping the diagnostic path read-only.
-- Let connected MCP clients read Fast Session history and send follow-ups through the same Roomote task communication interface used for standard tasks.
 - Open generated HTML artifacts as safely sandboxed previews with a source-code toggle, while keeping presentational widgets available in web transcripts and linked chat previews.
 - Add public Discord discussions and visible Linear issues to Memory, preserve richer Linear planning metadata, and render readable Notion database properties for more complete recall.
 - Let administrators enable Memory without a dedicated synthesis-provider key, enable it by default for new hosted deployments, and surface newly ingested pages within minutes instead of waiting for a later maintenance pass.
@@ -34,6 +33,9 @@ Roomote 1.0 makes Fast the default entry point for conversations, enables Memory
 - Browse current and previous Roomote releases directly in the update dialog, with the latest release expanded and newer remotely detected updates kept visible even when their notes are not yet available in the running image.
 - Open current and previous Roomote release notes directly from About Roomote in the existing in-app release-history dialog.
 - Follow delegated work more clearly in Sessions with live nested-task activity, a conversation-wide artifact gallery, cleaner task details and navigation, and modernized search, filter, board, and list controls.
+- Include one safely validated, representative pull-request screenshot in Slack Merge Announcer reports when the pull request provides a suitable image.
+- Show richer task context throughout Sessions with accumulated pull requests, actor and source details, clearer status indicators, direct access to a sole running task, and full task workspaces for Session deep links.
+- Make Roomote MCP Session-first so ordinary start, search, summary, message, and follow-up operations use Sessions by default while explicit task IDs continue to target individual coding tasks.
 
 ### Patch changes
 
@@ -48,6 +50,10 @@ Roomote 1.0 makes Fast the default entry point for conversations, enables Memory
 - Keep Session context accurate by including attached task inference spend in total costs, opening inline task links in their owning Session, and hiding running or artifact states when they no longer apply.
 - Keep Slack-backed Sessions and automations reliable by deferring silent custom-automation delivery, suppressing no-op placeholders, validating Fast titles without retry loops, restoring clear Configure actions, and using the correct Merge Announcer icon.
 - Restore required runtime dependencies in standalone deployment images while continuing to bundle in-app release history.
+- Show the shared progress spinner while tool calls are active, then restore each tool or integration icon when the call settles.
+- Let Fast mode discover, load, and explicitly invoke environment-scoped Settings skills while preserving built-in skill precedence and bounded access.
+- Complete large Notion historical discovery scans in the fast continuation loop instead of spreading database-row traversal across weeks of scheduled passes.
+- Keep tasks moving when visual proof takes too long by applying one five-minute deadline across capture, retries, and recovery before returning a graceful proof blocker.
 
 ## 0.45.1 (2026-08-29)
 
