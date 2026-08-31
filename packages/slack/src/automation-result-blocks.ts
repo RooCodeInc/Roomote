@@ -19,6 +19,7 @@ const AUTOMATION_RESULT_SETTINGS_BLOCK_ID =
   'roomote_automation_result_settings';
 
 const MAX_CONTAINER_CHILDREN = 10;
+const MAX_MESSAGE_BLOCKS = 50;
 const MAX_TABLE_ROWS = 100;
 const MAX_TABLE_COLUMNS = 20;
 const MAX_TABLE_CHARACTERS = 10_000;
@@ -317,8 +318,10 @@ export function buildAutomationResultBlocks(params: {
   );
 
   const groups: SlackBlock[][] = [];
-  let remainingBlocks = contentBlocks;
   const finalContentCapacity = MAX_CONTAINER_CHILDREN - actionGroups.length;
+  const maxContentBlocks =
+    (MAX_MESSAGE_BLOCKS - 1) * MAX_CONTAINER_CHILDREN + finalContentCapacity;
+  let remainingBlocks = contentBlocks.slice(0, maxContentBlocks);
   while (remainingBlocks.length > finalContentCapacity) {
     const leadingCount = Math.min(
       MAX_CONTAINER_CHILDREN,

@@ -281,4 +281,30 @@ describe('automation result blocks', () => {
     );
     expect(last.child_blocks.at(-1)?.type).toBe('actions');
   });
+
+  it('caps normalized reports while reserving the final actions container', () => {
+    const blocks = buildAutomationResultBlocks({
+      title: 'Audit',
+      iconUrl: 'https://app.example.com/automation-icons/wrench.png',
+      configureUrl: 'https://app.example.com/automations#audit',
+      contentBlocks: Array.from({ length: 500 }, (_, index) => ({
+        type: 'markdown' as const,
+        text: `Finding ${index + 1}`,
+      })),
+    });
+
+    expect(blocks).toHaveLength(50);
+    expect(blocks.every((block) => block.type === 'container')).toBe(true);
+    const serialized = JSON.stringify(blocks);
+    expect(serialized).toContain('Finding 499');
+    expect(serialized).not.toContain('Finding 500');
+    const last = blocks.at(-1);
+    expect(last?.type).toBe('container');
+    if (last?.type !== 'container') return;
+    expect(last.child_blocks).toHaveLength(10);
+    expect(last.child_blocks.at(-1)).toMatchObject({
+      type: 'actions',
+      block_id: 'roomote_automation_result_actions',
+    });
+  });
 });
