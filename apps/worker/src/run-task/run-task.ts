@@ -938,6 +938,7 @@ export const runTask = async ({
     // Fetch integration MCP availability. This is best-effort: failures are
     // logged but never block task execution.
     const integrations: IntegrationMcpOptions = {};
+    let mcpConfigurationLoadFailed = false;
 
     try {
       const { servers } = await sdk.mcpConnections.getMcpServerConfigs();
@@ -949,6 +950,7 @@ export const runTask = async ({
       logger.warn(
         `[runTask] Failed to fetch user MCP server configs: ${error instanceof Error ? error.message : String(error)}`,
       );
+      mcpConfigurationLoadFailed = true;
     }
 
     // Deployment-scoped custom stdio MCP servers. Same best-effort posture:
@@ -970,6 +972,7 @@ export const runTask = async ({
       logger.warn(
         `[runTask] Failed to fetch custom stdio MCP server configs: ${error instanceof Error ? error.message : String(error)}`,
       );
+      mcpConfigurationLoadFailed = true;
     }
 
     const slackReplyContext = getSlackReplyContext(taskRun);
@@ -1054,6 +1057,9 @@ export const runTask = async ({
         ),
         harnessInstructions,
         environmentInstructions,
+        mcpConfigurationLoadFailed
+          ? `# Integration availability\n\nRoomote could not load the configured MCP integrations for this task. Do not conclude that a missing integration or tool is unconfigured. Tell the user that integration availability could not be verified for this task, and suggest retrying or asking a deployment admin to check Settings > Integrations.`
+          : undefined,
       ]
         .filter((value): value is string => Boolean(value))
         .join('\n\n') || undefined;

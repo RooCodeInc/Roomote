@@ -23,6 +23,7 @@ const {
   drainSlackMessagesMock,
   existsSyncMock,
   getDecryptedKeyMock,
+  getCustomStdioMcpServersMock,
   getMcpServerConfigsMock,
   harnessManagerInstances,
   hasActiveInstallationMock,
@@ -87,6 +88,7 @@ const {
     .mockResolvedValue({ resumed: false, reason: 'no_pending_messages' }),
   existsSyncMock: vi.fn(),
   getDecryptedKeyMock: vi.fn().mockResolvedValue(undefined),
+  getCustomStdioMcpServersMock: vi.fn().mockResolvedValue({ servers: {} }),
   getMcpServerConfigsMock: vi.fn().mockResolvedValue({ servers: {} }),
   harnessManagerInstances: [] as FakeHarnessManager[],
   hasActiveInstallationMock: vi.fn().mockResolvedValue(false),
@@ -183,6 +185,7 @@ vi.mock('@roomote/sdk/client', () => ({
       hasActiveInstallation: hasActiveInstallationMock,
     },
     mcpConnections: {
+      getCustomStdioMcpServers: getCustomStdioMcpServersMock,
       getMcpServerConfigs: getMcpServerConfigsMock,
       isOrgEnabled: isOrgEnabledMock,
     },
@@ -1690,6 +1693,63 @@ describe('runTask', () => {
       }),
     );
   });
+
+  it.each([
+    ['user MCP', getMcpServerConfigsMock],
+    ['custom stdio MCP', getCustomStdioMcpServersMock],
+  ])(
+    'warns the agent when %s configuration cannot be loaded',
+    async (_, fetchMock) => {
+      fetchMock.mockRejectedValueOnce(
+        new Error('integration service unavailable'),
+      );
+
+      await runTask({
+        taskRun: {
+          id: 107,
+          taskId: 'task-107',
+          payloadKind: TaskPayloadKind.StandardTask,
+          harness: 'opencode-server',
+          payload: {},
+          result: null,
+        } as never,
+        envVars: {},
+        workspacePath: '/tmp/workspace',
+        prompt: '',
+        harnessInstructions: undefined,
+        agentInstructions: undefined,
+        environmentConfig: undefined,
+        callbacks: {},
+        context: {},
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          log: vi.fn(),
+        } as never,
+        harnessSessionId: undefined,
+        workerEnv: {
+          authToken: 'cloud-token',
+          roomoteAppUrl: 'https://api.example.test',
+          trpcUrl: 'https://web.example.test',
+          buildUserFacingEnv: vi.fn(() => ({
+            HOME: '/tmp/home',
+            PATH: '/usr/bin',
+          })),
+        } as never,
+      });
+
+      expect(createHarnessMock).toHaveBeenCalledTimes(1);
+      const developerInstructionsContent = createHarnessMock.mock.calls[0]?.[0]
+        .developerInstructionsContent as string;
+      expect(developerInstructionsContent).toContain(
+        'Do not conclude that a missing integration or tool is unconfigured.',
+      );
+      expect(developerInstructionsContent).not.toContain(
+        'integration service unavailable',
+      );
+    },
+  );
 
   it('passes the proof browser target to the harness when the environment exposes a browser surface', async () => {
     await runTask({
