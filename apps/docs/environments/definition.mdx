@@ -201,7 +201,7 @@ starting long-running services.
 | `cwd`               | string  | no       | Alias for `working_dir`.                                                                                        |
 | `timeout`           | number  | no       | Seconds before the command is killed. Defaults to `600`.                                                        |
 | `retries`           | integer | no       | Extra attempts for a failing command, with a 1-second delay. Use only for idempotent commands. Defaults to `0`. |
-| `continue_on_error` | boolean | no       | When `true`, setup continues even if this command fails. Defaults to `false`.                                   |
+| `continue_on_error` | boolean | no       | Currently does not change repository setup behavior; failures are recorded as warnings and setup continues.    |
 | `detached`          | boolean | no       | Run in the background under supervision. Use for long-running servers. Defaults to `false`.                     |
 | `logfile`           | string  | no       | Path to capture stdout and stderr. Used with `detached: true`.                                                  |
 
@@ -211,8 +211,8 @@ Guidance:
   before finishing" expectations in `agentInstructions` instead.
 - use `detached: true` with a `logfile` for servers such as `pnpm dev`, so the
   process keeps running and its output is debuggable.
-- use `continue_on_error: true` only for helpful-but-optional steps. If the app
-  cannot run without a command, let it fail so the problem is visible.
+- repository setup records failed commands as warnings and continues. Check the
+  setup status and logs before relying on the resulting environment.
 
 ## Services
 
