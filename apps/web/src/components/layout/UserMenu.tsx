@@ -14,11 +14,11 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  ExternalLink,
   Info,
   LogOut,
   Settings,
 } from '@/components/system';
+import { ReleaseNotesDialog } from '@/components/layout/release-notices/ReleaseNotesDialog';
 
 import { useUser } from '@/hooks/useUser';
 import { authClient } from '@/lib/auth-client';
@@ -85,6 +85,9 @@ function SignedInUserMenu({
 }) {
   const trpc = useTRPC();
   const [isAboutOpen, setIsAboutOpen] = useState(false);
+  const [releaseNotesVersion, setReleaseNotesVersion] = useState<string | null>(
+    null,
+  );
   const statusQuery = useQuery(
     trpc.releases.status.queryOptions(undefined, {
       staleTime: 30 * 60 * 1000,
@@ -109,6 +112,16 @@ function SignedInUserMenu({
   const releaseUrl = displayVersion
     ? `${GITHUB_RELEASES_BASE_URL}/#release-${toReleaseTag(displayVersion)}`
     : null;
+  const handleOpenReleaseNotes = () => {
+    const version =
+      statusQuery.data?.runningVersion ?? statusQuery.data?.displayVersion;
+    if (!version) {
+      return;
+    }
+
+    setIsAboutOpen(false);
+    setReleaseNotesVersion(version);
+  };
 
   return (
     <>
@@ -228,15 +241,13 @@ function SignedInUserMenu({
             Made with care by humans and robots.
           </p>
           <div>
-            <Button variant="link" size="sm" asChild>
-              <a
-                href={GITHUB_RELEASES_BASE_URL}
-                target="_blank"
-                rel="noreferrer"
-              >
-                See all Roomote releases
-                <ExternalLink />
-              </a>
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              onClick={handleOpenReleaseNotes}
+            >
+              See all Roomote releases
             </Button>
           </div>
           <Image
@@ -248,6 +259,18 @@ function SignedInUserMenu({
           />
         </DialogContent>
       </Dialog>
+      {releaseNotesVersion ? (
+        <ReleaseNotesDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              setReleaseNotesVersion(null);
+            }
+          }}
+          mode="whats-new"
+          version={releaseNotesVersion}
+        />
+      ) : null}
     </>
   );
 }

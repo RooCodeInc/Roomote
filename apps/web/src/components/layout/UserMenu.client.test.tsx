@@ -1,7 +1,8 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
-const { useQueryMock } = vi.hoisted(() => ({
+const { releaseNotesDialogMock, useQueryMock } = vi.hoisted(() => ({
+  releaseNotesDialogMock: vi.fn(),
   useQueryMock: vi.fn(),
 }));
 
@@ -18,8 +19,16 @@ vi.mock('@/components/system', async (importOriginal) => {
     DropdownMenuContent: ({ children }: { children: ReactNode }) => (
       <div>{children}</div>
     ),
-    DropdownMenuItem: ({ children }: { children: ReactNode }) => (
-      <div data-slot="dropdown-menu-item">{children}</div>
+    DropdownMenuItem: ({
+      children,
+      onClick,
+    }: {
+      children: ReactNode;
+      onClick?: () => void;
+    }) => (
+      <div data-slot="dropdown-menu-item" onClick={onClick}>
+        {children}
+      </div>
     ),
     DropdownMenuSeparator: () => <hr />,
     DropdownMenuTrigger: ({
@@ -47,6 +56,18 @@ vi.mock('@/hooks/useUser', () => ({
   }),
 }));
 
+vi.mock('@/components/layout/release-notices/ReleaseNotesDialog', () => ({
+  ReleaseNotesDialog: (props: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    mode: string;
+    version: string;
+  }) => {
+    releaseNotesDialogMock(props);
+    return props.open ? <div data-testid="release-notes-dialog" /> : null;
+  },
+}));
+
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     releases: {
@@ -61,6 +82,7 @@ import { UserMenu } from './UserMenu';
 
 describe('UserMenu', () => {
   beforeEach(() => {
+    releaseNotesDialogMock.mockClear();
     useQueryMock.mockReturnValue({ data: null });
   });
 
@@ -83,5 +105,59 @@ describe('UserMenu', () => {
     expect(
       screen.queryByRole('link', { name: 'Personal settings' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('opens release history with the running version and closes About Roomote', () => {
+    useQueryMock.mockReturnValue({
+      data: {
+        displayVersion: 'main-12345678',
+        runningVersion: '0.46.0',
+      },
+    });
+    render(<UserMenu />);
+
+    fireEvent.click(screen.getByText('About Roomote'));
+    expect(
+      screen.getByRole('heading', { name: 'About Roomote' }),
+    ).toBeInTheDocument();
+
+    const releasesButton = screen.getByRole('button', {
+      name: 'See all Roomote releases',
+    });
+    expect(
+      screen.queryByRole('link', { name: 'See all Roomote releases' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(releasesButton);
+
+    expect(
+      screen.queryByRole('heading', { name: 'About Roomote' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId('release-notes-dialog')).toBeInTheDocument();
+    expect(releaseNotesDialogMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        mode: 'whats-new',
+        open: true,
+        version: '0.46.0',
+      }),
+    );
+  });
+
+  it('falls back to the display version for release history', () => {
+    useQueryMock.mockReturnValue({
+      data: {
+        displayVersion: '0.45.1',
+        runningVersion: null,
+      },
+    });
+    render(<UserMenu />);
+
+    fireEvent.click(screen.getByText('About Roomote'));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'See all Roomote releases' }),
+    );
+
+    expect(releaseNotesDialogMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ version: '0.45.1' }),
+    );
   });
 });
