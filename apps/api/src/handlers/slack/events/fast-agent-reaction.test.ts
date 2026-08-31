@@ -79,12 +79,26 @@ describe('Fast Slack reaction input', () => {
     mocks.answerQuestion.mockResolvedValue('');
   });
 
-  it('routes a forward-arrow reaction with its concrete actionable target', async () => {
+  it('routes a reaction with its target and surrounding thread context', async () => {
     const slack = {
       getMessage: vi.fn(async () => ({
-        text: 'I can open a separate pull request for the focused fix.',
+        text: 'I can do that.',
         thread_ts: '100.000',
       })),
+      fetchThreadMessages: vi.fn(async () => [
+        {
+          user: 'UALICE',
+          username: 'Alice',
+          text: 'Please open a separate pull request for the Fast reaction fix.',
+          ts: '100.500',
+        },
+        {
+          username: 'Roomote',
+          text: 'I can do that.',
+          ts: '101.000',
+          bot_id: 'BROOMOTE',
+        },
+      ]),
       normalizeIncomingText: vi.fn(async () => '@alice'),
       updateMessage: vi.fn(),
     };
@@ -122,6 +136,10 @@ describe('Fast Slack reaction input', () => {
       messageId: '101.000',
       userId: 'user-1',
     });
+    expect(slack.fetchThreadMessages).toHaveBeenCalledWith({
+      channel: 'C1',
+      threadTs: '100.000',
+    });
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         currentMessageId: 'slack-reaction:102.000',
@@ -130,9 +148,16 @@ describe('Fast Slack reaction input', () => {
         turnSource: 'platform_event',
         platformEventKind: 'external_input',
         platformEventVisibility: 'optional',
-        question: expect.stringContaining(
-          'I can open a separate pull request for the focused fix.',
-        ),
+        question: expect.stringContaining('I can do that.'),
+        threadContext: [
+          {
+            user: 'UALICE',
+            username: 'Alice',
+            text: 'Please open a separate pull request for the Fast reaction fix.',
+            ts: '100.500',
+            bot_id: undefined,
+          },
+        ],
         platformEventTranscriptPayload: {
           externalInput: expect.objectContaining({
             type: 'reaction_added',
@@ -147,7 +172,7 @@ describe('Fast Slack reaction input', () => {
               channelId: 'C1',
               messageId: '101.000',
               threadId: '100.000',
-              text: 'I can open a separate pull request for the focused fix.',
+              text: 'I can do that.',
             }),
             eventId: '102.000',
           }),

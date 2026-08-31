@@ -79,6 +79,28 @@ async function processFastAgentReaction(params: {
   };
 
   try {
+    let threadMessages: Awaited<
+      ReturnType<typeof context.slack.fetchThreadMessages>
+    > = [];
+    try {
+      threadMessages = await context.slack.fetchThreadMessages({
+        channel: event.item.channel,
+        threadTs,
+      });
+    } catch (error) {
+      console.error(
+        `[SlackWebhook] Failed to fetch thread context for fast agent reaction: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const threadContext = threadMessages
+      .filter((message) => message.ts !== event.item.ts)
+      .map((message) => ({
+        user: message.user,
+        username: message.username,
+        text: message.text,
+        ts: message.ts,
+        bot_id: message.bot_id,
+      }));
     const activeTasks = await getActiveFastAgentTasks(session.id);
     const footerContext = await resolveFastSessionReplyFooterContext({
       taskIds: activeTasks.map((task) => task.taskId),
@@ -99,6 +121,7 @@ async function processFastAgentReaction(params: {
       platformEventKind: 'external_input',
       platformEventVisibility: 'optional',
       platformEventTranscriptPayload: { externalInput: reactionInput },
+      threadContext,
       adapter: {
         activity: createFastAgentSlackSessionActivity({
           slack: context.slack,

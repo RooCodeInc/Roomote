@@ -491,7 +491,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('<slack_modern_markdown>');
   });
 
-  it('treats a contextual forward-arrow reaction as approval without inventing ambiguous intent', () => {
+  it('treats Slack reactions as contextual user responses without bypassing safeguards', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       surface: 'slack',
@@ -509,22 +509,25 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).not.toContain('Do not call "ignore_event"');
     expect(prompt).toContain(
-      'infer intent from the reacted-to message and the surrounding conversation; do not interpret the emoji in isolation',
+      'A `reaction_added` input is a user response to the reacted-to message and surrounding conversation',
     );
     expect(prompt).toContain(
-      'Treat an `arrow_forward` reaction as approval to proceed when the reacted-to message presents one concrete actionable item and the conversation makes that item unambiguous',
+      'Treat it as substantive conversational input, not as ignorable noise',
     );
     expect(prompt).toContain(
-      'Carry out the item through the normal tools; do not call `ignore_event`, merely acknowledge it, or restate it',
+      "When the reaction's meaning is clear in context, respond or act through the normal tools exactly as if the user had typed that response",
     );
     expect(prompt).toContain(
-      'The reaction is approval for that unambiguous item, including its ordinary external effects',
+      'This includes approval to proceed, an answer to a question, or a request implied by the reacted-to message and conversation',
     );
     expect(prompt).toContain(
-      'it does not authorize broader work or waive an independently required confirmation for destructive or irreversible steps',
+      'It does not authorize broader work or waive normal clarification or confirmation safeguards for ambiguous, destructive, irreversible, or externally consequential actions',
     );
     expect(prompt).toContain(
-      'If the target presents no concrete item or multiple plausible items remain, do not invent approval',
+      'If the meaning is ambiguous between materially different actions, ask a brief clarification rather than guessing',
+    );
+    expect(prompt).toContain(
+      'A simple acknowledgement or sentiment that calls for no reply may close silently with `ignore_event`, but never ignore a reaction merely because it is an emoji',
     );
     expect(prompt).toContain('Do not use the reaction tool');
     expect(prompt).toContain(
@@ -535,7 +538,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('keeps forward-arrow approval scoped to Slack reaction input', () => {
+  it('keeps the contextual reaction contract scoped to Slack input', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       surface: 'discord',
@@ -545,7 +548,7 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(prompt).not.toContain(
-      'Treat an `arrow_forward` reaction as approval to proceed',
+      'A `reaction_added` input is a user response to the reacted-to message and surrounding conversation',
     );
   });
 
