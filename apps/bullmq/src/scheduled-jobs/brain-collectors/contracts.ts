@@ -50,6 +50,16 @@ export type CollectorResult = {
   itemUpdates?: CollectorItemUpdate[];
   itemDeletes?: CollectorItemDelete[];
   pageRetirements?: CollectorPageRetirement[];
+  /**
+   * Durable historical scan work (a sweep, reconcile, or discovery walk)
+   * advanced this call and remains unfinished. The engine re-runs this
+   * collector's collect phase in the fast historical continuation loop so a
+   * multi-hour scan completes in one session instead of trickling one
+   * bounded pass per scheduled tick. Leave unset for ordinary incremental
+   * polling — the loop must never spin on upstream polls that found
+   * nothing new.
+   */
+  historicalPending?: boolean;
 };
 
 export interface BrainCollector {
