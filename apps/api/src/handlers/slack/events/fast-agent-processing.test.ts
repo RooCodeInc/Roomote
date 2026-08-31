@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   postThreadMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
+  listCommunicationChannels: vi.fn(),
+  sendCommunicationChannelPost: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -78,6 +80,14 @@ vi.mock('../helpers/thread-posting.js', () => ({
   postSlackThreadMarkdownMessage: mocks.postThreadMessage,
 }));
 
+vi.mock('../../mcp/communication-channel-discovery.js', () => ({
+  listCommunicationChannels: mocks.listCommunicationChannels,
+}));
+
+vi.mock('../../mcp/communication-channel-posts.js', () => ({
+  sendCommunicationChannelPost: mocks.sendCommunicationChannelPost,
+}));
+
 import { processFastAgentMessage as processFastAgentMessageImpl } from './fast-agent.js';
 
 type ProcessFastAgentMessageParams = Parameters<
@@ -117,6 +127,10 @@ describe('processFastAgentMessage', () => {
       messageId: '101.001',
     });
     mocks.recordProviderMessage.mockResolvedValue(undefined);
+    mocks.listCommunicationChannels.mockResolvedValue({ channelCount: 0 });
+    mocks.sendCommunicationChannelPost.mockResolvedValue(
+      Response.json({ channelId: 'C456', messageTs: '200.001' }),
+    );
     mocks.answerQuestion.mockImplementation(
       async ({
         adapter,
@@ -238,6 +252,75 @@ describe('processFastAgentMessage', () => {
         ],
       }),
     );
+  });
+
+  it('binds Fast channel tools to the acting user and Slack workspace', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: {
+          listChatChannels: () => Promise<unknown>;
+          postToChannel: (params: {
+            channel: string;
+            threadTs?: string;
+            text: string;
+          }) => Promise<unknown>;
+        };
+      }) => {
+        await adapter.listChatChannels();
+        await adapter.postToChannel({
+          channel: '#shipping',
+          threadTs: '199.001',
+          text: 'Release is ready.',
+        });
+        return 'Posted.';
+      },
+    );
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: '!fast post the release update',
+        thread_ts: '100.001',
+        ts: '100.002',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+    });
+
+    expect(mocks.listCommunicationChannels).toHaveBeenCalledWith({
+      actingUserId: 'user-1',
+      slackTeamId: 'T123',
+    });
+    expect(mocks.sendCommunicationChannelPost).toHaveBeenCalledWith({
+      taskRun: {
+        id: 0,
+        taskId: 'fast-session-1',
+        actingUserId: 'user-1',
+        payload: {
+          communicationProvider: 'slack',
+          communicationTeamId: 'T123',
+          communicationChannelId: 'C123',
+          communicationThreadId: '100.001',
+        },
+      },
+      parsedBody: {
+        channel: '#shipping',
+        threadTs: '199.001',
+        text: 'Release is ready.',
+        images: [],
+      },
+    });
   });
 
   it('resumes the canonical Fast session bound to a delayed Slack root', async () => {

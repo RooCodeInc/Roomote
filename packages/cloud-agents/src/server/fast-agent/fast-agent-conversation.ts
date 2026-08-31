@@ -129,6 +129,12 @@ export type FastAgentMcpServerConfig = {
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
   postReply: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | void>;
+  listChatChannels?: () => Promise<unknown>;
+  postToChannel?: (params: {
+    channel: string;
+    threadTs?: string;
+    text: string;
+  }) => Promise<unknown>;
   replaceReply?: (
     handle: FastAgentReplyHandle,
     reply: FastAgentReply,

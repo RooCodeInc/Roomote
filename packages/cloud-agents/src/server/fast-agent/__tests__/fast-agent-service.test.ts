@@ -2147,6 +2147,136 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('exposes and targets Slack channel tools through the Fast parent', async () => {
+    const listChatChannels = vi.fn().mockResolvedValue({ channels: ['C123'] });
+    const postToChannel = vi.fn().mockResolvedValue({ messageTs: '200.1' });
+    const postReaction = vi.fn().mockResolvedValue(undefined);
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [
+          { name: 'get_chat_message_context' },
+          { name: 'get_chat_channel_messages' },
+          { name: 'add_reaction_to_slack_message' },
+        ],
+      },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeMcpTool('roomote', 'send_chat_reaction_emoji', {
+            name: ':eyes:',
+          }),
+        ).resolves.toMatchObject({ success: true, delivered: true });
+        await invokeMcpTool('roomote', 'list_chat_channels', {});
+        await invokeMcpTool('roomote', 'post_to_channel', {
+          channel: '#shipping',
+          threadTs: '199.9',
+          text: 'Release is ready.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Posted the release update.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks({ listChatChannels, postToChannel, postReaction }),
+    });
+
+    const roomoteTools = (
+      mocks.getNativeRuntime.mock.calls[0]?.[1] as Array<{
+        id: string;
+        tools: Array<{ name: string }>;
+      }>
+    )
+      .find(({ id }) => id === 'roomote')!
+      .tools.map(({ name }) => name);
+    expect(roomoteTools).toEqual(
+      expect.arrayContaining([
+        'get_chat_message_context',
+        'get_chat_channel_messages',
+        'list_chat_channels',
+        'post_to_channel',
+        'send_chat_reaction_emoji',
+      ]),
+    );
+    expect(roomoteTools).not.toContain('add_reaction_to_slack_message');
+    expect(listChatChannels).toHaveBeenCalledOnce();
+    expect(postToChannel).toHaveBeenCalledWith({
+      channel: '#shipping',
+      threadTs: '199.9',
+      text: 'Release is ready.',
+    });
+    expect(postReaction).toHaveBeenCalledWith({
+      name: 'eyes',
+      purpose: 'ack',
+      messageId: '100.2',
+    });
+    expect(mocks.callIntegration).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        toolName: expect.stringMatching(
+          /^(list_chat_channels|post_to_channel|send_chat_reaction_emoji)$/u,
+        ),
+      }),
+    );
+  });
+
+  it('omits gated channel tools when the Fast surface has no valid adapter', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [
+          { name: 'get_chat_message_context' },
+          { name: 'list_chat_channels' },
+          { name: 'post_to_channel' },
+          { name: 'send_chat_reaction_emoji' },
+          { name: 'add_reaction_to_slack_message' },
+        ],
+      },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'No channel action is available.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'web-session-1',
+      },
+      adapter: callbacks({ postReaction: undefined }),
+    });
+
+    const roomoteTools = (
+      mocks.getNativeRuntime.mock.calls[0]?.[1] as Array<{
+        id: string;
+        tools: Array<{ name: string }>;
+      }>
+    )
+      .find(({ id }) => id === 'roomote')!
+      .tools.map(({ name }) => name);
+    expect(roomoteTools).toEqual(['get_chat_message_context']);
+  });
+
   it.each([
     [undefined, '2026-08-23T12:00:00.000Z'],
     ['1710000000.000000', '2024-03-08T16:00:00.000Z'],
