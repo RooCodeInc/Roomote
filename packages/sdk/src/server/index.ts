@@ -239,12 +239,19 @@ export {
 } from './lib/agentmail/rui-answer-links';
 
 export {
+  buildAgentMailEmailLinkToken,
+  buildAgentMailEmailLinkUrl,
+  verifyAgentMailEmailLinkToken,
+} from './lib/agentmail/email-link-tokens';
+
+export {
   AGENTMAIL_WEBHOOK_EVENT_QUEUE_NAME,
   AgentMailConversationBusyError,
   drainAgentMailInboundTurns,
   processAgentMailWebhookEvent,
   recordAgentMailWebhookEvent,
   recoverPendingAgentMailWork,
+  redispatchAgentMailEventsForSender,
   type AgentMailWebhookEventJob,
 } from './lib/agentmail/inbound';
 

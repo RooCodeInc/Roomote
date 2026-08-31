@@ -2,6 +2,8 @@ import { Queue } from 'bullmq';
 
 import {
   AgentMailApiClient,
+  buildAgentMailButtonSections,
+  escapeAgentMailHtml,
   getAgentMailMessageBodyText,
   getAgentMailSenderAddress,
   getPendingCommunicationRequestUserInput,
@@ -36,6 +38,7 @@ import {
   type FastAgentConversation,
 } from '@roomote/types';
 
+import { buildAgentMailEmailLinkUrl } from './email-link-tokens';
 import {
   advanceAgentMailInboundAnchor,
   normalizeEmailAddress,
@@ -254,11 +257,17 @@ async function maybeSendStrangerRefusal(input: {
   }
 
   try {
+    const linkUrl = buildAgentMailEmailLinkUrl(input.senderAddress);
+    const refusalText = `This address isn't linked to a Roomote account, so I can't act on this email yet. If you have a Roomote account, link this address and this email will be processed automatically — no need to resend.`;
+    const buttonSections = buildAgentMailButtonSections([
+      [{ text: 'Link this address to my Roomote account', url: linkUrl }],
+    ]);
     await input.client.replyToMessage(
       input.inboxId,
       input.message.message_id,
       {
-        text: `This address isn't linked to a Roomote account, so I can't act on this email. If you have a Roomote account, verify this email address on it (or ask your admin to invite you), then send your request again.`,
+        text: `${refusalText}\n\n${buttonSections.text}`,
+        html: `<div><p>${escapeAgentMailHtml(refusalText)}</p>${buttonSections.html}</div>`,
       },
       {
         idempotencyKey: `agentmail:refusal:${input.message.message_id}`,
@@ -480,12 +489,26 @@ async function tryClaimPendingInputAnswer(input: {
   });
 }
 
+/**
+ * Email requests often live in the subject line ("what time is it" over an
+ * empty or one-word body), so the agent-visible turn text carries both. The
+ * raw body stays separate for answer parsing, where a prepended subject
+ * would corrupt option matching.
+ */
+function buildTurnQuestionText(
+  turn: DrainableTurn,
+  conversation: AgentMailConversationRow,
+): string {
+  const subject = conversation.subject?.trim();
+  return subject ? `Subject: ${subject}\n\n${turn.bodyText}` : turn.bodyText;
+}
+
 async function deliverTurn(
   turn: DrainableTurn,
   conversation: AgentMailConversationRow,
   turnSignal: AbortSignal,
 ) {
-  if (!turn.bodyText) {
+  if (!turn.bodyText && !conversation.subject?.trim()) {
     return;
   }
 
@@ -511,7 +534,7 @@ async function deliverTurn(
     // so a crash-and-retry of this turn cannot double-queue.
     await queueCommunicationMessageOnce('agentmail', activeRun.id, {
       provider: 'agentmail',
-      text: turn.bodyText,
+      text: buildTurnQuestionText(turn, conversation),
       user: turn.senderEmail,
       userId: turn.senderUserId,
       ts: turn.providerMessageId,
@@ -538,7 +561,7 @@ async function deliverTurn(
       sessionId: session.id,
       userId: turn.senderUserId,
       senderDisplayName: turn.senderEmail,
-      question: turn.bodyText,
+      question: buildTurnQuestionText(turn, conversation),
       currentMessageId: turn.providerMessageId,
     },
     turnSignal,
@@ -644,4 +667,61 @@ export async function recoverPendingAgentMailWork(): Promise<number> {
   }
 
   return staleEvents.length + pendingTurnConversations.length;
+}
+
+const REDISPATCH_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+const REDISPATCH_MAX_EVENTS = 10;
+
+/**
+ * After an address is linked to an account, reprocess the sender's recent
+ * refused emails so the original request is handled without a resend. A
+ * refused event is one that reached `processed` without admitting a turn;
+ * resetting it to `received` and re-dispatching runs the normal pipeline,
+ * which now resolves the sender. Idempotent: the unique turn-per-event
+ * constraint makes double dispatch harmless.
+ */
+export async function redispatchAgentMailEventsForSender(
+  emailAddress: string,
+): Promise<number> {
+  const normalized = normalizeEmailAddress(emailAddress);
+  const since = new Date(Date.now() - REDISPATCH_LOOKBACK_MS);
+
+  const candidates = await db
+    .select({
+      id: agentmailWebhookEvents.id,
+      deliveryId: agentmailWebhookEvents.deliveryId,
+      payload: agentmailWebhookEvents.payload,
+    })
+    .from(agentmailWebhookEvents)
+    .where(
+      and(
+        eq(agentmailWebhookEvents.state, 'processed'),
+        sql`${agentmailWebhookEvents.receivedAt} > ${since.toISOString()}::timestamp`,
+        sql`not exists (
+          select 1 from ${agentmailInboundTurns}
+          where ${agentmailInboundTurns.webhookEventId} = ${agentmailWebhookEvents.id}
+        )`,
+      ),
+    )
+    .orderBy(asc(agentmailWebhookEvents.receivedAt));
+
+  let redispatched = 0;
+  for (const candidate of candidates) {
+    if (redispatched >= REDISPATCH_MAX_EVENTS) break;
+    const event = parseAgentMailWebhookEvent(candidate.payload);
+    const message = event?.message;
+    if (!message) continue;
+    const sender = getAgentMailSenderAddress(message);
+    if (!sender || normalizeEmailAddress(sender) !== normalized) continue;
+    if (isAgentMailAutoGeneratedMessage(message)) continue;
+
+    await db
+      .update(agentmailWebhookEvents)
+      .set({ state: 'received', lastError: null, updatedAt: new Date() })
+      .where(eq(agentmailWebhookEvents.id, candidate.id));
+    await addProcessJob(candidate.deliveryId);
+    redispatched += 1;
+  }
+
+  return redispatched;
 }
