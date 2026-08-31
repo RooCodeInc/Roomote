@@ -18,12 +18,7 @@ export function getFastAgentConversationStorageWorkspaceId(
 
 export type FastAgentTurnSource = 'human' | 'platform_event';
 
-export type FastAgentInputKind = 'message' | 'reaction' | 'platform_event';
-
-export type FastAgentResponseVisibility = 'optional' | 'required';
-
-/** @deprecated Use FastAgentResponseVisibility for new turn contracts. */
-export type FastAgentPlatformEventVisibility = FastAgentResponseVisibility;
+export type FastAgentPlatformEventVisibility = 'optional' | 'required';
 
 export type FastAgentPlatformEventHandling = 'default' | 'present_only';
 
@@ -46,6 +41,13 @@ export type FastAgentReactionExternalInput = {
   };
   eventId: string;
 };
+
+export type FastAgentHumanInput =
+  | { type: 'message' }
+  | {
+      type: 'reaction';
+      externalInput: FastAgentReactionExternalInput;
+    };
 
 export function buildFastAgentReactionExternalInputQuestion(
   input: FastAgentReactionExternalInput,

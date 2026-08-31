@@ -503,7 +503,7 @@ describe('Fast conversation repository', () => {
     const prompt = (
       eventId: string,
       turnSource: 'human' | 'platform_event',
-      inputKind?: 'message' | 'reaction' | 'platform_event',
+      inputKind?: 'reaction',
     ) => ({
       eventId,
       turnId: eventId,
@@ -515,8 +515,7 @@ describe('Fast conversation repository', () => {
       metadata: {
         visibleInTranscript: true,
         turnSource,
-        inputKind:
-          inputKind ?? (turnSource === 'human' ? 'message' : 'platform_event'),
+        ...(inputKind ? { inputKind } : {}),
       },
       payload: {},
       source: 'slack',

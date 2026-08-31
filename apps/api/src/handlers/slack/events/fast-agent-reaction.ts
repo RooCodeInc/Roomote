@@ -100,11 +100,7 @@ async function processFastAgentReaction(params: {
       activeTasks,
       apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
       signal: releaseTurnLock.signal,
-      turnSource: 'human',
-      inputKind: 'reaction',
-      responseVisibility: 'optional',
-      currentMessageReactable: false,
-      turnTranscriptPayload: { externalInput: reactionInput },
+      input: { type: 'reaction', externalInput: reactionInput },
       adapter: {
         activity: createFastAgentSlackSessionActivity({
           slack: context.slack,

@@ -197,6 +197,26 @@ const baseParams = {
   senderExternalId: 'U123',
 };
 
+const reactionTurnInput = {
+  input: {
+    type: 'reaction' as const,
+    externalInput: {
+      type: 'reaction_added' as const,
+      provider: 'slack' as const,
+      reactions: [{ name: 'thumbsup' }],
+      reactor: { externalUserId: 'U123', displayName: 'Matt' },
+      message: {
+        workspaceId: 'team-1',
+        channelId: 'channel-1',
+        messageId: '100.2',
+        threadId: '100.1',
+        text: 'Should I continue?',
+      },
+      eventId: '100.3',
+    },
+  },
+};
+
 function callbacks(
   overrides: Partial<FastAgentTurnAdapter> = {},
 ): FastAgentTurnAdapter {
@@ -851,11 +871,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ...baseParams,
       question: buildFastAgentReactionExternalInputQuestion(reactionInput),
       currentMessageId: 'slack-reaction:100.3',
-      turnSource: 'human',
-      inputKind: 'reaction',
-      responseVisibility: 'optional',
-      currentMessageReactable: false,
-      turnTranscriptPayload: { externalInput: reactionInput },
+      input: { type: 'reaction', externalInput: reactionInput },
       adapter: callbacks(),
     });
 
@@ -1026,7 +1042,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ).resolves.toEqual({
           success: false,
           error:
-            'Only optional input or an eligible ambient human message may be ignored.',
+            'Only a reaction, optional platform event, or eligible ambient human message may be ignored.',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
@@ -2787,14 +2803,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
   it.each([
     ['message', {}],
-    [
-      'reaction',
-      {
-        inputKind: 'reaction' as const,
-        responseVisibility: 'optional' as const,
-        currentMessageReactable: false,
-      },
-    ],
+    ['reaction', reactionTurnInput],
   ])(
     'still requires an acknowledgement before canceling a task for human %s input',
     async (_inputKind, turnOptions) => {
@@ -2845,10 +2854,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(
       answerFastAgentQuestion({
         ...baseParams,
-        turnSource: 'human',
-        inputKind: 'reaction',
-        responseVisibility: 'optional',
-        currentMessageReactable: false,
+        ...reactionTurnInput,
         adapter,
       }),
     ).resolves.toBe('');
@@ -2875,10 +2881,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await answerFastAgentQuestion({
       ...baseParams,
       currentMessageId: 'slack-reaction:1710000000.000100',
-      turnSource: 'human',
-      inputKind: 'reaction',
-      responseVisibility: 'optional',
-      currentMessageReactable: false,
+      ...reactionTurnInput,
       adapter,
     });
 

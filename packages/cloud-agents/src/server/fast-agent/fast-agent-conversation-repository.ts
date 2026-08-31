@@ -532,13 +532,13 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           throw new Error('Fast conversation was not found.');
         }
 
-        const isHumanPrompt =
+        const isSubstantiveHumanPrompt =
           message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
           message.role === 'user' &&
           message.metadata?.turnSource === 'human' &&
           message.metadata?.inputKind !== 'reaction';
         let initialHumanTurn = false;
-        if (isHumanPrompt) {
+        if (isSubstantiveHumanPrompt) {
           const [currentHumanPrompt] = await tx
             .select({ id: fastAgentMessages.id })
             .from(fastAgentMessages)

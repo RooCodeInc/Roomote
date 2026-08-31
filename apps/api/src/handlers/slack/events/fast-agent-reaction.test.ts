@@ -127,32 +127,17 @@ describe('Fast Slack reaction input', () => {
         currentMessageId: 'slack-reaction:102.000',
         senderExternalId: 'UALICE',
         senderDisplayName: '@alice',
-        turnSource: 'human',
-        inputKind: 'reaction',
-        responseVisibility: 'optional',
-        currentMessageReactable: false,
-        question: expect.stringContaining(
-          'React to this message with your favorite emoji.',
-        ),
-        turnTranscriptPayload: {
+        input: {
+          type: 'reaction',
           externalInput: expect.objectContaining({
             type: 'reaction_added',
             provider: 'slack',
             reactions: [{ name: 'sparkling_heart' }],
-            reactor: {
-              externalUserId: 'UALICE',
-              displayName: '@alice',
-            },
-            message: expect.objectContaining({
-              workspaceId: 'T1',
-              channelId: 'C1',
-              messageId: '101.000',
-              threadId: '100.000',
-              text: 'React to this message with your favorite emoji.',
-            }),
-            eventId: '102.000',
           }),
         },
+        question: expect.stringContaining(
+          'React to this message with your favorite emoji.',
+        ),
       }),
     );
     expect(mocks.postThreadMessage).not.toHaveBeenCalled();
