@@ -130,11 +130,15 @@ describe('findPendingSessionInputRequest', () => {
         sessionId: 's',
         turnId: 't',
         callId: 'c',
+        preset: 'setup_starter_tasks',
         questions: multiRequest.questions,
       },
       ts: 1,
     };
-    expect(findPendingSessionInputRequest([request])?.requestId).toBe('rui:a');
+    expect(findPendingSessionInputRequest([request])).toMatchObject({
+      requestId: 'rui:a',
+      preset: 'setup_starter_tasks',
+    });
 
     const response = {
       eventType: 'roomote_runtime.request_user_input_response',

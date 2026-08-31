@@ -685,10 +685,12 @@ export async function submitSetupSessionUserInputCommand(
   },
 ): Promise<{ success: true }> {
   assertAdmin(auth);
-  const setupSession = normalizeSetupNewSetupSession(
-    (await readSetupNewState()).setupSession,
-  );
-  if (!setupSession || input.sessionId !== setupSession.sessionId) {
+  const setupConversation = await findSetupSessionConversation(auth);
+  if (
+    !setupConversation ||
+    (input.sessionId !== setupConversation.sessionId &&
+      input.sessionId !== setupConversation.fastConversationId)
+  ) {
     throw new Error('This input request does not belong to the setup Session.');
   }
   return submitFastSessionUserInputCommand(auth, input, {

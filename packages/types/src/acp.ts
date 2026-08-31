@@ -373,6 +373,7 @@ export function parseAcpRequestUserInputPayload(
   return {
     requestId,
     ...request,
+    ...(preset ? { preset } : {}),
     status: 'pending',
     ...(preset ? { preset } : {}),
   };
