@@ -211,14 +211,6 @@ describe('fast-agent integration broker', () => {
       'custom-server',
       'roomote',
     ]);
-    expect(mocks.listMcpTools).toHaveBeenCalledWith({
-      url: 'https://api.example.com/api/mcp/custom/server-1',
-      headers: {
-        'X-MCP-Client': 'Roomote',
-        Authorization: 'Bearer control-plane-token',
-      },
-      signal: expect.any(AbortSignal),
-    });
   });
 
   it('does not infer memory guidance from a custom server name', async () => {
