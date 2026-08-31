@@ -61,11 +61,16 @@ The task view gives you the working context for a run:
 - previews for running apps
 - task metadata and links back to the surface that started the task
 
+HTML and XHTML artifacts open in a sandboxed preview by default. Use the
+**Preview** and **Code** control in the artifact viewer to switch between the
+rendered result and its source.
+
 If a task started from Slack, Teams, Telegram, Discord, Linear, or source
 control, use the task view when the chat or provider thread does not show enough
 detail to review the work. Presentational widgets remain available in the task
-transcript; when an agent provides a text fallback, Roomote also sends that
-fallback to the originating Slack, Teams, Telegram, or Discord conversation.
+transcript. When an agent provides a text fallback, Slack and Discord receive it
+as a chat preview with a link to the rendered widget; Teams and Telegram receive
+the fallback text.
 
 For a Markdown plan artifact, **Build this** starts a new task from the plan.
 After the task starts, use **View task** in the confirmation message to follow
