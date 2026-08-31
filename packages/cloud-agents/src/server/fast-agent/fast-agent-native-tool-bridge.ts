@@ -52,6 +52,7 @@ import {
   isRoomoteTaskSandboxHost,
   shouldOverrideFastProjectConfigForTaskSandbox,
 } from './fast-agent-runtime-context';
+import { buildFastAgentToolFilter } from './fast-agent-tool-policy';
 
 export {
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -1206,6 +1207,17 @@ export async function getFastAgentNativeToolRuntime(
   writeFileSync(
     join(runtime.directory, 'opencode.json'),
     JSON.stringify({
+      // Keep the parent's fail-closed filter on its agent rather than on the
+      // session. OpenCode copies session deny rules into task-created child
+      // sessions, which would otherwise give advisor and judge the parent's
+      // wildcard deny and hide their actor-authorized MCP tools.
+      agent: {
+        build: {
+          tools: buildFastAgentToolFilter(
+            integrations.map((integration) => integration.id),
+          ),
+        },
+      },
       mcp: Object.fromEntries(
         integrations.map((integration) => [
           integration.id,
