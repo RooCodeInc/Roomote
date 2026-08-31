@@ -748,11 +748,6 @@ describe('roomote MCP tool descriptions', () => {
     expect(
       registeredTools.find(({ name }) => name === 'post_to_channel'),
     ).toBeUndefined();
-    expect(
-      registeredTools.find(
-        ({ name }) => name === 'add_reaction_to_slack_message',
-      ),
-    ).toBeUndefined();
   });
 
   it('registers one provider-neutral channel history lookup tool', async () => {
@@ -791,7 +786,6 @@ describe('roomote MCP tool descriptions', () => {
       'get_chat_message_context',
       'send_chat_reaction_emoji',
       'post_to_channel',
-      'add_reaction_to_slack_message',
     ]) {
       expect(names).not.toContain(name);
     }
@@ -821,9 +815,9 @@ describe('roomote MCP tool descriptions', () => {
         'send_chat_reply',
         'send_chat_reaction_emoji',
         'post_to_channel',
-        'add_reaction_to_slack_message',
       ]),
     );
+    expect(names).not.toContain('add_reaction_to_slack_message');
   });
 
   it('registers and forwards the provider-neutral channel listing tool', async () => {
@@ -986,29 +980,6 @@ describe('roomote MCP tool descriptions', () => {
     );
     expect(textField.description).not.toContain(
       'Keep simple updates simple instead of forcing structure.',
-    );
-  });
-
-  it('documents the Slack reaction tool', async () => {
-    const { registeredTools } = await importRoomoteMcpServer({
-      ROOMOTE_TASK_ID: 'task_123',
-    });
-    const reactionTool = getRegisteredTool(
-      registeredTools,
-      'add_reaction_to_slack_message',
-    );
-
-    expect(reactionTool.config.description).toBe(
-      'Slack-visible: adds an emoji reaction to a specific Slack message. Use this when the user explicitly wants a reaction added to a known Slack message and you already have the channel and message timestamp. The channel can be a channel ID, channel name, or Slack channel mention like C123ABC456, #eng, eng, or <#C123ABC456>.',
-    );
-    expect(getInputSchemaField(reactionTool, 'channel').description).toBe(
-      'Slack channel ID, channel name, or Slack channel mention that contains the target message',
-    );
-    expect(getInputSchemaField(reactionTool, 'messageTs').description).toBe(
-      'Non-empty Slack message timestamp for the message to react to',
-    );
-    expect(getInputSchemaField(reactionTool, 'name').description).toBe(
-      'Non-empty Slack emoji name without surrounding colons, for example eyes or white_check_mark',
     );
   });
 

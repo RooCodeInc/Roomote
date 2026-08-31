@@ -4,7 +4,6 @@ import {
   CHAT_REPLY_SATISFACTION_STATE_FILE_ENV,
   isChatTurnMessageTs,
 } from './chat-reply-satisfaction.js';
-import { handleAddReactionToSlackMessage } from './add-reaction-to-slack-message.js';
 import { addReactionToChatMessage } from './chat-api-client.js';
 import { catchError, errorResult, successResult } from './tool-result.js';
 import type { RoomoteConfig, ToolResult } from './types.js';
@@ -98,33 +97,22 @@ export async function handleSendChatReactionEmoji(
     return errorResult(NON_CHAT_TURN_REACTION_ERROR);
   }
 
-  if (isCommunicationReactionContext) {
-    const normalizedName = normalizeReactionName(input.name);
-    if (!normalizedName) {
-      return errorResult(
-        'name must be an emoji name without surrounding colons, for example eyes or white_check_mark',
-      );
-    }
-
-    try {
-      const response = await addReactionToChatMessage(roomoteConfig, {
-        channel,
-        messageTs: currentTurnMessageTs,
-        name: normalizedName,
-      });
-
-      return successResult({ ...response });
-    } catch (error) {
-      return catchError(error);
-    }
+  const normalizedName = normalizeReactionName(input.name);
+  if (!normalizedName) {
+    return errorResult(
+      `name must be ${isCommunicationReactionContext ? 'an' : 'a Slack'} emoji name without surrounding colons, for example eyes or white_check_mark`,
+    );
   }
 
-  return handleAddReactionToSlackMessage(
-    {
+  try {
+    const response = await addReactionToChatMessage(roomoteConfig, {
       channel,
       messageTs: currentTurnMessageTs,
-      name: input.name,
-    },
-    roomoteConfig,
-  );
+      name: normalizedName,
+    });
+
+    return successResult({ ...response });
+  } catch (error) {
+    return catchError(error);
+  }
 }
