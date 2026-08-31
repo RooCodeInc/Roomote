@@ -557,22 +557,33 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     vi.useFakeTimers();
     try {
       const createdAt = new Date('2026-08-31T12:00:00.000Z');
+      const queuedFollowUp = {
+        id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+        createdAt,
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.3',
+          currentMessageId: '100.3',
+          userId: 'user-1',
+          question: 'Use the corrected requirement.',
+          senderDisplayName: 'Matt',
+          senderExternalId: 'U123',
+        },
+      };
       mocks.getPendingHumanFollowUp
-        .mockResolvedValueOnce({
-          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
-          createdAt,
-          parent: { sessionId: 'conversation-1' },
-          event: {
-            type: 'human_follow_up',
-            eventId: '100.3',
-            currentMessageId: '100.3',
-            userId: 'user-1',
-            question: 'Use the corrected requirement.',
-            senderDisplayName: 'Matt',
-            senderExternalId: 'U123',
-          },
-        })
+        .mockResolvedValueOnce(queuedFollowUp)
+        // A stale read after promptAsync succeeds must not inject the same
+        // durable event twice before deliveredAt becomes visible.
+        .mockResolvedValueOnce(queuedFollowUp)
         .mockResolvedValue(undefined);
+      let finishNativeSteer: (() => void) | undefined;
+      mocks.nativeSteer.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishNativeSteer = resolve;
+          }),
+      );
       let finishTool:
         | ((value: { success: true; taskId: string }) => void)
         | undefined;
@@ -613,6 +624,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.nativeSteer).not.toHaveBeenCalled();
       finishTool?.({ success: true, taskId: 'task-1' });
       await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      expect(mocks.updateParentEventWhere).not.toHaveBeenCalled();
 
       expect(mocks.nativeSteer).toHaveBeenCalledWith({
         messageId: expect.stringMatching(/^msg_[a-f0-9]{26}$/u),
@@ -632,7 +644,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           }),
         }),
       );
-      expect(mocks.updateParentEventWhere).toHaveBeenCalled();
+      finishNativeSteer?.();
+      await vi.waitFor(() => {
+        expect(mocks.getPendingHumanFollowUp).toHaveBeenCalledTimes(3);
+        expect(mocks.updateParentEventWhere).toHaveBeenCalledTimes(2);
+      });
+      expect(mocks.nativeSteer).toHaveBeenCalledOnce();
 
       finishGeneration?.('Steered answer');
       await expect(resultPromise).resolves.toBe('Steered answer');
