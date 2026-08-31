@@ -61,9 +61,10 @@ function createDependencies() {
         defaultBranch: 'main',
         fullName: 'acme/widgets',
       }),
-      generateSummary: vi
-        .fn()
-        .mockResolvedValue('Adds exports and strengthens widget validation.'),
+      generateAnnouncement: vi.fn().mockResolvedValue({
+        summary: 'Adds exports and strengthens widget validation.',
+        imageCandidateId: null,
+      }),
       getAdapter: vi.fn().mockResolvedValue({ postMessage }),
       getRuntime: vi.fn().mockResolvedValue(runtime),
       listConnectedProviders: vi.fn().mockResolvedValue(['slack']),
@@ -94,7 +95,7 @@ describe('handleMergeAnnouncerPush', () => {
       status: 'ok',
       message: 'Merge announcement posted',
     });
-    expect(dependencies.generateSummary).toHaveBeenCalledWith(
+    expect(dependencies.generateAnnouncement).toHaveBeenCalledWith(
       expect.stringContaining('Pushed by: alice'),
     );
     expect(dependencies.findRepository).toHaveBeenCalledWith(
@@ -103,7 +104,7 @@ describe('handleMergeAnnouncerPush', () => {
         repository: expect.objectContaining({ externalId: '42' }),
       }),
     );
-    expect(dependencies.generateSummary).toHaveBeenCalledWith(
+    expect(dependencies.generateAnnouncement).toHaveBeenCalledWith(
       expect.stringContaining('1111111 by bob: Add widget export'),
     );
     expect(postMessage).toHaveBeenCalledWith({
@@ -195,12 +196,12 @@ describe('handleMergeAnnouncerPush', () => {
       dependencies,
     );
 
-    expect(dependencies.generateSummary).toHaveBeenCalledWith(
+    expect(dependencies.generateAnnouncement).toHaveBeenCalledWith(
       expect.stringContaining(
         'Open artifacts inside the execution-details panel without leaving the Session.',
       ),
     );
-    expect(dependencies.generateSummary).toHaveBeenCalledWith(
+    expect(dependencies.generateAnnouncement).toHaveBeenCalledWith(
       expect.stringContaining(
         'modified apps/web/src/app/(sandbox)/sessions/[sessionId]/SessionWorkspace.tsx (+92/-9)',
       ),
@@ -228,6 +229,10 @@ describe('handleMergeAnnouncerPush', () => {
 
   it('includes one representative PR image in the Slack announcement', async () => {
     const { dependencies, postMessage } = createDependencies();
+    dependencies.generateAnnouncement.mockResolvedValue({
+      summary: 'Updates the saved settings experience.',
+      imageCandidateId: 'unknown-candidate',
+    });
 
     await handleMergeAnnouncerPush(
       createPayload({
@@ -238,10 +243,14 @@ describe('handleMergeAnnouncerPush', () => {
           changedFileCount: 2,
           additions: 20,
           deletions: 4,
-          representativeImage: {
-            url: 'https://github.com/user-attachments/assets/product-preview',
-            altText: 'Product screenshot after save',
-          },
+          imageCandidates: [
+            {
+              id: 'image-1',
+              url: 'https://github.com/user-attachments/assets/product-preview',
+              altText: 'Product screenshot after save',
+              surroundingText: 'The refreshed settings screen after save.',
+            },
+          ],
         },
       }),
       dependencies,
@@ -267,6 +276,101 @@ describe('handleMergeAnnouncerPush', () => {
         (block: { type?: string }) => block.type === 'image',
       ),
     ).toHaveLength(1);
+  });
+
+  it('uses the merge-summary model candidate choice when it is valid', async () => {
+    const { dependencies, postMessage } = createDependencies();
+    dependencies.generateAnnouncement.mockResolvedValue({
+      summary: 'Updates the saved settings experience.',
+      imageCandidateId: 'image-2',
+    });
+
+    await handleMergeAnnouncerPush(
+      createPayload({
+        pullRequest: {
+          number: 7,
+          url: 'https://github.com/acme/widgets/pull/7',
+          title: 'Update settings',
+          changedFileCount: 2,
+          additions: 20,
+          deletions: 4,
+          imageCandidates: [
+            {
+              id: 'image-1',
+              url: 'https://cdn.example.com/architecture.png',
+              altText: 'Architecture',
+              surroundingText: 'Internal architecture diagram.',
+            },
+            {
+              id: 'image-2',
+              url: 'https://cdn.example.com/settings.png',
+              altText: 'Settings screenshot',
+              surroundingText: 'Updated settings after save.',
+            },
+          ],
+        },
+      }),
+      dependencies,
+    );
+
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [
+          expect.objectContaining({
+            child_blocks: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'image',
+                image_url: 'https://cdn.example.com/settings.png',
+              }),
+            ]),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('retries a rejected Slack image announcement without the image', async () => {
+    const { dependencies, postMessage } = createDependencies();
+    postMessage
+      .mockRejectedValueOnce(new Error('invalid_blocks'))
+      .mockResolvedValueOnce(undefined);
+
+    const result = await handleMergeAnnouncerPush(
+      createPayload({
+        pullRequest: {
+          number: 7,
+          url: 'https://github.com/acme/widgets/pull/7',
+          title: 'Update settings',
+          changedFileCount: 1,
+          additions: 10,
+          deletions: 2,
+          imageCandidates: [
+            {
+              id: 'image-1',
+              url: 'https://cdn.example.com/settings.png',
+              altText: 'Settings screenshot',
+              surroundingText: 'Updated settings after save.',
+            },
+          ],
+        },
+      }),
+      dependencies,
+    );
+
+    expect(result.status).toBe('ok');
+    expect(postMessage).toHaveBeenCalledTimes(2);
+    const firstContainer = postMessage.mock.calls[0]?.[0]?.blocks?.[0];
+    const secondContainer = postMessage.mock.calls[1]?.[0]?.blocks?.[0];
+    expect(
+      firstContainer?.child_blocks?.some(
+        (block: { type?: string }) => block.type === 'image',
+      ),
+    ).toBe(true);
+    expect(
+      secondContainer?.child_blocks?.some(
+        (block: { type?: string }) => block.type === 'image',
+      ),
+    ).toBe(false);
   });
 
   it('omits the Slack image block when PR context has no image', async () => {
@@ -396,12 +500,21 @@ describe('handleMergeAnnouncerPush', () => {
           additions: 231,
           deletions: 210,
           changedFiles,
+          imageCandidates: [
+            {
+              id: 'image-1',
+              url: 'https://cdn.example.com/settings.png',
+              altText: 'Settings screenshot',
+              surroundingText: 'The updated settings screen after save.',
+            },
+          ],
         },
       }),
       dependencies,
     );
 
-    const prompt = dependencies.generateSummary.mock.calls[0]?.[0] as string;
+    const prompt = dependencies.generateAnnouncement.mock
+      .calls[0]?.[0] as string;
     expect(prompt).toContain('one or two conversational sentences');
     expect(prompt).toContain('Do not use bullets or headings');
     expect(prompt).toContain(
@@ -427,6 +540,10 @@ describe('handleMergeAnnouncerPush', () => {
     expect(prompt).toContain('modified src/file-20.ts (+20/-19)');
     expect(prompt).not.toContain('src/file-21.ts');
     expect(prompt).not.toContain('supersecretvalue');
+    expect(prompt).toContain('Eligible image candidates');
+    expect(prompt).toContain('"id":"image-1"');
+    expect(prompt).toContain('The updated settings screen after save.');
+    expect(prompt).toContain('set imageCandidateId');
   });
 
   it('excludes pushes to non-default branches before generating a summary', async () => {
@@ -442,13 +559,13 @@ describe('handleMergeAnnouncerPush', () => {
       message: 'Not the default branch — skipping',
     });
     expect(dependencies.getRuntime).not.toHaveBeenCalled();
-    expect(dependencies.generateSummary).not.toHaveBeenCalled();
+    expect(dependencies.generateAnnouncement).not.toHaveBeenCalled();
     expect(postMessage).not.toHaveBeenCalled();
   });
 
   it('falls back to commit subjects when helper summary generation fails', async () => {
     const { dependencies, postMessage } = createDependencies();
-    dependencies.generateSummary.mockRejectedValue(
+    dependencies.generateAnnouncement.mockRejectedValue(
       new Error('model unavailable'),
     );
 
@@ -469,7 +586,7 @@ describe('handleMergeAnnouncerPush', () => {
 
   it('falls back to the redacted PR title when merged PR summarization fails', async () => {
     const { dependencies, postMessage } = createDependencies();
-    dependencies.generateSummary.mockRejectedValue(
+    dependencies.generateAnnouncement.mockRejectedValue(
       new Error('model unavailable'),
     );
 
@@ -483,6 +600,14 @@ describe('handleMergeAnnouncerPush', () => {
           changedFileCount: 2,
           additions: 20,
           deletions: 4,
+          imageCandidates: [
+            {
+              id: 'image-1',
+              url: 'https://cdn.example.com/fallback.png',
+              altText: 'Fallback screenshot',
+              surroundingText: 'Detailed rationale',
+            },
+          ],
         },
       }),
       dependencies,
@@ -503,6 +628,11 @@ describe('handleMergeAnnouncerPush', () => {
                   text: 'Merged pull request: &lt;!channel&gt; Ship widget &amp; &lt;export&gt;.',
                 },
               }),
+              {
+                type: 'image',
+                image_url: 'https://cdn.example.com/fallback.png',
+                alt_text: 'Fallback screenshot',
+              },
             ]),
           }),
         ],

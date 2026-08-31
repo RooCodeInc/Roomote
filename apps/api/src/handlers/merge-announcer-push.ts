@@ -3,6 +3,7 @@ import type {
   MergeAnnouncerPullRequestContext,
   MergeAnnouncerPushEvent,
 } from '@roomote/sdk/server';
+import { safeHeadFollowingRedirects } from '@roomote/sdk/server/safe-fetch';
 
 import { toHostFromUrl } from './utils';
 import type { AdoPushWebhook } from './ado/types';
@@ -13,9 +14,9 @@ import type { GitLabPushWebhook } from './gitlab/types';
 const MAX_GITHUB_ASSOCIATED_PULL_REQUESTS = 10;
 const MAX_GITHUB_PULL_REQUEST_CANDIDATES = 3;
 const MAX_GITHUB_CHANGED_FILES = 20;
-const MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES = 20;
+const MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES = 5;
 const MAX_GITHUB_PULL_REQUEST_IMAGE_ALT_CHARS = 200;
-const MAX_GITHUB_IMAGE_MEDIA_TYPE_CHECKS = 2;
+const MAX_GITHUB_PULL_REQUEST_IMAGE_CONTEXT_CHARS = 300;
 const MAX_GITHUB_IMAGE_REDIRECTS = 3;
 const GITHUB_IMAGE_MEDIA_TYPE_TIMEOUT_MS = 3_000;
 const MARKDOWN_IMAGE_PATTERN =
@@ -26,20 +27,16 @@ const HTML_ATTRIBUTE_PATTERN =
 const SCREENSHOT_LIKE_IMAGE_TEXT =
   /\b(?:after|before|demo|desktop|mobile|preview|screen(?:[ -]?shot)?|ui)\b/iu;
 const REJECTED_IMAGE_TEXT = /\b(?:avatar|badge|coverage|icon|logo|shield)\b/iu;
-const SUPPORTED_SLACK_IMAGE_EXTENSION = /\.(?:gif|jpe?g|png)$/iu;
 const SUPPORTED_SLACK_IMAGE_MEDIA_TYPES = new Set([
   'image/gif',
   'image/jpeg',
   'image/png',
 ]);
-const EXTENSION_REQUIRED_GITHUB_IMAGE_HOSTS = new Set([
-  'raw.githubusercontent.com',
-  'user-images.githubusercontent.com',
-]);
 
 type PullRequestImageCandidate = {
   url: string;
   altText: string;
+  surroundingText: string;
   position: number;
 };
 
@@ -51,83 +48,57 @@ function getHtmlImageAttribute(tag: string, name: 'src' | 'alt'): string {
   return '';
 }
 
-function isAllowedPublicGitHubImageUrl(value: string): boolean {
+function normalizeAnonymousImageUrl(value: string): string | null {
   try {
     const url = new URL(value.trim());
-    if (url.protocol !== 'https:' || url.username || url.password) return false;
-    const hostname = url.hostname.toLowerCase();
-    if (EXTENSION_REQUIRED_GITHUB_IMAGE_HOSTS.has(hostname)) {
-      return SUPPORTED_SLACK_IMAGE_EXTENSION.test(url.pathname);
-    }
-    return (
-      hostname === 'github.com' &&
-      url.pathname.startsWith('/user-attachments/assets/') &&
-      (!url.pathname.includes('.') ||
-        SUPPORTED_SLACK_IMAGE_EXTENSION.test(url.pathname))
-    );
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    return url.toString();
   } catch {
-    return false;
+    return null;
   }
 }
 
-function isExtensionlessGitHubAttachmentUrl(value: string): boolean {
-  const url = new URL(value);
+async function getAnonymousImageMediaType(
+  value: string,
+): Promise<string | null> {
+  const response = await safeHeadFollowingRedirects(value, {
+    maxRedirects: MAX_GITHUB_IMAGE_REDIRECTS,
+    requireHttps: true,
+    signal: AbortSignal.timeout(GITHUB_IMAGE_MEDIA_TYPE_TIMEOUT_MS),
+  });
+  if (!response.ok) return null;
+
   return (
-    url.hostname.toLowerCase() === 'github.com' &&
-    url.pathname.startsWith('/user-attachments/assets/') &&
-    !url.pathname.includes('.')
+    response.headers
+      .get('content-type')
+      ?.split(';', 1)[0]
+      ?.trim()
+      .toLowerCase() ?? null
   );
 }
 
-function isAllowedGitHubImageRedirect(url: URL): boolean {
-  const hostname = url.hostname.toLowerCase();
-  return (
-    url.protocol === 'https:' &&
-    !url.username &&
-    !url.password &&
-    (hostname === 'github.com' || hostname.endsWith('.githubusercontent.com'))
+function getImageSurroundingText(
+  body: string,
+  position: number,
+  sourceLength: number,
+): string {
+  const contextRadius = Math.floor(
+    MAX_GITHUB_PULL_REQUEST_IMAGE_CONTEXT_CHARS / 2,
   );
-}
-
-async function getPublicGitHubMediaType(value: string): Promise<string | null> {
-  let url = new URL(value);
-  const signal = AbortSignal.timeout(GITHUB_IMAGE_MEDIA_TYPE_TIMEOUT_MS);
-  for (
-    let redirects = 0;
-    redirects <= MAX_GITHUB_IMAGE_REDIRECTS;
-    redirects++
-  ) {
-    const response = await fetch(url, {
-      method: 'HEAD',
-      redirect: 'manual',
-      signal,
-    });
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get('location');
-      if (!location || redirects === MAX_GITHUB_IMAGE_REDIRECTS) return null;
-      url = new URL(location, url);
-      if (!isAllowedGitHubImageRedirect(url)) return null;
-      continue;
-    }
-    if (!response.ok) return null;
-
-    return (
-      response.headers
-        .get('content-type')
-        ?.split(';', 1)[0]
-        ?.trim()
-        .toLowerCase() ?? null
-    );
-  }
-  return null;
+  return `${body.slice(Math.max(0, position - contextRadius), position)} ${body.slice(position + sourceLength, position + sourceLength + contextRadius)}`
+    .replaceAll(/\s+/gu, ' ')
+    .trim()
+    .slice(0, MAX_GITHUB_PULL_REQUEST_IMAGE_CONTEXT_CHARS);
 }
 
 function normalizePullRequestImageCandidate(
   candidate: PullRequestImageCandidate,
 ): PullRequestImageCandidate | null {
   const altText = candidate.altText.trim().replaceAll(/\s+/gu, ' ');
-  const url = candidate.url.trim().replaceAll('&amp;', '&');
-  if (!isAllowedPublicGitHubImageUrl(url)) return null;
+  const url = normalizeAnonymousImageUrl(
+    candidate.url.trim().replaceAll('&amp;', '&'),
+  );
+  if (!url) return null;
   if (REJECTED_IMAGE_TEXT.test(`${altText} ${url}`)) return null;
 
   return {
@@ -135,23 +106,29 @@ function normalizePullRequestImageCandidate(
     altText:
       altText.slice(0, MAX_GITHUB_PULL_REQUEST_IMAGE_ALT_CHARS) ||
       'Pull request image',
+    surroundingText: candidate.surroundingText,
     position: candidate.position,
   };
 }
 
-export async function selectRepresentativeGitHubPullRequestImage(
+export async function extractEligiblePullRequestImages(
   body: string | null | undefined,
   resolveMediaType: (
     url: string,
-  ) => Promise<string | null> = getPublicGitHubMediaType,
-): Promise<MergeAnnouncerPullRequestContext['representativeImage'] | null> {
-  if (!body?.trim()) return null;
+  ) => Promise<string | null> = getAnonymousImageMediaType,
+): Promise<MergeAnnouncerPullRequestContext['imageCandidates']> {
+  if (!body?.trim()) return [];
 
   const candidates: PullRequestImageCandidate[] = [];
   for (const match of body.matchAll(MARKDOWN_IMAGE_PATTERN)) {
     candidates.push({
       altText: match[1] ?? '',
       url: match[2] ?? match[3] ?? '',
+      surroundingText: getImageSurroundingText(
+        body,
+        match.index,
+        match[0].length,
+      ),
       position: match.index,
     });
   }
@@ -160,6 +137,11 @@ export async function selectRepresentativeGitHubPullRequestImage(
     candidates.push({
       altText: getHtmlImageAttribute(tag, 'alt'),
       url: getHtmlImageAttribute(tag, 'src'),
+      surroundingText: getImageSurroundingText(
+        body,
+        match.index,
+        match[0].length,
+      ),
       position: match.index,
     });
   }
@@ -177,35 +159,27 @@ export async function selectRepresentativeGitHubPullRequestImage(
     });
 
   const mediaTypeResults = await Promise.allSettled(
-    rankedCandidates
-      .filter((candidate) => isExtensionlessGitHubAttachmentUrl(candidate.url))
-      .slice(0, MAX_GITHUB_IMAGE_MEDIA_TYPE_CHECKS)
-      .map(async (candidate) => ({
-        url: candidate.url,
-        mediaType: await resolveMediaType(candidate.url),
-      })),
+    rankedCandidates.map(async (candidate) => ({
+      candidate,
+      mediaType: await resolveMediaType(candidate.url),
+    })),
   );
-  const mediaTypes = new Map(
-    mediaTypeResults.flatMap((result) =>
-      result.status === 'fulfilled'
-        ? [[result.value.url, result.value.mediaType] as const]
+  return mediaTypeResults
+    .flatMap((result) =>
+      result.status === 'fulfilled' &&
+      result.value.mediaType &&
+      SUPPORTED_SLACK_IMAGE_MEDIA_TYPES.has(
+        result.value.mediaType.toLowerCase(),
+      )
+        ? [result.value.candidate]
         : [],
-    ),
-  );
-
-  for (const candidate of rankedCandidates) {
-    if (isExtensionlessGitHubAttachmentUrl(candidate.url)) {
-      const mediaType = mediaTypes.get(candidate.url);
-      if (
-        !mediaType ||
-        !SUPPORTED_SLACK_IMAGE_MEDIA_TYPES.has(mediaType.toLowerCase())
-      ) {
-        continue;
-      }
-    }
-    return { url: candidate.url, altText: candidate.altText };
-  }
-  return null;
+    )
+    .map((candidate, index) => ({
+      id: `image-${index + 1}`,
+      url: candidate.url,
+      altText: candidate.altText,
+      surroundingText: candidate.surroundingText,
+    }));
 }
 
 function getPullRequestNumberFromCommitMessage(
@@ -247,20 +221,19 @@ type GitHubPushWebhook = {
     full_name: string;
     default_branch?: string | null;
     html_url?: string | null;
-    private?: boolean;
   };
 };
 
 type GitHubMergeAnnouncerDependencies = {
   getInstallationOctokit: typeof getInstallationOctokit;
-  getPublicMediaType: typeof getPublicGitHubMediaType;
-  selectRepresentativeImage: typeof selectRepresentativeGitHubPullRequestImage;
+  getAnonymousMediaType: typeof getAnonymousImageMediaType;
+  extractEligibleImages: typeof extractEligiblePullRequestImages;
 };
 
 const githubMergeAnnouncerDependencies: GitHubMergeAnnouncerDependencies = {
   getInstallationOctokit,
-  getPublicMediaType: getPublicGitHubMediaType,
-  selectRepresentativeImage: selectRepresentativeGitHubPullRequestImage,
+  getAnonymousMediaType: getAnonymousImageMediaType,
+  extractEligibleImages: extractEligiblePullRequestImages,
 };
 
 export function normalizeGitHubPush(
@@ -366,19 +339,16 @@ export async function enrichGitHubMergeAnnouncerEvent(
       return event;
     }
 
-    let representativeImage: MergeAnnouncerPullRequestContext['representativeImage'];
-    if (payload.repository?.private === false) {
-      try {
-        representativeImage =
-          (await dependencies.selectRepresentativeImage(
-            pullRequest.body,
-            dependencies.getPublicMediaType,
-          )) ?? undefined;
-      } catch (error) {
-        console.warn(
-          `[mergeAnnouncer] Failed to select a pull request image for ${payload.repository.full_name}#${pullRequest.number}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
+    let imageCandidates: MergeAnnouncerPullRequestContext['imageCandidates'];
+    try {
+      imageCandidates = await dependencies.extractEligibleImages(
+        pullRequest.body,
+        dependencies.getAnonymousMediaType,
+      );
+    } catch (error) {
+      console.warn(
+        `[mergeAnnouncer] Failed to extract pull request images for ${payload.repository?.full_name}#${pullRequest.number}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     let changedFiles: MergeAnnouncerPullRequestContext['changedFiles'];
@@ -412,7 +382,7 @@ export async function enrichGitHubMergeAnnouncerEvent(
         changedFileCount: pullRequest.changed_files,
         additions: pullRequest.additions,
         deletions: pullRequest.deletions,
-        ...(representativeImage ? { representativeImage } : {}),
+        ...(imageCandidates?.length ? { imageCandidates } : {}),
         ...(changedFiles ? { changedFiles } : {}),
       },
     };
