@@ -36,7 +36,24 @@ vi.mock('@roomote/redis', () => ({
   acquireRedisLock: mocks.acquireLock,
 }));
 
-import { syncSlackAgentSessionTitleBestEffort } from '../agent-session-title-sync';
+import {
+  normalizeSlackAgentSessionTitle,
+  syncSlackAgentSessionTitleBestEffort,
+} from '../agent-session-title-sync';
+
+describe('normalizeSlackAgentSessionTitle', () => {
+  it('produces a trimmed single-line title without control characters', () => {
+    expect(
+      normalizeSlackAgentSessionTitle('  Investigate\nSlack\tstatus\u0000  '),
+    ).toBe('Investigate Slack status');
+  });
+
+  it('truncates by Unicode character without splitting emoji', () => {
+    const title = `${'a'.repeat(199)}😀extra`;
+
+    expect(normalizeSlackAgentSessionTitle(title)).toBe(`${'a'.repeat(199)}😀`);
+  });
+});
 
 describe('syncSlackAgentSessionTitleBestEffort', () => {
   beforeEach(() => {
@@ -57,12 +74,28 @@ describe('syncSlackAgentSessionTitleBestEffort', () => {
   };
 
   it('renames when Slack does not report the generated title', async () => {
-    const renameAgentSession = vi.fn().mockResolvedValue(true);
+    const renameAgentSession = vi.fn().mockResolvedValue({ ok: true });
 
     await syncSlackAgentSessionTitleBestEffort({
       ...baseInput,
       slack: { renameAgentSession },
       title: 'Generated Fast title',
+    });
+
+    expect(renameAgentSession).toHaveBeenCalledWith({
+      channel: 'C123',
+      threadTs: '100.001',
+      title: 'Generated Fast title',
+    });
+  });
+
+  it('sanitizes the title before sending it to Slack', async () => {
+    const renameAgentSession = vi.fn().mockResolvedValue({ ok: true });
+
+    await syncSlackAgentSessionTitleBestEffort({
+      ...baseInput,
+      slack: { renameAgentSession },
+      title: '  Generated\nFast\t title  ',
     });
 
     expect(renameAgentSession).toHaveBeenCalledWith({
@@ -87,7 +120,7 @@ describe('syncSlackAgentSessionTitleBestEffort', () => {
   });
 
   it('deduplicates an unchanged title across calls', async () => {
-    const renameAgentSession = vi.fn().mockResolvedValue(true);
+    const renameAgentSession = vi.fn().mockResolvedValue({ ok: true });
     const input = {
       ...baseInput,
       slack: { renameAgentSession },
@@ -101,7 +134,7 @@ describe('syncSlackAgentSessionTitleBestEffort', () => {
   });
 
   it('renames again when the persisted title changes', async () => {
-    const renameAgentSession = vi.fn().mockResolvedValue(true);
+    const renameAgentSession = vi.fn().mockResolvedValue({ ok: true });
 
     await syncSlackAgentSessionTitleBestEffort({
       ...baseInput,
@@ -122,7 +155,7 @@ describe('syncSlackAgentSessionTitleBestEffort', () => {
     mocks.acquireLock
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(mocks.release);
-    const renameAgentSession = vi.fn().mockResolvedValue(true);
+    const renameAgentSession = vi.fn().mockResolvedValue({ ok: true });
 
     const syncing = syncSlackAgentSessionTitleBestEffort({
       ...baseInput,
@@ -154,15 +187,15 @@ describe('syncSlackAgentSessionTitleBestEffort', () => {
       locked = true;
       return release;
     });
-    let resolveFirstRename!: (value: boolean) => void;
+    let resolveFirstRename!: (value: { ok: true }) => void;
     const renameAgentSession = vi
       .fn()
       .mockReturnValueOnce(
-        new Promise<boolean>((resolve) => {
+        new Promise<{ ok: true }>((resolve) => {
           resolveFirstRename = resolve;
         }),
       )
-      .mockResolvedValue(true);
+      .mockResolvedValue({ ok: true });
 
     const first = syncSlackAgentSessionTitleBestEffort({
       ...baseInput,
@@ -177,7 +210,7 @@ describe('syncSlackAgentSessionTitleBestEffort', () => {
       title: 'Newer title',
     });
     await Promise.resolve();
-    resolveFirstRename(true);
+    resolveFirstRename({ ok: true });
     await first;
     await vi.advanceTimersByTimeAsync(100);
     await second;
@@ -188,7 +221,7 @@ describe('syncSlackAgentSessionTitleBestEffort', () => {
   });
 
   it('does not let an older snapshot overwrite a newer persisted title', async () => {
-    const renameAgentSession = vi.fn().mockResolvedValue(true);
+    const renameAgentSession = vi.fn().mockResolvedValue({ ok: true });
 
     await syncSlackAgentSessionTitleBestEffort({
       ...baseInput,
@@ -202,7 +235,7 @@ describe('syncSlackAgentSessionTitleBestEffort', () => {
   });
 
   it('revalidates canonical title changes inside the lock', async () => {
-    const renameAgentSession = vi.fn().mockResolvedValue(true);
+    const renameAgentSession = vi.fn().mockResolvedValue({ ok: true });
     const resolveTitle = vi
       .fn()
       .mockResolvedValueOnce('Older title')
@@ -221,6 +254,80 @@ describe('syncSlackAgentSessionTitleBestEffort', () => {
       threadTs: '100.001',
       title: 'Newer title',
     });
+  });
+
+  it('does not retry the same title after Slack rejects it as invalid', async () => {
+    const renameAgentSession = vi
+      .fn()
+      .mockResolvedValue({ ok: false, error: 'invalid_name' });
+    const input = {
+      ...baseInput,
+      slack: { renameAgentSession },
+      title: 'Rejected title',
+    };
+
+    await syncSlackAgentSessionTitleBestEffort(input);
+    await syncSlackAgentSessionTitleBestEffort(input);
+
+    expect(renameAgentSession).toHaveBeenCalledOnce();
+    expect(mocks.redis.set).toHaveBeenCalledWith(
+      expect.stringMatching(/:rejected:[a-f0-9]{64}$/u),
+      '1',
+      'EX',
+      3600,
+    );
+  });
+
+  it('still attempts a changed title after an invalid title rejection', async () => {
+    const renameAgentSession = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, error: 'invalid_name' })
+      .mockResolvedValueOnce({ ok: true });
+
+    await syncSlackAgentSessionTitleBestEffort({
+      ...baseInput,
+      slack: { renameAgentSession },
+      title: 'Rejected title',
+    });
+    await syncSlackAgentSessionTitleBestEffort({
+      ...baseInput,
+      slack: { renameAgentSession },
+      title: 'Valid replacement',
+    });
+
+    expect(renameAgentSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('remembers each rejected title independently', async () => {
+    const renameAgentSession = vi
+      .fn()
+      .mockResolvedValue({ ok: false, error: 'invalid_name' });
+
+    for (const title of ['Rejected A', 'Rejected B', 'Rejected A']) {
+      await syncSlackAgentSessionTitleBestEffort({
+        ...baseInput,
+        slack: { renameAgentSession },
+        title,
+      });
+    }
+
+    expect(renameAgentSession.mock.calls.map(([input]) => input.title)).toEqual(
+      ['Rejected A', 'Rejected B'],
+    );
+  });
+
+  it('retries transient rename failures', async () => {
+    const renameAgentSession = vi.fn().mockResolvedValue({ ok: false });
+    const input = {
+      ...baseInput,
+      slack: { renameAgentSession },
+      title: 'Retryable title',
+    };
+
+    await syncSlackAgentSessionTitleBestEffort(input);
+    await syncSlackAgentSessionTitleBestEffort(input);
+
+    expect(renameAgentSession).toHaveBeenCalledTimes(2);
   });
 
   it('omits blank titles and contains Redis failures', async () => {
