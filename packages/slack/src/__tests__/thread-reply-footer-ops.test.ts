@@ -39,6 +39,7 @@ vi.mock('../thread-footer', () => ({
 
 import {
   isSlackThreadReplyFooterBlock,
+  postSlackThreadMessageWithFooterText,
   postSlackThreadMessageWithStickyFooter,
   removeSlackThreadReplyFooter,
 } from '../thread-reply-footer-ops';
@@ -92,14 +93,18 @@ describe('thread-reply-footer-ops', () => {
   it('posts with footer, strips the previous footer message, and tracks the new ts', async () => {
     const slack = {
       postMessage: vi.fn().mockResolvedValue('222.000'),
-      getMessageBlocks: vi.fn().mockResolvedValue([
-        { type: 'section', text: { type: 'mrkdwn', text: 'old body' } },
-        {
-          type: 'context',
-          block_id: 'roomote_thread_reply_footer',
-          elements: [{ type: 'mrkdwn', text: 'old footer' }],
-        },
-      ]),
+      getOwnMessageContent: vi.fn().mockResolvedValue({
+        text: 'old fallback',
+        blocks: [
+          { type: 'section', text: { type: 'mrkdwn', text: 'old body' } },
+          { type: 'divider' },
+          {
+            type: 'context',
+            block_id: 'roomote_thread_reply_footer',
+            elements: [{ type: 'mrkdwn', text: 'old footer' }],
+          },
+        ],
+      }),
       updateMessage: vi.fn().mockResolvedValue(true),
     };
 
@@ -135,8 +140,10 @@ describe('thread-reply-footer-ops', () => {
         channel: 'C1',
         ts: '111.000',
         message: {
+          text: 'old fallback',
           blocks: [
             { type: 'section', text: { type: 'mrkdwn', text: 'old body' } },
+            { type: 'divider' },
           ],
         },
       }),
@@ -165,11 +172,9 @@ describe('thread-reply-footer-ops', () => {
 
   it('no-ops remove when footer block is already absent', async () => {
     const slack = {
-      getMessageBlocks: vi
-        .fn()
-        .mockResolvedValue([
-          { type: 'section', text: { type: 'mrkdwn', text: 'body' } },
-        ]),
+      getOwnMessageContent: vi.fn().mockResolvedValue({
+        blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'body' } }],
+      }),
       updateMessage: vi.fn(),
     };
 
@@ -181,5 +186,86 @@ describe('thread-reply-footer-ops', () => {
     });
 
     expect(slack.updateMessage).not.toHaveBeenCalled();
+  });
+
+  it('attaches the footer to the first bot reply without attempting cleanup', async () => {
+    mockGetFooterTs.mockResolvedValue(null);
+    const slack = {
+      postMessage: vi.fn().mockResolvedValue('111.000'),
+      getOwnMessageContent: vi.fn(),
+      updateMessage: vi.fn(),
+    };
+
+    await postSlackThreadMessageWithFooterText({
+      slack,
+      channel: 'C1',
+      threadTs: '100.000',
+      text: 'first reply',
+      bodyBlocks: [{ type: 'markdown', text: 'first reply' }],
+      footerText: '_Reply or use the <https://app.example.com|web app>._',
+    });
+
+    expect(slack.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [
+          { type: 'markdown', text: 'first reply' },
+          expect.objectContaining({
+            block_id: 'roomote_thread_reply_footer',
+          }),
+        ],
+      }),
+    );
+    expect(slack.getOwnMessageContent).not.toHaveBeenCalled();
+    expect(slack.updateMessage).not.toHaveBeenCalled();
+    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', '111.000');
+  });
+
+  it('posts and tracks the new footer when prior-footer cleanup fails', async () => {
+    const slack = {
+      postMessage: vi.fn().mockResolvedValue('222.000'),
+      getOwnMessageContent: vi
+        .fn()
+        .mockRejectedValue(new Error('Slack unavailable')),
+      updateMessage: vi.fn(),
+    };
+
+    await expect(
+      postSlackThreadMessageWithFooterText({
+        slack,
+        channel: 'C1',
+        threadTs: '100.000',
+        text: 'new reply',
+        bodyBlocks: [{ type: 'markdown', text: 'new reply' }],
+        footerText: '_Reply or use the <https://app.example.com|web app>._',
+      }),
+    ).resolves.toBe('222.000');
+
+    expect(slack.postMessage).toHaveBeenCalledOnce();
+    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', '222.000');
+  });
+
+  it('does not remove the footer when a retry resolves to the tracked message', async () => {
+    const slack = {
+      postMessage: vi.fn().mockResolvedValue('111.000'),
+      getOwnMessageContent: vi.fn(),
+      updateMessage: vi.fn(),
+    };
+
+    await postSlackThreadMessageWithFooterText({
+      slack,
+      channel: 'C1',
+      threadTs: '100.000',
+      text: 'retried reply',
+      bodyBlocks: [{ type: 'markdown', text: 'retried reply' }],
+      footerText: '_Reply or use the <https://app.example.com|web app>._',
+      clientMsgId: 'stable-client-id',
+    });
+
+    expect(slack.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ client_msg_id: 'stable-client-id' }),
+    );
+    expect(slack.getOwnMessageContent).not.toHaveBeenCalled();
+    expect(slack.updateMessage).not.toHaveBeenCalled();
+    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', '111.000');
   });
 });

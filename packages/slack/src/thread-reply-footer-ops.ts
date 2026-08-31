@@ -132,33 +132,36 @@ export async function withSlackThreadReplyFooterLock<T>(params: {
 }
 
 export async function removeSlackThreadReplyFooter(params: {
-  slack: Pick<SlackNotifier, 'getMessageBlocks' | 'updateMessage'>;
+  slack: Pick<SlackNotifier, 'getOwnMessageContent' | 'updateMessage'>;
   channel: string;
   threadTs: string;
   messageTs: string;
 }): Promise<void> {
-  const blocks = await params.slack.getMessageBlocks({
+  const content = await params.slack.getOwnMessageContent({
     channel: params.channel,
     messageTs: params.messageTs,
     threadTs: params.threadTs,
   });
 
-  if (!blocks) {
+  if (!content) {
     return;
   }
 
-  const updatedBlocks = blocks.filter(
+  const updatedBlocks = content.blocks.filter(
     (block) => !isSlackThreadReplyFooterBlock(block),
   );
 
-  if (updatedBlocks.length === blocks.length) {
+  if (updatedBlocks.length === content.blocks.length) {
     return;
   }
 
   const updated = await params.slack.updateMessage({
     channel: params.channel,
     ts: params.messageTs,
-    message: { blocks: updatedBlocks },
+    message: {
+      ...(content.text !== undefined ? { text: content.text } : {}),
+      blocks: updatedBlocks,
+    },
   });
 
   if (!updated) {
@@ -184,7 +187,7 @@ function buildOutOfBandTaskUrl(taskId: string, utmCampaign: string): string {
 export async function postSlackThreadMessageWithFooterText(params: {
   slack: Pick<
     SlackNotifier,
-    'postMessage' | 'getMessageBlocks' | 'updateMessage'
+    'postMessage' | 'getOwnMessageContent' | 'updateMessage'
   >;
   channel: string;
   threadTs: string;
@@ -288,7 +291,7 @@ export async function postSlackThreadMessageWithFooterText(params: {
 export async function postSlackThreadMessageWithStickyFooter(params: {
   slack: Pick<
     SlackNotifier,
-    'postMessage' | 'getMessageBlocks' | 'updateMessage'
+    'postMessage' | 'getOwnMessageContent' | 'updateMessage'
   >;
   channel: string;
   threadTs: string;

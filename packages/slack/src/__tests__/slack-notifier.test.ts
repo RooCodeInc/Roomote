@@ -3227,6 +3227,81 @@ describe('SlackNotifier', () => {
     });
   });
 
+  describe('getOwnMessageContent', () => {
+    it('returns text and blocks for a message authored by this bot', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockImplementation(async (input) => {
+        const url = String(input);
+        return {
+          ok: true,
+          json: async () =>
+            url.includes('auth.test')
+              ? { ok: true, user_id: 'U_ROOMOTE', bot_id: 'B_ROOMOTE' }
+              : {
+                  ok: true,
+                  messages: [
+                    {
+                      user: 'U_ROOMOTE',
+                      bot_id: 'B_ROOMOTE',
+                      text: 'fallback text',
+                      ts: '111.000',
+                      type: 'message',
+                      blocks: [{ type: 'markdown', text: 'body' }],
+                    },
+                  ],
+                },
+        };
+      });
+
+      await expect(
+        notifier.getOwnMessageContent({
+          channel: 'C123',
+          threadTs: '100.000',
+          messageTs: '111.000',
+        }),
+      ).resolves.toEqual({
+        text: 'fallback text',
+        blocks: [{ type: 'markdown', text: 'body' }],
+      });
+    });
+
+    it('does not expose a user-authored message for updating', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockImplementation(async (input) => {
+        const url = String(input);
+        return {
+          ok: true,
+          json: async () =>
+            url.includes('auth.test')
+              ? { ok: true, user_id: 'U_ROOMOTE', bot_id: 'B_ROOMOTE' }
+              : {
+                  ok: true,
+                  messages: [
+                    {
+                      user: 'U_HUMAN',
+                      text: 'human-authored text',
+                      ts: '111.000',
+                      type: 'message',
+                      blocks: [
+                        {
+                          type: 'context',
+                          block_id: 'roomote_thread_reply_footer',
+                        },
+                      ],
+                    },
+                  ],
+                },
+        };
+      });
+
+      await expect(
+        notifier.getOwnMessageContent({
+          channel: 'C123',
+          threadTs: '100.000',
+          messageTs: '111.000',
+        }),
+      ).resolves.toBeNull();
+    });
+  });
+
   describe('unfurlTaskUrl', () => {
     it('delegates to WebClient.chat.unfurl with metadata when provided', async () => {
       const params = {

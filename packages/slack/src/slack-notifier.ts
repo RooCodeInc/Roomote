@@ -1364,6 +1364,61 @@ export class SlackNotifier {
   }
 
   /**
+   * Returns the editable content of one message only when it was authored by
+   * this notifier's bot identity. Slack rejects chat.update for other authors.
+   */
+  public async getOwnMessageContent({
+    channel,
+    messageTs,
+    threadTs,
+  }: {
+    channel: string;
+    messageTs: string;
+    threadTs: string;
+  }): Promise<{ text?: string; blocks: unknown[] } | null> {
+    try {
+      const [response, ownBotIdentity] = await Promise.all([
+        slackFetch(
+          `${buildSlackApiUrl('conversations.replies')}?channel=${encodeURIComponent(channel)}&ts=${encodeURIComponent(threadTs)}&oldest=${encodeURIComponent(messageTs)}&latest=${encodeURIComponent(messageTs)}&inclusive=true`,
+          {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${this.token}`,
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+          },
+        ),
+        this.getOwnBotIdentity(),
+      ]);
+
+      if (!response.ok || !ownBotIdentity) {
+        return null;
+      }
+
+      const result = (await response.json()) as SlackApiThreadResponse;
+      const targetMessage = result.ok
+        ? result.messages?.find((message) => message.ts === messageTs)
+        : undefined;
+
+      if (!targetMessage || !isOwnBotMessage(targetMessage, ownBotIdentity)) {
+        return null;
+      }
+
+      return {
+        ...(typeof targetMessage.text === 'string'
+          ? { text: targetMessage.text }
+          : {}),
+        blocks: targetMessage.blocks ?? [],
+      };
+    } catch (error) {
+      console.error(
+        `[getOwnMessageContent] Failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Fetches message metadata for a single message timestamp in a channel.
    * Uses conversations.history with include_all_metadata to retrieve hidden
    * app metadata (when present).
