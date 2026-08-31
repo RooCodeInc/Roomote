@@ -53,6 +53,9 @@ describe('setup prompt guidance and snapshot injection', () => {
       "This is often the user's first interaction with Roomote",
     );
     expect(prompt).toContain(
+      'always refer to Roomote in the first person: use "I", "me", and "my"',
+    );
+    expect(prompt).toContain(
       "use ordinary language centered on the user's action and outcome",
     );
     expect(prompt).toContain('Your repositories are ready');
