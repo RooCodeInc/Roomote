@@ -894,29 +894,36 @@ slackMcp.post('/clear_reply_quote', async (c) => {
 
 async function findSlackNotifierForLateBoundChannel(
   channelId: string,
-): Promise<{ slack: SlackNotifier; teamId: string } | null> {
+): Promise<
+  | { status: 'resolved'; slack: SlackNotifier; teamId: string }
+  | { status: 'unresolved' }
+  | { status: 'indeterminate' }
+> {
   const installations = await db.query.slackInstallations.findMany({
     columns: { botAccessToken: true, teamId: true },
     where: eq(slackInstallations.isActive, true),
   });
-  const matches = await Promise.all(
+  const candidates = await Promise.all(
     installations.map(async (installation) => {
       const slack = new SlackNotifier(installation.botAccessToken);
-      return (await slack.isAppInChannel(channelId)) === true
-        ? { slack, teamId: installation.teamId }
-        : null;
+      return {
+        membership: await slack.isAppInChannel(channelId),
+        slack,
+        teamId: installation.teamId,
+      };
     }),
   );
-  const matchingInstallations = matches.filter(
-    (
-      match,
-    ): match is {
-      slack: SlackNotifier;
-      teamId: string;
-    } => match !== null,
+  if (candidates.some((candidate) => candidate.membership === null)) {
+    return { status: 'indeterminate' };
+  }
+
+  const matchingInstallations = candidates.filter(
+    (candidate) => candidate.membership === true,
   );
 
-  return matchingInstallations.length === 1 ? matchingInstallations[0]! : null;
+  return matchingInstallations.length === 1
+    ? { status: 'resolved', ...matchingInstallations[0]! }
+    : { status: 'unresolved' };
 }
 
 slackMcp.post('/thread_reply', async (c) => {
@@ -1049,9 +1056,22 @@ slackMcp.post('/thread_reply', async (c) => {
     getSlackTeamIdFromTaskPayload(taskRun.payload);
   const needsLateBoundSlackResolution =
     !slackTeamId && !slackReplyTarget.threadTs;
-  const lateBoundSlack = needsLateBoundSlackResolution
+  const lateBoundSlackResolution = needsLateBoundSlackResolution
     ? await findSlackNotifierForLateBoundChannel(slackReplyTarget.channel)
     : null;
+  if (lateBoundSlackResolution?.status === 'indeterminate') {
+    return c.json(
+      {
+        error: 'Slack report destination could not be verified; retry shortly',
+        retryable: true,
+      },
+      503,
+    );
+  }
+  const lateBoundSlack =
+    lateBoundSlackResolution?.status === 'resolved'
+      ? lateBoundSlackResolution
+      : null;
   const slackInstallation = needsLateBoundSlackResolution
     ? null
     : await db.query.slackInstallations.findFirst({

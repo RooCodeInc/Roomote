@@ -481,6 +481,34 @@ describe('Slack thread reply quotes', () => {
     expect(postMessageDetailedMock).not.toHaveBeenCalled();
   });
 
+  it('returns a retryable error when late-bound channel membership is indeterminate', async () => {
+    taskRunFindFirstMock.mockResolvedValue({
+      id: 42,
+      actingUserId: null,
+      taskId: 'task-1',
+      payload: { channel: 'C123', customAutomationId: 'automation-1' },
+    });
+    slackInstallationFindManyMock.mockResolvedValue([
+      { botAccessToken: 'xoxb-owner', teamId: 'T_OWNER' },
+      { botAccessToken: 'xoxb-unknown', teamId: 'T_UNKNOWN' },
+    ]);
+    isAppInChannelMock.mockResolvedValueOnce(true).mockResolvedValueOnce(null);
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'A result worth reporting' }),
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: 'Slack report destination could not be verified; retry shortly',
+      retryable: true,
+    });
+    expect(slackInstallationFindFirstMock).not.toHaveBeenCalled();
+    expect(postMessageDetailedMock).not.toHaveBeenCalled();
+  });
+
   it('consumes the exact pending quote after an image-only reply without rendering it', async () => {
     const response = await createApp().request('/mcp/thread_reply', {
       method: 'POST',
