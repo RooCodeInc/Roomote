@@ -10,6 +10,7 @@ const {
   mockGetGitHubCopilotAccessToken,
   mockGetFreshXaiAccessToken,
   mockRecordLlmUsage,
+  mockCaptureActivationTrialInferenceUsed,
 } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
   mockResolveModelProviderEnvValue: vi.fn(),
@@ -17,6 +18,7 @@ const {
   mockGetGitHubCopilotAccessToken: vi.fn(),
   mockGetFreshXaiAccessToken: vi.fn(),
   mockRecordLlmUsage: vi.fn(),
+  mockCaptureActivationTrialInferenceUsed: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -42,6 +44,10 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   recordLlmUsage: mockRecordLlmUsage,
+}));
+
+vi.mock('@roomote/telemetry/server', () => ({
+  captureActivationTrialInferenceUsed: mockCaptureActivationTrialInferenceUsed,
 }));
 
 import { inference } from '../index';
@@ -308,6 +314,40 @@ describe('inference gateway', () => {
     expect(JSON.parse(String(init.body))).toMatchObject({
       model: 'openai/gpt-5.6-luna',
     });
+    expect(mockCaptureActivationTrialInferenceUsed).toHaveBeenCalledOnce();
+  });
+
+  it('does not record trial inference usage for an upstream error', async () => {
+    stubUpstreamFetch(
+      new Response(JSON.stringify({ error: { message: 'provider error' } }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/roomote/v1/chat/completions',
+      { model: 'roomote/openai/gpt-5.6-luna', messages: [] },
+    );
+
+    expect(response.status).toBe(500);
+    expect(mockCaptureActivationTrialInferenceUsed).not.toHaveBeenCalled();
+  });
+
+  it('does not record trial inference usage for model discovery', async () => {
+    stubUpstreamFetch();
+
+    const response = await createApp(createRunToken()).request(
+      '/api/inference/roomote/v1/models',
+      {
+        method: 'GET',
+        headers: { authorization: 'Bearer run-token-value' },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockCaptureActivationTrialInferenceUsed).not.toHaveBeenCalled();
   });
 
   it('returns an actionable response when managed Roomote inference is unavailable', async () => {
@@ -1386,9 +1426,14 @@ describe('inference gateway', () => {
       .mockRejectedValue(new Error('connect ECONNREFUSED'));
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await postMessages(createApp(createRunToken()));
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/roomote/v1/chat/completions',
+      { model: 'roomote/openai/gpt-5.6-luna', messages: [] },
+    );
 
     expect(response.status).toBe(502);
+    expect(mockCaptureActivationTrialInferenceUsed).not.toHaveBeenCalled();
   });
 
   it('rejects unsupported methods', async () => {

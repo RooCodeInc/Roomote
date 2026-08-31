@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { captureActivationTrialInferenceUsed } from '@roomote/telemetry/server';
 
 import {
   formatSingleLineLog,
@@ -481,6 +482,14 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
           402,
         );
       }
+    }
+
+    if (
+      providerId === ROOMOTE_INFERENCE_PROVIDER_ID &&
+      method === 'POST' &&
+      upstreamResponse.ok
+    ) {
+      void captureActivationTrialInferenceUsed();
     }
 
     return new Response(
