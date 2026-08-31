@@ -309,14 +309,15 @@ describe('customAutomationsJob', () => {
               expect.objectContaining({ text: 'Flaky tests' }),
             ]),
           }),
-          expect.objectContaining({
-            type: 'section',
-            block_id: 'roomote_automation_result_settings',
-            accessory: expect.objectContaining({
-              action_id: 'late_bound_automation_configure',
-            }),
-          }),
           { type: 'markdown', text: '**Flaky tests** is running.' },
+          expect.objectContaining({
+            type: 'actions',
+            elements: [
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+              }),
+            ],
+          }),
         ],
       }),
     );
@@ -326,13 +327,6 @@ describe('customAutomationsJob', () => {
       message: expect.objectContaining({
         blocks: expect.arrayContaining([
           expect.objectContaining({
-            type: 'section',
-            block_id: 'roomote_automation_result_settings',
-            accessory: expect.objectContaining({
-              action_id: 'late_bound_automation_configure',
-            }),
-          }),
-          expect.objectContaining({
             type: 'actions',
             elements: [
               expect.objectContaining({
@@ -341,6 +335,9 @@ describe('customAutomationsJob', () => {
                 url: expect.stringContaining(
                   '/sessions/33333333-3333-4333-8333-333333333333',
                 ),
+              }),
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
               }),
             ],
           }),

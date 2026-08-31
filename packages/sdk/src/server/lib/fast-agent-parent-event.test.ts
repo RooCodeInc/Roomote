@@ -536,16 +536,6 @@ describe('deliverFastAgentParentEvent', () => {
               expect.objectContaining({ text: 'Weekly scan' }),
             ]),
           }),
-          expect.objectContaining({
-            type: 'section',
-            block_id: 'roomote_automation_result_settings',
-            accessory: expect.objectContaining({
-              action_id: 'late_bound_automation_configure',
-              url: expect.stringContaining(
-                '/automations#custom-automation-automation-1',
-              ),
-            }),
-          }),
           { type: 'markdown', text: 'The proof is ready.' },
           expect.objectContaining({
             type: 'actions',
@@ -554,6 +544,12 @@ describe('deliverFastAgentParentEvent', () => {
                 action_id: 'late_bound_automation_view_session',
                 text: expect.objectContaining({ text: 'Follow' }),
                 url: expect.stringContaining(`/sessions/${parent.sessionId}`),
+              }),
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+                url: expect.stringContaining(
+                  '/automations#custom-automation-automation-1',
+                ),
               }),
             ],
           }),
