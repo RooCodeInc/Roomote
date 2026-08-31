@@ -72,6 +72,7 @@ import {
 import { NestedTaskSidePanel } from './NestedTaskSidePanel';
 import {
   OpenSessionTaskPanelContext,
+  OpenSessionTasksPanelContext,
   SessionRunningTaskCountContext,
 } from './session-task-panel-context';
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
@@ -685,6 +686,10 @@ export function SessionWorkspace({
     },
     [selectTask],
   );
+  const openTasksPanel = useCallback(() => {
+    setPanel({ kind: 'tasks' });
+    selectTask(null);
+  }, [selectTask]);
   const closePanel = () => {
     setPanel(null);
     selectTask(null);
@@ -760,7 +765,9 @@ export function SessionWorkspace({
           isPanelOpen={panelOpen}
           main={
             <SessionRunningTaskCountContext.Provider value={runningTaskCount}>
-              {children}
+              <OpenSessionTasksPanelContext.Provider value={openTasksPanel}>
+                {children}
+              </OpenSessionTasksPanelContext.Provider>
             </SessionRunningTaskCountContext.Provider>
           }
           panel={panelContent}

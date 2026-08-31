@@ -3,7 +3,10 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { z } from 'zod';
 
-import { resolveEffectiveModelRuntimeEnv } from '@roomote/db/server';
+import {
+  isSessionConversationResponding,
+  resolveEffectiveModelRuntimeEnv,
+} from '@roomote/db/server';
 import {
   getTextFromContentBlocks,
   PRODUCT_NAME,
@@ -130,6 +133,9 @@ export default async function SessionDetailPage({
               hasOlderMessages={session.hasOlderMessages}
               canReply
               initialTitle={unifiedSession.title}
+              initialConversationResponding={isSessionConversationResponding({
+                respondingUntil: unifiedSession.respondingUntil ?? null,
+              })}
               fallbackTitle={unifiedSession.title}
               sessionModel={session.model}
               sessionReasoningEffort={session.reasoningEffort}
