@@ -228,7 +228,7 @@ describe('Session detail page', () => {
     );
   });
 
-  it('resolves the unified session first and renders its Fast transcript', async () => {
+  it('hydrates a direct Session route without seeding the response lease', async () => {
     authorizeMock.mockResolvedValue({
       success: true,
       userId: 'user-1',

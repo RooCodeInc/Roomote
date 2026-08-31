@@ -504,7 +504,7 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByText('1 task running')).toBeInTheDocument();
   });
 
-  it('keeps hydrated task activity visible through the initial response snapshot', () => {
+  it('keeps running task activity visible when a Session is loaded directly', () => {
     render(
       <SessionRunningTaskCountContext.Provider value={1}>
         <FastSessionTranscript
