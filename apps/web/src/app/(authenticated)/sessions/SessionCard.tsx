@@ -1,11 +1,7 @@
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 
-import {
-  formatInferenceCost,
-  formatRepositoryName,
-  getUserDisplayName,
-} from '@/lib';
+import { formatInferenceCost, getUserDisplayName } from '@/lib';
 import { Avatar, Spinner } from '@/components/system';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { SessionSearchSnippet } from '@/components/sessions/SessionSearchSnippet';
@@ -46,7 +42,6 @@ export function SessionCard({
       name: session.ownerName,
       email: session.ownerEmail,
     }) ?? 'Roomote';
-  const primaryTask = session.tasks[0];
   const status = session.cachedStatus ?? 'ready';
 
   return (
@@ -95,15 +90,6 @@ export function SessionCard({
             <SessionStatusBadge status={status} className="capitalize" />
           )}
           <span>{getSessionSurfaceLabel(session.sourceSurface)}</span>
-          {primaryTask?.repositoryName ? (
-            <span>{formatRepositoryName(primaryTask.repositoryName)}</span>
-          ) : null}
-          {session.executionCount > 0 ? (
-            <span>
-              {session.executionCount} execution
-              {session.executionCount === 1 ? '' : 's'}
-            </span>
-          ) : null}
           {session.inferenceCostMicroUsd > 0 ? (
             <span>${formatInferenceCost(session.inferenceCostMicroUsd)}</span>
           ) : null}

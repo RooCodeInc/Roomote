@@ -191,6 +191,20 @@ describe('getTaskMessages', () => {
     expect(andMock.mock.calls[0]).toContain(visibleTaskHistoryCondition);
   });
 
+  it('omits transcript-hidden task messages from MCP responses', async () => {
+    mockResolveAcpTranscriptVisibility.mockReturnValueOnce(false);
+
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/task-1/messages',
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      messages: [],
+      returned: 0,
+    });
+  });
+
   it('returns 404 when the task is hidden from task history', async () => {
     taskSelectLimitMock.mockResolvedValueOnce([]);
 
@@ -221,6 +235,23 @@ describe('getTaskMessages', () => {
       returned: 1,
       messages: [{ taskId: 'fast-session-1', text: 'Fast response' }],
     });
+    expect(mockGetFastSessionMessagesForUser).toHaveBeenCalledWith({
+      sessionId: 'fast-session-1',
+      userId: 'user-1',
+      limit: undefined,
+      order: 'asc',
+    });
+  });
+
+  it('forwards explicit descending order to Fast session fallback', async () => {
+    taskSelectLimitMock.mockResolvedValueOnce([]);
+    mockGetFastSessionMessagesForUser.mockResolvedValueOnce([]);
+
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/fast-session-1/messages?order=desc',
+    );
+
+    expect(response.status).toBe(200);
     expect(mockGetFastSessionMessagesForUser).toHaveBeenCalledWith({
       sessionId: 'fast-session-1',
       userId: 'user-1',

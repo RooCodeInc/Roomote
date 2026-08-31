@@ -32,9 +32,10 @@ export async function getFastSessionMessagesForUser(params: {
   if (!canonicalFastSessionIdSchema.safeParse(params.sessionId).success) {
     return null;
   }
+  const fastConversationId = params.sessionId;
   if (
     !(await canUserAccessFastAgentSession({
-      sessionId: params.sessionId,
+      sessionId: fastConversationId,
       userId: params.userId,
     }))
   ) {
@@ -68,7 +69,7 @@ export async function getFastSessionMessagesForUser(params: {
     .from(fastAgentMessages)
     .where(
       and(
-        eq(fastAgentMessages.conversationId, params.sessionId),
+        eq(fastAgentMessages.conversationId, fastConversationId),
         sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
       ),
     )
@@ -112,9 +113,10 @@ export async function sendMessageToFastSessionForUser(params: {
   if (!canonicalFastSessionIdSchema.safeParse(params.sessionId).success) {
     return { success: false, status: 404, error: 'Task not found' };
   }
+  const fastConversationId = params.sessionId;
   if (
     !(await canUserAccessFastAgentSession({
-      sessionId: params.sessionId,
+      sessionId: fastConversationId,
       userId: params.userId,
     }))
   ) {
@@ -122,7 +124,7 @@ export async function sendMessageToFastSessionForUser(params: {
   }
 
   const queued = await queueFastAgentSurfaceReply({
-    sessionId: params.sessionId,
+    sessionId: fastConversationId,
     userId: params.userId,
     senderDisplayName: null,
     question: params.message,

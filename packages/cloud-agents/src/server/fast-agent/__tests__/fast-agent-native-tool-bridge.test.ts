@@ -167,13 +167,18 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(bridgeSource).toContain('agent: context.agent');
     expect(bridgeSource).toContain('metadata: payload.metadata ?? {}');
     expect(spillReadSource).toContain('never pass filesystem paths');
-    expect(skillListSource).toContain('repository-defined skills');
     expect(skillListSource).toContain(
-      'total, packaged, and repository skill counts',
+      'settings-defined and repository-defined skills',
+    );
+    expect(skillListSource).toContain(
+      'an exact name to find packaged and settings skills',
     );
     expect(skillListSource).toContain('environmentId: z.string()');
     expect(skillListSource).toContain('repositoryId: z.string()');
-    expect(skillListSource).toContain('Omit both scope fields');
+    expect(skillListSource).toContain('name: z.string()');
+    expect(skillListSource).toContain('sourceOffset: z.number()');
+    expect(skillListSource).toContain('nextSourceOffset');
+    expect(skillListSource).toContain('Omit scope and name');
     expect(skillListSource).toContain(
       'exactly one of environmentId or repositoryId',
     );
@@ -406,6 +411,7 @@ describe('Fast native OpenCode tool bridge', () => {
           counts: {
             packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
             repository: 1,
+            settings: 0,
             total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 1,
           },
           skills: expect.arrayContaining([
@@ -430,6 +436,7 @@ describe('Fast native OpenCode tool bridge', () => {
           counts: {
             packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
             repository: 0,
+            settings: 0,
             total: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
           },
           skills: expect.arrayContaining([
@@ -447,6 +454,16 @@ describe('Fast native OpenCode tool bridge', () => {
         },
       });
       expect(JSON.parse(ambiguousCatalog.output)).toEqual({
+        success: false,
+        error: 'The requested skill catalog is unavailable.',
+      });
+
+      const invalidContinuation = await callBridge({
+        sessionID: parentSession,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
+        args: { sourceOffset: 8 },
+      });
+      expect(JSON.parse(invalidContinuation.output)).toEqual({
         success: false,
         error: 'The requested skill catalog is unavailable.',
       });
