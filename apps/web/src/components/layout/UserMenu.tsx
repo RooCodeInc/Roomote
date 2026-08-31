@@ -108,19 +108,19 @@ function SignedInUserMenu({
   const userDisplayName = user.name ?? 'You';
   const userEmail = user.resource.primaryEmailAddress?.emailAddress;
   const displayVersion = statusQuery.data?.displayVersion ?? null;
+  const availableReleaseNotesVersion =
+    statusQuery.data?.runningVersion ?? statusQuery.data?.displayVersion;
   const isReleaseVersion = isParsableProductVersion(displayVersion);
   const releaseUrl = displayVersion
     ? `${GITHUB_RELEASES_BASE_URL}/#release-${toReleaseTag(displayVersion)}`
     : null;
   const handleOpenReleaseNotes = () => {
-    const version =
-      statusQuery.data?.runningVersion ?? statusQuery.data?.displayVersion;
-    if (!version) {
+    if (!availableReleaseNotesVersion) {
       return;
     }
 
     setIsAboutOpen(false);
-    setReleaseNotesVersion(version);
+    setReleaseNotesVersion(availableReleaseNotesVersion);
   };
 
   return (
@@ -246,6 +246,7 @@ function SignedInUserMenu({
               variant="link"
               size="sm"
               onClick={handleOpenReleaseNotes}
+              disabled={!availableReleaseNotesVersion}
             >
               See all Roomote releases
             </Button>

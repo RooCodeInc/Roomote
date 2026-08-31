@@ -107,6 +107,22 @@ describe('UserMenu', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('disables release history until a version is available', () => {
+    render(<UserMenu />);
+
+    fireEvent.click(screen.getByText('About Roomote'));
+    const releasesButton = screen.getByRole('button', {
+      name: 'See all Roomote releases',
+    });
+
+    expect(releasesButton).toBeDisabled();
+    fireEvent.click(releasesButton);
+    expect(releaseNotesDialogMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole('heading', { name: 'About Roomote' }),
+    ).toBeInTheDocument();
+  });
+
   it('opens release history with the running version and closes About Roomote', () => {
     useQueryMock.mockReturnValue({
       data: {
@@ -124,6 +140,7 @@ describe('UserMenu', () => {
     const releasesButton = screen.getByRole('button', {
       name: 'See all Roomote releases',
     });
+    expect(releasesButton).toBeEnabled();
     expect(
       screen.queryByRole('link', { name: 'See all Roomote releases' }),
     ).not.toBeInTheDocument();
