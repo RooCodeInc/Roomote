@@ -87,7 +87,10 @@ export function SessionCard({
         />
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           {status === 'active' ? (
-            <Spinner />
+            <>
+              <Spinner />
+              <span className="sr-only">Active</span>
+            </>
           ) : status === 'ready' ? null : (
             <SessionStatusBadge status={status} className="capitalize" />
           )}

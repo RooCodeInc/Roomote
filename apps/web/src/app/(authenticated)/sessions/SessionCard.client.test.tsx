@@ -115,6 +115,7 @@ describe('SessionCard', () => {
     );
     expect(container.querySelector('.animate-spin')).toBeInTheDocument();
     expect(screen.queryByText('active')).not.toBeInTheDocument();
+    expect(screen.getByText('Active')).toHaveClass('sr-only');
 
     rerender(
       <SessionCard
