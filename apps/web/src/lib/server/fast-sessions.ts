@@ -33,6 +33,10 @@ type FastSessionTaskSummary = {
   taskId: string;
   title: string;
   inferenceCostMicroUsd: number;
+  latestRun: {
+    status: (typeof taskRuns.$inferSelect)['status'];
+    taskPhase: (typeof taskRuns.$inferSelect)['taskPhase'];
+  };
 };
 
 export type FastSessionMessage = Pick<
@@ -223,6 +227,8 @@ export async function getFastSessionTasks(
         taskId: taskRuns.taskId,
         title: tasks.title,
         latestRunId: taskRuns.id,
+        status: taskRuns.status,
+        taskPhase: taskRuns.taskPhase,
       })
       .from(taskRuns)
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
@@ -240,6 +246,8 @@ export async function getFastSessionTasks(
     .select({
       taskId: latestRunPerTask.taskId,
       title: latestRunPerTask.title,
+      status: latestRunPerTask.status,
+      taskPhase: latestRunPerTask.taskPhase,
       inferenceCostMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
     })
     .from(latestRunPerTask)
@@ -251,12 +259,19 @@ export async function getFastSessionTasks(
       latestRunPerTask.taskId,
       latestRunPerTask.title,
       latestRunPerTask.latestRunId,
+      latestRunPerTask.status,
+      latestRunPerTask.taskPhase,
     )
     .orderBy(desc(latestRunPerTask.latestRunId));
 
   return rows.map((row) => ({
-    ...row,
+    taskId: row.taskId,
+    title: row.title,
     inferenceCostMicroUsd: Number(row.inferenceCostMicroUsd),
+    latestRun: {
+      status: row.status,
+      taskPhase: row.taskPhase,
+    },
   }));
 }
 

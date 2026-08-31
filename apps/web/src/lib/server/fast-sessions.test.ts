@@ -10,6 +10,7 @@ import {
   taskFactory,
   userFactory,
 } from '@roomote/db/server';
+import { RunStatus } from '@roomote/types';
 
 import {
   findAccessibleFastSession,
@@ -143,6 +144,8 @@ describe('Fast session queries', () => {
     });
     await runFactory.create({
       taskId: delegatedTask.id,
+      status: RunStatus.Running,
+      taskPhase: 'running',
       payload: {
         repo: 'acme/widgets',
         description: 'Delegated Fast task',
@@ -155,6 +158,7 @@ describe('Fast session queries', () => {
     });
     await runFactory.create({
       taskId: zeroCostTask.id,
+      status: RunStatus.Completed,
       payload: {
         repo: 'acme/widgets',
         description: 'Another delegated Fast task',
@@ -180,11 +184,19 @@ describe('Fast session queries', () => {
           taskId: delegatedTask.id,
           title: 'Delegated task',
           inferenceCostMicroUsd: 750_000,
+          latestRun: {
+            status: RunStatus.Running,
+            taskPhase: 'running',
+          },
         },
         {
           taskId: zeroCostTask.id,
           title: 'Zero cost task',
           inferenceCostMicroUsd: 0,
+          latestRun: {
+            status: RunStatus.Completed,
+            taskPhase: null,
+          },
         },
       ]),
     );
