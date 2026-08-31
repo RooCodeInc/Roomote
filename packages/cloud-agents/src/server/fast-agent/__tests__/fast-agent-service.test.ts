@@ -658,6 +658,107 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('waits when a tool starts while the follow-up user event is persisting', async () => {
+    vi.useFakeTimers();
+    try {
+      const queuedFollowUp = {
+        id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.3',
+          currentMessageId: '100.3',
+          userId: 'user-1',
+          question: 'Wait for the active tool.',
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce(queuedFollowUp)
+        .mockResolvedValueOnce(queuedFollowUp)
+        .mockResolvedValue(undefined);
+
+      let notePersistenceStarted: (() => void) | undefined;
+      const persistenceStarted = new Promise<void>((resolve) => {
+        notePersistenceStarted = resolve;
+      });
+      let finishPersistence: (() => void) | undefined;
+      const persistenceBlocked = new Promise<void>((resolve) => {
+        finishPersistence = resolve;
+      });
+      mocks.upsertMessage.mockImplementation(async ({ message }) => {
+        if (message.eventId === '100.3:user') {
+          notePersistenceStarted?.();
+          await persistenceBlocked;
+        }
+        return { initialHumanTurn: false };
+      });
+
+      let startTool: (() => void) | undefined;
+      const toolStartRequested = new Promise<void>((resolve) => {
+        startTool = resolve;
+      });
+      let finishTool:
+        | ((value: { success: true; taskId: string }) => void)
+        | undefined;
+      const adapter = callbacks({
+        launchTask: vi.fn(
+          async () =>
+            await new Promise<{ success: true; taskId: string }>((resolve) => {
+              finishTool = resolve;
+            }),
+        ),
+      });
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          await toolStartRequested;
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Run the active tool.',
+            environmentId: 'env-1',
+            model: null,
+            includeAttachments: false,
+            kickoffMessage: 'Running the active tool.',
+          });
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await persistenceStarted;
+
+      startTool?.();
+      await vi.waitFor(() => expect(finishTool).toBeTypeOf('function'));
+      finishPersistence?.();
+      await vi.waitFor(() => {
+        expect(mocks.getPendingHumanFollowUp).toHaveBeenCalledOnce();
+      });
+      expect(mocks.nativeSteer).not.toHaveBeenCalled();
+
+      finishTool?.({ success: true, taskId: 'task-1' });
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      expect(mocks.nativeSteer).toHaveBeenCalledWith(
+        expect.objectContaining({ text: 'Wait for the active tool.' }),
+      );
+
+      finishGeneration?.('Steered after tool completion');
+      await expect(resultPromise).resolves.toBe(
+        'Steered after tool completion',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps injected follow-ups in a clean-session retry bootstrap', async () => {
     vi.useFakeTimers();
     try {

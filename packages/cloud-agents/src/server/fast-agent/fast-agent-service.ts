@@ -1113,7 +1113,7 @@ export async function answerFastAgentQuestion({
         source: conversation.surface,
         nativeSessionId: activeOpenCodeSessionId,
       });
-      if (signal?.aborted || !nativeSteer) return;
+      if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) return;
       await nativeSteer({
         messageId: buildFastAgentNativeSteerMessageId(row.id, row.createdAt),
         text: normalizeThreadText(followUp.question),
