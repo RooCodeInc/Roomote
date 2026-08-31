@@ -63,16 +63,16 @@ describe('manager slack helpers', () => {
           {
             type: 'section',
             text: { type: 'mrkdwn', text: 'Hello managers' },
+            accessory: {
+              type: 'overflow',
+              action_id: 'late_bound_automation_configure',
+              options: [
+                expect.objectContaining({
+                  url: 'https://app.example.com/automations#suggest-ideas',
+                }),
+              ],
+            },
           },
-          expect.objectContaining({
-            type: 'actions',
-            elements: [
-              expect.objectContaining({
-                action_id: 'late_bound_automation_configure',
-                url: 'https://app.example.com/automations#suggest-ideas',
-              }),
-            ],
-          }),
         ],
       }),
     ]);
@@ -118,8 +118,13 @@ describe('manager slack helpers', () => {
               ),
             }),
             expect.objectContaining({
+              type: 'overflow',
               action_id: 'late_bound_automation_configure',
-              url: 'https://app.example.com/automations#custom-automation-automation-1',
+              options: [
+                expect.objectContaining({
+                  url: 'https://app.example.com/automations#custom-automation-automation-1',
+                }),
+              ],
             }),
           ],
         },
@@ -174,8 +179,11 @@ describe('manager slack helpers', () => {
             type: 'mrkdwn',
             text: '- Do the important thing\n\nReact on a thread item to start it.',
           },
+          accessory: expect.objectContaining({
+            type: 'overflow',
+            action_id: 'late_bound_automation_configure',
+          }),
         },
-        { type: 'actions' },
       ],
     });
   });
