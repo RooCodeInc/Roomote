@@ -624,6 +624,10 @@ async function launchCustomAutomationRow(
   // result; if that admin has no linked DM, preserve the task-UI fallback.
   let destination: ResolvedAutomationDestination | null = null;
   if (isConfiguredAutomationTarget(automation.target)) {
+    const deferSlackChannelResolution =
+      !fastExecution &&
+      automation.target.provider === 'slack' &&
+      automation.target.targetKind === 'slack_channel';
     if (fastExecution && !isFastDeliveryTarget(automation.target)) {
       const message = `${PROVIDER_LABELS[automation.target.provider as CommunicationProvider]} report destinations of this type are not supported in Fast mode.`;
       result.skippedReason = message;
@@ -636,7 +640,16 @@ async function launchCustomAutomationRow(
       return result;
     }
 
-    destination = await resolveDestination(automation.target);
+    // Sandbox reports are late-bound: a clean run may intentionally never
+    // contact Slack, so validate installation and channel access only when its
+    // first send_chat_reply actually creates the report root.
+    destination = deferSlackChannelResolution
+      ? {
+          provider: 'slack',
+          channelId: automation.target.externalRef,
+          source: 'automation_target',
+        }
+      : await resolveDestination(automation.target);
     if (!destination) {
       const message = isBackgroundAutomationUserTargetKind(
         automation.target.targetKind,
@@ -655,8 +668,10 @@ async function launchCustomAutomationRow(
       return result;
     }
 
-    const connected = await listConnectedCommunicationProviders();
-    if (!connected.includes(destination.provider)) {
+    const connected = deferSlackChannelResolution
+      ? null
+      : await listConnectedCommunicationProviders();
+    if (connected && !connected.includes(destination.provider)) {
       const message = `${destination.provider} is not connected.`;
       result.skippedReason = message;
       result.errors.push(message);
