@@ -24,7 +24,10 @@ import {
 } from '@roomote/types';
 
 import { FAST_RESPONDING_LEASE_MS } from './fast-agent-constants';
-import type { FastAgentConversation } from './fast-agent-conversation';
+import {
+  FAST_AGENT_REACTION_INPUT_TYPE,
+  type FastAgentConversation,
+} from './fast-agent-conversation';
 
 export type FastAgentConversationRecord = {
   id: string;
@@ -536,7 +539,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
           message.role === 'user' &&
           message.metadata?.turnSource === 'human' &&
-          message.metadata?.inputKind !== 'reaction';
+          message.metadata?.inputKind !== FAST_AGENT_REACTION_INPUT_TYPE;
         let initialHumanTurn = false;
         if (isSubstantiveHumanPrompt) {
           const [currentHumanPrompt] = await tx
@@ -552,7 +555,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
                 ),
                 eq(fastAgentMessages.role, 'user'),
                 sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
-                sql`coalesce(${fastAgentMessages.metadata}->>'inputKind', 'message') <> 'reaction'`,
+                sql`coalesce(${fastAgentMessages.metadata}->>'inputKind', 'message') <> ${FAST_AGENT_REACTION_INPUT_TYPE}`,
               ),
             )
             .limit(1);
@@ -568,7 +571,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
                 ),
                 eq(fastAgentMessages.role, 'user'),
                 sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
-                sql`coalesce(${fastAgentMessages.metadata}->>'inputKind', 'message') <> 'reaction'`,
+                sql`coalesce(${fastAgentMessages.metadata}->>'inputKind', 'message') <> ${FAST_AGENT_REACTION_INPUT_TYPE}`,
                 sql`${fastAgentMessages.eventId} <> ${message.eventId}`,
               ),
             )

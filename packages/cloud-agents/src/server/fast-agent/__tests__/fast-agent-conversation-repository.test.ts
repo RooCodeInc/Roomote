@@ -16,6 +16,7 @@ import {
   reconcileExpiredFastAgentInferenceRetryNotices,
   reconcileFastAgentInferenceRetryNotices,
 } from '../fast-agent-conversation-repository';
+import { FAST_AGENT_REACTION_INPUT_TYPE } from '../fast-agent-conversation';
 import { hasFastAgentSession } from '../fast-agent-session';
 
 const createdUserIds: string[] = [];
@@ -503,7 +504,7 @@ describe('Fast conversation repository', () => {
     const prompt = (
       eventId: string,
       turnSource: 'human' | 'platform_event',
-      inputKind?: 'reaction',
+      inputKind?: typeof FAST_AGENT_REACTION_INPUT_TYPE,
     ) => ({
       eventId,
       turnId: eventId,
@@ -530,7 +531,11 @@ describe('Fast conversation repository', () => {
     await expect(
       fastAgentConversationRepository.upsertMessage({
         conversationId: session.id,
-        message: prompt('human-reaction', 'human', 'reaction'),
+        message: prompt(
+          'human-reaction',
+          'human',
+          FAST_AGENT_REACTION_INPUT_TYPE,
+        ),
       }),
     ).resolves.toEqual({ initialHumanTurn: false });
     await expect(

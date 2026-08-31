@@ -42,10 +42,12 @@ export type FastAgentReactionExternalInput = {
   eventId: string;
 };
 
+export const FAST_AGENT_REACTION_INPUT_TYPE = 'reaction' as const;
+
 export type FastAgentHumanInput =
   | { type: 'message' }
   | {
-      type: 'reaction';
+      type: typeof FAST_AGENT_REACTION_INPUT_TYPE;
       externalInput: FastAgentReactionExternalInput;
     };
 

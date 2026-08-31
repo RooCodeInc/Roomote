@@ -110,6 +110,7 @@ import {
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
+  FAST_AGENT_REACTION_INPUT_TYPE,
   type FastAgentConversation,
   type FastAgentHumanInput,
   isFastAgentCommunicationConversation,
@@ -859,7 +860,8 @@ export async function answerFastAgentQuestion({
   });
   const platformEvent = turnSource === 'platform_event';
   const humanInput = input ?? ({ type: 'message' } as const);
-  const reactionInput = !platformEvent && humanInput.type === 'reaction';
+  const reactionInput =
+    !platformEvent && humanInput.type === FAST_AGENT_REACTION_INPUT_TYPE;
   const substantiveHumanInput = !platformEvent && !reactionInput;
   const currentMessageReactable = substantiveHumanInput;
   const transcriptPayload = reactionInput
@@ -1246,7 +1248,9 @@ export async function answerFastAgentQuestion({
           // transcript or title seeds.
           visibleInTranscript: substantiveHumanInput,
           turnSource,
-          ...(reactionInput ? { inputKind: 'reaction' as const } : {}),
+          ...(reactionInput
+            ? { inputKind: FAST_AGENT_REACTION_INPUT_TYPE }
+            : {}),
           ...(platformEvent ? { platformEventKind } : {}),
           userId,
           ...(senderDisplayName ? { userName: senderDisplayName } : {}),

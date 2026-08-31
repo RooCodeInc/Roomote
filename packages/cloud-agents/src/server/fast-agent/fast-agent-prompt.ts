@@ -6,13 +6,14 @@ import {
 
 import type { RoutableEnvironment } from '../router';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
-import type {
-  FastAgentHumanInput,
-  FastAgentPlatformEventHandling,
-  FastAgentPlatformEventKind,
-  FastAgentPlatformEventVisibility,
-  FastAgentSurface,
-  FastAgentTurnSource,
+import {
+  FAST_AGENT_REACTION_INPUT_TYPE,
+  type FastAgentHumanInput,
+  type FastAgentPlatformEventHandling,
+  type FastAgentPlatformEventKind,
+  type FastAgentPlatformEventVisibility,
+  type FastAgentSurface,
+  type FastAgentTurnSource,
 } from './fast-agent-conversation';
 import type { FastAgentActiveTask } from './fast-agent-session';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
@@ -123,7 +124,8 @@ export function buildFastAgentSystemPrompt({
   hasGitHubTools?: boolean;
 }): string {
   const platformEvent = turnSource === 'platform_event';
-  const reactionInput = !platformEvent && input?.type === 'reaction';
+  const reactionInput =
+    !platformEvent && input?.type === FAST_AGENT_REACTION_INPUT_TYPE;
   const currentMessageReactable = !platformEvent && !reactionInput;
   const surfaceName =
     surface === 'slack'
