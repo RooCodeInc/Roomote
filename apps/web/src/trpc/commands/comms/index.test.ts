@@ -7,6 +7,7 @@ const {
   mockTxSelect,
   mockDbTransaction,
   mockResolveAgentMailRuntimeCredentials,
+  mockAgentMailClientConstructor,
   mockAgentMailListInboxes,
   mockAgentMailCreateInbox,
   mockAgentMailGetInbox,
@@ -45,6 +46,7 @@ const {
     webhookSecret: null as string | null,
     inboxId: null as string | null,
   })),
+  mockAgentMailClientConstructor: vi.fn(),
   mockAgentMailListInboxes: vi.fn(),
   mockAgentMailCreateInbox: vi.fn(),
   mockAgentMailGetInbox: vi.fn(),
@@ -187,6 +189,9 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('@roomote/communication/agentmail-provider', () => ({
   AgentMailApiClient: class {
+    constructor(options: { apiKey: string }) {
+      mockAgentMailClientConstructor(options);
+    }
     listInboxes = mockAgentMailListInboxes;
     createInbox = mockAgentMailCreateInbox;
     getInbox = mockAgentMailGetInbox;
@@ -250,6 +255,7 @@ import {
   classifyTelegramWebhookCheckError,
   clearCommsAuthConfigCommand,
   getCommsStatusCommand,
+  listAgentMailInboxesCommand,
   listDiscordChannelsCommand,
   listDiscordGuildsCommand,
   repairTelegramWebhookCommand,
@@ -1108,6 +1114,69 @@ describe('comms commands', () => {
       });
     });
 
+    it('creates the proposal inbox when the chooser requests it and it is missing', async () => {
+      mockAgentMailGetInbox.mockRejectedValue(
+        new Error('AgentMail GET /v0/inboxes/x failed (404): Not Found'),
+      );
+      mockAgentMailCreateInbox.mockResolvedValue({
+        inbox_id: `${expectedUsername}@agentmail.to`,
+      });
+      mockAgentMailCreateWebhook.mockResolvedValue({
+        webhook_id: 'wh-1',
+        url: expectedWebhookUrl,
+        secret: 'whsec_test',
+      });
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+          values: {
+            R_AGENTMAIL_API_KEY: 'am-key',
+            R_AGENTMAIL_INBOX_ID: `${expectedUsername}@agentmail.to`,
+          },
+        }),
+      ).resolves.toMatchObject({
+        agentmail: { inboxAddress: `${expectedUsername}@agentmail.to` },
+      });
+
+      expect(mockAgentMailCreateInbox).toHaveBeenCalledWith({
+        username: expectedUsername,
+        clientId: `roomote-${hostHash}`,
+      });
+      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          values: expect.arrayContaining([
+            {
+              name: 'R_AGENTMAIL_INBOX_ID',
+              value: `${expectedUsername}@agentmail.to`,
+            },
+          ]),
+        }),
+      );
+    });
+
+    it('still rejects a missing inbox that is not the deployment proposal', async () => {
+      mockAgentMailGetInbox.mockRejectedValue(
+        new Error('AgentMail GET /v0/inboxes/x failed (404): Not Found'),
+      );
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+          values: {
+            R_AGENTMAIL_API_KEY: 'am-key',
+            R_AGENTMAIL_INBOX_ID: 'missing@agentmail.to',
+          },
+        }),
+      ).rejects.toThrow(
+        /could not find the inbox missing@agentmail\.to with this API key/u,
+      );
+
+      expect(mockAgentMailCreateInbox).not.toHaveBeenCalled();
+      expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+    });
+
     it('surfaces a taken username inline with guidance to pick an address', async () => {
       mockAgentMailCreateInbox.mockRejectedValue(
         new Error(
@@ -1123,6 +1192,91 @@ describe('comms commands', () => {
       ).rejects.toThrow(/already taken at AgentMail/u);
 
       expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listAgentMailInboxesCommand', () => {
+    const hostHash = createHash('sha256')
+      .update('app.example.com')
+      .digest('hex')
+      .slice(0, 6);
+    const proposedNewAddress = `roomote-app-example-com-${hostHash}@agentmail.to`;
+
+    it('rejects non-admin users', async () => {
+      await expect(
+        listAgentMailInboxesCommand(buildMockAuth({ isAdmin: false }), {}),
+      ).rejects.toThrow('Unauthorized');
+    });
+
+    it('lists normalized inboxes with the entered key even when one is saved', async () => {
+      mockResolveAgentMailRuntimeCredentials.mockResolvedValue({
+        apiKey: 'saved-key',
+        webhookSecret: null,
+        inboxId: null,
+      });
+      mockAgentMailListInboxes.mockResolvedValue({
+        inboxes: [
+          { inbox_id: 'One@AgentMail.to' },
+          { inbox_id: 'two@agentmail.to' },
+        ],
+      });
+
+      await expect(
+        listAgentMailInboxesCommand(buildMockAuth(), {
+          apiKey: '  typed-key  ',
+        }),
+      ).resolves.toEqual({
+        inboxes: ['one@agentmail.to', 'two@agentmail.to'],
+        proposedNewAddress,
+      });
+
+      expect(mockAgentMailClientConstructor).toHaveBeenCalledWith(
+        expect.objectContaining({ apiKey: 'typed-key' }),
+      );
+    });
+
+    it('falls back to the saved API key when none is entered', async () => {
+      mockResolveAgentMailRuntimeCredentials.mockResolvedValue({
+        apiKey: 'saved-key',
+        webhookSecret: null,
+        inboxId: null,
+      });
+      mockAgentMailListInboxes.mockResolvedValue({
+        inboxes: [{ inbox_id: 'existing@agentmail.to' }],
+      });
+
+      await expect(
+        listAgentMailInboxesCommand(buildMockAuth(), {}),
+      ).resolves.toEqual({
+        inboxes: ['existing@agentmail.to'],
+        proposedNewAddress,
+      });
+
+      expect(mockAgentMailClientConstructor).toHaveBeenCalledWith(
+        expect.objectContaining({ apiKey: 'saved-key' }),
+      );
+    });
+
+    it('errors clearly when no API key is entered or saved', async () => {
+      await expect(
+        listAgentMailInboxesCommand(buildMockAuth(), {}),
+      ).rejects.toThrow(
+        'Enter an AgentMail API key to load the account inboxes.',
+      );
+
+      expect(mockAgentMailListInboxes).not.toHaveBeenCalled();
+    });
+
+    it('classifies a refused key with the required permissions copy', async () => {
+      mockAgentMailListInboxes.mockRejectedValue(
+        new Error('AgentMail GET /v0/inboxes failed (403): Forbidden'),
+      );
+
+      await expect(
+        listAgentMailInboxesCommand(buildMockAuth(), { apiKey: 'bad-key' }),
+      ).rejects.toThrow(
+        /AgentMail rejected this API key\. Create a key in the AgentMail console with these permissions .* webhook_create/,
+      );
     });
   });
 

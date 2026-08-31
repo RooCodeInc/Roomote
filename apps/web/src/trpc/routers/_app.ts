@@ -340,6 +340,7 @@ import {
   saveCommsAuthConfigCommand,
   clearCommsAuthConfigCommand,
   diagnoseDiscordPermissionsCommand,
+  listAgentMailInboxesCommand,
   listDiscordChannelsCommand,
   listDiscordGuildsCommand,
   registerDiscordCommandsCommand,
@@ -2012,6 +2013,12 @@ export const appRouter = createRouter({
     repairTelegram: protectedProcedure.mutation(({ ctx: { auth } }) =>
       repairTelegramWebhookCommand(auth),
     ),
+
+    listAgentMailInboxes: protectedProcedure
+      .input(z.object({ apiKey: z.string().trim().optional() }))
+      .query(({ ctx: { auth }, input }) =>
+        listAgentMailInboxesCommand(auth, input),
+      ),
 
     listDiscordGuilds: protectedProcedure.query(({ ctx: { auth } }) =>
       listDiscordGuildsCommand(auth),

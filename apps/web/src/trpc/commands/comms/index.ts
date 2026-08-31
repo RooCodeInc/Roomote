@@ -750,6 +750,15 @@ function buildAgentMailInboxProposal(publicAppUrl: string): {
   return { username, clientId: `roomote-${hostHash}` };
 }
 
+/** Default domain AgentMail assigns to inboxes created without a domain. */
+const AGENTMAIL_DEFAULT_INBOX_DOMAIN = 'agentmail.to';
+
+function buildAgentMailProposedInboxAddress(proposal: {
+  username: string;
+}): string {
+  return `${proposal.username}@${AGENTMAIL_DEFAULT_INBOX_DOMAIN}`;
+}
+
 function normalizeAgentMailInboxAddress(
   value: string | null | undefined,
 ): string | null {
@@ -804,11 +813,88 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
   }
 }
 
+/**
+ * List the AgentMail inboxes the given (or saved) API key can see, plus the
+ * deployment's proposed new-inbox address, so the settings UI can offer a
+ * chooser instead of a free-text inbox field. Read-only: nothing is created
+ * or persisted here.
+ */
+export async function listAgentMailInboxesCommand(
+  auth: UserAuthSuccess,
+  input: { apiKey?: string } = {},
+): Promise<{ inboxes: string[]; proposedNewAddress: string }> {
+  assertAdmin(auth);
+
+  invalidateAgentMailRuntimeCredentialsCache();
+  const existing = await resolveAgentMailRuntimeCredentials();
+  const apiKey = input.apiKey?.trim() || existing.apiKey;
+
+  if (!apiKey) {
+    throw new Error('Enter an AgentMail API key to load the account inboxes.');
+  }
+
+  const client = createAgentMailApiClient(apiKey);
+
+  try {
+    const listed = await client.listInboxes();
+    const inboxes = (listed.inboxes ?? [])
+      .map((inbox) =>
+        normalizeAgentMailInboxAddress(
+          typeof inbox.inbox_id === 'string' ? inbox.inbox_id : null,
+        ),
+      )
+      .filter((address): address is string => Boolean(address));
+
+    return {
+      inboxes,
+      proposedNewAddress: buildAgentMailProposedInboxAddress(
+        buildAgentMailInboxProposal(Env.R_APP_URL),
+      ),
+    };
+  } catch (error) {
+    throw new Error(
+      classifyAgentMailSetupError(error, 'validating the API key'),
+    );
+  }
+}
+
 type AgentMailReconcileResult = {
   inboxAddress: string;
   webhookUrl: string;
   webhookSecret: string | null;
 };
+
+/**
+ * Create the deployment's proposed inbox (idempotent via the proposal client
+ * id) and return its normalized address. Shared by the blank-inbox provision
+ * path and the chooser's explicit "create new" path.
+ */
+async function createProposedAgentMailInbox(
+  client: AgentMailApiClient,
+  proposal: { username: string; clientId: string },
+): Promise<string> {
+  try {
+    const inbox = await client.createInbox({
+      username: proposal.username,
+      clientId: proposal.clientId,
+    });
+    const createdAddress = normalizeAgentMailInboxAddress(
+      typeof inbox.inbox_id === 'string' ? inbox.inbox_id : null,
+    );
+    if (!createdAddress) {
+      throw new Error('AgentMail created an inbox but returned no inbox id.');
+    }
+    return createdAddress;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/\(409\)|already exists|already taken/iu.test(message)) {
+      throw new Error(
+        `The email address ${proposal.username} is already taken at AgentMail. Enter an inbox email address of your own in the Inbox Email Address field and save again.`,
+      );
+    }
+    throw new Error(classifyAgentMailSetupError(error, 'creating an inbox'));
+  }
+}
 
 /**
  * Reconcile the AgentMail account against this deployment before persisting
@@ -878,11 +964,22 @@ async function reconcileAgentMailSetup(input: {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/\(404\)|not found/iu.test(message)) {
+        const proposal = buildAgentMailInboxProposal(Env.R_APP_URL);
+        if (requestedInboxId === buildAgentMailProposedInboxAddress(proposal)) {
+          // The inbox chooser's "create new" option submits the deployment's
+          // proposal address explicitly, so a 404 here means it does not
+          // exist yet: create it instead of erroring.
+          inboxAddress = await createProposedAgentMailInbox(client, proposal);
+        } else {
+          throw new Error(
+            `AgentMail could not find the inbox ${requestedInboxId} with this API key. Check the inbox email address, or clear it to let Roomote create one.`,
+          );
+        }
+      } else {
         throw new Error(
-          `AgentMail could not find the inbox ${requestedInboxId} with this API key. Check the inbox email address, or clear it to let Roomote create one.`,
+          classifyAgentMailSetupError(error, 'reading the inbox'),
         );
       }
-      throw new Error(classifyAgentMailSetupError(error, 'reading the inbox'));
     }
   } else if (orgInboxes.length === 1) {
     // The org already has exactly one inbox (the console provisions one at
@@ -894,28 +991,10 @@ async function reconcileAgentMailSetup(input: {
       `This AgentMail account has ${orgInboxes.length} inboxes. Enter the one Roomote should use in the Inbox Email Address field: ${orgInboxes.join(', ')}`,
     );
   } else {
-    const proposal = buildAgentMailInboxProposal(Env.R_APP_URL);
-    try {
-      const inbox = await client.createInbox({
-        username: proposal.username,
-        clientId: proposal.clientId,
-      });
-      const createdAddress = normalizeAgentMailInboxAddress(
-        typeof inbox.inbox_id === 'string' ? inbox.inbox_id : null,
-      );
-      if (!createdAddress) {
-        throw new Error('AgentMail created an inbox but returned no inbox id.');
-      }
-      inboxAddress = createdAddress;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (/\(409\)|already exists|already taken/iu.test(message)) {
-        throw new Error(
-          `The email address ${proposal.username} is already taken at AgentMail. Enter an inbox email address of your own in the Inbox Email Address field and save again.`,
-        );
-      }
-      throw new Error(classifyAgentMailSetupError(error, 'creating an inbox'));
-    }
+    inboxAddress = await createProposedAgentMailInbox(
+      client,
+      buildAgentMailInboxProposal(Env.R_APP_URL),
+    );
   }
 
   // Converge the deployment's webhook (found by client id) on the current
