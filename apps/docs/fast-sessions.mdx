@@ -31,7 +31,9 @@ conversation to execution to review without changing identity.
 A Session timeline shows prompts, replies, and delegated execution activity.
 Execution cards show their status, workspace, pull requests, artifacts, latest
 error, and cost. Select a card to open the lightweight details panel, or choose
-**Open full workspace** for terminal, logs, diff, and preview tools.
+**Open full workspace** for terminal, logs, diff, and preview tools. While an
+execution starts, the panel shows its live startup progress. Select an artifact
+in the panel to preview it without leaving the Session.
 
 The Sessions page supports list and board views, filters, pins, recent Sessions,
 and unread indicators. Search matches Session and task titles, repositories,
@@ -44,8 +46,9 @@ generated title that updates as the Session evolves.
 
 Fast sessions can also render presentational widgets such as status cards,
 tables, and plans directly in the transcript. Widget HTML is sanitized and
-sandboxed in the web view; chat surfaces receive only the widget's text
-fallback.
+sandboxed in the web view. Slack and Discord receive the widget's text fallback
+as a chat preview with a link to open the rendered widget; other chat surfaces
+receive the text fallback when the agent provides one.
 
 ## Reply to a session
 
