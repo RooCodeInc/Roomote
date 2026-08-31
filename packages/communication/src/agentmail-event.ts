@@ -126,8 +126,17 @@ function stripElementWithContent(html: string, tagName: string): string {
     // "Pleasereview"); later whitespace normalization collapses it.
     result += `${html.slice(cursor, openAt)} `;
 
+    // Scan for the close tag only AFTER the opening tag ends; a literal
+    // '</script>' inside the opening tag's attribute values must not
+    // terminate the block early and leak its content.
+    const openTagEnd = lower.indexOf('>', openAt);
+    if (openTagEnd === -1) {
+      // Unterminated opening tag: drop the rest, matching sanitizer behavior.
+      return result;
+    }
+
     const closePattern = `</${tagName}`;
-    let closeAt = lower.indexOf(closePattern, openAt);
+    let closeAt = lower.indexOf(closePattern, openTagEnd + 1);
     while (
       closeAt !== -1 &&
       !isTagNameBoundary(closeAt + closePattern.length)

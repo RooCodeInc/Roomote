@@ -103,6 +103,16 @@ describe('getAgentMailSenderAddress', () => {
 });
 
 describe('getAgentMailMessageBodyText', () => {
+  it('ignores close tags embedded in the opening tag attributes', () => {
+    expect(
+      getAgentMailMessageBodyText(
+        buildMessage({
+          html: '<script data-note="</script>">hidden()</script>visible',
+        }),
+      ),
+    ).toBe('visible');
+  });
+
   it('does not treat tags that merely start with script/style as blocks', () => {
     expect(
       getAgentMailMessageBodyText(
