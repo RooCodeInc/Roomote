@@ -168,6 +168,8 @@ export interface AcpRequestUserInputQuestion {
   isOther: boolean;
   isSecret: boolean;
   options?: AcpRequestUserInputQuestionOption[];
+  /** Multiple-choice questions default to one selection when absent. */
+  multiple?: boolean;
 }
 
 export type AcpRequestUserInputAnswers = Record<
@@ -187,6 +189,7 @@ export interface AcpRequestUserInputRequestParams {
 export interface AcpRequestUserInputPayload extends AcpRequestUserInputRequestParams {
   requestId: string;
   status: 'pending';
+  preset?: 'setup_source_control_provider' | 'setup_starter_tasks';
 }
 
 export interface AcpRequestUserInputResponsePayload {
@@ -263,7 +266,7 @@ function parseAcpRequestUserInputQuestionOption(
   return { label, description };
 }
 
-function parseAcpRequestUserInputQuestion(
+export function parseAcpRequestUserInputQuestion(
   value: unknown,
 ): AcpRequestUserInputQuestion | null {
   const record = asRecordOrNull(value);
@@ -291,6 +294,7 @@ function parseAcpRequestUserInputQuestion(
     isOther: record?.isOther === true,
     isSecret: record?.isSecret === true,
     ...(options ? { options } : {}),
+    ...(record?.multiple === true ? { multiple: true } : {}),
   };
 }
 

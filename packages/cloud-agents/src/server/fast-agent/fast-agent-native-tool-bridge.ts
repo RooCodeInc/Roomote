@@ -442,6 +442,30 @@ export default {
   execute: (args, context) => invoke("spill_grep", args, context),
 }
 `,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Ask structured questions, or use a trusted setup preset whose options Roomote supplies. Multiple-choice questions require explicit submission. The turn resumes from the persisted answer.",
+  args: z.union([z.object({
+    questions: z.array(z.object({
+      id: z.string().min(1).max(80),
+      header: z.string().min(1).max(60),
+      question: z.string().min(1).max(500),
+      options: z.array(z.object({
+        label: z.string().min(1).max(140),
+        description: z.string().min(1).max(500),
+      })).min(1).max(12).optional().describe("Present options as choices; omit for free-text"),
+      multiple: z.boolean().optional().describe("Allow more than one option; defaults to false"),
+    })).min(1).max(4),
+  }), z.object({
+    preset: z.enum(["setup_source_control_provider", "setup_starter_tasks"]),
+  })]),
+  execute: (args, context) => invoke("request_user_input", args, context),
+}
+`,
   };
 
 const activeExecutors = new Map<string, ActiveExecutor>();
@@ -909,7 +933,6 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
         });
         return;
       }
-
       const call = {
         sessionId: parsed.sessionID,
         name: parsed.tool,

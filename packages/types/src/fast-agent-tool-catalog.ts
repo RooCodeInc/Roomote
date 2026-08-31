@@ -18,6 +18,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   showWidget: 'show_widget',
   spillGrep: 'spill_grep',
   spillRead: 'spill_read',
+  requestUserInput: 'request_user_input',
 } as const;
 
 export type FastAgentNativeToolName =
@@ -58,6 +59,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep, kind: ACP_TOOL_KINDS.search },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead, kind: ACP_TOOL_KINDS.read },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
+    kind: ACP_TOOL_KINDS.communication,
+  },
 ] as const satisfies readonly {
   name: FastAgentNativeToolName;
   kind: KnownAcpToolKind;

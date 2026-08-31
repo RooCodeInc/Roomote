@@ -39,6 +39,9 @@ vi.mock('@/trpc/client', () => ({
       status: {
         queryOptions: vi.fn(() => ({ queryKey: ['setup.status'] })),
       },
+      sessionStatus: {
+        queryOptions: vi.fn(() => ({ queryKey: ['setup.sessionStatus'] })),
+      },
     },
   }),
 }));
@@ -76,15 +79,18 @@ describe('AuthenticatedLayoutClient', () => {
       isSignedIn: true,
       user: { isAdmin: true },
     });
-    useQueryMock.mockReturnValue({
-      data: {
-        hasGitHub: true,
-        hasEnvironments: true,
-        setupCompletedAt: '2026-01-01T00:00:00.000Z',
-      },
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: null, completed: false }
+          : {
+              hasGitHub: true,
+              hasEnvironments: true,
+              setupCompletedAt: '2026-01-01T00:00:00.000Z',
+            },
       isLoading: false,
       isError: false,
-    });
+    }));
   });
 
   it('renders authenticated pages when setup is complete', () => {
@@ -103,15 +109,18 @@ describe('AuthenticatedLayoutClient', () => {
   });
 
   it('redirects incomplete admins to setup before rendering the page', async () => {
-    useQueryMock.mockReturnValue({
-      data: {
-        hasGitHub: false,
-        hasEnvironments: false,
-        setupCompletedAt: null,
-      },
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: null, completed: false }
+          : {
+              hasGitHub: false,
+              hasEnvironments: false,
+              setupCompletedAt: null,
+            },
       isLoading: false,
       isError: false,
-    });
+    }));
 
     render(
       <AuthenticatedLayoutClient>
@@ -125,17 +134,46 @@ describe('AuthenticatedLayoutClient', () => {
     });
   });
 
-  it('renders authenticated pages when setup is complete but environments are still missing', () => {
-    mockPathname = '/settings/previews';
-    useQueryMock.mockReturnValue({
-      data: {
-        hasGitHub: true,
-        hasEnvironments: false,
-        setupCompletedAt: '2026-01-01T00:00:00.000Z',
-      },
+  it('redirects incomplete admins to their persisted setup Session', async () => {
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: 'setup-session-id', completed: false }
+          : {
+              hasGitHub: false,
+              hasEnvironments: false,
+              setupCompletedAt: null,
+            },
       isLoading: false,
       isError: false,
+    }));
+
+    render(
+      <AuthenticatedLayoutClient>
+        <div>Home content</div>
+      </AuthenticatedLayoutClient>,
+    );
+
+    expect(screen.queryByText('Home content')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/sessions/setup-session-id');
     });
+  });
+
+  it('renders authenticated pages when setup is complete but environments are still missing', () => {
+    mockPathname = '/settings/previews';
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: null, completed: false }
+          : {
+              hasGitHub: true,
+              hasEnvironments: false,
+              setupCompletedAt: '2026-01-01T00:00:00.000Z',
+            },
+      isLoading: false,
+      isError: false,
+    }));
 
     render(
       <AuthenticatedLayoutClient>

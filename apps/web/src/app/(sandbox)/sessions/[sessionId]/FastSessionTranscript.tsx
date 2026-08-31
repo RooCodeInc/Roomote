@@ -47,6 +47,10 @@ import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { truncatePageTitle } from '@/lib/page-title';
 import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
+import {
+  findPendingSessionInputRequest,
+  SessionUserInputCard,
+} from './SessionUserInputCard';
 
 import {
   AcpTranscriptBlockList,
@@ -401,19 +405,30 @@ export function FastSessionTranscript({
 
   const uiMessages = useMemo(
     () =>
-      messages.map((message) =>
-        toAcpUiMessage({
-          id: message.id,
-          ts: message.ts,
-          eventType: message.eventType as AcpEventType,
-          role: message.role,
-          kind: inferAcpMessageKind(message.eventType),
-          contentBlocks: message.contentBlocks,
-          metadata: message.metadata,
-          payload: message.payload,
-          text: getTextFromContentBlocks(message.contentBlocks) ?? undefined,
-        }),
-      ),
+      messages
+        .filter(
+          (message) =>
+            message.eventType !== ACP_ENVELOPE_EVENT_TYPES.RequestUserInput &&
+            message.eventType !==
+              ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+        )
+        .map((message) =>
+          toAcpUiMessage({
+            id: message.id,
+            ts: message.ts,
+            eventType: message.eventType as AcpEventType,
+            role: message.role,
+            kind: inferAcpMessageKind(message.eventType),
+            contentBlocks: message.contentBlocks,
+            metadata: message.metadata,
+            payload: message.payload,
+            text: getTextFromContentBlocks(message.contentBlocks) ?? undefined,
+          }),
+        ),
+    [messages],
+  );
+  const pendingInputRequest = useMemo(
+    () => findPendingSessionInputRequest(messages),
     [messages],
   );
   const reviewOffers = useMemo(
@@ -587,10 +602,18 @@ export function FastSessionTranscript({
               }
             />
           ))}
+          {pendingInputRequest ? (
+            <div className="mt-3">
+              <SessionUserInputCard
+                sessionId={sessionId}
+                request={pendingInputRequest}
+              />
+            </div>
+          ) : null}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
-      {canReply ? (
+      {canReply && !pendingInputRequest ? (
         <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card transition-colors @[56rem]:rounded-t-lg">
           <SessionPromptInput
             sessionId={sessionId}

@@ -72,11 +72,13 @@ export function StepSourceControlConnect({
   onContinue,
   onRemoveSyncMarker,
   onBack,
+  returnPath,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
   onContinue: () => void;
   onRemoveSyncMarker?: () => void;
   onBack?: () => void;
+  returnPath?: string;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -94,6 +96,9 @@ export function StepSourceControlConnect({
     trpc.sourceControl.saveConfig.mutationOptions({
       onError: (error) => toast.error(error.message),
     }),
+  );
+  const startRecommendations = useMutation(
+    trpc.automations.startRecommendations.mutationOptions(),
   );
 
   const createInstallation = useCreateGitHubInstallation({
@@ -116,6 +121,9 @@ export function StepSourceControlConnect({
         });
         await queryClient.invalidateQueries({
           queryKey: trpc.sourceControl.repositories.queryKey(),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: trpc.setup.sessionStatus.queryKey(),
         });
 
         if ('success' in data && data.success === false) {
@@ -148,6 +156,7 @@ export function StepSourceControlConnect({
         );
 
         if (refreshedProvider?.connected) {
+          startRecommendations.mutate();
           onContinue();
         } else {
           setSyncedWithZeroRepos(true);
@@ -407,7 +416,8 @@ export function StepSourceControlConnect({
               <Button
                 onClick={() =>
                   authenticateAdoAccount.mutate(
-                    `${window.location.pathname}?step=source-control-connect`,
+                    returnPath ??
+                      `${window.location.pathname}?step=source-control-connect`,
                   )
                 }
                 disabled={authenticateAdoAccount.isPending}
@@ -436,7 +446,8 @@ export function StepSourceControlConnect({
             <Button
               onClick={() =>
                 createInstallation.mutate(
-                  `${window.location.pathname}?step=source-control-connect`,
+                  returnPath ??
+                    `${window.location.pathname}?step=source-control-connect`,
                 )
               }
               disabled={createInstallation.isPending}

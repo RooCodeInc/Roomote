@@ -118,6 +118,11 @@ vi.mock('../../task/[taskId]/messages/acp/DelegatedTaskCard', () => ({
   ),
 }));
 
+vi.mock('./SessionUserInputCard', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./SessionUserInputCard')>()),
+  SessionUserInputCard: () => <div>Structured input request</div>,
+}));
+
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
   listeners = new Map<string, Set<(event: MessageEvent) => void>>();
@@ -1387,7 +1392,7 @@ describe('FastSessionTranscript', () => {
             source: 'web',
             nativeSessionId: null,
             nativeMessageId: null,
-            createdAt: new Date().toISOString(),
+            createdAt: new Date(),
           },
         ],
       });
@@ -1419,6 +1424,52 @@ describe('FastSessionTranscript', () => {
 
     expect(await screen.findByText('turn is busy')).toBeInTheDocument();
     expect(input.value).toBe('Do not lose me');
+  });
+
+  it('shows structured input instead of the ordinary composer while pending', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            id: 'request-1',
+            eventId: 'request-1',
+            turnId: 'turn-1',
+            turnSeq: 1,
+            ts: Date.now(),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+            role: 'assistant',
+            contentBlocks: [{ type: 'text', text: 'Choose one' }],
+            metadata: { visibleInTranscript: true },
+            payload: {
+              requestId: 'rui:request-1',
+              status: 'pending',
+              sessionId: 'session-1',
+              turnId: 'turn-1',
+              callId: 'call-1',
+              questions: [
+                {
+                  id: 'choice',
+                  header: 'Choice',
+                  question: 'Choose one',
+                  isOther: false,
+                  isSecret: false,
+                  options: [{ label: 'One', description: 'First choice' }],
+                },
+              ],
+            },
+            source: 'web',
+            nativeSessionId: null,
+            nativeMessageId: null,
+            createdAt: new Date(),
+          },
+        ]}
+        canReply
+      />,
+    );
+
+    expect(screen.getByText('Structured input request')).toBeVisible();
+    expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
   });
 
   it('updates the header title from the session stream event', () => {

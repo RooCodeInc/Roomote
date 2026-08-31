@@ -25,7 +25,8 @@ export type FastAgentPlatformEventHandling = 'default' | 'present_only';
 export type FastAgentPlatformEventKind =
   | 'delegated_task'
   | 'automation'
-  | 'setup';
+  | 'setup'
+  | 'input_response';
 
 export type FastAgentReactionExternalInput = {
   type: 'reaction_added';
@@ -92,6 +93,9 @@ export type LaunchFastAgentTask = (params: {
   launchIdempotencyKey?: string;
   model?: string | null;
   parentSessionId: string;
+  /** Optional launch idempotency key persisted in the standard task-run
+   * payload; a partial unique index makes concurrent retries converge. */
+  launchIdempotencyKey?: string;
   postKickoff: (task: {
     taskId: string;
     taskUrl?: string;
@@ -127,6 +131,25 @@ export type FastAgentMcpServerConfig = {
   disabledTools?: string[];
 };
 
+/** Structured input request issued with the Fast-native request_user_input tool. */
+export type FastAgentInputRequest = {
+  requestId: string;
+  preset?: FastAgentInputPreset;
+  questions: Array<{
+    id: string;
+    header: string;
+    question: string;
+    isOther: boolean;
+    isSecret: boolean;
+    options?: Array<{ label: string; description: string }>;
+    multiple?: boolean;
+  }>;
+};
+
+export type FastAgentInputPreset =
+  | 'setup_source_control_provider'
+  | 'setup_starter_tasks';
+
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
@@ -141,4 +164,11 @@ export type FastAgentTurnAdapter = {
   resolveMcpServerConfigs?: () => Promise<
     Record<string, FastAgentMcpServerConfig>
   >;
+  /** Called when the turn ends waiting on structured user input. The caller
+   * persists the pending request and marks the session needs_input. */
+  requestUserInput?: (request: FastAgentInputRequest) => Promise<void>;
+  /** Resolve a trusted preset without accepting model-supplied options. */
+  resolveUserInputPreset?: (
+    preset: FastAgentInputPreset,
+  ) => Promise<FastAgentInputRequest['questions']>;
 };

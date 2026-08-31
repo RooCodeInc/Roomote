@@ -26,9 +26,7 @@ import {
 } from '@/lib/setup-starter-tasks';
 import { buildInvokeMethods } from '../invokeMethods';
 import { StepTitle } from './StepTitle';
-import { getSetupStepDefinition } from './types';
-
-const INVOKE_STEP = getSetupStepDefinition('invoke');
+const INVOKE_STEP = { title: 'Start with Roomote' } as const;
 
 const STARTER_TASKS_TITLE = "You're set up. Let's get Roomote working.";
 const STARTER_TASK_LAUNCH_BATCH_STORAGE_KEY =

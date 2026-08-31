@@ -15,9 +15,6 @@ const SETUP_DOC_PATHS: Record<SetupDocsStep, string | null> = {
   welcome: null,
   'email-account': 'self-hosting',
   'email-password': 'self-hosting',
-  'auth-provider': 'communications',
-  'auth-env-vars': 'communications',
-  slack: 'providers/communications/slack',
   inference: 'models',
   'env-vars': 'models',
   'source-control-provider': 'source-control',
@@ -25,20 +22,11 @@ const SETUP_DOC_PATHS: Record<SetupDocsStep, string | null> = {
   'source-control-connect': 'source-control',
   'compute-provider': 'compute',
   'compute-config': 'compute',
-  'automation-recommendations': 'automations',
-  invoke: 'how-roomote-works',
 };
 
 export function getSetupDocsStep(step: string | null): SetupDocsStep {
   return step && step in SETUP_DOC_PATHS ? (step as SetupDocsStep) : 'welcome';
 }
-
-const AUTH_PROVIDER_DOC_PATHS: Record<string, string> = {
-  discord: 'providers/communications/discord',
-  microsoft: 'providers/communications/microsoft-teams',
-  slack: 'providers/communications/slack',
-  telegram: 'providers/communications/telegram',
-};
 
 const COMPUTE_PROVIDER_DOC_PATHS: Record<string, string> = {
   blaxel: 'providers/compute/blaxel',
@@ -92,19 +80,6 @@ export function getSetupDocsPath(
   step: SetupDocsStep,
   context: SetupDocsContext = {},
 ): string | null {
-  if (step === 'auth-env-vars') {
-    return (
-      AUTH_PROVIDER_DOC_PATHS[context.authProvider ?? ''] ?? 'communications'
-    );
-  }
-
-  if (step === 'slack') {
-    return (
-      AUTH_PROVIDER_DOC_PATHS[context.authProvider ?? ''] ??
-      SETUP_DOC_PATHS[step]
-    );
-  }
-
   if (step === 'env-vars') {
     return (
       MODEL_PROVIDER_DOC_PATHS[

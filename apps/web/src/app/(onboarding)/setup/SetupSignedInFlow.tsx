@@ -23,13 +23,6 @@ import { useTRPC } from '@/trpc/client';
 import { Button } from '@/components/system';
 
 import { StepWelcome } from './StepWelcome';
-import { StepAuthEnvVars } from './StepAuthEnvVars';
-import {
-  StepAuthProvider,
-  type CommunicationProviderChoice,
-} from './StepAuthProvider';
-import { StepTelegramSetup } from './StepTelegramSetup';
-import { StepDiscordSetup } from './StepDiscordSetup';
 import { StepInferenceProvider } from './StepInferenceProvider';
 import { StepConfigureInference } from './StepConfigureInference';
 import { StepComputeProvider } from './StepComputeProvider';
@@ -37,11 +30,9 @@ import { StepComputeConfig } from './StepComputeConfig';
 import { StepSourceControlProvider } from './StepSourceControlProvider';
 import { StepSourceControlConfig } from './StepSourceControlConfig';
 import { StepSourceControlConnect } from './StepSourceControlConnect';
-import { StepCommunicationConnect } from './StepCommunicationConnect';
-import { StepInvoke } from './StepInvoke';
 import { useSetupFlow } from './hooks';
-import { StepAutomationRecommendations } from './StepAutomationRecommendations';
-import { getSetupStepPath } from './types';
+import { SetupConversationalSetup } from './SetupConversationalSetup';
+import { StepInvoke } from './StepInvoke';
 import { LoadingSetupFlow, stepTransitionVariants } from './SetupBootstrapFlow';
 
 export function SetupSignedInFlow() {
@@ -50,12 +41,6 @@ export function SetupSignedInFlow() {
   const queryClient = useQueryClient();
   const { authStatus, isSignedIn, user } = useUser();
   const isAdmin = user?.isAdmin === true;
-  const [pendingAuthProvider, setPendingAuthProvider] =
-    useState<CommunicationProviderChoice | null>(null);
-  const pendingSetupAuthProvider =
-    pendingAuthProvider === 'telegram' || pendingAuthProvider === 'discord'
-      ? null
-      : pendingAuthProvider;
   const [pendingSourceControlProvider, setPendingSourceControlProvider] =
     useState<SourceControlProvider | null>(null);
   const [pendingComputeProvider, setPendingComputeProvider] =
@@ -77,7 +62,6 @@ export function SetupSignedInFlow() {
   );
   const flow = useSetupFlow({
     enabled: isSignedIn && isAdmin,
-    pendingAuthProvider: pendingSetupAuthProvider,
   });
   const {
     step,
@@ -90,7 +74,6 @@ export function SetupSignedInFlow() {
     readSetupSearchParams,
     commitSetupUrl,
     status,
-    setupSession,
     isLoading,
     isError,
   } = flow;
@@ -103,18 +86,6 @@ export function SetupSignedInFlow() {
         });
         setPendingSourceControlProvider(variables.provider);
         goToStep('source-control-config');
-      },
-      onError: (error) => toast.error(error.message),
-    }),
-  );
-  const saveAuthProviderChoice = useMutation(
-    trpc.setupNew.saveAuthProviderChoice.mutationOptions({
-      onSuccess: async (_data, variables) => {
-        await queryClient.invalidateQueries({
-          queryKey: trpc.setupNew.status.queryKey(),
-        });
-        setPendingAuthProvider(variables.provider);
-        goToStep('auth-env-vars');
       },
       onError: (error) => toast.error(error.message),
     }),
@@ -143,11 +114,6 @@ export function SetupSignedInFlow() {
   );
   const selectedComputeProvider =
     pendingComputeProvider ?? status?.setupNewState.computeProvider;
-  const selectedAuthProvider =
-    pendingAuthProvider ??
-    status?.setupNewState.authProvider ??
-    status?.authSetup.runtimeConfiguredProvider ??
-    status?.authSetup.selectedProvider;
   const selectedSourceControlProvider =
     pendingSourceControlProvider ??
     status?.setupNewState.sourceControlProvider ??
@@ -159,7 +125,6 @@ export function SetupSignedInFlow() {
   useEffect(() => {
     const params = readSetupSearchParams();
     const providerParams = {
-      authProvider: selectedAuthProvider,
       computeProvider: selectedComputeProvider,
       modelProvider: selectedModelProvider,
       sourceControlProvider: selectedSourceControlProvider,
@@ -178,7 +143,6 @@ export function SetupSignedInFlow() {
   }, [
     commitSetupUrl,
     readSetupSearchParams,
-    selectedAuthProvider,
     selectedComputeProvider,
     selectedModelProvider,
     selectedSourceControlProvider,
@@ -226,9 +190,6 @@ export function SetupSignedInFlow() {
     setupRedirectPath,
   ]);
   useEffect(() => {
-    if (status?.setupNewState.authProvider) setPendingAuthProvider(null);
-  }, [status?.setupNewState.authProvider]);
-  useEffect(() => {
     if (status?.setupNewState.modelProvider) setPendingModelProvider(null);
   }, [status?.setupNewState.modelProvider]);
 
@@ -246,22 +207,68 @@ export function SetupSignedInFlow() {
     );
   if (isLoading || !status) return <LoadingSetupFlow />;
 
+  const legacySetupStarted =
+    status.setupNewState.onboardingTaskId !== null &&
+    status.setupNewState.onboardingTaskStartedAt !== null;
+  if (legacySetupStarted) {
+    const provider = status.setupNewState.computeProvider;
+    const computeProvisioning =
+      provider && isSetupProvisionableComputeProvider(provider)
+        ? getSetupNewComputeProvisioningState(status.setupNewState, provider)
+        : null;
+    return (
+      <StepInvoke
+        onboardingTaskId={status.setupNewState.onboardingTaskId}
+        communicationProviders={
+          status.authSetup.selectedProvider
+            ? [status.authSetup.selectedProvider]
+            : status.hasSlack
+              ? ['slack']
+              : []
+        }
+        sourceControlProviders={
+          status.sourceControlSetup.connectedProvider
+            ? [status.sourceControlSetup.connectedProvider]
+            : []
+        }
+        includeLinear={status.hasLinear}
+        linkSuggestedTasks={status.queuedOnboardingTasks.some(
+          (task) => task.suggestionId !== null,
+        )}
+        computeProvisioning={computeProvisioning}
+        onRetryComputeProvisioning={() =>
+          goToStep('compute-config', { revisit: true })
+        }
+        onTryItOut={() => undefined}
+      />
+    );
+  }
+
+  // Deterministic bootstrap owns the flow until authentication, inference,
+  // and a usable compute path are confirmed. From there, the conversational
+  // setup session replaces the remaining wizard steps directly.
+  const conversationalSetupReady =
+    status.modelSetup.setupSatisfied &&
+    (status.computeSetup.setupSatisfied ||
+      (status.setupNewState.computeProvider != null &&
+        isSetupProvisionableComputeProvider(
+          status.setupNewState.computeProvider,
+        ) &&
+        getSetupNewComputeProvisioningState(
+          status.setupNewState,
+          status.setupNewState.computeProvider,
+        )?.status === 'building')) &&
+    status.computeSetup.selectedProvider != null &&
+    status.setupCompletedAt == null;
+  if (conversationalSetupReady) {
+    return <SetupConversationalSetup />;
+  }
+
   const removeSourceControlSyncMarker = () => {
     const params = readSetupSearchParams();
     params.delete('sync');
     commitSetupUrl(params);
   };
-  const computeProvisioning =
-    selectedComputeProvider &&
-    isSetupProvisionableComputeProvider(selectedComputeProvider)
-      ? getSetupNewComputeProvisioningState(
-          status.setupNewState,
-          selectedComputeProvider,
-        )
-      : null;
-  const hasPersistedSelectedSuggestedTasks = status.queuedOnboardingTasks.some(
-    (task) => task.suggestionId !== null,
-  );
 
   return (
     <div className="relative w-full">
@@ -282,80 +289,9 @@ export function SetupSignedInFlow() {
               }}
             />
           )}
-          {step === 'auth-provider' && (
-            <StepAuthProvider
-              additionalProviders={['telegram', 'discord']}
-              onContinue={(provider) => {
-                if (provider === 'telegram' || provider === 'discord') {
-                  setPendingAuthProvider(provider);
-                  goToStep('auth-env-vars');
-                  return;
-                }
-                saveAuthProviderChoice.mutate({ provider });
-              }}
-              onSkip={() => {
-                setupSession.setCommunicationStepState('skipped');
-                goToNextStep();
-              }}
-              onBack={canGoBack ? goToPreviousStep : undefined}
-              disabled={saveAuthProviderChoice.isPending}
-            />
-          )}
-          {step === 'auth-env-vars' &&
-            (pendingAuthProvider === 'telegram' ? (
-              <StepTelegramSetup
-                onContinue={() => {
-                  setupSession.setCommunicationStepState('completed');
-                  setPendingAuthProvider(null);
-                  goToNextStep();
-                }}
-                onBack={
-                  canGoBack
-                    ? () => {
-                        setPendingAuthProvider(null);
-                        goToPreviousStep();
-                      }
-                    : undefined
-                }
-              />
-            ) : pendingAuthProvider === 'discord' ? (
-              <StepDiscordSetup
-                onContinue={() => {
-                  setupSession.setCommunicationStepState('completed');
-                  setPendingAuthProvider(null);
-                  goToNextStep();
-                }}
-                onBack={
-                  canGoBack
-                    ? () => {
-                        setPendingAuthProvider(null);
-                        goToPreviousStep();
-                      }
-                    : undefined
-                }
-              />
-            ) : (
-              <StepAuthEnvVars
-                authSetup={status.authSetup}
-                selectedProviderId={pendingAuthProvider}
-                onContinue={() => {
-                  setPendingAuthProvider(null);
-                  goToNextStep();
-                }}
-                onBack={() => {
-                  setPendingAuthProvider(null);
-                  if (canGoBack) {
-                    goToPreviousStep();
-                    return;
-                  }
-                  goToStep('auth-provider');
-                }}
-                bootstrapMode={false}
-              />
-            ))}
           {step === 'inference' && (
             <StepConfigureInference
-              onUseTrial={goToNextStep}
+              onUseTrial={() => goToStep('compute-provider')}
               onConfigureProvider={() =>
                 goToStep('env-vars', { revisit: true })
               }
@@ -371,7 +307,7 @@ export function SetupSignedInFlow() {
               }
               onContinue={() => {
                 setPendingModelProvider(null);
-                goToNextStep();
+                goToStep('compute-provider');
               }}
               onBack={canGoBack ? goToPreviousStep : undefined}
               onSelectedProviderChange={setPendingModelProvider}
@@ -413,27 +349,6 @@ export function SetupSignedInFlow() {
               onBack={canGoBack ? goToPreviousStep : undefined}
             />
           )}
-          {step === 'automation-recommendations' && (
-            <StepAutomationRecommendations
-              onContinue={(automationRecommendations) => {
-                queryClient.setQueryData(
-                  trpc.setupNew.status.queryKey(),
-                  (currentStatus) =>
-                    currentStatus
-                      ? {
-                          ...currentStatus,
-                          setupNewState: {
-                            ...currentStatus.setupNewState,
-                            automationRecommendations,
-                          },
-                        }
-                      : currentStatus,
-                );
-                goToNextStep();
-              }}
-              onBack={canGoBack ? goToPreviousStep : undefined}
-            />
-          )}
           {step === 'compute-provider' && (
             <StepComputeProvider
               computeSetup={status.computeSetup}
@@ -450,7 +365,11 @@ export function SetupSignedInFlow() {
               selectedProviderId={pendingComputeProvider}
               onContinue={() => {
                 setPendingComputeProvider(null);
-                goToNextStep();
+                // The conversational setup session takes over as soon as the
+                // refreshed status confirms a usable compute provider.
+                void queryClient.invalidateQueries({
+                  queryKey: trpc.setupNew.status.queryKey(),
+                });
               }}
               onBack={
                 canGoBack
@@ -460,50 +379,6 @@ export function SetupSignedInFlow() {
                     }
                   : undefined
               }
-            />
-          )}
-          {step === 'slack' && (
-            <StepCommunicationConnect
-              authSetup={status.authSetup}
-              onContinue={goToNextStep}
-              onSkip={() => {
-                setupSession.setCommunicationStepState('skipped');
-                goToNextStep();
-              }}
-              onBack={canGoBack ? goToPreviousStep : undefined}
-              returnPath={getSetupStepPath('slack')}
-            />
-          )}
-          {step === 'invoke' && (
-            <StepInvoke
-              onboardingTaskId={
-                status.onboardingFailed
-                  ? null
-                  : status.setupNewState.onboardingTaskId
-              }
-              communicationProviders={
-                status.authSetup.selectedProvider
-                  ? [status.authSetup.selectedProvider]
-                  : status.hasSlack
-                    ? ['slack']
-                    : []
-              }
-              sourceControlProviders={
-                status.sourceControlSetup.connectedProvider
-                  ? [status.sourceControlSetup.connectedProvider]
-                  : status.sourceControlSetup.selectedProvider
-                    ? [status.sourceControlSetup.selectedProvider]
-                    : status.hasGitHub
-                      ? ['github']
-                      : []
-              }
-              includeLinear={status.hasLinear}
-              linkSuggestedTasks={hasPersistedSelectedSuggestedTasks}
-              computeProvisioning={computeProvisioning}
-              onRetryComputeProvisioning={() =>
-                goToStep('compute-config', { revisit: true })
-              }
-              onTryItOut={() => undefined}
             />
           )}
         </motion.div>

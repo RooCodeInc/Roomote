@@ -133,6 +133,7 @@ import {
   FAST_AGENT_REACTION_INPUT_TYPE,
   type FastAgentConversation,
   type FastAgentHumanInput,
+  type FastAgentInputPreset,
   isFastAgentCommunicationConversation,
   type FastAgentPlatformEventHandling,
   type FastAgentPlatformEventKind,
@@ -362,6 +363,34 @@ const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
 const saveMemoryArgsSchema = z.object({
   memory: z.string().trim().min(1).max(FAST_AGENT_MEMORY_FACT_MAX_CHARS),
 });
+const requestUserInputQuestionSchema = z.object({
+  id: z.string().trim().min(1).max(80),
+  header: z.string().trim().min(1).max(60),
+  question: z.string().trim().min(1).max(500),
+  isOther: z.boolean().optional().default(false),
+  isSecret: z.boolean().optional().default(false),
+  options: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(140),
+        description: z.string().trim().min(1).max(500),
+      }),
+    )
+    .min(1)
+    .max(12)
+    .optional(),
+  multiple: z.boolean().optional(),
+});
+const fastAgentInputPresetSchema = z.enum([
+  'setup_source_control_provider',
+  'setup_starter_tasks',
+]);
+const requestUserInputArgsSchema = z.union([
+  z.object({
+    questions: z.array(requestUserInputQuestionSchema).min(1).max(4),
+  }),
+  z.object({ preset: fastAgentInputPresetSchema }),
+]);
 
 function normalizeThreadText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -945,6 +974,8 @@ export async function answerFastAgentQuestion({
   platformEventTranscriptPayload,
   slackRoomoteUserId,
   currentDurableHumanFollowUpEventId,
+  setupSnapshot,
+  setupSession = false,
 }: {
   question: string;
   images?: string[];
@@ -976,6 +1007,11 @@ export async function answerFastAgentQuestion({
   /** The durable row currently running as a fallback whole turn. Excluding it
    * keeps this turn's native steer poller from injecting its own prompt. */
   currentDurableHumanFollowUpEventId?: string;
+  /** Trusted setup snapshot injected into setup-session turns. */
+  setupSnapshot?: string;
+  /** True only for the active conversational setup session; enables
+   * setup-only native tools. */
+  setupSession?: boolean;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
     currentMessageId,
@@ -1648,6 +1684,8 @@ export async function answerFastAgentQuestion({
       isCurrentUserAdmin: currentUser.isAdmin,
       implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
       releaseVersion,
+      ...(setupSnapshot ? { setupSnapshot } : {}),
+      setupSession,
     });
     let visibleUpdatePosted = false;
     let nativeToolInvoked = false;
@@ -2447,6 +2485,89 @@ export async function answerFastAgentQuestion({
               saved: true,
               note: 'Saved. The memory becomes searchable after the next ingestion pass.',
             };
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput: {
+            if (conversation.surface !== 'web') {
+              return {
+                success: false,
+                error: 'Structured input is available only in web Sessions.',
+              };
+            }
+            const args = requestUserInputArgsSchema.parse(call.args);
+            const preset = 'preset' in args ? args.preset : undefined;
+            if (preset && (!setupSession || !adapter.resolveUserInputPreset)) {
+              return {
+                success: false,
+                error:
+                  'That trusted input preset is unavailable in this session.',
+              };
+            }
+            const questions =
+              'questions' in args
+                ? args.questions
+                : await adapter.resolveUserInputPreset!(
+                    args.preset as FastAgentInputPreset,
+                  );
+            for (const question of questions) {
+              if (question.options && question.isSecret) {
+                return {
+                  success: false,
+                  error:
+                    'Secret questions must use free-text answers, not options.',
+                };
+              }
+              if (question.multiple && !question.options) {
+                return {
+                  success: false,
+                  error:
+                    'Multi-select questions require options to choose from.',
+                };
+              }
+            }
+            const inputEvent = allocateCanonicalEvent(
+              `input_request:${nextTurnSeq++}`,
+            );
+            const requestId = `rui:${inputEvent.eventId}`;
+            throwIfTurnCancelled();
+            await persistCanonicalMessage(
+              {
+                ...inputEvent,
+                turnId,
+                ts: Date.now(),
+                eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+                role: 'assistant',
+                contentBlocks: [
+                  {
+                    type: 'text',
+                    text: questions
+                      .map((question) => question.question)
+                      .join('\n'),
+                  },
+                ],
+                metadata: { visibleInTranscript: true },
+                payload: {
+                  requestId,
+                  status: 'pending',
+                  ...(preset ? { preset } : {}),
+                  sessionId: session.id,
+                  turnId,
+                  callId: requestId,
+                  questions,
+                },
+                source: conversation.surface,
+                nativeSessionId: activeOpenCodeSessionId,
+              },
+              true,
+            );
+            await adapter.requestUserInput?.({
+              requestId,
+              ...(preset ? { preset } : {}),
+              questions,
+            });
+            visibleUpdatePosted = true;
+            closed = true;
+            return { success: true, requestId, closed: true };
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {

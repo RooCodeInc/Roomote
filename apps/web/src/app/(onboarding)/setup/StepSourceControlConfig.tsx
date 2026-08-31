@@ -111,11 +111,13 @@ export function StepSourceControlConfig({
   selectedProviderId,
   onContinue,
   onBack,
+  returnPath,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
   selectedProviderId?: SourceControlProvider | null;
   onContinue: () => void;
   onBack?: () => void;
+  returnPath?: string;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -327,7 +329,7 @@ export function StepSourceControlConfig({
       selectedProvider.provider === 'bitbucket'
     ) {
       window.location.assign(
-        `/api/source-control/${selectedProvider.provider}/oauth/authorize`,
+        `/api/source-control/${selectedProvider.provider}/oauth/authorize${returnPath ? `?redirectTo=${encodeURIComponent(returnPath)}` : ''}`,
       );
     }
   };

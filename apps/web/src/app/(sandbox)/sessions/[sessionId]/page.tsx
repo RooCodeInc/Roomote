@@ -20,6 +20,13 @@ import {
 import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { WorkspaceHeader } from '@/components/layout';
 
+import {
+  findDeploymentSetupSessionId,
+  getSetupSessionStatusCommand,
+  reconcileSetupPlatformEvents,
+} from '@/trpc/commands/setup/setup-session';
+import { SetupRecommendationsInlineCard } from '../../../(onboarding)/setup/SetupRecommendationsInlineCard';
+import { SetupSessionSourceControlPanel } from '../../../(onboarding)/setup/SetupSourceControlPanel';
 import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionTaskTimeline } from './SessionTaskTimeline';
 import {
@@ -123,26 +130,47 @@ export default async function SessionDetailPage({
       status: unifiedSession.status,
       tasks: unifiedSession.tasks,
     };
+    // The setup session keeps its inline automation-recommendations card on
+    // its normal route after activation: recommendations are optional and
+    // must not interrupt activation, so they surface here once ready.
+    const isSetupSession =
+      authorizedUser.isAdmin &&
+      unifiedSession.id === (await findDeploymentSetupSessionId());
+    const setupSessionStatus = isSetupSession
+      ? await getSetupSessionStatusCommand(authorizedUser)
+      : null;
+    if (isSetupSession) void reconcileSetupPlatformEvents(authorizedUser);
+    const setupRecommendations = isSetupSession ? (
+      <SetupRecommendationsInlineCard sessionId={unifiedSession.id} />
+    ) : null;
     return (
       <SessionWorkspace session={sessionInfo}>
         <SessionReadTracker sessionId={unifiedSession.id} />
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
           {session ? (
-            <FastSessionTranscript
-              sessionId={session.id}
-              initialMessages={session.messages}
-              hasOlderMessages={session.hasOlderMessages}
-              canReply
-              initialTitle={unifiedSession.title}
-              fallbackTitle={unifiedSession.title}
-              sessionModel={session.model}
-              sessionReasoningEffort={session.reasoningEffort}
-              defaultModelId={defaultModelId}
-              defaultReasoningEffort={defaultReasoningEffort}
-              headerExtras={
-                <SessionHeaderExtras status={unifiedSession.status} />
-              }
-            />
+            <div className="flex min-h-0 flex-1">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <FastSessionTranscript
+                  sessionId={session.id}
+                  initialMessages={session.messages}
+                  hasOlderMessages={session.hasOlderMessages}
+                  canReply
+                  initialTitle={unifiedSession.title}
+                  fallbackTitle={unifiedSession.title}
+                  sessionModel={session.model}
+                  sessionReasoningEffort={session.reasoningEffort}
+                  defaultModelId={defaultModelId}
+                  defaultReasoningEffort={defaultReasoningEffort}
+                  headerExtras={
+                    <SessionHeaderExtras status={unifiedSession.status} />
+                  }
+                  timelineExtras={setupRecommendations}
+                />
+              </div>
+              {isSetupSession && setupSessionStatus?.completed === false ? (
+                <SetupSessionSourceControlPanel sessionId={unifiedSession.id} />
+              ) : null}
+            </div>
           ) : (
             <>
               <WorkspaceHeader

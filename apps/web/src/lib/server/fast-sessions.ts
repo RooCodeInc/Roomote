@@ -168,8 +168,18 @@ export async function findAccessibleFastSession(
       reasoningEffort: fastAgentConversations.reasoningEffort,
     })
     .from(fastAgentConversations)
+    .leftJoin(
+      sessions,
+      eq(sessions.fastConversationId, fastAgentConversations.id),
+    )
     .where(
-      and(eq(fastAgentConversations.id, sessionId), fastSessionScope(auth)),
+      and(
+        or(
+          eq(fastAgentConversations.id, sessionId),
+          eq(sessions.id, sessionId),
+        ),
+        fastSessionScope(auth),
+      ),
     )
     .limit(1);
 

@@ -11,18 +11,6 @@ const SETUP_STEP_DEFINITIONS = [
     title: `Welcome to ${PRODUCT_NAME}!`,
   },
   {
-    id: 'auth-provider',
-    title: 'Communication provider',
-  },
-  {
-    id: 'auth-env-vars',
-    title: 'Configure comms',
-  },
-  {
-    id: 'slack',
-    title: 'Connect Slack',
-  },
-  {
     id: 'inference',
     title: 'Configure inference',
   },
@@ -43,20 +31,12 @@ const SETUP_STEP_DEFINITIONS = [
     title: 'Connect source control',
   },
   {
-    id: 'automation-recommendations',
-    title: 'Automation recommendations',
-  },
-  {
     id: 'compute-provider',
     title: 'Sandbox provider',
   },
   {
     id: 'compute-config',
     title: 'Configure sandboxes',
-  },
-  {
-    id: 'invoke',
-    title: "That's it!",
   },
 ] as const satisfies readonly SetupStepConfig[];
 
@@ -68,34 +48,12 @@ export const SETUP_STEPS: readonly SetupStep[] = SETUP_STEP_DEFINITIONS.map(
   (definition) => definition.id,
 );
 
-const EMAIL_PASSWORD_SETUP_ORDER_POLICY = {
-  move: ['auth-provider', 'auth-env-vars', 'slack'],
-  after: 'source-control-connect',
-} as const satisfies {
-  move: readonly SetupStep[];
-  after: SetupStep;
-};
-
-const EMAIL_PASSWORD_MOVED_SETUP_STEPS = new Set<SetupStep>(
-  EMAIL_PASSWORD_SETUP_ORDER_POLICY.move,
-);
-
-const EMAIL_PASSWORD_SETUP_STEPS: readonly SetupStep[] = SETUP_STEPS.flatMap(
-  (step) => {
-    if (step === EMAIL_PASSWORD_SETUP_ORDER_POLICY.after) {
-      return [step, ...EMAIL_PASSWORD_SETUP_ORDER_POLICY.move];
-    }
-
-    return EMAIL_PASSWORD_MOVED_SETUP_STEPS.has(step) ? [] : [step];
-  },
-);
-
 export function getSetupSteps(
-  hasCommunicationAuthProvider: boolean,
+  _hasCommunicationAuthProvider: boolean,
 ): readonly SetupStep[] {
-  return hasCommunicationAuthProvider
-    ? SETUP_STEPS
-    : EMAIL_PASSWORD_SETUP_STEPS;
+  // Communication-provider configuration is excluded from the activation
+  // path; the parameter remains for call-site stability.
+  return SETUP_STEPS;
 }
 
 const SETUP_STEP_DEFINITION_MAP = Object.fromEntries(
@@ -106,16 +64,6 @@ const SETUP_STEP_DEFINITION_MAP = Object.fromEntries(
 
 export function getSetupStepDefinition(step: SetupStep) {
   return SETUP_STEP_DEFINITION_MAP[step];
-}
-
-/**
- * Canonical URL for a signed-in setup step. The setup flow keeps the active
- * step in the query string (`/setup?step=<step-id>`) so the URL is the source
- * of truth for navigation, deep links, and browser back/forward. OAuth
- * callbacks and setup deep links depend on this exact shape.
- */
-export function getSetupStepPath(step: SetupStep): string {
-  return `/setup?step=${step}`;
 }
 
 /**
