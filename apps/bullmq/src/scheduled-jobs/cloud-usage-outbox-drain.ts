@@ -14,6 +14,7 @@ function signUsageRequest(input: {
   timestamp: string;
   nonce: string;
   body: string;
+  pathWithQuery: string;
 }): string {
   const bodyHash = createHash('sha256').update(input.body).digest('hex');
   return createHmac('sha256', input.key)
@@ -22,7 +23,7 @@ function signUsageRequest(input: {
         input.timestamp,
         input.nonce,
         'POST',
-        '/internal/v1/usage',
+        input.pathWithQuery,
         bodyHash,
       ].join('\n'),
     )
@@ -38,32 +39,35 @@ export async function cloudUsageOutboxDrainJob(): Promise<void> {
 
   const rows = await claimCloudInferenceUsage(db, 100);
   if (rows.length === 0) return;
-  const events: InferenceUsageV1[] = rows.map((row) => ({
-    kind: 'inference',
-    schemaVersion: 1,
-    usageId: row.usageId,
-    provider: row.provider,
-    modelId: row.modelId,
-    usageType: row.usageType,
-    inputTokens: row.inputTokens,
-    outputTokens: row.outputTokens,
-    reasoningTokens: row.reasoningTokens,
-    cacheReadTokens: row.cacheReadTokens,
-    cacheWriteTokens: row.cacheWriteTokens,
-    latencyMs: row.latencyMs ?? undefined,
-    outcome: row.outcome,
-    completedAt: row.completedAt.toISOString(),
-    credentialOwner: row.credentialOwner,
-    estimatedCostMicroUsd: row.estimatedCostMicroUsd ?? undefined,
-    estimatePricingVersion: row.estimatePricingVersion ?? undefined,
-    providerReportedCostMicroUsd: row.providerReportedCostMicroUsd ?? undefined,
-  }));
-  const batch = usageBatchV1Schema.parse({ schemaVersion: 1, events });
-  const body = JSON.stringify(batch);
-  const timestamp = String(Date.now());
-  const nonce = randomUUID();
   try {
-    const response = await fetch(url, {
+    const events: InferenceUsageV1[] = rows.map((row) => ({
+      kind: 'inference',
+      schemaVersion: 1,
+      usageId: row.usageId,
+      provider: row.provider,
+      modelId: row.modelId,
+      usageType: row.usageType,
+      inputTokens: row.inputTokens,
+      outputTokens: row.outputTokens,
+      reasoningTokens: row.reasoningTokens,
+      cacheReadTokens: row.cacheReadTokens,
+      cacheWriteTokens: row.cacheWriteTokens,
+      latencyMs: row.latencyMs ?? undefined,
+      outcome: row.outcome,
+      completedAt: row.completedAt.toISOString(),
+      credentialOwner: row.credentialOwner,
+      estimatedCostMicroUsd: row.estimatedCostMicroUsd ?? undefined,
+      estimatePricingVersion: row.estimatePricingVersion ?? undefined,
+      providerReportedCostMicroUsd:
+        row.providerReportedCostMicroUsd ?? undefined,
+    }));
+    const batch = usageBatchV1Schema.parse({ schemaVersion: 1, events });
+    const body = JSON.stringify(batch);
+    const timestamp = String(Date.now());
+    const nonce = randomUUID();
+    const endpoint = new URL(url);
+    const pathWithQuery = endpoint.pathname + endpoint.search;
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -75,6 +79,7 @@ export async function cloudUsageOutboxDrainJob(): Promise<void> {
           timestamp,
           nonce,
           body,
+          pathWithQuery,
         }),
       },
       body,

@@ -1,4 +1,4 @@
-import type { InferenceUsageV1 } from '@roomote/types';
+import { inferenceUsageV1Schema, type InferenceUsageV1 } from '@roomote/types';
 
 import type { DatabaseOrTransaction } from '../db';
 import { cloudInferenceUsageOutbox } from '../schema';
@@ -11,25 +11,27 @@ export async function enqueueCloudInferenceUsage(
   database: DatabaseOrTransaction,
   event: InferenceUsageV1,
 ): Promise<void> {
+  const validated = inferenceUsageV1Schema.parse(event);
   await database
     .insert(cloudInferenceUsageOutbox)
     .values({
-      usageId: event.usageId,
-      provider: event.provider,
-      modelId: event.modelId ?? null,
-      usageType: event.usageType,
-      inputTokens: event.inputTokens ?? 0,
-      outputTokens: event.outputTokens ?? 0,
-      reasoningTokens: event.reasoningTokens ?? 0,
-      cacheReadTokens: event.cacheReadTokens ?? 0,
-      cacheWriteTokens: event.cacheWriteTokens ?? 0,
-      latencyMs: event.latencyMs ?? null,
-      outcome: event.outcome,
-      completedAt: new Date(event.completedAt),
-      credentialOwner: event.credentialOwner,
-      estimatedCostMicroUsd: event.estimatedCostMicroUsd ?? null,
-      estimatePricingVersion: event.estimatePricingVersion ?? null,
-      providerReportedCostMicroUsd: event.providerReportedCostMicroUsd ?? null,
+      usageId: validated.usageId,
+      provider: validated.provider,
+      modelId: validated.modelId ?? null,
+      usageType: validated.usageType,
+      inputTokens: validated.inputTokens ?? 0,
+      outputTokens: validated.outputTokens ?? 0,
+      reasoningTokens: validated.reasoningTokens ?? 0,
+      cacheReadTokens: validated.cacheReadTokens ?? 0,
+      cacheWriteTokens: validated.cacheWriteTokens ?? 0,
+      latencyMs: validated.latencyMs ?? null,
+      outcome: validated.outcome,
+      completedAt: new Date(validated.completedAt),
+      credentialOwner: validated.credentialOwner,
+      estimatedCostMicroUsd: validated.estimatedCostMicroUsd ?? null,
+      estimatePricingVersion: validated.estimatePricingVersion ?? null,
+      providerReportedCostMicroUsd:
+        validated.providerReportedCostMicroUsd ?? null,
     })
     .onConflictDoNothing({ target: cloudInferenceUsageOutbox.usageId });
 }

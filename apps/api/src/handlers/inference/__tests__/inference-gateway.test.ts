@@ -332,6 +332,12 @@ describe('inference gateway', () => {
   });
 
   it('returns an actionable response when Roomote inference credits are exhausted', async () => {
+    vi.stubEnv(
+      'ROOMOTE_CLOUD_USAGE_URL',
+      'https://cloud.example/internal/v1/usage',
+    );
+    vi.stubEnv('ROOMOTE_CLOUD_TOKEN_ID', crypto.randomUUID());
+    vi.stubEnv('ROOMOTE_CLOUD_TOKEN_SECRET', 'derived-service-credential');
     stubUpstreamFetch(
       new Response(
         JSON.stringify({ error: { message: 'insufficient credits' } }),
@@ -353,6 +359,14 @@ describe('inference gateway', () => {
       error:
         'Roomote inference credits are exhausted. Connect an inference provider to continue.',
     });
+    expect(mockEnqueueCloudInferenceUsage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        provider: 'roomote',
+        outcome: 'provider_error',
+        credentialOwner: 'roomote',
+      }),
+    );
   });
 
   it.each([

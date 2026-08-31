@@ -511,6 +511,22 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
       });
     }
 
+    let usageSettled = false;
+    const settleUsage = (
+      outcome: 'succeeded' | 'provider_error' | 'canceled',
+    ) => {
+      if (usageSettled) return;
+      usageSettled = true;
+      enqueueCentralInferenceUsage({
+        usageId,
+        provider: providerId,
+        modelId,
+        startedAt,
+        outcome,
+        providerReportedCostMicroUsd,
+      });
+    };
+
     if (!upstreamResponse.ok) {
       console.warn(
         formatSingleLineLog(`${logPrefix} Upstream returned non-OK status`, {
@@ -528,6 +544,7 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
         providerId === ROOMOTE_INFERENCE_PROVIDER_ID &&
         upstreamResponse.status === 402
       ) {
+        settleUsage('provider_error');
         return c.json(
           {
             error:
@@ -538,21 +555,6 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
       }
     }
 
-    let usageSettled = false;
-    const settleUsage = (
-      outcome: 'succeeded' | 'provider_error' | 'canceled',
-    ) => {
-      if (usageSettled) return;
-      usageSettled = true;
-      enqueueCentralInferenceUsage({
-        usageId,
-        provider: providerId,
-        modelId,
-        startedAt,
-        outcome,
-        providerReportedCostMicroUsd,
-      });
-    };
     const responseBody = createLoggedProxyResponseBody({
       body: upstreamResponse.body,
       logPrefix: `${logPrefix} Upstream response stream failed`,
