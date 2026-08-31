@@ -160,6 +160,30 @@ describe('Merge announcer push normalization', () => {
     ]);
   });
 
+  it('does not let rejected images consume the anonymous probe limit', async () => {
+    const rejectedImages = Array.from(
+      { length: 5 },
+      (_, index) =>
+        `![Build badge ${index + 1}](https://cdn.example.com/badge-${index + 1}.png)`,
+    ).join('\n');
+    const screenshotUrl = 'https://cdn.example.com/settings.png';
+    const resolveMediaType = vi.fn().mockResolvedValue('image/png');
+
+    await expect(
+      extractEligiblePullRequestImages(
+        `${rejectedImages}\n![Settings screenshot](${screenshotUrl})`,
+        resolveMediaType,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        url: screenshotUrl,
+        altText: 'Settings screenshot',
+      }),
+    ]);
+    expect(resolveMediaType).toHaveBeenCalledOnce();
+    expect(resolveMediaType).toHaveBeenCalledWith(screenshotUrl);
+  });
+
   it('enriches GitHub merge pushes with bounded PR metadata and file stats', async () => {
     const payload = {
       ref: 'refs/heads/main',

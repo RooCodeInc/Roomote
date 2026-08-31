@@ -148,7 +148,6 @@ export async function extractEligiblePullRequestImages(
 
   const rankedCandidates = candidates
     .sort((a, b) => a.position - b.position)
-    .slice(0, MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES)
     .map(normalizePullRequestImageCandidate)
     .filter((candidate): candidate is PullRequestImageCandidate => !!candidate)
     .sort((a, b) => {
@@ -156,7 +155,8 @@ export async function extractEligiblePullRequestImages(
         Number(SCREENSHOT_LIKE_IMAGE_TEXT.test(b.altText)) -
         Number(SCREENSHOT_LIKE_IMAGE_TEXT.test(a.altText));
       return screenshotScoreDifference || a.position - b.position;
-    });
+    })
+    .slice(0, MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES);
 
   const mediaTypeResults = await Promise.allSettled(
     rankedCandidates.map(async (candidate) => ({
