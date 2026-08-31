@@ -168,10 +168,13 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(bridgeSource).toContain('metadata: payload.metadata ?? {}');
     expect(spillReadSource).toContain('never pass filesystem paths');
     expect(skillListSource).toContain(
-      'settings-defined and repository-defined skills',
+      'authorized settings-defined skills, plus optionally repository-defined skills',
     );
     expect(skillListSource).toContain(
       'an exact name to find packaged and settings skills',
+    );
+    expect(skillListSource).toContain(
+      'complete packaged and Settings inventory across authorized environments',
     );
     expect(skillListSource).toContain('environmentId: z.string()');
     expect(skillListSource).toContain('repositoryId: z.string()');
