@@ -10,7 +10,11 @@ import {
 } from '@testing-library/react';
 
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
-import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
+import {
+  SessionHeaderExtras,
+  SessionWorkspace,
+  type SessionInfo,
+} from './SessionWorkspace';
 import {
   useOpenSessionTaskPanel,
   useOpenSessionTasksPanel,
@@ -110,8 +114,19 @@ vi.mock('@/components/tasks/ArtifactViewerContent', () => ({
 }));
 
 vi.mock('./NestedTaskSidePanel', () => ({
-  NestedTaskSidePanel: ({ taskId }: { taskId: string }) => (
-    <div>Nested panel {taskId}</div>
+  NestedTaskSidePanel: ({
+    taskId,
+    onClose,
+  }: {
+    taskId: string;
+    onClose: () => void;
+  }) => (
+    <div aria-label={`Full task ${taskId}`}>
+      Nested panel {taskId}
+      <button type="button" onClick={onClose}>
+        Close panel
+      </button>
+    </div>
   ),
 }));
 
@@ -336,6 +351,126 @@ describe('SessionWorkspace', () => {
     expect(artifacts.querySelector('svg')).toHaveClass('lucide-layout-grid');
   });
 
+  it('aggregates task pull requests in the header and removes duplicates', async () => {
+    const firstTask = {
+      ...singleTask,
+      pullRequests: [
+        {
+          id: 'pr-1',
+          url: 'https://github.com/acme/widgets/pull/42',
+          number: 42,
+          title: 'First PR',
+          repository: 'acme/widgets',
+          status: 'open',
+        },
+      ],
+    };
+    const secondTask = {
+      ...singleTask,
+      taskId: 'task-2',
+      pullRequests: [
+        {
+          id: 'pr-duplicate-number',
+          url: 'https://github.com/acme/widgets/pull/42?duplicate=1',
+          number: 42,
+          title: 'Duplicate PR',
+          repository: 'acme/widgets',
+          status: 'open',
+        },
+        {
+          id: 'pr-duplicate-url',
+          url: 'https://github.com/acme/widgets/pull/42',
+          number: 99,
+          title: 'Duplicate URL',
+          repository: 'acme/other',
+          status: 'open',
+        },
+        {
+          id: 'pr-2',
+          url: 'https://github.com/acme/api/pull/7',
+          number: 7,
+          title: 'Second PR',
+          repository: 'acme/api',
+          status: 'open',
+        },
+        {
+          id: 'pr-closed',
+          url: 'https://github.com/acme/api/pull/8',
+          number: 8,
+          title: 'Closed PR',
+          repository: 'acme/api',
+          status: 'closed',
+        },
+        {
+          id: 'pr-merged',
+          url: 'https://github.com/acme/api/pull/9',
+          number: 9,
+          title: 'Merged PR',
+          repository: 'acme/api',
+          status: 'merged',
+        },
+      ],
+    };
+
+    renderWorkspace({
+      isMobile: false,
+      children: <SessionHeaderExtras status="active" />,
+      sessionOverride: { tasks: [firstTask, secondTask] },
+    });
+
+    expect(await screen.findByText('active')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'widgets#42' })).toHaveAttribute(
+      'href',
+      'https://github.com/acme/widgets/pull/42',
+    );
+    expect(screen.getByRole('link', { name: 'api#7' })).toHaveAttribute(
+      'href',
+      'https://github.com/acme/api/pull/7',
+    );
+    expect(screen.getAllByRole('link')).toHaveLength(2);
+  });
+
+  it('updates header pull requests from refreshed session tasks', async () => {
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      children: <SessionHeaderExtras status="active" />,
+      sessionOverride: { tasks: [] },
+    });
+
+    expect(screen.queryByRole('link')).toBeNull();
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryState(['sessions', 'byId', session.id])?.status,
+      ).toBe('success'),
+    );
+
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        status: 'active',
+        tasks: [
+          {
+            ...singleTask,
+            pullRequests: [
+              {
+                id: 'pr-new',
+                url: 'https://github.com/acme/new/pull/123',
+                number: 123,
+                title: 'Newly opened PR',
+                repository: 'acme/new',
+                status: 'open',
+              },
+            ],
+          },
+        ],
+      });
+    });
+
+    expect(
+      await screen.findByRole('link', { name: 'new#123' }),
+    ).toHaveAttribute('target', '_blank');
+  });
+
   it('matches the task sidebar replacement behavior and controls on mobile', () => {
     renderWorkspace({ isMobile: true });
 
@@ -440,7 +575,7 @@ describe('SessionWorkspace', () => {
 
       expect(screen.getByText('Session transcript')).toBeInTheDocument();
       expect(
-        screen.queryByRole('button', { name: 'Close task details' }),
+        screen.queryByLabelText('Full task task-1'),
       ).not.toBeInTheDocument();
       expect(routerReplaceMock).not.toHaveBeenCalled();
     },
@@ -469,7 +604,7 @@ describe('SessionWorkspace', () => {
   );
 
   it.each([false, true])(
-    'keeps task details closed when a sole task arrives after navigation and isMobile=%s',
+    'keeps the full task closed when a sole task arrives without a selector and isMobile=%s',
     async (isMobile) => {
       renderWorkspace({
         isMobile,
@@ -487,14 +622,14 @@ describe('SessionWorkspace', () => {
       });
       expect(screen.getByText('Session transcript')).toBeInTheDocument();
       expect(
-        screen.queryByRole('button', { name: 'Close task details' }),
+        screen.queryByLabelText('Full task task-1'),
       ).not.toBeInTheDocument();
       expect(routerReplaceMock).not.toHaveBeenCalled();
     },
   );
 
   it.each([false, true])(
-    'opens explicitly selected task details when isMobile=%s',
+    'opens an explicitly selected full task in the responsive panel when isMobile=%s',
     (isMobile) => {
       renderWorkspace({
         isMobile,
@@ -503,19 +638,17 @@ describe('SessionWorkspace', () => {
           'utm_source=slack&utm_medium=link&utm_campaign=slack.fast_reply&task=task-1',
       });
 
-      expect(
-        screen.getByRole('heading', { name: singleTask.title }),
-      ).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'Go to task' })).toHaveAttribute(
-        'href',
-        '/task/task-1?returnTo=%2Fsessions%2Fsession-1%3Ftask%3Dtask-1',
-      );
-      expect(screen.queryByText('Execution details')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Full task task-1')).toBeInTheDocument();
+      if (isMobile) {
+        expect(
+          screen.queryByText('Session transcript'),
+        ).not.toBeInTheDocument();
+      } else {
+        expect(screen.getByText('Session transcript')).toBeInTheDocument();
+      }
       expect(routerReplaceMock).not.toHaveBeenCalled();
 
-      fireEvent.click(
-        screen.getByRole('button', { name: 'Close task details' }),
-      );
+      fireEvent.click(screen.getByRole('button', { name: 'Close panel' }));
       expect(routerReplaceMock).toHaveBeenCalledWith(
         '/sessions/session-1?utm_source=slack&utm_medium=link&utm_campaign=slack.fast_reply',
       );
@@ -533,36 +666,37 @@ describe('SessionWorkspace', () => {
       });
 
       expect(
-        await screen.findByRole('heading', { name: singleTask.title }),
+        await screen.findByLabelText('Full task task-1'),
       ).toBeInTheDocument();
       expect(routerReplaceMock).not.toHaveBeenCalled();
     },
   );
 
-  it('omits the Artifacts section from task details when empty', () => {
-    renderWorkspace({
-      isMobile: false,
-      selectedTaskId: singleTask.taskId,
-      sessionOverride: { tasks: [singleTask] },
-    });
+  it.each([false, true])(
+    'opens a Slack-linked Fast task from task cards when isMobile=%s',
+    (isMobile) => {
+      renderWorkspace({
+        isMobile,
+        sessionOverride: {
+          tasks: [],
+          taskSource: 'fast',
+          taskCards: [singleTask],
+        },
+        searchParams:
+          'utm_source=slack&utm_medium=link&utm_campaign=fast-delegation&task=task-1',
+      });
 
-    expect(screen.queryByRole('heading', { name: 'Artifacts' })).toBeNull();
-    expect(screen.queryByText('No artifacts in this task yet.')).toBeNull();
-  });
-
-  it('uses Tasks terminology and withholds task navigation without access', () => {
-    renderWorkspace({
-      isMobile: false,
-      selectedTaskId: singleTask.taskId,
-      sessionOverride: {
-        tasks: [{ ...singleTask, canAccessDetails: false }],
-      },
-    });
-
-    expect(screen.getByText('Task details require task access.')).toBeVisible();
-    expect(screen.queryByRole('link', { name: 'Go to task' })).toBeNull();
-    expect(screen.queryByText(/execution/i)).toBeNull();
-  });
+      expect(screen.getByLabelText('Full task task-1')).toBeInTheDocument();
+      if (isMobile) {
+        expect(
+          screen.queryByText('Session transcript'),
+        ).not.toBeInTheDocument();
+      } else {
+        expect(screen.getByText('Session transcript')).toBeInTheDocument();
+      }
+      expect(routerReplaceMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('disables the Tasks panel button until the session has a task', () => {
     renderWorkspace({ isMobile: false });
@@ -587,142 +721,6 @@ describe('SessionWorkspace', () => {
 
     expect(screen.getByText('Nested panel task-1')).toBeInTheDocument();
   });
-
-  it.each([false, true])(
-    'groups artifacts and opens image and file previews inside task details when isMobile=%s',
-    async (isMobile) => {
-      renderWorkspace({
-        isMobile,
-        selectedTaskId: 'task-1',
-        sessionOverride: {
-          tasks: [
-            {
-              taskId: 'task-1',
-              title: 'Capture sidebar proof',
-              workflow: 'standard',
-              state: 'completed',
-              repositoryName: 'RooCodeInc/Roomote',
-              latestOutput: null,
-              inferenceCostMicroUsd: 0,
-              canAccessDetails: true,
-              latestRun: null,
-              artifacts: [
-                {
-                  id: 'artifact-image',
-                  path: 'tmp/capture-visual-proof/sidebar-alignment.png',
-                  version: 2,
-                  artifactType: 'visual-proof',
-                  contentType: 'image/png',
-                  size: 1024,
-                  createdAt: new Date('2026-01-02T00:00:00.000Z'),
-                  thumbnailUrl: '/api/artifacts/artifact-image/raw?sig=test',
-                },
-                {
-                  id: 'artifact-file',
-                  path: 'plans/sidebar.md',
-                  version: 1,
-                  artifactType: 'plan',
-                  contentType: 'text/markdown',
-                  size: 512,
-                  createdAt: new Date('2026-01-01T00:00:00.000Z'),
-                },
-                {
-                  id: 'artifact-image-older',
-                  path: 'tmp/capture-visual-proof/sidebar-alignment.png',
-                  version: 1,
-                  artifactType: 'visual-proof',
-                  contentType: 'image/png',
-                  size: 1024,
-                  createdAt: new Date('2026-01-03T00:00:00.000Z'),
-                  thumbnailUrl:
-                    '/api/artifacts/artifact-image-older/raw?sig=test',
-                },
-                {
-                  id: 'artifact-video',
-                  path: 'recordings/session-walkthrough.webm',
-                  version: 1,
-                  artifactType: 'visual-proof',
-                  contentType: 'video/webm',
-                  size: 2048,
-                  createdAt: new Date('2026-01-01T00:00:00.000Z'),
-                  previewUrl: '/api/artifacts/artifact-video/raw?sig=test',
-                },
-              ],
-              pullRequests: [],
-            },
-          ],
-        },
-      });
-
-      expect(
-        screen.getByRole('heading', { name: 'Screenshots' }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole('heading', { name: 'Files' }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole('heading', { name: 'Videos' }),
-      ).toBeInTheDocument();
-
-      const imageButton = screen.getByRole('button', {
-        name: /Sidebar Alignment/,
-      });
-      const thumbnail = screen.getByRole('img', { name: 'Sidebar Alignment' });
-      expect(thumbnail).toHaveAttribute(
-        'src',
-        '/api/artifacts/artifact-image/raw?sig=test',
-      );
-      fireEvent.error(thumbnail);
-      expect(
-        screen.queryByRole('img', { name: 'Sidebar Alignment' }),
-      ).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Sidebar' })).toBeVisible();
-      expect(
-        screen.queryByText('tmp/capture-visual-proof/sidebar-alignment.png'),
-      ).not.toBeInTheDocument();
-      const videoPreview = screen.getByLabelText(
-        'Video preview: Session Walkthrough',
-      );
-      expect(videoPreview).toHaveAttribute(
-        'src',
-        '/api/artifacts/artifact-video/raw?sig=test',
-      );
-      fireEvent.error(videoPreview);
-      expect(
-        screen.queryByLabelText('Video preview: Session Walkthrough'),
-      ).not.toBeInTheDocument();
-
-      fireEvent.click(imageButton);
-      expect(
-        await screen.findByText(
-          'Artifact preview: tmp/capture-visual-proof/sidebar-alignment.png',
-        ),
-      ).toBeVisible();
-      expect(routerReplaceMock).not.toHaveBeenCalled();
-
-      fireEvent.click(
-        screen.getByRole('button', { name: 'Back to artifacts' }),
-      );
-      fireEvent.click(screen.getByRole('button', { name: 'Sidebar' }));
-      expect(
-        await screen.findByText('Artifact preview: plans/sidebar.md'),
-      ).toBeVisible();
-      expect(routerReplaceMock).not.toHaveBeenCalled();
-
-      fireEvent.click(
-        screen.getByRole('button', { name: 'Back to artifacts' }),
-      );
-      fireEvent.click(
-        screen.getByRole('button', { name: /Session Walkthrough/ }),
-      );
-      expect(
-        await screen.findByText(
-          'Artifact preview: recordings/session-walkthrough.webm',
-        ),
-      ).toBeVisible();
-      expect(routerReplaceMock).not.toHaveBeenCalled();
-    },
-  );
 
   it('navigates to an empty session Artifacts panel and back', () => {
     renderWorkspace({ isMobile: false });
@@ -876,7 +874,7 @@ describe('SessionWorkspace', () => {
     ).toBeInTheDocument();
   });
 
-  it('opens the Tasks panel from transcript context', async () => {
+  it('selects the task from transcript context when exactly one task is running', async () => {
     renderWorkspace({
       isMobile: false,
       children: <OpenTasksPanel />,
@@ -899,11 +897,59 @@ describe('SessionWorkspace', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Open tasks' }));
 
+    expect(routerReplaceMock).toHaveBeenCalledWith(
+      '/sessions/session-1?task=task-2',
+    );
     expect(
-      screen.getByRole('button', {
+      screen.queryByRole('button', {
         name: 'View coding task: Running coding task',
       }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('opens the Tasks panel from transcript context when multiple tasks are running', async () => {
+    renderWorkspace({
+      isMobile: false,
+      children: <OpenTasksPanel />,
+      sessionOverride: { taskSource: 'fast', taskCards: [] },
+      queriedFastTasks: [
+        {
+          taskId: 'task-2',
+          title: 'First running task',
+          latestRun: {
+            status: RunStatus.Running,
+            taskPhase: 'running',
+          },
+          artifacts: [],
+        },
+        {
+          taskId: 'task-3',
+          title: 'Second running task',
+          latestRun: {
+            status: RunStatus.Pending,
+            taskPhase: null,
+          },
+          artifacts: [],
+        },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Tasks' })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open tasks' }));
+
+    expect(
+      screen.getByRole('button', {
+        name: 'View coding task: First running task',
+      }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: 'View coding task: Second running task',
+      }),
+    ).toBeInTheDocument();
+    expect(routerReplaceMock).not.toHaveBeenCalled();
   });
 
   it('populates the Artifacts panel from refreshed Fast-session tasks', async () => {

@@ -42,6 +42,14 @@ vi.mock('@roomote/communication/discord-event', () => ({
   getDiscordMessageCreate: mocks.getMessage,
 }));
 
+vi.mock('@roomote/communication', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/communication')>()),
+  resolveFastSessionReplyFooterContext: vi.fn(async () => ({
+    linkedPrs: [],
+    livePreviewUrl: null,
+  })),
+}));
+
 vi.mock('@roomote/env', () => ({
   Env: { R_APP_URL: 'https://roomote.example.com' },
 }));

@@ -86,7 +86,7 @@ async function processFastAgentReaction(params: {
   try {
     const activeTasks = await getActiveFastAgentTasks(session.id);
     const footerContext = await resolveFastSessionReplyFooterContext({
-      taskIds: activeTasks.map((task) => task.taskId),
+      sessionId: session.id,
     });
     let didSendVisibleResponse = false;
 

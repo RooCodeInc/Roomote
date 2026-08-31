@@ -58,6 +58,18 @@ vi.mock('@roomote/redis', async (importOriginal) => {
   };
 });
 
+vi.mock('@roomote/communication', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/communication')>()),
+  resolveFastSessionReplyFooterContext: vi.fn(
+    async ({ pullRequest, pullRequests = [] }) => ({
+      linkedPrs: [...(pullRequest ? [pullRequest] : []), ...pullRequests].map(
+        ({ number, url }) => ({ prNumber: number, prUrl: url }),
+      ),
+      livePreviewUrl: null,
+    }),
+  ),
+}));
+
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,

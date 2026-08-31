@@ -66,6 +66,14 @@ vi.mock('@roomote/sdk/server', () => ({
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
 
+vi.mock('@roomote/communication', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/communication')>()),
+  resolveFastSessionReplyFooterContext: vi.fn(async () => ({
+    linkedPrs: [],
+    livePreviewUrl: null,
+  })),
+}));
+
 vi.mock('../helpers/thread-posting.js', () => ({
   postSlackThreadMarkdownMessage: mocks.postThreadMessage,
 }));
@@ -211,6 +219,7 @@ describe('processFastAgentMessage', () => {
       slack: slack as never,
       userId: 'user-1',
       teamId: 'T123',
+      roomoteSlackUserId: 'UROOMOTE',
       activeTasks: [
         { taskId: 'task-1', title: 'Fix API' },
         { taskId: 'task-2', title: 'Update docs' },
@@ -220,6 +229,7 @@ describe('processFastAgentMessage', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         question: 'investigate this',
+        slackRoomoteUserId: 'UROOMOTE',
         currentMessageAgentContext: 'Slack block text:\nState: New',
         adapter: expect.objectContaining({ launchTask }),
         activeTasks: [

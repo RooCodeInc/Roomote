@@ -80,6 +80,7 @@ export async function processFastAgentMessage(params: {
   processingReactionName?: string;
   isExistingConversation?: boolean;
   directedAtRoomote?: boolean;
+  roomoteSlackUserId?: string;
   onAccepted?: (abort: () => Promise<void>) => void;
   onRejected?: () => void;
 }): Promise<void> {
@@ -96,6 +97,7 @@ export async function processFastAgentMessage(params: {
     processingReactionName = 'eyes',
     isExistingConversation = false,
     directedAtRoomote = false,
+    roomoteSlackUserId,
   } = params;
   const threadId = event.thread_ts || event.ts;
   const incomingConversation = {
@@ -243,7 +245,7 @@ export async function processFastAgentMessage(params: {
       ? await resolveActiveTasks()
       : activeTasks;
     const footerContext = await resolveFastSessionReplyFooterContext({
-      taskIds: resolvedActiveTasks.map((task) => task.taskId),
+      sessionId: session.id,
     });
     const responseText = await answerFastAgentQuestion({
       question,
@@ -267,6 +269,7 @@ export async function processFastAgentMessage(params: {
         event.channel_type !== 'mpim' &&
         hasOtherHumanParticipant &&
         !directedAtRoomote,
+      ...(roomoteSlackUserId ? { slackRoomoteUserId: roomoteSlackUserId } : {}),
       adapter: {
         activity: createFastAgentSlackSessionActivity({
           slack,

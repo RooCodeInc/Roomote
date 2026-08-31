@@ -1,0 +1,101 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const {
+  getSessionForFastConversationMock,
+  selectWhereMock,
+  resolveThreadReplyFooterContextMock,
+} = vi.hoisted(() => ({
+  getSessionForFastConversationMock: vi.fn(),
+  selectWhereMock: vi.fn(),
+  resolveThreadReplyFooterContextMock: vi.fn(),
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  db: {
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        innerJoin: vi.fn(() => ({ where: selectWhereMock })),
+      })),
+    })),
+  },
+  and: vi.fn((...args: unknown[]) => ({ and: args })),
+  eq: vi.fn((...args: unknown[]) => ({ eq: args })),
+  getSessionForFastConversation: getSessionForFastConversationMock,
+  isNull: vi.fn((value: unknown) => ({ isNull: value })),
+  sessionTasks: {
+    sessionId: 'sessionId',
+    taskId: 'taskId',
+  },
+  tasks: {
+    id: 'id',
+    deletedAt: 'deletedAt',
+  },
+}));
+
+vi.mock('../thread-reply-footer-context', () => ({
+  resolveThreadReplyFooterContext: resolveThreadReplyFooterContextMock,
+}));
+
+vi.mock('@roomote/env', () => ({
+  Env: { R_APP_URL: 'https://roomote.example' },
+}));
+
+import { resolveFastSessionReplyFooterContext } from '../fast-session-footer';
+
+describe('resolveFastSessionReplyFooterContext', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getSessionForFastConversationMock.mockResolvedValue({ id: 'session-1' });
+    selectWhereMock.mockResolvedValue([
+      { taskId: 'task-1' },
+      { taskId: 'task-2' },
+    ]);
+    resolveThreadReplyFooterContextMock.mockImplementation(
+      async ({ taskId }: { taskId: string }) => ({
+        linkedPrs:
+          taskId === 'task-1'
+            ? [
+                {
+                  prNumber: 42,
+                  prUrl: 'https://github.com/acme/widgets/pull/42',
+                },
+              ]
+            : [
+                {
+                  prNumber: 42,
+                  prUrl: 'https://github.com/acme/widgets/pull/42',
+                },
+                {
+                  prNumber: 7,
+                  prUrl: 'https://github.com/acme/api/pull/7',
+                },
+              ],
+        livePreviewUrl: taskId === 'task-1' ? 'https://preview.example' : null,
+      }),
+    );
+  });
+
+  it('accumulates and deduplicates pull requests from every unified Session task', async () => {
+    await expect(
+      resolveFastSessionReplyFooterContext({ sessionId: 'fast-session-1' }),
+    ).resolves.toEqual({
+      linkedPrs: [
+        {
+          prNumber: 42,
+          prUrl: 'https://github.com/acme/widgets/pull/42',
+        },
+        {
+          prNumber: 7,
+          prUrl: 'https://github.com/acme/api/pull/7',
+        },
+      ],
+      livePreviewUrl: 'https://preview.example',
+    });
+
+    expect(getSessionForFastConversationMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'fast-session-1',
+    );
+    expect(resolveThreadReplyFooterContextMock).toHaveBeenCalledTimes(2);
+  });
+});

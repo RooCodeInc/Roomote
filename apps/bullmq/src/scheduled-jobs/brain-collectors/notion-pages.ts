@@ -1456,6 +1456,7 @@ export async function collectNotionTraversal(input: {
     pages,
     nextSince: null,
     itemUpdates,
+    historicalPending: !complete,
     stateUpdates: [
       {
         collectorId: NOTION_INCREMENTAL_STATE_ID,
@@ -1527,6 +1528,9 @@ export async function collectNotionReconciliation(input: {
     pages,
     nextSince: null,
     itemUpdates,
+    // Reconcile always hands off to another historical phase (more stale
+    // items, or the traversal walk), so the fast loop keeps going.
+    historicalPending: true,
     itemDeletes: [
       {
         collectorId: NOTION_PAGES_COLLECTOR_ID,
@@ -1572,6 +1576,7 @@ async function collectDisabledNotionPages(
   return {
     pages: batch.map(buildUnavailableNotionPage),
     nextSince: null,
+    historicalPending: !complete,
     itemDeletes: [
       {
         collectorId: NOTION_PAGES_COLLECTOR_ID,
@@ -1724,6 +1729,11 @@ async function collectNotionPages(input: {
     pages,
     nextSince: null,
     itemUpdates,
+    // A sweep (finished or not) always leaves historical phases ahead of it;
+    // ordinary incremental catch-up must NOT hold the fast loop open — it
+    // re-polls the same newest-first search, and its watermark chase settles
+    // on the next scheduled tick.
+    historicalPending: mode === 'sweep',
     stateUpdates: [
       {
         collectorId: NOTION_INCREMENTAL_STATE_ID,

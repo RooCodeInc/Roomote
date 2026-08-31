@@ -66,7 +66,9 @@ describe('Merge announcer push normalization', () => {
         number: 7,
         html_url: 'https://github.com/acme/widgets/pull/7',
         title: 'Ship widget export',
-        body: 'Adds the export and updates validation.',
+        body: `Adds the export and updates validation.
+
+![Product screenshot](https://github.com/user-attachments/assets/product-preview)`,
         merged_at: '2026-08-29T12:00:00Z',
         merge_commit_sha: payload.after,
         base: { ref: 'main' },
@@ -92,7 +94,6 @@ describe('Merge announcer push normalization', () => {
         pulls: { get, listFiles },
       },
     });
-
     const enriched = await enrichGitHubMergeAnnouncerEvent(payload, event, {
       getInstallationOctokit: getInstallationOctokit as never,
     });
@@ -120,7 +121,9 @@ describe('Merge announcer push normalization', () => {
       number: 7,
       url: 'https://github.com/acme/widgets/pull/7',
       title: 'Ship widget export',
-      body: 'Adds the export and updates validation.',
+      body: `Adds the export and updates validation.
+
+![Product screenshot](https://github.com/user-attachments/assets/product-preview)`,
       changedFileCount: 24,
       additions: 120,
       deletions: 15,

@@ -43,7 +43,9 @@ regular Memory collector ticks, and a daily full sweep discovers older pages
 that were newly shared without being edited. Because Notion's search index
 does not reliably surface pages that live inside databases, the sweep also
 enumerates every shared data source and walks page trees to capture database
-rows and other inheritance-shared pages. The same sweep replaces pages
+rows and other inheritance-shared pages, running that discovery to
+completion in a continuous loop rather than trickling across scheduled
+ticks. The same sweep replaces pages
 that are no longer shared with unavailable tombstones, so their former
 content is no longer retained in Memory search results.
 

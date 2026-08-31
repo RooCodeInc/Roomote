@@ -43,6 +43,13 @@ const LOG_PREFIX = '[brainCollectors]';
 type BrainCollectorRunResult = {
   backfillProgressed: boolean;
   interrupted: boolean;
+  /**
+   * Collectors that advanced durable historical scan work this pass and have
+   * more remaining. Feed back as `continueCollectorIds` so the continuation
+   * loop keeps their scans moving; empty once every scan settles, which is
+   * what lets the loop end.
+   */
+  historicalPendingCollectorIds: string[];
 };
 
 async function persistCollectorItemUpdates(
@@ -136,6 +143,12 @@ export async function runBrainCollectors(
     collectors?: BrainCollector[];
     /** Skip upstream incremental polls during fast historical continuation. */
     includeIncremental?: boolean;
+    /**
+     * Collectors whose previous pass reported historicalPending: their
+     * collect phase runs again even on a continuation pass, so an unfinished
+     * sweep/reconcile/discovery scan keeps advancing in the fast loop.
+     */
+    continueCollectorIds?: string[];
   } = {},
 ): Promise<BrainCollectorRunResult> {
   const sink = options.sink ?? postToBrain;
@@ -143,6 +156,8 @@ export async function runBrainCollectors(
   const retireSink = options.retireSink ?? retireBrainPage;
   const collectors = options.collectors ?? BRAIN_COLLECTORS;
   const includeIncremental = options.includeIncremental ?? true;
+  const continueIds = new Set(options.continueCollectorIds ?? []);
+  const historicalPendingCollectorIds: string[] = [];
   let backfillProgressed = false;
 
   for (const collector of collectors) {
@@ -153,10 +168,12 @@ export async function runBrainCollectors(
 
       const state = await getBrainSyncState(db, collector.id);
 
-      if (includeIncremental) {
+      if (includeIncremental || continueIds.has(collector.id)) {
         // Incremental phase runs once per scheduled tick: new activity stays
         // fresh without repeating upstream API polls in the one-second
-        // historical continuation loop.
+        // historical continuation loop. The exception is a collector whose
+        // last pass reported unfinished historical scan work — its collect
+        // phase is productive upstream work, not a wasted poll.
         const {
           pages,
           nextSince,
@@ -164,6 +181,7 @@ export async function runBrainCollectors(
           itemUpdates = [],
           itemDeletes = [],
           pageRetirements = [],
+          historicalPending = false,
         } = await collector.collect({
           since: state?.watermark ?? null,
           now: new Date(),
@@ -226,6 +244,13 @@ export async function runBrainCollectors(
           }
         }
 
+        // An overshot pass persisted nothing, so re-running it in the fast
+        // loop would repeat the same over-limit collect; let the next
+        // scheduled tick retry it instead.
+        if (historicalPending && !overshot) {
+          historicalPendingCollectorIds.push(collector.id);
+        }
+
         if (capped.length > 0) {
           console.log(
             `${LOG_PREFIX} ${collector.id} ingested ${capped.length} pages`,
@@ -258,7 +283,11 @@ export async function runBrainCollectors(
             isBrainRateLimited(error) ? 'rate limited' : 'cannot embed'
           }); ending collector pass until next tick`,
         );
-        return { backfillProgressed, interrupted: true };
+        return {
+          backfillProgressed,
+          interrupted: true,
+          historicalPendingCollectorIds,
+        };
       }
 
       console.warn(
@@ -267,7 +296,11 @@ export async function runBrainCollectors(
     }
   }
 
-  return { backfillProgressed, interrupted: false };
+  return {
+    backfillProgressed,
+    interrupted: false,
+    historicalPendingCollectorIds,
+  };
 }
 
 /**

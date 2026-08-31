@@ -610,6 +610,28 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('marks a Slack mention skill invocation that appears later in a long message', async () => {
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: [
+        'The incident has a long timeline and several unrelated dollar amounts.',
+        'Please use the operations workflow for the concrete request below.',
+        '<@ROOMOTE_ID> $handle-operations-ticket investigate the handoff',
+      ].join('\n'),
+      slackRoomoteUserId: 'ROOMOTE_ID',
+      adapter: callbacks(),
+    });
+
+    const prompt = mocks.generateText.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain(
+      '<explicit_skill_invocation name="handle-operations-ticket" />\n\n<slack_message',
+    );
+    expect(prompt).toContain(
+      '&lt;@ROOMOTE_ID&gt; $handle-operations-ticket investigate the handoff',
+    );
+    expect(prompt.match(/<explicit_skill_invocation/gu)).toHaveLength(1);
+  });
+
   it('escapes tag injection in non-Slack sender and message context', async () => {
     await answerFastAgentQuestion({
       question:

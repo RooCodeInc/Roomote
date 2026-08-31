@@ -14,8 +14,13 @@ import {
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
-  ROOMOTE_TASK_INSPECTION_ACTIONS,
-  roomoteTaskInspectionFieldSchemas,
+  ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
+  ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION,
+  ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
+  getRoomoteSearchStatusError,
+  resolveRoomoteCommunicationTarget,
+  roomoteManagementFieldSchemas,
+  shouldSearchTasks,
   sourceControlProviderSchema,
   taskArtifactTypeSchema,
   workspaceReadinessSchema,
@@ -79,6 +84,13 @@ import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
 import { handleManageCustomAutomations } from './custom-automations.js';
 import { handleManageGoal } from './goal.js';
+import {
+  handleGetSessionMessages,
+  handleGetSessionSummary,
+  handleSearchSessions,
+  handleSendSessionMessage,
+  handleStartSession,
+} from './sessions.js';
 
 export {
   taskSuggestionResultHasSubmittedSuggestions,
@@ -504,61 +516,30 @@ const ENVIRONMENT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const manageTasksToolDescription =
-  `Manage ${PRODUCT_NAME} tasks. ` +
-  `When the user provides an existing ${PRODUCT_NAME} task URL or asks about an existing task, extract the task ID and use action "get_summary" for current status or action "get_messages" for transcript details before resorting to browser or task-UI navigation. ` +
+  ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION +
+  ' ' +
+  `When the user provides an existing ${PRODUCT_NAME} task URL, extract its task ID and pass taskId to get_summary or get_messages before resorting to browser navigation. ` +
   'Always call action "list_environments" immediately before action "launch" so you can copy a valid environmentId. ' +
   'Use action "list_environments" to list launch targets (named environments and the org-wide target). ' +
-  'Use action "search" to find tasks by query or status. ' +
-  `Use action "get_summary" to inspect a specific task's latest status and failure details (requires taskId). ` +
+  'Use action "search_tasks" only to search direct tasks by query or status. ' +
+  `Use action "get_summary" with taskId to inspect a specific task's latest status and failure details. ` +
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
-  'Use action "get_messages" to retrieve the latest message history for a task or Fast session (requires taskId, returns newest first). For a Fast session, pass its canonical session ID as taskId. ' +
+  'Use action "get_messages" with sessionId for Session history, or taskId for a specific task transcript; results are newest first. ' +
   `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
-  'Use action "send_message" to send a follow-up message to a running task or Fast session (requires taskId and message). For a Fast session, pass its canonical session ID as taskId. ' +
+  'Use action "send_message" with sessionId to continue a Session, or taskId to message a specific task. ' +
   'Use action "list_models" to list the enabled model IDs available for task model selection. Call it before "update_models" when resolving a requested model name to an exact ID. ' +
   'Use action "update_models" ONLY when the user explicitly asks to change the model or reasoning level for a task (requires role; taskId defaults to the current task). Pass the desired model id and/or reasoningEffort; omit both to reset the role to the deployment default. Users usually phrase both together: in "switch to Luna Max" or "use GPT 5.4 medium", the trailing low/medium/high/extra high/max word is the reasoningEffort and the rest names the model — set BOTH fields in one call. Changes apply from the next turn, so a change to the current task does not affect the turn that is already running.';
 
 const manageTasksInputSchema = {
   action: z
     .enum([
-      ...ROOMOTE_TASK_INSPECTION_ACTIONS,
-      'launch',
-      'cancel',
-      'send_message',
+      ...ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
       'list_models',
       'update_models',
-      'list_environments',
     ])
-    .describe(
-      'The task action to perform. Call "list_environments" immediately before "launch".',
-    ),
-  ...roomoteTaskInspectionFieldSchemas,
-  taskId: z
-    .string()
-    .optional()
-    .describe(
-      'The task ID; for get_messages and send_message this may instead be a canonical Fast session ID',
-    ),
-  message: z
-    .string()
-    .optional()
-    .describe(
-      'Follow-up message text to send to a running task (required for send_message)',
-    ),
-  prompt: z
-    .string()
-    .optional()
-    .describe(
-      'Task description or instructions in natural language (required for launch)',
-    ),
-  environmentId: z
-    .string()
-    .optional()
-    .describe(
-      'Environment ID returned by "list_environments" (required for launch). ' +
-        'Call "list_environments" immediately before launching and copy one of the returned environmentId values.',
-    ),
-  branch: z.string().optional().describe('Branch to use (for launch)'),
+    .describe(ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION),
+  ...roomoteManagementFieldSchemas,
   role: z
     .enum(['coding', 'helper', 'vision', 'codeReview', 'explore', 'planning'])
     .optional()
@@ -576,12 +557,6 @@ const manageTasksInputSchema = {
     .optional()
     .describe(
       'For update_models: desired reasoning level for the role ("extra high" maps to xhigh). A level qualifier trailing a model name ("Luna Max", "Sonnet high") is this field, not part of the model id — pass it here alongside the model. Omit to use the deployment default level.',
-    ),
-  notifyOnSettle: z
-    .boolean()
-    .optional()
-    .describe(
-      'For launch: when true, the platform sends a message into THIS task session when the launched task settles (completes, fails, is canceled, or goes idle), so you can wait for that notification instead of polling get_summary.',
     ),
 } satisfies Record<string, z.ZodTypeAny>;
 
@@ -620,7 +595,7 @@ roomoteMcpServer.registerTool(
 roomoteMcpServer.registerTool(
   'manage_tasks',
   {
-    title: 'Manage Tasks',
+    title: 'Manage Sessions and Tasks',
     description: manageTasksToolDescription,
     inputSchema: manageTasksInputSchema,
     annotations: {
@@ -637,7 +612,53 @@ roomoteMcpServer.registerTool(
     }
 
     switch (params.action) {
+      case 'start': {
+        if (!params.message?.trim()) {
+          return errorResult('message is required for start');
+        }
+        return handleStartSession(params.message, config);
+      }
       case 'search': {
+        const statusError = getRoomoteSearchStatusError({
+          action: 'search',
+          pullRequest: params.pullRequest,
+          status: params.status,
+        });
+        if (statusError) return errorResult(statusError);
+        if (
+          shouldSearchTasks({
+            action: 'search',
+            pullRequest: params.pullRequest,
+            status: params.status,
+          })
+        ) {
+          return handleSearchTasks(
+            {
+              query: params.query,
+              pullRequest: params.pullRequest,
+              status: params.status,
+              limit: params.limit ? Math.min(params.limit, 100) : undefined,
+              cursor: params.cursor,
+            },
+            config,
+          );
+        }
+        return handleSearchSessions(
+          {
+            query: params.query,
+            status: params.status,
+            limit: params.limit ? Math.min(params.limit, 100) : undefined,
+            cursor: params.cursor,
+          },
+          config,
+        );
+      }
+      case 'search_tasks': {
+        const statusError = getRoomoteSearchStatusError({
+          action: 'search_tasks',
+          status: params.status,
+        });
+        if (statusError) return errorResult(statusError);
         return handleSearchTasks(
           {
             query: params.query,
@@ -650,10 +671,15 @@ roomoteMcpServer.registerTool(
         );
       }
       case 'get_summary': {
-        if (!params.taskId?.trim()) {
-          return errorResult('taskId is required for get_summary');
+        const target = resolveRoomoteCommunicationTarget(params);
+        if (!target) {
+          return errorResult(
+            'sessionId is required for get_summary when taskId is omitted',
+          );
         }
-        return handleGetTaskSummary({ taskId: params.taskId }, config);
+        return target.kind === 'task'
+          ? handleGetTaskSummary({ taskId: target.id }, config)
+          : handleGetSessionSummary(target.id, config);
       }
       case 'get_compute_logs': {
         if (!params.taskId?.trim()) {
@@ -662,11 +688,20 @@ roomoteMcpServer.registerTool(
         return handleGetTaskComputeLogs({ taskId: params.taskId }, config);
       }
       case 'get_messages': {
-        if (!params.taskId?.trim()) {
-          return errorResult('taskId is required for get_messages');
+        const target = resolveRoomoteCommunicationTarget(params);
+        if (!target) {
+          return errorResult(
+            'sessionId is required for get_messages when taskId is omitted',
+          );
         }
-        return handleGetTaskMessages(
-          { taskId: params.taskId, limit: params.limit },
+        if (target.kind === 'task') {
+          return handleGetTaskMessages(
+            { taskId: target.id, limit: params.limit },
+            config,
+          );
+        }
+        return handleGetSessionMessages(
+          { sessionId: target.id, limit: params.limit },
           config,
         );
       }
@@ -735,16 +770,24 @@ roomoteMcpServer.registerTool(
         return handleListTaskModels(config);
       }
       case 'send_message': {
-        if (!params.taskId?.trim()) {
-          return errorResult('taskId is required for send_message');
-        }
         if (!params.message?.trim()) {
           return errorResult('message is required for send_message');
         }
-        return handleSendMessage(
-          { taskId: params.taskId, message: params.message },
-          config,
-        );
+        const target = resolveRoomoteCommunicationTarget(params);
+        if (!target) {
+          return errorResult(
+            'sessionId is required for send_message when taskId is omitted',
+          );
+        }
+        return target.kind === 'task'
+          ? handleSendMessage(
+              { taskId: target.id, message: params.message },
+              config,
+            )
+          : handleSendSessionMessage(
+              { sessionId: target.id, message: params.message },
+              config,
+            );
       }
       case 'list_environments': {
         return handleListEnvironments(config);
