@@ -750,7 +750,7 @@ describe('SessionWorkspace', () => {
     ).toBeInTheDocument();
   });
 
-  it('opens the Tasks panel from transcript context', async () => {
+  it('selects the task from transcript context when exactly one task is running', async () => {
     renderWorkspace({
       isMobile: false,
       children: <OpenTasksPanel />,
@@ -773,11 +773,59 @@ describe('SessionWorkspace', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Open tasks' }));
 
+    expect(routerReplaceMock).toHaveBeenCalledWith(
+      '/sessions/session-1?task=task-2',
+    );
     expect(
-      screen.getByRole('button', {
+      screen.queryByRole('button', {
         name: 'View coding task: Running coding task',
       }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('opens the Tasks panel from transcript context when multiple tasks are running', async () => {
+    renderWorkspace({
+      isMobile: false,
+      children: <OpenTasksPanel />,
+      sessionOverride: { taskSource: 'fast', taskCards: [] },
+      queriedFastTasks: [
+        {
+          taskId: 'task-2',
+          title: 'First running task',
+          latestRun: {
+            status: RunStatus.Running,
+            taskPhase: 'running',
+          },
+          artifacts: [],
+        },
+        {
+          taskId: 'task-3',
+          title: 'Second running task',
+          latestRun: {
+            status: RunStatus.Pending,
+            taskPhase: null,
+          },
+          artifacts: [],
+        },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Tasks' })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open tasks' }));
+
+    expect(
+      screen.getByRole('button', {
+        name: 'View coding task: First running task',
+      }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: 'View coding task: Second running task',
+      }),
+    ).toBeInTheDocument();
+    expect(routerReplaceMock).not.toHaveBeenCalled();
   });
 
   it('populates the Artifacts panel from refreshed Fast-session tasks', async () => {
