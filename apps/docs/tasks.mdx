@@ -37,6 +37,20 @@ execution count, workspace or pull-request context, aggregate cost, and unread
 state. Use the **Tasks** scope when you only want Sessions containing execution
 work. Board and list choices remain in the URL so views are shareable.
 
+## Fast sessions
+
+Open `/sessions` on your Roomote deployment to review persisted Fast
+conversations available to your account. Select a session to inspect its
+canonical transcript, including user prompts, Roomote replies, and visible tool
+activity. Admins can review sessions across the deployment; other users can see
+sessions they own or participated in.
+
+Each session shows whether it is using native context or stored history and
+whether its reply destination has been verified. Sessions created before
+canonical message persistence may not have transcript entries until a new turn
+is recorded. For long conversations, the transcript displays the most recent
+messages and indicates when older messages are not shown.
+
 ## Recover from a failed start
 
 When a task cannot start, select **Try in a new task** to open an editable task
