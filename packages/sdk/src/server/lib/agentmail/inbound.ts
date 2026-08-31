@@ -265,6 +265,9 @@ async function maybeSendStrangerRefusal(input: {
       },
     );
   } catch (error) {
+    // Release the once-per-thread claim so a later email from this sender
+    // still gets its refusal; only a DELIVERED refusal should consume it.
+    await redis.del(key).catch(() => undefined);
     console.warn(
       `${LOG_PREFIX} Failed to send stranger refusal for thread ${input.message.thread_id}: ${error instanceof Error ? error.message : String(error)}`,
     );

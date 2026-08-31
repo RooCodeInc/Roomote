@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type {
   CommunicationChannelMessagesResult,
   CommunicationPostMessageInput,
@@ -19,6 +21,16 @@ const DEFAULT_AGENTMAIL_TIMEOUT_MS = 10_000;
 const DEFAULT_AGENTMAIL_MAX_RETRIES = 2;
 const AGENTMAIL_RETRY_BASE_DELAY_MS = 250;
 const AGENTMAIL_ERROR_BODY_MAX_BYTES = 4_096;
+
+/**
+ * AgentMail restricts Idempotency-Key to `A-Z a-z 0-9 - . _ ~`. Logical keys
+ * elsewhere in the codebase are colon-delimited (and may embed RFC822
+ * message ids), so the header value is the hex digest of the logical key:
+ * same input, same header, guaranteed charset.
+ */
+function toAgentMailIdempotencyHeader(logicalKey: string): string {
+  return createHash('sha256').update(logicalKey).digest('hex');
+}
 
 /** Loop instead of a suffix regex (CodeQL js/polynomial-redos). */
 function trimTrailingSlashes(value: string): string {
@@ -285,7 +297,11 @@ async function callAgentMailApi<T>(params: {
             ? { 'content-type': 'application/json' }
             : {}),
           ...(params.idempotencyKey
-            ? { 'idempotency-key': params.idempotencyKey }
+            ? {
+                'idempotency-key': toAgentMailIdempotencyHeader(
+                  params.idempotencyKey,
+                ),
+              }
             : {}),
         },
         ...(params.body !== undefined

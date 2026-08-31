@@ -900,6 +900,29 @@ export class MockAgentMailServer {
     replyTarget: MockAgentMailStoredMessage | undefined,
   ): void {
     const idempotencyKey = request.headers['idempotency-key'];
+    // Mirror the real API's charset restriction so parity bugs surface in
+    // tests instead of production (validation_error, path headers/Idempotency-Key).
+    if (
+      typeof idempotencyKey === 'string' &&
+      idempotencyKey &&
+      !/^[A-Za-z0-9\-._~]+$/.test(idempotencyKey)
+    ) {
+      json(response, 400, {
+        name: 'ValidationError',
+        code: 'validation_error',
+        message: 'Request validation failed',
+        errors: [
+          {
+            code: 'invalid_format',
+            format: 'custom',
+            path: ['headers', 'Idempotency-Key'],
+            message:
+              'Idempotency-Key must contain only the following characters: A-Z a-z 0-9 - . _ ~',
+          },
+        ],
+      });
+      return;
+    }
     const idempotencyMapKey =
       typeof idempotencyKey === 'string' && idempotencyKey
         ? [
