@@ -104,6 +104,7 @@ import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
 import {
   FastAgentProcessShutdownError,
+  markFastAgentShutdownCloseoutPending,
   markFastAgentShutdownCloseoutSettled,
 } from './fast-agent-turn-lock';
 import {
@@ -867,6 +868,9 @@ export async function answerFastAgentQuestion({
   platformEventTranscriptPayload?: Record<string, unknown>;
   slackRoomoteUserId?: string;
 }): Promise<string> {
+  if (signal) {
+    markFastAgentShutdownCloseoutPending(signal);
+  }
   const turnId = buildFastAgentTurnId({
     currentMessageId,
     conversation,

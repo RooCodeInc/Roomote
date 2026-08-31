@@ -8,6 +8,7 @@ const FAST_AGENT_TURN_LOCK_RENEW_MS =
 const FAST_AGENT_TURN_LOCK_RETRY_MS = 500;
 const activeFastAgentTurnLocks = new Set<FastAgentTurnLockHandle>();
 const shutdownCloseoutResolvers = new WeakMap<AbortSignal, () => void>();
+const shutdownCloseoutPendingSignals = new WeakSet<AbortSignal>();
 let processShutdownReason: FastAgentProcessShutdownError | null = null;
 
 export class FastAgentTurnLockLostError extends Error {
@@ -39,6 +40,16 @@ export function markFastAgentShutdownCloseoutSettled(
   signal: AbortSignal,
 ): void {
   shutdownCloseoutResolvers.get(signal)?.();
+}
+
+/** Mark that an accepted turn has entered answer handling and can deliver the
+ * user-visible shutdown closeout. */
+export function markFastAgentShutdownCloseoutPending(
+  signal: AbortSignal,
+): void {
+  if (!signal.aborted && shutdownCloseoutResolvers.has(signal)) {
+    shutdownCloseoutPendingSignals.add(signal);
+  }
 }
 
 export async function abortActiveFastAgentTurns(
@@ -120,6 +131,7 @@ export async function acquireFastAgentTurnLock(params: {
       const settleShutdownCloseout = () => {
         if (shutdownCloseoutSettled) return;
         shutdownCloseoutSettled = true;
+        shutdownCloseoutPendingSignals.delete(ownership.signal);
         shutdownCloseoutResolvers.delete(ownership.signal);
         resolveShutdownCloseout?.();
       };
@@ -147,7 +159,12 @@ export async function acquireFastAgentTurnLock(params: {
       };
       releaseTurnLock.abortForShutdown = async (reason) => {
         ownership.abort(reason);
-        await shutdownCloseoutPromise;
+        if (
+          ownership.signal.reason instanceof FastAgentProcessShutdownError &&
+          shutdownCloseoutPendingSignals.has(ownership.signal)
+        ) {
+          await shutdownCloseoutPromise;
+        }
         await releaseRedisTurnLock();
       };
       releaseTurnLock.shutdownCloseoutSettled = shutdownCloseoutPromise;
