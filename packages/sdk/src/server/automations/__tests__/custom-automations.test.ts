@@ -304,17 +304,17 @@ describe('customAutomationsJob', () => {
         text: 'Flaky tests is running.',
         blocks: [
           expect.objectContaining({
-            type: 'context',
-            elements: expect.arrayContaining([
-              expect.objectContaining({ text: 'Flaky tests' }),
-            ]),
-          }),
-          { type: 'markdown', text: '**Flaky tests** is running.' },
-          expect.objectContaining({
-            type: 'actions',
-            elements: [
+            type: 'container',
+            title: expect.objectContaining({ text: 'Flaky tests' }),
+            child_blocks: [
+              expect.objectContaining({ type: 'rich_text' }),
               expect.objectContaining({
-                action_id: 'late_bound_automation_configure',
+                type: 'actions',
+                elements: [
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_configure',
+                  }),
+                ],
               }),
             ],
           }),
@@ -327,19 +327,24 @@ describe('customAutomationsJob', () => {
       message: expect.objectContaining({
         blocks: expect.arrayContaining([
           expect.objectContaining({
-            type: 'actions',
-            elements: [
+            type: 'container',
+            child_blocks: expect.arrayContaining([
               expect.objectContaining({
-                action_id: 'late_bound_automation_view_session',
-                text: expect.objectContaining({ text: 'Follow' }),
-                url: expect.stringContaining(
-                  '/sessions/33333333-3333-4333-8333-333333333333',
-                ),
+                type: 'actions',
+                elements: [
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_view_session',
+                    text: expect.objectContaining({ text: 'Follow' }),
+                    url: expect.stringContaining(
+                      '/sessions/33333333-3333-4333-8333-333333333333',
+                    ),
+                  }),
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_configure',
+                  }),
+                ],
               }),
-              expect.objectContaining({
-                action_id: 'late_bound_automation_configure',
-              }),
-            ],
+            ]),
           }),
         ]),
       }),

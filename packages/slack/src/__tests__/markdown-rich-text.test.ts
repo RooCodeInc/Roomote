@@ -70,6 +70,32 @@ describe('convertMarkdownInlineToRichText', () => {
     ]);
   });
 
+  it('normalizes angle-bracket Markdown link destinations', () => {
+    expect(
+      convertMarkdownInlineToRichText(
+        '[Finding](<https://x.com/example/status/1>)',
+      ),
+    ).toEqual([
+      {
+        type: 'text',
+        text: '[Finding](<https://x.com/example/status/1>)',
+      },
+    ]);
+    expect(
+      convertMarkdownInlineToRichText(
+        '[Finding](<https://x.com/example/status/1>)',
+        {},
+        { angleBracketLinkDestinations: true },
+      ),
+    ).toEqual([
+      {
+        type: 'link',
+        url: 'https://x.com/example/status/1',
+        text: 'Finding',
+      },
+    ]);
+  });
+
   it('leaves sentence punctuation after a bare URL out of the link', () => {
     expect(
       convertMarkdownInlineToRichText(

@@ -153,7 +153,7 @@ describe('refreshAutomationRootFooter', () => {
     ).toHaveLength(24);
   });
 
-  it('preserves top-level Markdown while refreshing automation actions', async () => {
+  it('migrates top-level Markdown into the structured result container', async () => {
     resolveThreadReplyLinkedPrsMock.mockResolvedValue([]);
     const updateMessage = vi.fn().mockResolvedValue(true);
     const markdown =
@@ -190,17 +190,31 @@ describe('refreshAutomationRootFooter', () => {
     ).resolves.toBe(true);
 
     const blocks = updateMessage.mock.calls[0]?.[0]?.message?.blocks ?? [];
-    expect(blocks).toContainEqual({ type: 'markdown', text: markdown });
+    expect(blocks).toHaveLength(1);
     expect(blocks[0]).toMatchObject({
-      type: 'context',
-      elements: expect.arrayContaining([
-        { type: 'plain_text', text: 'Saved metadata' },
+      type: 'container',
+      title: { text: 'Audit' },
+      subtitle: { type: 'plain_text', text: 'Saved metadata' },
+      child_blocks: expect.arrayContaining([
+        expect.objectContaining({ type: 'rich_text' }),
+        expect.objectContaining({
+          type: 'table',
+          rows: expect.arrayContaining([
+            expect.arrayContaining([
+              expect.objectContaining({ type: 'rich_text' }),
+            ]),
+          ]),
+        }),
+        expect.objectContaining({ type: 'actions' }),
       ]),
     });
+    expect(blocks).not.toContainEqual({ type: 'markdown', text: markdown });
     expect(
-      blocks.filter(
-        (block: { block_id?: string }) =>
-          block.block_id === 'roomote_automation_result_actions',
+      blocks.flatMap(
+        (block: { child_blocks?: Array<{ block_id?: string }> }) =>
+          block.child_blocks?.filter(
+            (child) => child.block_id === 'roomote_automation_result_actions',
+          ) ?? [],
       ),
     ).toHaveLength(1);
   });

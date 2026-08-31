@@ -4,6 +4,7 @@ import {
   buildAutomationSettingsContextText,
   buildAutomationSettingsMessage,
   buildCustomAutomationSlackMessage,
+  CODE_QUALITY_AUDITOR_SETTINGS_HASH,
   degradeSlackMrkdwnToMarkdown,
   SENTRY_TRIAGE_SETTINGS_HASH,
   SUGGEST_IDEAS_SETTINGS_HASH,
@@ -86,45 +87,35 @@ describe('manager slack helpers', () => {
       sessionId: 'session-1',
     });
 
-    expect(message).toEqual({
-      text: 'Found two regressions.',
-      blocks: [
-        {
-          type: 'context',
-          block_id: 'roomote_automation_result_header',
-          elements: [
-            {
-              type: 'image',
-              image_url: 'https://app.example.com/automation-icons/zap.png',
-              alt_text: 'Weekly scan automation icon',
-            },
-            {
-              type: 'plain_text',
-              text: 'Weekly scan',
-              emoji: false,
-            },
-          ],
-        },
-        { type: 'markdown', text: 'Found two regressions.' },
-        {
-          type: 'actions',
-          block_id: 'roomote_automation_result_actions',
-          elements: [
-            expect.objectContaining({
-              action_id: 'late_bound_automation_view_session',
-              text: expect.objectContaining({ text: 'Follow' }),
-              url: expect.stringMatching(
-                /\/sessions\/session-1\?utm_source=slack&utm_medium=link&utm_campaign=slack\.fast_reply$/,
-              ),
-            }),
-            expect.objectContaining({
-              action_id: 'late_bound_automation_configure',
-              url: 'https://app.example.com/automations#custom-automation-automation-1',
-            }),
-          ],
-        },
-      ],
-    });
+    expect(message.text).toBe('Found two regressions.');
+    expect(message.blocks).toEqual([
+      expect.objectContaining({
+        type: 'container',
+        title: { type: 'plain_text', text: 'Weekly scan', emoji: false },
+        icon: expect.objectContaining({
+          image_url: 'https://app.example.com/automation-icons/zap.png',
+        }),
+        child_blocks: [
+          expect.objectContaining({ type: 'rich_text' }),
+          expect.objectContaining({
+            type: 'actions',
+            elements: [
+              expect.objectContaining({
+                action_id: 'late_bound_automation_view_session',
+                text: expect.objectContaining({ text: 'Follow' }),
+                url: expect.stringMatching(
+                  /\/sessions\/session-1\?utm_source=slack&utm_medium=link&utm_campaign=slack\.fast_reply$/,
+                ),
+              }),
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+                url: 'https://app.example.com/automations#custom-automation-automation-1',
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
   });
 
   it('preserves custom automation Markdown without entity escaping', () => {
@@ -137,13 +128,40 @@ describe('manager slack helpers', () => {
       '| Link | **Found** |',
     ].join('\n');
 
-    expect(
-      buildCustomAutomationSlackMessage({
-        automationId: 'automation-1',
-        automationName: 'Weekly scan',
-        text,
-      }).blocks,
-    ).toContainEqual({ type: 'markdown', text });
+    const [container] = buildCustomAutomationSlackMessage({
+      automationId: 'automation-1',
+      automationName: 'Weekly scan',
+      text,
+    }).blocks;
+    expect(container).toMatchObject({
+      type: 'container',
+      child_blocks: expect.arrayContaining([
+        expect.objectContaining({ type: 'rich_text' }),
+      ]),
+    });
+    expect(container).not.toMatchObject({
+      type: 'container',
+      child_blocks: expect.arrayContaining([{ type: 'markdown', text }]),
+    });
+    expect(JSON.stringify(container)).toContain(
+      '"url":"https://x.com/example/status/1"',
+    );
+    expect(JSON.stringify(container)).not.toContain(
+      '[Finding](<https://x.com/example/status/1>)',
+    );
+    expect(container).toMatchObject({
+      type: 'container',
+      child_blocks: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'table',
+          rows: expect.arrayContaining([
+            expect.arrayContaining([
+              expect.objectContaining({ type: 'rich_text' }),
+            ]),
+          ]),
+        }),
+      ]),
+    });
   });
 
   it('joins a generated summary with an optional action footer', () => {
@@ -177,6 +195,26 @@ describe('manager slack helpers', () => {
         },
         { type: 'actions' },
       ],
+    });
+  });
+
+  it('uses the same result container for representative built-in automations', () => {
+    const suggestIdeas = buildAutomationRootSummaryMessage({
+      summaryText: 'Three ideas stood out.',
+      automationSettingsHash: SUGGEST_IDEAS_SETTINGS_HASH,
+    });
+    const codeQuality = buildAutomationRootSummaryMessage({
+      summaryText: 'One maintainability issue stood out.',
+      automationSettingsHash: CODE_QUALITY_AUDITOR_SETTINGS_HASH,
+    });
+
+    expect(suggestIdeas.blocks[0]).toMatchObject({
+      type: 'container',
+      title: { text: 'Suggest Ideas' },
+    });
+    expect(codeQuality.blocks[0]).toMatchObject({
+      type: 'container',
+      title: { text: 'Code Quality Auditor' },
     });
   });
 
