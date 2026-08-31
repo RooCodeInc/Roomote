@@ -21,6 +21,11 @@ export type SlackBlock =
       text: string;
     }
   | {
+      type: 'rich_text';
+      block_id?: string;
+      elements: Array<Record<string, unknown>>;
+    }
+  | {
       type: 'divider';
     }
   | {
