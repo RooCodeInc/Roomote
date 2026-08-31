@@ -187,6 +187,23 @@ describe('Capture visual proof skill', () => {
     );
   });
 
+  it('uses one five-minute budget and returns a blocked timeout handoff', () => {
+    const skillContent = read(
+      '../skills/standard/capture-visual-proof/SKILL.md',
+    );
+
+    expect(skillContent).toContain(
+      'The entire visual proof handoff has one hard five-minute deadline, starting when this skill is entered.',
+    );
+    expect(skillContent).toContain(
+      'no phase, retry, or settlement recovery receives a fresh five minutes',
+    );
+    expect(skillContent).toContain(
+      'return a blocked proof handoff with blocker type `proof capture timed out`',
+    );
+    expect(skillContent).toContain('proof_capture_timed_out');
+  });
+
   it('no longer ships the removed thin-runner reference files', () => {
     for (const removedReference of [
       'thin-proof-runner.md',
