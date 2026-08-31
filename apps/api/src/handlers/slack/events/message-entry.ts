@@ -10,6 +10,7 @@ import {
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS,
 } from '@roomote/cloud-agents/server';
 import {
+  acquireSlackFastRootBindingLock,
   autoConfirmRouting,
   collectAndExtractThreadAttachmentTexts,
   collectAndProcessThreadImages,
@@ -106,6 +107,30 @@ import {
 import { showManualPickerForAutoRouteFallback } from './auto-route-fallback.js';
 
 const REMOVED_EVAL_COMMAND_PATTERN = /^!eval(?:\s|$)/iu;
+
+async function hasBoundSlackFastAgentSession(params: {
+  teamId: string;
+  channelId: string;
+  threadId: string;
+}): Promise<boolean> {
+  const releaseRootBindingLock = await acquireSlackFastRootBindingLock({
+    teamId: params.teamId,
+    channelId: params.channelId,
+  });
+  try {
+    return await hasFastAgentSession({
+      surface: 'slack',
+      workspaceId: params.teamId,
+      conversationId: params.threadId,
+      replyTarget: {
+        channelId: params.channelId,
+        threadId: params.threadId,
+      },
+    });
+  } finally {
+    await releaseRootBindingLock().catch(() => {});
+  }
+}
 
 export function isRemovedEvalCommandInvocation(text: string): boolean {
   const mentionStrippedText = text
@@ -505,11 +530,10 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   if (pendingRoutingConfirmation) {
     eligibilityReason = 'pending-routing-confirmation';
   } else {
-    isFastAgentThread = await hasFastAgentSession({
-      surface: 'slack',
-      workspaceId: teamId,
-      conversationId: event.thread_ts,
-      replyTarget: { channelId: event.channel, threadId: event.thread_ts },
+    isFastAgentThread = await hasBoundSlackFastAgentSession({
+      teamId,
+      channelId: event.channel,
+      threadId: event.thread_ts,
     });
 
     roomoteThreadMatch = isFastAgentThread
@@ -1781,11 +1805,10 @@ async function handleSlackEntryEvent(params: {
     authoredEventText,
   )
     ? false
-    : await hasFastAgentSession({
-        surface: 'slack',
-        workspaceId: teamId,
-        conversationId: threadId,
-        replyTarget: { channelId: event.channel, threadId },
+    : await hasBoundSlackFastAgentSession({
+        teamId,
+        channelId: event.channel,
+        threadId,
       });
 
   if (isFastAgentContinuation) {
