@@ -36,8 +36,14 @@ test('release workflow keeps promotion as the only automated PR gate', () => {
     2,
   );
   assert.doesNotMatch(promoteScript, /git fetch origin main/);
-  assert.match(promoteScript, /the candidate reached main while this refresh was running/);
-  assert.match(promoteScript, /the Promote PR closed while this refresh was running/);
+  assert.match(
+    promoteScript,
+    /the candidate reached main while this refresh was running/,
+  );
+  assert.match(
+    promoteScript,
+    /the Promote PR closed while this refresh was running/,
+  );
   assert.match(promoteScript, /release_sha="\$bump_sha"/);
   assert.match(
     promoteScript,
@@ -70,4 +76,85 @@ test('GHCR release workflow announces only newly created releases in Discord', (
   );
   assert.match(announceRelease.run, /build-discord-release-payload\.mjs/);
   assert.match(announceRelease.run, /--retry-all-errors/);
+});
+
+test('GHCR workflow publishes explicitly requested pull request images safely', () => {
+  const publishWorkflow = YAML.parse(
+    readFileSync(
+      join(repoRoot, '.github/workflows/publish-pr-images.yml'),
+      'utf8',
+    ),
+  );
+  const ciWorkflow = YAML.parse(
+    readFileSync(join(repoRoot, '.github/workflows/CI.yml'), 'utf8'),
+  );
+
+  assert.deepEqual(publishWorkflow.on.issue_comment.types, ['created']);
+  assert.match(publishWorkflow.jobs.prepare.if, /\/publish-images/);
+  assert.match(publishWorkflow.jobs.prepare.if, /state == 'open'/);
+  assert.match(publishWorkflow.jobs.prepare.if, /OWNER/);
+  assert.match(publishWorkflow.jobs.prepare.if, /MEMBER/);
+  assert.match(publishWorkflow.jobs.prepare.if, /COLLABORATOR/);
+  const fallbackBuild = publishWorkflow.jobs.build;
+  assert.match(fallbackBuild.if, /reuse_artifacts != 'true'/);
+  assert.equal(fallbackBuild.permissions.packages, undefined);
+  assert.match(
+    fallbackBuild.steps.find((step) => step.name === 'Verify PR merge').run,
+    /EXPECTED_MERGE_SHA/,
+  );
+
+  for (const jobName of ['docker-build-app', 'docker-build-worker']) {
+    const job = ciWorkflow.jobs[jobName];
+    const buildImage = job.steps.find((step) =>
+      step.name.startsWith('Build publishable '),
+    );
+    const uploadImage = job.steps.find((step) =>
+      step.name.startsWith('Upload publishable '),
+    );
+    assert.match(buildImage.if, /pull_request/);
+    assert.match(buildImage.if, /amd64/);
+    assert.match(buildImage.with.outputs, /type=docker/);
+    assert.equal(buildImage.with.push, undefined);
+    assert.equal(uploadImage.with['retention-days'], 1);
+  }
+
+  const prepareScript = publishWorkflow.jobs.prepare.steps[0].run;
+  assert.match(prepareScript, /actions\/workflows\/CI\.yml\/runs/);
+  assert.match(prepareScript, /conclusion == "success"/);
+  assert.match(prepareScript, /pr-image-app/);
+  assert.match(prepareScript, /pr-image-metadata/);
+  assert.match(prepareScript, /reuse_artifacts=false/);
+
+  const publisher = publishWorkflow.jobs.publish;
+  assert.equal(publisher.permissions.packages, 'write');
+  assert.equal(
+    publisher.steps.some(
+      (step) =>
+        step.uses?.startsWith('actions/checkout') ||
+        step.uses?.startsWith('./'),
+    ),
+    false,
+  );
+  const publishScript = publisher.steps.find(
+    (step) => step.name === 'Import and publish images',
+  ).run;
+  assert.match(publishScript, /docker load/);
+  assert.match(publishScript, /current_sha/);
+  assert.match(publishScript, /current_base_sha/);
+  assert.match(publishScript, /roomote-app roomote-worker/);
+  assert.match(publishScript, /BASE_VERSION/);
+  assert.match(publishScript, /workerImageAffected/);
+  assert.match(publisher.if, /needs\.build\.result == 'skipped'/);
+  assert.equal(
+    publisher.outputs.mutable_updated,
+    '${{ steps.images.outputs.mutable_updated }}',
+  );
+
+  const commentJob = publishWorkflow.jobs.comment;
+  assert.deepEqual(commentJob.needs, ['prepare', 'publish']);
+  assert.equal(commentJob.permissions['pull-requests'], 'write');
+  assert.match(commentJob.steps[0].run, /roomote-app/);
+  assert.match(commentJob.steps[0].run, /roomote-worker/);
+  assert.match(commentJob.steps[0].run, /Movable references/);
+  assert.match(commentJob.steps[0].run, /MUTABLE_UPDATED/);
 });
