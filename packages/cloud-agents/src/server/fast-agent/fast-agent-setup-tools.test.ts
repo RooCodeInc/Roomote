@@ -40,7 +40,7 @@ describe('setup prompt guidance and snapshot injection', () => {
     availableEnvironments: [],
   } as Parameters<typeof buildFastAgentSystemPrompt>[0];
 
-  it('includes agenda, side-panel, and starter-catalog guidance for setup sessions', () => {
+  it('includes first-interaction and plain-language guidance for setup sessions', () => {
     const prompt = buildFastAgentSystemPrompt({
       ...baseInput,
       setupSession: true,
@@ -48,6 +48,17 @@ describe('setup prompt guidance and snapshot injection', () => {
     });
 
     expect(prompt).toContain('## Conversational Setup');
+    expect(prompt).toContain('## First Roomote Interaction');
+    expect(prompt).toContain(
+      "This is often the user's first interaction with Roomote",
+    );
+    expect(prompt).toContain(
+      "use ordinary language centered on the user's action and outcome",
+    );
+    expect(prompt).toContain('Your repositories are ready');
+    expect(prompt).toContain(
+      "I'm looking for flaky tests and fixing the ones causing the most trouble.",
+    );
     expect(prompt).toContain('<setup_snapshot>');
     expect(prompt).toContain('request_user_input');
     expect(prompt).toContain('setup_starter_tasks');
