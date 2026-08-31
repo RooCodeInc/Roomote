@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
@@ -541,7 +543,9 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     // Deterministic per-post identity: a re-run of the same inbound turn
     // (crash between the provider accepting the email and the turn being
     // marked consumed) replays the same key sequence, so retries cannot
-    // duplicate outbound emails.
+    // duplicate outbound emails. The text digest keeps distinct replies
+    // from ever colliding — web-initiated turns have no unique inbound
+    // message id, and a reused key with a different body is a provider 409.
     let agentMailPostIndex = 0;
     return {
       conversation,
@@ -561,7 +565,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             threadId: conversation.conversationId,
             text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'agentmail', sessionId: session.id, ...footerContext })}`,
             textFormat: 'markdown',
-            idempotencyKey: `agentmail:${conversation.conversationId}:fast-reply:${params.currentMessageId ?? 'turn'}:${agentMailPostIndex++}`,
+            idempotencyKey: `agentmail:${conversation.conversationId}:fast-reply:${params.currentMessageId ?? 'web'}:${agentMailPostIndex++}:${createHash('sha256').update(message).digest('hex').slice(0, 12)}`,
           });
           await recordFastAgentConversationMessageBestEffort({
             sessionId: session.id,

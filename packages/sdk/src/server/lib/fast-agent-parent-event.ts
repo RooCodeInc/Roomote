@@ -1382,7 +1382,7 @@ async function createAgentMailFastAgentParentTurn(
           // Durable parent events retry after crashes that may land AFTER the
           // provider accepted the email; the event's stable identity makes
           // the replay a no-op instead of a duplicate result email.
-          idempotencyKey: `agentmail:${conversation.conversationId}:parent-event:${createHash('sha256').update(buildEventClientMessageSeed(params.event)).digest('hex').slice(0, 24)}`,
+          idempotencyKey: `agentmail:${conversation.conversationId}:parent-event:${createHash('sha256').update(buildEventClientMessageSeed(params.event)).update('\0').update(message).digest('hex').slice(0, 24)}`,
         });
         await recordFastAgentConversationMessageBestEffort({
           sessionId: session.id,
