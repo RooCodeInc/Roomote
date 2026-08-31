@@ -30,3 +30,6 @@ export * from './useCreateTelegramLinkCode';
 export * from './useDiscordLinkedAccount';
 export * from './useUnlinkDiscordLinkedAccount';
 export * from './useCreateDiscordLinkCode';
+
+export * from './useEmailLinkPreview';
+export * from './useLinkEmailAddress';

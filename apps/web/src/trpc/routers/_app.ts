@@ -173,6 +173,8 @@ import {
   createDiscordLinkCodeCommand,
   unlinkLinkedDiscordAccountCommand,
   getLinkedMicrosoftTeamsAccountCommand,
+  previewEmailLinkCommand,
+  linkEmailAddressCommand,
 } from '../commands/linked-accounts';
 import {
   getPersonalAccountCapabilitiesCommand,
@@ -1450,6 +1452,18 @@ export const appRouter = createRouter({
     unlinkDiscord: protectedProcedure.mutation(({ ctx: { auth } }) =>
       unlinkLinkedDiscordAccountCommand(auth),
     ),
+
+    previewEmailLink: protectedProcedure
+      .input(z.object({ token: z.string().min(1) }))
+      .query(({ ctx: { auth }, input }) =>
+        previewEmailLinkCommand(auth, input.token),
+      ),
+
+    linkEmailAddress: protectedProcedure
+      .input(z.object({ token: z.string().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        linkEmailAddressCommand(auth, input.token),
+      ),
   }),
 
   preferences: createRouter({
