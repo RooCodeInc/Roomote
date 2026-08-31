@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./bounded-response-body": "./src/bounded-response-body.ts",
     "./chat-messages": "./src/chat-messages.ts",
     "./discord-event": "./src/discord-event.ts",
     "./discord-provider": "./src/discord-provider.ts",
