@@ -372,7 +372,15 @@ describe('roomote MCP tool descriptions', () => {
     })) as { content?: Array<{ text?: string }> };
 
     expect(result.content?.[0]?.text).toContain(
-      'status must be one of: active, completed, all for search_tasks',
+      'status must be one of: active, completed, all when search resolves to tasks',
+    );
+    const legacyResult = (await tool.handler?.({
+      action: 'search',
+      pullRequest: 'owner/repo#1',
+      status: 'needs_input',
+    })) as { content?: Array<{ text?: string }> };
+    expect(legacyResult.content?.[0]?.text).toContain(
+      'status must be one of: active, completed, all when search resolves to tasks',
     );
   });
 

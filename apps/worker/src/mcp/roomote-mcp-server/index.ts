@@ -619,6 +619,12 @@ roomoteMcpServer.registerTool(
         return handleStartSession(params.message, config);
       }
       case 'search': {
+        const statusError = getRoomoteSearchStatusError({
+          action: 'search',
+          pullRequest: params.pullRequest,
+          status: params.status,
+        });
+        if (statusError) return errorResult(statusError);
         if (
           shouldSearchTasks({
             action: 'search',

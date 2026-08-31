@@ -69,12 +69,23 @@ describe('Roomote MCP management contract', () => {
         action: 'search_tasks',
         status: 'needs_input',
       }),
-    ).toBe('status must be one of: active, completed, all for search_tasks');
+    ).toBe(
+      'status must be one of: active, completed, all when search resolves to tasks',
+    );
     expect(
       getRoomoteSearchStatusError({
         action: 'search_tasks',
         status: 'active',
       }),
     ).toBeNull();
+    expect(
+      getRoomoteSearchStatusError({
+        action: 'search',
+        pullRequest: 'owner/repo#1',
+        status: 'needs_input',
+      }),
+    ).toBe(
+      'status must be one of: active, completed, all when search resolves to tasks',
+    );
   });
 });

@@ -82,6 +82,12 @@ export function registerRoomoteMemberTools(
           );
         }
         case 'search': {
+          const statusError = getRoomoteSearchStatusError({
+            action: 'search',
+            pullRequest: params.pullRequest,
+            status: params.status,
+          });
+          if (statusError) return toolError({ error: statusError });
           if (
             shouldSearchTasks({
               action: 'search',

@@ -44,14 +44,15 @@ export function shouldSearchTasks(input: {
 
 export function getRoomoteSearchStatusError(input: {
   action: 'search' | 'search_tasks';
+  pullRequest?: string;
   status?: string;
 }): string | null {
   if (
-    input.action === 'search_tasks' &&
+    shouldSearchTasks(input) &&
     input.status &&
     !['active', 'completed', 'all'].includes(input.status)
   ) {
-    return 'status must be one of: active, completed, all for search_tasks';
+    return 'status must be one of: active, completed, all when search resolves to tasks';
   }
   return null;
 }

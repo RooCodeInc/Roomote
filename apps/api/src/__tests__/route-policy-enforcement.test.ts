@@ -402,8 +402,34 @@ describe('route policy enforcement', () => {
         };
       expect(invalidTaskSearchBody.result?.isError).toBe(true);
       expect(invalidTaskSearchBody.result?.structuredContent).toMatchObject({
-        error: 'status must be one of: active, completed, all for search_tasks',
+        error:
+          'status must be one of: active, completed, all when search resolves to tasks',
       });
+
+      const invalidLegacySearchResponse = await createApiApp().request(
+        'http://localhost/mcp',
+        {
+          ...request,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 6,
+            method: 'tools/call',
+            params: {
+              name: 'manage_tasks',
+              arguments: {
+                action: 'search',
+                pullRequest: 'owner/repo#1',
+                status: 'needs_input',
+              },
+            },
+          }),
+        },
+      );
+      const invalidLegacySearchBody =
+        (await invalidLegacySearchResponse.json()) as {
+          result?: { isError?: boolean };
+        };
+      expect(invalidLegacySearchBody.result?.isError).toBe(true);
 
       const callResponse = await createApiApp().request(
         'http://localhost/mcp',
