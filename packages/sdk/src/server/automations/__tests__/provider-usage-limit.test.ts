@@ -151,18 +151,14 @@ describe('provider usage limit automation', () => {
               url: expect.stringContaining('/settings/models'),
             }),
             expect.objectContaining({
-              type: 'overflow',
+              type: 'button',
               action_id: 'late_bound_automation_configure',
-              options: [
-                expect.objectContaining({
-                  text: {
-                    type: 'plain_text',
-                    text: 'Configure alert',
-                    emoji: false,
-                  },
-                  url: expect.stringContaining('#provider-usage-limit'),
-                }),
-              ],
+              text: {
+                type: 'plain_text',
+                text: 'Configure alert',
+                emoji: false,
+              },
+              url: expect.stringContaining('#provider-usage-limit'),
             }),
           ],
         },

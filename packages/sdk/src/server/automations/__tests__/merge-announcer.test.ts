@@ -131,15 +131,6 @@ describe('handleMergeAnnouncerPush', () => {
                 type: 'mrkdwn',
                 text: 'Adds exports and strengthens widget validation.',
               },
-              accessory: expect.objectContaining({
-                type: 'overflow',
-                action_id: 'late_bound_automation_configure',
-                options: [
-                  expect.objectContaining({
-                    text: expect.objectContaining({ text: 'Configure' }),
-                  }),
-                ],
-              }),
             }),
             expect.objectContaining({
               type: 'actions',
@@ -148,6 +139,10 @@ describe('handleMergeAnnouncerPush', () => {
                   action_id: 'merge_announcer_view_changes',
                   text: expect.objectContaining({ text: 'View changes' }),
                   url: 'https://github.com/acme/widgets/compare/before...after',
+                }),
+                expect.objectContaining({
+                  action_id: 'late_bound_automation_configure',
+                  text: expect.objectContaining({ text: 'Configure' }),
                 }),
               ]),
             }),

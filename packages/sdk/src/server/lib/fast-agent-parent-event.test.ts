@@ -572,15 +572,10 @@ describe('deliverFastAgentParentEvent', () => {
                 url: expect.stringContaining(`/sessions/${parent.sessionId}`),
               }),
               expect.objectContaining({
-                type: 'overflow',
                 action_id: 'late_bound_automation_configure',
-                options: [
-                  expect.objectContaining({
-                    url: expect.stringContaining(
-                      '/automations#custom-automation-automation-1',
-                    ),
-                  }),
-                ],
+                url: expect.stringContaining(
+                  '/automations#custom-automation-automation-1',
+                ),
               }),
             ],
           }),
