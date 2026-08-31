@@ -191,9 +191,7 @@ function renderWorkspace({
   children?: ReactNode;
   sessionOverride?: Partial<SessionInfo>;
   queriedTasks?: SessionInfo['tasks'];
-  queriedFastTasks?: Array<
-    Pick<SessionInfo['tasks'][number], 'taskId' | 'title'>
-  >;
+  queriedFastTasks?: NonNullable<SessionInfo['taskCards']>;
   selectedTaskId?: string;
   searchParams?: string;
 }) {
@@ -813,6 +811,39 @@ describe('SessionWorkspace', () => {
         name: 'View coding task: Refreshed coding task',
       }),
     ).toBeInTheDocument();
+  });
+
+  it('populates the Artifacts panel from refreshed Fast-session tasks', async () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { taskSource: 'fast', taskCards: [] },
+      queriedFastTasks: [
+        {
+          taskId: 'fast-task-1',
+          title: 'Fast execution',
+          artifacts: [
+            {
+              id: 'fast-artifact-1',
+              path: 'reports/fast-result.md',
+              version: 1,
+              artifactType: 'plan',
+              contentType: 'text/markdown',
+              size: 200,
+              createdAt: new Date('2026-01-02T00:00:00.000Z'),
+            },
+          ],
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'Open Fast Result from Fast execution',
+      }),
+    ).toBeVisible();
+    expect(screen.queryByText('No artifacts in this session yet.')).toBeNull();
   });
 
   it('opens delegated tasks in the existing session side-panel slot', () => {

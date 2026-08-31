@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   createWebTaskLauncher: vi.fn(),
   getOrCreateSession: vi.fn(),
   getUnifiedSession: vi.fn(),
+  getFastSessionTasks: vi.fn(),
+  currentEpochSeconds: vi.fn(),
   dbUpdate: vi.fn(),
   dbSet: vi.fn(),
   dbWhere: vi.fn(),
@@ -48,8 +50,14 @@ vi.mock('@/lib/server/fast-sessions', () => ({
   findAccessibleFastSession: mocks.findAccessibleSession,
   buildFastSessionPrReviewDestinationKey: () => '["web","user-1","session-1"]',
   getFastSessionPrReviewOfferStatus: mocks.getOfferStatus,
-  getFastSessionTasks: vi.fn(),
+  getFastSessionTasks: mocks.getFastSessionTasks,
   updateFastSessionPrReviewOfferStatus: mocks.updateOfferStatus,
+}));
+
+vi.mock('@/lib/server/artifact-signature', () => ({
+  currentEpochSeconds: mocks.currentEpochSeconds,
+  signArtifactId: (artifactId: string, timestamp: number) =>
+    `signature-${artifactId}-${timestamp}`,
 }));
 
 vi.mock('@/lib/server/pr-review-actions', () => ({
@@ -57,6 +65,7 @@ vi.mock('@/lib/server/pr-review-actions', () => ({
 }));
 
 import {
+  getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
   replyToFastSessionCommand,
   scheduleWebFastAgentTurn,
@@ -64,6 +73,54 @@ import {
   startSetupFastSessionCommand,
   updateFastSessionModelSelectionCommand,
 } from './index';
+
+describe('getFastSessionTasksCommand', () => {
+  it('adds stable image and video preview URLs to Fast-session artifacts', async () => {
+    mocks.currentEpochSeconds.mockReturnValue(7_201);
+    mocks.getFastSessionTasks.mockResolvedValue([
+      {
+        taskId: 'task-1',
+        title: 'Fast task',
+        inferenceCostMicroUsd: 0,
+        artifacts: [
+          {
+            id: 'artifact-image',
+            path: 'screenshots/result.png',
+            version: 1,
+            artifactType: 'visual-proof',
+            contentType: 'image/png',
+            size: 100,
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          },
+          {
+            id: 'artifact-video',
+            path: 'recordings/result.webm',
+            version: 1,
+            artifactType: 'visual-proof',
+            contentType: 'video/webm',
+            size: 200,
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          },
+        ],
+      },
+    ]);
+
+    const result = await getFastSessionTasksCommand(auth, 'session-1');
+
+    expect(result?.[0]?.artifacts).toEqual([
+      expect.objectContaining({
+        id: 'artifact-image',
+        thumbnailUrl:
+          '/api/artifacts/artifact-image/raw?sig=signature-artifact-image-7200&ts=7200',
+      }),
+      expect.objectContaining({
+        id: 'artifact-video',
+        previewUrl:
+          '/api/artifacts/artifact-video/raw?sig=signature-artifact-video-7200&ts=7200',
+      }),
+    ]);
+  });
+});
 
 const auth = {
   userId: 'user-1',

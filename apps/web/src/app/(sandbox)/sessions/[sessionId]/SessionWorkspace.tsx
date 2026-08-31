@@ -146,7 +146,7 @@ export type SessionInfo = {
   status: string | null;
   tasks: SessionTaskSummary[];
   taskSource?: 'unified' | 'fast';
-  taskCards?: Array<Pick<SessionTaskSummary, 'taskId' | 'title'>>;
+  taskCards?: Array<Pick<SessionTaskSummary, 'taskId' | 'title' | 'artifacts'>>;
 };
 
 function SessionArtifactCard({
@@ -228,8 +228,13 @@ type SessionArtifactEntry = {
   artifact: SessionArtifact;
 };
 
+type SessionArtifactTask = Pick<
+  SessionTaskSummary,
+  'taskId' | 'title' | 'artifacts'
+>;
+
 function getLatestSessionArtifacts(
-  tasks: SessionTaskSummary[],
+  tasks: SessionArtifactTask[],
 ): SessionArtifactEntry[] {
   const entries: SessionArtifactEntry[] = [];
 
@@ -483,7 +488,7 @@ function SessionArtifactsPanel({
   tasks,
   onClose,
 }: {
-  tasks: SessionTaskSummary[];
+  tasks: SessionArtifactTask[];
   onClose: () => void;
 }) {
   const [selectedArtifact, setSelectedArtifact] =
@@ -797,9 +802,9 @@ export function SessionWorkspace({
     ),
   );
   const sessionTasks = currentSession?.tasks ?? session.tasks;
-  const taskCards = isFastTaskSource
-    ? (currentFastTasks ?? session.taskCards ?? session.tasks)
-    : sessionTasks;
+  const fastTasks = currentFastTasks ?? session.taskCards ?? [];
+  const taskCards = isFastTaskSource ? fastTasks : sessionTasks;
+  const artifactTasks = isFastTaskSource ? fastTasks : sessionTasks;
   const selectedTaskId = searchParams.get('task');
   const selectedTask = sessionTasks.find(
     (task) => task.taskId === selectedTaskId,
@@ -852,7 +857,7 @@ export function SessionWorkspace({
       onClose={closePanel}
     />
   ) : panel?.kind === 'artifacts' ? (
-    <SessionArtifactsPanel tasks={sessionTasks} onClose={closePanel} />
+    <SessionArtifactsPanel tasks={artifactTasks} onClose={closePanel} />
   ) : (
     <SessionInfoPanel session={session} onClose={closePanel} />
   );

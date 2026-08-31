@@ -7,6 +7,7 @@ import {
   llmUsageEvents,
   runFactory,
   sessions,
+  taskArtifacts,
   taskFactory,
   userFactory,
 } from '@roomote/db/server';
@@ -167,6 +168,24 @@ describe('Fast session queries', () => {
       costSource: 'missing',
       costMicroUsd: 750_000,
     });
+    await db.insert(taskArtifacts).values([
+      {
+        taskId: delegatedTask.id,
+        path: 'reports/result.md',
+        version: 2,
+        contentType: 'text/markdown',
+        size: 200,
+        uploaded: true,
+      },
+      {
+        taskId: delegatedTask.id,
+        path: 'reports/pending.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 0,
+        uploaded: false,
+      },
+    ]);
 
     const result = await getFastSessionTasks(
       { userId: owner.id, isAdmin: false },
@@ -180,11 +199,18 @@ describe('Fast session queries', () => {
           taskId: delegatedTask.id,
           title: 'Delegated task',
           inferenceCostMicroUsd: 750_000,
+          artifacts: [
+            expect.objectContaining({
+              path: 'reports/result.md',
+              version: 2,
+            }),
+          ],
         },
         {
           taskId: zeroCostTask.id,
           title: 'Zero cost task',
           inferenceCostMicroUsd: 0,
+          artifacts: [],
         },
       ]),
     );
