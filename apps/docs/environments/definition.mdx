@@ -376,6 +376,31 @@ agentInstructions: |
 Avoid vague instructions like "be careful" or "use best practices." If a
 repository has a known trap, state it plainly.
 
+### Repository-owned instructions
+
+For repository work, Roomote's built-in workflows instruct the agent to
+discover tracked `AGENTS.md` files and read the applicable hierarchy from the
+repository root through the nearest ancestor of the path being inspected. In a
+shared workspace, Roomote also creates a workspace-root `AGENTS.md` that points
+the agent to each prepared repository; it does not replace the repositories'
+own scoped instructions.
+
+Keep guidance that should work across different models and agent harnesses in
+`AGENTS.md`. This gives mixed-agent teams one portable, version-controlled
+source for repository rules instead of requiring equivalent copies for each
+tool.
+
+During environment setup, Roomote also instructs the setup agent to discover
+tracked `CLAUDE.md` files and read the applicable hierarchy. A repository-root
+`.claude/CLAUDE.md` is treated as root-scoped guidance. Within this workflow,
+when applicable repository instructions conflict, the closest file to the
+inspected path wins; at the same scope, `AGENTS.md` takes precedence over
+`CLAUDE.md`.
+
+Repository-owned instructions are supplemental. They cannot override Roomote
+workflow rules, tool or safety requirements, or direct instructions in the
+task.
+
 ## Routing rules
 
 Admins can configure natural-language routing rules from **Settings →
