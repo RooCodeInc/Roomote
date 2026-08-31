@@ -247,11 +247,20 @@ function scheduleWebFastAgentInitialTurn(input: {
         userId: input.userId,
         apiBaseUrl: resolveApiBaseUrl() ?? undefined,
         conversation,
-        currentMessageId: `web-initial-${input.sessionId}`,
+        currentMessageId: initialTurn.platformEventKind
+          ? `setup-kickoff:${input.sessionId}`
+          : `web-initial-${input.sessionId}`,
         signal: release.signal,
         model: initialTurn.model,
         reasoningEffort: initialTurn.reasoningEffort,
         rethrowHandledErrors: true,
+        ...(initialTurn.platformEventKind
+          ? {
+              turnSource: 'platform_event' as const,
+              platformEventKind: initialTurn.platformEventKind,
+              platformEventVisibility: 'required' as const,
+            }
+          : {}),
         adapter: {
           resolveMcpServerConfigs: () =>
             resolveUserMcpServerConfigs({
@@ -338,9 +347,8 @@ export async function startFastSessionCommand(
  * Creates (or reuses) the first-run setup session and schedules its kickoff
  * as a trusted setup platform event instead of a human message. The
  * deterministic conversationId makes creation idempotent per launch batch. A
- * kickoff is scheduled on creation, and again on reuse while the transcript
- * is still empty: creation can commit while a later failure (or a process
- * crash) loses the kickoff, and an empty transcript means it never ran.
+ * kickoff is persisted with the conversation and rescheduled while pending,
+ * so creation can commit without losing the turn to a later process exit.
  */
 export async function startSetupFastSessionCommand(
   auth: UserAuthSuccess,
@@ -359,31 +367,13 @@ export async function startSetupFastSessionCommand(
   const session = await getOrCreateFastAgentSession({
     userId: auth.userId,
     conversation,
+    initialTurn: {
+      question: `<platform_event>${JSON.stringify(input.event)}</platform_event>`,
+      platformEventKind: 'setup',
+    },
   });
 
-  // The kickoff turn runs under a deterministic turn ID, so its persisted
-  // prompt row has a knowable event ID. Claiming on that exact row (rather
-  // than transcript emptiness) means an early human reply in the new session
-  // can never masquerade as an already-run kickoff.
-  const kickoffTurnId = `setup-kickoff:${session.id}`;
-  const kickoffPromptEventId = `${kickoffTurnId}:user`;
-
-  let scheduleKickoff = session.created;
-  if (!scheduleKickoff) {
-    const [existingKickoff] = await db
-      .select({ id: fastAgentMessages.id })
-      .from(fastAgentMessages)
-      .where(
-        and(
-          eq(fastAgentMessages.conversationId, session.id),
-          eq(fastAgentMessages.eventId, kickoffPromptEventId),
-        ),
-      )
-      .limit(1);
-    scheduleKickoff = !existingKickoff;
-  }
-
-  if (scheduleKickoff) {
+  if (session.initialTurnPending) {
     // Fixed, human-authored-style title: marking it user-edited keeps the
     // LLM title refresh from renaming the setup session later. Best-effort:
     // a failed rename must never cost the kickoff and the starter launches.
@@ -405,7 +395,8 @@ export async function startSetupFastSessionCommand(
       );
     }
 
-    scheduleWebFastAgentTurn({
+    scheduleWebFastAgentInitialTurn({
+      sessionId: session.id,
       userId: auth.userId,
       delivery: {
         conversation,
@@ -416,13 +407,6 @@ export async function startSetupFastSessionCommand(
           }),
           postReply: async () => {},
         },
-      },
-      question: `<platform_event>${JSON.stringify(input.event)}</platform_event>`,
-      platformEventKind: 'setup',
-      currentMessageId: kickoffTurnId,
-      skipIfEventExists: {
-        conversationId: session.id,
-        eventId: kickoffPromptEventId,
       },
     });
   }

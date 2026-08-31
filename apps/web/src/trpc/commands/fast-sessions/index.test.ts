@@ -364,6 +364,7 @@ describe('startSetupFastSessionCommand', () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: true,
+      initialTurnPending: true,
     });
 
     await expect(startSetupFastSessionCommand(auth, input)).resolves.toEqual({
@@ -372,6 +373,18 @@ describe('startSetupFastSessionCommand', () => {
     });
 
     expect(mocks.after).toHaveBeenCalledOnce();
+    expect(mocks.getOrCreateSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: input.conversationId,
+      },
+      initialTurn: {
+        question: `<platform_event>${JSON.stringify(input.event)}</platform_event>`,
+        platformEventKind: 'setup',
+      },
+    });
     expect(mocks.dbSet).toHaveBeenCalledWith(
       expect.objectContaining({
         title: 'Set up Roomote',
@@ -382,10 +395,11 @@ describe('startSetupFastSessionCommand', () => {
     expect(mocks.dbSelect).not.toHaveBeenCalled();
   });
 
-  it('skips a scheduled kickoff whose transcript gained messages before the turn lock', async () => {
+  it('skips a scheduled kickoff completed before it acquires the turn lock', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: true,
+      initialTurnPending: true,
     });
     let scheduled: (() => Promise<void>) | undefined;
     mocks.after.mockImplementation((callback) => {
@@ -395,13 +409,11 @@ describe('startSetupFastSessionCommand', () => {
       signal: new AbortController().signal,
     });
     mocks.acquireTurnLock.mockResolvedValue(release);
+    mocks.getPendingInitialTurn.mockResolvedValue(null);
 
     await startSetupFastSessionCommand(auth, input);
     expect(scheduled).toBeDefined();
 
-    // A concurrent submit's kickoff persisted its prompt row first: the
-    // re-check under the turn lock sees the kickoff event and skips.
-    mocks.dbSelectLimit.mockResolvedValue([{ id: 'message-1' }]);
     await scheduled?.();
 
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
@@ -412,6 +424,7 @@ describe('startSetupFastSessionCommand', () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: true,
+      initialTurnPending: true,
     });
     let scheduled: (() => Promise<void>) | undefined;
     mocks.after.mockImplementation((callback) => {
@@ -421,6 +434,10 @@ describe('startSetupFastSessionCommand', () => {
       signal: new AbortController().signal,
     });
     mocks.acquireTurnLock.mockResolvedValue(release);
+    mocks.getPendingInitialTurn.mockResolvedValue({
+      question: `<platform_event>${JSON.stringify(input.event)}</platform_event>`,
+      platformEventKind: 'setup',
+    });
     mocks.answerQuestion.mockResolvedValue('Welcome');
 
     await startSetupFastSessionCommand(auth, input);
@@ -434,6 +451,9 @@ describe('startSetupFastSessionCommand', () => {
         currentMessageId: 'setup-kickoff:setup-conversation-1',
       }),
     );
+    expect(mocks.completeInitialTurn).toHaveBeenCalledWith(
+      'setup-conversation-1',
+    );
     expect(release).toHaveBeenCalledOnce();
   });
 
@@ -441,6 +461,7 @@ describe('startSetupFastSessionCommand', () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: false,
+      initialTurnPending: true,
     });
     mocks.dbSelectLimit.mockResolvedValue([]);
 
@@ -452,12 +473,12 @@ describe('startSetupFastSessionCommand', () => {
     expect(mocks.after).toHaveBeenCalledOnce();
   });
 
-  it('does not schedule a second kickoff once the kickoff event row exists', async () => {
+  it('does not schedule a completed durable kickoff', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: false,
+      initialTurnPending: false,
     });
-    mocks.dbSelectLimit.mockResolvedValue([{ id: 'message-1' }]);
 
     await expect(startSetupFastSessionCommand(auth, input)).resolves.toEqual({
       sessionId: 'unified-session-1',
@@ -472,6 +493,7 @@ describe('startSetupFastSessionCommand', () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: true,
+      initialTurnPending: true,
     });
     mocks.dbWhere.mockRejectedValue(new Error('title write failed'));
 

@@ -104,6 +104,7 @@ export type FastAgentInitialTurn = {
   attachmentTexts?: string[];
   model?: string;
   reasoningEffort?: ReasoningEffort;
+  platformEventKind?: 'setup';
 };
 
 /** Cached self-hosted licensing lease issued by Roomote Cloud. */
