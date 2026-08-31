@@ -663,9 +663,12 @@ export function SessionWorkspace({
   const fastTasks = currentFastTasks ?? session.taskCards ?? [];
   const taskCards = isFastTaskSource ? fastTasks : sessionTasks;
   const artifactTasks = isFastTaskSource ? fastTasks : sessionTasks;
-  const runningTaskCount = taskCards.filter((task) =>
+  const runningTasks = taskCards.filter((task) =>
     isActivelyRunningTask(task.latestRun?.status, task.latestRun?.taskPhase),
-  ).length;
+  );
+  const runningTaskCount = runningTasks.length;
+  const singleRunningTaskId =
+    runningTaskCount === 1 ? runningTasks[0]?.taskId : null;
   const selectedTaskId = searchParams.get('task');
   const selectedTask = taskCards.find((task) => task.taskId === selectedTaskId);
   const panelOpen = panel !== null || Boolean(selectedTask);
@@ -691,9 +694,15 @@ export function SessionWorkspace({
     [selectTask],
   );
   const openTasksPanel = useCallback(() => {
+    if (singleRunningTaskId) {
+      setPanel(null);
+      selectTask(singleRunningTaskId);
+      return;
+    }
+
     setPanel({ kind: 'tasks' });
     selectTask(null);
-  }, [selectTask]);
+  }, [selectTask, singleRunningTaskId]);
   const closePanel = () => {
     setPanel(null);
     selectTask(null);

@@ -459,7 +459,7 @@ describe('FastSessionTranscript', () => {
     );
 
     const button = screen.getByRole('button', {
-      name: '1 task running. Open tasks',
+      name: '1 task running. Open task',
     });
     button.focus();
     expect(button).toHaveFocus();
