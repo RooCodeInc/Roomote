@@ -166,6 +166,34 @@ describe('discoverProviderModels', () => {
     );
   });
 
+  it('returns no models when an OpenAI-compatible endpoint responds with HTTP 400', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: 'No models available' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    await expect(
+      discoverProviderModels({
+        provider: 'openai-compatible',
+        baseUrl: 'https://proxy.example.com/v1',
+        apiKey: 'submitted-key',
+      }),
+    ).resolves.toEqual({
+      models: [],
+      modelCount: 0,
+      recommendedModels: [],
+      error: 'OpenAI-compatible returned HTTP 400.',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://proxy.example.com/v1/models',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer submitted-key' },
+      }),
+    );
+  });
+
   it('uses saved LiteLLM credentials and metadata when discovering models', async () => {
     mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
       LITELLM_BASE_URL: 'https://litellm.example/v1',

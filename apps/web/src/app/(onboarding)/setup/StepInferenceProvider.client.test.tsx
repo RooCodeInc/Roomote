@@ -251,6 +251,22 @@ function ollamaProviderStatus(): SetupModelStatus['providers'][number] {
   };
 }
 
+function openAiCompatibleProviderStatus(): SetupModelStatus['providers'][number] {
+  return {
+    id: 'openai-compatible',
+    label: 'OpenAI-compatible',
+    envVarName: 'OPENAI_COMPATIBLE_BASE_URL',
+    envVarLabel: 'Endpoint URL',
+    defaultRoomoteModel: '',
+    authKind: 'endpoint',
+    suggestedTaskModels: [],
+    additionalEnvFields: [],
+    additionalEnvValues: {},
+    runtimeApiKeySatisfied: false,
+    savedApiKeySatisfied: false,
+  };
+}
+
 function buildModelSetup(
   overrides: Partial<SetupModelStatus> = {},
 ): SetupModelStatus {
@@ -502,6 +518,54 @@ describe('StepInferenceProvider configured API key display', () => {
       );
     });
     expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps setup incomplete when OpenAI-compatible discovery returns HTTP 400 with no models', async () => {
+    mutateAsyncMock.mockResolvedValueOnce({
+      error: 'OpenAI-compatible returned HTTP 400.',
+      modelCount: 0,
+      recommendedModels: [],
+    });
+    const onContinue = vi.fn();
+
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          preselectedProvider: 'openai-compatible',
+          providers: [
+            openAiCompatibleProviderStatus(),
+            openrouterProviderStatus(),
+          ],
+        })}
+        onContinue={onContinue}
+      />,
+    );
+
+    selectProvider('openai-compatible');
+    fireEvent.change(
+      screen.getByPlaceholderText(/Endpoint URL for OpenAI-compatible/i),
+      { target: { value: 'https://proxy.example.com/v1' } },
+    );
+    fireEvent.change(
+      screen.getByRole('textbox', {
+        name: 'Connection name for OpenAI-compatible endpoint',
+      }),
+      { target: { value: 'company-proxy' } },
+    );
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        'OpenAI-compatible returned HTTP 400.',
+      );
+    });
+    expect(mutateAsyncMock).toHaveBeenCalledOnce();
+    expect(mutateAsyncMock).toHaveBeenCalledWith({
+      provider: 'openai-compatible',
+      baseUrl: 'https://proxy.example.com/v1',
+      apiKey: undefined,
+    });
+    expect(onContinue).not.toHaveBeenCalled();
   });
 
   it('reports a tool-calling failure separately from model eligibility', async () => {
