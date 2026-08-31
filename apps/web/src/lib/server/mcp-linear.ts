@@ -1,12 +1,7 @@
 import { LinearClient } from '@linear/sdk';
 
 import { buildTaskStartingText } from '@roomote/communication/chat-messages';
-import {
-  db,
-  mcpConnections,
-  eq,
-  deploymentMcpEnablements,
-} from '@roomote/db/server';
+import { db, mcpConnections, eq } from '@roomote/db/server';
 import {
   consumeMcpOauthReplay,
   findLinearDeploymentMcpConnection,
@@ -214,7 +209,6 @@ export async function hydrateLinearMcpConnectionAfterOauth(input: {
   connection: NonNullable<McpConnectionRecord>;
   tokens: OAuthTokens;
   replayToken?: string | null;
-  enabledByUserId?: string;
 }) {
   const viewerClient = new LinearClient({
     accessToken: input.tokens.access_token,
@@ -235,24 +229,6 @@ export async function hydrateLinearMcpConnectionAfterOauth(input: {
       linearOrganizationUrlKey: organization.urlKey ?? null,
       appUserId: viewer.id,
     });
-
-    if (input.enabledByUserId) {
-      await db
-        .insert(deploymentMcpEnablements)
-        .values({
-          mcpId: 'linear',
-          enabled: true,
-          enabledByUserId: input.enabledByUserId,
-        })
-        .onConflictDoUpdate({
-          target: deploymentMcpEnablements.mcpId,
-          set: {
-            enabled: true,
-            enabledByUserId: input.enabledByUserId,
-            updatedAt: new Date(),
-          },
-        });
-    }
 
     return;
   }

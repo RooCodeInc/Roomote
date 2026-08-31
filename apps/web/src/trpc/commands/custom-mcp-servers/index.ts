@@ -20,7 +20,10 @@ import {
 } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
 import { Env, isCustomMcpDisabled } from '@/lib/server/env';
-import { captureIntegrationLifecycleEvent } from '@/lib/server/integration-telemetry';
+import {
+  captureIntegrationConnectionTransitions,
+  captureIntegrationLifecycleEvent,
+} from '@/lib/server/integration-telemetry';
 
 export const CUSTOM_MCP_DISABLED_MESSAGE =
   'Custom MCP servers are disabled by the deployment operator.';
@@ -242,18 +245,12 @@ export async function createCustomMcpServerCommand(
   );
 
   const integrationId = customMcpConnectionId(created.id);
-  captureIntegrationLifecycleEvent(
-    'integration_enabled',
+  captureIntegrationConnectionTransitions({
     integrationId,
-    auth.userId,
-  );
-  if (input.transport === 'stdio' || input.authType !== 'oauth') {
-    captureIntegrationLifecycleEvent(
-      'integration_connected',
-      integrationId,
-      auth.userId,
-    );
-  }
+    userId: auth.userId,
+    connected: input.transport === 'stdio' || input.authType !== 'oauth',
+    enabled: true,
+  });
 
   return { id: created.id };
 }

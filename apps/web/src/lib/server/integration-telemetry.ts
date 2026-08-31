@@ -16,3 +16,25 @@ export function captureIntegrationLifecycleEvent(
     properties: { integration_id: integrationId },
   });
 }
+
+export function captureIntegrationConnectionTransitions(input: {
+  integrationId: string;
+  userId: string;
+  connected: boolean;
+  enabled: boolean;
+}): void {
+  if (input.connected) {
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      input.integrationId,
+      input.userId,
+    );
+  }
+  if (input.enabled) {
+    captureIntegrationLifecycleEvent(
+      'integration_enabled',
+      input.integrationId,
+      input.userId,
+    );
+  }
+}

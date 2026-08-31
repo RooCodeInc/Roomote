@@ -1,13 +1,7 @@
 import { createHash } from 'node:crypto';
 import { type NextRequest, NextResponse } from 'next/server';
 
-import {
-  and,
-  db,
-  mcpConnections,
-  deploymentMcpEnablements,
-  eq,
-} from '@roomote/db/server';
+import { db, mcpConnections, eq } from '@roomote/db/server';
 import {
   getMcpIntegration,
   getMcpIntegrationDefaultDisabledTools,
@@ -30,7 +24,8 @@ import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { logger } from '@/lib/server/logger';
-import { captureIntegrationLifecycleEvent } from '@/lib/server/integration-telemetry';
+import { captureIntegrationConnectionTransitions } from '@/lib/server/integration-telemetry';
+import { enableDeploymentMcpIntegration } from '@/lib/server/deployment-mcp-connection';
 import {
   hydrateLinearMcpConnectionAfterOauth,
   LinearReplayIdentityMismatchError,
@@ -367,7 +362,6 @@ export async function GET(request: NextRequest) {
         connection,
         tokens,
         replayToken: oauthState.replayToken,
-        enabledByUserId: userId,
       });
     } else {
       failureStage = 'token_storage';
@@ -381,51 +375,19 @@ export async function GET(request: NextRequest) {
       failureStage = 'deployment_enablement';
       const defaultDisabledTools =
         getMcpIntegrationDefaultDisabledTools(integration);
-      const [reenabled] = await db
-        .update(deploymentMcpEnablements)
-        .set({
-          enabled: true,
-          enabledByUserId: userId,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(deploymentMcpEnablements.mcpId, integration.id),
-            eq(deploymentMcpEnablements.enabled, false),
-          ),
-        )
-        .returning({ mcpId: deploymentMcpEnablements.mcpId });
-      const [inserted] = reenabled
-        ? []
-        : await db
-            .insert(deploymentMcpEnablements)
-            .values({
-              mcpId: integration.id,
-              enabled: true,
-              enabledByUserId: userId,
-              ...(defaultDisabledTools.length > 0
-                ? {
-                    disabledTools: [...defaultDisabledTools],
-                  }
-                : {}),
-            })
-            .onConflictDoNothing({ target: deploymentMcpEnablements.mcpId })
-            .returning({ mcpId: deploymentMcpEnablements.mcpId });
-      integrationBecameEnabled = Boolean(reenabled || inserted);
+      integrationBecameEnabled = await enableDeploymentMcpIntegration({
+        mcpId: integration.id,
+        userId,
+        defaultDisabledTools: [...defaultDisabledTools],
+      });
     }
 
-    captureIntegrationLifecycleEvent(
-      'integration_connected',
-      connection.mcpId,
+    captureIntegrationConnectionTransitions({
+      integrationId: connection.mcpId,
       userId,
-    );
-    if (integrationBecameEnabled && integration) {
-      captureIntegrationLifecycleEvent(
-        'integration_enabled',
-        integration.id,
-        userId,
-      );
-    }
+      connected: true,
+      enabled: integrationBecameEnabled,
+    });
 
     return redirectToResult({ status: 'connected' });
   } catch (error) {

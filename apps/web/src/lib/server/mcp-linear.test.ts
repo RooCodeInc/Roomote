@@ -61,7 +61,6 @@ vi.mock('@roomote/db/server', () => ({
     query: { mcpConnections: { findFirst: vi.fn() } },
     update: dbUpdateMock,
   },
-  deploymentMcpEnablements: {},
   eq: vi.fn(),
   mcpConnections: { id: 'id' },
 }));
