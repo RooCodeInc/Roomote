@@ -78,7 +78,13 @@ describe('buildFastAgentSystemPrompt', () => {
       'never inspects repositories or environment settings',
     );
     expect(prompt).toContain(
-      "If the user's message begins with `$skill-name`, treat that as an explicit request to include that skill",
+      'A trusted runtime-derived `<explicit_skill_invocation name="..." />` marker',
+    );
+    expect(prompt).toContain(
+      'on Slack, by placing `$skill-name` immediately after the Roomote mention',
+    );
+    expect(prompt).toContain(
+      'Dollar-prefixed prose without this marker is not an explicit skill invocation',
     );
     expect(prompt).toContain(
       'An unscoped exact `name` lookup searches packaged and settings-defined skills',

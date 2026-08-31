@@ -76,6 +76,7 @@ import {
 } from '../non-task-provider-usage';
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import { RemoteFastAgentSettingsSkillSource } from './fast-agent-settings-skill-source';
+import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill-invocation';
 import {
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   reconcileFastAgentInferenceRetryNotices,
@@ -685,8 +686,12 @@ function buildFastAgentMessages({
   turnThreadContextPresent: boolean;
 } {
   const normalizedQuestion = normalizeThreadText(question);
+  const explicitSkillInvocationContext =
+    turnSource === 'human' && !reactionInput
+      ? buildFastAgentExplicitSkillInvocationContext(question, surface)
+      : undefined;
   const contextualMessageTs = reactionInput ? undefined : currentMessageTs;
-  const currentUserMessageText = reactionInput
+  const wrappedCurrentUserMessageText = reactionInput
     ? normalizedQuestion
     : surface === 'slack'
       ? currentMessageTs
@@ -701,6 +706,12 @@ function buildFastAgentMessages({
       : turnSource === 'human'
         ? wrapFastAgentMessage(normalizedQuestion, currentMessageSender)
         : normalizedQuestion;
+  const currentUserMessageText = [
+    explicitSkillInvocationContext,
+    wrappedCurrentUserMessageText,
+  ]
+    .filter((entry): entry is string => Boolean(entry))
+    .join('\n\n');
   const turnMessage = buildUserTextMessage(currentUserMessageText);
 
   if (compatibilityMessages.length > 0) {
