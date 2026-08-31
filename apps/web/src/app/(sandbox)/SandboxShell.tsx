@@ -58,15 +58,16 @@ export function SandboxShell({
       staleTime: 30_000,
     }),
   );
-  const { data: setupSessionStatus } = useQuery(
-    trpc.setup.sessionStatus.queryOptions(undefined, {
-      enabled:
-        onboardingQueryEnabled &&
-        user?.isAdmin === true &&
-        setupStatus?.setupCompletedAt == null,
-      staleTime: 10_000,
-    }),
-  );
+  const { data: setupSessionStatus, isLoading: isSetupSessionLoading } =
+    useQuery(
+      trpc.setup.sessionStatus.queryOptions(undefined, {
+        enabled:
+          onboardingQueryEnabled &&
+          user?.isAdmin === true &&
+          setupStatus?.setupCompletedAt == null,
+        staleTime: 10_000,
+      }),
+    );
 
   const needsOnboarding =
     user?.isAdmin !== true &&
@@ -85,7 +86,10 @@ export function SandboxShell({
   );
 
   useEffect(() => {
-    if (needsAdminSetup && !isAllowedSetupSession) {
+    // Wait for the setup-session lookup before routing. Otherwise a direct
+    // visit to the in-progress setup session can briefly see no session ID
+    // and be redirected to /setup before the lookup resolves.
+    if (needsAdminSetup && !isSetupSessionLoading && !isAllowedSetupSession) {
       router.replace(setupSessionPath ?? '/setup');
     } else if (needsOnboarding || isOnboardingError) {
       router.replace('/onboarding');
@@ -93,6 +97,7 @@ export function SandboxShell({
   }, [
     isAllowedSetupSession,
     isOnboardingError,
+    isSetupSessionLoading,
     needsAdminSetup,
     needsOnboarding,
     router,

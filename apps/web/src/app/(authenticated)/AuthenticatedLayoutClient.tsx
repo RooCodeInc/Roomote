@@ -51,16 +51,19 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
     shouldCheckSetup && !isSetupError && setupStatus != null
       ? getSetupRedirectPath(setupStatus)
       : null;
-  const { data: setupSessionStatus } = useQuery(
-    trpc.setup.sessionStatus.queryOptions(undefined, {
-      enabled: shouldCheckSetup && setupStatus?.setupCompletedAt == null,
-      staleTime: 10_000,
-    }),
-  );
+  const { data: setupSessionStatus, isLoading: isSetupSessionLoading } =
+    useQuery(
+      trpc.setup.sessionStatus.queryOptions(undefined, {
+        enabled: shouldCheckSetup && setupStatus?.setupCompletedAt == null,
+        staleTime: 10_000,
+      }),
+    );
   const effectiveSetupRedirectPath =
-    setupRedirectPath && setupSessionStatus?.sessionId
-      ? `/sessions/${setupSessionStatus.sessionId}`
-      : setupRedirectPath;
+    setupRedirectPath && isSetupSessionLoading
+      ? null
+      : setupRedirectPath && setupSessionStatus?.sessionId
+        ? `/sessions/${setupSessionStatus.sessionId}`
+        : setupRedirectPath;
 
   // Treat the redirect target itself and any page beneath it as allowed so
   // setup can keep ownership of any remaining required bootstrap screens.

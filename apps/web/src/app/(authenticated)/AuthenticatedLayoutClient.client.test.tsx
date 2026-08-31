@@ -160,6 +160,30 @@ describe('AuthenticatedLayoutClient', () => {
     });
   });
 
+  it('waits for the setup-session lookup before redirecting an incomplete admin', () => {
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? undefined
+          : {
+              hasGitHub: false,
+              hasEnvironments: false,
+              setupCompletedAt: null,
+            },
+      isLoading: options.queryKey[0] === 'setup.sessionStatus',
+      isError: false,
+    }));
+
+    render(
+      <AuthenticatedLayoutClient>
+        <div>Home content</div>
+      </AuthenticatedLayoutClient>,
+    );
+
+    expect(screen.getByText('Home content')).toBeVisible();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
   it('renders authenticated pages when setup is complete but environments are still missing', () => {
     mockPathname = '/settings/previews';
     useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
