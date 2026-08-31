@@ -22,16 +22,22 @@ export type FastAgentHumanFollowUpAdmission =
 export async function admitFastAgentHumanFollowUp(params: {
   parent: FastAgentParent;
   event: FastAgentHumanFollowUpEvent;
+  forceQueue?: boolean;
 }): Promise<FastAgentHumanFollowUpAdmission> {
-  const turnLock = await acquireFastAgentTurnLock({
-    conversation: params.parent.conversation,
-    maxWaitMs: 0,
-  });
+  const turnLock = params.forceQueue
+    ? null
+    : await acquireFastAgentTurnLock({
+        conversation: params.parent.conversation,
+        maxWaitMs: 0,
+      });
   if (turnLock) {
     return { kind: 'turn', turnLock };
   }
 
-  const { eventKey } = await enqueueFastAgentParentEvent(params);
+  const { eventKey } = await enqueueFastAgentParentEvent({
+    parent: params.parent,
+    event: params.event,
+  });
   return {
     kind: 'queued',
     abort: async () => {

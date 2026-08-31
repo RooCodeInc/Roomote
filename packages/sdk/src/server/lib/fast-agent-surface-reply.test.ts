@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   createActivity: vi.fn(() => ({ start: vi.fn(), settle: vi.fn() })),
   slackPostThreadMessage: vi.fn(),
   slackUpdateMessage: vi.fn(),
+  admitHumanFollowUp: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -40,6 +41,10 @@ vi.mock('../automations/destination', () => ({
   findTeamsConversationRoute: mocks.findTeamsConversationRoute,
 }));
 
+vi.mock('./fast-agent-human-follow-up', () => ({
+  admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
+}));
+
 import {
   and,
   db,
@@ -51,7 +56,10 @@ import {
   userFactory,
 } from '@roomote/db/server';
 
-import { buildFastAgentSurfaceReplyDelivery } from './fast-agent-surface-reply';
+import {
+  buildFastAgentSurfaceReplyDelivery,
+  queueFastAgentSurfaceReply,
+} from './fast-agent-surface-reply';
 
 async function createConversation(input: {
   userId: string;
@@ -103,6 +111,10 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     });
     mocks.slackPostThreadMessage.mockResolvedValue('slack-message-1');
     mocks.slackUpdateMessage.mockResolvedValue(true);
+    mocks.admitHumanFollowUp.mockResolvedValue({
+      kind: 'queued',
+      abort: vi.fn(),
+    });
   });
 
   it('serves web sessions with a transcript-only adapter', async () => {
@@ -124,6 +136,30 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     await expect(
       delivery!.adapter.postReply({ purpose: 'closeout', message: 'hi' }),
     ).resolves.toBeUndefined();
+  });
+
+  it('reports durable admission failures instead of acknowledging the queued follow-up', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'web',
+    });
+    mocks.admitHumanFollowUp.mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+
+    await expect(
+      queueFastAgentSurfaceReply({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Matt',
+        question: 'Follow up',
+        currentMessageId: 'web-message-1',
+      }),
+    ).rejects.toThrow('database unavailable');
+    expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({ forceQueue: true }),
+    );
   });
 
   it('serves automation sessions the same transcript-only adapter', async () => {

@@ -77,4 +77,20 @@ describe('admitFastAgentHumanFollowUp', () => {
     if (admission.kind === 'queued') await admission.abort();
     expect(mocks.updateWhere).toHaveBeenCalled();
   });
+
+  it('persists directly to the durable queue when queueing is required', async () => {
+    mocks.enqueueParentEvent.mockResolvedValue({
+      eventKey: 'stable-event-key',
+      queued: true,
+    });
+
+    await expect(
+      admitFastAgentHumanFollowUp({ parent, event, forceQueue: true }),
+    ).resolves.toEqual({
+      kind: 'queued',
+      abort: expect.any(Function),
+    });
+    expect(mocks.acquireTurnLock).not.toHaveBeenCalled();
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith({ parent, event });
+  });
 });

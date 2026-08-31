@@ -534,38 +534,53 @@ export async function continueFastAgentSurfaceReply(
     return false;
   }
 
-  return runFastAgentSurfaceReply({ ...params, delivery });
+  const admission = await admitFastAgentSurfaceHumanFollowUp(params, delivery);
+  if (admission?.kind === 'queued') return true;
+
+  return runFastAgentSurfaceReply({ ...params, delivery, admission });
+}
+
+type FastAgentSurfaceHumanFollowUpAdmission = Awaited<
+  ReturnType<typeof admitFastAgentHumanFollowUp>
+> | null;
+
+async function admitFastAgentSurfaceHumanFollowUp(
+  params: FastAgentSurfaceReplyParams,
+  delivery: FastAgentSurfaceReplyDelivery,
+  forceQueue = false,
+): Promise<FastAgentSurfaceHumanFollowUpAdmission> {
+  if (params.externalInput) return null;
+
+  return admitFastAgentHumanFollowUp({
+    parent: {
+      sessionId: params.sessionId,
+      conversation: delivery.conversation,
+    },
+    event: {
+      type: 'human_follow_up',
+      eventId: params.currentMessageId,
+      currentMessageId: params.currentMessageId,
+      userId: params.userId,
+      question: params.question,
+      ...(params.images?.length ? { images: params.images } : {}),
+      ...(params.senderDisplayName
+        ? { senderDisplayName: params.senderDisplayName }
+        : {}),
+    },
+    forceQueue,
+  });
 }
 
 async function runFastAgentSurfaceReply(
   params: FastAgentSurfaceReplyParams & {
     delivery: FastAgentSurfaceReplyDelivery;
+    admission: FastAgentSurfaceHumanFollowUpAdmission;
   },
 ): Promise<boolean> {
-  const { delivery } = params;
-  const admission = params.externalInput
-    ? null
-    : await admitFastAgentHumanFollowUp({
-        parent: {
-          sessionId: params.sessionId,
-          conversation: delivery.conversation,
-        },
-        event: {
-          type: 'human_follow_up',
-          eventId: params.currentMessageId,
-          currentMessageId: params.currentMessageId,
-          userId: params.userId,
-          question: params.question,
-          ...(params.images?.length ? { images: params.images } : {}),
-          ...(params.senderDisplayName
-            ? { senderDisplayName: params.senderDisplayName }
-            : {}),
-        },
-      });
-  if (admission?.kind === 'queued') return true;
+  const { admission, delivery } = params;
 
   const release =
-    admission?.turnLock ??
+    (admission?.kind === 'turn' ? admission.turnLock : null) ??
     (await acquireFastAgentTurnLock({
       conversation: delivery.conversation,
     }));
@@ -617,8 +632,17 @@ export async function queueFastAgentSurfaceReply(
   const delivery = await buildFastAgentSurfaceReplyDelivery(params);
   if (!delivery) return false;
 
-  void runFastAgentSurfaceReply({ ...params, delivery }).catch((error) => {
-    console.error('[Fast Agent] Queued surface reply failed:', error);
-  });
+  const admission = await admitFastAgentSurfaceHumanFollowUp(
+    params,
+    delivery,
+    true,
+  );
+  if (admission?.kind === 'queued') return true;
+
+  void runFastAgentSurfaceReply({ ...params, delivery, admission }).catch(
+    (error) => {
+      console.error('[Fast Agent] Queued surface reply failed:', error);
+    },
+  );
   return true;
 }
