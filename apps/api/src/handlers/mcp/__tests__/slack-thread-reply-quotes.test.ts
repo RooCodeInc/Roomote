@@ -409,13 +409,8 @@ describe('Slack thread reply quotes', () => {
                 action_id: 'late_bound_automation_view_task',
               }),
               expect.objectContaining({
-                type: 'overflow',
                 action_id: 'late_bound_automation_configure',
-                options: [
-                  expect.objectContaining({
-                    url: 'https://app.example.com/automations#custom-automation-automation-1',
-                  }),
-                ],
+                url: 'https://app.example.com/automations#custom-automation-automation-1',
               }),
             ]),
           }),

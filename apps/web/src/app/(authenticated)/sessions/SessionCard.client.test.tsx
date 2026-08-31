@@ -92,4 +92,54 @@ describe('SessionCard', () => {
     rerender(<SessionCard session={session} viewerUserId="user-1" />);
     expect(screen.getByLabelText('Unread activity')).toBeInTheDocument();
   });
+
+  it('renders the list and board status indicators', () => {
+    const session = {
+      id: 'session-4',
+      title: 'Review status indicators',
+      ownerName: 'Test User',
+      ownerEmail: 'test@example.com',
+      ownerImageUrl: null,
+      ownerUserId: 'user-1',
+      sourceSurface: 'web',
+      activityAt: Date.now() / 1000,
+      cachedStatus: 'active' as const,
+      executionCount: 0,
+      inferenceCostMicroUsd: 0,
+      unread: false,
+      tasks: [],
+    };
+
+    const { container, rerender } = render(
+      <SessionCard session={session} viewerUserId="user-1" />,
+    );
+    expect(container.querySelector('.animate-spin')).toBeInTheDocument();
+    expect(screen.queryByText('active')).not.toBeInTheDocument();
+    expect(screen.getByText('Active')).toHaveClass('sr-only');
+
+    rerender(
+      <SessionCard
+        session={{ ...session, cachedStatus: 'ready' }}
+        viewerUserId="user-1"
+      />,
+    );
+    expect(container.querySelector('.animate-spin')).not.toBeInTheDocument();
+    expect(screen.queryByText('ready')).not.toBeInTheDocument();
+
+    rerender(
+      <SessionCard
+        session={{ ...session, cachedStatus: 'needs_input' }}
+        viewerUserId="user-1"
+      />,
+    );
+    expect(screen.getByText('needs input')).toHaveClass('capitalize');
+
+    rerender(
+      <SessionCard
+        session={{ ...session, cachedStatus: 'blocked' }}
+        viewerUserId="user-1"
+      />,
+    );
+    expect(screen.getByText('blocked')).toHaveClass('capitalize');
+  });
 });

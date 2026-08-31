@@ -210,7 +210,7 @@ function RunningTasksMessage({
           <button
             type="button"
             className="w-fit cursor-pointer rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            aria-label={`${label}. Open tasks`}
+            aria-label={`${label}. Open ${count === 1 ? 'task' : 'tasks'}`}
             onClick={onOpenTasks}
           >
             {shouldReduceMotion ? (

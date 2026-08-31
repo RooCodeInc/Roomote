@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import {
   createContext,
@@ -20,7 +19,6 @@ import {
 
 import {
   formatInferenceCost,
-  formatRepositoryName,
   getUserDisplayName,
   humanizeFilename,
 } from '@/lib';
@@ -44,7 +42,6 @@ import {
   Button,
   Calendar,
   DollarSign,
-  ExternalLink,
   FileText,
   Globe,
   Image,
@@ -58,11 +55,6 @@ import {
   VideoIcon,
   X,
   Rows4,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
 } from '@/components/system';
 import { SandboxSidePanelHeader } from '../../SandboxSidePanelHeader';
 import {
@@ -425,156 +417,6 @@ function SessionArtifactViewer({
   );
 }
 
-function SessionTaskPanel({
-  sessionId,
-  task,
-  tasks,
-  onSelect,
-  onClose,
-}: {
-  sessionId: string;
-  task: SessionTaskSummary;
-  tasks: SessionTaskSummary[];
-  onSelect: (taskId: string) => void;
-  onClose: () => void;
-}) {
-  const [selectedArtifact, setSelectedArtifact] =
-    useState<SessionArtifactEntry | null>(null);
-  const latestArtifactEntries = getLatestSessionArtifacts([task]);
-  const latestArtifacts = latestArtifactEntries.map((entry) => entry.artifact);
-  const screenshotArtifacts = latestArtifacts.filter((artifact) =>
-    artifact.contentType.startsWith('image/'),
-  );
-  const videoArtifacts = latestArtifacts.filter((artifact) =>
-    artifact.contentType.startsWith('video/'),
-  );
-  const fileArtifacts = latestArtifacts.filter(
-    (artifact) =>
-      !artifact.contentType.startsWith('image/') &&
-      !artifact.contentType.startsWith('video/'),
-  );
-  const artifactSections = [
-    { label: 'Screenshots', artifacts: screenshotArtifacts },
-    { label: 'Videos', artifacts: videoArtifacts },
-    { label: 'Files', artifacts: fileArtifacts },
-  ];
-
-  return (
-    <FramedSurface
-      frameClassName="p-0"
-      surfaceClassName="relative flex flex-col overflow-hidden"
-    >
-      {selectedArtifact ? (
-        <SessionArtifactViewer
-          entry={selectedArtifact}
-          closeLabel="Close task details"
-          onBack={() => setSelectedArtifact(null)}
-          onClose={onClose}
-        />
-      ) : (
-        <>
-          <SandboxSidePanelHeader
-            title={task.title}
-            closeLabel="Close task details"
-            onClose={onClose}
-            actions={
-              task.canAccessDetails === false ? null : (
-                <Button asChild variant="ghost" size="sm">
-                  <Link
-                    href={`/task/${task.taskId}?returnTo=${encodeURIComponent(`/sessions/${sessionId}?task=${task.taskId}`)}`}
-                  >
-                    Go to task
-                    <ExternalLink />
-                  </Link>
-                </Button>
-              )
-            }
-          />
-          <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-4 text-sm">
-            {tasks.length > 1 ? (
-              <Select value={task.taskId} onValueChange={onSelect}>
-                <SelectTrigger aria-label="Choose task">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {tasks.map((item) => (
-                    <SelectItem key={item.taskId} value={item.taskId}>
-                      {item.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : null}
-            <div className="space-y-1">
-              <p className="text-muted-foreground capitalize">{task.state}</p>
-              {task.repositoryName ? (
-                <p className="text-muted-foreground">
-                  {formatRepositoryName(task.repositoryName)}
-                </p>
-              ) : null}
-            </div>
-            {task.canAccessDetails === false ? (
-              <p className="rounded-md border bg-muted p-3 text-muted-foreground">
-                Task details require task access.
-              </p>
-            ) : null}
-            {task.latestRun?.error ? (
-              <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-destructive">
-                {task.latestRun.error}
-              </div>
-            ) : null}
-            {task.pullRequests.length ? (
-              <section className="space-y-2">
-                <h3 className="font-medium">Pull requests</h3>
-                {task.pullRequests.map((pullRequest) => (
-                  <a
-                    key={pullRequest.id}
-                    href={pullRequest.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block truncate text-primary hover:underline"
-                  >
-                    {pullRequest.repository}#{pullRequest.number}
-                  </a>
-                ))}
-              </section>
-            ) : null}
-            {latestArtifacts.length ? (
-              <section className="space-y-3 @container">
-                <h3 className="font-medium">Artifacts</h3>
-                {artifactSections.map(({ label, artifacts }) =>
-                  artifacts.length ? (
-                    <div key={label} className="space-y-2">
-                      <h4 className="text-xs font-medium text-muted-foreground">
-                        {label}
-                      </h4>
-                      <div className="grid grid-cols-2 gap-4 @[500px]:grid-cols-3">
-                        {artifacts.map((artifact) => (
-                          <SessionArtifactCard
-                            key={artifact.id}
-                            artifact={artifact}
-                            onOpen={() =>
-                              setSelectedArtifact(
-                                latestArtifactEntries.find(
-                                  (entry) => entry.artifact.id === artifact.id,
-                                ) ?? null,
-                              )
-                            }
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ) : null,
-                )}
-              </section>
-            ) : null}
-          </div>
-        </>
-      )}
-    </FramedSurface>
-  );
-}
-
 function SessionArtifactsPanel({
   tasks,
   onClose,
@@ -897,13 +739,14 @@ export function SessionWorkspace({
   const taskCards = isFastTaskSource ? fastTasks : sessionTasks;
   const artifactTasks = isFastTaskSource ? fastTasks : sessionTasks;
   const sessionPullRequests = getSessionPullRequests(sessionTasks);
-  const runningTaskCount = taskCards.filter((task) =>
+  const runningTasks = taskCards.filter((task) =>
     isActivelyRunningTask(task.latestRun?.status, task.latestRun?.taskPhase),
-  ).length;
-  const selectedTaskId = searchParams.get('task');
-  const selectedTask = sessionTasks.find(
-    (task) => task.taskId === selectedTaskId,
   );
+  const runningTaskCount = runningTasks.length;
+  const singleRunningTaskId =
+    runningTaskCount === 1 ? runningTasks[0]?.taskId : null;
+  const selectedTaskId = searchParams.get('task');
+  const selectedTask = taskCards.find((task) => task.taskId === selectedTaskId);
   const panelOpen = panel !== null || Boolean(selectedTask);
 
   const selectTask = useCallback(
@@ -927,9 +770,15 @@ export function SessionWorkspace({
     [selectTask],
   );
   const openTasksPanel = useCallback(() => {
+    if (singleRunningTaskId) {
+      setPanel(null);
+      selectTask(singleRunningTaskId);
+      return;
+    }
+
     setPanel({ kind: 'tasks' });
     selectTask(null);
-  }, [selectTask]);
+  }, [selectTask, singleRunningTaskId]);
   const closePanel = () => {
     setPanel(null);
     selectTask(null);
@@ -939,14 +788,7 @@ export function SessionWorkspace({
     selectTask(null);
   };
   const panelContent = selectedTask ? (
-    <SessionTaskPanel
-      key={selectedTask.taskId}
-      sessionId={session.id}
-      task={selectedTask}
-      tasks={sessionTasks}
-      onSelect={selectTask}
-      onClose={closePanel}
-    />
+    <NestedTaskSidePanel taskId={selectedTask.taskId} onClose={closePanel} />
   ) : panel?.kind === 'nested' ? (
     <NestedTaskSidePanel taskId={panel.taskId} onClose={closePanel} />
   ) : panel?.kind === 'tasks' ? (
