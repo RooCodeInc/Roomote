@@ -4991,6 +4991,9 @@ export class OpenCodeServerHarness
 
     this.inFlight = false;
     this.finalizedAssistantTurn = null;
+    // capture-visual-proof is a turn-scoped handoff. Once that turn returns,
+    // its deadline must not carry into the parent's delivery turn.
+    this.clearVisualProofTimeout();
     // A completed turn means the model recovered past any prior rate-limit
     // or provider-error hop; reset so a later failure gets a fresh bounded
     // automatic-retry budget.

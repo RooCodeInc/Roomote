@@ -922,6 +922,41 @@ describe('OpenCode visual proof deadline', () => {
     }
   });
 
+  it('clears the deadline before the parent starts a follow-up delivery turn', async () => {
+    const client = new FakeOpenCodeServerClient();
+    const { harness } = createHarness(client, {
+      visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+    });
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part: createSkillToolPart('capture-visual-proof') },
+      });
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Continue delivery.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() =>
+        expect(client.promptAsync).toHaveBeenCalledTimes(2),
+      );
+
+      await vi.advanceTimersByTimeAsync(VISUAL_PROOF_TIMEOUT_MS);
+
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('does not reset the deadline for a delegated capture retry', async () => {
     const client = new FakeOpenCodeServerClient();
     const { harness } = createHarness(client, {
