@@ -241,6 +241,7 @@ describe('Session detail page', () => {
       fastConversationId: '6a1f8f1e-0000-4000-8000-000000000005',
       directInferenceCostMicroUsd: 100_000,
       inferenceCostMicroUsd: 300_000,
+      respondingUntil: new Date(Date.now() + 60_000),
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       status: 'active',
       tasks: [
@@ -306,6 +307,7 @@ describe('Session detail page', () => {
         sessionId: '6a1f8f1e-0000-4000-8000-000000000005',
         canReply: true,
         initialTitle: 'Session title',
+        initialConversationResponding: true,
         fallbackTitle: 'Session title',
       }),
       undefined,

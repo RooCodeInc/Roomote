@@ -40,6 +40,7 @@ import {
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import {
   useOpenSessionTaskPanel,
+  useOpenSessionTasksPanel,
   useSessionRunningTaskCount,
 } from './session-task-panel-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
@@ -192,7 +193,13 @@ function ThinkingMessage() {
   );
 }
 
-function RunningTasksMessage({ count }: { count: number }) {
+function RunningTasksMessage({
+  count,
+  onOpenTasks,
+}: {
+  count: number;
+  onOpenTasks: () => void;
+}) {
   const shouldReduceMotion = useReducedMotion();
   const label = `${count} ${count === 1 ? 'task' : 'tasks'} running`;
 
@@ -200,20 +207,27 @@ function RunningTasksMessage({ count }: { count: number }) {
     <Message from="assistant" className="chat-reasoning-message">
       <MessageContent>
         <span role="status" aria-live="polite">
-          {shouldReduceMotion ? (
-            <span className="text-sm font-light text-muted-foreground">
-              {label}
-            </span>
-          ) : (
-            <Shimmer
-              as="span"
-              className="text-sm font-light"
-              duration={3}
-              spread={1}
-            >
-              {label}
-            </Shimmer>
-          )}
+          <button
+            type="button"
+            className="w-fit cursor-pointer rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            aria-label={`${label}. Open tasks`}
+            onClick={onOpenTasks}
+          >
+            {shouldReduceMotion ? (
+              <span className="text-sm font-light text-muted-foreground">
+                {label}
+              </span>
+            ) : (
+              <Shimmer
+                as="span"
+                className="text-sm font-light"
+                duration={3}
+                spread={1}
+              >
+                {label}
+              </Shimmer>
+            )}
+          </button>
         </span>
       </MessageContent>
     </Message>
@@ -226,6 +240,7 @@ export function FastSessionTranscript({
   hasOlderMessages,
   canReply,
   initialTitle = null,
+  initialConversationResponding = null,
   fallbackTitle = 'New session',
   sessionModel = null,
   sessionReasoningEffort = null,
@@ -239,6 +254,7 @@ export function FastSessionTranscript({
   hasOlderMessages?: boolean;
   canReply?: boolean;
   initialTitle?: string | null;
+  initialConversationResponding?: boolean | null;
   fallbackTitle?: string;
   sessionModel?: string | null;
   sessionReasoningEffort?: ReasoningEffort | null;
@@ -249,6 +265,7 @@ export function FastSessionTranscript({
 }) {
   const trpcClient = useTRPCClient();
   const openTaskPanel = useOpenSessionTaskPanel();
+  const openTasksPanel = useOpenSessionTasksPanel();
   const runningTaskCount = useSessionRunningTaskCount();
   const { enabled: narrationModeEnabled } = useNarrationMode();
   const displayMode = narrationModeEnabled ? 'narration' : 'default';
@@ -277,15 +294,24 @@ export function FastSessionTranscript({
   );
   const [replyError, setReplyError] = useState<string | null>(null);
   const [title, setTitle] = useState<string | null>(initialTitle);
+  const [conversationResponding, setConversationResponding] = useState<
+    boolean | null
+  >(initialConversationResponding);
   usePageTitle(truncatePageTitle(title ?? fallbackTitle));
 
   useEffect(() => {
     const source = new EventSource(`/api/sessions/${sessionId}/stream`);
     const onMessages = (event: MessageEvent) => {
       try {
-        const { messages } = JSON.parse(event.data) as {
+        const { messages, conversationResponding: responding } = JSON.parse(
+          event.data,
+        ) as {
           messages: TranscriptMessage[];
+          conversationResponding?: boolean | null;
         };
+        if (responding !== undefined) {
+          setConversationResponding(responding);
+        }
         const previous = serverMessagesRef.current;
         const canonicalMessages = messages.filter(
           (message) => !previous.has(message.eventId),
@@ -327,10 +353,16 @@ export function FastSessionTranscript({
     };
     const onSession = (event: MessageEvent) => {
       try {
-        const { title: nextTitle } = JSON.parse(event.data) as {
-          title: string | null;
+        const update = JSON.parse(event.data) as {
+          title?: string;
+          conversationResponding?: boolean | null;
         };
-        setTitle(nextTitle);
+        if (update.title !== undefined) {
+          setTitle(update.title);
+        }
+        if (update.conversationResponding !== undefined) {
+          setConversationResponding(update.conversationResponding);
+        }
       } catch {
         // Ignore malformed frames.
       }
@@ -518,8 +550,14 @@ export function FastSessionTranscript({
           />
           {pendingResponseState.pendingAfter !== null ? (
             <ThinkingMessage />
-          ) : !isSending && runningTaskCount > 0 ? (
-            <RunningTasksMessage count={runningTaskCount} />
+          ) : !isSending &&
+            conversationResponding !== true &&
+            runningTaskCount > 0 &&
+            openTasksPanel ? (
+            <RunningTasksMessage
+              count={runningTaskCount}
+              onOpenTasks={openTasksPanel}
+            />
           ) : null}
           {reviewOffers.map((offer) => (
             <PrReviewActionOffer

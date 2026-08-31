@@ -19,6 +19,7 @@ const {
   updateModelSelectionMutate,
   preparePromptAttachments,
   openTaskPanel,
+  openTasksPanel,
   narrationState,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
@@ -26,6 +27,7 @@ const {
   updateModelSelectionMutate: vi.fn(),
   preparePromptAttachments: vi.fn(),
   openTaskPanel: vi.fn(),
+  openTasksPanel: vi.fn(),
   narrationState: { enabled: false },
 }));
 
@@ -99,6 +101,7 @@ vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
 vi.mock('./session-task-panel-context', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./session-task-panel-context')>()),
   useOpenSessionTaskPanel: () => openTaskPanel,
+  useOpenSessionTasksPanel: () => openTasksPanel,
 }));
 
 vi.mock('../../task/[taskId]/messages/acp/DelegatedTaskCard', () => ({
@@ -152,6 +155,7 @@ beforeEach(() => {
   );
   narrationState.enabled = false;
   openTaskPanel.mockReset();
+  openTasksPanel.mockReset();
   vi.stubGlobal('EventSource', FakeEventSource);
 });
 
@@ -430,6 +434,41 @@ describe('FastSessionTranscript', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
+  it('opens the tasks panel from a keyboard-focusable activity button', () => {
+    render(
+      <SessionRunningTaskCountContext.Provider value={1}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+
+    const button = screen.getByRole('button', {
+      name: '1 task running. Open tasks',
+    });
+    button.focus();
+    expect(button).toHaveFocus();
+    expect(button).toHaveAttribute('type', 'button');
+    fireEvent.click(button);
+
+    expect(openTasksPanel).toHaveBeenCalledOnce();
+  });
+
   it('shows the task indicator only after the session response finishes', () => {
     render(
       <SessionRunningTaskCountContext.Provider value={1}>
@@ -463,6 +502,99 @@ describe('FastSessionTranscript', () => {
     });
 
     expect(screen.getByText('1 task running')).toBeInTheDocument();
+  });
+
+  it('suppresses nested task activity while the session is responding', () => {
+    render(
+      <SessionRunningTaskCountContext.Provider value={1}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          initialConversationResponding
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+
+    expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Tasks launched and still responding',
+            ts: 2,
+          }),
+        ],
+      });
+    });
+    expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: false,
+      });
+    });
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+  });
+
+  it('applies streamed parent activity with visible output atomically', () => {
+    render(
+      <SessionRunningTaskCountContext.Provider value={1}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          initialConversationResponding={false}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        conversationResponding: true,
+        messages: [
+          textMessage({
+            id: 'assistant-2',
+            role: 'assistant',
+            text: 'Parent output is streaming',
+            ts: 3,
+          }),
+        ],
+      });
+    });
+
+    expect(screen.getByText('Parent output is streaming')).toBeInTheDocument();
+    expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
   });
 
   it('shows Thinking while the initial Fast turn is awaiting output', () => {

@@ -11,8 +11,11 @@ import {
 
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
 import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
-import { useOpenSessionTaskPanel } from './session-task-panel-context';
-import { useSessionRunningTaskCount } from './session-task-panel-context';
+import {
+  useOpenSessionTaskPanel,
+  useOpenSessionTasksPanel,
+  useSessionRunningTaskCount,
+} from './session-task-panel-context';
 
 const {
   useMediaQueryMock,
@@ -261,6 +264,15 @@ function OpenNestedTask() {
 function RunningTaskCount() {
   const count = useSessionRunningTaskCount();
   return <output aria-label="Running task count">{count}</output>;
+}
+
+function OpenTasksPanel() {
+  const openTasksPanel = useOpenSessionTasksPanel();
+  return (
+    <button type="button" onClick={openTasksPanel ?? undefined}>
+      Open tasks
+    </button>
+  );
 }
 
 describe('SessionWorkspace', () => {
@@ -836,6 +848,36 @@ describe('SessionWorkspace', () => {
     expect(
       screen.getByRole('button', {
         name: 'View coding task: Refreshed coding task',
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('opens the Tasks panel from transcript context', async () => {
+    renderWorkspace({
+      isMobile: false,
+      children: <OpenTasksPanel />,
+      sessionOverride: { taskSource: 'fast', taskCards: [] },
+      queriedFastTasks: [
+        {
+          taskId: 'task-2',
+          title: 'Running coding task',
+          latestRun: {
+            status: RunStatus.Running,
+            taskPhase: 'running',
+          },
+          artifacts: [],
+        },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Tasks' })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open tasks' }));
+
+    expect(
+      screen.getByRole('button', {
+        name: 'View coding task: Running coding task',
       }),
     ).toBeInTheDocument();
   });
