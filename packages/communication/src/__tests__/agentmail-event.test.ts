@@ -103,6 +103,16 @@ describe('getAgentMailSenderAddress', () => {
 });
 
 describe('getAgentMailMessageBodyText', () => {
+  it('does not treat tags that merely start with script/style as blocks', () => {
+    expect(
+      getAgentMailMessageBodyText(
+        buildMessage({
+          html: '<scripture>keep me</scripture> and <script>drop()</script>done',
+        }),
+      ),
+    ).toBe('keep me and done');
+  });
+
   it('keeps neighboring text separated when script/style blocks are removed', () => {
     expect(
       getAgentMailMessageBodyText(

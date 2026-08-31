@@ -557,25 +557,23 @@ async function sendTelegramThreadReply(params: {
 }
 
 /**
- * Email replies must be delivered at most once per logical reply, and the MCP
- * thread-reply request carries no client-supplied message id or dedupe nonce.
- * The base identity is (run, reply text); the AgentMail adapter appends the
- * reply anchor it resolves atomically at send time, so a worker retry of the
- * same tool call maps to the same final key while an intentional
- * identical-text reply in a later turn (new inbound anchor) still delivers.
- * Deriving the anchor here instead would race a concurrent inbound email
- * between this lookup and the adapter's own.
+ * Email replies must be delivered at most once per logical reply. The worker
+ * mints a clientSendId per tool invocation and every HTTP retry of that call
+ * carries it, so the key is stable across the whole logical send without
+ * depending on mutable route state; a fresh tool call (including an agent's
+ * own deliberate retry) is a new send. The text digest is only the legacy
+ * fallback for callers that predate clientSendId.
  */
 function buildAgentMailThreadReplyIdempotencyKey(params: {
   conversationId: string;
   runId: number;
   text: string;
+  clientSendId?: string;
 }): string {
-  const digest = createHash('sha256')
-    .update(params.text)
-    .digest('hex')
-    .slice(0, 16);
-  return `agentmail:${params.conversationId}:${params.runId}-${digest}:thread-reply`;
+  const sendId =
+    params.clientSendId ??
+    createHash('sha256').update(params.text).digest('hex').slice(0, 16);
+  return `agentmail:${params.conversationId}:${params.runId}-${sendId}:thread-reply`;
 }
 
 async function sendAgentMailThreadReply(params: {
@@ -636,6 +634,9 @@ async function sendAgentMailThreadReply(params: {
       conversationId,
       runId: params.taskRun.id,
       text,
+      ...(params.parsedBody.clientSendId
+        ? { clientSendId: params.parsedBody.clientSendId }
+        : {}),
     }),
   });
 

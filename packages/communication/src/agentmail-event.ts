@@ -103,11 +103,23 @@ function stripElementWithContent(html: string, tagName: string): string {
   let result = '';
   let cursor = 0;
 
+  const isTagNameBoundary = (index: number): boolean => {
+    const next = lower.charAt(index);
+    // '<scripture>' must not match '<script': the tag name has to end at
+    // '>', whitespace, or '/'.
+    return next === '>' || next === '/' || /\s/.test(next);
+  };
+
   for (;;) {
     const openAt = lower.indexOf(openToken, cursor);
     if (openAt === -1) {
       result += html.slice(cursor);
       return result;
+    }
+    if (!isTagNameBoundary(openAt + openToken.length)) {
+      result += html.slice(cursor, openAt + openToken.length);
+      cursor = openAt + openToken.length;
+      continue;
     }
     // Replace the removed block with a space so neighboring text does not
     // merge ("Please<script>x</script>review" must not become
@@ -115,7 +127,13 @@ function stripElementWithContent(html: string, tagName: string): string {
     result += `${html.slice(cursor, openAt)} `;
 
     const closePattern = `</${tagName}`;
-    const closeAt = lower.indexOf(closePattern, openAt);
+    let closeAt = lower.indexOf(closePattern, openAt);
+    while (
+      closeAt !== -1 &&
+      !isTagNameBoundary(closeAt + closePattern.length)
+    ) {
+      closeAt = lower.indexOf(closePattern, closeAt + closePattern.length);
+    }
     if (closeAt === -1) {
       // Unterminated block: drop the rest, matching sanitizer behavior.
       return result;

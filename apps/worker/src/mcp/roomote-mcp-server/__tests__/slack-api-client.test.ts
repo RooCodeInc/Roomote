@@ -40,7 +40,9 @@ describe('replyToSlackThread', () => {
         headers: expect.objectContaining({
           Authorization: 'Bearer test-token',
         }),
-        body: JSON.stringify({ text: 'hello from worker' }),
+        body: expect.stringMatching(
+          /^\{"text":"hello from worker","clientSendId":"[0-9a-f-]{36}"\}$/,
+        ),
       }),
     );
   });
@@ -111,10 +113,9 @@ describe('replyToSlackThread', () => {
     expect(fetch).toHaveBeenCalledWith(
       'https://platform.example.com/api/mcp/slack/thread_reply',
       expect.objectContaining({
-        body: JSON.stringify({
-          text: 'with screenshot',
-          images: [{ artifactId: 'art-1' }, { artifactId: 'art-2' }],
-        }),
+        body: expect.stringMatching(
+          /^\{"text":"with screenshot","images":\[\{"artifactId":"art-1"\},\{"artifactId":"art-2"\}\],"clientSendId":"[0-9a-f-]{36}"\}$/,
+        ),
       }),
     );
   });
