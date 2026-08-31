@@ -1,4 +1,5 @@
 import {
+  automations,
   db,
   eq,
   ensureSessionForFastConversation,
@@ -11,6 +12,7 @@ import {
   taskArtifacts,
   taskFactory,
   taskMessages,
+  taskPullRequests,
   tasks,
   userFactory,
 } from '@roomote/db/server';
@@ -99,6 +101,81 @@ describe('unified Session queries', () => {
     );
 
     expect(result.sessions.map((session) => session.id)).toEqual([included.id]);
+  });
+
+  it('filters Session owners by automation creator values', async () => {
+    const user = await userFactory.create();
+    await db
+      .insert(automations)
+      .values({ key: 'sentry_triage' })
+      .onConflictDoNothing();
+    const automationSession = await sessionFactory.create({
+      ownerKind: 'automation',
+      ownerAutomation: 'sentry_triage',
+      title: 'Automation Session',
+    });
+    const userSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: user.id,
+      title: 'User Session',
+    });
+
+    const result = await getSessions(
+      { userId: user.id, isAdmin: true },
+      {
+        ids: [automationSession.id, userSession.id],
+        user: 'automation:sentry_triage',
+      },
+    );
+
+    expect(result.sessions.map((session) => session.id)).toEqual([
+      automationSession.id,
+    ]);
+  });
+
+  it('includes active pull requests from linked tasks in Session rows', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+    });
+    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+    await db.insert(taskPullRequests).values([
+      {
+        taskId: task.id,
+        prUrl: 'https://github.com/RooCodeInc/Roomote/pull/1939',
+        prNumber: 1939,
+        repository: 'RooCodeInc/Roomote',
+        sourceControlProvider: 'github',
+        status: 'open',
+      },
+      {
+        taskId: task.id,
+        prUrl: 'https://github.com/RooCodeInc/Roomote/pull/1900',
+        prNumber: 1900,
+        repository: 'RooCodeInc/Roomote',
+        sourceControlProvider: 'github',
+        status: 'merged',
+      },
+    ]);
+
+    const result = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { ids: [session.id] },
+    );
+
+    expect(result.sessions[0]?.pullRequests).toEqual([
+      {
+        repository: 'RooCodeInc/Roomote',
+        number: 1939,
+        url: 'https://github.com/RooCodeInc/Roomote/pull/1939',
+      },
+    ]);
   });
 
   it('lists only distinct visible sources available to the current user', async () => {
