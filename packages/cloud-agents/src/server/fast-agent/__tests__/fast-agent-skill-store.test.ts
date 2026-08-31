@@ -256,6 +256,7 @@ describe('FastAgentSkillStore', () => {
     const repositorySkills = { list: vi.fn(), read: vi.fn() };
     const settingsSkills = {
       list: vi.fn().mockResolvedValue({
+        nextSourceOffset: 8,
         skills: [
           {
             description: 'Support triage.',
@@ -283,6 +284,7 @@ describe('FastAgentSkillStore', () => {
     expect(catalog.skills).toEqual([
       expect.objectContaining({ id: 'settings:manual:support-triage' }),
     ]);
+    expect(catalog.nextSourceOffset).toBe(8);
   });
 
   it('rejects traversal, non-Markdown files, symlinks, and unknown skills', async () => {

@@ -67,6 +67,7 @@ export type FastAgentSkillDocument = FastAgentSkillSummary & {
 };
 
 export type FastAgentSkillListResult = {
+  nextSourceOffset?: number;
   skills: FastAgentSkillSummary[];
   warnings: string[];
 };
@@ -84,6 +85,7 @@ export type FastAgentSkillQuery = {
   environmentId?: string;
   name?: string;
   repositoryId?: string;
+  sourceOffset?: number;
 };
 
 export type FastAgentSkillScope =
@@ -258,7 +260,10 @@ export class FastAgentSkillStore {
         ? await this.settingsSkills.list(query)
         : { skills: [], warnings: [] };
     const repository =
-      !packagedMatchIsAuthoritative && scope && this.repositorySkills
+      !packagedMatchIsAuthoritative &&
+      (query.sourceOffset ?? 0) === 0 &&
+      scope &&
+      this.repositorySkills
         ? await this.repositorySkills.list(scope)
         : { skills: [], warnings: [] };
     const filteredPackaged = query.name
@@ -297,6 +302,9 @@ export class FastAgentSkillStore {
           ? left.id.localeCompare(right.id)
           : left.name.localeCompare(right.name),
       ),
+      ...(settings.nextSourceOffset === undefined
+        ? {}
+        : { nextSourceOffset: settings.nextSourceOffset }),
       warnings: [...settings.warnings, ...repository.warnings],
     };
   }

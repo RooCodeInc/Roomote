@@ -176,6 +176,8 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(skillListSource).toContain('environmentId: z.string()');
     expect(skillListSource).toContain('repositoryId: z.string()');
     expect(skillListSource).toContain('name: z.string()');
+    expect(skillListSource).toContain('sourceOffset: z.number()');
+    expect(skillListSource).toContain('nextSourceOffset');
     expect(skillListSource).toContain('Omit scope and name');
     expect(skillListSource).toContain(
       'exactly one of environmentId or repositoryId',
@@ -452,6 +454,16 @@ describe('Fast native OpenCode tool bridge', () => {
         },
       });
       expect(JSON.parse(ambiguousCatalog.output)).toEqual({
+        success: false,
+        error: 'The requested skill catalog is unavailable.',
+      });
+
+      const invalidContinuation = await callBridge({
+        sessionID: parentSession,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
+        args: { sourceOffset: 8 },
+      });
+      expect(JSON.parse(invalidContinuation.output)).toEqual({
         success: false,
         error: 'The requested skill catalog is unavailable.',
       });

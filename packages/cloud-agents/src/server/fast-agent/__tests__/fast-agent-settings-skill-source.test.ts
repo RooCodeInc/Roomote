@@ -189,7 +189,7 @@ describe('RemoteFastAgentSettingsSkillSource', () => {
     expect(catalog.warnings).toEqual([]);
   });
 
-  it('searches all authorized all-selection sources for an exact name in bounded batches', async () => {
+  it('paginates all-selection sources for an exact name within the source bound', async () => {
     const skills = Object.fromEntries(
       Array.from({ length: 9 }, (_, index) => [
         `owner/source-${index + 1}`,
@@ -221,17 +221,38 @@ describe('RemoteFastAgentSettingsSkillSource', () => {
       ]),
     });
 
-    const catalog = await source.list({ name: 'target-skill' });
+    const firstPage = await source.list({ name: 'target-skill' });
+    const secondPage = await source.list({
+      name: 'target-skill',
+      sourceOffset: firstPage.nextSourceOffset,
+    });
 
     expect(loadMarketplaceSnapshot).toHaveBeenCalledTimes(9);
     expect(maxActiveLoads).toBeLessThanOrEqual(8);
-    expect(catalog.skills).toEqual([
+    expect(firstPage).toMatchObject({
+      nextSourceOffset: 8,
+      skills: [],
+      warnings: [],
+    });
+    expect(secondPage.skills).toEqual([
       expect.objectContaining({
         name: 'target-skill',
         settingsSource: 'owner/source-9',
       }),
     ]);
-    expect(catalog.warnings).toEqual([]);
+    expect(secondPage.nextSourceOffset).toBeUndefined();
+    expect(secondPage.warnings).toEqual([]);
+  });
+
+  it('rejects a source continuation without an exact name', async () => {
+    const source = new RemoteFastAgentSettingsSkillSource({
+      allowedEnvironmentIds: ['environment-1'],
+      resolveEnvironments: vi.fn(),
+    });
+
+    await expect(source.list({ sourceOffset: 8 })).rejects.toThrow(
+      'requires an exact name',
+    );
   });
 
   it('uses targeted sized tree metadata to exclude oversized Markdown resources', async () => {

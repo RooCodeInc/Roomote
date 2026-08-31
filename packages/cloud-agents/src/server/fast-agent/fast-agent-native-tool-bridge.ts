@@ -192,10 +192,15 @@ const listSkillsArgsSchema = z
     environmentId: z.string().min(1).optional(),
     name: z.string().min(1).optional(),
     repositoryId: z.string().min(1).optional(),
+    sourceOffset: z.number().int().nonnegative().optional(),
   })
   .refine(
     (args) => !(args.environmentId && args.repositoryId),
     'Only one skill scope may be provided.',
+  )
+  .refine(
+    (args) => args.sourceOffset === undefined || !!args.name,
+    'A source offset requires an exact skill name.',
   );
 
 const loadSkillArgsSchema = z.object({
@@ -379,11 +384,12 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "List packaged Roomote skills and optionally settings-defined and repository-defined skills without filesystem access. Omit scope and name for packaged skills only. Provide an exact name to find packaged and settings skills across authorized environments without inspecting repositories, or provide exactly one of environmentId or repositoryId to include settings and repository skills from that scope. Returns source counts plus exact IDs, task invocation names, descriptions, repositories, settings sources, and environment IDs for load_skill and task routing.",
+  description: "List packaged Roomote skills and optionally settings-defined and repository-defined skills without filesystem access. Omit scope and name for packaged skills only. Provide an exact name to find packaged and settings skills across authorized environments without inspecting repositories, following nextSourceOffset with sourceOffset until no continuation remains. Provide exactly one of environmentId or repositoryId to include settings and repository skills from that scope. Returns source counts plus exact IDs, task invocation names, descriptions, repositories, settings sources, and environment IDs for load_skill and task routing.",
   args: {
     environmentId: z.string().min(1).optional().describe("Exact environment ID from the system prompt; mutually exclusive with repositoryId"),
     name: z.string().min(1).optional().describe("Exact skill invocation name; an unscoped lookup checks packaged and settings skills only"),
     repositoryId: z.string().min(1).optional().describe("Exact repository ID from the system prompt; mutually exclusive with environmentId"),
+    sourceOffset: z.number().int().nonnegative().optional().describe("Continuation offset returned as nextSourceOffset by an exact-name lookup; requires name"),
   },
   execute: (args, context) => invoke("list_skills", args, context),
 }
@@ -933,6 +939,7 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
               'environmentId',
               'name',
               'repositoryId',
+              'sourceOffset',
             ]),
           );
           const catalog = await activeExecutor.skillStore.list(args);

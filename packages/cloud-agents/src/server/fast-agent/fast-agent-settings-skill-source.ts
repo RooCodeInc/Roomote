@@ -393,6 +393,10 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
   }
 
   async list(query: FastAgentSkillQuery): Promise<FastAgentSkillListResult> {
+    if (query.sourceOffset !== undefined && !query.name) {
+      throw new Error('A settings skill source offset requires an exact name.');
+    }
+    const sourceOffset = query.name ? (query.sourceOffset ?? 0) : 0;
     if (
       query.environmentId &&
       !this.allowedEnvironmentIds.has(query.environmentId)
@@ -406,38 +410,43 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
     const warnings: string[] = [];
     const byId = new Map<string, SettingsSkillRecord>();
 
-    for (const environment of authorizedEnvironments) {
-      for (const manualSkill of environment.config.manualSkills ?? []) {
-        const content = renderManualSkillMarkdown(manualSkill);
-        if (
-          Buffer.byteLength(content, 'utf8') > FAST_AGENT_SPILL_MAX_FILE_BYTES
-        ) {
-          warnings.push(
-            `A settings skill in environment ${environment.id} exceeded the Fast document limit.`,
+    if (sourceOffset === 0) {
+      for (const environment of authorizedEnvironments) {
+        for (const manualSkill of environment.config.manualSkills ?? []) {
+          const content = renderManualSkillMarkdown(manualSkill);
+          if (
+            Buffer.byteLength(content, 'utf8') > FAST_AGENT_SPILL_MAX_FILE_BYTES
+          ) {
+            warnings.push(
+              `A settings skill in environment ${environment.id} exceeded the Fast document limit.`,
+            );
+            continue;
+          }
+          const id = settingsSkillId(
+            'manual',
+            `${manualSkill.name}\0${content}`,
           );
-          continue;
+          const record = byId.get(id) ?? {
+            content,
+            description: manualSkill.description,
+            environmentIds: [],
+            id,
+            invocation: manualSkill.name,
+            name: manualSkill.name,
+            resources: new Map([
+              [
+                'SKILL.md',
+                {
+                  byteLength: Buffer.byteLength(content, 'utf8'),
+                  path: 'SKILL.md',
+                  resource: 'SKILL.md',
+                },
+              ],
+            ]),
+          };
+          record.environmentIds.push(environment.id);
+          byId.set(id, record);
         }
-        const id = settingsSkillId('manual', `${manualSkill.name}\0${content}`);
-        const record = byId.get(id) ?? {
-          content,
-          description: manualSkill.description,
-          environmentIds: [],
-          id,
-          invocation: manualSkill.name,
-          name: manualSkill.name,
-          resources: new Map([
-            [
-              'SKILL.md',
-              {
-                byteLength: Buffer.byteLength(content, 'utf8'),
-                path: 'SKILL.md',
-                resource: 'SKILL.md',
-              },
-            ],
-          ]),
-        };
-        record.environmentIds.push(environment.id);
-        byId.set(id, record);
       }
     }
 
@@ -482,43 +491,33 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
           Number(hasExplicitSelection(left[1]))
         );
       });
-    const selectedSources = query.name
-      ? sourceCandidates
-      : sourceCandidates.slice(0, SETTINGS_SKILL_MAX_SOURCES);
+    const selectedSources = sourceCandidates.slice(
+      sourceOffset,
+      sourceOffset + SETTINGS_SKILL_MAX_SOURCES,
+    );
     if (!query.name && sourceCandidates.length > selectedSources.length) {
       warnings.push(
         `Settings skill discovery omitted ${sourceCandidates.length - selectedSources.length} marketplace sources after reaching the limit of ${SETTINGS_SKILL_MAX_SOURCES}.`,
       );
     }
-    const marketplaceResults = [];
-    for (
-      let start = 0;
-      start < selectedSources.length;
-      start += SETTINGS_SKILL_MAX_SOURCES
-    ) {
-      marketplaceResults.push(
-        ...(await Promise.all(
-          selectedSources
-            .slice(start, start + SETTINGS_SKILL_MAX_SOURCES)
-            .map(async ([source, selectionsByEnvironment]) => {
-              let snapshotPromise = this.marketplaceSnapshots.get(source);
-              if (!snapshotPromise) {
-                snapshotPromise = this.loadMarketplaceSnapshot(source);
-                this.marketplaceSnapshots.set(source, snapshotPromise);
-              }
-              try {
-                return {
-                  selectionsByEnvironment,
-                  snapshot: await snapshotPromise,
-                  source,
-                };
-              } catch {
-                return { selectionsByEnvironment, snapshot: null, source };
-              }
-            }),
-        )),
-      );
-    }
+    const marketplaceResults = await Promise.all(
+      selectedSources.map(async ([source, selectionsByEnvironment]) => {
+        let snapshotPromise = this.marketplaceSnapshots.get(source);
+        if (!snapshotPromise) {
+          snapshotPromise = this.loadMarketplaceSnapshot(source);
+          this.marketplaceSnapshots.set(source, snapshotPromise);
+        }
+        try {
+          return {
+            selectionsByEnvironment,
+            snapshot: await snapshotPromise,
+            source,
+          };
+        } catch {
+          return { selectionsByEnvironment, snapshot: null, source };
+        }
+      }),
+    );
     for (const result of marketplaceResults) {
       const { selectionsByEnvironment, snapshot, source } = result;
       if (!snapshot) {
@@ -562,7 +561,16 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
         source: 'settings',
       });
     }
-    return { skills, warnings };
+    const nextSourceOffset =
+      query.name &&
+      sourceOffset + selectedSources.length < sourceCandidates.length
+        ? sourceOffset + selectedSources.length
+        : undefined;
+    return {
+      ...(nextSourceOffset === undefined ? {} : { nextSourceOffset }),
+      skills,
+      warnings,
+    };
   }
 
   async read(

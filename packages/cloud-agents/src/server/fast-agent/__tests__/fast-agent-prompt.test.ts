@@ -83,6 +83,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'An unscoped exact `name` lookup searches packaged and settings-defined skills',
     );
+    expect(prompt).toContain(
+      'whenever a result includes `nextSourceOffset`, call `list_skills` again',
+    );
+    expect(prompt).toContain('collect every page');
     expect(prompt).toContain('exact returned skill ID');
     expect(prompt).toContain('Not every skill applies in Fast');
     expect(prompt).toContain('some require starting a coding task');
