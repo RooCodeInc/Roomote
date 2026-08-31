@@ -149,6 +149,14 @@ vi.mock('@roomote/communication/messages', () => ({
   setLatestInboundMessageId: mocks.setLatestInbound,
 }));
 
+vi.mock('@roomote/communication', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/communication')>()),
+  resolveFastSessionReplyFooterContext: vi.fn(async () => ({
+    linkedPrs: [],
+    livePreviewUrl: null,
+  })),
+}));
+
 vi.mock('../../tasks/acting-user-sync.js', () => ({
   syncActingUserForInboundMessage: mocks.syncActingUser,
 }));

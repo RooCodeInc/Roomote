@@ -382,6 +382,22 @@ describe('SessionWorkspace', () => {
           repository: 'acme/api',
           status: 'open',
         },
+        {
+          id: 'pr-closed',
+          url: 'https://github.com/acme/api/pull/8',
+          number: 8,
+          title: 'Closed PR',
+          repository: 'acme/api',
+          status: 'closed',
+        },
+        {
+          id: 'pr-merged',
+          url: 'https://github.com/acme/api/pull/9',
+          number: 9,
+          title: 'Merged PR',
+          repository: 'acme/api',
+          status: 'merged',
+        },
       ],
     };
 

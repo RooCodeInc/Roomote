@@ -181,6 +181,8 @@ type SessionHeaderPullRequest = {
   url: string;
 };
 
+const TERMINAL_PULL_REQUEST_STATUSES = new Set(['closed', 'merged']);
+
 const SessionPullRequestsContext = createContext<SessionHeaderPullRequest[]>(
   [],
 );
@@ -194,7 +196,14 @@ function getSessionPullRequests(
 
   for (const task of tasks) {
     for (const pullRequest of task.pullRequests) {
-      if (!pullRequest.repository || pullRequest.number === null) continue;
+      if (
+        !pullRequest.repository ||
+        pullRequest.number === null ||
+        (pullRequest.status &&
+          TERMINAL_PULL_REQUEST_STATUSES.has(pullRequest.status))
+      ) {
+        continue;
+      }
 
       const identity = `${pullRequest.repository.toLowerCase()}:${pullRequest.number}`;
       const url = pullRequest.url.trim();
