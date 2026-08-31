@@ -1,8 +1,24 @@
 import { render, screen } from '@testing-library/react';
 
+const { routerPushMock } = vi.hoisted(() => ({
+  routerPushMock: vi.fn(),
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: routerPushMock }),
+}));
+
+vi.mock('@/components/sandbox', () => ({
+  WorkspaceBadge: ({ repo }: { repo?: string }) => <span>{repo}</span>,
+}));
+
 import { SessionCard } from './SessionCard';
 
 describe('SessionCard', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('links to the transcript without implicitly selecting execution details', () => {
     render(
       <SessionCard
@@ -32,6 +48,7 @@ describe('SessionCard', () => {
     expect(
       screen.getByRole('link', { name: /Update homepage background/ }),
     ).toHaveAttribute('href', '/sessions/session-1');
+    expect(screen.getByText('started a session')).toBeInTheDocument();
   });
 
   it('shows a contextual matching transcript snippet', () => {

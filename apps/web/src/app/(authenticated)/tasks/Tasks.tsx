@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -31,8 +31,6 @@ import {
   Trash2,
   AlertTriangle,
   ListChecks,
-  Columns3,
-  List,
   X,
   FunnelX,
   Button,
@@ -52,11 +50,16 @@ import {
 import {
   TaskFilters,
   TaskCard,
-  TaskCardSkeleton,
   TaskCardError,
   TaskBoard,
   TaskBoardSkeleton,
 } from '@/components/tasks';
+import {
+  WorkListPage,
+  WorkListRows,
+  WorkListRowSkeleton,
+  WorkListViewToggle,
+} from '@/components/work-list';
 import {
   parseTaskTypeFilterParam,
   serializeTaskTypeFilterParam,
@@ -394,8 +397,6 @@ export const Tasks = () => {
     dependencies: [effectiveFilters, timePeriod],
   });
 
-  const tasksListRef = useRef<HTMLDivElement>(null);
-
   /**
    * Task Deletion
    */
@@ -525,8 +526,8 @@ export const Tasks = () => {
 
   const canSelect = tasks.length > 0 && !isSelectionMode && !isLoading;
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-card">
-      <div className="bg-background border-b-4 border-b-card p-4">
+    <WorkListPage
+      toolbar={
         <div className="flex flex-wrap items-center justify-between gap-3 bg-b">
           <TaskFilters
             userId={effectiveFilterUserId}
@@ -617,36 +618,18 @@ export const Tasks = () => {
                 </Button>
               </div>
             )}
-            <div className="flex items-center rounded-lg border border-border p-0.5">
-              <Button
-                variant={isBoardView ? 'ghost' : 'default'}
-                size="sm"
-                onClick={() => handleViewChange('list')}
-                aria-pressed={!isBoardView}
-                title="List view"
-                className="rounded-r-none"
-              >
-                <List />
-              </Button>
-              <Button
-                variant={isBoardView ? 'default' : 'ghost'}
-                size="sm"
-                onClick={() => handleViewChange('board')}
-                aria-pressed={isBoardView}
-                title="Board view"
-                className="rounded-l-none"
-              >
-                <Columns3 />
-              </Button>
-            </div>
+            <WorkListViewToggle
+              view={isBoardView ? 'board' : 'list'}
+              onChange={handleViewChange}
+            />
           </div>
         </div>
-      </div>
-
+      }
+    >
       {/* Content area: loading, error, or tasks */}
       {isLoading ? (
         <div className="flex min-h-0 flex-1 bg-background">
-          {isBoardView ? <TaskBoardSkeleton /> : <TaskCardSkeleton />}
+          {isBoardView ? <TaskBoardSkeleton /> : <WorkListRowSkeleton />}
         </div>
       ) : isError ? (
         <div className="flex min-h-0 flex-1 bg-background">
@@ -721,48 +704,37 @@ export const Tasks = () => {
             </DialogContent>
           </Dialog>
 
-          <div className="flex min-h-0 flex-1 flex-col bg-background">
-            <div
-              ref={tasksListRef}
-              className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
-            >
-              {isBoardView ? (
-                <TaskBoard tasks={tasks} />
-              ) : (
-                <div className="divide-y divide-card">
-                  {tasks.map((task) => (
-                    <TaskCard
-                      key={task.id}
-                      task={task}
-                      filterState={taskFilterState}
-                      isSelected={selectedTasks.has(task.id)}
-                      inSelectionMode={isSelectionMode}
-                      onSelectionChange={
-                        isSelectionMode ? handleSelectionChange : undefined
-                      }
-                    />
-                  ))}
-                </div>
-              )}
-              {infiniteTasks.hasNextPage && (
-                <div className="flex justify-center py-4">
-                  <Button
-                    variant="outline"
-                    onClick={() => infiniteTasks.fetchNextPage()}
-                    disabled={infiniteTasks.isFetchingNextPage}
-                  >
-                    {infiniteTasks.isFetchingNextPage ? (
-                      <Spinner />
-                    ) : (
-                      'Load more'
-                    )}
-                  </Button>
-                </div>
-              )}
+          {isBoardView ? (
+            <TaskBoard tasks={tasks} />
+          ) : (
+            <WorkListRows>
+              {tasks.map((task) => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  filterState={taskFilterState}
+                  isSelected={selectedTasks.has(task.id)}
+                  inSelectionMode={isSelectionMode}
+                  onSelectionChange={
+                    isSelectionMode ? handleSelectionChange : undefined
+                  }
+                />
+              ))}
+            </WorkListRows>
+          )}
+          {infiniteTasks.hasNextPage && (
+            <div className="flex justify-center py-4">
+              <Button
+                variant="outline"
+                onClick={() => infiniteTasks.fetchNextPage()}
+                disabled={infiniteTasks.isFetchingNextPage}
+              >
+                {infiniteTasks.isFetchingNextPage ? <Spinner /> : 'Load more'}
+              </Button>
             </div>
-          </div>
+          )}
         </>
       )}
-    </div>
+    </WorkListPage>
   );
 };

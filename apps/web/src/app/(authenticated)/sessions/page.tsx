@@ -10,10 +10,43 @@ import {
 import { parseTimePeriodParam } from '@/types';
 import { authorize } from '@/lib/server/auth-context';
 import { getSessions, type SessionScope } from '@/lib/server/sessions';
-import { Empty, EmptyDescription, EmptyHeader } from '@/components/system';
+import {
+  Button,
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from '@/components/system';
+import {
+  WorkListBoard,
+  WorkListBoardColumn,
+  WorkListPage,
+  WorkListRows,
+} from '@/components/work-list';
 
 import { SessionsFilters } from './SessionsFilters';
 import { SessionCard } from './SessionCard';
+
+const SESSION_COLUMN_CONFIG: Record<
+  SessionStatus,
+  { description: string; dotClassName: string }
+> = {
+  active: {
+    description: 'In progress now',
+    dotClassName: 'bg-emerald-500',
+  },
+  needs_input: {
+    description: 'Waiting for a response',
+    dotClassName: 'bg-amber-500',
+  },
+  blocked: {
+    description: 'Needs follow-up',
+    dotClassName: 'bg-red-500',
+  },
+  ready: {
+    description: 'Ready for more work',
+    dotClassName: 'bg-slate-400',
+  },
+};
 
 export default async function SessionsPage({
   searchParams,
@@ -73,8 +106,8 @@ export default async function SessionsPage({
   const columns = SESSION_STATUSES;
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-card">
-      <div className="border-b-4 border-b-card bg-background p-4">
+    <WorkListPage
+      toolbar={
         <SessionsFilters
           userId={user ?? null}
           timePeriod={timePeriod}
@@ -87,61 +120,57 @@ export default async function SessionsPage({
           source={params.source ?? 'all'}
           model={params.model ?? null}
         />
-      </div>
-      <main className="min-h-0 flex-1 overflow-y-auto bg-background">
-        {result.sessions.length === 0 ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyDescription>No sessions found.</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : view === 'board' ? (
-          <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
-            {columns.map((column) => (
-              <section key={column} aria-labelledby={`session-${column}`}>
-                <h2
-                  id={`session-${column}`}
-                  className="mb-2 text-sm font-medium capitalize"
-                >
-                  {getSessionStatusLabel(column)}
-                </h2>
-                <div className="divide-y rounded-lg border bg-card">
-                  {result.sessions
-                    .filter((session) =>
-                      column === 'ready'
-                        ? !session.cachedStatus ||
-                          session.cachedStatus === column
-                        : session.cachedStatus === column,
-                    )
-                    .map((session) => (
-                      <SessionCard
-                        key={session.id}
-                        session={session}
-                        query={q}
-                      />
-                    ))}
-                </div>
-              </section>
-            ))}
-          </div>
-        ) : (
-          <div className="divide-y divide-card">
-            {result.sessions.map((session) => (
-              <SessionCard key={session.id} session={session} query={q} />
-            ))}
-          </div>
-        )}
-        {result.nextCursor ? (
-          <div className="flex justify-center p-4">
-            <Link
-              href={`/sessions?${olderParams.toString()}`}
-              className="text-sm underline-offset-4 hover:underline"
-            >
+      }
+    >
+      {result.sessions.length === 0 ? (
+        <Empty>
+          <EmptyHeader>
+            <EmptyDescription>No sessions found.</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : view === 'board' ? (
+        <WorkListBoard>
+          {columns.map((column) => {
+            const sessions = result.sessions.filter((session) =>
+              column === 'ready'
+                ? !session.cachedStatus || session.cachedStatus === column
+                : session.cachedStatus === column,
+            );
+            const config = SESSION_COLUMN_CONFIG[column];
+
+            return (
+              <WorkListBoardColumn
+                key={column}
+                id={`session-${column}`}
+                label={getSessionStatusLabel(column)}
+                description={config.description}
+                count={sessions.length}
+                dotClassName={config.dotClassName}
+                empty={sessions.length === 0}
+              >
+                {sessions.map((session) => (
+                  <SessionCard key={session.id} session={session} query={q} />
+                ))}
+              </WorkListBoardColumn>
+            );
+          })}
+        </WorkListBoard>
+      ) : (
+        <WorkListRows>
+          {result.sessions.map((session) => (
+            <SessionCard key={session.id} session={session} query={q} />
+          ))}
+        </WorkListRows>
+      )}
+      {result.nextCursor ? (
+        <div className="flex justify-center p-4">
+          <Button asChild variant="outline">
+            <Link href={`/sessions?${olderParams.toString()}`}>
               Show older sessions
             </Link>
-          </div>
-        ) : null}
-      </main>
-    </div>
+          </Button>
+        </div>
+      ) : null}
+    </WorkListPage>
   );
 }

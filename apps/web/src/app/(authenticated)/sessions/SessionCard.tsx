@@ -1,15 +1,10 @@
-import Link from 'next/link';
-import { formatDistanceToNow } from 'date-fns';
-
-import {
-  formatInferenceCost,
-  formatRepositoryName,
-  getUserDisplayName,
-} from '@/lib';
+import { getUserDisplayName } from '@/lib';
 import { Avatar } from '@/components/system';
+import { WorkspaceBadge } from '@/components/sandbox';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { SessionSearchSnippet } from '@/components/sessions/SessionSearchSnippet';
 import { getSessionSurfaceLabel } from '@/components/sessions/session-surfaces';
+import { WorkListInferenceCost, WorkListRow } from '@/components/work-list';
 
 type SessionCardData = {
   id: string;
@@ -47,58 +42,54 @@ export function SessionCard({
   const status = session.cachedStatus ?? 'ready';
 
   return (
-    <Link
+    <WorkListRow
       href={`/sessions/${session.id}`}
-      className="ph-no-capture group flex w-full items-start gap-3 p-4 transition-colors hover:bg-accent-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <div className="relative mt-1 shrink-0">
-        <Avatar
-          imageUrl={session.ownerImageUrl}
-          name={owner}
-          email={session.ownerEmail ?? undefined}
-          size="md"
-          alt={owner}
-        />
-        {session.unread ? (
-          <span
-            aria-label="Unread activity"
-            className="absolute -top-1 -right-1 size-3 rounded-full bg-primary ring-2 ring-background"
+      ariaLabel={`Open session: ${session.title}`}
+      leading={
+        <div className="relative">
+          <Avatar
+            imageUrl={session.ownerImageUrl}
+            name={owner}
+            email={session.ownerEmail ?? undefined}
+            size="md"
+            alt={owner}
           />
-        ) : null}
-      </div>
-      <div className="min-w-0 flex-1 space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="line-clamp-2 text-base font-medium group-hover:underline">
-            {session.title}
-          </p>
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {formatDistanceToNow(new Date(session.activityAt * 1000), {
-              addSuffix: true,
-            })}
-          </span>
+          {session.unread ? (
+            <span
+              aria-label="Unread activity"
+              className="absolute -top-1 -right-1 size-3 rounded-full bg-primary ring-2 ring-background"
+            />
+          ) : null}
         </div>
-        <SessionSearchSnippet
-          snippet={session.searchSnippet}
-          query={query}
-          className="line-clamp-2"
-        />
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      }
+      actor={owner}
+      activityLabel="started a session"
+      activityDate={new Date(session.activityAt * 1000)}
+      title={session.title}
+      description={
+        session.searchSnippet ? (
+          <SessionSearchSnippet
+            snippet={session.searchSnippet}
+            query={query}
+            className="line-clamp-2"
+          />
+        ) : undefined
+      }
+      metadata={
+        <>
           <SessionStatusBadge status={status} />
           <span>{getSessionSurfaceLabel(session.sourceSurface)}</span>
-          {primaryTask?.repositoryName ? (
-            <span>{formatRepositoryName(primaryTask.repositoryName)}</span>
-          ) : null}
+          <WorkspaceBadge repo={primaryTask?.repositoryName ?? undefined} />
           {session.executionCount > 0 ? (
             <span>
               {session.executionCount} execution
               {session.executionCount === 1 ? '' : 's'}
             </span>
           ) : null}
-          {session.inferenceCostMicroUsd > 0 ? (
-            <span>${formatInferenceCost(session.inferenceCostMicroUsd)}</span>
-          ) : null}
-        </div>
-      </div>
-    </Link>
+          <WorkListInferenceCost costMicroUsd={session.inferenceCostMicroUsd} />
+        </>
+      }
+      nativeLink
+    />
   );
 }
