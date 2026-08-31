@@ -439,7 +439,9 @@ describe('SessionWorkspace', () => {
       });
 
       expect(screen.getByText('Session transcript')).toBeInTheDocument();
-      expect(screen.queryByText('Execution details')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Close task details' }),
+      ).not.toBeInTheDocument();
       expect(routerReplaceMock).not.toHaveBeenCalled();
     },
   );
@@ -467,7 +469,7 @@ describe('SessionWorkspace', () => {
   );
 
   it.each([false, true])(
-    'keeps execution details closed when a sole task arrives after navigation and isMobile=%s',
+    'keeps task details closed when a sole task arrives after navigation and isMobile=%s',
     async (isMobile) => {
       renderWorkspace({
         isMobile,
@@ -484,13 +486,15 @@ describe('SessionWorkspace', () => {
         expect(screen.getByRole('button', { name: 'Tasks' })).toBeEnabled();
       });
       expect(screen.getByText('Session transcript')).toBeInTheDocument();
-      expect(screen.queryByText('Execution details')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Close task details' }),
+      ).not.toBeInTheDocument();
       expect(routerReplaceMock).not.toHaveBeenCalled();
     },
   );
 
   it.each([false, true])(
-    'opens explicitly selected execution details when isMobile=%s',
+    'opens explicitly selected task details when isMobile=%s',
     (isMobile) => {
       renderWorkspace({
         isMobile,
@@ -499,14 +503,18 @@ describe('SessionWorkspace', () => {
           'utm_source=slack&utm_medium=link&utm_campaign=slack.fast_reply&task=task-1',
       });
 
-      expect(screen.getByText('Execution details')).toBeInTheDocument();
       expect(
-        screen.getByRole('button', { name: 'Close execution details' }),
+        screen.getByRole('heading', { name: singleTask.title }),
       ).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Go to task' })).toHaveAttribute(
+        'href',
+        '/task/task-1?returnTo=%2Fsessions%2Fsession-1%3Ftask%3Dtask-1',
+      );
+      expect(screen.queryByText('Execution details')).not.toBeInTheDocument();
       expect(routerReplaceMock).not.toHaveBeenCalled();
 
       fireEvent.click(
-        screen.getByRole('button', { name: 'Close execution details' }),
+        screen.getByRole('button', { name: 'Close task details' }),
       );
       expect(routerReplaceMock).toHaveBeenCalledWith(
         '/sessions/session-1?utm_source=slack&utm_medium=link&utm_campaign=slack.fast_reply',
@@ -524,12 +532,14 @@ describe('SessionWorkspace', () => {
         selectedTaskId: singleTask.taskId,
       });
 
-      expect(await screen.findByText('Execution details')).toBeInTheDocument();
+      expect(
+        await screen.findByRole('heading', { name: singleTask.title }),
+      ).toBeInTheDocument();
       expect(routerReplaceMock).not.toHaveBeenCalled();
     },
   );
 
-  it('omits the Artifacts section from execution details when empty', () => {
+  it('omits the Artifacts section from task details when empty', () => {
     renderWorkspace({
       isMobile: false,
       selectedTaskId: singleTask.taskId,
@@ -538,6 +548,20 @@ describe('SessionWorkspace', () => {
 
     expect(screen.queryByRole('heading', { name: 'Artifacts' })).toBeNull();
     expect(screen.queryByText('No artifacts in this task yet.')).toBeNull();
+  });
+
+  it('uses Tasks terminology and withholds task navigation without access', () => {
+    renderWorkspace({
+      isMobile: false,
+      selectedTaskId: singleTask.taskId,
+      sessionOverride: {
+        tasks: [{ ...singleTask, canAccessDetails: false }],
+      },
+    });
+
+    expect(screen.getByText('Task details require task access.')).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Go to task' })).toBeNull();
+    expect(screen.queryByText(/execution/i)).toBeNull();
   });
 
   it('disables the Tasks panel button until the session has a task', () => {
@@ -565,7 +589,7 @@ describe('SessionWorkspace', () => {
   });
 
   it.each([false, true])(
-    'groups artifacts and opens image and file previews inside execution details when isMobile=%s',
+    'groups artifacts and opens image and file previews inside task details when isMobile=%s',
     async (isMobile) => {
       renderWorkspace({
         isMobile,
