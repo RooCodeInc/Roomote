@@ -1,6 +1,28 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildFastSessionReplyFooterText } from '../fast-session-footer';
+import {
+  buildFastSessionReplyFooterText,
+  buildSelectedTaskSessionUrl,
+} from '../fast-session-footer';
+
+describe('buildSelectedTaskSessionUrl', () => {
+  it.each(['slack', 'discord'] as const)(
+    'preserves %s attribution while explicitly selecting the task',
+    (provider) => {
+      const taskUrl = `https://roomote.example/task/task-1?utm_source=${provider}&utm_medium=link&utm_campaign=fast-delegation`;
+
+      expect(
+        buildSelectedTaskSessionUrl({
+          taskUrl,
+          sessionId: 'session-1',
+          taskId: 'task-1',
+        }),
+      ).toBe(
+        `https://roomote.example/sessions/session-1?utm_source=${provider}&utm_medium=link&utm_campaign=fast-delegation&task=task-1`,
+      );
+    },
+  );
+});
 
 describe('buildFastSessionReplyFooterText', () => {
   it.each(['slack', 'discord', 'teams', 'telegram'] as const)(

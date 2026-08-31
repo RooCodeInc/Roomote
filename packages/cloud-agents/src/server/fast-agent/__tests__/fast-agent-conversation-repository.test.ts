@@ -16,6 +16,7 @@ import {
   reconcileExpiredFastAgentInferenceRetryNotices,
   reconcileFastAgentInferenceRetryNotices,
 } from '../fast-agent-conversation-repository';
+import { FAST_AGENT_REACTION_INPUT_TYPE } from '../fast-agent-conversation';
 import { hasFastAgentSession } from '../fast-agent-session';
 
 const createdUserIds: string[] = [];
@@ -182,6 +183,51 @@ describe('Fast conversation repository', () => {
 
     expect(moved.id).toBe(original.id);
     expect(resolved?.conversation).toEqual(movedConversation);
+  });
+
+  it('resolves a delayed Slack root to the original Fast session', async () => {
+    const user = await createUser();
+    const pendingConversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-delayed-root',
+      conversationId: 'automation-1:occurrence-1',
+      replyTarget: { channelId: 'channel-delayed-root' },
+    };
+    const pending = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: pendingConversation,
+    });
+    await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: {
+        ...pendingConversation,
+        replyTarget: {
+          ...pendingConversation.replyTarget,
+          threadId: 'root-delayed-root',
+        },
+      },
+    });
+    const inboundConversation = {
+      surface: 'slack' as const,
+      workspaceId: pendingConversation.workspaceId,
+      conversationId: 'root-delayed-root',
+      replyTarget: {
+        channelId: pendingConversation.replyTarget.channelId,
+        threadId: 'root-delayed-root',
+      },
+    };
+
+    expect(await hasFastAgentSession(inboundConversation)).toBe(true);
+    const resumed = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: inboundConversation,
+    });
+
+    expect(resumed.id).toBe(pending.id);
+    expect(resumed.conversation).toMatchObject({
+      conversationId: pendingConversation.conversationId,
+      replyTarget: inboundConversation.replyTarget,
+    });
   });
 
   it('isolates identical external identities by provider', async () => {
@@ -449,7 +495,7 @@ describe('Fast conversation repository', () => {
     ).toBe(true);
   });
 
-  it('classifies the first human prompt after platform events and retries idempotently', async () => {
+  it('classifies the first message after platform events and human reactions', async () => {
     const user = await createUser();
     const session = await fastAgentConversationRepository.getOrCreate({
       userId: user.id,
@@ -458,6 +504,7 @@ describe('Fast conversation repository', () => {
     const prompt = (
       eventId: string,
       turnSource: 'human' | 'platform_event',
+      inputKind?: typeof FAST_AGENT_REACTION_INPUT_TYPE,
     ) => ({
       eventId,
       turnId: eventId,
@@ -466,7 +513,11 @@ describe('Fast conversation repository', () => {
       eventType: 'roomote_runtime.user_prompt' as const,
       role: 'user' as const,
       contentBlocks: [{ type: 'text' as const, text: 'Prompt' }],
-      metadata: { visibleInTranscript: true, turnSource },
+      metadata: {
+        visibleInTranscript: true,
+        turnSource,
+        ...(inputKind ? { inputKind } : {}),
+      },
       payload: {},
       source: 'slack',
     });
@@ -475,6 +526,16 @@ describe('Fast conversation repository', () => {
       fastAgentConversationRepository.upsertMessage({
         conversationId: session.id,
         message: prompt('platform-event', 'platform_event'),
+      }),
+    ).resolves.toEqual({ initialHumanTurn: false });
+    await expect(
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message: prompt(
+          'human-reaction',
+          'human',
+          FAST_AGENT_REACTION_INPUT_TYPE,
+        ),
       }),
     ).resolves.toEqual({ initialHumanTurn: false });
     await expect(

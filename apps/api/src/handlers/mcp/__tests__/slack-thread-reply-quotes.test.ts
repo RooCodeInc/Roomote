@@ -13,10 +13,12 @@ const {
   getActiveSlackRunReplyTargetMock,
   getCustomAutomationByIdMock,
   getTaskChannelBindingsMock,
+  isAppInChannelMock,
   maybeSendCommunicationThreadReplyMock,
   postMessageDetailedMock,
   resolveAutomationResultSubtitleMock,
   slackInstallationFindFirstMock,
+  slackInstallationFindManyMock,
   suppressNextSlackReplyQuoteMock,
   taskRunFindFirstMock,
 } = vi.hoisted(() => ({
@@ -29,10 +31,12 @@ const {
   getActiveSlackRunReplyTargetMock: vi.fn(),
   getCustomAutomationByIdMock: vi.fn(),
   getTaskChannelBindingsMock: vi.fn(),
+  isAppInChannelMock: vi.fn(),
   maybeSendCommunicationThreadReplyMock: vi.fn(),
   postMessageDetailedMock: vi.fn(),
   resolveAutomationResultSubtitleMock: vi.fn(),
   slackInstallationFindFirstMock: vi.fn(),
+  slackInstallationFindManyMock: vi.fn(),
   suppressNextSlackReplyQuoteMock: vi.fn(),
   taskRunFindFirstMock: vi.fn(),
 }));
@@ -42,7 +46,10 @@ vi.mock('@roomote/db/server', () => ({
   asc: vi.fn(),
   db: {
     query: {
-      slackInstallations: { findFirst: slackInstallationFindFirstMock },
+      slackInstallations: {
+        findFirst: slackInstallationFindFirstMock,
+        findMany: slackInstallationFindManyMock,
+      },
       taskRuns: { findFirst: taskRunFindFirstMock },
       tasks: { findFirst: vi.fn().mockResolvedValue(null) },
       workItems: { findFirst: vi.fn() },
@@ -93,6 +100,7 @@ vi.mock('@roomote/slack', async (importOriginal) => {
     setSlackThreadReplyFooterMessageTs: vi.fn(),
     SlackNotifier: vi.fn(
       class {
+        isAppInChannel = isAppInChannelMock;
         postMessageDetailed = postMessageDetailedMock;
       },
     ),
@@ -193,6 +201,10 @@ describe('Slack thread reply quotes', () => {
       botAccessToken: 'xoxb-test',
       teamId: 'T123',
     });
+    slackInstallationFindManyMock.mockResolvedValue([
+      { botAccessToken: 'xoxb-test', teamId: 'T123' },
+    ]);
+    isAppInChannelMock.mockResolvedValue(true);
     getTaskChannelBindingsMock.mockResolvedValue(null);
     maybeSendCommunicationThreadReplyMock.mockResolvedValue(null);
     resolveAutomationResultSubtitleMock.mockResolvedValue({
@@ -386,14 +398,6 @@ describe('Slack thread reply quotes', () => {
               }),
             ]),
           }),
-          expect.objectContaining({
-            type: 'section',
-            block_id: 'roomote_automation_result_settings',
-            accessory: expect.objectContaining({
-              action_id: 'late_bound_automation_configure',
-              url: 'https://app.example.com/automations#custom-automation-automation-1',
-            }),
-          }),
           {
             type: 'markdown',
             text: '**Summary**\n\n| Idea | Priority |\n| --- | --- |\n| Demo | High |',
@@ -404,11 +408,105 @@ describe('Slack thread reply quotes', () => {
               expect.objectContaining({
                 action_id: 'late_bound_automation_view_task',
               }),
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+                url: 'https://app.example.com/automations#custom-automation-automation-1',
+              }),
             ]),
           }),
         ],
       }),
     );
+  });
+
+  it('selects the Slack installation that owns a late-bound automation channel', async () => {
+    taskRunFindFirstMock.mockResolvedValue({
+      id: 42,
+      actingUserId: null,
+      taskId: 'task-1',
+      payload: { channel: 'C123', customAutomationId: 'automation-1' },
+    });
+    slackInstallationFindManyMock.mockResolvedValue([
+      { botAccessToken: 'xoxb-other', teamId: 'T_OTHER' },
+      { botAccessToken: 'xoxb-owner', teamId: 'T_OWNER' },
+    ]);
+    isAppInChannelMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    getCustomAutomationByIdMock.mockResolvedValue({
+      id: 'automation-1',
+      name: 'Daily demo ideas',
+      scheduleMode: 'daily',
+    });
+    buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'A result worth reporting' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(slackInstallationFindFirstMock).not.toHaveBeenCalled();
+    expect(isAppInChannelMock).toHaveBeenNthCalledWith(1, 'C123');
+    expect(isAppInChannelMock).toHaveBeenNthCalledWith(2, 'C123');
+    expect(postMessageDetailedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'C123' }),
+    );
+  });
+
+  it('rejects an ambiguous late-bound automation channel', async () => {
+    taskRunFindFirstMock.mockResolvedValue({
+      id: 42,
+      actingUserId: null,
+      taskId: 'task-1',
+      payload: { channel: 'C123', customAutomationId: 'automation-1' },
+    });
+    slackInstallationFindManyMock.mockResolvedValue([
+      { botAccessToken: 'xoxb-first', teamId: 'T_FIRST' },
+      { botAccessToken: 'xoxb-second', teamId: 'T_SECOND' },
+    ]);
+    isAppInChannelMock.mockResolvedValue(true);
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'A result worth reporting' }),
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error:
+        'Slack report destination could not be resolved to one active installation',
+    });
+    expect(slackInstallationFindFirstMock).not.toHaveBeenCalled();
+    expect(postMessageDetailedMock).not.toHaveBeenCalled();
+  });
+
+  it('returns a retryable error when late-bound channel membership is indeterminate', async () => {
+    taskRunFindFirstMock.mockResolvedValue({
+      id: 42,
+      actingUserId: null,
+      taskId: 'task-1',
+      payload: { channel: 'C123', customAutomationId: 'automation-1' },
+    });
+    slackInstallationFindManyMock.mockResolvedValue([
+      { botAccessToken: 'xoxb-owner', teamId: 'T_OWNER' },
+      { botAccessToken: 'xoxb-unknown', teamId: 'T_UNKNOWN' },
+    ]);
+    isAppInChannelMock.mockResolvedValueOnce(true).mockResolvedValueOnce(null);
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'A result worth reporting' }),
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: 'Slack report destination could not be verified; retry shortly',
+      retryable: true,
+    });
+    expect(slackInstallationFindFirstMock).not.toHaveBeenCalled();
+    expect(postMessageDetailedMock).not.toHaveBeenCalled();
   });
 
   it('consumes the exact pending quote after an image-only reply without rendering it', async () => {

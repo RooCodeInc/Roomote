@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   captureTurnSettled: vi.fn(),
   revokeMcpCapabilities: vi.fn(),
   reconcileRetryNotices: vi.fn(),
+  getSessionForTask: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
         agent?: string;
@@ -90,7 +91,7 @@ vi.mock('@roomote/db/server', () => ({
   isBrainEnabled: mocks.isBrainEnabled,
   db: {},
   getSessionForFastConversation: vi.fn().mockResolvedValue(null),
-  getSessionForTask: vi.fn().mockResolvedValue(null),
+  getSessionForTask: mocks.getSessionForTask,
   touchSessionActivity: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -174,9 +175,11 @@ import {
   answerFastAgentQuestion,
   FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN,
 } from '../fast-agent-service';
-import type {
-  FastAgentTurnAdapter,
-  LaunchFastAgentTask,
+import {
+  buildFastAgentReactionExternalInputQuestion,
+  type FastAgentReactionExternalInput,
+  type FastAgentTurnAdapter,
+  type LaunchFastAgentTask,
 } from '../fast-agent-conversation';
 
 const baseParams = {
@@ -192,6 +195,26 @@ const baseParams = {
   currentMessageId: '100.2',
   senderDisplayName: 'Matt',
   senderExternalId: 'U123',
+};
+
+const reactionTurnInput = {
+  input: {
+    type: 'reaction' as const,
+    externalInput: {
+      type: 'reaction_added' as const,
+      provider: 'slack' as const,
+      reactions: [{ name: 'thumbsup' }],
+      reactor: { externalUserId: 'U123', displayName: 'Matt' },
+      message: {
+        workspaceId: 'team-1',
+        channelId: 'channel-1',
+        messageId: '100.2',
+        threadId: '100.1',
+        text: 'Should I continue?',
+      },
+      eventId: '100.3',
+    },
+  },
 };
 
 function callbacks(
@@ -230,6 +253,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.nativeExecutor = undefined;
     mocks.mcpExecutor = undefined;
     mocks.mcpCapabilityAvailable = false;
+    mocks.getSessionForTask.mockResolvedValue(null);
     mocks.getNativeRuntime.mockImplementation(async () => {
       mocks.mcpCapabilityAvailable = true;
       return {
@@ -804,6 +828,119 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.captureTurnSettled).toHaveBeenLastCalledWith(
       expect.objectContaining({ initialHumanTurn: true }),
     );
+    expect(mocks.refreshTitle).toHaveBeenCalledWith({
+      sessionId: 'conversation-1',
+      userId: 'user-1',
+    });
+  });
+
+  it('rebuilds accumulated conversation context for a reaction that directly answers Fast', async () => {
+    const reactionInput: FastAgentReactionExternalInput = {
+      type: 'reaction_added',
+      provider: 'slack',
+      reactions: [{ name: 'sparkling_heart' }],
+      reactor: { externalUserId: 'U123', displayName: 'Matt' },
+      message: {
+        workspaceId: 'team-1',
+        channelId: 'channel-1',
+        messageId: '100.2',
+        threadId: '100.1',
+        text: 'React to this message with your favorite emoji.',
+      },
+      eventId: '100.3',
+    };
+    mocks.getSession.mockResolvedValueOnce({
+      id: 'conversation-1',
+      compatibilityMessages: [
+        { role: 'user', content: 'What is your favorite emoji?' },
+        {
+          role: 'assistant',
+          content: 'React to this message with your favorite emoji.',
+        },
+      ],
+      openCodeSessionId: null,
+    });
+    mocks.runSession.mockImplementationOnce(({ bootstrapPrompt, execute }) =>
+      execute({}, bootstrapPrompt, {
+        path: 'cold_rebuild',
+        validateSession: false,
+      }),
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: buildFastAgentReactionExternalInputQuestion(reactionInput),
+      currentMessageId: 'slack-reaction:100.3',
+      input: { type: 'reaction', externalInput: reactionInput },
+      adapter: callbacks(),
+    });
+
+    const prompt = mocks.generateText.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain('[USER]\nWhat is your favorite emoji?');
+    expect(prompt).toContain(
+      '[ASSISTANT]\nReact to this message with your favorite emoji.',
+    );
+    expect(prompt).toContain('<external_input>');
+    expect(prompt).toContain('sparkling_heart');
+    expect(prompt).toContain('React to this message with your favorite emoji.');
+    expect(prompt).not.toContain('<slack_message ts="slack-reaction:100.3">');
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          metadata: expect.objectContaining({
+            inputKind: 'reaction',
+            turnSource: 'human',
+            visibleInTranscript: false,
+          }),
+        }),
+      }),
+    );
+    expect(mocks.captureTurnSettled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialHumanTurn: false,
+        turnSource: 'human',
+      }),
+    );
+    expect(mocks.getUserIdentity).toHaveBeenCalledWith('user-1');
+    expect(mocks.refreshTitle).not.toHaveBeenCalled();
+
+    const mirroredReactionTurn =
+      mocks.appendVisibleMessages.mock.calls.at(-1)?.[0].messages;
+    expect(mirroredReactionTurn).toEqual([
+      expect.objectContaining({ role: 'assistant' }),
+    ]);
+    expect(JSON.stringify(mirroredReactionTurn)).not.toContain(
+      '<external_input>',
+    );
+
+    mocks.getSession.mockResolvedValueOnce({
+      id: 'conversation-1',
+      compatibilityMessages: mirroredReactionTurn,
+      openCodeSessionId: null,
+    });
+    mocks.runSession.mockImplementationOnce(({ bootstrapPrompt, execute }) =>
+      execute({}, bootstrapPrompt, {
+        path: 'cold_rebuild',
+        validateSession: false,
+      }),
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'This is the first real message.',
+      currentMessageId: '100.4',
+      adapter: callbacks(),
+    });
+
+    const nextColdPrompt = mocks.generateText.mock.calls.at(-1)?.[0].prompt;
+    expect(nextColdPrompt).toContain('This is the first real message.');
+    expect(nextColdPrompt).not.toContain('<external_input>');
+    expect(mocks.captureTurnSettled).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        initialHumanTurn: true,
+        turnSource: 'human',
+      }),
+    );
   });
 
   it('leaves initial-turn classification unknown when prompt persistence fails', async () => {
@@ -905,7 +1042,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ).resolves.toEqual({
           success: false,
           error:
-            'Only an optional platform event or eligible ambient human message may be ignored.',
+            'Only a reaction, optional platform event, or eligible ambient human message may be ignored.',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
@@ -2484,11 +2621,44 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('delivers the kickoff when a surface launcher does not invoke the gate callback', async () => {
+    mocks.getSessionForTask.mockResolvedValue({ id: 'session-discord' });
     const adapter = callbacks({
       launchTask: vi.fn(async () => ({
         success: true as const,
         taskId: 'task-discord',
-        taskUrl: 'https://roomote.example/task-discord',
+        taskUrl:
+          'https://roomote.example/task/task-discord?utm_source=discord&utm_medium=link&utm_campaign=discord.thread_start',
+      })),
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Fix checkout.',
+          kickoffMessage: 'I’m delegating the Discord checkout fix.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      kickoff: true,
+      purpose: 'progress',
+      message:
+        'I’m delegating the Discord checkout fix.\n\n[Open in Roomote](https://roomote.example/sessions/session-discord?utm_source=discord&utm_medium=link&utm_campaign=discord.thread_start&task=task-discord)',
+    });
+  });
+
+  it('keeps the attributed task URL when a legacy task has no linked session', async () => {
+    const taskUrl =
+      'https://roomote.example/task/task-discord?utm_source=discord&utm_medium=link&utm_campaign=discord.thread_start';
+    const adapter = callbacks({
+      launchTask: vi.fn(async () => ({
+        success: true as const,
+        taskId: 'task-discord',
+        taskUrl,
       })),
     });
     mocks.generateText.mockImplementation(
@@ -2505,7 +2675,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await answerFastAgentQuestion({ ...baseParams, adapter });
 
     expect(adapter.postReply).toHaveBeenCalledWith(
-      expect.objectContaining({ kickoff: true, purpose: 'progress' }),
+      expect.objectContaining({
+        message: `I’m delegating the Discord checkout fix.\n\n[Open in Roomote](${taskUrl})`,
+      }),
     );
   });
 
@@ -2629,37 +2801,47 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('still requires an acknowledgement before canceling a task', async () => {
-    mocks.getActiveTasks.mockResolvedValue([
-      { taskId: 'task-1', title: 'Checkout', status: 'running' },
-    ]);
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await expect(
-          invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
-        ).resolves.toEqual({
-          success: false,
-          error:
-            'Post an acknowledgement with send_chat_reply before this action.',
-        });
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'ack',
-          message: 'I’ll stop it.',
-        });
-        await expect(
-          invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
-        ).resolves.toEqual({ success: true });
-        return '';
-      },
-    );
+  it.each([
+    ['message', {}],
+    ['reaction', reactionTurnInput],
+  ])(
+    'still requires an acknowledgement before canceling a task for human %s input',
+    async (_inputKind, turnOptions) => {
+      mocks.getActiveTasks.mockResolvedValue([
+        { taskId: 'task-1', title: 'Checkout', status: 'running' },
+      ]);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await expect(
+            invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
+          ).resolves.toEqual({
+            success: false,
+            error:
+              'Post an acknowledgement with send_chat_reply before this action.',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’ll stop it.',
+          });
+          await expect(
+            invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
+          ).resolves.toEqual({ success: true });
+          return '';
+        },
+      );
 
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      await answerFastAgentQuestion({
+        ...baseParams,
+        ...turnOptions,
+        adapter: callbacks(),
+      });
 
-    expect(mocks.cancelTask).toHaveBeenCalledOnce();
-  });
+      expect(mocks.cancelTask).toHaveBeenCalledOnce();
+    },
+  );
 
-  it('silently ignores optional external input through the existing native tool', async () => {
+  it('silently ignores optional human reaction input through the existing native tool', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -2672,16 +2854,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(
       answerFastAgentQuestion({
         ...baseParams,
-        turnSource: 'platform_event',
-        platformEventKind: 'external_input',
-        platformEventVisibility: 'optional',
+        ...reactionTurnInput,
         adapter,
       }),
     ).resolves.toBe('');
     expect(adapter.postReply).not.toHaveBeenCalled();
   });
 
-  it('rejects reaction side effects during platform events', async () => {
+  it('rejects reaction side effects on non-reactable human reaction input', async () => {
     let reactionResult: unknown;
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -2701,16 +2881,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await answerFastAgentQuestion({
       ...baseParams,
       currentMessageId: 'slack-reaction:1710000000.000100',
-      turnSource: 'platform_event',
-      platformEventKind: 'external_input',
-      platformEventVisibility: 'optional',
+      ...reactionTurnInput,
       adapter,
     });
 
     expect(reactionResult).toEqual({
       success: false,
       error:
-        'Emoji reactions are unavailable during platform events. Use send_chat_reply or ignore_event instead.',
+        'Emoji reactions are unavailable for this input. Use send_chat_reply or ignore_event instead.',
     });
     expect(adapter.postReaction).not.toHaveBeenCalled();
   });

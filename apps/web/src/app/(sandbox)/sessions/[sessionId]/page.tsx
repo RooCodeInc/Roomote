@@ -3,7 +3,10 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { z } from 'zod';
 
-import { resolveEffectiveModelRuntimeEnv } from '@roomote/db/server';
+import {
+  isSessionConversationResponding,
+  resolveEffectiveModelRuntimeEnv,
+} from '@roomote/db/server';
 import {
   getTextFromContentBlocks,
   PRODUCT_NAME,
@@ -107,6 +110,14 @@ export default async function SessionDetailPage({
       model: session?.model ?? defaultModelId,
       reasoningEffort: session?.reasoningEffort ?? defaultReasoningEffort,
       inferenceCostMicroUsd: unifiedSession.inferenceCostMicroUsd,
+      inferenceCostBreakdown: {
+        directInferenceCostMicroUsd: unifiedSession.directInferenceCostMicroUsd,
+        tasks: unifiedSession.tasks.map((task) => ({
+          taskId: task.taskId,
+          title: task.title,
+          inferenceCostMicroUsd: task.inferenceCostMicroUsd,
+        })),
+      },
       createdAt: unifiedSession.createdAt,
       status: unifiedSession.status,
       tasks: unifiedSession.tasks,
@@ -122,6 +133,9 @@ export default async function SessionDetailPage({
               hasOlderMessages={session.hasOlderMessages}
               canReply
               initialTitle={unifiedSession.title}
+              initialConversationResponding={isSessionConversationResponding({
+                respondingUntil: unifiedSession.respondingUntil ?? null,
+              })}
               fallbackTitle={unifiedSession.title}
               sessionModel={session.model}
               sessionReasoningEffort={session.reasoningEffort}
@@ -148,6 +162,15 @@ export default async function SessionDetailPage({
   }
   if (!session) notFound();
 
+  const fastTasks =
+    (await getFastSessionTasks(authorizedUser, session.id)) ?? [];
+  const directInferenceCostMicroUsd =
+    session.directInferenceCostMicroUsd ?? session.inferenceCostMicroUsd ?? 0;
+  const inferenceCostMicroUsd = fastTasks.reduce(
+    (total, task) => total + task.inferenceCostMicroUsd,
+    directInferenceCostMicroUsd,
+  );
+
   const sessionInfo: SessionInfo = {
     id: session.id,
     ownerName: session.ownerName,
@@ -156,12 +179,16 @@ export default async function SessionDetailPage({
     surface: session.surface,
     model: session.model ?? defaultModelId,
     reasoningEffort: session.reasoningEffort ?? defaultReasoningEffort,
-    inferenceCostMicroUsd: session.inferenceCostMicroUsd,
+    inferenceCostMicroUsd,
+    inferenceCostBreakdown: {
+      directInferenceCostMicroUsd,
+      tasks: fastTasks,
+    },
     createdAt: session.createdAt,
     status: null,
     tasks: [],
     taskSource: 'fast',
-    taskCards: (await getFastSessionTasks(authorizedUser, session.id)) ?? [],
+    taskCards: fastTasks,
   };
   const initialUserMessage = session.messages.find(
     (message) => message.role === 'user',

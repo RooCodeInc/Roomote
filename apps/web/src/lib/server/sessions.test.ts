@@ -4,6 +4,7 @@ import {
   ensureSessionForFastConversation,
   fastAgentConversations,
   fastAgentMessages,
+  llmUsageEvents,
   runFactory,
   sessionFactory,
   sessionTasks,
@@ -29,6 +30,7 @@ import {
   getLatestExternalSessionEvent,
   getSessionById,
   getSessionForTask,
+  getSessionSources,
   getSessions,
   getSessionTimeline,
   setSessionPinned,
@@ -97,6 +99,159 @@ describe('unified Session queries', () => {
     );
 
     expect(result.sessions.map((session) => session.id)).toEqual([included.id]);
+  });
+
+  it('lists only distinct visible sources available to the current user', async () => {
+    const owner = await userFactory.create();
+    const stranger = await userFactory.create();
+    await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      sourceSurface: 'web',
+    });
+    await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      sourceSurface: 'web',
+    });
+    await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      sourceSurface: 'slack',
+      archivedAt: new Date(),
+    });
+    await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: stranger.id,
+      sourceSurface: 'discord',
+    });
+
+    await expect(
+      getSessionSources({ userId: owner.id, isAdmin: false }),
+    ).resolves.toEqual(['web']);
+  });
+
+  it('aggregates direct and attached-task inference costs exactly once', async () => {
+    const owner = await userFactory.create();
+    const nativeSessionId = `native-${crypto.randomUUID()}`;
+    const currentNativeSessionId = `native-current-${crypto.randomUUID()}`;
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+        openCodeSessionId: currentNativeSessionId,
+      })
+      .returning();
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: `cost-message-${crypto.randomUUID()}`,
+      turnId: 'turn-1',
+      turnSeq: 0,
+      ts: 1,
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+      nativeSessionId,
+    });
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      fastConversationId: conversation!.id,
+    });
+    const [firstTask, secondTask, zeroCostTask] = await Promise.all([
+      taskFactory.create({ initiatorUserId: owner.id, title: 'First task' }),
+      taskFactory.create({ initiatorUserId: owner.id, title: 'Second task' }),
+      taskFactory.create({
+        initiatorUserId: owner.id,
+        title: 'Zero cost task',
+      }),
+    ]);
+    await db.insert(sessionTasks).values(
+      [firstTask, secondTask, zeroCostTask].map((task) => ({
+        sessionId: session.id,
+        taskId: task.id,
+        origin: 'fast_delegation' as const,
+      })),
+    );
+    await db.insert(llmUsageEvents).values([
+      {
+        eventKey: `session-direct-${crypto.randomUUID()}`,
+        sessionId: session.id,
+        costSource: 'missing',
+        costMicroUsd: 100_000,
+      },
+      {
+        eventKey: `session-task-${crypto.randomUUID()}`,
+        sessionId: session.id,
+        taskId: firstTask.id,
+        costSource: 'missing',
+        costMicroUsd: 200_000,
+      },
+      {
+        eventKey: `legacy-task-${crypto.randomUUID()}`,
+        taskId: firstTask.id,
+        costSource: 'missing',
+        costMicroUsd: 300_000,
+      },
+      {
+        eventKey: `legacy-fast-direct-${crypto.randomUUID()}`,
+        harnessSessionId: nativeSessionId,
+        messageId: `message-${crypto.randomUUID()}`,
+        costSource: 'missing',
+        costMicroUsd: 400_000,
+      },
+      {
+        eventKey: `legacy-fast-task-${crypto.randomUUID()}`,
+        harnessSessionId: nativeSessionId,
+        messageId: `message-${crypto.randomUUID()}`,
+        taskId: secondTask.id,
+        costSource: 'missing',
+        costMicroUsd: 500_000,
+      },
+      {
+        eventKey: `current-fast-direct-${crypto.randomUUID()}`,
+        harnessSessionId: currentNativeSessionId,
+        messageId: `message-${crypto.randomUUID()}`,
+        costSource: 'missing',
+        costMicroUsd: 600_000,
+      },
+    ]);
+
+    const detail = await getSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+    const listed = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { ids: [session.id] },
+    );
+
+    expect(detail).toMatchObject({
+      directInferenceCostMicroUsd: 1_100_000,
+      inferenceCostMicroUsd: 2_100_000,
+    });
+    expect(detail?.tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskId: firstTask.id,
+          inferenceCostMicroUsd: 500_000,
+        }),
+        expect.objectContaining({
+          taskId: secondTask.id,
+          inferenceCostMicroUsd: 500_000,
+        }),
+        expect.objectContaining({
+          taskId: zeroCostTask.id,
+          inferenceCostMicroUsd: 0,
+        }),
+      ]),
+    );
+    expect(listed.sessions[0]).toMatchObject({
+      directInferenceCostMicroUsd: 1_100_000,
+      inferenceCostMicroUsd: 2_100_000,
+    });
   });
 
   it('searches visible Fast and task transcript text', async () => {
@@ -527,6 +682,7 @@ describe('unified Session queries', () => {
       {
         taskId: task.id,
         path: 'screenshots/result.png',
+        version: 2,
         contentType: 'image/png',
         size: 123,
         uploaded: true,
@@ -560,7 +716,11 @@ describe('unified Session queries', () => {
         taskId: task.id,
         title: 'Delegated work',
         artifacts: [
-          expect.objectContaining({ path: 'screenshots/result.png' }),
+          expect.objectContaining({
+            path: 'screenshots/result.png',
+            version: 2,
+            createdAt: expect.any(Date),
+          }),
         ],
       }),
     ]);
@@ -584,6 +744,77 @@ describe('unified Session queries', () => {
     expect(taskEvent).not.toHaveProperty('task.latestRun');
     expect(taskEvent).not.toHaveProperty('task.artifacts');
     expect(taskEvent).not.toHaveProperty('task.pullRequests');
+  });
+
+  it('hydrates uploaded artifacts for every associated task without collapsing shared paths', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Artifact session',
+    });
+    const firstTask = await taskFactory.create({
+      initiatorUserId: owner.id,
+      title: 'First task',
+    });
+    const secondTask = await taskFactory.create({
+      initiatorUserId: owner.id,
+      title: 'Second task',
+    });
+    await db.insert(sessionTasks).values([
+      { sessionId: session.id, taskId: firstTask.id, origin: 'direct_launch' },
+      {
+        sessionId: session.id,
+        taskId: secondTask.id,
+        origin: 'fast_delegation',
+      },
+    ]);
+    await db.insert(taskArtifacts).values([
+      {
+        taskId: firstTask.id,
+        path: 'reports/result.md',
+        version: 2,
+        contentType: 'text/markdown',
+        size: 200,
+        uploaded: true,
+      },
+      {
+        taskId: secondTask.id,
+        path: 'reports/result.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 100,
+        uploaded: true,
+      },
+      {
+        taskId: secondTask.id,
+        path: 'reports/pending.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 0,
+        uploaded: false,
+      },
+    ]);
+
+    const detail = await getSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(detail?.tasks).toEqual([
+      expect.objectContaining({
+        taskId: firstTask.id,
+        artifacts: [
+          expect.objectContaining({ path: 'reports/result.md', version: 2 }),
+        ],
+      }),
+      expect.objectContaining({
+        taskId: secondTask.id,
+        artifacts: [
+          expect.objectContaining({ path: 'reports/result.md', version: 1 }),
+        ],
+      }),
+    ]);
   });
 
   it('resolves the latest external event from visible messages only', async () => {

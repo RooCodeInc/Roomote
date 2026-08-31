@@ -21,6 +21,7 @@ import type {
 type FastAgentSessionRecord = {
   id: string;
   title: string | null;
+  conversation: FastAgentConversation;
   compatibilityMessages: ModelMessage[];
   openCodeSessionId: string | null;
   created: boolean;

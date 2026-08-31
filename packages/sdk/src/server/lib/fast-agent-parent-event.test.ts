@@ -3,11 +3,15 @@ const mocks = vi.hoisted(() => ({
   releaseTurnLock: Object.assign(vi.fn(), {
     signal: new AbortController().signal,
   }),
+  acquireRootBindingLock: vi.fn(),
+  releaseRootBindingLock: vi.fn(),
   answerQuestion: vi.fn(),
   createLauncher: vi.fn(),
   launchTask: vi.fn(),
   findSession: vi.fn(),
+  bindConversation: vi.fn(),
   findInstallation: vi.fn(),
+  findCustomAutomation: vi.fn(),
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
   findTaskPullRequests: vi.fn(),
@@ -58,7 +62,10 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
   resolveApiBaseUrl: () => 'https://roomote.example.com',
-  fastAgentConversationRepository: { findById: mocks.findSession },
+  fastAgentConversationRepository: {
+    findById: mocks.findSession,
+    getOrCreate: mocks.bindConversation,
+  },
   createFastAgentTaskLauncher:
     ({
       buildTask,
@@ -104,6 +111,7 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args: unknown[]) => args),
   eq: vi.fn((...args: unknown[]) => args),
   inArray: vi.fn((...args: unknown[]) => args),
+  getCustomAutomationById: mocks.findCustomAutomation,
   slackInstallations: {
     isActive: 'slack_installations.is_active',
     teamId: 'slack_installations.team_id',
@@ -120,6 +128,7 @@ vi.mock('@roomote/env', () => ({
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
+  acquireSlackFastRootBindingLock: mocks.acquireRootBindingLock,
   SlackNotifier: class SlackNotifier {
     postMessage = mocks.postMessage;
     updateMessage = mocks.updateMessage;
@@ -212,7 +221,11 @@ describe('deliverFastAgentParentEvent', () => {
     vi.clearAllMocks();
     mocks.releaseTurnLock.signal = new AbortController().signal;
     mocks.acquireTurnLock.mockResolvedValue(mocks.releaseTurnLock);
+    mocks.acquireRootBindingLock.mockResolvedValue(
+      mocks.releaseRootBindingLock,
+    );
     mocks.releaseTurnLock.mockResolvedValue(undefined);
+    mocks.releaseRootBindingLock.mockResolvedValue(undefined);
     mocks.findSession.mockImplementation(
       async ({ fallbackConversation }: { fallbackConversation: unknown }) => ({
         id: parent.sessionId,
@@ -225,6 +238,19 @@ describe('deliverFastAgentParentEvent', () => {
       botAccessToken: 'xoxb-test',
       teamDomain: 'acme',
     });
+    mocks.findCustomAutomation.mockResolvedValue({
+      id: 'automation-1',
+      name: 'Weekly scan',
+    });
+    mocks.bindConversation.mockImplementation(
+      async ({ conversation }: { conversation: unknown }) => ({
+        id: parent.sessionId,
+        userId: 'u1',
+        conversation,
+        compatibilityMessages: [],
+        openCodeSessionId: null,
+      }),
+    );
     mocks.createLauncher.mockReturnValue(mocks.launchTask);
     mocks.findArtifacts.mockResolvedValue([
       {
@@ -536,16 +562,6 @@ describe('deliverFastAgentParentEvent', () => {
               expect.objectContaining({ text: 'Weekly scan' }),
             ]),
           }),
-          expect.objectContaining({
-            type: 'section',
-            block_id: 'roomote_automation_result_settings',
-            accessory: expect.objectContaining({
-              action_id: 'late_bound_automation_configure',
-              url: expect.stringContaining(
-                '/automations#custom-automation-automation-1',
-              ),
-            }),
-          }),
           { type: 'markdown', text: 'The proof is ready.' },
           expect.objectContaining({
             type: 'actions',
@@ -554,6 +570,12 @@ describe('deliverFastAgentParentEvent', () => {
                 action_id: 'late_bound_automation_view_session',
                 text: expect.objectContaining({ text: 'Follow' }),
                 url: expect.stringContaining(`/sessions/${parent.sessionId}`),
+              }),
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+                url: expect.stringContaining(
+                  '/automations#custom-automation-automation-1',
+                ),
               }),
             ],
           }),
@@ -675,6 +697,205 @@ describe('deliverFastAgentParentEvent', () => {
       conversation: discordParent.conversation,
       messageId: 'message-1',
     });
+  });
+
+  it('keeps a no-op pending Fast automation completely silent in Slack', async () => {
+    const pendingParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'C123' },
+      },
+    };
+    mocks.answerQuestion.mockResolvedValueOnce('');
+
+    await deliverFastAgentParentEvent({
+      parent: pendingParent,
+      event: {
+        type: 'automation_triggered',
+        eventId: 'occurrence-1',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Report only actionable findings.',
+        trigger: 'schedule',
+      },
+    });
+
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.updateMessage).not.toHaveBeenCalled();
+    expect(mocks.bindConversation).not.toHaveBeenCalled();
+  });
+
+  it('creates the delayed Slack root for a meaningful artifact closeout', async () => {
+    const pendingParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'C123' },
+      },
+    };
+
+    await deliverFastAgentParentEvent({
+      parent: pendingParent,
+      event,
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        text: 'The proof is ready.',
+        blocks: expect.arrayContaining([
+          { type: 'markdown', text: 'The proof is ready.' },
+          expect.objectContaining({ type: 'image' }),
+        ]),
+      }),
+    );
+    expect(mocks.bindConversation).toHaveBeenCalledWith({
+      userId: 'u1',
+      conversation: {
+        ...pendingParent.conversation,
+        replyTarget: { channelId: 'C123', threadId: '101.001' },
+      },
+    });
+  });
+
+  it('creates the first Slack message when a pending Fast automation settles', async () => {
+    const pendingParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'C123' },
+      },
+    };
+
+    await deliverFastAgentParentEvent({
+      parent: pendingParent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        client_msg_id: expect.any(String),
+        text: 'The proof is ready.',
+        blocks: [
+          expect.objectContaining({
+            type: 'context',
+            elements: expect.arrayContaining([
+              expect.objectContaining({ text: 'Weekly scan' }),
+            ]),
+          }),
+          { type: 'markdown', text: 'The proof is ready.' },
+          expect.objectContaining({
+            type: 'actions',
+            elements: expect.arrayContaining([
+              expect.objectContaining({
+                action_id: 'late_bound_automation_view_task',
+              }),
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+              }),
+            ]),
+          }),
+        ],
+      }),
+    );
+    expect(mocks.updateMessage).not.toHaveBeenCalled();
+    expect(mocks.bindConversation).toHaveBeenCalledWith({
+      userId: 'u1',
+      conversation: {
+        ...pendingParent.conversation,
+        replyTarget: { channelId: 'C123', threadId: '101.001' },
+      },
+    });
+    expect(
+      mocks.acquireRootBindingLock.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.postMessage.mock.invocationCallOrder[0]!);
+    expect(mocks.postMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.bindConversation.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.bindConversation.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.releaseRootBindingLock.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('keeps a failed pending Fast automation silent in Slack', async () => {
+    const pendingParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'C123' },
+      },
+    };
+
+    await deliverFastAgentParentEvent({
+      parent: pendingParent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'failed',
+        error: 'Sandbox startup failed.',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.updateMessage).not.toHaveBeenCalled();
+    expect(mocks.bindConversation).not.toHaveBeenCalled();
+  });
+
+  it('replaces an input root with the completed automation result', async () => {
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.updateMessage).toHaveBeenCalledWith({
+      channel: 'C123',
+      ts: '100.001',
+      message: expect.objectContaining({
+        text: 'The proof is ready.',
+        blocks: expect.arrayContaining([
+          { type: 'markdown', text: 'The proof is ready.' },
+          expect.objectContaining({
+            type: 'actions',
+            elements: expect.arrayContaining([
+              expect.objectContaining({
+                action_id: 'late_bound_automation_view_task',
+              }),
+            ]),
+          }),
+        ]),
+      }),
+    });
+    expect(mocks.postMessage).not.toHaveBeenCalled();
   });
 
   it('relays child lifecycle events into a stored automation conversation', async () => {

@@ -17,6 +17,7 @@ type SessionCardData = {
   ownerName: string | null;
   ownerEmail: string | null;
   ownerImageUrl: string | null;
+  ownerUserId: string | null;
   sourceSurface: string;
   activityAt: number;
   cachedStatus: 'active' | 'needs_input' | 'blocked' | 'ready' | null;
@@ -33,9 +34,11 @@ type SessionCardData = {
 
 export function SessionCard({
   session,
+  viewerUserId,
   query = '',
 }: {
   session: SessionCardData;
+  viewerUserId: string;
   query?: string;
 }) {
   const owner =
@@ -59,10 +62,10 @@ export function SessionCard({
           size="md"
           alt={owner}
         />
-        {session.unread ? (
+        {session.unread && session.ownerUserId === viewerUserId ? (
           <span
             aria-label="Unread activity"
-            className="absolute -top-1 -right-1 size-3 rounded-full bg-primary ring-2 ring-background"
+            className="absolute top-0 right-0 size-2 rounded-full bg-accent-foreground ring-2 ring-background"
           />
         ) : null}
       </div>

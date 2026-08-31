@@ -178,7 +178,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'announcer',
     label: 'Summarize Merged PRs',
-    slackIcon: 'megaphone',
+    slackIcon: 'git-merge',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
     // Merged-PR summaries read the provider-neutral taskPullRequests table.
     manualTriggerRequirements: ['slack', 'repository'],
@@ -304,7 +304,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'merge_announcer',
     label: 'Merge announcer',
-    slackIcon: 'git-commit-vertical',
+    slackIcon: 'git-merge',
     scheduleModes: MERGE_ANNOUNCER_SCHEDULE_MODES,
     // Source-control push webhooks trigger this automation; 'daily' only means enabled.
     manualTriggerRequirements: [],

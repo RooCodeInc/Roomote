@@ -86,18 +86,6 @@ describe('automation result blocks', () => {
           },
         ],
       },
-      {
-        type: 'section',
-        block_id: 'roomote_automation_result_settings',
-        text: { type: 'plain_text', text: '\u200B' },
-        accessory: {
-          type: 'button',
-          action_id: 'late_bound_automation_configure',
-          text: { type: 'plain_text', text: '\u2699\uFE0F', emoji: false },
-          accessibility_label: 'Configure Daily report automation',
-          url: 'https://app.example.com/automations#custom-automation-1',
-        },
-      },
       { type: 'markdown', text: '  ## Summary\n- Healthy  ' },
       {
         type: 'image',
@@ -113,6 +101,12 @@ describe('automation result blocks', () => {
             action_id: 'late_bound_automation_view_task',
             text: { type: 'plain_text', text: 'Go to task', emoji: false },
             url: 'https://app.example.com/task/1',
+          },
+          {
+            type: 'button',
+            action_id: 'late_bound_automation_configure',
+            text: { type: 'plain_text', text: 'Configure', emoji: false },
+            url: 'https://app.example.com/automations#custom-automation-1',
           },
         ],
       },
@@ -157,7 +151,7 @@ describe('automation result blocks', () => {
     ).toBe('Weekly · GPT 5.6 Max · $0.00 · 1d 2h 3m 4s');
   });
 
-  it('places Configure in a compact accessible settings accessory', () => {
+  it('places additional actions before a custom Configure label', () => {
     const blocks = buildAutomationResultBlocks({
       title: 'Usage alert',
       iconUrl: 'https://app.example.com/automation-icons/battery-warning.png',
@@ -176,25 +170,20 @@ describe('automation result blocks', () => {
     const [container] = blocks;
     expect(container?.type).toBe('container');
     if (container?.type !== 'container') return;
-    expect(container.child_blocks[0]).toEqual({
-      type: 'section',
-      block_id: 'roomote_automation_result_settings',
-      text: { type: 'plain_text', text: '\u200B' },
-      accessory: expect.objectContaining({
-        action_id: 'late_bound_automation_configure',
-        text: expect.objectContaining({ text: '\u2699\uFE0F' }),
-        accessibility_label: 'Configure alert',
-        url: 'https://app.example.com/automations#provider-usage-limit',
-      }),
-    });
     expect(container.child_blocks.at(-1)).toEqual({
       type: 'actions',
       block_id: 'roomote_automation_result_actions',
-      elements: [expect.objectContaining({ action_id: 'manage_models' })],
+      elements: [
+        expect.objectContaining({ action_id: 'manage_models' }),
+        expect.objectContaining({
+          action_id: 'late_bound_automation_configure',
+          text: expect.objectContaining({ text: 'Configure alert' }),
+        }),
+      ],
     });
   });
 
-  it('reserves action capacity for the task button', () => {
+  it('reserves action capacity for task and configure buttons', () => {
     const blocks = buildAutomationResultBlocks({
       title: 'Audit',
       iconUrl: 'https://app.example.com/automation-icons/wrench.png',
@@ -208,21 +197,18 @@ describe('automation result blocks', () => {
     });
 
     const actions = blocks.filter((block) => block.type === 'actions');
-    expect(actions).toHaveLength(1);
+    expect(actions).toHaveLength(2);
     expect(actions[0]?.type).toBe('actions');
-    if (actions[0]?.type !== 'actions') return;
+    expect(actions[1]?.type).toBe('actions');
+    if (actions[0]?.type !== 'actions' || actions[1]?.type !== 'actions')
+      return;
     expect(actions[0].elements).toHaveLength(25);
     expect(actions[0].elements?.at(-1)?.action_id).toBe(
       'late_bound_automation_view_task',
     );
-    expect(blocks).toContainEqual(
-      expect.objectContaining({
-        block_id: 'roomote_automation_result_settings',
-        accessory: expect.objectContaining({
-          action_id: 'late_bound_automation_configure',
-        }),
-      }),
-    );
+    expect(actions[1].elements?.map((element) => element.action_id)).toEqual([
+      'late_bound_automation_configure',
+    ]);
   });
 
   it('reserves top-level block capacity for automation chrome', () => {
@@ -242,17 +228,8 @@ describe('automation result blocks', () => {
 
     expect(blocks).toHaveLength(50);
     expect(blocks[0]?.type).toBe('context');
-    expect(blocks[1]).toMatchObject({
-      type: 'section',
-      block_id: 'roomote_automation_result_settings',
-    });
-    expect(blocks[2]).toEqual({ type: 'markdown', text: '## Summary' });
-    expect(blocks.at(-1)).toEqual(
-      expect.objectContaining({
-        type: 'image',
-        image_url: 'https://app.example.com/proof-47.png',
-      }),
-    );
+    expect(blocks[1]).toEqual({ type: 'markdown', text: '## Summary' });
+    expect(blocks.at(-1)?.type).toBe('actions');
     expect(blocks).not.toContainEqual(
       expect.objectContaining({
         image_url: 'https://app.example.com/proof-48.png',

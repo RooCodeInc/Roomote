@@ -8,7 +8,9 @@ export const AUTOMATION_RESULT_ACTIONS_BLOCK_ID =
   'roomote_automation_result_actions';
 export const AUTOMATION_RESULT_HEADER_BLOCK_ID =
   'roomote_automation_result_header';
-export const AUTOMATION_RESULT_SETTINGS_BLOCK_ID =
+// Kept for removing the settings accessory from messages created before the
+// Configure button returned to the actions row.
+const AUTOMATION_RESULT_SETTINGS_BLOCK_ID =
   'roomote_automation_result_settings';
 
 const MAX_CONTAINER_CHILDREN = 10;
@@ -89,41 +91,33 @@ export function buildAutomationResultBlocks(params: {
       url: params.taskUrl,
     });
   }
-  const configureAction = {
+  actionElements.push({
     type: 'button',
     action_id: 'late_bound_automation_configure',
     text: {
       type: 'plain_text',
-      text: '\u2699\uFE0F',
+      text: params.configureLabel ?? 'Configure',
       emoji: false,
     },
-    accessibility_label: (
-      params.configureLabel ?? `Configure ${params.title} automation`
-    ).slice(0, 75),
     url: params.configureUrl,
-  };
-  const actionGroups = actionElements.length > 0 ? [actionElements] : [];
+  });
+  const configureAction = actionElements.pop();
+  const actionGroups =
+    actionElements.length === 25 && configureAction
+      ? [actionElements, [configureAction]]
+      : [[...actionElements, ...(configureAction ? [configureAction] : [])]];
 
-  // Slack requires text on both a section and its button, so use invisible
-  // section text plus a labeled gear to keep settings compact and accessible.
-  const contentBlocks = [
-    {
-      type: 'section' as const,
-      block_id: AUTOMATION_RESULT_SETTINGS_BLOCK_ID,
-      text: { type: 'plain_text', text: '\u200B' },
-      accessory: configureAction,
-    },
-    ...(params.contentBlocks
+  const contentBlocks = (
+    params.contentBlocks
       ? normalizeContentBlocks(params.contentBlocks)
       : buildAutomationResultContentBlocks(params.contentText ?? '')
-    ).filter(
-      (block) =>
-        !(
-          'block_id' in block &&
-          block.block_id === AUTOMATION_RESULT_SETTINGS_BLOCK_ID
-        ),
-    ),
-  ];
+  ).filter(
+    (block) =>
+      !(
+        'block_id' in block &&
+        block.block_id === AUTOMATION_RESULT_SETTINGS_BLOCK_ID
+      ),
+  );
 
   if (!contentBlocks.some((block) => block.type === 'markdown')) {
     const groups: SlackBlock[][] = [];

@@ -491,29 +491,57 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('<slack_modern_markdown>');
   });
 
-  it('allows optional external input to use the existing ignore-event path', () => {
+  it('treats optional reactions as non-reactable human conversation', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       surface: 'slack',
-      turnSource: 'platform_event',
-      platformEventKind: 'external_input',
-      platformEventVisibility: 'optional',
+      input: {
+        type: 'reaction',
+        externalInput: {
+          type: 'reaction_added',
+          provider: 'slack',
+          reactions: [{ name: 'sparkling_heart' }],
+          reactor: { externalUserId: 'U123', displayName: 'Matt' },
+          message: {
+            workspaceId: 'team-1',
+            channelId: 'channel-1',
+            messageId: '100.2',
+            text: 'React with your favorite emoji.',
+          },
+          eventId: '100.3',
+        },
+      },
     });
 
-    expect(prompt).toContain('External Platform Input');
+    expect(prompt).toContain('Human Reaction Input');
+    expect(prompt).toContain('This is intentional human input');
     expect(prompt).toContain(
-      'external interaction associated with this conversation',
+      'the reaction payload, the reacted-to message, and recent conversation',
     );
     expect(prompt).toContain(
-      'Call "ignore_event" only when the event is duplicate, lifecycle-only, machinery-only, or a routine log that adds nothing useful',
-    );
-    expect(prompt).not.toContain('Do not call "ignore_event"');
-    expect(prompt).toContain('Do not use the reaction tool');
-    expect(prompt).toContain(
-      'an inbound emoji-reaction event is not itself a reactable message surface',
+      'If it answers a question or invitation, continue from that answer',
     );
     expect(prompt).toContain(
-      'If the reaction warrants a response, post a text reply; otherwise stay silent according to the ignore rules above',
+      'call `ignore_event` when it is duplicate or contextually meaningless',
+    );
+    expect(prompt).toContain(
+      'Do not infer authorization for destructive, irreversible, or externally consequential work beyond the normal confirmation rules',
+    );
+    expect(prompt).toContain(
+      '`reactor` fields in the current `<external_input>` identify the human sender',
+    );
+    expect(prompt).toContain(
+      'The reacted-to message is context, not the current message surface',
+    );
+    expect(prompt).toContain(
+      'Do not call `send_chat_reaction` or `retry_task_start`',
+    );
+    expect(prompt).not.toContain('External Platform Input');
+    expect(prompt).not.toContain(
+      'a platform event has no incoming chat message',
+    );
+    expect(prompt).not.toContain(
+      'Use `send_chat_reaction` when an emoji itself is the appropriate response',
     );
   });
 

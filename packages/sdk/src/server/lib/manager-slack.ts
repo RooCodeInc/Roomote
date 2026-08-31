@@ -75,6 +75,7 @@ export function buildCustomAutomationSlackMessage(params: {
   text: string;
   contentBlocks?: SlackBlock[];
   sessionId?: string;
+  taskUrl?: string;
 }): SlackAutomationSettingsMessage {
   return {
     text: params.text,
@@ -85,6 +86,7 @@ export function buildCustomAutomationSlackMessage(params: {
       contentBlocks: params.contentBlocks ?? [
         { type: 'markdown', text: params.text },
       ],
+      ...(params.taskUrl ? { taskUrl: params.taskUrl } : {}),
       additionalActions: params.sessionId
         ? [
             {

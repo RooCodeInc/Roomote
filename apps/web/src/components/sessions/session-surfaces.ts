@@ -33,7 +33,7 @@ const surface = (
   brandIcon,
 });
 
-export const SESSION_SURFACES: Record<string, SurfaceDescriptor> = {
+const SESSION_SURFACES: Record<string, SurfaceDescriptor> = {
   web: surface('web'),
   api: surface('api'),
   slack: surface('slack'),

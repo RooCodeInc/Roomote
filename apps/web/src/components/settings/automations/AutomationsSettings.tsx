@@ -30,6 +30,7 @@ import {
   type TaskTrigger,
   type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
+import { GitMergeIcon } from '@primer/octicons-react';
 
 import { useConnectSlack } from '@/hooks/slack';
 import { formatDistanceToNowCompact } from '@/lib/formatters';
@@ -104,7 +105,6 @@ import {
   Input,
   Label,
   Lightbulb,
-  Megaphone,
   Play,
   Plus,
   RotateCcwClock,
@@ -574,7 +574,7 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     category: 'communication',
   },
   announcer: {
-    ...getAutomationDefinition('announcer', 'announcer', Megaphone),
+    ...getAutomationDefinition('announcer', 'announcer', GitMergeIcon),
     category: 'communication',
   },
   platformIssueAlerts: {

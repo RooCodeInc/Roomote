@@ -6,12 +6,14 @@ describe('SessionCard', () => {
   it('links to the transcript without implicitly selecting execution details', () => {
     render(
       <SessionCard
+        viewerUserId="user-1"
         session={{
           id: 'session-1',
           title: 'Update homepage background',
           ownerName: 'Test User',
           ownerEmail: 'test@example.com',
           ownerImageUrl: null,
+          ownerUserId: 'user-1',
           sourceSurface: 'web',
           activityAt: Date.now() / 1000,
           cachedStatus: 'active',
@@ -37,6 +39,7 @@ describe('SessionCard', () => {
   it('shows a contextual matching transcript snippet', () => {
     render(
       <SessionCard
+        viewerUserId="user-1"
         query="heliotrope"
         session={{
           id: 'session-2',
@@ -44,6 +47,7 @@ describe('SessionCard', () => {
           ownerName: 'Test User',
           ownerEmail: 'test@example.com',
           ownerImageUrl: null,
+          ownerUserId: 'user-1',
           sourceSurface: 'web',
           activityAt: Date.now() / 1000,
           cachedStatus: 'ready',
@@ -61,5 +65,31 @@ describe('SessionCard', () => {
     expect(match.parentElement).toHaveTextContent(
       '...preserve the Heliotrope detail before release.',
     );
+  });
+
+  it('only shows unread activity for the session owner', () => {
+    const session = {
+      id: 'session-3',
+      title: 'Review customer feedback',
+      ownerName: 'Test User',
+      ownerEmail: 'test@example.com',
+      ownerImageUrl: null,
+      ownerUserId: 'user-1',
+      sourceSurface: 'web',
+      activityAt: Date.now() / 1000,
+      cachedStatus: 'ready' as const,
+      executionCount: 0,
+      inferenceCostMicroUsd: 0,
+      unread: true,
+      tasks: [],
+    };
+
+    const { rerender } = render(
+      <SessionCard session={session} viewerUserId="user-2" />,
+    );
+    expect(screen.queryByLabelText('Unread activity')).not.toBeInTheDocument();
+
+    rerender(<SessionCard session={session} viewerUserId="user-1" />);
+    expect(screen.getByLabelText('Unread activity')).toBeInTheDocument();
   });
 });

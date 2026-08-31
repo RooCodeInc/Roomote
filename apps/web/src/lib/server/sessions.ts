@@ -468,9 +468,9 @@ async function hydrateSessionRows(
   const [
     linkedTasks,
     participants,
-    usage,
-    legacyTaskUsage,
-    legacyFastUsage,
+    directSessionUsage,
+    attachedTaskUsage,
+    legacyFastDirectUsage,
     externalFastActivity,
     pins,
   ] = await Promise.all([
@@ -507,7 +507,12 @@ async function hydrateSessionRows(
         costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
       })
       .from(llmUsageEvents)
-      .where(inArray(llmUsageEvents.sessionId, ids))
+      .where(
+        and(
+          inArray(llmUsageEvents.sessionId, ids),
+          isNull(llmUsageEvents.taskId),
+        ),
+      )
       .groupBy(llmUsageEvents.sessionId),
     db
       .select({
@@ -515,13 +520,9 @@ async function hydrateSessionRows(
         costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
       })
       .from(sessionTasks)
+      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
       .innerJoin(llmUsageEvents, eq(llmUsageEvents.taskId, sessionTasks.taskId))
-      .where(
-        and(
-          inArray(sessionTasks.sessionId, ids),
-          isNull(llmUsageEvents.sessionId),
-        ),
-      )
+      .where(and(inArray(sessionTasks.sessionId, ids), isNull(tasks.deletedAt)))
       .groupBy(sessionTasks.sessionId),
     db
       .select({
@@ -530,11 +531,17 @@ async function hydrateSessionRows(
           select coalesce(sum(legacy_usage.cost_micro_usd), 0)::bigint
           from task_inference_usage_events legacy_usage
           where legacy_usage.session_id is null
+            and legacy_usage.task_id is null
             and legacy_usage.harness_session_id in (
               select distinct ${fastAgentMessages.nativeSessionId}
               from ${fastAgentMessages}
               where ${fastAgentMessages.conversationId} = ${sessions.fastConversationId}
                 and ${fastAgentMessages.nativeSessionId} is not null
+              union
+              select ${fastAgentConversations.openCodeSessionId}
+              from ${fastAgentConversations}
+              where ${fastAgentConversations.id} = ${sessions.fastConversationId}
+                and ${fastAgentConversations.openCodeSessionId} is not null
             )
         )`,
       })
@@ -592,23 +599,27 @@ async function hydrateSessionRows(
           ?.eventAt ?? 0,
       ),
     );
+    const directInferenceCostMicroUsd =
+      Number(
+        directSessionUsage.find((event) => event.sessionId === row.id)
+          ?.costMicroUsd ?? 0,
+      ) +
+      Number(
+        legacyFastDirectUsage.find((event) => event.sessionId === row.id)
+          ?.costMicroUsd ?? 0,
+      );
+    const taskInferenceCostMicroUsd = Number(
+      attachedTaskUsage.find((event) => event.sessionId === row.id)
+        ?.costMicroUsd ?? 0,
+    );
     return {
       ...row,
       tasks: tasksForSession,
       executionCount: tasksForSession.length,
       participants: sessionParticipantsRows,
+      directInferenceCostMicroUsd,
       inferenceCostMicroUsd:
-        Number(
-          usage.find((event) => event.sessionId === row.id)?.costMicroUsd ?? 0,
-        ) +
-        Number(
-          legacyTaskUsage.find((event) => event.sessionId === row.id)
-            ?.costMicroUsd ?? 0,
-        ) +
-        Number(
-          legacyFastUsage.find((event) => event.sessionId === row.id)
-            ?.costMicroUsd ?? 0,
-        ),
+        directInferenceCostMicroUsd + taskInferenceCostMicroUsd,
       unread: latestExternalEventAt > Number(cursor?.lastReadEventAt ?? 0),
       pinned: pinned.has(row.id),
     };
@@ -650,6 +661,22 @@ export async function getSessions(auth: SessionAuth, input: SessionListInput) {
         ? encodeCursor(last, search ? last.searchRank : undefined)
         : null,
   };
+}
+
+export async function getSessionSources(auth: SessionAuth) {
+  const rows = await db
+    .selectDistinct({ source: sessions.sourceSurface })
+    .from(sessions)
+    .where(
+      and(
+        sessionScope(auth),
+        eq(sessions.visibility, 'visible'),
+        isNull(sessions.archivedAt),
+      ),
+    )
+    .orderBy(asc(sessions.sourceSurface));
+
+  return rows.map(({ source }) => source);
 }
 
 export async function findAccessibleSession(
@@ -730,6 +757,8 @@ async function getSessionTasks(sessionId: string) {
           artifactType: taskArtifacts.artifactType,
           contentType: taskArtifacts.contentType,
           size: taskArtifacts.size,
+          version: taskArtifacts.version,
+          createdAt: taskArtifacts.createdAt,
         })
         .from(taskArtifacts)
         .where(

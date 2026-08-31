@@ -378,6 +378,7 @@ RUN chmod +x /entrypoint.sh
 COPY --chown=roomote-app:roomote-app --from=build-web /roomote/apps/web/.next/standalone ./
 COPY --chown=roomote-app:roomote-app --from=build-web /roomote/apps/web/.next/static ./apps/web/.next/static/
 COPY --chown=roomote-app:roomote-app --from=build-web /roomote/apps/web/public ./apps/web/public/
+COPY --chown=roomote-app:roomote-app CHANGELOG.md ./CHANGELOG.md
 # The web server (cwd /roomote/apps/web) reads setup-flow docs from
 # ../docs at request time, so the MDX sources must ship in the image.
 COPY --chown=roomote-app:roomote-app --from=build-web /roomote/apps/docs ./apps/docs/
