@@ -258,15 +258,23 @@ describe('platform issue alert delivery', () => {
         }),
         child_blocks: expect.arrayContaining([
           expect.objectContaining({
+            type: 'section',
+            accessory: expect.objectContaining({
+              type: 'overflow',
+              action_id: 'late_bound_automation_configure',
+              options: [
+                expect.objectContaining({
+                  url: 'https://app.example.com/automations#platform-issue-alerts',
+                }),
+              ],
+            }),
+          }),
+          expect.objectContaining({
             type: 'actions',
             elements: expect.arrayContaining([
               expect.objectContaining({
                 action_id: 'late_bound_automation_view_task',
                 url: expect.stringContaining('utm_source=slack'),
-              }),
-              expect.objectContaining({
-                action_id: 'late_bound_automation_configure',
-                url: 'https://app.example.com/automations#platform-issue-alerts',
               }),
             ]),
           }),
@@ -485,6 +493,10 @@ describe('platform issue alert delivery', () => {
                 type: 'mrkdwn',
                 text: `Platform issue reported: *${REPORT.title}*\n> ${REPORT.summary}`,
               },
+              accessory: expect.objectContaining({
+                type: 'overflow',
+                action_id: 'late_bound_automation_configure',
+              }),
             },
           ]),
         }),

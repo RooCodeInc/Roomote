@@ -8,8 +8,8 @@ export const AUTOMATION_RESULT_ACTIONS_BLOCK_ID =
   'roomote_automation_result_actions';
 export const AUTOMATION_RESULT_HEADER_BLOCK_ID =
   'roomote_automation_result_header';
-// Kept for removing the settings accessory from messages created before the
-// Configure button returned to the actions row.
+// Kept for removing the dedicated settings section from messages created
+// before configuration moved to the content overflow menu.
 const AUTOMATION_RESULT_SETTINGS_BLOCK_ID =
   'roomote_automation_result_settings';
 
@@ -26,6 +26,45 @@ function normalizeContentBlocks(blocks: SlackBlock[]): SlackBlock[] {
       ? buildAutomationResultContentBlocks(block.text)
       : [block],
   );
+}
+
+function buildConfigureOverflow(params: {
+  configureUrl: string;
+  configureLabel?: string;
+}): Record<string, unknown> {
+  return {
+    type: 'overflow',
+    action_id: 'late_bound_automation_configure',
+    options: [
+      {
+        text: {
+          type: 'plain_text',
+          text: params.configureLabel ?? 'Configure',
+          emoji: false,
+        },
+        url: params.configureUrl,
+      },
+    ],
+  };
+}
+
+function attachConfigureOverflow(
+  blocks: SlackBlock[],
+  overflow: Record<string, unknown>,
+): { blocks: SlackBlock[]; attached: boolean } {
+  const sectionIndex = blocks.findIndex(
+    (block) => block.type === 'section' && !block.accessory,
+  );
+  if (sectionIndex === -1) return { blocks, attached: false };
+
+  return {
+    blocks: blocks.map((block, index) =>
+      index === sectionIndex && block.type === 'section'
+        ? { ...block, accessory: overflow }
+        : block,
+    ),
+    attached: true,
+  };
 }
 
 export function formatAutomationResultSubtitle(params: {
@@ -64,6 +103,20 @@ export function buildAutomationResultBlocks(params: {
   additionalActions?: Record<string, unknown>[];
   configureLabel?: string;
 }): SlackBlock[] {
+  const normalizedContentBlocks = (
+    params.contentBlocks
+      ? normalizeContentBlocks(params.contentBlocks)
+      : buildAutomationResultContentBlocks(params.contentText ?? '')
+  ).filter(
+    (block) =>
+      !(
+        'block_id' in block &&
+        block.block_id === AUTOMATION_RESULT_SETTINGS_BLOCK_ID
+      ),
+  );
+  const configureOverflow = buildConfigureOverflow(params);
+  const { blocks: contentBlocks, attached: configureOverflowAttached } =
+    attachConfigureOverflow(normalizedContentBlocks, configureOverflow);
   const actionElements = [...(params.additionalActions ?? [])];
   const linkedPrUrls = params.linkedPrUrls ?? [];
   const reservedActions = actionElements.length + (params.taskUrl ? 1 : 0);
@@ -91,33 +144,15 @@ export function buildAutomationResultBlocks(params: {
       url: params.taskUrl,
     });
   }
-  actionElements.push({
-    type: 'button',
-    action_id: 'late_bound_automation_configure',
-    text: {
-      type: 'plain_text',
-      text: params.configureLabel ?? 'Configure',
-      emoji: false,
-    },
-    url: params.configureUrl,
-  });
-  const configureAction = actionElements.pop();
+  const configureAction = configureOverflowAttached
+    ? undefined
+    : configureOverflow;
   const actionGroups =
     actionElements.length === 25 && configureAction
       ? [actionElements, [configureAction]]
-      : [[...actionElements, ...(configureAction ? [configureAction] : [])]];
-
-  const contentBlocks = (
-    params.contentBlocks
-      ? normalizeContentBlocks(params.contentBlocks)
-      : buildAutomationResultContentBlocks(params.contentText ?? '')
-  ).filter(
-    (block) =>
-      !(
-        'block_id' in block &&
-        block.block_id === AUTOMATION_RESULT_SETTINGS_BLOCK_ID
-      ),
-  );
+      : actionElements.length > 0 || configureAction
+        ? [[...actionElements, ...(configureAction ? [configureAction] : [])]]
+        : [];
 
   if (!contentBlocks.some((block) => block.type === 'markdown')) {
     const groups: SlackBlock[][] = [];

@@ -127,22 +127,31 @@ describe('refreshAutomationRootFooter', () => {
       type: 'plain_text',
       text: 'Weekly · GPT 5.6 High · $0.56 · 02:37s',
     });
-    const actionIds = blocks
-      .flatMap(
-        (block: { child_blocks?: Array<Record<string, unknown>> }) =>
-          block.child_blocks ?? [],
-      )
+    const childBlocks = blocks.flatMap(
+      (block: { child_blocks?: Array<Record<string, unknown>> }) =>
+        block.child_blocks ?? [],
+    );
+    const actionIds = childBlocks
       .filter((block: { type?: unknown }) => block.type === 'actions')
       .flatMap(
         (block: { elements?: Array<{ action_id?: string }> }) =>
           block.elements ?? [],
       )
       .map((element: { action_id?: string }) => element.action_id);
-    expect(
-      actionIds.filter((id: string | undefined) =>
-        id?.includes('automation_configure'),
-      ),
-    ).toEqual(['late_bound_automation_configure']);
+    expect(childBlocks).toContainEqual(
+      expect.objectContaining({
+        type: 'section',
+        accessory: expect.objectContaining({
+          type: 'overflow',
+          action_id: 'late_bound_automation_configure',
+          options: [
+            expect.objectContaining({
+              url: 'https://app.example.com/automations#audit',
+            }),
+          ],
+        }),
+      }),
+    );
     expect(blocks[0]?.child_blocks).not.toContainEqual(
       expect.objectContaining({
         block_id: 'roomote_automation_result_settings',
