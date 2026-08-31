@@ -103,14 +103,7 @@ type SessionTaskSummary = {
     error: string | null;
     result: unknown;
   } | null;
-  artifacts: Array<{
-    id: string;
-    path: string;
-    artifactType: string;
-    contentType: string;
-    thumbnailUrl?: string;
-    previewUrl?: string;
-  }>;
+  artifacts: SessionArtifact[];
   pullRequests: Array<{
     id: string;
     url: string;
@@ -119,6 +112,18 @@ type SessionTaskSummary = {
     repository: string | null;
     status: string | null;
   }>;
+};
+
+type SessionArtifact = {
+  id: string;
+  path: string;
+  version: number;
+  artifactType: string;
+  contentType: string;
+  size: number;
+  createdAt: Date;
+  thumbnailUrl?: string;
+  previewUrl?: string;
 };
 
 export type SessionInfo = {
@@ -146,9 +151,11 @@ export type SessionInfo = {
 
 function SessionArtifactCard({
   artifact,
+  taskTitle,
   onOpen,
 }: {
   artifact: SessionTaskSummary['artifacts'][number];
+  taskTitle?: string;
   onOpen: () => void;
 }) {
   const [failedPreviewUrl, setFailedPreviewUrl] = useState<string | null>(null);
@@ -162,7 +169,8 @@ function SessionArtifactCard({
     <button
       type="button"
       onClick={onOpen}
-      title={artifact.path}
+      title={taskTitle ? `${artifact.path} - ${taskTitle}` : artifact.path}
+      aria-label={taskTitle ? `Open ${label} from ${taskTitle}` : undefined}
       className="group block w-full min-w-0 cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-opacity hover:opacity-70"
     >
       <span className="flex aspect-video w-full items-center justify-center overflow-hidden bg-muted">
@@ -204,8 +212,117 @@ function SessionArtifactCard({
       </span>
       <span className="block border-t px-2 py-1.5 text-center">
         <span className="block truncate text-xs font-medium">{label}</span>
+        {taskTitle ? (
+          <span className="block truncate text-xs text-muted-foreground">
+            {taskTitle}
+          </span>
+        ) : null}
       </span>
     </button>
+  );
+}
+
+type SessionArtifactEntry = {
+  taskId: string;
+  taskTitle: string;
+  artifact: SessionArtifact;
+};
+
+function getLatestSessionArtifacts(
+  tasks: SessionTaskSummary[],
+): SessionArtifactEntry[] {
+  const entries: SessionArtifactEntry[] = [];
+
+  for (const task of tasks) {
+    const latestByPath = new Map<string, SessionArtifact>();
+    for (const artifact of task.artifacts) {
+      const current = latestByPath.get(artifact.path);
+      if (!current || artifact.version > current.version) {
+        latestByPath.set(artifact.path, artifact);
+      }
+    }
+    for (const artifact of latestByPath.values()) {
+      entries.push({ taskId: task.taskId, taskTitle: task.title, artifact });
+    }
+  }
+
+  return entries.sort(
+    (a, b) =>
+      new Date(b.artifact.createdAt).getTime() -
+      new Date(a.artifact.createdAt).getTime(),
+  );
+}
+
+function SessionArtifactViewer({
+  entry,
+  closeLabel,
+  onBack,
+  onClose,
+}: {
+  entry: SessionArtifactEntry;
+  closeLabel: string;
+  onBack: () => void;
+  onClose: () => void;
+}) {
+  const {
+    data: artifact,
+    isPending,
+    isError,
+  } = useArtifactByPath(
+    entry.taskId,
+    entry.artifact.path,
+    entry.artifact.version,
+  );
+
+  return (
+    <>
+      <div className="flex min-w-0 shrink-0 items-center gap-2 border-b-2 border-card px-4 py-2">
+        <BasicTooltip content="Back to artifacts">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 shrink-0"
+            aria-label="Back to artifacts"
+            onClick={onBack}
+          >
+            <ArrowLeft />
+          </Button>
+        </BasicTooltip>
+        <h2 className="min-w-0 flex-1 truncate text-sm font-medium">
+          {humanizeFilename(entry.artifact.path)}
+        </h2>
+        <BasicTooltip content="Close">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={closeLabel}
+            onClick={onClose}
+          >
+            <X />
+          </Button>
+        </BasicTooltip>
+      </div>
+      <div className="min-h-0 flex-1 bg-zinc-800">
+        {isPending ? (
+          <div
+            className="flex h-full items-center justify-center"
+            aria-label="Loading artifact"
+          >
+            <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : isError || !artifact ? (
+          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+            This artifact is unavailable.
+          </div>
+        ) : (
+          <ArtifactViewerContent
+            artifact={artifact}
+            taskId={entry.taskId}
+            className="h-full border-0"
+          />
+        )}
+      </div>
+    </>
   );
 }
 
@@ -222,20 +339,10 @@ function SessionTaskPanel({
   onSelect: (taskId: string) => void;
   onClose: () => void;
 }) {
-  const [selectedArtifactPath, setSelectedArtifactPath] = useState<
-    string | null
-  >(null);
-  const {
-    data: selectedArtifact,
-    isPending: isArtifactPending,
-    isError: isArtifactError,
-  } = useArtifactByPath(task.taskId, selectedArtifactPath);
-  const artifactPaths = new Set<string>();
-  const latestArtifacts = task.artifacts.filter((artifact) => {
-    if (artifactPaths.has(artifact.path)) return false;
-    artifactPaths.add(artifact.path);
-    return true;
-  });
+  const [selectedArtifact, setSelectedArtifact] =
+    useState<SessionArtifactEntry | null>(null);
+  const latestArtifactEntries = getLatestSessionArtifacts([task]);
+  const latestArtifacts = latestArtifactEntries.map((entry) => entry.artifact);
   const screenshotArtifacts = latestArtifacts.filter((artifact) =>
     artifact.contentType.startsWith('image/'),
   );
@@ -253,56 +360,14 @@ function SessionTaskPanel({
     { label: 'Files', artifacts: fileArtifacts },
   ];
 
-  if (selectedArtifactPath) {
+  if (selectedArtifact) {
     return (
-      <>
-        <div className="flex min-w-0 shrink-0 items-center gap-2 border-b-2 border-card px-4 py-2">
-          <BasicTooltip content="Back to artifacts">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-7 shrink-0"
-              aria-label="Back to artifacts"
-              onClick={() => setSelectedArtifactPath(null)}
-            >
-              <ArrowLeft />
-            </Button>
-          </BasicTooltip>
-          <h2 className="min-w-0 flex-1 truncate text-sm font-medium">
-            {humanizeFilename(selectedArtifactPath)}
-          </h2>
-          <BasicTooltip content="Close">
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Close execution details"
-              onClick={onClose}
-            >
-              <X />
-            </Button>
-          </BasicTooltip>
-        </div>
-        <div className="min-h-0 flex-1 bg-zinc-800">
-          {isArtifactPending ? (
-            <div
-              className="flex h-full items-center justify-center"
-              aria-label="Loading artifact"
-            >
-              <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
-            </div>
-          ) : isArtifactError || !selectedArtifact ? (
-            <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-              This artifact is unavailable.
-            </div>
-          ) : (
-            <ArtifactViewerContent
-              artifact={selectedArtifact}
-              taskId={task.taskId}
-              className="h-full border-0"
-            />
-          )}
-        </div>
-      </>
+      <SessionArtifactViewer
+        entry={selectedArtifact}
+        closeLabel="Close execution details"
+        onBack={() => setSelectedArtifact(null)}
+        onClose={onClose}
+      />
     );
   }
 
@@ -385,7 +450,13 @@ function SessionTaskPanel({
                       <SessionArtifactCard
                         key={artifact.id}
                         artifact={artifact}
-                        onOpen={() => setSelectedArtifactPath(artifact.path)}
+                        onOpen={() =>
+                          setSelectedArtifact(
+                            latestArtifactEntries.find(
+                              (entry) => entry.artifact.id === artifact.id,
+                            ) ?? null,
+                          )
+                        }
                       />
                     ))}
                   </div>
@@ -405,6 +476,94 @@ function SessionTaskPanel({
         )}
       </div>
     </>
+  );
+}
+
+function SessionArtifactsPanel({
+  tasks,
+  onClose,
+}: {
+  tasks: SessionTaskSummary[];
+  onClose: () => void;
+}) {
+  const [selectedArtifact, setSelectedArtifact] =
+    useState<SessionArtifactEntry | null>(null);
+  const artifacts = getLatestSessionArtifacts(tasks);
+  const artifactSections = [
+    {
+      label: 'Screenshots',
+      artifacts: artifacts.filter(({ artifact }) =>
+        artifact.contentType.startsWith('image/'),
+      ),
+    },
+    {
+      label: 'Videos',
+      artifacts: artifacts.filter(({ artifact }) =>
+        artifact.contentType.startsWith('video/'),
+      ),
+    },
+    {
+      label: 'Files',
+      artifacts: artifacts.filter(
+        ({ artifact }) =>
+          !artifact.contentType.startsWith('image/') &&
+          !artifact.contentType.startsWith('video/'),
+      ),
+    },
+  ];
+
+  return (
+    <FramedSurface
+      frameClassName="p-0"
+      surfaceClassName="relative flex flex-col overflow-hidden"
+    >
+      {selectedArtifact ? (
+        <SessionArtifactViewer
+          entry={selectedArtifact}
+          closeLabel="Close artifacts"
+          onBack={() => setSelectedArtifact(null)}
+          onClose={onClose}
+        />
+      ) : (
+        <>
+          <SandboxSidePanelHeader
+            title="Artifacts"
+            closeLabel="Close artifacts"
+            onClose={onClose}
+          />
+          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 py-3 @container">
+            {artifacts.length === 0 ? (
+              <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+                No artifacts in this session yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {artifactSections.map(
+                  ({ label, artifacts: sectionArtifacts }) =>
+                    sectionArtifacts.length ? (
+                      <section key={label} className="space-y-2">
+                        <h3 className="text-xs font-medium text-muted-foreground">
+                          {label}
+                        </h3>
+                        <div className="grid grid-cols-2 gap-4 @[500px]:grid-cols-3">
+                          {sectionArtifacts.map((entry) => (
+                            <SessionArtifactCard
+                              key={`${entry.taskId}:${entry.artifact.path}`}
+                              artifact={entry.artifact}
+                              taskTitle={entry.taskTitle}
+                              onOpen={() => setSelectedArtifact(entry)}
+                            />
+                          ))}
+                        </div>
+                      </section>
+                    ) : null,
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </FramedSurface>
   );
 }
 
@@ -595,6 +754,7 @@ function SessionInfoPanel({
 type WorkspacePanel =
   | { kind: 'info' }
   | { kind: 'tasks' }
+  | { kind: 'artifacts' }
   | { kind: 'nested'; taskId: string };
 
 export function SessionWorkspace({
@@ -670,7 +830,7 @@ export function SessionWorkspace({
     setPanel(null);
     selectTask(null);
   };
-  const togglePanel = (kind: 'info' | 'tasks') => {
+  const togglePanel = (kind: 'info' | 'tasks' | 'artifacts') => {
     setPanel((previous) => (previous?.kind === kind ? null : { kind }));
     selectTask(null);
   };
@@ -691,6 +851,8 @@ export function SessionWorkspace({
       onOpenTask={openTaskPanel}
       onClose={closePanel}
     />
+  ) : panel?.kind === 'artifacts' ? (
+    <SessionArtifactsPanel tasks={sessionTasks} onClose={closePanel} />
   ) : (
     <SessionInfoPanel session={session} onClose={closePanel} />
   );
@@ -720,6 +882,14 @@ export function SessionWorkspace({
                 disabled={taskCards.length === 0}
                 icon={Rows4}
                 onClick={() => togglePanel('tasks')}
+              />
+              <SideNavItem
+                side="right"
+                label="Artifacts"
+                tooltip="Artifacts"
+                active={panel?.kind === 'artifacts' && !selectedTask}
+                icon={FileText}
+                onClick={() => togglePanel('artifacts')}
               />
             </SandboxSideActions>
             {!isSidebarVisible && !panelOpen ? (
