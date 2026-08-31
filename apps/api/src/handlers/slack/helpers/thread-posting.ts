@@ -4,7 +4,10 @@ import {
   findSlackConversationSubjectByUserId,
   recordSlackConversationMessageBestEffort,
 } from '@roomote/sdk/server';
-import { buildFastSessionReplyFooterText } from '@roomote/communication';
+import {
+  buildFastSessionReplyFooterText,
+  type FastSessionReplyFooterContext,
+} from '@roomote/communication';
 import {
   buildStartedBlocks,
   persistPostedSlackKickoff,
@@ -39,7 +42,7 @@ export async function postSlackThreadMarkdownMessage({
     source: string;
   };
   /** Attach the sticky Fast session reply footer to this message. */
-  fastSessionFooter?: { sessionId: string };
+  fastSessionFooter?: { sessionId: string } & FastSessionReplyFooterContext;
 }): Promise<SlackThreadMarkdownPostResult> {
   if (sourceMessageTs) {
     const sourceMessageExists = await slack.hasMessageInThread({
@@ -67,7 +70,7 @@ export async function postSlackThreadMarkdownMessage({
         bodyBlocks: [{ type: 'markdown', text }],
         footerText: buildFastSessionReplyFooterText({
           provider: 'slack',
-          sessionId: fastSessionFooter.sessionId,
+          ...fastSessionFooter,
         }),
       })
     : await slack.postMessage({

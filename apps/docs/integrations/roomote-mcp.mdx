@@ -1,38 +1,40 @@
 ---
 title: Roomote MCP
 icon: '/favicon.svg'
-description: Run and manage Roomote agent tasks from your MCP client.
+description: Start, inspect, and continue Roomote Sessions and tasks from your MCP client.
 ---
 
 Roomote MCP brings your Roomote workspace into the coding tools you already
-use. From any OAuth-capable MCP client, you can kick off a new Roomote task,
-check on its progress, and follow up without switching back and forth between
-tools.
+use. From any OAuth-capable MCP client, you can start a Session, inspect its
+conversation and delegated tasks, and follow up without switching back and
+forth between tools.
 
 ## What you can do
 
-### Kick off a new task
+### Start a Session
 
-Ask your MCP client to start a Roomote task with a clear prompt. Roomote MCP
-finds the available launch environments and uses the right one for the work.
-For example, you can delegate an investigation or implementation, keep working
-locally, and come back for the result when the task finishes. You can also push
-work in progress to a remote branch and hand that branch to a Roomote agent to
-continue.
+Ask your MCP client to start Roomote with a clear message. The ordinary start
+action creates a Session, where Fast can answer directly or delegate repository
+work to tasks. You can keep working locally and return to the same Session for
+the result. When work must start directly in a known compute environment, your
+client can still use the explicit environment-targeted task launch action.
 
 ### Check on and steer existing work
 
-Search active or completed tasks by keyword, status, or pull request. Once you
-find a task, you can read its summary, conversation, and compute logs to
-understand what happened and where the work stands.
+Search finds Sessions by default. Once you find one, provide its Session ID to
+read the summary or newest conversation messages and to send a follow-up. When
+you need one concrete coding task instead, use task search and pass its task ID;
+the task ID takes precedence if both identifiers are supplied. Compute logs,
+cancellation, environment-targeted launch, and task model controls remain
+task-specific operations.
 
 This is useful when you want to:
 
-- catch up on a task that is already running
+- catch up on a Session that is already active
 - find an earlier investigation or implementation
-- understand why a task failed
+- inspect a delegated task when you need its execution details
 - pull the result of a Roomote task into your current conversation
-- send follow-up instructions or cancel work that is no longer needed
+- send follow-up instructions or cancel task work that is no longer needed
 
 Follow-up instructions normally wait behind the task's current turn. When the
 new instruction must take effect immediately, ask your MCP client to steer the
@@ -53,11 +55,13 @@ only returns conversations your signed-in user is allowed to read.
 
 - “Push what I’m working on to a remote branch, then start a Roomote task from
   that branch to take over.”
-- “Start a Roomote task in the web app environment to investigate this bug.”
-- “Find my active tasks related to OAuth and summarize their progress.”
+- “Start a Roomote Session to investigate this bug.”
+- “Find my active Sessions related to OAuth and summarize their progress.”
+- “Find the coding task for this pull request and show its compute logs.”
 - “Show me the messages and compute logs from the task that failed this
   morning.”
 - “Tell the running task to add a regression test before it opens the PR.”
+- “Read the latest messages from this Fast Session and send a follow-up.”
 - “Use this Slack message as context and explain what the team decided.”
 - “Cancel the task working on the old approach.”
 

@@ -37,7 +37,7 @@ export type FeatureFlagConfigMap = {
 };
 
 export type FeatureFlagValues = {
-  [K in FeatureFlag]: boolean;
+  [K in FeatureFlag]?: boolean;
 };
 
 export type FeatureFlagContext =

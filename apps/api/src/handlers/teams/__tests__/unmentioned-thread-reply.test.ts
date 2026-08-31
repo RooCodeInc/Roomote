@@ -174,6 +174,25 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
     await expect(routeDecision(threadReplyActivity())).resolves.toBe(true);
   });
 
+  it('keeps routing after the sender mentions themself', async () => {
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanGraphMessage({
+        id: THREAD_ROOT_ID,
+        userId: 'aad-user-1',
+        mentions: [botMention()],
+      }),
+      botGraphMessage('1700000000100'),
+      humanGraphMessage({
+        id: '1700000000200',
+        userId: 'aad-user-1',
+        text: '@Ada note to self',
+        mentions: [{ userId: 'aad-user-1', name: 'Ada' }],
+      }),
+    ]);
+
+    await expect(routeDecision(threadReplyActivity())).resolves.toBe(true);
+  });
+
   it('requires a mention when somebody else posted since the bot last spoke', async () => {
     fetchThreadMessagesMock.mockResolvedValue([
       humanGraphMessage({

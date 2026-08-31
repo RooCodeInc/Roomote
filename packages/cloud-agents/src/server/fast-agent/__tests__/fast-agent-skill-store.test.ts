@@ -155,6 +155,7 @@ describe('FastAgentSkillStore', () => {
     expect(catalog.counts).toEqual({
       packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
       repository: 1,
+      settings: 0,
       total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 1,
     });
     expect(catalog.skills).toEqual(
@@ -177,6 +178,7 @@ describe('FastAgentSkillStore', () => {
     expect(packagedOnlyCatalog.counts).toEqual({
       packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
       repository: 0,
+      settings: 0,
       total: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
     });
     expect(packagedOnlyCatalog.skills).not.toEqual(
@@ -185,6 +187,168 @@ describe('FastAgentSkillStore', () => {
       ]),
     );
     expect(packagedOnlyCatalog.warnings).toEqual([]);
+  });
+
+  it('includes authorized settings skills in an unscoped catalog with deterministic precedence', async () => {
+    const repositorySkills = { list: vi.fn(), read: vi.fn() };
+    const settingsSkills = {
+      list: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            description: 'Second environment variant.',
+            environmentIds: ['environment-2'],
+            id: 'settings:manual:z-thermonuclear',
+            name: 'thermonuclear',
+            source: 'settings' as const,
+          },
+          {
+            description: 'Must lose to the packaged skill.',
+            environmentIds: ['environment-1'],
+            id: 'settings:manual:review-code',
+            name: 'review-code',
+            source: 'settings' as const,
+          },
+          {
+            description: 'First environment variant.',
+            environmentIds: ['environment-1'],
+            id: 'settings:manual:a-thermonuclear',
+            name: 'thermonuclear',
+            source: 'settings' as const,
+          },
+        ],
+        warnings: [],
+      }),
+      read: vi.fn(),
+    };
+    const store = new FastAgentSkillStore(
+      undefined,
+      repositorySkills,
+      settingsSkills,
+    );
+
+    const catalog = await store.list();
+
+    expect(settingsSkills.list).toHaveBeenCalledWith({});
+    expect(repositorySkills.list).not.toHaveBeenCalled();
+    expect(
+      catalog.skills.filter((skill) => skill.name === 'thermonuclear'),
+    ).toEqual([
+      expect.objectContaining({
+        environmentIds: ['environment-1'],
+        id: 'settings:manual:a-thermonuclear',
+      }),
+      expect.objectContaining({
+        environmentIds: ['environment-2'],
+        id: 'settings:manual:z-thermonuclear',
+      }),
+    ]);
+    expect(
+      catalog.skills.filter((skill) => skill.name === 'review-code'),
+    ).toEqual([expect.objectContaining({ id: 'packaged:review-code' })]);
+    expect(catalog.counts).toEqual({
+      packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+      repository: 0,
+      settings: 2,
+      total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 2,
+    });
+  });
+
+  it('keeps packaged skills ahead of settings skills and settings ahead of repository skills', async () => {
+    const repositorySkills = {
+      list: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            description: 'Repository collision.',
+            id: 'repository:repo-1:.agents/skills:review-code',
+            name: 'review-code',
+            source: 'repository' as const,
+          },
+          {
+            description: 'Repository release.',
+            id: 'repository:repo-1:.agents/skills:release',
+            name: 'release',
+            source: 'repository' as const,
+          },
+        ],
+        warnings: [],
+      }),
+      read: vi.fn(),
+    };
+    const settingsSkills = {
+      list: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            description: 'Settings collision with packaged.',
+            id: 'settings:manual:review-code',
+            name: 'review-code',
+            source: 'settings' as const,
+          },
+          {
+            description: 'Settings release.',
+            id: 'settings:manual:release',
+            name: 'release',
+            source: 'settings' as const,
+          },
+        ],
+        warnings: [],
+      }),
+      read: vi.fn(),
+    };
+    const store = new FastAgentSkillStore(
+      undefined,
+      repositorySkills,
+      settingsSkills,
+    );
+
+    const catalog = await store.list({ environmentId: 'environment-1' });
+
+    expect(
+      catalog.skills.filter((skill) => skill.name === 'review-code'),
+    ).toEqual([expect.objectContaining({ id: 'packaged:review-code' })]);
+    expect(catalog.skills.filter((skill) => skill.name === 'release')).toEqual([
+      expect.objectContaining({ id: 'settings:manual:release' }),
+    ]);
+    expect(catalog.counts).toEqual({
+      packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+      repository: 0,
+      settings: 1,
+      total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 1,
+    });
+  });
+
+  it('uses an unscoped exact-name lookup for packaged and settings skills only', async () => {
+    const repositorySkills = { list: vi.fn(), read: vi.fn() };
+    const settingsSkills = {
+      list: vi.fn().mockResolvedValue({
+        nextSourceOffset: 8,
+        skills: [
+          {
+            description: 'Thermonuclear playbook.',
+            id: 'settings:manual:thermonuclear',
+            name: 'thermonuclear',
+            source: 'settings' as const,
+          },
+        ],
+        warnings: [],
+      }),
+      read: vi.fn(),
+    };
+    const store = new FastAgentSkillStore(
+      undefined,
+      repositorySkills,
+      settingsSkills,
+    );
+
+    const catalog = await store.list({ name: 'thermonuclear' });
+
+    expect(settingsSkills.list).toHaveBeenCalledWith({
+      name: 'thermonuclear',
+    });
+    expect(repositorySkills.list).not.toHaveBeenCalled();
+    expect(catalog.skills).toEqual([
+      expect.objectContaining({ id: 'settings:manual:thermonuclear' }),
+    ]);
+    expect(catalog.nextSourceOffset).toBe(8);
   });
 
   it('rejects traversal, non-Markdown files, symlinks, and unknown skills', async () => {

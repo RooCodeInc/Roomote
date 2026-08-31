@@ -1,152 +1,69 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
-import { createContext, useContext, useState, type ReactNode } from 'react';
-
-const CollapsibleContext = createContext<{
-  open: boolean;
-  setOpen: (open: boolean) => void;
-} | null>(null);
+import { fireEvent, render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 
 const {
-  queryOptionsMock,
-  environmentNamesQueryOptionsMock,
-  setTaskPinnedMock,
-  setSideNavExpandedMock,
   openCommandPaletteMock,
-  useQueryMock,
+  queryOptionsMock,
+  sessionsQueryOptionsMock,
+  setSideNavExpandedMock,
+  setTaskPinnedMock,
   useLiveTaskStatusMock,
-  isTaskPinMutationPendingMock,
-  makeSearchTasks,
+  useQueryMock,
   state,
-} = vi.hoisted(() => {
-  const makeSearchTasks = (
-    overrides: Record<
-      string,
-      Partial<{
-        title: string;
-        timestamp: number;
-        lastMessageAt: number;
-        taskRun: {
-          payload: { environmentId: string; repo: string };
-        };
-      }>
-    > = {},
-  ) =>
-    [
-      {
-        id: 'task-1',
-        title: 'Task 1',
-        timestamp: 6,
-        lastMessageAt: 6,
-        taskRun: { payload: { environmentId: 'env-1', repo: 'org/repo-1' } },
-      },
-      {
-        id: 'task-2',
-        title: 'Task 2',
-        timestamp: 5,
-        lastMessageAt: 5,
-        taskRun: { payload: { environmentId: 'env-2', repo: 'org/repo-2' } },
-      },
-      {
-        id: 'task-3',
-        title: 'Task 3',
-        timestamp: 4,
-        lastMessageAt: 4,
-        taskRun: { payload: { environmentId: 'env-3', repo: 'org/repo-3' } },
-      },
-      {
-        id: 'task-4',
-        title: 'Task 4',
-        timestamp: 3,
-        lastMessageAt: 3,
-        taskRun: { payload: { environmentId: 'env-4', repo: 'org/repo-4' } },
-      },
-      {
-        id: 'task-5',
-        title: 'Task 5',
-        timestamp: 2,
-        lastMessageAt: 2,
-        taskRun: { payload: { environmentId: 'env-5', repo: 'org/repo-5' } },
-      },
-      {
-        id: 'task-6',
-        title: 'Task 6',
-        timestamp: 1,
-        lastMessageAt: 1,
-        taskRun: { payload: { environmentId: 'env-6', repo: 'org/repo-6' } },
-      },
-    ].map((task) => ({ ...task, ...(overrides[task.id] ?? {}) }));
-
-  return {
-    queryOptionsMock: vi.fn((input, options) => ({
-      queryKind: 'tasksSearch',
-      input,
-      options,
-    })),
-    environmentNamesQueryOptionsMock: vi.fn((input, options) => ({
-      queryKind: 'environmentNames',
-      input,
-      options,
-    })),
-    setTaskPinnedMock: vi.fn(),
-    setSideNavExpandedMock: vi.fn(),
-    openCommandPaletteMock: vi.fn(),
-    useQueryMock: vi.fn(),
-    useLiveTaskStatusMock: vi.fn<
-      (taskId: string | null) => {
-        phase: string | null;
-        lastErrorMessage: string | undefined;
-      } | null
-    >(() => null),
-    isTaskPinMutationPendingMock: vi.fn(() => false),
-    makeSearchTasks,
-    state: {
-      pathname: '/tasks',
-      user: {
-        isAdmin: true,
-      },
-      isSideNavExpanded: false,
-      recentTaskIds: ['task-2', 'task-3', 'task-4', 'task-5'],
-      pinnedTaskIds: ['task-3', 'task-1'],
-      environments: [
-        { id: 'env-1', name: 'Environment 1' },
-        { id: 'env-2', name: 'Environment 2' },
-        { id: 'env-3', name: 'Environment 3' },
-        { id: 'env-4', name: 'Environment 4' },
-        { id: 'env-5', name: 'Environment 5' },
-        { id: 'env-6', name: 'Environment 6' },
-      ],
-      searchTasks: makeSearchTasks(),
-    },
-  };
-});
+} = vi.hoisted(() => ({
+  openCommandPaletteMock: vi.fn(),
+  queryOptionsMock: vi.fn((input, options) => ({
+    queryKind: 'tasksSearch',
+    input,
+    options,
+  })),
+  sessionsQueryOptionsMock: vi.fn((input, options) => ({
+    queryKind: 'sessionsList',
+    input,
+    options,
+  })),
+  setSideNavExpandedMock: vi.fn(),
+  setTaskPinnedMock: vi.fn(),
+  useLiveTaskStatusMock: vi.fn<
+    (taskId: string | null) => {
+      phase: string | null;
+      lastErrorMessage: string | undefined;
+    } | null
+  >(() => null),
+  useQueryMock: vi.fn(),
+  state: {
+    pathname: '/tasks',
+    user: { isAdmin: true },
+    isSideNavExpanded: false,
+    recentSessionIds: ['session-2', 'session-1'],
+    pinnedTaskIds: ['task-3', 'task-1'],
+    tasks: [
+      { id: 'task-1', title: 'Task 1' },
+      { id: 'task-2', title: 'Task 2' },
+      { id: 'task-3', title: 'Task 3' },
+    ],
+    sessions: [
+      { id: 'session-1', title: 'Session 1' },
+      { id: 'session-2', title: 'Session 2' },
+    ],
+  },
+}));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => state.pathname,
-}));
-
-vi.mock('@/hooks/useUser', () => ({
-  useAuthorizedUser: () => state.user,
 }));
 
 vi.mock('@tanstack/react-query', () => ({
   keepPreviousData: (previousData: unknown) => previousData,
   useQuery: (...args: unknown[]) => {
     useQueryMock(...args);
-    const queryOptions = args[0] as
-      | { queryKind?: string; input?: { ids?: string[] } }
-      | undefined;
+    const queryOptions = args[0] as { queryKind?: string } | undefined;
 
-    if (queryOptions?.queryKind === 'environmentNames') {
-      const ids = new Set(queryOptions.input?.ids ?? []);
-
-      return {
-        data: state.environments.filter((environment) =>
-          ids.has(environment.id),
-        ),
-      };
+    if (queryOptions?.queryKind === 'sessionsList') {
+      return { data: { sessions: state.sessions, nextCursor: null } };
     }
 
-    return { data: state.searchTasks };
+    return { data: state.tasks };
   },
 }));
 
@@ -173,94 +90,34 @@ vi.mock('@/components/system', () => ({
   ),
   ChartColumnIncreasing: () => <svg aria-hidden="true" />,
   ChevronDown: () => <svg aria-hidden="true" />,
-  Collapsible: ({
-    children,
-    defaultOpen,
-  }: {
-    children: ReactNode;
-    defaultOpen?: boolean;
-  }) => {
-    const [open, setOpen] = useState(Boolean(defaultOpen));
-
-    return (
-      <CollapsibleContext.Provider value={{ open, setOpen }}>
-        <div data-state={open ? 'open' : 'closed'}>{children}</div>
-      </CollapsibleContext.Provider>
-    );
-  },
-  CollapsibleContent: ({
-    children,
-    className,
-  }: {
-    children: ReactNode;
-    className?: string;
-  }) => {
-    const context = useContext(CollapsibleContext);
-
-    if (!context?.open) {
-      return null;
-    }
-
-    return <div className={className}>{children}</div>;
-  },
-  CollapsibleTrigger: ({
-    children,
-    className,
-  }: {
-    children: ReactNode;
-    className?: string;
-  }) => {
-    const context = useContext(CollapsibleContext);
-
-    if (!context) {
-      return null;
-    }
-
-    return (
-      <button
-        type="button"
-        className={className}
-        data-state={context.open ? 'open' : 'closed'}
-        onClick={() => context.setOpen(!context.open)}
-      >
-        {children}
-      </button>
-    );
-  },
-  CollapsibleIconTrigger: ({ icon: Icon }: { icon: () => ReactNode }) => (
-    <Icon />
-  ),
   Container: () => <svg aria-hidden="true" />,
   GalleryVerticalEnd: () => <svg aria-hidden="true" />,
   House: () => <svg aria-hidden="true" />,
   Lightbulb: () => <svg aria-hidden="true" />,
   ListChevronsUpDown: () => <svg aria-hidden="true" />,
-  MessageSquarePlus: () => <svg aria-hidden="true" />,
   MessageCircleQuestionMark: () => <svg aria-hidden="true" />,
-  Rows4: () => <svg aria-hidden="true" />,
-  Settings: () => <svg aria-hidden="true" />,
-  Search: () => <svg aria-hidden="true" />,
+  MessageSquarePlus: () => <svg aria-hidden="true" />,
   PanelLeftClose: () => <svg aria-hidden="true" />,
   PanelLeftOpen: () => <svg aria-hidden="true" />,
-  VectorSquare: () => <svg aria-hidden="true" />,
+  Plus: () => <svg aria-hidden="true" />,
+  Rows4: () => <svg aria-hidden="true" />,
+  Search: () => <svg aria-hidden="true" />,
+  Settings: () => <svg aria-hidden="true" />,
   Zap: () => <svg aria-hidden="true" />,
 }));
 
 vi.mock('@/components/layout', () => ({
-  useChatWidgetButton: () => ({ isVisible: false, show: vi.fn() }),
-  Logo: () => <div>logo</div>,
-  RoomoteWordmark: ({
-    className,
-    'aria-label': ariaLabel,
-  }: {
-    className?: string;
-    'aria-label'?: string;
-  }) => (
-    <div role="img" aria-label={ariaLabel} data-class-name={className}>
+  RoomoteWordmark: ({ 'aria-label': ariaLabel }: { 'aria-label'?: string }) => (
+    <div role="img" aria-label={ariaLabel}>
       wordmark
     </div>
   ),
   UserMenu: () => <div data-testid="user-menu">user</div>,
+  useChatWidgetButton: () => ({ isVisible: false, show: vi.fn() }),
+}));
+
+vi.mock('@/components/layout/ChatWidgetButton', () => ({
+  ChatWidgetSideNavItem: () => null,
 }));
 
 vi.mock('@/components/layout/release-notices', () => ({
@@ -271,18 +128,16 @@ vi.mock('@/components/layout/CommandPaletteContext', () => ({
   useCommandPalette: () => ({ setOpen: openCommandPaletteMock }),
 }));
 
-vi.mock('@/hooks/useRecentTasks', () => ({
-  useRecentTasks: () => ({ recentTaskIds: state.recentTaskIds }),
-}));
-
-vi.mock('@/hooks/environments', () => ({
-  useEnvironments: () => ({ data: state.environments }),
+vi.mock('@/components/tasks/NewTaskDialog', () => ({
+  NewTaskDialog: ({ open }: { open: boolean }) => (
+    <div data-testid="new-task-dialog" data-open={String(open)} />
+  ),
 }));
 
 vi.mock('@/hooks/useLayoutOptions', () => ({
   useHydrateLayoutStore: () => undefined,
   useLayoutStore: (
-    selector: (state: {
+    selector: (layoutState: {
       hasHydrated: boolean;
       isSideNavExpanded: boolean;
       setSideNavExpanded: (expanded: boolean) => void;
@@ -295,26 +150,30 @@ vi.mock('@/hooks/useLayoutOptions', () => ({
     }),
 }));
 
+vi.mock('@/hooks/useRecentSessions', () => ({
+  useRecentSessions: () => ({ recentSessionIds: state.recentSessionIds }),
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => state.user,
+}));
+
 vi.mock('@/hooks/tasks', () => ({
   useLiveTaskStatus: (taskId: string | null) => useLiveTaskStatusMock(taskId),
   useTaskPins: () => ({
     pinnedTaskIds: state.pinnedTaskIds,
     setTaskPinned: setTaskPinnedMock,
-    isTaskPinMutationPending: isTaskPinMutationPendingMock,
+    isTaskPinMutationPending: () => false,
   }),
 }));
 
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
-    environments: {
-      namesByIds: {
-        queryOptions: environmentNamesQueryOptionsMock,
-      },
+    sessions: {
+      list: { queryOptions: sessionsQueryOptionsMock },
     },
     tasks: {
-      search: {
-        queryOptions: queryOptionsMock,
-      },
+      search: { queryOptions: queryOptionsMock },
     },
   }),
 }));
@@ -365,7 +224,6 @@ vi.mock('./SideNavTaskItem', () => ({
       type="button"
       data-testid={`task-item-${task.id}`}
       data-active={String(isActive)}
-      data-pinned={String(isPinned)}
       data-expanded={String(expanded)}
       data-live-phase={liveStatus?.phase ?? ''}
       onClick={() => onTogglePin(!isPinned)}
@@ -375,336 +233,211 @@ vi.mock('./SideNavTaskItem', () => ({
   ),
 }));
 
-import { SideNav, getTaskIdFromPathname } from './SideNav';
+vi.mock('./SideNavSessionItem', () => ({
+  SideNavSessionItem: ({
+    session,
+    isActive,
+  }: {
+    session: { id: string };
+    isActive: boolean;
+  }) => (
+    <a
+      href={`/sessions/${session.id}`}
+      data-testid={`session-item-${session.id}`}
+      data-active={String(isActive)}
+    >
+      {session.id}
+    </a>
+  ),
+}));
 
-describe('SideNav quick access tasks', () => {
+import {
+  SideNav,
+  getSessionIdFromPathname,
+  getTaskIdFromPathname,
+} from './SideNav';
+
+describe('SideNav recent sessions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     state.pathname = '/tasks';
-    state.user = {
-      isAdmin: true,
-    };
+    state.user.isAdmin = true;
     state.isSideNavExpanded = false;
-    state.recentTaskIds = ['task-2', 'task-3', 'task-4', 'task-5'];
+    state.recentSessionIds = ['session-2', 'session-1'];
     state.pinnedTaskIds = ['task-3', 'task-1'];
-    state.environments = [
-      { id: 'env-1', name: 'Environment 1' },
-      { id: 'env-2', name: 'Environment 2' },
-      { id: 'env-3', name: 'Environment 3' },
-      { id: 'env-4', name: 'Environment 4' },
-      { id: 'env-5', name: 'Environment 5' },
-      { id: 'env-6', name: 'Environment 6' },
+    state.tasks = [
+      { id: 'task-1', title: 'Task 1' },
+      { id: 'task-2', title: 'Task 2' },
+      { id: 'task-3', title: 'Task 3' },
     ];
-    state.searchTasks = makeSearchTasks();
+    state.sessions = [
+      { id: 'session-1', title: 'Session 1' },
+      { id: 'session-2', title: 'Session 2' },
+    ];
     useLiveTaskStatusMock.mockReturnValue(null);
   });
 
-  it('extracts task id from task routes and subroutes', () => {
-    expect(getTaskIdFromPathname('/task/task-123')).toBe('task-123');
-    expect(getTaskIdFromPathname('/task/task-123/artifacts/path/to/file')).toBe(
+  it('extracts task and session ids only from detail routes', () => {
+    expect(getTaskIdFromPathname('/task/task-123/artifacts/file')).toBe(
       'task-123',
     );
     expect(getTaskIdFromPathname('/tasks')).toBeNull();
-  });
-
-  it('renders pinned-first quick access list when expanded, up to the wider cap', () => {
-    state.isSideNavExpanded = true;
-    state.recentTaskIds = [
-      'task-2',
-      'task-3',
-      'task-4',
-      'task-5',
-      'task-6',
-      'task-7',
-      'task-8',
-    ];
-    state.searchTasks = [
-      ...makeSearchTasks(),
-      {
-        id: 'task-7',
-        title: 'Task 7',
-        timestamp: 0,
-        lastMessageAt: 0,
-        taskRun: { payload: { environmentId: 'env-7', repo: 'org/repo-7' } },
-      },
-      {
-        id: 'task-8',
-        title: 'Task 8',
-        timestamp: -1,
-        lastMessageAt: -1,
-        taskRun: { payload: { environmentId: 'env-8', repo: 'org/repo-8' } },
-      },
-    ];
-
-    render(<SideNav />);
-
-    const renderedTaskIds = screen
-      .getAllByTestId(/^task-item-/)
-      .map((item) => item.textContent);
-
-    expect(renderedTaskIds).toEqual([
-      'task-3',
-      'task-1',
-      'task-2',
-      'task-4',
-      'task-5',
-      'task-6',
-      'task-7',
-      'task-8',
-    ]);
-
-    expect(queryOptionsMock).toHaveBeenCalledWith(
-      {
-        limit: 20,
-        includeIds: [
-          'task-3',
-          'task-1',
-          'task-2',
-          'task-4',
-          'task-5',
-          'task-6',
-          'task-7',
-          'task-8',
-        ],
-      },
-      expect.objectContaining({
-        enabled: true,
-        placeholderData: expect.any(Function),
-      }),
+    expect(getSessionIdFromPathname('/sessions/session-123/details')).toBe(
+      'session-123',
     );
-    expect(screen.queryAllByRole('separator')).toHaveLength(0);
+    expect(getSessionIdFromPathname('/sessions')).toBeNull();
   });
 
-  it('marks the active quick access task for task subroutes', () => {
+  it('renders pinned tasks and recent sessions when expanded', () => {
     state.isSideNavExpanded = true;
-    state.pathname = '/task/task-4/artifacts/plans/spec.md';
 
     render(<SideNav />);
 
-    expect(screen.getByTestId('task-item-task-4')).toHaveAttribute(
+    expect(
+      screen.getAllByTestId(/^task-item-/).map((item) => item.textContent),
+    ).toEqual(['task-3', 'task-1']);
+    expect(
+      screen.getAllByTestId(/^session-item-/).map((item) => item.textContent),
+    ).toEqual(['session-2', 'session-1']);
+    expect(screen.getByText('Pinned tasks')).toBeInTheDocument();
+    expect(screen.getByText('Recent sessions')).toBeInTheDocument();
+    expect(screen.queryByText('Recent tasks')).not.toBeInTheDocument();
+    expect(queryOptionsMock).toHaveBeenCalledWith(
+      { limit: 2, includeIds: ['task-3', 'task-1'] },
+      expect.objectContaining({ enabled: true }),
+    );
+    expect(sessionsQueryOptionsMock).toHaveBeenCalledWith(
+      { ids: ['session-2', 'session-1'], limit: 20 },
+      expect.objectContaining({ enabled: true }),
+    );
+  });
+
+  it('keeps recent sessions in visit order and omits unavailable ids', () => {
+    state.isSideNavExpanded = true;
+    state.recentSessionIds = ['session-2', 'missing-session', 'session-1'];
+
+    render(<SideNav />);
+
+    const sessionItems = screen.getAllByTestId(/^session-item-/);
+    expect(sessionItems.map((item) => item.textContent)).toEqual([
+      'session-2',
+      'session-1',
+    ]);
+    expect(sessionItems[0]).toHaveAttribute('href', '/sessions/session-2');
+    expect(sessionItems[1]).toHaveAttribute('href', '/sessions/session-1');
+  });
+
+  it('marks the active session and active pinned task on detail subroutes', () => {
+    state.isSideNavExpanded = true;
+    state.pathname = '/sessions/session-2/details';
+    const view = render(<SideNav />);
+
+    expect(screen.getByTestId('session-item-session-2')).toHaveAttribute(
       'data-active',
       'true',
     );
-    expect(screen.getByTestId('task-item-task-3')).toHaveAttribute(
+    expect(screen.getByTestId('session-item-session-1')).toHaveAttribute(
       'data-active',
       'false',
     );
+
+    state.pathname = '/task/task-3/artifacts/file';
+    view.rerender(<SideNav />);
+    expect(screen.getByTestId('task-item-task-3')).toHaveAttribute(
+      'data-active',
+      'true',
+    );
   });
 
-  it('renders the settings nav item for members', () => {
-    state.user.isAdmin = false;
+  it('keeps the recent items in the established scroll region', () => {
+    state.isSideNavExpanded = true;
 
     render(<SideNav />);
 
-    expect(screen.getByTestId('nav-/settings')).toBeInTheDocument();
+    const scrollRegion = screen
+      .getByTestId('session-item-session-2')
+      .closest('.overflow-y-auto');
+    expect(scrollRegion).toHaveClass('overflow-y-auto', 'scroll-thin');
+    expect(scrollRegion?.parentElement?.parentElement).toHaveClass(
+      'overflow-clip',
+    );
   });
 
-  it('keeps analytics visible without feature gating', () => {
+  it('does not query or render recent items while collapsed', () => {
+    render(<SideNav />);
+
+    expect(screen.queryByTestId(/^task-item-/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId(/^session-item-/)).not.toBeInTheDocument();
+    expect(queryOptionsMock).toHaveBeenCalledWith(
+      { limit: 2, includeIds: ['task-3', 'task-1'] },
+      expect.objectContaining({ enabled: false }),
+    );
+    expect(sessionsQueryOptionsMock).toHaveBeenCalledWith(
+      { ids: ['session-2', 'session-1'], limit: 20 },
+      expect.objectContaining({ enabled: false }),
+    );
+  });
+
+  it('keeps the desktop-only responsive rail behavior', () => {
+    render(<SideNav />);
+
+    expect(screen.getByRole('navigation')).toHaveClass('hidden', 'md:flex');
+  });
+
+  it('preserves collapsed and expanded sidebar controls', () => {
+    const view = render(<SideNav />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }));
+    expect(setSideNavExpandedMock).toHaveBeenCalledWith(true);
+    fireEvent.click(screen.getByTestId('nav-action-Expand sidebar'));
+    expect(setSideNavExpandedMock).toHaveBeenCalledWith(true);
+
+    state.isSideNavExpanded = true;
+    view.rerender(<SideNav />);
+    fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
+    expect(setSideNavExpandedMock).toHaveBeenCalledWith(false);
+    expect(
+      screen.queryByTestId('nav-action-Expand sidebar'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps primary nav actions working', () => {
+    render(<SideNav />);
+
+    fireEvent.click(screen.getByTestId('nav-action-Search (⌘K)'));
+    expect(openCommandPaletteMock).toHaveBeenCalledWith(true);
+
+    fireEvent.click(screen.getByTestId('nav-action-New Session'));
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+      'data-open',
+      'true',
+    );
+  });
+
+  it('keeps the new session action above Home', () => {
+    render(<SideNav />);
+
+    const newSessionItem = screen.getByTestId('nav-action-New Session');
+    const homeItem = screen.getByTestId('nav-/');
+    expect(newSessionItem.compareDocumentPosition(homeItem)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it('keeps analytics visible and Sessions before automations for admins', () => {
     render(<SideNav />);
 
     expect(screen.getByTestId('nav-/analytics')).toBeInTheDocument();
-  });
-
-  it('shows task history before automations for admins', () => {
-    render(<SideNav />);
-
     const automations = screen.getByTestId('nav-/automations');
-    const tasks = screen.getByTestId('nav-/tasks');
-
-    expect(automations.compareDocumentPosition(tasks)).toBe(
+    const sessions = screen.getByTestId('nav-/sessions');
+    expect(automations.compareDocumentPosition(sessions)).toBe(
       Node.DOCUMENT_POSITION_PRECEDING,
     );
   });
 
-  it('hides automations from non-admins', () => {
-    state.user.isAdmin = false;
-
-    render(<SideNav />);
-
-    expect(screen.queryByTestId('nav-/automations')).not.toBeInTheDocument();
-  });
-
-  it('routes pin toggles to the task pin mutation hook', () => {
+  it('preserves pinned-task actions and live status', () => {
     state.isSideNavExpanded = true;
-
-    render(<SideNav />);
-
-    fireEvent.click(screen.getByTestId('task-item-task-3'));
-    fireEvent.click(screen.getByTestId('task-item-task-2'));
-
-    expect(setTaskPinnedMock).toHaveBeenNthCalledWith(1, 'task-3', false);
-    expect(setTaskPinnedMock).toHaveBeenNthCalledWith(2, 'task-2', true);
-  });
-
-  it('orders non-pinned quick access tasks by last activity, not visit order', () => {
-    state.isSideNavExpanded = true;
-    state.pinnedTaskIds = [];
-    state.recentTaskIds = ['task-5', 'task-2', 'task-4'];
-    state.searchTasks = makeSearchTasks({
-      'task-2': { timestamp: 2, lastMessageAt: 6 },
-      'task-4': { timestamp: 4, lastMessageAt: 5 },
-      'task-5': { timestamp: 6, lastMessageAt: 4 },
-    });
-
-    render(<SideNav />);
-
-    const renderedTaskIds = screen
-      .getAllByTestId(/^task-item-/)
-      .map((item) => item.textContent);
-
-    expect(renderedTaskIds).toEqual([
-      'task-2',
-      'task-1',
-      'task-4',
-      'task-5',
-      'task-3',
-      'task-6',
-    ]);
-  });
-
-  it('groups recent tasks under collapsible environment sections', () => {
-    state.isSideNavExpanded = true;
-    state.pinnedTaskIds = [];
-    state.recentTaskIds = ['task-2', 'task-4', 'task-5'];
-    state.searchTasks = makeSearchTasks({
-      'task-1': {
-        timestamp: 6,
-        lastMessageAt: 6,
-        taskRun: { payload: { environmentId: 'env-1', repo: 'org/repo-1' } },
-      },
-      'task-2': {
-        timestamp: 5,
-        lastMessageAt: 5,
-        taskRun: { payload: { environmentId: 'env-1', repo: 'org/repo-2' } },
-      },
-      'task-4': {
-        timestamp: 4,
-        lastMessageAt: 4,
-        taskRun: { payload: { environmentId: 'env-2', repo: 'org/repo-4' } },
-      },
-      'task-5': {
-        timestamp: 3,
-        lastMessageAt: 3,
-        taskRun: { payload: { environmentId: 'env-2', repo: 'org/repo-5' } },
-      },
-      'task-3': {
-        timestamp: 2,
-        lastMessageAt: 2,
-        taskRun: { payload: { environmentId: 'env-3', repo: 'org/repo-3' } },
-      },
-      'task-6': {
-        timestamp: 1,
-        lastMessageAt: 1,
-        taskRun: { payload: { environmentId: 'env-3', repo: 'org/repo-6' } },
-      },
-    });
-    state.environments = [
-      { id: 'env-1', name: 'Maxolen Staging' },
-      { id: 'env-2', name: 'CC Environment' },
-      { id: 'env-3', name: 'Roomote Dev' },
-    ];
-
-    render(<SideNav />);
-
-    const groupButtons = screen.getAllByRole('button', {
-      name: /Maxolen Staging|CC Environment|Roomote Dev/,
-    });
-
-    expect(groupButtons.map((button) => button.textContent)).toEqual([
-      'Maxolen Staging',
-      'CC Environment',
-      'Roomote Dev',
-    ]);
-    expect(environmentNamesQueryOptionsMock).toHaveBeenCalledWith(
-      { ids: ['env-1', 'env-2', 'env-3'] },
-      expect.objectContaining({
-        enabled: true,
-        placeholderData: expect.any(Function),
-      }),
-    );
-
-    const maxolenGroup = groupButtons[0]?.parentElement;
-    expect(maxolenGroup).not.toBeNull();
-    expect(
-      within(maxolenGroup as HTMLElement)
-        .getAllByTestId(/^task-item-/)
-        .map((item) => item.textContent),
-    ).toEqual(['task-1', 'task-2']);
-  });
-
-  it('uses distinct fallback labels while environment names are unavailable', () => {
-    state.isSideNavExpanded = true;
-    state.pinnedTaskIds = [];
-    state.searchTasks = makeSearchTasks({
-      'task-1': {
-        taskRun: { payload: { environmentId: 'env-1', repo: 'org/repo-1' } },
-      },
-      'task-2': {
-        taskRun: { payload: { environmentId: 'env-1', repo: 'org/repo-2' } },
-      },
-      'task-3': {
-        taskRun: { payload: { environmentId: 'env-2', repo: 'org/repo-3' } },
-      },
-      'task-4': {
-        taskRun: { payload: { environmentId: 'env-3', repo: 'org/repo-4' } },
-      },
-    });
-    state.environments = [];
-
-    render(<SideNav />);
-
-    const groupButtons = screen.getAllByRole('button', {
-      name: /Environment env-/,
-    });
-
-    expect(groupButtons.map((button) => button.textContent)).toEqual([
-      'Environment env-1',
-      'Environment env-2',
-      'Environment env-3',
-      'Environment env-5',
-      'Environment env-6',
-    ]);
-  });
-
-  it('collapses an environment section without affecting other groups', () => {
-    state.isSideNavExpanded = true;
-    state.pinnedTaskIds = [];
-    state.searchTasks = makeSearchTasks({
-      'task-1': {
-        taskRun: { payload: { environmentId: 'env-1', repo: 'org/repo-1' } },
-      },
-      'task-2': {
-        taskRun: { payload: { environmentId: 'env-1', repo: 'org/repo-2' } },
-      },
-      'task-3': {
-        taskRun: { payload: { environmentId: 'env-2', repo: 'org/repo-3' } },
-      },
-      'task-4': {
-        taskRun: { payload: { environmentId: 'env-2', repo: 'org/repo-4' } },
-      },
-    });
-    state.environments = [
-      { id: 'env-1', name: 'Maxolen Staging' },
-      { id: 'env-2', name: 'CC Environment' },
-      { id: 'env-3', name: 'Roomote Dev' },
-      { id: 'env-4', name: 'Sandbox' },
-      { id: 'env-5', name: 'QA' },
-      { id: 'env-6', name: 'Prod' },
-    ];
-
-    render(<SideNav />);
-
-    fireEvent.click(screen.getByRole('button', { name: /Maxolen Staging/i }));
-
-    expect(screen.queryByTestId('task-item-task-1')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('task-item-task-2')).not.toBeInTheDocument();
-    expect(screen.getByTestId('task-item-task-3')).toBeInTheDocument();
-    expect(screen.getByTestId('task-item-task-4')).toBeInTheDocument();
-  });
-
-  it('passes live status only to the active task item', () => {
-    state.isSideNavExpanded = true;
-    state.pathname = '/task/task-4';
+    state.pathname = '/task/task-3';
     useLiveTaskStatusMock.mockReturnValue({
       phase: 'waiting_for_prompt',
       lastErrorMessage: undefined,
@@ -712,79 +445,23 @@ describe('SideNav quick access tasks', () => {
 
     render(<SideNav />);
 
-    expect(screen.getByTestId('task-item-task-4')).toHaveAttribute(
+    expect(screen.getByTestId('task-item-task-3')).toHaveAttribute(
       'data-live-phase',
       'waiting_for_prompt',
     );
-    expect(screen.getByTestId('task-item-task-3')).toHaveAttribute(
+    expect(screen.getByTestId('task-item-task-1')).toHaveAttribute(
       'data-live-phase',
       '',
     );
+    fireEvent.click(screen.getByTestId('task-item-task-3'));
+    expect(setTaskPinnedMock).toHaveBeenCalledWith('task-3', false);
   });
 
-  it('renders quick access tasks inside a scrollable region when expanded', () => {
+  it('renders expanded navigation rows with their established expanded state', () => {
     state.isSideNavExpanded = true;
 
     render(<SideNav />);
 
-    const taskItem = screen.getByTestId('task-item-task-3');
-    const scrollRegion = taskItem.closest('.overflow-y-auto');
-
-    expect(scrollRegion).toHaveClass('overflow-y-auto', 'scroll-thin');
-    expect(scrollRegion?.parentElement?.parentElement).toHaveClass(
-      'overflow-clip',
-    );
-  });
-
-  it('opens the expanded side nav from the collapsed header control', () => {
-    render(<SideNav />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }));
-
-    expect(setSideNavExpandedMock).toHaveBeenCalledWith(true);
-  });
-
-  it('opens the command palette from the unified search nav item', () => {
-    render(<SideNav />);
-
-    fireEvent.click(screen.getByTestId('nav-action-Search (⌘K)'));
-
-    expect(openCommandPaletteMock).toHaveBeenCalledWith(true);
-  });
-
-  it('shows the collapsed-only task list affordance after search and expands the sidebar', () => {
-    render(<SideNav />);
-
-    const searchItem = screen.getByTestId('nav-action-Search (⌘K)');
-    const expandItem = screen.getByTestId('nav-action-Expand sidebar');
-
-    expect(searchItem.compareDocumentPosition(expandItem)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-
-    fireEvent.click(expandItem);
-
-    expect(setSideNavExpandedMock).toHaveBeenCalledWith(true);
-  });
-
-  it('hides the collapsed-only task list affordance when expanded', () => {
-    state.isSideNavExpanded = true;
-
-    render(<SideNav />);
-
-    expect(
-      screen.queryByTestId('nav-action-Expand sidebar'),
-    ).not.toBeInTheDocument();
-  });
-
-  it('renders expanded nav rows and closes through the header control', () => {
-    state.isSideNavExpanded = true;
-
-    render(<SideNav />);
-
-    expect(screen.getByRole('img', { name: 'Roomote' })).toHaveTextContent(
-      'wordmark',
-    );
     expect(screen.getByTestId('nav-/')).toHaveAttribute(
       'data-expanded',
       'true',
@@ -797,25 +474,14 @@ describe('SideNav quick access tasks', () => {
       'data-expanded',
       'true',
     );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
-
-    expect(setSideNavExpandedMock).toHaveBeenCalledWith(false);
   });
 
-  it('keeps the collapsed nav free of quick access tasks', () => {
+  it('keeps settings visible for members and automations admin-only', () => {
+    state.user.isAdmin = false;
+
     render(<SideNav />);
 
-    expect(screen.queryByTestId('task-item-task-1')).not.toBeInTheDocument();
-    expect(queryOptionsMock).toHaveBeenCalledWith(
-      {
-        limit: 20,
-        includeIds: ['task-3', 'task-1', 'task-2', 'task-4', 'task-5'],
-      },
-      expect.objectContaining({
-        enabled: false,
-        placeholderData: expect.any(Function),
-      }),
-    );
+    expect(screen.getByTestId('nav-/settings')).toBeInTheDocument();
+    expect(screen.queryByTestId('nav-/automations')).not.toBeInTheDocument();
   });
 });

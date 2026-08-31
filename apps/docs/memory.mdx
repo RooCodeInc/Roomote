@@ -21,8 +21,12 @@ Roomote fills Memory from what it can already see:
   its own work: what it decided, why, and what is still open
 - **pull requests** from your connected source-control provider
 - **public Slack channels** the Roomote bot has been added to
+- **public Discord server channels and active public threads** the Roomote bot
+  can read
 - **GitHub issues** in connected repositories
 - **Notion pages** explicitly shared with the deployment's Notion integration
+  including readable database property values such as status, dates, people,
+  labels, relations, and formula or rollup results
 - **meeting notes** from Granola, when that integration is connected
 - **employee directory and reporting structure** from Rippling, when that
   integration is connected; HRIS reporting and membership fields remain
@@ -61,6 +65,15 @@ inside what your team has already made visible company-wide. Slack directory
 cards contain names, handles, and job titles, but never copy profile email,
 status, timezone, or avatar fields into Memory.
 
+Discord collection follows the server's permission model: Roomote includes only
+channels visible to the server's `@everyone` role where the bot also has **View
+Channel** and **Read Message History**. Private channels, private threads, group
+DMs, and direct messages are never collected. Active public threads and forum
+posts inherit the visibility of their public parent channel. Roomote re-reads a
+bounded recent window so edits and deletions are reflected, and removes stored
+pages when an authoritative permission scan shows that a channel is no longer
+publicly accessible.
+
 Notion only returns pages explicitly shared with its integration. Workspace
 guests and restricted users may omit email addresses, and some integration
 configurations cannot list users at all. Roomote still keeps stable Notion user
@@ -68,7 +81,9 @@ references in page snapshots in those cases, but it does not guess a match from
 the display name. The workspace user directory is refreshed once a day; people
 removed from the workspace (or hidden when the integration loses its
 user-listing capability) have their Notion identity cards marked deleted on
-the next refresh.
+the next refresh. Notion may truncate long multi-value database properties;
+Memory marks those partial values and links back to the source page for the
+complete list.
 
 ## Turning it on
 
@@ -76,51 +91,54 @@ Memory runs as its own service alongside Roomote, reachable only on your
 deployment's internal network. On the hosted templates (Railway, Render,
 Coolify) that service is already there after a deploy, sitting idle.
 
-Setting a Memory provider key, `R_BRAIN_OPENROUTER_API_KEY` or
-`R_BRAIN_OPENAI_API_KEY`, is what turns it on. Set either one as an
-environment variable or a Settings environment value; the value can be the
-same key you already use for tasks, or a separate one to bill Memory
-independently. The explicit `R_BRAIN_*` name is the opt-in: the general
-provider keys your deployment uses for tasks never activate Memory on
-their own, so configuring task models leaves Memory off.
+New Roomote Cloud deployments enable Memory when initial setup completes.
+Existing deployments keep their current setting. Administrators can change it
+with the **Enable Memory** toggle at the top of **Settings → Memory**; no
+provider key is required. Synthesis runs through your deployment's helper model
+— the same small model that already writes task titles and summaries.
+Deployments that enabled Memory before the toggle existed, by setting
+`R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY`, stay enabled without
+doing anything; using the toggle stores an explicit choice that wins over the
+key from then on.
 
-The Memory service holds no provider key of its own. It asks Roomote for
-embeddings and synthesis, and Roomote forwards them under the Memory key.
-Changing that key later takes effect on Memory's next request, with no
-redeploy.
+Semantic recall still needs embeddings. Those come from an OpenRouter or
+OpenAI key — a Memory-specific `R_BRAIN_*` key to bill Memory separately, or
+the deployment's general provider key once Memory is enabled — or from a
+self-run embeddings upstream (below). The Memory service holds no provider
+key of its own: it asks Roomote for embeddings and synthesis, and Roomote
+forwards them. Changing a key later takes effect on Memory's next request,
+with no redeploy.
 
-OpenRouter and OpenAI both support Memory's embedding and synthesis calls.
-Search reranking requires OpenRouter unless a self-run rerank upstream is
-configured.
+OpenRouter and OpenAI both support Memory's embedding calls.
 
-### Run embeddings and reranking locally
+### Run embeddings locally
 
-Self-hosted Compose deployments can keep embeddings and reranking on their own
-hardware while continuing to send chat synthesis to the configured Memory
-provider. Enable both services and point Memory at the bundled inference server:
+Self-hosted Compose deployments can keep embeddings on their own hardware
+while continuing to send chat synthesis to the configured Memory provider.
+Enable both services and point Memory at the bundled inference server:
 
 ```sh
 COMPOSE_PROFILES=brain,local-inference
 R_BRAIN_EMBEDDINGS_UPSTREAM_URL=http://infinity:7997
-R_BRAIN_RERANK_UPSTREAM_URL=http://infinity:7997
 R_BRAIN_EMBEDDING_MODEL=BAAI/bge-m3
 R_BRAIN_EMBEDDING_DIMENSIONS=1024
-R_BRAIN_RERANKER_MODEL=BAAI/bge-reranker-v2-m3
 ```
 
 The bundled CPU service uses multilingual models so recall can cross languages.
+Its anonymous usage reporting is disabled by default in the Roomote Compose
+bundle. This is separate from Roomote's own optional anonymous analytics.
 For a smaller CPU host, `Alibaba-NLP/gte-multilingual-base` with `768`
 dimensions is a lighter embedding alternative. Choose the embedding model and
 dimensions before Memory's first boot; changing that pair later requires
 re-embedding the corpus.
 
-The two upstream URLs can instead target any OpenAI-compatible embedding and
-rerank server. Set `R_BRAIN_INFERENCE_UPSTREAM_API_KEY` when that server requires
-a bearer key. Roomote forwards model names unchanged to self-run upstreams, so
-`R_BRAIN_EMBEDDING_MODEL` and `R_BRAIN_RERANKER_MODEL` must exactly match the
-models that server exposes, without a provider prefix.
+The upstream URL can instead target any OpenAI-compatible embedding server.
+Set `R_BRAIN_INFERENCE_UPSTREAM_API_KEY` when that server requires a bearer
+key. Roomote forwards model names unchanged to self-run upstreams, so
+`R_BRAIN_EMBEDDING_MODEL` must exactly match a model that server exposes,
+without a provider prefix.
 
-Without a Memory key, Memory stays inert. Agents are not told it exists,
+While Memory is disabled, it stays inert. Agents are not told it exists,
 and nothing is ingested.
 
 Roomote schedules one maintenance pass each night. It retrieves a bounded,
@@ -149,9 +167,10 @@ that upstream feature requires an operator review workflow before proposals
 become canonical memory.
 
 <Note>
-  Self-hosted Compose deployments start Memory from the `brain`
-  profile, so set a Memory key in your environment file to bring the container
-  up. Everything after that is the same.
+  Self-hosted Compose deployments start Memory from the `brain` profile, so
+  add `brain` to `COMPOSE_PROFILES` in your environment file to bring the
+  container up, then enable Memory in Settings. Everything after that is the
+  same.
 </Note>
 
 ## Seeing what it knows
@@ -218,23 +237,19 @@ in staging is distinguishable from one written against production.
 
 ## Choosing models
 
-Three settings pick Memory's models:
+Two settings pick Memory's models:
 
 | Variable                      | What it does      | Written as                        | Changeable            |
 | ----------------------------- | ----------------- | --------------------------------- | --------------------- |
 | `R_BRAIN_MODEL`               | Sourced synthesis | your provider's naming            | any time              |
 | `R_BRAIN_EMBEDDING_MODEL`     | Semantic recall   | a plain model id                  | before the first boot |
-| `R_BRAIN_RERANKER_MODEL`      | Search precision  | provider or upstream naming        | after a restart       |
 
-Leave the first two unset and Memory uses OpenAI's `gpt-5.6-luna` and
+Leave them unset and Memory uses OpenAI's `gpt-5.6-luna` and
 `text-embedding-3-small` through whichever provider you configured.
 
-The reranker defaults to OpenRouter's `voyageai/rerank-2.5-lite`. Set
-`R_BRAIN_RERANKER_MODEL` to choose another model from
-OpenRouter's reranker catalog. Reranking requires an OpenRouter key; with only
-OpenAI configured, gbrain keeps the unreranked results instead of failing the
-search. When `R_BRAIN_RERANK_UPSTREAM_URL` is set, use the exact bare model id
-served by that upstream instead.
+Memory search does not use a cross-encoder reranker: retrieval is hybrid
+(vector + keyword fusion), which keeps search latency flat and provider
+requirements minimal.
 
 The synthesis model is applied by Roomote when it forwards the call and passed
 to the provider as written, so use that provider's naming
@@ -291,6 +306,6 @@ matching on keywords alone.
 - **Memory has no public service route.** It is never exposed to the internet,
   and task sandboxes reach it only through Roomote's API with their run token,
   which grants read access only.
-- **To run with no memory at all**, leave both provider keys unset. Deployments
-  that want to reclaim the resources entirely can delete the Memory service
-  from their compose file or template.
+- **To run with no memory at all**, leave Memory disabled in Settings.
+  Deployments that want to reclaim the resources entirely can delete the
+  Memory service from their compose file or template.

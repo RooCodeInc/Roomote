@@ -24,7 +24,7 @@ function readAppendix(skillContent: string, appendixName: string) {
   return skillContent.slice(startIndex, endIndex);
 }
 
-function expectAppendixIgnoresCi(
+function expectAppendixAvoidsCiBookkeeping(
   appendix: string,
   summaryTitleMarker: string,
   reviewInstruction: string,
@@ -33,9 +33,6 @@ function expectAppendixIgnoresCi(
   expect(appendix).toContain(summaryTitleMarker);
   expect(appendix).toContain(reviewInstruction);
   expect(appendix).toContain(commentInstruction);
-  expect(appendix).not.toContain(
-    'gh pr checks [PR_NUMBER] --repo [owner]/[repo]',
-  );
   expect(appendix).not.toContain('latest fetched CI state');
   expect(appendix).not.toContain('Do not wait for CI');
   expect(appendix).not.toContain('pending_check');
@@ -49,6 +46,18 @@ describe('review-code GitHub workflow paths', () => {
   it('forbids nested judge subagent spawns during code review', () => {
     expect(skillContent).toContain(
       'Do not spawn the `judge` subagent or any other nested review-only subagent',
+    );
+  });
+
+  it('publishes findings as comments instead of change-request reviews', () => {
+    expect(skillContent).toContain(
+      'Do not submit a `request_changes` review in any pull-request review path.',
+    );
+    expect(skillContent).toContain(
+      'Publish actionable findings as inline comments plus the canonical summary',
+    );
+    expect(skillContent).toContain(
+      'reserve `submit_pull_request_review` for `approve` only in the approval-enabled clean paths.',
     );
   });
 
@@ -98,7 +107,7 @@ describe('review-code GitHub workflow paths', () => {
       );
     }
     expect(skillContent).toContain(
-      'When `existing_review_comments` or `issue_comments` are missing, or when current thread or top-level discussion state must be revalidated before a side effect, call `mcp__roomote__manage_source_control` with `action: "list_pull_request_comments"`.',
+      'When `existing_review_comments` or `issue_comments` are missing, or when current thread, top-level review, or discussion state must be revalidated before a side effect, call `mcp__roomote__manage_source_control` with `action: "list_pull_request_comments"`.',
     );
     expect(skillContent).not.toContain('gh pr view');
     expect(skillContent).not.toContain('gh pr diff');
@@ -118,12 +127,12 @@ describe('review-code GitHub workflow paths', () => {
     );
   });
 
-  it('keeps every GitHub PR review path focused on code findings instead of CI state', () => {
+  it('keeps every GitHub PR review path focused on code findings without owning CI orchestration', () => {
     for (const appendixName of [
       'review-github-pr',
       'review-github-pr-with-approval',
     ]) {
-      expectAppendixIgnoresCi(
+      expectAppendixAvoidsCiBookkeeping(
         readAppendix(skillContent, appendixName),
         '<title>Update the canonical summary comment</title>',
         'Review the diff in context first before publishing the review findings.',
@@ -135,13 +144,43 @@ describe('review-code GitHub workflow paths', () => {
       'sync-github-pr-review',
       'sync-github-pr-review-with-approval',
     ]) {
-      expectAppendixIgnoresCi(
+      expectAppendixAvoidsCiBookkeeping(
         readAppendix(skillContent, appendixName),
         '<title>Refresh the canonical summary comment</title>',
         'Review the delta in context first before publishing the review findings.',
         'For each net-new finding, check the fetched review threads for an existing thread anchored on the same file and overlapping lines.',
       );
     }
+  });
+
+  it('uses the diff and existing CI as primary evidence without rerunning broad validation', () => {
+    expect(skillContent).toContain(
+      'Use the diff, surrounding code, and existing CI results for the reviewed commit as the primary evidence.',
+    );
+    expect(skillContent).toContain(
+      "When CI state matters, actively inspect the current commit's checks with available repository or provider commands; do not require CI status to be injected into task context.",
+    );
+    expect(skillContent).toContain(
+      'If CI is pending, continue the review in parallel and leave broad validation to CI.',
+    );
+    expect(skillContent).toContain(
+      'If CI has passed for the current commit, trust it by default.',
+    );
+    expect(skillContent).toContain(
+      'Treat CI failure alerts received after the review begins as new evidence: inspect the reported failure and incorporate any actionable issue into the review.',
+    );
+    expect(skillContent).toContain(
+      'Do not run the full test suite by default.',
+    );
+    expect(skillContent).toContain(
+      'Run only small targeted tests when needed to validate a suspected behavioral bug, when existing CI does not cover the relevant behavior, or when concrete evidence shows an environment or coverage gap.',
+    );
+    expect(skillContent).toContain(
+      'Still identify weak coverage, suspicious caching, stale expectations, or other concrete reasons the current CI result may not be trustworthy.',
+    );
+    expect(skillContent).toContain(
+      'do not respond by routinely rerunning broad validation.',
+    );
   });
 
   it('keeps code-only summary inventory, task handoff, and sync anchor recovery in the shared skill', () => {
@@ -187,6 +226,16 @@ describe('review-code GitHub workflow paths', () => {
     expect(skillContent).toContain(
       'On providers where approval maps to a vote or is not permitted for the token identity, the tool reports `applied: false` with warnings; report that gap honestly instead of claiming the pull request was approved.',
     );
+    expect(skillContent).toContain(
+      'top-level `reviews` with review ids and states when exposed',
+    );
+    expect(skillContent).toContain(
+      'dismiss each unique top-level review whose `state` is `CHANGES_REQUESTED` and whose author matches the normalized Roomote-managed login set',
+    );
+    expect(skillContent).toContain(
+      '`action: "dismiss_pull_request_review"`, that review\'s `reviewId`, and body `Requested changes have been addressed.`',
+    );
+    expect(skillContent).toContain("Never dismiss another reviewer's review.");
     expect(skillContent).toContain(
       '<summary>Use when you need actionable pull-request review findings, live provider context discovery, and one canonical summary comment without approval.</summary>',
     );
@@ -393,7 +442,7 @@ describe('review-code GitHub workflow paths', () => {
     expect(skillContent).not.toContain('summary-carried on all providers');
   });
 
-  it('removes CI and check-state language from the shared skill contract', () => {
+  it('keeps CI results out of the review finding inventory and summary bookkeeping', () => {
     expect(skillContent).not.toContain(
       'If unresolved findings remain after combining the published code findings with the latest fetched CI state',
     );
@@ -426,9 +475,6 @@ describe('review-code GitHub workflow paths', () => {
     );
     expect(skillContent).not.toContain(
       '<finding_kind>code_finding|check|pending_check</finding_kind>',
-    );
-    expect(skillContent).not.toContain(
-      'gh pr checks [PR_NUMBER] --repo [owner]/[repo]',
     );
     expect(skillContent).not.toContain('latest fetched CI state');
     expect(skillContent).not.toContain('Do not wait for CI');

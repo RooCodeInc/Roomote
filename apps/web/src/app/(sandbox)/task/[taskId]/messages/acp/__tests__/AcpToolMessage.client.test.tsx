@@ -7,9 +7,17 @@ import {
 } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
-import { Bot, Eye, Search, SquarePen, Wrench } from '@/components/system';
+import {
+  AlertCircle,
+  Bot,
+  FileIcon,
+  Search,
+  SquarePen,
+  Wrench,
+} from '@/components/system';
 
 import { AcpToolMessage } from '../AcpToolMessage';
+import { mcpIntegrationIconFor } from '../tool-icons';
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from '../types';
 
 const toolHeaderSpy = vi.fn();
@@ -145,6 +153,55 @@ describe('AcpToolMessage', () => {
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         icon: SquarePen,
+      }),
+    );
+  });
+
+  it('keeps the resolved tool icon while the header renders running progress', () => {
+    render(
+      <AcpToolMessage msg={buildMessage('edit', { status: 'in_progress' })} />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: SquarePen,
+        state: 'input-available',
+      }),
+    );
+  });
+
+  it('keeps a known MCP brand icon while the header renders running progress', () => {
+    render(
+      <AcpToolMessage
+        msg={buildMessage('mcp', {
+          status: 'in_progress',
+          isMcp: true,
+          mcpServerName: 'sentry',
+          mcpToolName: 'search_issues',
+          serverName: 'sentry',
+          toolName: 'search_issues',
+        })}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: mcpIntegrationIconFor('sentry'),
+        state: 'input-available',
+      }),
+    );
+  });
+
+  it('keeps failure presentation ahead of partial progress', () => {
+    const msg = buildMessage('edit', { status: 'failed' });
+    msg.partial = true;
+
+    render(<AcpToolMessage msg={msg} />);
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: AlertCircle,
+        state: 'output-error',
       }),
     );
   });
@@ -349,7 +406,7 @@ describe('AcpToolMessage', () => {
     expect(toolDetailsSpy).not.toHaveBeenCalled();
   });
 
-  it('renders the gbrain MCP server as Hippocampus', () => {
+  it('renders the gbrain MCP server as Memory', () => {
     render(
       <AcpToolMessage
         msg={buildResultMessage('mcp', {
@@ -367,7 +424,29 @@ describe('AcpToolMessage', () => {
       expect.objectContaining({
         action: 'Used',
         object: 'Query',
-        suffix: 'Hippocampus',
+        suffix: 'Memory',
+      }),
+    );
+  });
+
+  it('uses the known MCP integration’s brand icon', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'search_issues',
+          isMcp: true,
+          mcpServerName: 'sentry',
+          mcpToolName: 'search_issues',
+          serverName: 'sentry',
+          toolName: 'search_issues',
+        })}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: mcpIntegrationIconFor('sentry'),
+        suffix: 'Sentry',
       }),
     );
   });
@@ -387,7 +466,7 @@ describe('AcpToolMessage', () => {
 
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        icon: Eye,
+        icon: FileIcon,
         collapsible: false,
       }),
     );

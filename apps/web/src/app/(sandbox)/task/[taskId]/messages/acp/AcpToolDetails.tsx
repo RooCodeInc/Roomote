@@ -42,10 +42,6 @@ export function AcpToolDetails({
 
   const sanitizedToolData = sanitizeSandboxPathsForDisplay(msg.data);
   const visibleToolInput = getVisibleToolInput(msg.data);
-  const sanitizedText = msg.text
-    ? sanitizeSandboxPathString(msg.text)
-    : msg.text;
-  const formattedText = formatToolDetails(sanitizedText, visibleToolInput);
   const isSubagent = isSubagentToolPayload(msg.data);
   const subagentPrompt = getSubagentPrompt(msg);
   const subagentLastMessage = getSubagentLastMessage(msg);
@@ -91,16 +87,45 @@ export function AcpToolDetails({
     );
   }
 
-  return formattedText ? (
-    <CodeBlock
-      code={formattedText.code}
-      language={formattedText.isStructured ? 'yaml' : 'bash'}
-      maxHeight={maxHeight}
-      variant="compact"
-      highlight={false}
-      className="[&>div]:rounded-none [&>div]:bg-transparent [&_pre]:px-0 [&_pre]:py-0"
-    />
-  ) : (
+  const rawResult =
+    msg.kind === 'tool_result'
+      ? msg.data.output || msg.text
+      : visibleToolInput
+        ? undefined
+        : msg.text;
+  const sanitizedResult = rawResult
+    ? sanitizeSandboxPathString(rawResult)
+    : undefined;
+  const formattedInput = formatStructuredValue(visibleToolInput);
+  const formattedResult = formatToolResult(
+    sanitizedResult,
+    Boolean(formattedInput),
+  );
+
+  if (formattedInput || formattedResult) {
+    return (
+      <div className="space-y-3">
+        {formattedInput ? (
+          <ToolDetailSection
+            label="Input"
+            code={formattedInput.code}
+            language="yaml"
+            maxHeight={maxHeight}
+          />
+        ) : null}
+        {formattedResult ? (
+          <ToolDetailSection
+            label="Result"
+            code={formattedResult.code}
+            language={formattedResult.isStructured ? 'yaml' : 'bash'}
+            maxHeight={maxHeight}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
     <ToolInput
       input={sanitizedToolData}
       style={{
@@ -111,9 +136,45 @@ export function AcpToolDetails({
   );
 }
 
-function formatToolDetails(
+function ToolDetailSection({
+  label,
+  code,
+  language,
+  maxHeight,
+}: {
+  label: string;
+  code: string;
+  language: 'yaml' | 'bash';
+  maxHeight: number;
+}) {
+  return (
+    <section className="space-y-1.5">
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <CodeBlock
+        code={code}
+        language={language}
+        maxHeight={maxHeight}
+        variant="compact"
+        highlight={false}
+        className="[&>div]:rounded-none [&>div]:bg-transparent [&_pre]:min-w-0 [&_pre]:whitespace-pre-wrap [&_pre]:wrap-break-word [&_pre]:px-0 [&_pre]:py-0"
+      />
+    </section>
+  );
+}
+
+function formatStructuredValue(
+  value: Record<string, string> | null,
+): { code: string } | undefined {
+  if (!value || Object.keys(value).length === 0) return undefined;
+
+  return {
+    code: YAML.stringify(value, { indent: 2, lineWidth: 0 }).trimEnd(),
+  };
+}
+
+function formatToolResult(
   text: string | undefined,
-  visibleToolInput: Record<string, string> | null,
+  hasVisibleInput: boolean,
 ): { code: string; isStructured: boolean } | undefined {
   if (!text) return undefined;
 
@@ -123,19 +184,17 @@ function formatToolDetails(
       return { code: text, isStructured: false };
     }
 
-    const details =
-      !Array.isArray(result) &&
-      visibleToolInput &&
-      Object.keys(visibleToolInput).length > 0
-        ? { ...(result as Record<string, unknown>), ...visibleToolInput }
-        : result;
-
     return {
-      code: YAML.stringify(details, { indent: 2, lineWidth: 0 }).trimEnd(),
+      code: YAML.stringify(result, { indent: 2, lineWidth: 0 }).trimEnd(),
       isStructured: true,
     };
   } catch {
-    return { code: text, isStructured: false };
+    return hasVisibleInput
+      ? {
+          code: YAML.stringify(text, { lineWidth: 0 }).trimEnd(),
+          isStructured: true,
+        }
+      : { code: text, isStructured: false };
   }
 }
 

@@ -5,9 +5,11 @@ import path from 'node:path';
 
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { GitMergeIcon } from '@primer/octicons-react';
 import {
   ChartColumnIncreasing,
   BatteryWarning,
+  GitCommitVertical,
   GitMergeConflict,
   Lightbulb,
   Megaphone,
@@ -27,6 +29,7 @@ const outputDirectory = path.resolve(
 const lucideIcons = {
   'battery-warning': BatteryWarning,
   'chart-column-increasing': ChartColumnIncreasing,
+  'git-commit-vertical': GitCommitVertical,
   'git-merge-conflict': GitMergeConflict,
   lightbulb: Lightbulb,
   megaphone: Megaphone,
@@ -34,6 +37,10 @@ const lucideIcons = {
   'triangle-alert': TriangleAlert,
   wrench: Wrench,
   zap: Zap,
+};
+
+const octicons = {
+  'git-merge': GitMergeIcon,
 };
 
 const simpleIcons = {
@@ -59,6 +66,17 @@ function renderLucideIcon(Icon) {
   );
 }
 
+function renderOcticon(Icon) {
+  return wrapIcon(
+    renderToStaticMarkup(
+      createElement(Icon, {
+        size: 56,
+        fill: '#000000',
+      }),
+    ),
+  );
+}
+
 function renderSimpleIcon(icon) {
   return wrapIcon(
     `<svg width="56" height="56" viewBox="0 0 24 24" fill="#000000" aria-hidden="true"><path d="${icon.path}"/></svg>`,
@@ -69,6 +87,12 @@ await mkdir(outputDirectory, { recursive: true });
 
 for (const [name, Icon] of Object.entries(lucideIcons)) {
   await sharp(Buffer.from(renderLucideIcon(Icon)))
+    .png()
+    .toFile(path.join(outputDirectory, `${name}.png`));
+}
+
+for (const [name, Icon] of Object.entries(octicons)) {
+  await sharp(Buffer.from(renderOcticon(Icon)))
     .png()
     .toFile(path.join(outputDirectory, `${name}.png`));
 }

@@ -13,27 +13,8 @@ import {
   CollapsibleContent,
   CollapsibleIconTrigger,
   CollapsibleTrigger,
+  Spinner,
 } from '@/components/system';
-
-// const TOOL_STATE_LABELS: Record<ToolState, string> = {
-//   'input-streaming': 'Pending',
-//   'input-available': 'Running',
-//   'approval-requested': 'Awaiting Approval',
-//   'approval-responded': 'Responded',
-//   'output-available': 'Completed',
-//   'output-error': 'Error',
-//   'output-denied': 'Denied',
-// };
-
-// const TOOL_STATE_ICONS: Record<ToolState, ReactNode> = {
-//   'input-streaming': <Circle className="size-4" />,
-//   'input-available': <Clock className="size-4 animate-pulse" />,
-//   'approval-requested': <Clock className="size-4 text-yellow-600" />,
-//   'approval-responded': <Check className="size-4 text-blue-600" />,
-//   'output-available': <Check className="size-4 text-green-600" />,
-//   'output-error': <X className="size-4 text-red-600" />,
-//   'output-denied': <X className="size-4 text-orange-600" />,
-// };
 
 type ToolState =
   | 'input-streaming'
@@ -43,6 +24,16 @@ type ToolState =
   | 'output-available'
   | 'output-error'
   | 'output-denied';
+
+const TOOL_STATE_LABELS: Record<ToolState, string> = {
+  'input-streaming': 'Running',
+  'input-available': 'Running',
+  'approval-requested': 'Awaiting approval',
+  'approval-responded': 'Responded',
+  'output-available': 'Completed',
+  'output-error': 'Failed',
+  'output-denied': 'Denied',
+};
 
 type ToolProps = ComponentProps<typeof Collapsible>;
 
@@ -71,7 +62,7 @@ export const ToolHeader = ({
   suffix,
   suffixPrefix = 'from',
   icon: ActionIcon,
-  state: _state,
+  state,
   params: _params,
   additions,
   deletions,
@@ -83,6 +74,12 @@ export const ToolHeader = ({
     (additions !== undefined && additions > 0) ||
     (deletions !== undefined && deletions > 0);
   const hasSecondaryLabel = Boolean(object || suffix);
+  const statusLabel = TOOL_STATE_LABELS[state];
+  const showStatus =
+    state === 'input-streaming' ||
+    state === 'input-available' ||
+    state === 'output-error';
+  const isRunning = state === 'input-streaming' || state === 'input-available';
 
   const inner = (
     <div
@@ -91,7 +88,9 @@ export const ToolHeader = ({
         !collapsible && 'cursor-default',
       )}
     >
-      {collapsible ? (
+      {isRunning ? (
+        <Spinner size="sm" className="shrink-0" />
+      ) : collapsible ? (
         <CollapsibleIconTrigger icon={ActionIcon} />
       ) : (
         <ActionIcon className="size-3 shrink-0" />
@@ -129,6 +128,15 @@ export const ToolHeader = ({
           )}
         </span>
       )}
+      <span
+        aria-live="polite"
+        className={cn(
+          showStatus ? 'shrink-0 text-xs' : 'sr-only',
+          state === 'output-error' && 'text-destructive',
+        )}
+      >
+        {statusLabel}
+      </span>
     </div>
   );
 

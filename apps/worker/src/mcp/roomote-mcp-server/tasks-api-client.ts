@@ -10,6 +10,10 @@ import type {
   SuggestionPriority,
   TaskLaunchRequest,
   WorkspaceReadiness,
+  RoomoteSearchSessionsResponse,
+  RoomoteSessionMessagesResponse,
+  RoomoteSessionSummary,
+  RoomoteStartSessionResponse,
 } from '@roomote/types';
 import type {
   RoomoteConfig,
@@ -64,6 +68,83 @@ async function apiFetch<T>(
   }
 
   return (await response.json()) as T;
+}
+
+export async function startSession(
+  config: RoomoteConfig,
+  message: string,
+): Promise<RoomoteStartSessionResponse> {
+  return apiFetch(
+    config,
+    '/api/mcp/sessions',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    },
+    'Failed to start session',
+  );
+}
+
+export async function searchSessions(
+  config: RoomoteConfig,
+  params: {
+    query?: string;
+    status?: string;
+    limit?: number;
+    cursor?: string;
+  },
+): Promise<RoomoteSearchSessionsResponse> {
+  const qs = buildSearchParams(params);
+  return apiFetch(
+    config,
+    `/api/mcp/sessions${qs}`,
+    {},
+    'Failed to search sessions',
+  );
+}
+
+export async function getSessionSummary(
+  config: RoomoteConfig,
+  sessionId: string,
+): Promise<RoomoteSessionSummary> {
+  return apiFetch(
+    config,
+    `/api/mcp/sessions/${encodeURIComponent(sessionId)}/summary`,
+    {},
+    'Failed to get session summary',
+  );
+}
+
+export async function getSessionMessages(
+  config: RoomoteConfig,
+  sessionId: string,
+  limit?: number,
+): Promise<RoomoteSessionMessagesResponse> {
+  const qs = buildSearchParams({ limit });
+  return apiFetch(
+    config,
+    `/api/mcp/sessions/${encodeURIComponent(sessionId)}/messages${qs}`,
+    {},
+    'Failed to get session messages',
+  );
+}
+
+export async function sendMessageToSession(
+  config: RoomoteConfig,
+  sessionId: string,
+  message: string,
+): Promise<SendMessageResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/sessions/${encodeURIComponent(sessionId)}/send_message`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    },
+    'Failed to send session message',
+  );
 }
 
 function buildSearchParams(
@@ -325,6 +406,7 @@ export async function manageSourceControl(
     targetBranch?: string;
     title: string;
     body: string;
+    prAttribution?: string;
     labels?: string[];
     assignees?: string[];
     sourceControlProvider?: SourceControlProvider;
@@ -387,11 +469,13 @@ export async function writeSourceControl(
       | 'create_pull_request_review_comment'
       | 'resolve_pull_request_thread'
       | 'submit_pull_request_review'
+      | 'dismiss_pull_request_review'
       | 'update_pull_request_comment';
     repositoryFullName: string;
     prNumber: number;
     threadId?: string;
     commentId?: string;
+    reviewId?: string;
     body?: string;
     resolved?: boolean;
     reviewEvent?: 'approve' | 'request_changes' | 'comment';

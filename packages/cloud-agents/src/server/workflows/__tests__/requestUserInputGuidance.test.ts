@@ -258,6 +258,48 @@ describe('request_user_input guidance in workflow prompts', () => {
     );
   });
 
+  it('uses the task provider label for linked assignee instructions', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Implement a repository change',
+      repo: 'Roomote/example-app',
+      taskRunUrl: 'https://example.com/task/123',
+      sourceControlProvider: 'gitea',
+      attribution: {
+        ...matchedUserAttributionWithAssignee,
+        githubLogin: null,
+        publicDisplayName: '@monalisa',
+        prAssigneeLogin: 'monalisa',
+      },
+    });
+
+    expect(harnessInstructions).toContain(
+      "because the creating user has linked Gitea login `monalisa`, the delegated PR-delivery skill must pass `assignees: ['monalisa']`",
+    );
+    expect(harnessInstructions).not.toContain('linked GitHub login `monalisa`');
+  });
+
+  it('preserves provider-aware attribution and assignment for all-repository tasks', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Implement a repository change',
+      repo: ALL_REPOSITORIES,
+      repoFullNames: ['shared/api', 'shared/web'],
+      taskRunUrl: 'https://example.com/task/123',
+      sourceControlProvider: 'gitea',
+      attribution: {
+        ...matchedUserAttributionWithAssignee,
+        githubLogin: null,
+        publicDisplayName: '@monalisa',
+        prAssigneeLogin: 'monalisa',
+      },
+    });
+
+    expect(harnessInstructions).toContain('Opened on behalf of Jane Doe.');
+    expect(harnessInstructions).toContain(
+      "because the creating user has linked Gitea login `monalisa`, the delegated PR-delivery skill must pass `assignees: ['monalisa']`",
+    );
+    expect(harnessInstructions).not.toContain('linked GitHub login `monalisa`');
+  });
+
   it('uses a Slack conversation link for Slack-launched PR follow-up instructions when thread metadata is available', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',

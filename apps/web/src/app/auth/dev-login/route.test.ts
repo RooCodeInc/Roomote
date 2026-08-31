@@ -2,7 +2,24 @@ import { createHmac } from 'node:crypto';
 
 import { NextRequest } from 'next/server';
 
-import { authSessions, authUsers, db, eq, users } from '@roomote/db/server';
+import {
+  authSessions,
+  authUsers,
+  db,
+  deploymentSettings,
+  deploymentSecrets,
+  environmentVariables,
+  eq,
+  inArray,
+  resolveDeploymentEnvVar,
+  users,
+} from '@roomote/db/server';
+import { encryptJSON } from '@roomote/db/encryption';
+import {
+  buildSetupModelStatus,
+  DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER,
+  normalizeDeploymentModelConfig,
+} from '@roomote/types';
 
 const { envMock, mockBootstrapWebRuntimeEnv, mockIsWebServerBindExposed } =
   vi.hoisted(() => ({
@@ -65,14 +82,35 @@ async function deleteDevLoginRows() {
     .delete(authSessions)
     .where(eq(authSessions.userAgent, 'roomote-dev-login-test'));
   await db
+    .delete(environmentVariables)
+    .where(
+      inArray(environmentVariables.name, [
+        'ANTHROPIC_API_KEY',
+        'OPENROUTER_API_KEY',
+      ]),
+    );
+  await db
     .delete(authUsers)
     .where(eq(authUsers.email, envMock.WEB_DEV_LOGIN_EMAIL));
   await db.delete(users).where(eq(users.email, envMock.WEB_DEV_LOGIN_EMAIL));
+  await db
+    .delete(deploymentSettings)
+    .where(eq(deploymentSettings.id, 'default'));
+  await db
+    .delete(deploymentSecrets)
+    .where(
+      inArray(deploymentSecrets.name, [
+        'CHATGPT_SUBSCRIPTION_OAUTH',
+        'GITHUB_COPILOT_SUBSCRIPTION_OAUTH',
+        'XAI_SUBSCRIPTION_OAUTH',
+      ]),
+    );
 }
 
 describe('GET /auth/dev-login', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     envMock.APP_ENV = 'development';
     envMock.R_APP_URL = 'http://localhost:3000';
     envMock.WEB_DEV_LOGIN_EMAIL = 'local@roomote.dev';
@@ -83,6 +121,7 @@ describe('GET /auth/dev-login', () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await deleteDevLoginRows();
   });
 
@@ -130,6 +169,116 @@ describe('GET /auth/dev-login', () => {
       name: 'Local Admin',
     });
   });
+
+  it('satisfies inference setup with an intentionally invalid saved key when configuration is empty', async () => {
+    const response = await GET(
+      new NextRequest('http://localhost:3000/auth/dev-login', {
+        headers: { 'user-agent': 'roomote-dev-login-test' },
+      }),
+    );
+
+    expect(response.status).toBe(307);
+    await expect(resolveDeploymentEnvVar('OPENROUTER_API_KEY')).resolves.toBe(
+      DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER,
+    );
+
+    const settings = await db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+      columns: { runtimeModelConfig: true },
+    });
+    expect(settings?.runtimeModelConfig?.roomoteModel).toMatch(
+      /^openrouter\//u,
+    );
+    expect(
+      buildSetupModelStatus({
+        runtimeEnv: {},
+        persistedModelConfig: settings?.runtimeModelConfig,
+        persistedEnvVarNames: ['OPENROUTER_API_KEY'],
+      }).setupSatisfied,
+    ).toBe(true);
+  });
+
+  it('does not overwrite an existing saved inference configuration', async () => {
+    await db.insert(environmentVariables).values({
+      userId: null,
+      name: 'ANTHROPIC_API_KEY',
+      value: 'real-saved-key',
+    });
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      runtimeModelConfig: normalizeDeploymentModelConfig({
+        roomoteModel: 'anthropic/claude-sonnet-5',
+      }),
+    });
+
+    const response = await GET(
+      new NextRequest('http://localhost:3000/auth/dev-login', {
+        headers: { 'user-agent': 'roomote-dev-login-test' },
+      }),
+    );
+
+    expect(response.status).toBe(307);
+    await expect(resolveDeploymentEnvVar('OPENROUTER_API_KEY')).resolves.toBe(
+      null,
+    );
+    const settings = await db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+      columns: { runtimeModelConfig: true },
+    });
+    expect(settings?.runtimeModelConfig?.roomoteModel).toBe(
+      'anthropic/claude-sonnet-5',
+    );
+  });
+
+  it('does not add saved inference configuration when runtime configuration exists', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'real-runtime-key');
+
+    const response = await GET(
+      new NextRequest('http://localhost:3000/auth/dev-login', {
+        headers: { 'user-agent': 'roomote-dev-login-test' },
+      }),
+    );
+
+    expect(response.status).toBe(307);
+    await expect(resolveDeploymentEnvVar('OPENROUTER_API_KEY')).resolves.toBe(
+      null,
+    );
+    const settings = await db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+      columns: { runtimeModelConfig: true },
+    });
+    expect(settings?.runtimeModelConfig).toBeNull();
+  });
+
+  it.each([
+    'CHATGPT_SUBSCRIPTION_OAUTH',
+    'GITHUB_COPILOT_SUBSCRIPTION_OAUTH',
+    'XAI_SUBSCRIPTION_OAUTH',
+  ])(
+    'does not add placeholder configuration when %s is connected',
+    async (secretName) => {
+      await db.insert(deploymentSecrets).values({
+        name: secretName,
+        value: encryptJSON({ status: 'connected' }),
+      });
+
+      const response = await GET(
+        new NextRequest('http://localhost:3000/auth/dev-login', {
+          headers: { 'user-agent': 'roomote-dev-login-test' },
+        }),
+      );
+
+      expect(response.status).toBe(307);
+      await expect(resolveDeploymentEnvVar('OPENROUTER_API_KEY')).resolves.toBe(
+        null,
+      );
+      const settings = await db.query.deploymentSettings.findFirst({
+        where: eq(deploymentSettings.id, 'default'),
+        columns: { runtimeModelConfig: true },
+      });
+      expect(settings?.runtimeModelConfig).toBeNull();
+    },
+  );
 
   it('falls back to the root path when the redirect is cross-origin', async () => {
     const response = await GET(
@@ -314,6 +463,9 @@ describe('GET /auth/dev-login', () => {
 
       expect(response.status).toBe(404);
       expect(response.headers.get('set-cookie')).toBeNull();
+      await expect(
+        resolveDeploymentEnvVar('OPENROUTER_API_KEY'),
+      ).resolves.toBeNull();
     },
   );
 

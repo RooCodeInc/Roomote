@@ -24,6 +24,7 @@ describe('handleGetTaskMessages', () => {
           text: 'Hello, I will help you fix this bug.',
           images: [],
           metadata: {},
+          visibleInTranscript: true,
         },
         {
           id: 'msg-2',
@@ -34,12 +35,19 @@ describe('handleGetTaskMessages', () => {
           text: 'Should I also update the tests?',
           images: [],
           metadata: {},
+          visibleInTranscript: true,
         },
       ],
       returned: 2,
     });
 
     const result = await handleGetTaskMessages({ taskId: 'task-1' }, config);
+
+    expect(vi.mocked(tasksApiClient.getTaskMessages)).toHaveBeenCalledWith(
+      config,
+      'task-1',
+      { limit: undefined, order: 'desc' },
+    );
 
     const text = result.content[0]?.text ?? '';
     expect(text).toContain('2 message(s)');
@@ -59,6 +67,7 @@ describe('handleGetTaskMessages', () => {
           text: 'Most recent message',
           images: [],
           metadata: {},
+          visibleInTranscript: true,
         },
       ],
       returned: 1,
@@ -115,6 +124,7 @@ describe('handleGetTaskMessages', () => {
           text: 'npm test',
           images: [],
           metadata: {},
+          visibleInTranscript: true,
         },
       ],
       returned: 1,
@@ -165,6 +175,7 @@ describe('handleGetTaskMessages', () => {
           text: 'custom message',
           images: [],
           metadata: {},
+          visibleInTranscript: true,
         },
       ],
       returned: 1,

@@ -150,14 +150,17 @@ one. Check the running application version and applied schema migration at any
 time under **Settings → Deployment → Diagnostics**; both are also recorded in
 every backup bundle's manifest.
 
-After you upgrade, Roomote can surface the new release in the web app:
+Roomote surfaces release history and available updates in the web app:
 
 - **Admins** on self-hosted deployments see an update notice in the sidenav when
-  a newer GitHub release is available, with release notes and a link back to
-  GitHub. Use `roomote upgrade` (or your image roll-forward process) to install
-  it.
-- **Everyone** sees a short "what's new" notice once after the app is upgraded
-  to a new version, pulled from the same GitHub release notes as the changelog.
+  a newer GitHub release is available. The update dialog keeps that target and
+  its GitHub link visible even when the running image does not yet contain the
+  newer release's notes. Use `roomote upgrade` (or your image roll-forward
+  process) to install it.
+- **Everyone** can open **About Roomote** and select **See all Roomote releases**
+  to browse the current and previous release notes bundled in the running
+  image, with the latest release expanded. After an upgrade, Roomote also shows
+  the latest "what's new" notice once.
 
 ## Deployment modes
 
@@ -187,9 +190,9 @@ After you upgrade, Roomote can surface the new release in the web app:
 
 The final setup step offers a small set of preselected starter tasks. Keep the
 ones you want, clear any you do not want to run yet, then select **Go**. If you
-start one task, Roomote opens it directly; if you start several, Roomote opens
-the task list. You can also clear every selection and finish setup without
-starting a task.
+keep any selected, Roomote completes setup and opens one **Set up Roomote**
+Session that launches the starter tasks and keeps their progress together. You
+can also clear every selection and finish setup without starting a Session.
 
 After setup, run a small task that uses the first environment if you did not
 start one from the starter list. A healthy deployment should let you:

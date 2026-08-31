@@ -1,73 +1,30 @@
-import {
-  and,
-  db,
-  desc,
-  environments,
-  eq,
-  isNull,
-  sql,
-  taskRuns,
-} from '@roomote/db/server';
-import { ALL_REPOSITORIES } from '@roomote/types';
 import { captureEvent } from '@roomote/telemetry/server';
+import { getUserDisplayName } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 import {
   getSetupStarterTask,
   type SetupStarterTaskId,
 } from '@/lib/setup-starter-tasks';
-import { createStandardTaskRunCommand } from '../task-runs';
+import { startSetupFastSessionCommand } from '../fast-sessions';
 import { completeSetupCommand } from './index';
 import { assertAdmin } from './shared';
 
 type CompleteSetupWithStarterTasksResult = {
-  launched: Array<{ starterTaskId: SetupStarterTaskId; taskId: string }>;
-  failed: Array<{ starterTaskId: SetupStarterTaskId; error: string }>;
+  /** Setup session to land in, or null when nothing was selected. */
+  sessionId: string | null;
   setupCompleted: boolean;
   completionError: string | null;
 };
 
 /**
- * Picks the launch workspace for setup starter tasks: the most recently
- * updated deployment environment when one exists (matching the ordering the
- * web environments list uses), otherwise the tasks fall back to the
- * ALL_REPOSITORIES workspace.
- */
-async function findStarterTaskEnvironmentId(): Promise<string | null> {
-  const [environment] = await db
-    .select({ id: environments.id })
-    .from(environments)
-    .where(and(isNull(environments.userId), eq(environments.isEval, false)))
-    .orderBy(desc(environments.updatedAt))
-    .limit(1);
-
-  return environment?.id ?? null;
-}
-
-async function findStarterTaskLaunch(
-  launchIdempotencyKey: string,
-): Promise<string | null> {
-  const [existingRun] = await db
-    .select({ taskId: taskRuns.taskId })
-    .from(taskRuns)
-    .where(
-      sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
-    )
-    .limit(1);
-
-  return existingRun?.taskId ?? null;
-}
-
-/**
- * Launches the selected setup starter tasks as direct standard web tasks and
- * completes setup once every requested launch succeeded.
+ * Completes setup, then drops the administrator into one "Set up Roomote"
+ * Fast session whose kickoff turn launches the selected starter tasks and
+ * opens the conversation around them.
  *
- * Each launch carries a stable key derived from the browser-session batch and
- * starter-task id. A partial unique index on task_runs makes concurrent retries
- * mutually exclusive, while the lookup before and after create recovers the
- * original task after a lost response or uniqueness race. An empty selection
- * simply completes setup, and setup stays incomplete while any requested launch
- * is still failing.
+ * Setup completion is deterministic and happens before the session's first
+ * turn runs, so a failed or slow model turn can never leave setup incomplete.
+ * An empty selection simply completes setup with no session.
  */
 export async function completeSetupWithStarterTasksCommand(
   auth: UserAuthSuccess,
@@ -80,117 +37,66 @@ export async function completeSetupWithStarterTasksCommand(
 ): Promise<CompleteSetupWithStarterTasksResult> {
   assertAdmin(auth);
 
-  type StarterTaskLaunchOutcome =
-    | { starterTaskId: SetupStarterTaskId; taskId: string }
-    | { starterTaskId: SetupStarterTaskId; error: string };
-
   const selectedStarterTaskIds = [...new Set(input.selectedStarterTaskIds)];
-  const environmentId =
-    selectedStarterTaskIds.length > 0
-      ? await findStarterTaskEnvironmentId()
-      : null;
 
-  const outcomes = await Promise.all(
-    selectedStarterTaskIds.map(
-      async (starterTaskId): Promise<StarterTaskLaunchOutcome> => {
-        const starterTask = getSetupStarterTask(starterTaskId);
-        const launchIdempotencyKey = [
-          'setup-starter',
-          auth.userId,
-          input.launchBatchId,
-          starterTaskId,
-        ].join(':');
-
-        try {
-          const existingTaskId =
-            await findStarterTaskLaunch(launchIdempotencyKey);
-          if (existingTaskId) {
-            return { starterTaskId, taskId: existingTaskId };
-          }
-
-          const result = await createStandardTaskRunCommand(auth, {
-            payload: {
-              repo: ALL_REPOSITORIES,
-              ...(environmentId ? { environmentId } : {}),
-              description: starterTask.prompt,
-              launchIdempotencyKey,
-            },
-          });
-
-          if (result.success) {
-            return { starterTaskId, taskId: result.taskId };
-          }
-
-          // A concurrent request can win the unique-index race after our first
-          // lookup. Recover its task instead of surfacing a retry that would
-          // otherwise remain ambiguous.
-          const concurrentlyLaunchedTaskId =
-            await findStarterTaskLaunch(launchIdempotencyKey);
-          return concurrentlyLaunchedTaskId
-            ? { starterTaskId, taskId: concurrentlyLaunchedTaskId }
-            : { starterTaskId, error: result.error };
-        } catch (error) {
-          const concurrentlyLaunchedTaskId =
-            await findStarterTaskLaunch(launchIdempotencyKey);
-          if (concurrentlyLaunchedTaskId) {
-            return { starterTaskId, taskId: concurrentlyLaunchedTaskId };
-          }
-
-          return {
-            starterTaskId,
-            error:
-              error instanceof Error
-                ? error.message
-                : 'The task could not be started.',
-          };
-        }
-      },
-    ),
-  );
-
-  const launched: CompleteSetupWithStarterTasksResult['launched'] = [];
-  const failed: CompleteSetupWithStarterTasksResult['failed'] = [];
-
-  for (const outcome of outcomes) {
-    if ('taskId' in outcome) {
-      launched.push(outcome);
-    } else {
-      failed.push(outcome);
-    }
-  }
-
-  let setupCompleted = false;
-  let completionError: string | null = null;
-
-  if (failed.length === 0) {
-    try {
-      await completeSetupCommand(auth, {
-        ...(input.anonymousAnalyticsEnabled === undefined
-          ? {}
-          : { anonymousAnalyticsEnabled: input.anonymousAnalyticsEnabled }),
-        ...(input.productUpdatesEnabled === undefined
-          ? {}
-          : { productUpdatesEnabled: input.productUpdatesEnabled }),
-      });
-      setupCompleted = true;
-    } catch (error) {
-      completionError =
+  try {
+    await completeSetupCommand(auth, {
+      ...(input.anonymousAnalyticsEnabled === undefined
+        ? {}
+        : { anonymousAnalyticsEnabled: input.anonymousAnalyticsEnabled }),
+      ...(input.productUpdatesEnabled === undefined
+        ? {}
+        : { productUpdatesEnabled: input.productUpdatesEnabled }),
+    });
+  } catch (error) {
+    return {
+      sessionId: null,
+      setupCompleted: false,
+      completionError:
         error instanceof Error
           ? error.message
-          : 'Setup could not be completed.';
-    }
+          : 'Setup could not be completed.',
+    };
   }
+
+  if (selectedStarterTaskIds.length === 0) {
+    return { sessionId: null, setupCompleted: true, completionError: null };
+  }
+
+  const adminName = getUserDisplayName({
+    name: auth.name,
+    email: auth.primaryEmail,
+  });
+
+  const { sessionId, created } = await startSetupFastSessionCommand(auth, {
+    conversationId: `setup-session:${input.launchBatchId}`,
+    title: 'Set up Roomote',
+    event: {
+      type: 'setup_session_started',
+      description:
+        'The administrator finished initial setup and selected these starter tasks to launch.',
+      ...(adminName ? { adminName } : {}),
+      starterTasks: selectedStarterTaskIds.map((starterTaskId) => {
+        const starterTask = getSetupStarterTask(starterTaskId);
+        return {
+          id: starterTask.id,
+          title: starterTask.title,
+          description: starterTask.description,
+          prompt: starterTask.prompt,
+        };
+      }),
+    },
+  });
 
   // Anonymous analytics: fixed catalog ids and counts only, never prompt text.
   void captureEvent('setup_starter_tasks_submitted', {
     userId: auth.userId,
     properties: {
       selectedCount: selectedStarterTaskIds.length,
-      launchedCount: launched.length,
-      failedCount: failed.length,
       starterTaskIds: selectedStarterTaskIds.join(','),
+      setupSessionCreated: created,
     },
   });
 
-  return { launched, failed, setupCompleted, completionError };
+  return { sessionId, setupCompleted: true, completionError: null };
 }

@@ -378,11 +378,10 @@ const serverSchema = {
   R_TRIAL_OPENROUTER_API_KEY: z.string().min(1).optional(),
   // Optional self-run inference upstreams for the Brain gateway. When set,
   // the gateway routes that path's requests there instead of the configured
-  // model provider — embeddings and rerank can move to a local or fleet
+  // model provider — embeddings can move to a local or fleet
   // inference service while chat synthesis keeps flowing to the provider.
   // Model names pass through unrewritten: the upstream owns its own names.
   R_BRAIN_EMBEDDINGS_UPSTREAM_URL: z.string().url().optional(),
-  R_BRAIN_RERANK_UPSTREAM_URL: z.string().url().optional(),
   // One key for both paths: they are the same service in every planned
   // deployment shape. Optional because a compose-network upstream may have
   // no auth at all.
@@ -540,7 +539,6 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_BRAIN_OPENAI_API_KEY',
   'R_TRIAL_OPENROUTER_API_KEY',
   'R_BRAIN_EMBEDDINGS_UPSTREAM_URL',
-  'R_BRAIN_RERANK_UPSTREAM_URL',
   'R_BRAIN_INFERENCE_UPSTREAM_API_KEY',
   'R_BRAIN_GATEWAY_TOKEN',
   'R_BRAIN_GATEWAY_TOKEN_FILE',
@@ -717,8 +715,10 @@ export function isRoomoteCloudEnabled(
  * signal means "a Brain could be wired here", never "an operator turned the
  * Brain on". Activation — everything user-visible, from delivering the
  * gbrain MCP server to agents to running ingestion — additionally requires
- * an explicit R_BRAIN_* provider key and lives in isBrainProviderConfigured
- * (@roomote/db), which also reads Settings.
+ * the Brain to be enabled: the `brainEnabled` Settings toggle, falling back
+ * to an explicit R_BRAIN_* provider key for deployments that opted in
+ * before the toggle existed. That predicate lives in isBrainEnabled
+ * (@roomote/db).
  *
  * Not R_GBRAIN_URL, which every compose file defaults to a service address
  * whether or not that service runs. Keying on a defaulted value made this
@@ -728,8 +728,8 @@ export function isRoomoteCloudEnabled(
  * The split exists because this gates the cheap, synchronous paths that only
  * need to know a Brain might exist, above all the outbox insert inside the
  * run-completion transaction, which must not do a database lookup of its
- * own. Enqueuing memories for a Brain that has no key yet is intentional:
- * the drainer holds them until one is configured, so turning the Brain on
+ * own. Enqueuing memories for a Brain that is not enabled yet is
+ * intentional: the drainer holds them until it is, so turning the Brain on
  * later picks up the history rather than starting from that moment.
  */
 export function isBrainConfigured(env: {
@@ -738,7 +738,6 @@ export function isBrainConfigured(env: {
   R_BRAIN_OPENROUTER_API_KEY?: string;
   R_BRAIN_OPENAI_API_KEY?: string;
   R_BRAIN_EMBEDDINGS_UPSTREAM_URL?: string;
-  R_BRAIN_RERANK_UPSTREAM_URL?: string;
   R_BRAIN_INFERENCE_UPSTREAM_API_KEY?: string;
 }): boolean {
   return Boolean(

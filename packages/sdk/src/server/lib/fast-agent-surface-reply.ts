@@ -3,18 +3,29 @@ import {
   answerFastAgentQuestion,
   createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
+  getActiveFastAgentTasks,
   resolveApiBaseUrl,
   type FastAgentConversation,
+  type FastAgentReactionExternalInput,
   type FastAgentTurnAdapter,
 } from '@roomote/cloud-agents/server';
-import { and, db, eq, slackInstallations } from '@roomote/db/server';
+import {
+  and,
+  db,
+  eq,
+  fastAgentMessages,
+  slackInstallations,
+  sql,
+} from '@roomote/db/server';
 import {
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
   getDiscordFooterlessFinalChunk,
+  resolveFastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
   createFastAgentSlackLiveTaskLauncher,
+  createFastAgentSlackSessionActivity,
   getSlackThreadReplyFooterMessageTs,
   postSlackThreadMessageWithFooterText,
   withSlackThreadReplyFooterLock,
@@ -101,9 +112,43 @@ export type FastAgentSurfaceReplyDelivery = {
   conversation: FastAgentConversation;
   adapter: Pick<
     FastAgentTurnAdapter,
-    'launchTask' | 'postReply' | 'replaceReply'
+    'activity' | 'launchTask' | 'postReply' | 'replaceReply'
   >;
 };
+
+type FastAgentSurfaceReplyParams = {
+  sessionId: string;
+  userId: string;
+  senderDisplayName: string | null;
+  question: string;
+  currentMessageId: string;
+  replyToMessageId?: string;
+  images?: string[];
+  externalInput?: FastAgentReactionExternalInput;
+};
+
+export async function canUserAccessFastAgentSession(params: {
+  sessionId: string;
+  userId: string;
+}): Promise<boolean> {
+  const [session] = await db
+    .select({ id: fastAgentMessages.conversationId })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, params.sessionId),
+        sql`${fastAgentMessages.metadata} ->> 'userId' = ${params.userId}`,
+      ),
+    )
+    .limit(1);
+
+  if (session) return true;
+
+  const conversation = await fastAgentConversationRepository.findById({
+    id: params.sessionId,
+  });
+  return conversation?.userId === params.userId;
+}
 
 /**
  * Build the platform delivery for a web-initiated reply to an existing Fast
@@ -118,6 +163,9 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   userId: string;
   senderDisplayName: string | null;
   question: string;
+  currentMessageId?: string;
+  replyToMessageId?: string;
+  externalInput?: FastAgentReactionExternalInput;
 }): Promise<FastAgentSurfaceReplyDelivery | null> {
   const session = await fastAgentConversationRepository.findById({
     id: params.sessionId,
@@ -125,7 +173,12 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   if (!session) {
     return null;
   }
-  if (session.userId !== params.userId) {
+  if (
+    !(await canUserAccessFastAgentSession({
+      sessionId: session.id,
+      userId: params.userId,
+    }))
+  ) {
     return null;
   }
   const conversation = session.conversation;
@@ -146,7 +199,15 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     };
   }
 
+  const footerContext = await resolveFastSessionReplyFooterContext({
+    sessionId: session.id,
+  });
+
   if (conversation.surface === 'slack') {
+    const threadId = conversation.replyTarget.threadId;
+    if (!threadId) {
+      return null;
+    }
     const installation = await db.query.slackInstallations.findFirst({
       where: and(
         eq(slackInstallations.isActive, true),
@@ -159,14 +220,26 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     }
 
     const slack = new SlackNotifier(installation.botAccessToken);
-    let pendingQuote = buildSlackReplyQuote({
-      senderDisplayName: params.senderDisplayName,
-      text: params.question,
-    });
+    let pendingQuote = params.externalInput
+      ? null
+      : buildSlackReplyQuote({
+          senderDisplayName: params.senderDisplayName,
+          text: params.question,
+        });
 
     return {
       conversation,
       adapter: {
+        activity: createFastAgentSlackSessionActivity({
+          slack,
+          workspaceId: conversation.workspaceId,
+          channel: conversation.replyTarget.channelId,
+          threadTs: threadId,
+          title: session.title,
+          resolveTitle: async () =>
+            (await fastAgentConversationRepository.findById({ id: session.id }))
+              ?.title,
+        }),
         launchTask: createFastAgentSlackLiveTaskLauncher({
           slack,
           userId: params.userId,
@@ -175,7 +248,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             ? { teamDomain: installation.teamDomain }
             : {}),
           channelId: conversation.replyTarget.channelId,
-          threadTs: conversation.replyTarget.threadId,
+          threadTs: threadId,
         }),
         postReply: async ({ message }) => {
           const quote = pendingQuote;
@@ -183,7 +256,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           const messageTs = await postSlackThreadMessageWithFooterText({
             slack,
             channel: conversation.replyTarget.channelId,
-            threadTs: conversation.replyTarget.threadId,
+            threadTs: threadId,
             text: quote ? `${quote}\n${message}` : message,
             bodyBlocks: [
               ...(quote
@@ -200,11 +273,17 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             footerText: buildFastSessionReplyFooterText({
               provider: 'slack',
               sessionId: session.id,
+              ...footerContext,
             }),
           });
           if (!messageTs) {
             throw new Error('Slack did not return a Fast reply timestamp.');
           }
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: messageTs,
+          });
           return { messageId: messageTs };
         },
         replaceReply: async (handle, { message }) => {
@@ -213,11 +292,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           // concurrent relocation cannot slip in between them.
           const updated = await withSlackThreadReplyFooterLock({
             channel: conversation.replyTarget.channelId,
-            threadTs: conversation.replyTarget.threadId,
+            threadTs: threadId,
             fn: async () => {
               const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
                 conversation.replyTarget.channelId,
-                conversation.replyTarget.threadId,
+                threadId,
               ).catch(() => null);
               return slack.updateMessage({
                 channel: conversation.replyTarget.channelId,
@@ -232,6 +311,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                             footerText: buildFastSessionReplyFooterText({
                               provider: 'slack',
                               sessionId: session.id,
+                              ...footerContext,
                             }),
                           }),
                         ]
@@ -244,6 +324,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           if (!updated) {
             throw new Error('Slack did not update the Fast reply.');
           }
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: handle.messageId,
+          });
           return handle;
         },
       },
@@ -257,10 +342,12 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       return null;
     }
 
-    let pendingQuote = buildDiscordReplyQuote({
-      senderDisplayName: params.senderDisplayName,
-      text: params.question,
-    });
+    let pendingQuote = params.externalInput
+      ? null
+      : buildDiscordReplyQuote({
+          senderDisplayName: params.senderDisplayName,
+          text: params.question,
+        });
 
     return {
       conversation,
@@ -276,6 +363,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           const footerText = buildFastSessionReplyFooterText({
             provider: 'discord',
             sessionId: session.id,
+            ...footerContext,
           });
           const bodyText = quote ? `${quote}\n\n${message}` : message;
           const textWithFooter = `${bodyText}\n\n${footerText}`;
@@ -356,7 +444,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                   replyToMessageId: conversation.replyTarget.threadId,
                 }
               : {}),
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id })}`,
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id, ...footerContext })}`,
             textFormat: 'markdown',
           });
           await recordFastAgentConversationMessageBestEffort({
@@ -371,7 +459,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             channelId: conversation.replyTarget.channelId,
             messageId: handle.messageId,
             serviceUrl,
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id })}`,
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id, ...footerContext })}`,
             textFormat: 'markdown',
           });
           await recordFastAgentConversationMessageBestEffort({
@@ -391,6 +479,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     if (!provider) {
       return null;
     }
+    const replyToMessageId = params.replyToMessageId ?? params.currentMessageId;
     return {
       conversation,
       adapter: {
@@ -404,8 +493,14 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             ...(conversation.replyTarget.threadId
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id })}`,
+            ...(replyToMessageId ? { replyToMessageId } : {}),
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id, ...footerContext })}`,
             textFormat: 'markdown',
+          });
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: posted.lastTextMessageId ?? posted.messageId,
           });
           return { messageId: posted.messageId };
         },
@@ -413,8 +508,13 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           await provider.editMessageText({
             channelId: conversation.replyTarget.channelId,
             messageId: handle.messageId,
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id })}`,
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id, ...footerContext })}`,
             textFormat: 'markdown',
+          });
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: handle.messageId,
           });
           return handle;
         },
@@ -425,18 +525,23 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   return null;
 }
 
-export async function continueFastAgentSurfaceReply(params: {
-  sessionId: string;
-  userId: string;
-  senderDisplayName: string | null;
-  question: string;
-  currentMessageId: string;
-  images?: string[];
-}): Promise<boolean> {
+export async function continueFastAgentSurfaceReply(
+  params: FastAgentSurfaceReplyParams,
+): Promise<boolean> {
   const delivery = await buildFastAgentSurfaceReplyDelivery(params);
   if (!delivery) {
     return false;
   }
+
+  return runFastAgentSurfaceReply({ ...params, delivery });
+}
+
+async function runFastAgentSurfaceReply(
+  params: FastAgentSurfaceReplyParams & {
+    delivery: FastAgentSurfaceReplyDelivery;
+  },
+): Promise<boolean> {
+  const { delivery } = params;
 
   const release = await acquireFastAgentTurnLock({
     conversation: delivery.conversation,
@@ -447,6 +552,9 @@ export async function continueFastAgentSurfaceReply(params: {
 
   const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
   try {
+    const activeTasks = params.externalInput
+      ? await getActiveFastAgentTasks(params.sessionId)
+      : undefined;
     await answerFastAgentQuestion({
       question: params.question,
       images: params.images,
@@ -456,6 +564,16 @@ export async function continueFastAgentSurfaceReply(params: {
       currentMessageId: params.currentMessageId,
       signal: release.signal,
       senderDisplayName: params.senderDisplayName ?? undefined,
+      ...(activeTasks ? { activeTasks } : {}),
+      ...(params.externalInput
+        ? {
+            senderExternalId: params.externalInput.reactor.externalUserId,
+            input: {
+              type: 'reaction' as const,
+              externalInput: params.externalInput,
+            },
+          }
+        : {}),
       adapter: {
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
@@ -470,4 +588,16 @@ export async function continueFastAgentSurfaceReply(params: {
   } finally {
     await release().catch(() => {});
   }
+}
+
+export async function queueFastAgentSurfaceReply(
+  params: FastAgentSurfaceReplyParams,
+): Promise<boolean> {
+  const delivery = await buildFastAgentSurfaceReplyDelivery(params);
+  if (!delivery) return false;
+
+  void runFastAgentSurfaceReply({ ...params, delivery }).catch((error) => {
+    console.error('[Fast Agent] Queued surface reply failed:', error);
+  });
+  return true;
 }

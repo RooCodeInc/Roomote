@@ -1,49 +1,104 @@
 ---
-title: Fast sessions
-icon: zap
-description: Chat with the fast orchestrator from the dashboard and review every Fast session transcript.
+title: Sessions
+icon: messages-square
+description: Follow a conversation and every execution it delegates from one continuous Roomote workspace.
 ---
 
-Fast is Roomote's conversational orchestrator: it answers directly when it can
-and delegates execution work into tasks when needed. A Fast session persists
-across Slack, Discord, Microsoft Teams, Telegram, an automation, or the web
-dashboard.
+Sessions are the primary way to follow work in Roomote. A Session keeps the
+conversation, delegated executions, review activity, artifacts, pull requests,
+cost, and unread state together, whether it started in chat, source control, an
+automation, the API, or the web dashboard. Fast is the conversational
+orchestrator inside a Session: it answers directly when it can and delegates
+execution work when needed across Slack, Discord, Microsoft Teams, Telegram,
+automations, and the web dashboard.
 
-## Start a Fast session from the dashboard
+## Start a Session from the dashboard
 
-On the home page, open the workspace selector next to the prompt box and choose
-**Fast**. Your prompt starts a Fast session instead of a sandbox task, and
-Roomote takes you straight to the session view, where the response streams in
-as it is produced.
+On the home page, leave the workspace selector on **Auto** to start a
+conversation. Roomote answers directly when it can and delegates execution
+when the request needs a repository workspace. Selecting an environment or
+repository starts the execution directly, but Roomote still creates the
+owning Session and opens it with that execution selected.
 
-Use Fast when you want an answer, a decision, or a delegation rather than a
-full sandbox run. Fast can still launch tasks on your behalf; delegated tasks
-appear in the transcript with links to their task pages.
+Fast is the default for **Auto** and other unpinned requests across the web
+dashboard and supported chat providers. Choose an environment or repository
+explicitly when the request should skip conversation-first routing and start a
+coding task immediately.
+
+Select **New Session** in the navigation to open the same launcher from any
+dashboard page.
+
+You do not need to choose a separate conversation mode. The Session grows from
+conversation to execution to review without changing identity.
 
 ## The session view
 
-A session's transcript shows prompts, replies, and the tool activity behind
-them, rendered with the same transcript view as tasks, with a generated title
-that updates as the session evolves. The view updates in real time while
-a turn is running, so you can watch tool calls complete and replies land
-without refreshing.
+A Session timeline shows prompts, replies, and delegated execution activity.
+Execution cards show their status, workspace, pull requests, artifacts, latest
+error, and cost. Select a card to open the lightweight details panel, or choose
+**Open full workspace** for terminal, logs, diff, and preview tools.
+
+When delegated tasks keep working after the conversation becomes idle, the
+timeline shows the live task count. Select that activity to open the **Tasks**
+panel. The **Artifacts** panel combines the latest uploaded outputs from every
+task in the Session, labels which task produced each item, and opens previews
+without leaving the Session. Individual task details continue to show their own
+artifacts.
+
+**Session info** shows the total inference cost for the conversation and its
+attached tasks. Open the cost breakdown to separate direct Session orchestration
+from each task's usage.
+
+The Sessions page supports list and board views, pins, recent Sessions, and
+unread indicators. Common scope, status, and time filters stay visible; turn on
+advanced filters for user, environment, pull request, model, and source. Active
+advanced filters remain visible until you clear them, and Roomote remembers the
+selected list or board view. Search matches Session and task titles,
+repositories, and conversation text. Queries of at least three characters
+include transcript matches and show a highlighted excerpt. **Ready** is not a
+terminal state: you can reply or start another execution in the same Session
+later.
+
+Session rows show who or which automation started the work, its source and
+cost, and links to accumulated active pull requests. In the Session workspace,
+those pull requests remain available across delegated tasks. Selecting the live
+task count opens the only running task directly or shows the task list when
+several are active. A Session link with a selected task opens that task's full
+workspace while keeping the Session conversation alongside it on desktop.
+
+The transcript renders prompts, replies, and tool activity in real time with a
+generated title that updates as the Session evolves.
 
 Fast sessions can also render presentational widgets such as status cards,
 tables, and plans directly in the transcript. Widget HTML is sanitized and
-sandboxed in the web view; chat surfaces receive only the widget's text
-fallback.
+sandboxed in the web view. Chat surfaces receive a concise text preview and a
+link to open the rendered widget when both are available.
 
 ## Reply to a session
 
-Every session has a reply box at the bottom of the transcript; follow-ups
-continue the same session with full context. For sessions that live
-on another surface, such as a Slack thread, Roomote's answer is posted back
-into the originating thread with a quoted copy of your web message, so the
-session stays in one place for everyone following it there. Fast replies
-across Slack, Discord, Microsoft Teams, and Telegram carry a "Reply or use the
-web app" footer linking to the session view. Slack and Discord can also resume
-Fast directly from chat. Microsoft Teams replies to Fast session and automation
-messages also continue the same session after Roomote verifies the tenant,
-installation, conversation, and linked user. Telegram currently uses the
-session view for Fast follow-ups because its inbound webhook route does not yet
-carry Fast session identity.
+Conversational Sessions have a reply box at the bottom of the transcript;
+follow-ups continue the same conversation with full context. For conversations
+that live on another surface, Roomote posts the answer back into the originating
+thread with a quoted copy of your web message, so the conversation stays in one
+place for everyone following it there.
+
+For substantive requests, Fast sends a brief acknowledgement before it starts
+model-invoked work. An eligible Slack message may receive an acknowledgement
+reaction instead. Immediate answers and clarifying questions remain single
+responses, and delegated tasks keep their existing kickoff message rather than
+posting a duplicate acknowledgement.
+
+Fast replies across Slack, Discord, Microsoft Teams, and Telegram link back to
+the Session view and can resume the same Session directly from chat. Roomote
+verifies the provider installation, conversation, and linked user before it
+accepts the follow-up.
+
+In shared Slack and Discord conversations, Fast can stay silent when linked
+participants are talking to each other. A direct reply to Roomote, a mention,
+an explicit Fast command, or a direct message still requires a response.
+
+## Execution access
+
+Session participants can see timeline summaries. Full execution details keep
+the existing task permissions, so joining a shared channel does not grant
+access to logs, terminals, diffs, previews, or private artifacts.

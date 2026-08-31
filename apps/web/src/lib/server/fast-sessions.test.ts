@@ -1,16 +1,26 @@
 import {
   db,
+  ensureSessionForFastConversation,
+  eq,
   fastAgentConversations,
   fastAgentMessages,
+  llmUsageEvents,
+  runFactory,
+  sessions,
+  taskArtifacts,
+  taskFactory,
   userFactory,
 } from '@roomote/db/server';
+import { RunStatus } from '@roomote/types';
 
 import {
-  encodeFastSessionCursor,
   findAccessibleFastSession,
+  getFastSessionPrReviewOfferStatus,
   getFastSessionById,
+  getFastSessionTasks,
   getFastSessionMessagesSince,
-  getFastSessions,
+  getFastSessionDisplayTitle,
+  updateFastSessionPrReviewOfferStatus,
 } from './fast-sessions';
 
 async function createFastSession({
@@ -77,96 +87,35 @@ async function createFastMessage({
 }
 
 describe('Fast session queries', () => {
-  it('lists only the current user sessions for a non-admin', async () => {
+  it('prefers the unified Session title for live Fast updates', async () => {
     const owner = await userFactory.create();
-    const otherUser = await userFactory.create();
-    const older = await createFastSession({
+    const conversation = await createFastSession({
       userId: owner.id,
-      conversationId: 'older',
+      conversationId: 'unified-display-title',
       updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     });
-    const newer = await createFastSession({
-      userId: owner.id,
-      conversationId: 'newer',
-      updatedAt: new Date('2026-01-02T00:00:00.000Z'),
-    });
-    await createFastMessage({
-      conversationId: newer.id,
-      eventId: 'newer:user',
-      turnSeq: 0,
-      role: 'user',
-      eventType: 'roomote_runtime.user_prompt',
-    });
-    await createFastSession({
-      userId: otherUser.id,
-      conversationId: 'other-user',
-      updatedAt: new Date('2026-01-03T00:00:00.000Z'),
-    });
+    const session = await ensureSessionForFastConversation(db, conversation.id);
+    await db
+      .update(sessions)
+      .set({
+        title: 'Manual unified title',
+        titleEditedByUserAt: new Date(),
+      })
+      .where(eq(sessions.id, session.id));
+    await db
+      .update(fastAgentConversations)
+      .set({ title: 'Generated conversation title' })
+      .where(eq(fastAgentConversations.id, conversation.id));
 
-    const { sessions, nextCursor } = await getFastSessions({
-      userId: owner.id,
-      isAdmin: false,
-    });
-
-    expect(sessions.map((session) => session.id)).toEqual([newer.id, older.id]);
-    expect(sessions[0]).toMatchObject({
-      messageCount: 1,
-      ownerName: owner.name,
-    });
-    expect(nextCursor).toBeNull();
+    await expect(
+      getFastSessionDisplayTitle(
+        conversation.id,
+        'Generated conversation title',
+      ),
+    ).resolves.toBe('Manual unified title');
   });
 
-  it('lists sessions across users for an admin', async () => {
-    const admin = await userFactory.create();
-    const otherUser = await userFactory.create();
-    const adminSession = await createFastSession({
-      userId: admin.id,
-      conversationId: 'admin-session',
-      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-    });
-    const otherSession = await createFastSession({
-      userId: otherUser.id,
-      conversationId: 'other-session',
-      updatedAt: new Date('2026-01-02T00:00:00.000Z'),
-    });
-
-    const { sessions } = await getFastSessions({
-      userId: admin.id,
-      isAdmin: true,
-    });
-
-    expect(sessions.map((session) => session.id)).toEqual(
-      expect.arrayContaining([adminSession.id, otherSession.id]),
-    );
-  });
-
-  it('pages older sessions with a keyset cursor', async () => {
-    const owner = await userFactory.create();
-    const oldest = await createFastSession({
-      userId: owner.id,
-      conversationId: 'cursor-oldest',
-      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-    });
-    const middle = await createFastSession({
-      userId: owner.id,
-      conversationId: 'cursor-middle',
-      updatedAt: new Date('2026-01-02T00:00:00.000Z'),
-    });
-    await createFastSession({
-      userId: owner.id,
-      conversationId: 'cursor-newest',
-      updatedAt: new Date('2026-01-03T00:00:00.000Z'),
-    });
-
-    const { sessions } = await getFastSessions(
-      { userId: owner.id, isAdmin: false },
-      { before: encodeFastSessionCursor(middle) },
-    );
-
-    expect(sessions.map((session) => session.id)).toEqual([oldest.id]);
-  });
-
-  it('applies the same scope to detail lookups', async () => {
+  it('applies the caller scope to detail lookups', async () => {
     const owner = await userFactory.create();
     const otherUser = await userFactory.create();
     const session = await createFastSession({
@@ -181,6 +130,162 @@ describe('Fast session queries', () => {
     await expect(
       getFastSessionById({ userId: otherUser.id, isAdmin: true }, session.id),
     ).resolves.toMatchObject({ id: session.id, userId: owner.id });
+  });
+
+  it('lists every task associated with a Fast session', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'tasks-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const delegatedTask = await taskFactory.create({
+      title: 'Delegated task',
+      state: 'active',
+    });
+    await runFactory.create({
+      taskId: delegatedTask.id,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      payload: {
+        repo: 'acme/widgets',
+        description: 'Delegated Fast task',
+        fastAgentSessionId: session.id,
+      },
+    });
+    const zeroCostTask = await taskFactory.create({
+      title: 'Zero cost task',
+      state: 'active',
+    });
+    await runFactory.create({
+      taskId: zeroCostTask.id,
+      status: RunStatus.Completed,
+      payload: {
+        repo: 'acme/widgets',
+        description: 'Another delegated Fast task',
+        fastAgentSessionId: session.id,
+      },
+    });
+    await db.insert(llmUsageEvents).values({
+      eventKey: `fast-task-cost-${crypto.randomUUID()}`,
+      taskId: delegatedTask.id,
+      costSource: 'missing',
+      costMicroUsd: 750_000,
+    });
+    await db.insert(taskArtifacts).values([
+      {
+        taskId: delegatedTask.id,
+        path: 'reports/result.md',
+        version: 2,
+        contentType: 'text/markdown',
+        size: 200,
+        uploaded: true,
+      },
+      {
+        taskId: delegatedTask.id,
+        path: 'reports/pending.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 0,
+        uploaded: false,
+      },
+    ]);
+
+    const result = await getFastSessionTasks(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(result).toHaveLength(2);
+    expect(result).toEqual(
+      expect.arrayContaining([
+        {
+          taskId: delegatedTask.id,
+          title: 'Delegated task',
+          inferenceCostMicroUsd: 750_000,
+          artifacts: [
+            expect.objectContaining({
+              path: 'reports/result.md',
+              version: 2,
+            }),
+          ],
+          latestRun: {
+            status: RunStatus.Running,
+            taskPhase: 'running',
+          },
+        },
+        {
+          taskId: zeroCostTask.id,
+          title: 'Zero cost task',
+          inferenceCostMicroUsd: 0,
+          artifacts: [],
+          latestRun: {
+            status: RunStatus.Completed,
+            taskPhase: null,
+          },
+        },
+      ]),
+    );
+  });
+
+  it('keeps task-linked usage out of the legacy Fast direct cost', async () => {
+    const owner = await userFactory.create();
+    const nativeSessionId = `native-${crypto.randomUUID()}`;
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'direct-cost-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await db
+      .update(fastAgentConversations)
+      .set({ openCodeSessionId: nativeSessionId })
+      .where(eq(fastAgentConversations.id, session.id));
+    const task = await taskFactory.create({ title: 'Delegated task' });
+    await runFactory.create({
+      taskId: task.id,
+      payload: {
+        repo: 'acme/widgets',
+        description: 'Delegated Fast task',
+        fastAgentSessionId: session.id,
+      },
+    });
+    await db.insert(llmUsageEvents).values([
+      {
+        eventKey: `fast-direct-${crypto.randomUUID()}`,
+        harnessSessionId: nativeSessionId,
+        messageId: `message-${crypto.randomUUID()}`,
+        costSource: 'missing',
+        costMicroUsd: 250_000,
+      },
+      {
+        eventKey: `fast-task-${crypto.randomUUID()}`,
+        harnessSessionId: nativeSessionId,
+        messageId: `message-${crypto.randomUUID()}`,
+        taskId: task.id,
+        costSource: 'missing',
+        costMicroUsd: 500_000,
+      },
+    ]);
+
+    const detail = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+    const taskCosts = await getFastSessionTasks(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(detail).toMatchObject({
+      directInferenceCostMicroUsd: 250_000,
+      inferenceCostMicroUsd: 250_000,
+    });
+    expect(taskCosts).toEqual([
+      expect.objectContaining({
+        taskId: task.id,
+        inferenceCostMicroUsd: 500_000,
+      }),
+    ]);
   });
 
   it('reads canonical messages in timestamp and turn sequence order', async () => {
@@ -289,9 +394,6 @@ describe('Fast session queries', () => {
     await expect(
       getFastSessionById(participantAuth, session.id),
     ).resolves.toMatchObject({ id: session.id });
-    const { sessions: participantList } =
-      await getFastSessions(participantAuth);
-    expect(participantList.map((row) => row.id)).toContain(session.id);
 
     await expect(
       getFastSessionById({ userId: bystander.id, isAdmin: false }, session.id),
@@ -441,6 +543,47 @@ describe('Fast session queries', () => {
     expect(third.messages.map((message) => message.eventId)).toEqual([
       'turn-1:assistant:0',
     ]);
+  });
+
+  it('streams an in-place review offer retirement', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'review-offer-stream',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const deliveryId = '11111111-1111-4111-8111-111111111111';
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:assistant:review',
+      turnSeq: 1,
+      payload: {
+        prReviewAction: {
+          deliveryId,
+          question: 'Resolve these issues?',
+          status: 'pending',
+        },
+      },
+    });
+    const first = await getFastSessionMessagesSince(session.id, 0);
+    await expect(
+      getFastSessionPrReviewOfferStatus(session.id, deliveryId),
+    ).resolves.toBe('pending');
+
+    await updateFastSessionPrReviewOfferStatus(
+      session.id,
+      [deliveryId],
+      'dismissed',
+    );
+    const second = await getFastSessionMessagesSince(session.id, first.cursor);
+
+    expect(second.messages).toHaveLength(1);
+    expect(second.messages[0]?.payload).toMatchObject({
+      prReviewAction: { deliveryId, status: 'dismissed' },
+    });
+    await expect(
+      getFastSessionPrReviewOfferStatus(session.id, deliveryId),
+    ).resolves.toBe('dismissed');
   });
 
   it('finds sessions for owners and participants but not bystanders', async () => {

@@ -16,6 +16,7 @@ import {
   type QueuedCommunicationMessage,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
+  getTaskReportConsumerFromPayload,
   isCommunicationProvider,
   SANDBOX_SERVER_PORT,
   SANDBOX_TIMEOUT_MS,
@@ -1047,6 +1048,9 @@ export const runTask = async ({
             process.env.RELEASE_VERSION,
             packageJson.version,
           ),
+          {
+            reportConsumer: getTaskReportConsumerFromPayload(taskRun.payload),
+          },
         ),
         harnessInstructions,
         environmentInstructions,

@@ -1,5 +1,5 @@
 import {
-  resolveBrainInferenceProvider,
+  isBrainEmbeddingAvailable,
   resolveBrainConnection,
 } from '@roomote/sdk/server';
 
@@ -63,16 +63,20 @@ export function createGbrainMcpProxy(options?: { allowAuthTokens?: boolean }) {
       // service has a Brain, and the read-only agent client is provisioned
       // headlessly on first use.
       //
-      // Both halves are required before an agent is told the Brain exists. A
-      // Brain container with no provider key configured yet can still answer
-      // keyword queries, which is worse than absent: recall would look real
-      // while silently missing everything semantic.
-      const [connection, provider] = await Promise.all([
+      // Both halves are required before an agent is told the Brain exists: a
+      // place to read from (connection) and a way to embed the query. Without
+      // an embedding path a Brain can still answer keyword queries, which is
+      // worse than absent — recall would look real while silently missing
+      // everything semantic. The embedding check is provider-agnostic, matching
+      // the ingest side (isBrainEmbeddingAvailable): a self-run embedder is
+      // enough, so a trial or Anthropic-only tenant whose pages the drain
+      // ingested can also query them, instead of accumulating unreadable memory.
+      const [connection, embeddingAvailable] = await Promise.all([
         resolveBrainConnection('agent'),
-        resolveBrainInferenceProvider(),
+        isBrainEmbeddingAvailable(),
       ]);
 
-      if (!connection || !provider) {
+      if (!connection || !embeddingAvailable) {
         throw new McpProxyError(
           404,
           'The Brain is not configured on this deployment',

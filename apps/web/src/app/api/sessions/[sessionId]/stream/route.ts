@@ -2,12 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createResponse } from 'better-sse';
 import { z } from 'zod';
 
-import { db, eq, fastAgentConversations } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  fastAgentConversations,
+  isSessionConversationResponding,
+  sessions as unifiedSessions,
+} from '@roomote/db/server';
 
 import { authorizeUserToken } from '@/lib/server';
 import {
   findAccessibleFastSession,
   getFastSessionMessagesSince,
+  getFastSessionDisplayTitle,
 } from '@/lib/server/fast-sessions';
 
 export const runtime = 'nodejs';
@@ -54,6 +61,7 @@ export async function GET(
     ? sinceParam.data
     : Date.now() - INITIAL_CURSOR_OVERLAP_MS;
   let lastTitle = session.title;
+  let lastConversationResponding: boolean | null | undefined;
 
   return createResponse(request, async (sseSession) => {
     const startTime = Date.now();
@@ -67,17 +75,49 @@ export async function GET(
         const { messages, cursor: nextCursor } =
           await getFastSessionMessagesSince(session.id, cursor);
         cursor = nextCursor;
-        if (messages.length > 0) {
-          await sseSession.push({ messages }, 'messages');
-        }
 
-        const conversation = await db.query.fastAgentConversations.findFirst({
-          where: eq(fastAgentConversations.id, session.id),
-          columns: { title: true },
-        });
-        if (conversation && conversation.title !== lastTitle) {
-          lastTitle = conversation.title;
-          await sseSession.push({ title: conversation.title }, 'session');
+        const [conversation] = await db
+          .select({
+            title: fastAgentConversations.title,
+            unifiedSessionId: unifiedSessions.id,
+            respondingUntil: unifiedSessions.respondingUntil,
+          })
+          .from(fastAgentConversations)
+          .leftJoin(
+            unifiedSessions,
+            eq(unifiedSessions.fastConversationId, fastAgentConversations.id),
+          )
+          .where(eq(fastAgentConversations.id, session.id))
+          .limit(1);
+        const title = await getFastSessionDisplayTitle(
+          session.id,
+          conversation?.title ?? null,
+        );
+        const conversationResponding = conversation?.unifiedSessionId
+          ? isSessionConversationResponding({
+              respondingUntil: conversation.respondingUntil,
+            })
+          : null;
+        if (messages.length > 0) {
+          await sseSession.push(
+            { messages, conversationResponding },
+            'messages',
+          );
+        }
+        const sessionUpdate: {
+          title?: string;
+          conversationResponding?: boolean | null;
+        } = {};
+        if (title && title !== lastTitle) {
+          lastTitle = title;
+          sessionUpdate.title = title;
+        }
+        if (conversationResponding !== lastConversationResponding) {
+          lastConversationResponding = conversationResponding;
+          sessionUpdate.conversationResponding = conversationResponding;
+        }
+        if (Object.keys(sessionUpdate).length > 0) {
+          await sseSession.push(sessionUpdate, 'session');
         }
       } catch {
         break;

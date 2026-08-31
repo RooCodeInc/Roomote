@@ -1,47 +1,15 @@
 'use client';
 
-import Link from 'next/link';
+import Image from 'next/image';
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useForm, FormProvider } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { toast } from 'sonner';
+import { DiscordLogoIcon } from '@radix-ui/react-icons';
 
-import {
-  type ComputeProvider,
-  ALL_REPOSITORIES,
-  FAST_EXECUTION,
-  DEFAULT_LAUNCH_CODING_HARNESS,
-  DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
-  pickPreferredConfiguredComputeProvider,
-  SETUP_COMPUTE_PROVIDER_CATALOG,
-} from '@roomote/types';
-import type { RoutingDecision } from '@roomote/cloud-agents/server';
+import type { ComputeProvider } from '@roomote/types';
 
-import { type CreateTaskFormValues, createTaskFormSchema } from '@/types';
-
-import { SETTINGS_PATHS } from '@/lib/settings';
-import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { cn } from '@/lib/utils';
-import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
-
 import { useEnvironments } from '@/hooks/environments';
-import { usePersonalPreferences } from '@/hooks/usePersonalPreferences';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import {
-  type WorkspaceSelection,
-  useWorkspaceStorage,
-} from '@/hooks/useWorkspaceStorage';
-import {
-  useCreateStandardTaskRun,
-  useStartFastSession,
-  useRouteHomeTask,
-} from '@/hooks/task-runs';
-
-import {
-  Alert,
-  ArrowRight,
   Button,
   Calendar,
   Dialog,
@@ -50,28 +18,13 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Loader2,
   Mail,
   MessageCirclePlus,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  VectorSquare,
 } from '@/components/system';
-import type { PromptInputMessage } from '@/components/ai-elements';
-import {
-  SelectWorkspace,
-  ModelSelect,
-  TaskPromptInput,
-  AUTO_WORKSPACE_VALUE,
-} from '@/components/tasks';
+import { NewTaskForm } from '@/components/tasks/NewTaskForm';
 
 import { OnboardingCard } from './OnboardingCard';
 import { BottomSheetTabs } from './BottomSheetTabs';
-import Image from 'next/image';
-import { DiscordLogoIcon } from '@radix-ui/react-icons';
 import {
   HOME_PROMPT_PLACEHOLDERS,
   normalizeHomePromptPlaceholderIndex,
@@ -101,38 +54,6 @@ function persistFeedbackPromptDismissal(): void {
   }
 }
 
-type RoutingFlowState = 'idle' | 'routing_pending' | 'launching';
-
-type SubmissionSnapshot = {
-  branch?: string;
-  description?: string;
-  images?: string[];
-  blank: boolean;
-};
-
-const DEFAULT_FORM_VALUES: CreateTaskFormValues = {
-  repository: AUTO_WORKSPACE_VALUE,
-  branch: '',
-  environmentId: undefined,
-  text: '',
-  images: [],
-  port: undefined,
-};
-
-function resolveInitialComputeProvider(
-  defaultComputeProvider: ComputeProvider,
-  availableComputeProviders: readonly ComputeProvider[],
-): ComputeProvider {
-  if (availableComputeProviders.includes(defaultComputeProvider)) {
-    return defaultComputeProvider;
-  }
-
-  return (
-    pickPreferredConfiguredComputeProvider(availableComputeProviders) ??
-    defaultComputeProvider
-  );
-}
-
 type HomeProps = {
   initialPlaceholderIndex: number;
   defaultComputeProvider?: ComputeProvider;
@@ -141,53 +62,12 @@ type HomeProps = {
 
 export function Home({
   initialPlaceholderIndex,
-  defaultComputeProvider = 'docker',
+  defaultComputeProvider,
   availableComputeProviders,
 }: HomeProps) {
-  const router = useRouter();
   const environments = useEnvironments();
-  const {
-    cloudEnabled,
-    isAdmin,
-    managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
-  } = useAuthorizedUser();
-
-  const canSelectBranch = false;
-
-  // Keep option order identical to the setup catalog so the first fallback
-  // matches the first visible Sandbox provider row.
-  const catalogComputeProviders = SETUP_COMPUTE_PROVIDER_CATALOG.map(
-    (descriptor) => descriptor.provider,
-  );
-  const computeProviderOptions =
-    availableComputeProviders === undefined
-      ? catalogComputeProviders
-      : availableComputeProviders.length > 0
-        ? catalogComputeProviders.filter((provider) =>
-            availableComputeProviders.includes(provider),
-          )
-        : [defaultComputeProvider];
-  const computeProviderDescriptors = SETUP_COMPUTE_PROVIDER_CATALOG.filter(
-    (descriptor) => computeProviderOptions.includes(descriptor.provider),
-  );
-  const initialComputeProvider = resolveInitialComputeProvider(
-    defaultComputeProvider,
-    computeProviderOptions,
-  );
-
-  const searchParams = useSearchParams();
-  const promptParam = searchParams.get('prompt') ?? '';
-  const modelParam = searchParams.get('model')?.trim() || undefined;
-  const environmentIdParam = searchParams.get('environmentId')?.trim() ?? '';
-
-  const [promptText, setPromptText] = useState(promptParam);
+  const { isAdmin } = useAuthorizedUser();
   const [isExiting, setIsExiting] = useState(false);
-  const [routingState, setRoutingState] = useState<RoutingFlowState>('idle');
-  const [selectedComputeProvider, setSelectedComputeProvider] =
-    useState<ComputeProvider>(initialComputeProvider);
-  const [selectedModelOverrideId, setSelectedModelOverrideId] = useState<
-    string | undefined
-  >(modelParam);
   const [isBottomSheetExpanded, setIsBottomSheetExpanded] = useState(false);
   const [isFeedbackPromptVisible, setIsFeedbackPromptVisible] = useState(false);
   const [isFeedbackDialogOpen, setIsFeedbackDialogOpen] = useState(false);
@@ -195,22 +75,15 @@ export function Home({
   const [placeholderIndex, setPlaceholderIndex] = useState(() =>
     normalizeHomePromptPlaceholderIndex(initialPlaceholderIndex),
   );
-
-  const activePromptPlaceholder =
-    HOME_PROMPT_PLACEHOLDERS[placeholderIndex] ?? FALLBACK_PROMPT_PLACEHOLDER;
-
-  const workspaceRef = useRef<HTMLDivElement>(null);
-  const contentColumnRef = useRef<HTMLDivElement>(null);
-  const promptCardRef = useRef<HTMLDivElement>(null);
-
   const [textareaMaxHeight, setTextareaMaxHeight] = useState<
     number | undefined
   >(undefined);
 
-  const routingRequestIdRef = useRef(0);
+  const activePromptPlaceholder =
+    HOME_PROMPT_PLACEHOLDERS[placeholderIndex] ?? FALLBACK_PROMPT_PLACEHOLDER;
 
-  useEffect(() => setPromptText(promptParam), [promptParam]);
-  useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
+  const contentColumnRef = useRef<HTMLDivElement>(null);
+  const promptCardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setIsFeedbackPromptVisible(!isFeedbackPromptDismissed());
@@ -295,248 +168,6 @@ export function Home({
     };
   }, []);
 
-  const form = useForm<CreateTaskFormValues>({
-    resolver: zodResolver(createTaskFormSchema),
-    defaultValues: DEFAULT_FORM_VALUES,
-  });
-  const watchedRepository = form.watch('repository');
-
-  const { workspace, setWorkspace } = useWorkspaceStorage();
-  const { preferences, isLoading: isPersonalPreferencesLoading } =
-    usePersonalPreferences();
-  const hasRestoredWorkspace = useRef(false);
-  const shouldRestoreDefaultWorkspace = useRef(false);
-
-  const handleInvalidWorkspaceReset = useCallback(() => {
-    shouldRestoreDefaultWorkspace.current = true;
-  }, []);
-
-  const clearRoutingState = useCallback(() => {
-    setRoutingState('idle');
-  }, []);
-
-  const cancelRoutingInFlight = useCallback(() => {
-    routingRequestIdRef.current += 1;
-    clearRoutingState();
-  }, [clearRoutingState]);
-
-  const resetToAutoWorkspace = useCallback(() => {
-    setWorkspace({
-      workspace: { type: 'auto' },
-    });
-
-    form.setValue('repository', AUTO_WORKSPACE_VALUE);
-    form.setValue('environmentId', undefined);
-    form.setValue('branch', '');
-  }, [form, setWorkspace]);
-
-  useEffect(() => {
-    const restoredWorkspace = workspace.workspace as
-      | WorkspaceSelection['workspace']
-      | undefined;
-
-    if (hasRestoredWorkspace.current) {
-      if (
-        !shouldRestoreDefaultWorkspace.current ||
-        restoredWorkspace?.type !== 'auto' ||
-        form.getValues('repository') !== AUTO_WORKSPACE_VALUE
-      ) {
-        return;
-      }
-
-      hasRestoredWorkspace.current = false;
-      shouldRestoreDefaultWorkspace.current = false;
-    }
-
-    if (environmentIdParam) {
-      form.setValue('repository', environmentIdParam);
-      form.setValue('environmentId', environmentIdParam);
-      form.setValue('branch', '');
-
-      setWorkspace({
-        workspace: { type: 'environment', id: environmentIdParam },
-      });
-
-      hasRestoredWorkspace.current = true;
-      return;
-    }
-
-    if (form.getValues('repository') !== AUTO_WORKSPACE_VALUE) {
-      hasRestoredWorkspace.current = true;
-      return;
-    }
-
-    if (isPersonalPreferencesLoading) {
-      return;
-    }
-
-    if (preferences.communicationsFastModeDefault) {
-      form.setValue('repository', FAST_EXECUTION);
-      form.setValue('environmentId', undefined);
-      form.setValue('branch', '');
-      hasRestoredWorkspace.current = true;
-      return;
-    }
-
-    if (restoredWorkspace?.type === 'repository') {
-      form.setValue('repository', restoredWorkspace.value);
-      form.setValue('environmentId', undefined);
-      hasRestoredWorkspace.current = true;
-      return;
-    }
-
-    if (restoredWorkspace?.type === 'environment') {
-      form.setValue('repository', restoredWorkspace.id);
-      form.setValue('environmentId', restoredWorkspace.id);
-      hasRestoredWorkspace.current = true;
-      return;
-    }
-
-    // Auto (or unset) stored preference: wait for environments so we can
-    // default the sole environment instead of writing Auto over the selector.
-    if (environments.isPending || !environments.isSuccess) {
-      return;
-    }
-
-    const soleEnvironment =
-      environments.data?.length === 1 ? environments.data[0] : undefined;
-
-    if (soleEnvironment) {
-      form.setValue('repository', soleEnvironment.id);
-      form.setValue('environmentId', soleEnvironment.id);
-      form.setValue('branch', '');
-      setWorkspace({
-        workspace: { type: 'environment', id: soleEnvironment.id },
-      });
-    } else {
-      form.setValue('repository', AUTO_WORKSPACE_VALUE);
-      form.setValue('environmentId', undefined);
-      form.setValue('branch', '');
-    }
-
-    hasRestoredWorkspace.current = true;
-  }, [
-    environmentIdParam,
-    environments.data,
-    environments.isPending,
-    environments.isSuccess,
-    form,
-    isPersonalPreferencesLoading,
-    preferences.communicationsFastModeDefault,
-    setWorkspace,
-    workspace,
-  ]);
-
-  const wiggleWorkspace = useCallback(() => {
-    const el = workspaceRef.current;
-
-    if (!el) {
-      return;
-    }
-
-    el.classList.remove('animate-wiggle');
-    void el.offsetWidth;
-    el.classList.add('animate-wiggle');
-  }, []);
-
-  const navigateToTaskRun = (result: {
-    success: boolean;
-    taskId?: string;
-    error?: string;
-  }) => {
-    if (result.success && 'taskId' in result) {
-      setIsExiting(true);
-      router.push(`/task/${result.taskId}`);
-    } else if ('error' in result) {
-      toast.error(result.error);
-    }
-  };
-
-  const mutationOptions = {
-    onSuccess: navigateToTaskRun,
-    onError: (error: Error) => toast.error(error.message),
-  };
-
-  const createStandardTaskRun = useCreateStandardTaskRun(mutationOptions);
-  const routeHomeTask = useRouteHomeTask();
-  const startFastSessionMutation = useStartFastSession();
-
-  const startFastSession = useCallback(
-    async (payload: {
-      text: string;
-      images?: string[];
-      model?: string;
-    }): Promise<void> => {
-      // A second submit while the first is in flight would mint a second
-      // session and orphan one of them.
-      if (startFastSessionMutation.isPending) {
-        return;
-      }
-      try {
-        const { sessionId } =
-          await startFastSessionMutation.mutateAsync(payload);
-        setIsExiting(true);
-        router.push(`/sessions/${sessionId}`);
-      } catch (error) {
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : 'Failed to start Fast session',
-        );
-      }
-    },
-    [startFastSessionMutation, router],
-  );
-  const launchTaskModels = useLaunchTaskModels();
-  const selectedModelId =
-    selectedModelOverrideId ?? launchTaskModels.data?.defaultModelId;
-
-  const launchTask = useCallback(
-    async (payload: {
-      repo: string;
-      branch?: string;
-      environmentId?: string;
-      description?: string;
-      images?: string[];
-      modelId?: string;
-      blank: boolean;
-    }): Promise<boolean> => {
-      try {
-        const result = await createStandardTaskRun.mutateAsync({
-          harness: DEFAULT_LAUNCH_CODING_HARNESS,
-          model: payload.modelId ?? selectedModelId,
-          computeProvider: selectedComputeProvider,
-          payload,
-        });
-
-        return result.success;
-      } catch {
-        return false;
-      }
-    },
-    [createStandardTaskRun, selectedComputeProvider, selectedModelId],
-  );
-
-  useEffect(() => {
-    if (routingState !== 'routing_pending') {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') {
-        return;
-      }
-
-      event.preventDefault();
-      cancelRoutingInFlight();
-      resetToAutoWorkspace();
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [cancelRoutingInFlight, resetToAutoWorkspace, routingState]);
-
   useEffect(() => {
     const mediaQuery = window.matchMedia('(max-height: 80rem)');
     const syncViewportHeight = () => {
@@ -551,304 +182,43 @@ export function Home({
     };
   }, []);
 
-  const isBusy =
-    createStandardTaskRun.isPending ||
-    startFastSessionMutation.isPending ||
-    routingState === 'routing_pending' ||
-    routingState === 'launching';
+  const handleTaskStarted = useCallback(() => {
+    setIsExiting(true);
+  }, []);
 
-  const showRoutingSpinner = routingState === 'routing_pending';
   const shouldDimMainForm = isBottomSheetExpanded && isShortViewport;
   const hasAnyEnvironments = (environments.data?.length ?? 0) > 0;
   const showNoEnvironmentsWarning =
     isAdmin && !environments.isPending && !hasAnyEnvironments;
-  const submitDisabledReason =
-    getTaskLaunchDisabledReason(managedAccess) ??
-    (!hasAnyEnvironments && watchedRepository === AUTO_WORKSPACE_VALUE
-      ? 'Auto routing needs an environment. Create one, or select All Repositories to work without one.'
-      : undefined);
-
-  const handleAutoSubmit = useCallback(
-    async (submission: SubmissionSnapshot) => {
-      cancelRoutingInFlight();
-      setRoutingState('routing_pending');
-      const routingRequestId = routingRequestIdRef.current + 1;
-      routingRequestIdRef.current = routingRequestId;
-
-      let routedResult: RoutingDecision;
-
-      try {
-        routedResult = await routeHomeTask.mutateAsync({
-          description: submission.description ?? '',
-          ...(submission.images?.length ? { images: submission.images } : {}),
-        });
-      } catch (error) {
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : 'Could not auto-route this task.',
-        );
-        clearRoutingState();
-        return;
-      }
-
-      if (routingRequestId !== routingRequestIdRef.current) {
-        return;
-      }
-
-      if (routedResult.status === 'platform_answer') {
-        toast(routedResult.result.answer);
-        clearRoutingState();
-        return;
-      }
-
-      if (routedResult.status === 'fallback') {
-        toast.error("Couldn't auto-route this task.");
-        clearRoutingState();
-        return;
-      }
-
-      if (routedResult.result.workspace.type === 'environment') {
-        if (!routedResult.result.workspace.id.trim()) {
-          toast.error('Could not determine a routed environment.');
-          clearRoutingState();
-          return;
-        }
-      } else {
-        toast.error('Auto routing requires an environment-backed workspace.');
-        clearRoutingState();
-        return;
-      }
-
-      setRoutingState('launching');
-      const routedModelId =
-        routedResult.result.model?.source === 'preference'
-          ? routedResult.result.model.id
-          : undefined;
-
-      const didLaunch = await launchTask({
-        repo: ALL_REPOSITORIES,
-        branch: submission.branch,
-        environmentId:
-          routedResult.result.workspace.type === 'environment'
-            ? routedResult.result.workspace.id
-            : undefined,
-        description: submission.description,
-        images: submission.images,
-        modelId: routedModelId,
-        blank: submission.blank,
-      });
-
-      if (didLaunch) {
-        resetToAutoWorkspace();
-      }
-
-      clearRoutingState();
-    },
-    [
-      cancelRoutingInFlight,
-      clearRoutingState,
-      launchTask,
-      resetToAutoWorkspace,
-      routeHomeTask,
-    ],
-  );
-
-  const handleSubmit = useCallback(
-    async (message: PromptInputMessage) => {
-      const { repository, branch, environmentId } = form.getValues();
-      const isAutoWorkspace = repository === AUTO_WORKSPACE_VALUE;
-
-      if (!isAutoWorkspace && !repository) {
-        wiggleWorkspace();
-        return;
-      }
-
-      const text = message.text.trim();
-
-      const preparedPrompt = await preparePromptAttachments({
-        text,
-        attachments: message.files,
-      });
-
-      const submission: SubmissionSnapshot = {
-        branch: canSelectBranch ? branch : undefined,
-        description:
-          preparedPrompt.text.length > 0 ? preparedPrompt.text : undefined,
-        images: preparedPrompt.images,
-        blank: preparedPrompt.text.length === 0,
-      };
-
-      if (repository === FAST_EXECUTION) {
-        if (!submission.description && !submission.images?.length) {
-          return;
-        }
-        await startFastSession({
-          text: submission.description ?? '',
-          images: submission.images,
-          model: selectedModelId,
-        });
-        return;
-      }
-
-      if (isAutoWorkspace) {
-        await handleAutoSubmit(submission);
-        return;
-      }
-
-      const didLaunch = await launchTask({
-        repo: environmentId ? ALL_REPOSITORIES : repository,
-        branch: environmentId ? undefined : submission.branch,
-        environmentId,
-        description: submission.description,
-        images: submission.images,
-        blank: submission.blank,
-      });
-
-      if (!didLaunch) {
-        return;
-      }
-
-      setWorkspace({
-        workspace: environmentId
-          ? { type: 'environment', id: environmentId }
-          : { type: 'repository', value: repository },
-      });
-    },
-    [
-      form,
-      handleAutoSubmit,
-      launchTask,
-      setWorkspace,
-      canSelectBranch,
-      wiggleWorkspace,
-      startFastSession,
-      selectedModelId,
-    ],
-  );
 
   return (
-    <FormProvider {...form}>
+    <>
       <div className="flex flex-1 md:items-center justify-center h-[calc(var(--effective-viewport-height)-4rem)] md:h-[calc(var(--effective-viewport-height)-1rem)]">
         <div
           className={cn(
-            'flex w-full max-w-3xl flex-col px-4 justify-center h-full',
+            'flex w-full max-w-3xl flex-col justify-center px-4 h-full',
             isExiting && 'animate-[exit-right_500ms_1_forwards]',
           )}
         >
           <div
             ref={contentColumnRef}
             className={cn(
-              'flex flex-col gap-4 md:gap-3 grow flex-1 min-h-0 overflow-y-auto md:overflow-visible md:h-full justify-start md:justify-center transition-all duration-500',
+              'flex flex-col gap-4 md:gap-3 justify-start grow flex-1 min-h-0 overflow-y-auto md:overflow-visible md:h-full md:justify-center transition-all duration-500',
               shouldDimMainForm && 'scale-90 blur-[3px] opacity-70',
             )}
           >
             <h1 className="text-2xl tracking-tight font-bold animate-[enter-down_1s_1] pt-10 md:pt-0">
-              {promptParam ? (
-                <>Let&apos;s do this</>
-              ) : (
-                <>Let&apos;s get started</>
-              )}
+              New Session
             </h1>
 
-            <div
-              data-testid="home-top-controls"
-              className="flex flex-wrap items-center gap-2 animate-[enter-down_1s_1_100ms_backwards]"
-            >
-              <div ref={workspaceRef}>
-                <SelectWorkspace
-                  allowAuto
-                  allowFast
-                  autoSelectDefaultWorkspace={
-                    !isPersonalPreferencesLoading &&
-                    !preferences.communicationsFastModeDefault
-                  }
-                  onInvalidWorkspaceReset={handleInvalidWorkspaceReset}
-                  allowBranchSelection={canSelectBranch}
-                />
-              </div>
-
-              <ModelSelect
-                value={selectedModelId}
-                onValueChange={setSelectedModelOverrideId}
-              />
-
-              {!cloudEnabled && computeProviderDescriptors.length > 1 && (
-                <Select
-                  value={selectedComputeProvider}
-                  onValueChange={(value) =>
-                    setSelectedComputeProvider(value as ComputeProvider)
-                  }
-                >
-                  <SelectTrigger size="sm" aria-label="Sandbox provider">
-                    <SelectValue placeholder="Backend" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {computeProviderDescriptors.map((descriptor) => (
-                      <SelectItem
-                        key={descriptor.provider}
-                        value={descriptor.provider}
-                      >
-                        {descriptor.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-
-              {showRoutingSpinner && (
-                <div
-                  aria-live="polite"
-                  className="inline-flex items-center gap-2 text-sm text-muted-foreground"
-                >
-                  <Loader2
-                    className="size-3.5 animate-spin"
-                    aria-hidden="true"
-                  />
-                  <span className="sr-only">Routing...</span>
-                </div>
-              )}
-            </div>
-
-            <div
-              ref={promptCardRef}
-              className="animate-[enter-down_1s_1_200ms_backwards]"
-            >
-              <TaskPromptInput
-                promptKey={promptParam}
-                isBusy={isBusy}
-                promptText={promptText}
-                onPromptTextChange={setPromptText}
-                onSubmit={handleSubmit}
-                placeholder={activePromptPlaceholder}
-                autoFocus
-                textareaMaxHeight={textareaMaxHeight}
-                animateContainer={false}
-                submitDisabledReason={submitDisabledReason}
-              />
-            </div>
-
-            {showNoEnvironmentsWarning && (
-              <Alert
-                variant="light"
-                className="mt-2 animate-[enter-down_1s_1_300ms_backwards]"
-              >
-                <VectorSquare />
-                <p>
-                  <span>You haven&apos;t created any environments yet. </span>
-                  <span className="block md:inline">
-                    Roomote can work directly on your repos, but it can&apos;t
-                    verify its work.{' '}
-                  </span>
-                  <Link
-                    href={SETTINGS_PATHS.newEnvironment}
-                    className="text-primary font-semibold underline hover:no-underline block md:inline"
-                  >
-                    Create your first <ArrowRight className="inline size-4" />
-                  </Link>
-                </p>
-              </Alert>
-            )}
+            <NewTaskForm
+              defaultComputeProvider={defaultComputeProvider}
+              availableComputeProviders={availableComputeProviders}
+              onTaskStarted={handleTaskStarted}
+              placeholder={activePromptPlaceholder}
+              textareaMaxHeight={textareaMaxHeight}
+              promptContainerRef={promptCardRef}
+            />
 
             <div className="flex flex-col md:flex-row flex-wrap md:items-center gap-2 animate-[fade-in_1s_1_750ms_backwards]">
               {!showNoEnvironmentsWarning && <OnboardingCard />}
@@ -938,6 +308,6 @@ export function Home({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </FormProvider>
+    </>
   );
 }

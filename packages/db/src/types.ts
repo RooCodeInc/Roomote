@@ -10,6 +10,7 @@ import type {
   DependabotTriageFrequency,
   IssueFixerFrequency,
   ManagerStatsFrequency,
+  MergeAnnouncerFrequency,
   ProviderUsageLimitFrequency,
   ProviderUsageLimitThreshold,
   PrReviewSettings,
@@ -23,6 +24,11 @@ import type {
   deploymentSettings,
   tasks,
   taskPins,
+  sessions,
+  sessionTasks,
+  sessionParticipants,
+  sessionPins,
+  sessionBackfillState,
   taskPullRequests,
   taskRuns,
   taskRunEvents,
@@ -99,6 +105,31 @@ export type CreateTask = typeof tasks.$inferInsert;
 export type TaskPin = typeof taskPins.$inferSelect;
 
 export type CreateTaskPin = Omit<typeof taskPins.$inferInsert, Generated>;
+
+/**
+ * sessions
+ */
+
+export type Session = typeof sessions.$inferSelect;
+
+export type CreateSession = Omit<typeof sessions.$inferInsert, Generated>;
+
+export type SessionTask = typeof sessionTasks.$inferSelect;
+
+export type CreateSessionTask = Omit<
+  typeof sessionTasks.$inferInsert,
+  'attachedAt'
+>;
+
+export type SessionParticipant = typeof sessionParticipants.$inferSelect;
+
+export type CreateSessionParticipant = Omit<
+  typeof sessionParticipants.$inferInsert,
+  Generated
+>;
+
+export type SessionBackfillState = typeof sessionBackfillState.$inferSelect;
+export type SessionPin = typeof sessionPins.$inferSelect;
 
 /**
  * taskPullRequests
@@ -558,6 +589,17 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   ciFailureTriageDiscordChannelId: string | null;
   ciFailureTriageLastRunAt: Date | null;
   ciFailureTriageScanCursor?: CiFailureTriageScanCursor | null;
+  mergeAnnouncerFrequency: MergeAnnouncerFrequency;
+  mergeAnnouncerLastRunAt: Date | null;
+  mergeAnnouncerScanCursor?: CiFailureTriageScanCursor | null;
+  mergeAnnouncerTargetProvider:
+    | 'slack'
+    | 'teams'
+    | 'telegram'
+    | 'discord'
+    | null;
+  mergeAnnouncerTargetMode: 'channel' | 'direct_message' | null;
+  mergeAnnouncerTargetChannelId: string | null;
 };
 
 export type SecurityAuditorScanCursor = AutomationScanCursor;

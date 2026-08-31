@@ -1,5 +1,7 @@
 import {
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
+  parsePrReviewActionOffer,
+  type PrReviewActionOfferStatus,
   sanitizeEnvelopeFields,
 } from '@roomote/types';
 import {
@@ -9,20 +11,43 @@ import {
   desc,
   eq,
   exists,
-  gte,
   fastAgentConversations,
   fastAgentMessages,
   llmUsageEvents,
-  lt,
+  inArray,
+  isNull,
   or,
+  sessions,
   sql,
+  taskArtifacts,
+  taskRuns,
+  tasks,
   users,
 } from '@roomote/db/server';
 import type { FastAgentMessage } from '@roomote/db';
 
-import type { TimePeriodFilter, UserAuthSuccess } from '@/types';
+import type { UserAuthSuccess } from '@/types';
 
 type FastSessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
+
+type FastSessionTaskSummary = {
+  taskId: string;
+  title: string;
+  inferenceCostMicroUsd: number;
+  artifacts: Array<{
+    id: string;
+    path: string;
+    version: number;
+    artifactType: string;
+    contentType: string;
+    size: number;
+    createdAt: Date;
+  }>;
+  latestRun: {
+    status: (typeof taskRuns.$inferSelect)['status'];
+    taskPhase: (typeof taskRuns.$inferSelect)['taskPhase'];
+  };
+};
 
 export type FastSessionMessage = Pick<
   FastAgentMessage,
@@ -42,7 +67,59 @@ export type FastSessionMessage = Pick<
   | 'createdAt'
 >;
 
-const FAST_SESSION_LIST_LIMIT = 200;
+export function buildFastSessionPrReviewDestinationKey(session: {
+  surface: string;
+  workspaceId: string;
+  conversationId: string;
+}): string {
+  return JSON.stringify([
+    session.surface,
+    session.workspaceId,
+    session.conversationId,
+  ]);
+}
+
+export async function updateFastSessionPrReviewOfferStatus(
+  sessionId: string,
+  deliveryIds: string[],
+  status: PrReviewActionOfferStatus,
+): Promise<void> {
+  if (deliveryIds.length === 0) return;
+
+  await db
+    .update(fastAgentMessages)
+    .set({
+      payload: sql`jsonb_set(coalesce(${fastAgentMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb(${status}::text), true)`,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, sessionId),
+        inArray(
+          sql<string>`${fastAgentMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
+          deliveryIds,
+        ),
+      ),
+    );
+}
+
+export async function getFastSessionPrReviewOfferStatus(
+  sessionId: string,
+  deliveryId: string,
+): Promise<PrReviewActionOfferStatus | null> {
+  const [message] = await db
+    .select({ payload: fastAgentMessages.payload })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, sessionId),
+        sql`${fastAgentMessages.payload} -> 'prReviewAction' ->> 'deliveryId' = ${deliveryId}`,
+      ),
+    )
+    .limit(1);
+  return parsePrReviewActionOffer(message?.payload)?.status ?? null;
+}
+
 const FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT = 1000;
 
 const fastSessionSelection = {
@@ -118,6 +195,120 @@ export async function findAccessibleFastSession(
     .limit(1);
 
   return session ?? null;
+}
+
+export async function getFastSessionDisplayTitle(
+  fastConversationId: string,
+  fallbackTitle: string | null,
+): Promise<string | null> {
+  const [session] = await db
+    .select({ title: sessions.title })
+    .from(sessions)
+    .where(eq(sessions.fastConversationId, fastConversationId))
+    .limit(1);
+  return session?.title ?? fallbackTitle;
+}
+
+/**
+ * Fast conversations predate the unified Session tables. Their delegated tasks
+ * are linked directly from task runs, rather than through session_tasks.
+ */
+export async function getFastSessionTasks(
+  auth: FastSessionAuth,
+  sessionId: string,
+): Promise<FastSessionTaskSummary[] | null> {
+  const session = await findAccessibleFastSession(auth, sessionId);
+  if (!session) return null;
+
+  const [conversation] = await db
+    .select({
+      legacyConversationIds: fastAgentConversations.legacyConversationIds,
+    })
+    .from(fastAgentConversations)
+    .where(eq(fastAgentConversations.id, session.id))
+    .limit(1);
+  const lookupIds = [
+    session.id,
+    ...(conversation?.legacyConversationIds ?? []),
+  ];
+  const latestRunPerTask = db.$with('latest_fast_session_task_runs').as(
+    db
+      .selectDistinctOn([taskRuns.taskId], {
+        taskId: taskRuns.taskId,
+        title: tasks.title,
+        latestRunId: taskRuns.id,
+        status: taskRuns.status,
+        taskPhase: taskRuns.taskPhase,
+      })
+      .from(taskRuns)
+      .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+      .where(
+        and(
+          inArray(taskRuns.fastAgentSessionId, lookupIds),
+          isNull(tasks.deletedAt),
+        ),
+      )
+      .orderBy(taskRuns.taskId, desc(taskRuns.id)),
+  );
+
+  const rows = await db
+    .with(latestRunPerTask)
+    .select({
+      taskId: latestRunPerTask.taskId,
+      title: latestRunPerTask.title,
+      status: latestRunPerTask.status,
+      taskPhase: latestRunPerTask.taskPhase,
+      inferenceCostMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
+    })
+    .from(latestRunPerTask)
+    .leftJoin(
+      llmUsageEvents,
+      eq(llmUsageEvents.taskId, latestRunPerTask.taskId),
+    )
+    .groupBy(
+      latestRunPerTask.taskId,
+      latestRunPerTask.title,
+      latestRunPerTask.latestRunId,
+      latestRunPerTask.status,
+      latestRunPerTask.taskPhase,
+    )
+    .orderBy(desc(latestRunPerTask.latestRunId));
+
+  const taskIds = rows.map((row) => row.taskId);
+  const artifactRows = taskIds.length
+    ? await db
+        .select({
+          taskId: taskArtifacts.taskId,
+          id: taskArtifacts.id,
+          path: taskArtifacts.path,
+          version: taskArtifacts.version,
+          artifactType: taskArtifacts.artifactType,
+          contentType: taskArtifacts.contentType,
+          size: taskArtifacts.size,
+          createdAt: taskArtifacts.createdAt,
+        })
+        .from(taskArtifacts)
+        .where(
+          and(
+            inArray(taskArtifacts.taskId, taskIds),
+            eq(taskArtifacts.uploaded, true),
+          ),
+        )
+        .orderBy(desc(taskArtifacts.createdAt))
+    : [];
+
+  return rows.map((row) => ({
+    taskId: row.taskId,
+    title: row.title,
+    inferenceCostMicroUsd: Number(row.inferenceCostMicroUsd),
+    artifacts: artifactRows
+      .filter((artifact) => artifact.taskId === row.taskId)
+      .map(({ taskId: _taskId, ...artifact }) => artifact),
+    latestRun: {
+      status: row.status,
+      taskPhase: row.taskPhase,
+    },
+  }));
 }
 
 function sanitizeFastSessionMessageRow<
@@ -199,88 +390,6 @@ export async function getFastSessionMessagesSince(
   return { messages, cursor };
 }
 
-export function encodeFastSessionCursor(row: {
-  updatedAt: Date;
-  id: string;
-}): string {
-  return `${row.updatedAt.getTime()}:${row.id}`;
-}
-
-function decodeFastSessionCursor(cursor: string | undefined) {
-  if (!cursor) {
-    return null;
-  }
-
-  const separator = cursor.indexOf(':');
-  if (separator <= 0) {
-    return null;
-  }
-
-  const updatedAtMs = Number(cursor.slice(0, separator));
-  const id = cursor.slice(separator + 1);
-  if (!Number.isFinite(updatedAtMs) || !id) {
-    return null;
-  }
-
-  return { updatedAt: new Date(updatedAtMs), id };
-}
-
-export async function getFastSessions(
-  auth: FastSessionAuth,
-  options?: {
-    before?: string;
-    filterUserId?: string | null;
-    timePeriod?: TimePeriodFilter;
-  },
-) {
-  const cursor = decodeFastSessionCursor(options?.before);
-
-  // Keyset pagination matching the (updatedAt desc, id desc) ordering.
-  const beforeCursor = cursor
-    ? or(
-        lt(fastAgentConversations.updatedAt, cursor.updatedAt),
-        and(
-          eq(fastAgentConversations.updatedAt, cursor.updatedAt),
-          lt(fastAgentConversations.id, cursor.id),
-        ),
-      )
-    : undefined;
-
-  const ownerFilter = options?.filterUserId
-    ? eq(fastAgentConversations.userId, options.filterUserId)
-    : undefined;
-  const timePeriod = options?.timePeriod ?? 'all';
-  const timeFilter =
-    timePeriod === 'all'
-      ? undefined
-      : gte(
-          fastAgentConversations.updatedAt,
-          new Date(Date.now() - timePeriod * 24 * 60 * 60 * 1000),
-        );
-
-  const rows = await db
-    .select(fastSessionSelection)
-    .from(fastAgentConversations)
-    .innerJoin(users, eq(fastAgentConversations.userId, users.id))
-    .where(and(fastSessionScope(auth), ownerFilter, timeFilter, beforeCursor))
-    .orderBy(
-      desc(fastAgentConversations.updatedAt),
-      desc(fastAgentConversations.id),
-    )
-    .limit(FAST_SESSION_LIST_LIMIT + 1);
-
-  const sessions = rows.slice(0, FAST_SESSION_LIST_LIMIT);
-  const lastSession = sessions.at(-1);
-
-  return {
-    sessions,
-    nextCursor:
-      rows.length > FAST_SESSION_LIST_LIMIT && lastSession
-        ? encodeFastSessionCursor(lastSession)
-        : null,
-  };
-}
-
 export async function getFastSessionById(
   auth: FastSessionAuth,
   sessionId: string,
@@ -357,26 +466,32 @@ export async function getFastSessionById(
   // Fast usage events carry the OpenCode session id; a conversation can span
   // several (cold rebuilds), so sum across every session id the transcript
   // references plus the current one.
-  const [usage] = await db
+  const [directUsage] = await db
     .select({
       costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
     })
     .from(llmUsageEvents)
     .where(
-      sql`${llmUsageEvents.harnessSessionId} in (
-        select distinct ${fastAgentMessages.nativeSessionId}
-        from ${fastAgentMessages}
-        where ${fastAgentMessages.conversationId} = ${session.id}
-          and ${fastAgentMessages.nativeSessionId} is not null
-        union
-        select ${session.openCodeSessionId}::text
-      )`,
+      and(
+        isNull(llmUsageEvents.taskId),
+        sql`${llmUsageEvents.harnessSessionId} in (
+          select distinct ${fastAgentMessages.nativeSessionId}
+          from ${fastAgentMessages}
+          where ${fastAgentMessages.conversationId} = ${session.id}
+            and ${fastAgentMessages.nativeSessionId} is not null
+          union
+          select ${session.openCodeSessionId}::text
+        )`,
+      ),
     );
+
+  const directInferenceCostMicroUsd = Number(directUsage?.costMicroUsd ?? 0);
 
   return {
     ...session,
     messages,
     hasOlderMessages,
-    inferenceCostMicroUsd: Number(usage?.costMicroUsd ?? 0),
+    directInferenceCostMicroUsd,
+    inferenceCostMicroUsd: directInferenceCostMicroUsd,
   };
 }

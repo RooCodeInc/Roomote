@@ -8,12 +8,12 @@ export const SLACK_LIVE_TASK_CARD_MESSAGE_MAX_CHARS = 4000;
 
 /** Terminal messages shared by the worker and the control plane so a card
  * settled from either side reads the same. */
-export const SLACK_LIVE_TASK_CARD_MESSAGES = {
-  completed: 'Task completed.',
-  canceled: 'Task canceled.',
-  failed: 'The task stopped because of an error.',
+export const SLACK_SESSION_LIVE_TASK_CARD_MESSAGES = {
+  completed: 'Ready.',
+  canceled: 'Stopped.',
+  failed: 'Stopped because of an error.',
   trackingUnavailable:
-    'Live updates are unavailable for this task; open it to follow progress.',
+    'Live updates are unavailable; open Roomote to follow progress.',
 } as const;
 
 export interface SlackLiveTaskCardContent {
@@ -53,7 +53,7 @@ export function buildSlackLiveTaskCardBlocks(
     text: [
       content.title,
       message,
-      content.taskUrl ? `<${content.taskUrl}|Open the task>` : undefined,
+      content.taskUrl ? `<${content.taskUrl}|Open in Roomote>` : undefined,
     ]
       .filter((line): line is string => Boolean(line))
       .join('\n'),
@@ -68,7 +68,11 @@ export function buildSlackLiveTaskCardBlocks(
         ...(content.taskUrl
           ? {
               sources: [
-                { type: 'url', url: content.taskUrl, text: 'View task' },
+                {
+                  type: 'url',
+                  url: content.taskUrl,
+                  text: 'Open in Roomote',
+                },
               ],
             }
           : {}),

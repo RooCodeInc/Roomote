@@ -42,6 +42,14 @@ vi.mock('@roomote/communication/discord-event', () => ({
   getDiscordMessageCreate: mocks.getMessage,
 }));
 
+vi.mock('@roomote/communication', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/communication')>()),
+  resolveFastSessionReplyFooterContext: vi.fn(async () => ({
+    linkedPrs: [],
+    livePreviewUrl: null,
+  })),
+}));
+
 vi.mock('@roomote/env', () => ({
   Env: { R_APP_URL: 'https://roomote.example.com' },
 }));
@@ -170,6 +178,76 @@ describe('processDiscordFastAgentMessage', () => {
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });
 
+  it('allows silence only for an undirected turn with another human participant', async () => {
+    mocks.fetchHistory.mockResolvedValue([
+      { id: '100', user: 'discord-user-2', text: 'Hi', attachments: [] },
+      {
+        id: '101',
+        user: 'application-1',
+        botId: 'application-1',
+        text: 'Hello',
+        attachments: [],
+      },
+    ]);
+    const provider = { editMessage: vi.fn().mockResolvedValue(undefined) };
+
+    await processDiscordFastAgentMessage({
+      event: { eventId: 'event-1' } as never,
+      question: 'Makes sense',
+      sender: { id: 'discord-user-1', username: 'matt' } as never,
+      senderUserId: 'user-1',
+      provider: provider as never,
+      applicationId: 'application-1',
+      channel: {
+        channelId: 'channel-1',
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: true,
+      } as never,
+      metadata: {
+        communicationChannelId: 'parent-1',
+        communicationThreadId: 'channel-1',
+      } as never,
+      conversationId: 'channel-1',
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ allowSilentAmbientReply: true }),
+    );
+  });
+
+  it('requires a response for a directed turn with another human participant', async () => {
+    mocks.fetchHistory.mockResolvedValue([
+      { id: '100', user: 'discord-user-2', text: 'Hi', attachments: [] },
+    ]);
+    const provider = { editMessage: vi.fn().mockResolvedValue(undefined) };
+
+    await processDiscordFastAgentMessage({
+      event: { eventId: 'event-1' } as never,
+      question: 'Can you expand on that?',
+      sender: { id: 'discord-user-1', username: 'matt' } as never,
+      senderUserId: 'user-1',
+      provider: provider as never,
+      applicationId: 'application-1',
+      channel: {
+        channelId: 'channel-1',
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: true,
+      } as never,
+      metadata: {
+        communicationChannelId: 'parent-1',
+        communicationThreadId: 'channel-1',
+      } as never,
+      conversationId: 'channel-1',
+      directedAtRoomote: true,
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ allowSilentAmbientReply: false }),
+    );
+  });
+
   it.each([
     { channelType: 0, threadType: 11, label: 'text' },
     { channelType: 5, threadType: 10, label: 'announcement' },
@@ -277,6 +355,65 @@ describe('processDiscordFastAgentMessage', () => {
       );
     },
   );
+
+  it('anchors the thread and replies on an explicit anchor message (reaction summons)', async () => {
+    const provider = {
+      createThreadFromMessage: vi.fn().mockResolvedValue({
+        channelId: 'reacted-1',
+        parentChannelId: 'channel-1',
+        name: 'Investigate this',
+        kind: 'thread',
+        messageId: 'reacted-1',
+      }),
+      editMessage: vi.fn().mockResolvedValue(undefined),
+    };
+    mocks.answerQuestion.mockResolvedValueOnce('A quick answer');
+
+    await processDiscordFastAgentMessage({
+      event: { eventId: 'synthetic-1' } as never,
+      question: 'Investigate this',
+      sender: { id: 'discord-user-1', username: 'matt' } as never,
+      senderUserId: 'user-1',
+      provider: provider as never,
+      applicationId: 'application-1',
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      metadata: {
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'reacted-1',
+        communicationAnchorMessageId: 'reacted-1',
+        communicationGuildId: 'guild-1',
+      } as never,
+      conversationId: 'reacted-1',
+      anchorMessageId: 'reacted-1',
+    });
+
+    // The synthesized message id ('source-1' from getDiscordMessageCreate) is
+    // not a real Discord message; the reacted-on message anchors everything.
+    expect(provider.createThreadFromMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'reacted-1',
+      name: 'Investigate this',
+    });
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ currentMessageId: 'reacted-1' }),
+    );
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: expect.objectContaining({
+          channelId: 'reacted-1',
+          isThread: true,
+        }),
+        replyToMessageId: 'reacted-1',
+      }),
+    );
+  });
 
   it('continues an existing guild thread without creating another thread', async () => {
     const provider = {

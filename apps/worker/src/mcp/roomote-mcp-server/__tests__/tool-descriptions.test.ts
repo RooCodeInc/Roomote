@@ -276,13 +276,13 @@ describe('roomote MCP tool descriptions', () => {
     const manageTasksTool = getRegisteredTool(registeredTools, 'manage_tasks');
 
     expect(manageTasksTool.config.description).toContain(
-      'Manage Roomote tasks.',
+      'Manage Roomote Sessions by default',
     );
     expect(manageTasksTool.config.description).not.toContain(
       'Not Slack-visible by itself',
     );
     expect(manageTasksTool.config.description).toContain(
-      'When the user provides an existing Roomote task URL or asks about an existing task, extract the task ID and use action "get_summary" for current status or action "get_messages" for transcript details before resorting to browser or task-UI navigation.',
+      'When the user provides an existing Roomote task URL, extract its task ID and pass taskId to get_summary or get_messages before resorting to browser navigation.',
     );
   });
 
@@ -309,23 +309,29 @@ describe('roomote MCP tool descriptions', () => {
     );
     expect(manageTasksTool.config.description).not.toContain('get_harness_log');
     expect(actionField.options).toEqual([
+      'start',
       'search',
       'get_summary',
-      'get_compute_logs',
       'get_messages',
+      'send_message',
+      'search_tasks',
+      'get_compute_logs',
       'launch',
       'cancel',
-      'send_message',
+      'list_environments',
       'list_models',
       'update_models',
-      'list_environments',
     ]);
     expect(taskIdField.description).toBe(
-      'The task ID (required for get_summary, get_compute_logs, get_messages, cancel, and send_message)',
+      'Optional concrete task ID. When provided to get_summary, get_messages, or send_message, targets that task instead of a Session. Required for task-only controls such as get_compute_logs and cancel.',
     );
     expect(limitField.description).toBe(
-      'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages',
+      'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages (task or Fast session)',
     );
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty(
+      'targetTasks',
+    );
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty('targetType');
   });
 
   it('keeps task model discovery beside task model switching', async () => {
@@ -337,6 +343,44 @@ describe('roomote MCP tool descriptions', () => {
     );
     expect(getInputSchemaField(manageTasksTool, 'model').description).toContain(
       'Call list_models first and pass an exact returned model ID',
+    );
+  });
+
+  it('models Session-first communication with natural task targeting', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(registeredTools, 'manage_tasks');
+
+    expect(tool.config.description).toContain(
+      'Use action "get_messages" with sessionId for Session history, or taskId for a specific task transcript',
+    );
+    expect(tool.config.description).toContain(
+      'Use start to begin new work in a Session',
+    );
+    expect(
+      registeredTools.some((candidate) => candidate.name === 'manage_sessions'),
+    ).toBe(false);
+  });
+
+  it('rejects Session-only statuses before task search reaches the API', async () => {
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'test-token',
+    });
+    const tool = getRegisteredTool(registeredTools, 'manage_tasks');
+    const result = (await tool.handler?.({
+      action: 'search_tasks',
+      status: 'needs_input',
+    })) as { content?: Array<{ text?: string }> };
+
+    expect(result.content?.[0]?.text).toContain(
+      'status must be one of: active, completed, all when search resolves to tasks',
+    );
+    const legacyResult = (await tool.handler?.({
+      action: 'search',
+      pullRequest: 'owner/repo#1',
+      status: 'needs_input',
+    })) as { content?: Array<{ text?: string }> };
+    expect(legacyResult.content?.[0]?.text).toContain(
+      'status must be one of: active, completed, all when search resolves to tasks',
     );
   });
 
@@ -1118,6 +1162,63 @@ describe('roomote MCP tool descriptions', () => {
     });
   });
 
+  it('forwards PR attribution from manage_source_control tool params', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          success: true,
+          action: 'created',
+          provider: 'github',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          number: 1838,
+          url: 'https://github.com/RooCodeInc/Roomote/pull/1838',
+          title: '[Fix] Preserve PR attribution',
+          targetBranch: 'develop',
+          draft: true,
+          warnings: [],
+        }),
+      }),
+    );
+
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+      ROOMOTE_TASK_ID: 'task_123',
+    });
+    const sourceControlTool = getRegisteredTool(
+      registeredTools,
+      'manage_source_control',
+    );
+
+    await sourceControlTool.handler?.({
+      action: 'create_or_update_pull_request',
+      repositoryFullName: 'RooCodeInc/Roomote',
+      sourceBranch: 'fix/pr-attribution',
+      targetBranch: 'develop',
+      title: '[Fix] Preserve PR attribution',
+      body: 'Body',
+      prAttribution: 'Matt Rubens',
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/tasks/task_123/source_control',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'create_or_update_pull_request',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          sourceBranch: 'fix/pr-attribution',
+          targetBranch: 'develop',
+          title: '[Fix] Preserve PR attribution',
+          body: 'Body',
+          prAttribution: 'Matt Rubens',
+        }),
+      }),
+    );
+  });
+
   it('forwards inline review comment anchor fields from manage_source_control tool params', async () => {
     vi.stubGlobal(
       'fetch',
@@ -1181,5 +1282,56 @@ describe('roomote MCP tool descriptions', () => {
         },
       ],
     });
+  });
+
+  it('forwards reviewId from manage_source_control tool params', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          success: true,
+          action: 'dismiss_pull_request_review',
+          provider: 'github',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          number: 12,
+          commentId: '900',
+          applied: true,
+          warnings: [],
+        }),
+      }),
+    );
+
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+      ROOMOTE_TASK_ID: 'task_123',
+    });
+    const sourceControlTool = getRegisteredTool(
+      registeredTools,
+      'manage_source_control',
+    );
+
+    await sourceControlTool.handler?.({
+      action: 'dismiss_pull_request_review',
+      repositoryFullName: 'RooCodeInc/Roomote',
+      prNumber: 12,
+      reviewId: '900',
+      body: 'Requested changes have been addressed.',
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/tasks/task_123/source_control',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'dismiss_pull_request_review',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          prNumber: 12,
+          reviewId: '900',
+          body: 'Requested changes have been addressed.',
+        }),
+      }),
+    );
   });
 });

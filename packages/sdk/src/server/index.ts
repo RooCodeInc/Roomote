@@ -67,9 +67,12 @@ export {
   type ActivePrReviewFollowUpRequest,
 } from './lib/task-runs/active-pr-review-follow-up';
 export {
+  acquireGithubPrReviewLifecycleLock,
   completeGithubPrReviewCheckFromSummary,
   GITHUB_PR_REVIEW_CHECK_NAME,
   publishGithubPrReviewCheck,
+  reconcileGithubPrReviewCheckForRun,
+  transferGithubPrReviewCheckToRun,
 } from './lib/task-runs/github-pr-review-check';
 export {
   PULL_REQUEST_MERGEABILITY_CHECK_QUEUE_NAME,
@@ -199,6 +202,17 @@ export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/te
 export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib/telegram-communication';
 
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
+export { syncFastAgentSlackTitleBestEffort } from './lib/fast-agent-slack-title-sync';
+
+export {
+  buildFastAgentParentEventKey,
+  drainFastAgentParentEvents,
+  enqueueFastAgentParentEvent,
+  FastAgentParentBusyError,
+  FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
+  recoverPendingFastAgentParentEvents,
+  type FastAgentParentEventQueueRequest,
+} from './lib/fast-agent-parent-event-queue';
 
 export {
   getCommunicationProviderAdapter,
@@ -249,6 +263,8 @@ export {
   buildPrReviewNotificationPostInput,
   beginCanonicalPrReviewAutoDispatch,
   beginCanonicalPrReviewPrompt,
+  beginCanonicalPrReviewWebPrompt,
+  beginCanonicalPrReviewWebAutoDispatch,
   completeCanonicalPrReviewAutoDispatch,
   consumePendingPrReviewActivity,
   dispatchDuePrReviewNotifications,
@@ -258,6 +274,7 @@ export {
   finalizePrReviewNotificationRequest,
   isDurablePrReviewNotificationRequest,
   renewPrReviewNotificationRequestLease,
+  releaseCanonicalPrReviewWebAutoDispatch,
   hasPrReviewNotificationThreadContext,
   migrateLegacyPrReviewNotificationRequest,
   prepareCanonicalPrReviewNotificationRequest,
@@ -280,6 +297,8 @@ export {
   PrReviewNotificationRateLimitError,
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
+  getTaskPrReviewOfferStatus,
+  updateTaskPrReviewOfferStatus,
   triagePrReviewActivity,
   type PreparedPrReviewNotification,
   type PrReviewTriageContext,
@@ -421,6 +440,7 @@ export {
 } from './lib/mcp/linear-connections';
 
 export {
+  requestBrainBackfill,
   requestInstancePing,
   requestLicenseUsageSync,
   resetInstancePingQueueForTests,
@@ -429,5 +449,6 @@ export * from './lib/brain-clients';
 export * from './lib/brain-corpus';
 export * from './lib/brain-mcp';
 export * from './lib/brain-github';
+export * from './lib/brain-linear';
 export * from './lib/brain-inference';
 export * from './lib/brain-source-availability';

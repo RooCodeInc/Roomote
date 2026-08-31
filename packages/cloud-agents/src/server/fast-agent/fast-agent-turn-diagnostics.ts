@@ -10,6 +10,10 @@ import type {
   FastAgentConversation,
   FastAgentTurnSource,
 } from './fast-agent-conversation';
+import {
+  captureFastAgentTurnSettled,
+  type FastAgentSessionPath,
+} from './fast-agent-context-telemetry';
 
 const MAX_TERMINAL_ERROR_LENGTH = 4_000;
 
@@ -21,6 +25,7 @@ type FastAgentTurnDiagnosticsContext = {
   hasImages: boolean;
   modelRole: 'primary' | 'small' | 'orchestration';
   turnSource: FastAgentTurnSource;
+  userId: string;
 };
 
 type FastAgentTurnDiagnosticsOptions = {
@@ -57,10 +62,14 @@ export class FastAgentTurnDiagnostics {
   private readonly processConcurrentTurnCountAtStart: number;
   private readonly turnStartedAt: number;
   private canonicalConversationId: string | null = null;
+  private initialHumanTurn: boolean | undefined;
   private failureReason: string | undefined;
   private terminalError: unknown;
   private visibleReplyCount = 0;
+  private firstAssistantResponseAt: number | undefined;
   private resolvedModel: string | undefined;
+  private sessionPath: FastAgentSessionPath | undefined;
+  private openCodeSessionId: string | undefined;
   private inferenceQueuedAt: number | undefined;
   private inferenceSetupStartedAt: number | undefined;
   private inferenceStartedAt: number | undefined;
@@ -97,12 +106,27 @@ export class FastAgentTurnDiagnostics {
     this.canonicalConversationId = conversationId;
   }
 
-  recordVisibleReply(): void {
+  recordInitialHumanTurn(initialHumanTurn: boolean | undefined): void {
+    this.initialHumanTurn = initialHumanTurn;
+  }
+
+  recordVisibleReply(options: { assistantResponse?: boolean } = {}): void {
     this.visibleReplyCount += 1;
+    if (options.assistantResponse !== false) {
+      this.firstAssistantResponseAt ??= this.now();
+    }
   }
 
   recordModelResolved(model: string): void {
     this.resolvedModel = model;
+  }
+
+  recordSessionPath(path: FastAgentSessionPath): void {
+    this.sessionPath = path;
+  }
+
+  recordOpenCodeSessionReady(sessionId: string): void {
+    this.openCodeSessionId = sessionId;
   }
 
   markInferenceQueued(): void {
@@ -128,7 +152,7 @@ export class FastAgentTurnDiagnostics {
     }
   }
 
-  recordOpenCodeProviderRetry(attempt: number): void {
+  recordOpenCodeProviderRetry(attempt: number, error?: unknown): void {
     this.openCodeProviderRetryEventCount += 1;
     this.lastOpenCodeProviderRetryAttempt = attempt;
 
@@ -139,6 +163,52 @@ export class FastAgentTurnDiagnostics {
     const elapsedMs = this.now() - this.inferenceStartedAt;
     this.firstOpenCodeProviderRetryElapsedMs ??= elapsedMs;
     this.lastOpenCodeProviderRetryElapsedMs = elapsedMs;
+
+    this.logger.warn(
+      formatSingleLineLog('[Fast Agent] OpenCode provider retry.', {
+        surface: this.context.conversation.surface,
+        conversationId: this.context.conversation.conversationId,
+        messageId: this.context.currentMessageId,
+        canonicalConversationId: this.canonicalConversationId,
+        sessionPath: this.sessionPath,
+        openCodeSessionId: this.openCodeSessionId,
+        resolvedModel: this.resolvedModel,
+        attempt,
+        elapsedMs,
+        error: error === undefined ? undefined : formatTerminalError(error),
+      }),
+    );
+  }
+
+  recordInferenceAttemptFailure(input: {
+    attemptNumber: number;
+    promptKind: string;
+    stage: string;
+    elapsedMs: number;
+    reason: string;
+    retryable: boolean;
+    providerRetryEventCount: number;
+    error: unknown;
+  }): void {
+    this.logger.warn(
+      formatSingleLineLog('[Fast Agent] Inference attempt failed.', {
+        surface: this.context.conversation.surface,
+        conversationId: this.context.conversation.conversationId,
+        messageId: this.context.currentMessageId,
+        canonicalConversationId: this.canonicalConversationId,
+        sessionPath: this.sessionPath,
+        openCodeSessionId: this.openCodeSessionId,
+        resolvedModel: this.resolvedModel,
+        attemptNumber: input.attemptNumber,
+        promptKind: input.promptKind,
+        stage: input.stage,
+        elapsedMs: input.elapsedMs,
+        reason: input.reason,
+        retryable: input.retryable,
+        providerRetryEventCount: input.providerRetryEventCount,
+        error: formatTerminalError(input.error),
+      }),
+    );
   }
 
   recordRoomoteInferenceRetry(): void {
@@ -210,6 +280,48 @@ export class FastAgentTurnDiagnostics {
     ).reduce((total, stats) => total + stats.count, 0);
     const preInferenceFinishedAt =
       this.inferenceQueuedAt ?? this.inferenceStartedAt ?? turnFinishedAt;
+    const serviceDurationMs = turnFinishedAt - this.turnStartedAt;
+    const firstResponseDurationMs =
+      this.firstAssistantResponseAt === undefined
+        ? undefined
+        : this.firstAssistantResponseAt - this.turnStartedAt;
+    const sandboxlessStartupDurationMs =
+      this.inferenceStartedAt === undefined
+        ? undefined
+        : this.inferenceStartedAt - this.turnStartedAt;
+    const inferenceToFirstResponseDurationMs =
+      this.inferenceStartedAt === undefined ||
+      this.firstAssistantResponseAt === undefined
+        ? undefined
+        : this.firstAssistantResponseAt - this.inferenceStartedAt;
+    const inferenceDurationMs =
+      this.inferenceStartedAt !== undefined &&
+      this.inferenceFinishedAt !== undefined
+        ? this.inferenceFinishedAt - this.inferenceStartedAt
+        : undefined;
+    const postInferenceDurationMs =
+      this.inferenceFinishedAt === undefined
+        ? undefined
+        : turnFinishedAt - this.inferenceFinishedAt;
+
+    captureFastAgentTurnSettled({
+      userId: this.context.userId,
+      surface: this.context.conversation.surface,
+      turnSource: this.context.turnSource,
+      initialHumanTurn: this.initialHumanTurn,
+      sessionPath: this.sessionPath,
+      outcome: this.failed ? 'failure' : 'success',
+      serviceDurationMs,
+      firstResponseDurationMs,
+      sandboxlessStartupDurationMs,
+      inferenceToFirstResponseDurationMs,
+      inferenceDurationMs,
+      postInferenceDurationMs,
+      visibleReplyCount: this.visibleReplyCount,
+      openCodeProviderRetryEventCount: this.openCodeProviderRetryEventCount,
+      roomoteInferenceRetryCount: this.roomoteInferenceRetryCount,
+    });
+
     const logMessage = formatSingleLineLog('[Fast Agent] Turn finished.', {
       surface: this.context.conversation.surface,
       workspaceId: this.context.conversation.workspaceId,
@@ -219,11 +331,16 @@ export class FastAgentTurnDiagnostics {
       turnSource: this.context.turnSource,
       modelRole: this.context.modelRole,
       resolvedModel: this.resolvedModel,
+      sessionPath: this.sessionPath,
+      openCodeSessionId: this.openCodeSessionId,
       release: this.deployMarker.roomote_release,
       releaseSource: this.deployMarker.roomote_release_source,
       outcome: this.failed ? 'failure' : 'success',
       reason: this.failureReason,
-      serviceDurationMs: turnFinishedAt - this.turnStartedAt,
+      serviceDurationMs,
+      firstResponseDurationMs,
+      sandboxlessStartupDurationMs,
+      inferenceToFirstResponseDurationMs,
       preInferenceDurationMs: preInferenceFinishedAt - this.turnStartedAt,
       conversationQueueDurationMs:
         this.inferenceQueuedAt !== undefined &&
@@ -235,15 +352,8 @@ export class FastAgentTurnDiagnostics {
         this.inferenceStartedAt !== undefined
           ? this.inferenceStartedAt - this.inferenceSetupStartedAt
           : undefined,
-      inferenceDurationMs:
-        this.inferenceStartedAt !== undefined &&
-        this.inferenceFinishedAt !== undefined
-          ? this.inferenceFinishedAt - this.inferenceStartedAt
-          : undefined,
-      postInferenceDurationMs:
-        this.inferenceFinishedAt !== undefined
-          ? turnFinishedAt - this.inferenceFinishedAt
-          : undefined,
+      inferenceDurationMs,
+      postInferenceDurationMs,
       processConcurrentTurnCountAtStart: this.processConcurrentTurnCountAtStart,
       openCodeProviderRetryEventCount: this.openCodeProviderRetryEventCount,
       firstOpenCodeProviderRetryElapsedMs:
@@ -252,6 +362,10 @@ export class FastAgentTurnDiagnostics {
         this.lastOpenCodeProviderRetryElapsedMs,
       lastOpenCodeProviderRetryAttempt: this.lastOpenCodeProviderRetryAttempt,
       roomoteInferenceRetryCount: this.roomoteInferenceRetryCount,
+      recoveredAfterOpenCodeProviderRetry:
+        !this.failed && this.openCodeProviderRetryEventCount > 0,
+      recoveredAfterRoomoteInferenceRetry:
+        !this.failed && this.roomoteInferenceRetryCount > 0,
       nativeToolCallCount: this.nativeToolCallCount,
       completedNativeToolCallCount,
       nativeToolStats:

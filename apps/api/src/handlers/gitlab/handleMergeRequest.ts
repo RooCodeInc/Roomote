@@ -135,6 +135,7 @@ export async function handleGitLabMergeRequest(
         prNumber: mergeRequest.iid,
         prTitle: mergeRequest.title,
         prUrl: mergeRequest.url,
+        targetBranch: mergeRequest.target_branch,
         status,
         actorLogin:
           payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',

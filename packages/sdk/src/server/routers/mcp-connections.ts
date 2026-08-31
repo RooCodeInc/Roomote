@@ -15,7 +15,7 @@ import {
   eq,
   and,
   inArray,
-  isBrainProviderConfigured,
+  isBrainEnabled,
   isNull,
   isNotNull,
   or,
@@ -122,11 +122,7 @@ async function resolveMcpServerConfigs(options: {
     }
   }
 
-  if (
-    Env.R_GBRAIN_URL &&
-    !servers[BRAIN_MCP_ID] &&
-    (await isBrainProviderConfigured())
-  ) {
+  if (Env.R_GBRAIN_URL && !servers[BRAIN_MCP_ID] && (await isBrainEnabled())) {
     servers[BRAIN_MCP_ID] = {
       url: `${options.requestOrigin ?? ''}${BRAIN_PROXY_PATH}`,
       headers: {},

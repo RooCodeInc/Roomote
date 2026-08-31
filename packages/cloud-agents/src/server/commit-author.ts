@@ -363,7 +363,7 @@ export async function resolveRunCommitAuthor(
         displayName,
         publicDisplayName: username ? `@${username}` : null,
         githubLogin: null,
-        prAssigneeLogin: null,
+        prAssigneeLogin: sourceControl.provider === 'gitea' ? username : null,
         gitAuthor: {
           name: displayName,
           email: commitEmail,

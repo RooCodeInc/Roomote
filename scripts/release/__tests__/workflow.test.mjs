@@ -33,12 +33,48 @@ test('release workflow keeps promotion as the only automated PR gate', () => {
     promoteScript.match(
       /git fetch origin "refs\/heads\/main:refs\/remotes\/origin\/main"(?: --tags)? --quiet/g,
     )?.length,
-    2,
+    3,
   );
   assert.doesNotMatch(promoteScript, /git fetch origin main/);
-  assert.match(promoteScript, /the candidate reached main while this refresh was running/);
-  assert.match(promoteScript, /the Promote PR closed while this refresh was running/);
+  assert.match(
+    promoteScript,
+    /the candidate reached main while this refresh was running/,
+  );
+  assert.match(
+    promoteScript,
+    /the Promote PR closed while this refresh was running/,
+  );
   assert.match(promoteScript, /release_sha="\$bump_sha"/);
+  assert.match(
+    promoteScript,
+    /points to \$\{remote_release_sha\}, expected \$\{release_sha\}; refusing to write Promote PR metadata/,
+  );
+  assert.match(
+    promoteScript,
+    /moved to \$\{remote_release_sha\}, expected \$\{release_sha\}; refusing to update Promote PR metadata/,
+  );
+  assert.match(
+    promoteScript,
+    /remote_release_sha="\$\(git ls-remote --exit-code --heads origin "refs\/heads\/\$\{release_branch\}" \| cut -f1\)"/,
+  );
+  assert.match(promoteScript, /shipping_guard_sha="\$candidate_sha"/);
+  assert.match(promoteScript, /shipping_guard_sha="\$release_sha"/);
+  assert.match(
+    promoteScript,
+    /the candidate reached main while the branch was being prepared/,
+  );
+  assert.match(
+    promoteScript,
+    /the Promote PR closed while the branch was being updated/,
+  );
+  assert.ok(
+    promoteScript.indexOf(
+      'the candidate reached main while the branch was being prepared',
+    ) <
+      promoteScript.indexOf(
+        'notes="$(node scripts/release/extract-changelog-section.mjs',
+      ),
+  );
   assert.match(
     promoteScript,
     /git push origin "\$\{release_sha\}:refs\/heads\/\$\{release_branch\}"/,

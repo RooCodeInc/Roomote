@@ -80,6 +80,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'launch_task.js'),
       'utf8',
     );
+    const sendTaskMessageSource = await readFile(
+      join(toolsDirectory, 'send_task_message.js'),
+      'utf8',
+    );
     const showWidgetSource = await readFile(
       join(toolsDirectory, 'show_widget.js'),
       'utf8',
@@ -113,6 +117,13 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(launchTaskSource).toContain('deployment-enabled model ID');
     expect(launchTaskSource).toContain(
+      'includeAttachments: z.boolean().optional()',
+    );
+    expect(launchTaskSource).toContain(
+      'Supported current-turn attachments are forwarded only when includeAttachments is true',
+    );
+    expect(launchTaskSource).toContain('defaults to false');
+    expect(launchTaskSource).toContain(
       'Brief user-facing description of the work now underway',
     );
     expect(launchTaskSource).toContain(
@@ -125,11 +136,22 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(launchTaskSource).toContain(
       'to run against all active repositories',
     );
+    expect(sendTaskMessageSource).toContain(
+      'includeAttachments: z.boolean().optional()',
+    );
+    expect(sendTaskMessageSource).toContain(
+      'Supported current-turn attachments are forwarded only when includeAttachments is true',
+    );
+    expect(sendTaskMessageSource).toContain('defaults to false');
     expect(showWidgetSource).toContain('invoke("show_widget"');
     expect(showWidgetSource).toContain('textFallback: z.string().max(4000)');
     expect(showWidgetSource).toContain(
-      'On Slack or Discord, textFallback is posted instead',
+      'On Slack or Discord, textFallback is posted as a chat preview with a link to open the rendered widget',
     );
+    expect(showWidgetSource).toContain(
+      'Optional chat preview shown on Slack or Discord with a link to open the rendered widget',
+    );
+    expect(showWidgetSource).not.toContain('textFallback is posted instead');
     expect(showWidgetSource).toContain(SHOW_WIDGET_THEME_GUIDANCE);
     expect(showWidgetSource).toContain(SHOW_WIDGET_FIXED_CANVAS_GUIDANCE);
     expect(showWidgetSource).toContain(SHOW_WIDGET_HEIGHT_DESCRIPTION);
@@ -145,13 +167,21 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(bridgeSource).toContain('agent: context.agent');
     expect(bridgeSource).toContain('metadata: payload.metadata ?? {}');
     expect(spillReadSource).toContain('never pass filesystem paths');
-    expect(skillListSource).toContain('repository-defined skills');
     expect(skillListSource).toContain(
-      'total, packaged, and repository skill counts',
+      'authorized settings-defined skills, plus optionally repository-defined skills',
+    );
+    expect(skillListSource).toContain(
+      'an exact name to find packaged and settings skills',
+    );
+    expect(skillListSource).toContain(
+      'complete packaged and Settings inventory across authorized environments',
     );
     expect(skillListSource).toContain('environmentId: z.string()');
     expect(skillListSource).toContain('repositoryId: z.string()');
-    expect(skillListSource).toContain('Omit both scope fields');
+    expect(skillListSource).toContain('name: z.string()');
+    expect(skillListSource).toContain('sourceOffset: z.number()');
+    expect(skillListSource).toContain('nextSourceOffset');
+    expect(skillListSource).toContain('Omit scope and name');
     expect(skillListSource).toContain(
       'exactly one of environmentId or repositoryId',
     );
@@ -384,6 +414,7 @@ describe('Fast native OpenCode tool bridge', () => {
           counts: {
             packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
             repository: 1,
+            settings: 0,
             total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 1,
           },
           skills: expect.arrayContaining([
@@ -408,6 +439,7 @@ describe('Fast native OpenCode tool bridge', () => {
           counts: {
             packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
             repository: 0,
+            settings: 0,
             total: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
           },
           skills: expect.arrayContaining([
@@ -425,6 +457,16 @@ describe('Fast native OpenCode tool bridge', () => {
         },
       });
       expect(JSON.parse(ambiguousCatalog.output)).toEqual({
+        success: false,
+        error: 'The requested skill catalog is unavailable.',
+      });
+
+      const invalidContinuation = await callBridge({
+        sessionID: parentSession,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
+        args: { sourceOffset: 8 },
+      });
+      expect(JSON.parse(invalidContinuation.output)).toEqual({
         success: false,
         error: 'The requested skill catalog is unavailable.',
       });
@@ -605,6 +647,7 @@ describe('Fast native OpenCode tool bridge', () => {
     const config = JSON.parse(
       await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
     ) as {
+      agent: { build: { tools: Record<string, boolean> } };
       mcp: Record<string, { url: string; headers: Record<string, string> }>;
     };
     const executor = vi.fn(async ({ args }) => ({ matches: [args.query] }));
@@ -614,6 +657,25 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(config.mcp.github!.headers.Authorization).not.toContain(
       runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN,
     );
+    expect(config.agent.build.tools).toMatchObject({
+      '*': false,
+      task: true,
+      'github_*': true,
+    });
+    const serverConfig = JSON.parse(
+      buildOpenCodeCliEnv(runtime.env, {
+        preserveReasoning: true,
+        promptOnlySubagents: true,
+      }).OPENCODE_CONFIG_CONTENT ?? '{}',
+    ) as {
+      agent: Record<string, { tools: Record<string, boolean> }>;
+    };
+    expect(serverConfig.agent.advisor!.tools).toMatchObject({
+      '*': true,
+      task: false,
+      roomote_manage_custom_automations: false,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: false,
+    });
     const unbind = bindFastAgentMcpToolExecutor(
       runtime.mcpCapability,
       executor,

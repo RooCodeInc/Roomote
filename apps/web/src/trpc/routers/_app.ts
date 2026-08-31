@@ -32,13 +32,31 @@ import {
 } from '@roomote/types';
 
 import {
+  getFastSessionTasksCommand,
+  handleFastSessionPrReviewActionCommand,
   replyToFastSessionCommand,
   startFastSessionCommand,
+  updateFastSessionModelSelectionCommand,
 } from '../commands/fast-sessions';
 import {
   replyToFastSessionInputSchema,
+  fastSessionPrReviewActionInputSchema,
   startFastSessionInputSchema,
+  updateFastSessionModelSelectionInputSchema,
 } from '../commands/fast-sessions/input';
+import {
+  getSessionByIdCommand,
+  getSessionForTask,
+  getSessions,
+  getSessionTimeline,
+  archiveSessionCommand,
+  listSessionPins,
+  markSessionReadCommand,
+  sessionIdInputSchema,
+  sessionsListInputSchema,
+  setSessionPinned,
+  updateSessionMetadata,
+} from '../commands/sessions';
 import {
   analyticsChartInputSchema,
   analyticsDetailsInputSchema,
@@ -113,7 +131,6 @@ import {
   syncRepositoriesCommand,
 } from '../commands/source-control';
 import {
-  routeHomeTaskCommand,
   createStandardTaskRunCommand,
   cancelTaskRunCommand,
   retryFailedTaskStartCommand,
@@ -204,6 +221,8 @@ import {
   answerSandboxUserInputRequestCommand,
   answerSandboxUserInputRequestInputSchema,
   getSandboxSessionByTaskIdCommand,
+  handlePrReviewNotificationActionCommand,
+  handlePrReviewNotificationActionInputSchema,
   saveDraftPromptCommand,
   sendSandboxPromptCommand,
   sendSandboxPromptInputSchema,
@@ -356,6 +375,7 @@ import {
   triggerAutomationCommand,
   updateCustomAutomationCommand,
 } from '../commands/automations';
+import { mergeAnnouncerDestinationInputShape } from '../commands/automations/settings-schema';
 import {
   getAgentBehaviorSettingsCommand,
   updateAgentBehaviorSettingsCommand,
@@ -444,10 +464,12 @@ import {
   getBrainSettingsCommand,
   listBrainPagesCommand,
   retryFailedBrainTaskMemoriesCommand,
+  setMemoryEnabledCommand,
 } from '../commands/brain';
 import {
   getReleaseNotesCommand,
   getReleaseStatusCommand,
+  getReleaseHistoryCommand,
 } from '../commands/product-releases';
 import { getStatuspageIncident } from '@roomote/slack';
 
@@ -682,6 +704,7 @@ const automationsRouter = createRouter({
           .nullable()
           .optional(),
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
+        ...mergeAnnouncerDestinationInputShape,
         issueFixerInstructions: z.string().max(8_000).nullable().optional(),
         suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
@@ -1043,17 +1066,6 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         startTaskGoalCommand(auth, input),
-      ),
-
-    routeHomeTask: protectedProcedure
-      .input(
-        z.object({
-          description: z.string(),
-          images: z.array(z.string()).optional(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        routeHomeTaskCommand(auth, input),
       ),
 
     createStandardTask: protectedProcedure
@@ -1462,14 +1474,12 @@ export const appRouter = createRouter({
             colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
-            communicationsFastModeDefault: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
-              input.narrationMode !== undefined ||
-              input.communicationsFastModeDefault !== undefined,
+              input.narrationMode !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -2111,6 +2121,12 @@ export const appRouter = createRouter({
       .input(answerSandboxUserInputRequestInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         answerSandboxUserInputRequestCommand(auth, input),
+      ),
+
+    handlePrReviewNotificationAction: protectedProcedure
+      .input(handlePrReviewNotificationActionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        handlePrReviewNotificationActionCommand(auth, input),
       ),
 
     takeOverBrowserControl: protectedProcedure
@@ -2814,6 +2830,94 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
       ),
+    reviewAction: protectedProcedure
+      .input(fastSessionPrReviewActionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        handleFastSessionPrReviewActionCommand(auth, input),
+      ),
+    updateModelSelection: protectedProcedure
+      .input(updateFastSessionModelSelectionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        updateFastSessionModelSelectionCommand(auth, input),
+      ),
+    tasks: protectedProcedure
+      .input(z.object({ sessionId: z.string().uuid() }))
+      .query(({ ctx: { auth }, input }) =>
+        getFastSessionTasksCommand(auth, input.sessionId),
+      ),
+  }),
+
+  sessions: createRouter({
+    list: protectedProcedure
+      .input(sessionsListInputSchema)
+      .query(({ ctx: { auth }, input }) => getSessions(auth, input)),
+    byId: protectedProcedure
+      .input(sessionIdInputSchema)
+      .query(({ ctx: { auth }, input }) =>
+        getSessionByIdCommand(auth, input.sessionId),
+      ),
+    timeline: protectedProcedure
+      .input(sessionIdInputSchema.extend({ since: z.number().optional() }))
+      .query(({ ctx: { auth }, input }) =>
+        getSessionTimeline(auth, input.sessionId, input.since),
+      ),
+    forTask: protectedProcedure
+      .input(z.object({ taskId: z.string().min(1) }))
+      .query(({ ctx: { auth }, input }) =>
+        getSessionForTask(auth, input.taskId),
+      ),
+    markRead: protectedProcedure
+      .input(
+        sessionIdInputSchema
+          .extend({
+            throughEventAt: z.number().nonnegative().optional(),
+            throughEventId: z.string().min(1).optional(),
+          })
+          .refine(
+            (value) =>
+              (value.throughEventAt === undefined) ===
+              (value.throughEventId === undefined),
+            'Pass both cursor fields or neither.',
+          ),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        markSessionReadCommand(auth, input),
+      ),
+    rename: protectedProcedure
+      .input(
+        sessionIdInputSchema.extend({
+          title: z.string().trim().min(1).max(500),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateSessionMetadata(auth, input.sessionId, { title: input.title }),
+      ),
+    archive: protectedProcedure
+      .input(sessionIdInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        archiveSessionCommand(auth, input.sessionId),
+      ),
+    unarchive: protectedProcedure
+      .input(sessionIdInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        updateSessionMetadata(auth, input.sessionId, { archivedAt: null }),
+      ),
+    pins: protectedProcedure.query(({ ctx: { auth } }) =>
+      listSessionPins(auth),
+    ),
+    setPinned: protectedProcedure
+      .input(sessionIdInputSchema.extend({ pinned: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) => setSessionPinned(auth, input)),
+    search: protectedProcedure
+      .input(
+        z.object({
+          query: z.string().max(200),
+          limit: z.number().int().min(1).max(50).optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getSessions(auth, { q: input.query, limit: input.limit ?? 20 }),
+      ),
   }),
 
   agentBehavior: createRouter({
@@ -3000,6 +3104,12 @@ export const appRouter = createRouter({
       .input(z.object({ slug: z.string().min(1).max(512) }))
       .query(({ ctx: { auth }, input }) => getBrainPageCommand(auth, input)),
 
+    setMemoryEnabled: protectedProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setMemoryEnabledCommand(auth, input),
+      ),
+
     backfillTaskMemories: protectedProcedure.mutation(({ ctx: { auth } }) =>
       backfillBrainTaskMemoriesCommand(auth),
     ),
@@ -3041,6 +3151,15 @@ export const appRouter = createRouter({
         }),
       )
       .query(({ ctx: { auth }, input }) => getReleaseNotesCommand(auth, input)),
+    history: protectedProcedure
+      .input(
+        z.object({
+          version: z.string().min(1).max(64),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getReleaseHistoryCommand(auth, input),
+      ),
   }),
 });
 

@@ -188,13 +188,36 @@ async function callFastAgentTaskApi({
 
 export async function sendFastAgentTaskMessage(
   context: FastAgentTaskApiContext,
-  params: { taskId: string; message: string },
+  params: { taskId: string; message: string; images?: string[] },
 ): Promise<FastAgentTaskToolResult> {
   return callFastAgentTaskApi({
     ...context,
     method: 'POST',
     path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/steer_message`,
-    body: { message: params.message, senderMode: 'fast_agent' },
+    body: {
+      message: params.message,
+      ...(params.images?.length ? { images: params.images } : {}),
+      senderMode: 'fast_agent',
+    },
+  });
+}
+
+export async function sendFastAgentTaskMessageOnce(
+  context: FastAgentTaskApiContext,
+  params: {
+    taskId: string;
+    message: string;
+    clientMessageId: string;
+  },
+): Promise<FastAgentTaskToolResult> {
+  return callFastAgentTaskApi({
+    ...context,
+    method: 'POST',
+    path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/send_message`,
+    body: {
+      message: params.message,
+      clientMessageId: params.clientMessageId,
+    },
   });
 }
 

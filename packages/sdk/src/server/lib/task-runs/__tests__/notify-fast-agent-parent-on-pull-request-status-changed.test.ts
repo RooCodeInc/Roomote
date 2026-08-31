@@ -96,6 +96,7 @@ const pullRequest = {
   number: 42,
   title: 'Fix review feedback',
   url: 'https://github.com/acme/web/pull/42',
+  targetBranch: 'develop',
   status: 'merged' as const,
 };
 

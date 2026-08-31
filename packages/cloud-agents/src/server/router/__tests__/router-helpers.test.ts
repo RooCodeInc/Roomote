@@ -435,6 +435,17 @@ describe('router helpers', () => {
     expect(isRouterMcpToolAllowed('roomote', allowedTools[0]!)).toBe(true);
   });
 
+  it('exposes only read-only GitHub Actions inspection tools', () => {
+    expect(getAllowedRouterMcpToolNames('github')).toEqual(
+      expect.arrayContaining(['actions_get', 'actions_list', 'get_job_logs']),
+    );
+    expect(getRouterMcpUpstreamConstraints('github')).toEqual({
+      readonly: true,
+      toolsets: ['repos', 'pull_requests', 'issues', 'actions'],
+    });
+    expect(isRouterMcpToolAllowed('github', 'actions_run_trigger')).toBe(false);
+  });
+
   it('includes Roomote lookup support for Slack and Discord permalink references', () => {
     expect(
       shouldIncludeRoomoteRouterLookup(

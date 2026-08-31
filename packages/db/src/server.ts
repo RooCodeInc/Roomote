@@ -51,6 +51,7 @@ export * from './lib/work-item-claims';
 export * from './lib/tracked-suggestion-cards';
 export * from './lib/task-start-parallel-counts';
 export * from './lib/tasks';
+export * from './lib/sessions';
 export * from './lib/task-goals';
 export * from './lib/source-control-provider';
 export * from './lib/sync-task-state';
@@ -120,6 +121,15 @@ export {
   tasksRelations,
   taskPins,
   taskPinsRelations,
+  sessions,
+  sessionsRelations,
+  sessionTasks,
+  sessionTasksRelations,
+  sessionParticipants,
+  sessionParticipantsRelations,
+  sessionPins,
+  sessionPinsRelations,
+  sessionBackfillState,
   taskArtifacts,
   taskArtifactsRelations,
   taskPullRequests,
@@ -188,6 +198,8 @@ export {
   fastAgentMemoryEvents,
   fastAgentMessages,
   fastAgentMessagesRelations,
+  fastAgentParentEvents,
+  fastAgentParentEventsRelations,
   fastAgentProviderMessages,
   fastAgentProviderMessagesRelations,
   fastAgentPrFeedbackDeliveries,
@@ -243,5 +255,11 @@ export type {
   SuggestionType,
   ManagerMcpSetupNotificationReason,
   EnvironmentConfigVersionSource,
+  SessionOwnerKind,
+  SessionSourceSurface,
+  SessionStatus,
+  SessionTaskOrigin,
+  SessionParticipantRole,
+  SessionBackfillPhase,
 } from './schema';
 export type { AutomationWorkItemDisposition } from '@roomote/types';

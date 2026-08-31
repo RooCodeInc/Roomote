@@ -3,6 +3,7 @@ import type { Context } from 'hono';
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
 import { steerMessageToTask } from './sendMessageToTask';
+import { sendMessageToFastSessionForUser } from './fastSessionCommunication';
 
 /**
  * POST /api/tasks/:taskId/steer_message
@@ -48,13 +49,22 @@ export async function steerMessage(
     return c.json({ error: 'senderMode is invalid' }, 400);
   }
 
-  const result = await steerMessageToTask({
+  let result = await steerMessageToTask({
     taskId,
     userId: auth.userId,
     message: body.message,
     images: body.images,
     senderMode: body.senderMode,
   });
+
+  if (!result.success && result.status === 404) {
+    result = await sendMessageToFastSessionForUser({
+      sessionId: taskId,
+      userId: auth.userId,
+      message: body.message,
+      images: body.images,
+    });
+  }
 
   if (result.success) {
     return c.json(result);

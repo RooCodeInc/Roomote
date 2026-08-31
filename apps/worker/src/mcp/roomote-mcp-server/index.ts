@@ -14,8 +14,13 @@ import {
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
-  ROOMOTE_TASK_INSPECTION_ACTIONS,
-  roomoteTaskInspectionFieldSchemas,
+  ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
+  ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION,
+  ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
+  getRoomoteSearchStatusError,
+  resolveRoomoteCommunicationTarget,
+  roomoteManagementFieldSchemas,
+  shouldSearchTasks,
   sourceControlProviderSchema,
   taskArtifactTypeSchema,
   workspaceReadinessSchema,
@@ -79,6 +84,13 @@ import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
 import { handleManageCustomAutomations } from './custom-automations.js';
 import { handleManageGoal } from './goal.js';
+import {
+  handleGetSessionMessages,
+  handleGetSessionSummary,
+  handleSearchSessions,
+  handleSendSessionMessage,
+  handleStartSession,
+} from './sessions.js';
 
 export {
   taskSuggestionResultHasSubmittedSuggestions,
@@ -504,61 +516,30 @@ const ENVIRONMENT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const manageTasksToolDescription =
-  `Manage ${PRODUCT_NAME} tasks. ` +
-  `When the user provides an existing ${PRODUCT_NAME} task URL or asks about an existing task, extract the task ID and use action "get_summary" for current status or action "get_messages" for transcript details before resorting to browser or task-UI navigation. ` +
+  ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION +
+  ' ' +
+  `When the user provides an existing ${PRODUCT_NAME} task URL, extract its task ID and pass taskId to get_summary or get_messages before resorting to browser navigation. ` +
   'Always call action "list_environments" immediately before action "launch" so you can copy a valid environmentId. ' +
   'Use action "list_environments" to list launch targets (named environments and the org-wide target). ' +
-  'Use action "search" to find tasks by query or status. ' +
-  `Use action "get_summary" to inspect a specific task's latest status and failure details (requires taskId). ` +
+  'Use action "search_tasks" only to search direct tasks by query or status. ' +
+  `Use action "get_summary" with taskId to inspect a specific task's latest status and failure details. ` +
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
-  'Use action "get_messages" to retrieve the latest message history for a task (requires taskId, returns newest first). ' +
+  'Use action "get_messages" with sessionId for Session history, or taskId for a specific task transcript; results are newest first. ' +
   `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
-  'Use action "send_message" to send a follow-up message to a running task (requires taskId and message). ' +
+  'Use action "send_message" with sessionId to continue a Session, or taskId to message a specific task. ' +
   'Use action "list_models" to list the enabled model IDs available for task model selection. Call it before "update_models" when resolving a requested model name to an exact ID. ' +
   'Use action "update_models" ONLY when the user explicitly asks to change the model or reasoning level for a task (requires role; taskId defaults to the current task). Pass the desired model id and/or reasoningEffort; omit both to reset the role to the deployment default. Users usually phrase both together: in "switch to Luna Max" or "use GPT 5.4 medium", the trailing low/medium/high/extra high/max word is the reasoningEffort and the rest names the model — set BOTH fields in one call. Changes apply from the next turn, so a change to the current task does not affect the turn that is already running.';
 
 const manageTasksInputSchema = {
   action: z
     .enum([
-      ...ROOMOTE_TASK_INSPECTION_ACTIONS,
-      'launch',
-      'cancel',
-      'send_message',
+      ...ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
       'list_models',
       'update_models',
-      'list_environments',
     ])
-    .describe(
-      'The task action to perform. Call "list_environments" immediately before "launch".',
-    ),
-  ...roomoteTaskInspectionFieldSchemas,
-  taskId: z
-    .string()
-    .optional()
-    .describe(
-      'The task ID (required for get_summary, get_compute_logs, get_messages, cancel, and send_message)',
-    ),
-  message: z
-    .string()
-    .optional()
-    .describe(
-      'Follow-up message text to send to a running task (required for send_message)',
-    ),
-  prompt: z
-    .string()
-    .optional()
-    .describe(
-      'Task description or instructions in natural language (required for launch)',
-    ),
-  environmentId: z
-    .string()
-    .optional()
-    .describe(
-      'Environment ID returned by "list_environments" (required for launch). ' +
-        'Call "list_environments" immediately before launching and copy one of the returned environmentId values.',
-    ),
-  branch: z.string().optional().describe('Branch to use (for launch)'),
+    .describe(ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION),
+  ...roomoteManagementFieldSchemas,
   role: z
     .enum(['coding', 'helper', 'vision', 'codeReview', 'explore', 'planning'])
     .optional()
@@ -576,12 +557,6 @@ const manageTasksInputSchema = {
     .optional()
     .describe(
       'For update_models: desired reasoning level for the role ("extra high" maps to xhigh). A level qualifier trailing a model name ("Luna Max", "Sonnet high") is this field, not part of the model id — pass it here alongside the model. Omit to use the deployment default level.',
-    ),
-  notifyOnSettle: z
-    .boolean()
-    .optional()
-    .describe(
-      'For launch: when true, the platform sends a message into THIS task session when the launched task settles (completes, fails, is canceled, or goes idle), so you can wait for that notification instead of polling get_summary.',
     ),
 } satisfies Record<string, z.ZodTypeAny>;
 
@@ -620,7 +595,7 @@ roomoteMcpServer.registerTool(
 roomoteMcpServer.registerTool(
   'manage_tasks',
   {
-    title: 'Manage Tasks',
+    title: 'Manage Sessions and Tasks',
     description: manageTasksToolDescription,
     inputSchema: manageTasksInputSchema,
     annotations: {
@@ -637,7 +612,53 @@ roomoteMcpServer.registerTool(
     }
 
     switch (params.action) {
+      case 'start': {
+        if (!params.message?.trim()) {
+          return errorResult('message is required for start');
+        }
+        return handleStartSession(params.message, config);
+      }
       case 'search': {
+        const statusError = getRoomoteSearchStatusError({
+          action: 'search',
+          pullRequest: params.pullRequest,
+          status: params.status,
+        });
+        if (statusError) return errorResult(statusError);
+        if (
+          shouldSearchTasks({
+            action: 'search',
+            pullRequest: params.pullRequest,
+            status: params.status,
+          })
+        ) {
+          return handleSearchTasks(
+            {
+              query: params.query,
+              pullRequest: params.pullRequest,
+              status: params.status,
+              limit: params.limit ? Math.min(params.limit, 100) : undefined,
+              cursor: params.cursor,
+            },
+            config,
+          );
+        }
+        return handleSearchSessions(
+          {
+            query: params.query,
+            status: params.status,
+            limit: params.limit ? Math.min(params.limit, 100) : undefined,
+            cursor: params.cursor,
+          },
+          config,
+        );
+      }
+      case 'search_tasks': {
+        const statusError = getRoomoteSearchStatusError({
+          action: 'search_tasks',
+          status: params.status,
+        });
+        if (statusError) return errorResult(statusError);
         return handleSearchTasks(
           {
             query: params.query,
@@ -650,10 +671,15 @@ roomoteMcpServer.registerTool(
         );
       }
       case 'get_summary': {
-        if (!params.taskId?.trim()) {
-          return errorResult('taskId is required for get_summary');
+        const target = resolveRoomoteCommunicationTarget(params);
+        if (!target) {
+          return errorResult(
+            'sessionId is required for get_summary when taskId is omitted',
+          );
         }
-        return handleGetTaskSummary({ taskId: params.taskId }, config);
+        return target.kind === 'task'
+          ? handleGetTaskSummary({ taskId: target.id }, config)
+          : handleGetSessionSummary(target.id, config);
       }
       case 'get_compute_logs': {
         if (!params.taskId?.trim()) {
@@ -662,11 +688,20 @@ roomoteMcpServer.registerTool(
         return handleGetTaskComputeLogs({ taskId: params.taskId }, config);
       }
       case 'get_messages': {
-        if (!params.taskId?.trim()) {
-          return errorResult('taskId is required for get_messages');
+        const target = resolveRoomoteCommunicationTarget(params);
+        if (!target) {
+          return errorResult(
+            'sessionId is required for get_messages when taskId is omitted',
+          );
         }
-        return handleGetTaskMessages(
-          { taskId: params.taskId, limit: params.limit },
+        if (target.kind === 'task') {
+          return handleGetTaskMessages(
+            { taskId: target.id, limit: params.limit },
+            config,
+          );
+        }
+        return handleGetSessionMessages(
+          { sessionId: target.id, limit: params.limit },
           config,
         );
       }
@@ -735,16 +770,24 @@ roomoteMcpServer.registerTool(
         return handleListTaskModels(config);
       }
       case 'send_message': {
-        if (!params.taskId?.trim()) {
-          return errorResult('taskId is required for send_message');
-        }
         if (!params.message?.trim()) {
           return errorResult('message is required for send_message');
         }
-        return handleSendMessage(
-          { taskId: params.taskId, message: params.message },
-          config,
-        );
+        const target = resolveRoomoteCommunicationTarget(params);
+        if (!target) {
+          return errorResult(
+            'sessionId is required for send_message when taskId is omitted',
+          );
+        }
+        return target.kind === 'task'
+          ? handleSendMessage(
+              { taskId: target.id, message: params.message },
+              config,
+            )
+          : handleSendSessionMessage(
+              { sessionId: target.id, message: params.message },
+              config,
+            );
       }
       case 'list_environments': {
         return handleListEnvironments(config);
@@ -764,10 +807,10 @@ roomoteMcpServer.registerTool(
       'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. ' +
       'Use action "get_pull_request" to read PR/MR details (state, branches, head/base SHAs), ' +
       '"list_pull_requests" to list open PRs/MRs in a repository (summaries with branches, labels, and mergeability where the provider exposes it), and ' +
-      '"list_pull_request_comments" to read review threads (with resolution state) and issue comments. ' +
+      '"list_pull_request_comments" to read review threads, top-level reviews, and issue comments. ' +
       'Use "reply_to_pull_request_comment" to answer a review thread, "create_pull_request_comment" for a top-level comment, ' +
       '"create_pull_request_review_comment" for a new inline comment anchored to a file and line of the current diff, ' +
-      '"resolve_pull_request_thread" to resolve or reopen a thread, and "submit_pull_request_review" to approve, request changes, or leave a review comment. ' +
+      '"resolve_pull_request_thread" to resolve or reopen a thread, "submit_pull_request_review" to approve, request changes, or leave a review comment, and "dismiss_pull_request_review" to dismiss a GitHub review. ' +
       'Provider gaps are reported as warnings with applied:false instead of errors. ' +
       'For the PR diff, use local git against the returned SHAs instead of a provider CLI. ' +
       'The platform resolves the current task source-control provider and keeps provider tokens server-side.',
@@ -783,13 +826,14 @@ roomoteMcpServer.registerTool(
           'create_pull_request_review_comment',
           'resolve_pull_request_thread',
           'submit_pull_request_review',
+          'dismiss_pull_request_review',
           'update_pull_request_comment',
           'get_issue',
           'list_issue_comments',
           'create_issue_comment',
         ])
         .describe(
-          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline review comment anchored to a file and line of the current diff (one finding per call); resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; update_pull_request_comment edits an existing comment in place.',
+          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads, top-level reviews, and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline review comment anchored to a file and line of the current diff (one finding per call); resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; dismiss_pull_request_review dismisses a GitHub review; update_pull_request_comment edits an existing comment in place.',
         ),
       repositoryFullName: z
         .string()
@@ -843,6 +887,12 @@ roomoteMcpServer.registerTool(
         .optional()
         .describe(
           'Required for update_pull_request_comment: the comment id from list_pull_request_comments or a prior write result.',
+        ),
+      reviewId: z
+        .string()
+        .optional()
+        .describe(
+          'Required for dismiss_pull_request_review: the review id from list_pull_request_comments.',
         ),
       resolved: z
         .boolean()
@@ -914,7 +964,15 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'The text content: the PR/MR description for create_or_update_pull_request, the comment text for issue/PR reply or create actions, or the optional review body for submit_pull_request_review.',
+          'The text content: the PR/MR description for create_or_update_pull_request, the comment text for issue/PR reply or create actions, the optional review body for submit_pull_request_review, or the required dismissal reason for dismiss_pull_request_review.',
+        ),
+      prAttribution: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe(
+          'Optional PR-body provenance choice for create_or_update_pull_request. Pass the name or source-control login of a participant recorded in the task conversation or the current acting user. Omit to retain current acting-user attribution. This does not change commit authorship or assignees.',
         ),
       labels: z
         .array(z.string())
@@ -960,6 +1018,7 @@ roomoteMcpServer.registerTool(
         limit: params.limit,
         threadId: params.threadId,
         commentId: params.commentId,
+        reviewId: params.reviewId,
         resolved: params.resolved,
         reviewEvent: params.reviewEvent,
         path: params.path,
@@ -971,6 +1030,7 @@ roomoteMcpServer.registerTool(
         targetBranch: params.targetBranch,
         title: params.title,
         body: params.body,
+        prAttribution: params.prAttribution,
         labels: params.labels,
         assignees: params.assignees,
         sourceControlProvider: params.sourceControlProvider,

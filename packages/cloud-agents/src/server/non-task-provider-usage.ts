@@ -55,6 +55,14 @@ export const FAST_AGENT_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
   action: permission === 'task' ? 'allow' : 'deny',
 }));
 
+export const FAST_AGENT_SESSION_TOOL_FILTER: Record<string, boolean> =
+  Object.fromEntries(
+    FAST_AGENT_SESSION_PERMISSIONS.map(({ permission, action }) => [
+      permission,
+      action === 'allow',
+    ]),
+  );
+
 /**
  * Default per-prompt tool filter: disable every registered tool — including MCP or
  * plugin tools an externally configured server (`OPENCODE_SDK_SERVER_URL`)
@@ -67,7 +75,9 @@ export const FAST_AGENT_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
  * release renames that internal tool, structured calls fail loudly ("Model
  * did not produce structured output") rather than any tool becoming
  * executable — this filter fails closed. Fast supplies a separate explicit
- * allowlist containing only its loopback bridge tools.
+ * allowlist on its generated primary-agent config. Fast prompts persist only
+ * the explicit built-in denials above, never a wildcard that OpenCode would
+ * inherit into task-created child sessions.
  */
 const NON_TASK_SESSION_TOOL_DISABLES: Record<string, boolean> = {
   '*': false,
@@ -91,10 +101,12 @@ export type NonTaskInferenceTrackingInput = {
   surface: string;
   userId?: string | null;
   taskId?: string | null;
+  fastConversationId?: string | null;
   provider?: string;
 };
 
 export const NON_TASK_INFERENCE_SURFACES = {
+  brainSynthesis: 'brain_synthesis',
   chatAudioTranscription: 'chat_audio_transcription',
   chatVideoDescription: 'chat_video_description',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
@@ -359,6 +371,9 @@ async function recordNonTaskOpenCodeUsage(
       usageType: 'inference',
       eventKey: `non-task:${params.surface}:${harnessSessionId}:${messageId}`,
       taskId: params.taskId ?? null,
+      ...(params.fastConversationId
+        ? { fastConversationId: params.fastConversationId }
+        : {}),
       userId: params.userId ?? null,
       harnessSessionId,
       messageId,

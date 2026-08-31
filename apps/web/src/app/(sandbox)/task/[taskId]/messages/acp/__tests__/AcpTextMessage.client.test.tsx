@@ -1,9 +1,18 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 const transcriptVisibilityState = vi.hoisted(() => ({
   enabled: false,
+}));
+const reviewActionMutate = vi.hoisted(() => vi.fn());
+
+vi.mock('@/trpc/client', () => ({
+  useTRPCClient: () => ({
+    sandboxSession: {
+      handlePrReviewNotificationAction: { mutate: reviewActionMutate },
+    },
+  }),
 }));
 
 vi.mock('@/components/ai-elements', () => ({
@@ -52,55 +61,62 @@ vi.mock('@/components/ai-elements', () => ({
     <time data-anchor-id={anchorId}>{String(ts)}</time>
   ),
 }));
-vi.mock('@/components/system', () => ({
-  BasicTooltip: ({
-    children,
-    content,
-  }: {
-    children: ReactNode;
-    content: ReactNode;
-  }) => (
-    <div data-testid="basic-tooltip" data-content={String(content)}>
-      {children}
-    </div>
-  ),
-  Button: ({
-    children,
-    ...props
-  }: { children: ReactNode } & Record<string, unknown>) => (
-    <button type="button" {...props}>
-      {children}
-    </button>
-  ),
-  ChevronDownIcon: () => <svg aria-label="ChevronDownIcon" />,
-  GitCommitVertical: () => <svg aria-label="GitCommitVertical" />,
-  GitPullRequestCreateArrow: () => (
-    <svg aria-label="GitPullRequestCreateArrow" />
-  ),
-  GitPullRequestDraft: () => <svg aria-label="GitPullRequestDraft" />,
-  Image: () => <svg aria-label="Image" />,
-  ListChecks: () => <svg aria-label="ListChecks" />,
-  MediaViewerDialog: ({
-    children,
-    open,
-    title,
-  }: {
-    children: ReactNode;
-    open: boolean;
-    title: string;
-  }) =>
-    open ? (
-      <div data-testid="media-viewer" aria-label={title}>
+vi.mock('@/components/system', async () => {
+  const actual = await vi.importActual<typeof import('@/components/system')>(
+    '@/components/system',
+  );
+
+  return {
+    ...actual,
+    BasicTooltip: ({
+      children,
+      content,
+    }: {
+      children: ReactNode;
+      content: ReactNode;
+    }) => (
+      <div data-testid="basic-tooltip" data-content={String(content)}>
         {children}
       </div>
-    ) : null,
-  MediaViewerImage: ({ alt }: { alt: string }) => (
-    <div role="img" aria-label={alt} />
-  ),
-  ScanFace: () => <svg aria-label="ScanFace" />,
-  ScanSearch: () => <svg aria-label="ScanSearch" />,
-  Sparkles: () => <svg aria-label="Sparkles" />,
-}));
+    ),
+    Button: ({
+      children,
+      ...props
+    }: { children: ReactNode } & Record<string, unknown>) => (
+      <button type="button" {...props}>
+        {children}
+      </button>
+    ),
+    ChevronDownIcon: () => <svg aria-label="ChevronDownIcon" />,
+    GitCommitVertical: () => <svg aria-label="GitCommitVertical" />,
+    GitPullRequestCreateArrow: () => (
+      <svg aria-label="GitPullRequestCreateArrow" />
+    ),
+    GitPullRequestDraft: () => <svg aria-label="GitPullRequestDraft" />,
+    Image: () => <svg aria-label="Image" />,
+    ListChecks: () => <svg aria-label="ListChecks" />,
+    MediaViewerDialog: ({
+      children,
+      open,
+      title,
+    }: {
+      children: ReactNode;
+      open: boolean;
+      title: string;
+    }) =>
+      open ? (
+        <div data-testid="media-viewer" aria-label={title}>
+          {children}
+        </div>
+      ) : null,
+    MediaViewerImage: ({ alt }: { alt: string }) => (
+      <div role="img" aria-label={alt} />
+    ),
+    ScanFace: () => <svg aria-label="ScanFace" />,
+    ScanSearch: () => <svg aria-label="ScanSearch" />,
+    Sparkles: () => <svg aria-label="Sparkles" />,
+  };
+});
 
 vi.mock('../../../useInternalTranscriptRowsVisible', () => ({
   useInternalTranscriptRowsVisible: () => transcriptVisibilityState.enabled,
@@ -111,6 +127,57 @@ import { AcpTextMessage } from '../AcpTextMessage';
 describe('AcpTextMessage', () => {
   beforeEach(() => {
     transcriptVisibilityState.enabled = false;
+    reviewActionMutate.mockReset();
+  });
+
+  const reviewOfferMessage = (status = 'pending') => ({
+    id: 'review-offer-1',
+    ts: 123,
+    role: 'assistant' as const,
+    kind: 'text' as const,
+    partial: false,
+    sessionId: 'session-1',
+    updateType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+    text: 'Review feedback remains.',
+    data: {
+      prReviewAction: {
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        question: 'Would you like me to resolve these issues?',
+        status,
+      },
+    },
+  });
+
+  it('renders and dispatches a canonical review action offer', async () => {
+    reviewActionMutate.mockResolvedValue({ status: 'resolved' });
+    render(<AcpTextMessage msg={reviewOfferMessage()} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Resolve these issues' }),
+    );
+    await waitFor(() =>
+      expect(reviewActionMutate).toHaveBeenCalledWith({
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        choice: 'yes',
+      }),
+    );
+    expect(
+      await screen.findByText('Resolving the current review issues.'),
+    ).toBeVisible();
+  });
+
+  it('does not render a persisted dismissed offer', () => {
+    render(<AcpTextMessage msg={reviewOfferMessage('dismissed')} />);
+
+    expect(
+      screen.queryByTestId('pr-review-notification-actions'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Review action dismissed.'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Resolve these issues' }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows copy and new task actions for assistant completion text', () => {
@@ -718,8 +785,12 @@ describe('AcpTextMessage', () => {
       />,
     );
 
-    const avatar = screen.getByRole('img', { name: 'Test User' });
+    const avatar = screen.getByLabelText('Test User');
     expect(avatar).toBeVisible();
+    expect(avatar.querySelector('img')).toHaveAttribute(
+      'src',
+      'https://example.com/avatar.png',
+    );
     expect(screen.getByTestId('basic-tooltip')).toHaveAttribute(
       'data-content',
       'Test User',
@@ -774,7 +845,7 @@ describe('AcpTextMessage', () => {
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
-  it('does not show avatar when userImageUrl is missing', () => {
+  it('falls back to initials when the user image fails to load', () => {
     render(
       <AcpTextMessage
         msg={{
@@ -787,11 +858,42 @@ describe('AcpTextMessage', () => {
           updateType: 'roomote_runtime.assistant_message',
           text: 'Hello',
           data: {},
+          userName: 'Test User',
+          userEmail: 'test@example.com',
+          userImageUrl: 'https://example.com/missing.png',
         }}
       />,
     );
 
-    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    const avatar = screen.getByLabelText('Test User');
+    fireEvent.error(avatar.querySelector('img')!);
+
+    expect(avatar.querySelector('img')).not.toBeInTheDocument();
+    expect(screen.getByText('TU')).toBeInTheDocument();
+  });
+
+  it('falls back to initials when userImageUrl is missing', () => {
+    render(
+      <AcpTextMessage
+        msg={{
+          id: 'message-1',
+          ts: 123,
+          role: 'user',
+          kind: 'text',
+          partial: false,
+          sessionId: 'session-1',
+          updateType: 'roomote_runtime.assistant_message',
+          text: 'Hello',
+          data: {},
+          userName: 'Test User',
+          userEmail: 'test@example.com',
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText('Test User')).toBeVisible();
+    expect(screen.getByText('TU')).toBeInTheDocument();
+    expect(document.querySelector('img')).not.toBeInTheDocument();
   });
 
   it('shows copy and new task actions for optimistic user text', () => {

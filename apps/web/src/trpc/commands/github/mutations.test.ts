@@ -80,6 +80,10 @@ vi.mock('@roomote/sdk/server/automation-recommendations', () => ({
   enqueueAutomationSignalPrefetch: vi.fn(async () => undefined),
 }));
 
+vi.mock('@roomote/sdk/server/request-instance-ping', () => ({
+  requestBrainBackfill: vi.fn(async () => undefined),
+}));
+
 import {
   finishCreateGitHubAppManifestCommand,
   resolvePendingGitHubInstallationsCommand,

@@ -1,11 +1,22 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { useReducedMotion } from 'motion/react';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   getImageUrisFromContentBlocks,
   getTextFromContentBlocks,
   inferAcpMessageKind,
+  parsePrReviewActionOffer,
+  type PrReviewActionChoice,
   type AcpEventType,
   type ReasoningEffort,
 } from '@roomote/types';
@@ -16,7 +27,10 @@ import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
+  Message,
+  MessageContent,
   MessageUiOptionsProvider,
+  Shimmer,
 } from '@/components/ai-elements';
 import { WorkspaceHeader } from '@/components/layout';
 import {
@@ -24,6 +38,15 @@ import {
   type SessionPromptSubmission,
 } from './SessionPromptInput';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
+import {
+  useOpenSessionTaskPanel,
+  useOpenSessionTasksPanel,
+  useSessionRunningTaskCount,
+} from './session-task-panel-context';
+import { useNarrationMode } from '@/hooks/useNarrationMode';
+import { usePageTitle } from '@/hooks/usePageTitle';
+import { truncatePageTitle } from '@/lib/page-title';
+import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
 
 import {
   AcpTranscriptBlockList,
@@ -37,10 +60,36 @@ type TranscriptMessage = Omit<FastSessionMessage, 'createdAt'> & {
   createdAt: Date | string;
 };
 
-function compareTranscriptMessages(a: TranscriptMessage, b: TranscriptMessage) {
+type TranscriptOrder = Pick<TranscriptMessage, 'id' | 'ts' | 'turnSeq'>;
+
+type PendingResponseState = {
+  pendingAfter: TranscriptOrder | null;
+  latestVisibleResponse: TranscriptOrder | null;
+  optimisticRollback: {
+    optimisticId: string;
+    pendingAfter: TranscriptOrder | null;
+  } | null;
+};
+
+type PendingResponseAction =
+  | { type: 'hydrate'; messages: TranscriptMessage[] }
+  | {
+      type: 'messages';
+      messages: TranscriptMessage[];
+      newEventIds: ReadonlySet<string>;
+    }
+  | { type: 'optimistic'; message: TranscriptOrder }
+  | { type: 'commitOptimistic'; optimisticId: string }
+  | { type: 'rollbackOptimistic'; optimisticId: string };
+
+function compareTranscriptOrder(a: TranscriptOrder, b: TranscriptOrder) {
   if (a.ts !== b.ts) return a.ts - b.ts;
   if (a.turnSeq !== b.turnSeq) return a.turnSeq - b.turnSeq;
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+function compareTranscriptMessages(a: TranscriptMessage, b: TranscriptMessage) {
+  return compareTranscriptOrder(a, b);
 }
 
 function getUserMessageIdentity(message: TranscriptMessage) {
@@ -50,17 +99,154 @@ function getUserMessageIdentity(message: TranscriptMessage) {
   ]);
 }
 
+function isVisibleResponseActivity(message: TranscriptMessage) {
+  return (
+    message.role !== 'user' && message.metadata?.visibleInTranscript !== false
+  );
+}
+
+export function pendingResponseReducer(
+  state: PendingResponseState,
+  action: PendingResponseAction,
+): PendingResponseState {
+  if (action.type === 'hydrate' || action.type === 'messages') {
+    let pendingAfter =
+      action.type === 'hydrate'
+        ? action.messages.length === 0
+          ? { id: '', ts: 0, turnSeq: -1 }
+          : null
+        : state.pendingAfter;
+    let latestVisibleResponse =
+      action.type === 'hydrate' ? null : state.latestVisibleResponse;
+
+    for (const message of [...action.messages].sort(
+      compareTranscriptMessages,
+    )) {
+      const pendingThreshold = pendingAfter ?? latestVisibleResponse;
+      const isNewMessage =
+        action.type === 'hydrate' || action.newEventIds.has(message.eventId);
+      if (
+        message.role === 'user' &&
+        isNewMessage &&
+        (action.type === 'hydrate' ||
+          pendingThreshold === null ||
+          message.ts >= pendingThreshold.ts)
+      ) {
+        pendingAfter = message;
+      } else if (isNewMessage && isVisibleResponseActivity(message)) {
+        if (
+          latestVisibleResponse === null ||
+          compareTranscriptOrder(message, latestVisibleResponse) >= 0
+        ) {
+          latestVisibleResponse = message;
+        }
+        if (
+          pendingAfter !== null &&
+          compareTranscriptOrder(message, pendingAfter) >= 0
+        ) {
+          pendingAfter = null;
+        }
+      }
+    }
+
+    return { ...state, pendingAfter, latestVisibleResponse };
+  }
+
+  if (action.type === 'optimistic') {
+    return {
+      pendingAfter: action.message,
+      latestVisibleResponse: state.latestVisibleResponse,
+      optimisticRollback: {
+        optimisticId: action.message.id,
+        pendingAfter: state.pendingAfter,
+      },
+    };
+  }
+
+  if (state.optimisticRollback?.optimisticId !== action.optimisticId) {
+    return state;
+  }
+
+  if (action.type === 'commitOptimistic') {
+    return { ...state, optimisticRollback: null };
+  }
+
+  return {
+    pendingAfter:
+      state.pendingAfter?.id === action.optimisticId
+        ? state.optimisticRollback.pendingAfter
+        : state.pendingAfter,
+    latestVisibleResponse: state.latestVisibleResponse,
+    optimisticRollback: null,
+  };
+}
+
+function ThinkingMessage() {
+  return (
+    <Message from="assistant" className="chat-reasoning-message">
+      <MessageContent>
+        <Shimmer className="text-sm font-light" direction="rl" duration={1}>
+          Thinking
+        </Shimmer>
+      </MessageContent>
+    </Message>
+  );
+}
+
+function RunningTasksMessage({
+  count,
+  onOpenTasks,
+}: {
+  count: number;
+  onOpenTasks: () => void;
+}) {
+  const shouldReduceMotion = useReducedMotion();
+  const label = `${count} ${count === 1 ? 'task' : 'tasks'} running`;
+
+  return (
+    <Message from="assistant" className="chat-reasoning-message">
+      <MessageContent>
+        <span role="status" aria-live="polite">
+          <button
+            type="button"
+            className="w-fit cursor-pointer rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            aria-label={`${label}. Open ${count === 1 ? 'task' : 'tasks'}`}
+            onClick={onOpenTasks}
+          >
+            {shouldReduceMotion ? (
+              <span className="text-sm font-light text-muted-foreground">
+                {label}
+              </span>
+            ) : (
+              <Shimmer
+                as="span"
+                className="text-sm font-light"
+                duration={3}
+                spread={1}
+              >
+                {label}
+              </Shimmer>
+            )}
+          </button>
+        </span>
+      </MessageContent>
+    </Message>
+  );
+}
+
 export function FastSessionTranscript({
   sessionId,
   initialMessages,
   hasOlderMessages,
   canReply,
   initialTitle = null,
-  fallbackTitle = 'Session',
+  fallbackTitle = 'New session',
   sessionModel = null,
   sessionReasoningEffort = null,
   defaultModelId = null,
   defaultReasoningEffort = null,
+  headerExtras,
+  timelineExtras,
 }: {
   sessionId: string;
   initialMessages: FastSessionMessage[];
@@ -72,32 +258,75 @@ export function FastSessionTranscript({
   sessionReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
   defaultReasoningEffort?: ReasoningEffort | null;
+  headerExtras?: ReactNode;
+  timelineExtras?: ReactNode;
 }) {
   const trpcClient = useTRPCClient();
+  const openTaskPanel = useOpenSessionTaskPanel();
+  const openTasksPanel = useOpenSessionTasksPanel();
+  const runningTaskCount = useSessionRunningTaskCount();
+  const { enabled: narrationModeEnabled } = useNarrationMode();
+  const displayMode = narrationModeEnabled ? 'narration' : 'default';
   const [serverMessages, setServerMessages] = useState<
     Map<string, TranscriptMessage>
   >(
     () => new Map(initialMessages.map((message) => [message.eventId, message])),
   );
   const serverMessagesRef = useRef(serverMessages);
+  const hasReceivedInitialSessionStateRef = useRef(false);
   const [optimisticMessages, setOptimisticMessages] = useState<
     TranscriptMessage[]
   >([]);
   const [isSending, setIsSending] = useState(false);
+  const [pendingResponseState, dispatchPendingResponse] = useReducer(
+    pendingResponseReducer,
+    initialMessages,
+    (messages) =>
+      pendingResponseReducer(
+        {
+          pendingAfter: null,
+          latestVisibleResponse: null,
+          optimisticRollback: null,
+        },
+        { type: 'hydrate', messages },
+      ),
+  );
   const [replyError, setReplyError] = useState<string | null>(null);
   const [title, setTitle] = useState<string | null>(initialTitle);
+  const [conversationResponding, setConversationResponding] = useState<
+    boolean | null
+  >(null);
+  usePageTitle(truncatePageTitle(title ?? fallbackTitle));
 
   useEffect(() => {
+    hasReceivedInitialSessionStateRef.current = false;
     const source = new EventSource(`/api/sessions/${sessionId}/stream`);
+    const onOpen = () => {
+      hasReceivedInitialSessionStateRef.current = false;
+    };
     const onMessages = (event: MessageEvent) => {
       try {
-        const { messages } = JSON.parse(event.data) as {
+        const { messages, conversationResponding: responding } = JSON.parse(
+          event.data,
+        ) as {
           messages: TranscriptMessage[];
+          conversationResponding?: boolean | null;
         };
         const previous = serverMessagesRef.current;
-        const canonicalUserMessages = messages.filter(
-          (message) =>
-            message.role === 'user' && !previous.has(message.eventId),
+        const canonicalMessages = messages.filter(
+          (message) => !previous.has(message.eventId),
+        );
+        // The stream overlaps the server-rendered transcript on connect. A
+        // replayed lease can be stale, so only new output proves that the
+        // parent response should suppress hydrated nested-task activity.
+        if (
+          responding !== undefined &&
+          (responding !== true || canonicalMessages.length > 0)
+        ) {
+          setConversationResponding(responding);
+        }
+        const canonicalUserMessages = canonicalMessages.filter(
+          (message) => message.role === 'user',
         );
         const next = new Map(previous);
         for (const message of messages) {
@@ -105,6 +334,13 @@ export function FastSessionTranscript({
         }
         serverMessagesRef.current = next;
         setServerMessages(next);
+        dispatchPendingResponse({
+          type: 'messages',
+          messages,
+          newEventIds: new Set(
+            canonicalMessages.map((message) => message.eventId),
+          ),
+        });
 
         if (canonicalUserMessages.length > 0) {
           setOptimisticMessages((current) => {
@@ -126,17 +362,31 @@ export function FastSessionTranscript({
     };
     const onSession = (event: MessageEvent) => {
       try {
-        const { title: nextTitle } = JSON.parse(event.data) as {
-          title: string | null;
+        const update = JSON.parse(event.data) as {
+          title?: string;
+          conversationResponding?: boolean | null;
         };
-        setTitle(nextTitle);
+        if (update.title !== undefined) {
+          setTitle(update.title);
+        }
+        const isInitialSessionState =
+          !hasReceivedInitialSessionStateRef.current;
+        hasReceivedInitialSessionStateRef.current = true;
+        if (
+          update.conversationResponding !== undefined &&
+          (!isInitialSessionState || update.conversationResponding !== true)
+        ) {
+          setConversationResponding(update.conversationResponding);
+        }
       } catch {
         // Ignore malformed frames.
       }
     };
+    source.addEventListener('open', onOpen);
     source.addEventListener('messages', onMessages);
     source.addEventListener('session', onSession);
     return () => {
+      source.removeEventListener('open', onOpen);
       source.removeEventListener('messages', onMessages);
       source.removeEventListener('session', onSession);
       source.close();
@@ -166,14 +416,23 @@ export function FastSessionTranscript({
       ),
     [messages],
   );
+  const reviewOffers = useMemo(
+    () =>
+      messages.flatMap((message) => {
+        const offer = parsePrReviewActionOffer(message.payload);
+        return offer ? [offer] : [];
+      }),
+    [messages],
+  );
   const { renderBlocks, suppressMessage } = useAcpTranscriptBlocks({
     messages: uiMessages,
     artifacts: [],
-    displayMode: 'default',
+    displayMode,
     initialPrompt: null,
     shouldHideFirstMessage: false,
     showInternalMessages: false,
     hasLeadingTextBoundary: false,
+    keepDelegatedTasksVisible: true,
     resetKey: `${messages.length}:${messages[0]?.eventId ?? ''}:${messages.at(-1)?.eventId ?? ''}`,
   });
 
@@ -227,12 +486,20 @@ export function FastSessionTranscript({
           createdAt: new Date(),
         };
         setOptimisticMessages((previous) => [...previous, optimistic]);
+        dispatchPendingResponse({ type: 'optimistic', message: optimistic });
         await trpcClient.fastSessions.reply.mutate({
           sessionId,
           text: prepared.text,
           ...(images.length > 0 ? { images } : {}),
+          ...(prepared.attachmentTexts?.length
+            ? { attachmentTexts: prepared.attachmentTexts }
+            : {}),
           model: message.model ?? null,
           reasoningEffort: message.reasoningEffort ?? null,
+        });
+        dispatchPendingResponse({
+          type: 'commitOptimistic',
+          optimisticId,
         });
         return true;
       } catch (error) {
@@ -245,6 +512,12 @@ export function FastSessionTranscript({
         setReplyError(
           error instanceof Error ? error.message : 'Failed to send message',
         );
+        if (optimisticId) {
+          dispatchPendingResponse({
+            type: 'rollbackOptimistic',
+            optimisticId,
+          });
+        }
         return false;
       } finally {
         setIsSending(false);
@@ -253,12 +526,30 @@ export function FastSessionTranscript({
     [isSending, sessionId, trpcClient],
   );
 
+  const handleReviewAction = useCallback(
+    async (deliveryId: string, choice: PrReviewActionChoice) => {
+      const result = await trpcClient.fastSessions.reviewAction.mutate({
+        sessionId,
+        deliveryId,
+        choice,
+      });
+      return result.status;
+    },
+    [sessionId, trpcClient],
+  );
+
   return (
-    <MessageUiOptionsProvider>
-      <WorkspaceHeader contentClassName="flex-row items-center gap-3">
-        <h1 className="ph-no-capture min-w-0 flex-1 truncate text-sm font-medium">
+    <MessageUiOptionsProvider
+      value={{ displayMode, hidePrReviewActions: true }}
+    >
+      <WorkspaceHeader
+        className="py-4.25"
+        contentClassName="items-stretch gap-2 pr-12 @[600px]:items-center @[600px]:gap-3 @[600px]:pr-4"
+      >
+        <h1 className="ph-no-capture min-w-0 flex-1 break-words text-sm font-medium @[600px]:truncate">
           {title ?? fallbackTitle}
         </h1>
+        {headerExtras}
       </WorkspaceHeader>
       <Conversation className="min-h-0 flex-1" initial="instant">
         <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4">
@@ -267,17 +558,42 @@ export function FastSessionTranscript({
               Older messages in this session are not shown.
             </p>
           ) : null}
+          {timelineExtras}
           <AcpTranscriptBlockList
             blocks={renderBlocks}
             showInternalMessages={false}
             onSuppress={suppressMessage}
+            onOpenDelegatedTask={openTaskPanel ?? undefined}
           />
+          {pendingResponseState.pendingAfter !== null ? (
+            <ThinkingMessage />
+          ) : !isSending &&
+            conversationResponding !== true &&
+            runningTaskCount > 0 &&
+            openTasksPanel ? (
+            <RunningTasksMessage
+              count={runningTaskCount}
+              onOpenTasks={openTasksPanel}
+            />
+          ) : null}
+          {reviewOffers.map((offer) => (
+            <PrReviewActionOffer
+              key={offer.deliveryId}
+              className="mt-3 rounded-lg border border-border/70 bg-muted/40 px-3 py-3"
+              offer={offer}
+              showQuestion
+              onAction={(choice) =>
+                handleReviewAction(offer.deliveryId, choice)
+              }
+            />
+          ))}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
       {canReply ? (
         <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card transition-colors @[56rem]:rounded-t-lg">
           <SessionPromptInput
+            sessionId={sessionId}
             isBusy={isSending}
             onSend={sendReply}
             initialModel={sessionModel}

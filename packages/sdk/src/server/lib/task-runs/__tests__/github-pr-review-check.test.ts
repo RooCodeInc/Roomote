@@ -6,23 +6,38 @@ const {
   mockDbUpdate,
   mockDbUpdateSet,
   mockDbUpdateWhere,
+  mockDbUpdateReturning,
   mockCreateCheck,
   mockGetCheck,
   mockGetIssueComment,
   mockUpdateInstallationCheck,
   mockUpdateCheckRun,
-} = vi.hoisted(() => ({
-  mockFindFirstLinkage: vi.fn(),
-  mockFindFirstRun: vi.fn(),
-  mockDbUpdate: vi.fn(),
-  mockDbUpdateSet: vi.fn(),
-  mockDbUpdateWhere: vi.fn(),
-  mockCreateCheck: vi.fn(),
-  mockGetCheck: vi.fn(),
-  mockGetIssueComment: vi.fn(),
-  mockUpdateInstallationCheck: vi.fn(),
-  mockUpdateCheckRun: vi.fn(),
-}));
+  mockGetTokenCheckRun,
+  mockAcquireRedisLock,
+  mockRenewRedisLock,
+  mockReleaseRedisLock,
+} = vi.hoisted(() => {
+  const mockRenewRedisLock = vi.fn();
+  return {
+    mockFindFirstLinkage: vi.fn(),
+    mockFindFirstRun: vi.fn(),
+    mockDbUpdate: vi.fn(),
+    mockDbUpdateSet: vi.fn(),
+    mockDbUpdateWhere: vi.fn(),
+    mockDbUpdateReturning: vi.fn(),
+    mockCreateCheck: vi.fn(),
+    mockGetCheck: vi.fn(),
+    mockGetIssueComment: vi.fn(),
+    mockUpdateInstallationCheck: vi.fn(),
+    mockUpdateCheckRun: vi.fn(),
+    mockGetTokenCheckRun: vi.fn(),
+    mockAcquireRedisLock: vi.fn(),
+    mockRenewRedisLock,
+    mockReleaseRedisLock: Object.assign(vi.fn(), {
+      renewDetailed: mockRenewRedisLock,
+    }),
+  };
+});
 
 vi.mock('@roomote/db/server', async () => {
   const actual =
@@ -57,6 +72,7 @@ vi.mock('@roomote/github', async () => {
       },
     }),
     updateCheckRun: mockUpdateCheckRun,
+    getCheckRun: mockGetTokenCheckRun,
   };
 });
 
@@ -70,11 +86,19 @@ vi.mock('@roomote/cloud-agents/server', async () => {
   };
 });
 
+vi.mock('@roomote/redis', () => ({
+  acquireRedisLock: (...args: unknown[]) => mockAcquireRedisLock(...args),
+}));
+
 import {
+  acquireGithubPrReviewLifecycleLock,
   completeGithubPrReviewCheckFromSummary,
   getGithubPrReviewCheckResult,
+  GithubPrReviewLifecycleLockLostError,
   markGithubPrReviewCheckInProgress,
   publishGithubPrReviewCheck,
+  reconcileGithubPrReviewCheckForRun,
+  transferGithubPrReviewCheckToRun,
 } from '../github-pr-review-check';
 
 describe('GitHub PR review check lifecycle', () => {
@@ -82,11 +106,82 @@ describe('GitHub PR review check lifecycle', () => {
     vi.clearAllMocks();
     mockDbUpdate.mockReturnValue({ set: mockDbUpdateSet });
     mockDbUpdateSet.mockReturnValue({ where: mockDbUpdateWhere });
-    mockDbUpdateWhere.mockResolvedValue(undefined);
+    mockDbUpdateWhere.mockReturnValue({ returning: mockDbUpdateReturning });
+    mockDbUpdateReturning.mockResolvedValue([{ id: 'linkage-1' }]);
     mockFindFirstRun.mockResolvedValue(undefined);
     mockGetCheck.mockResolvedValue({
       data: { head_sha: '789abcd', status: 'in_progress' },
     });
+    mockGetTokenCheckRun.mockResolvedValue({
+      data: {
+        external_id: 'roomote-review:2',
+        head_sha: '789abcd',
+        status: 'in_progress',
+      },
+    });
+    mockAcquireRedisLock.mockResolvedValue(mockReleaseRedisLock);
+    mockRenewRedisLock.mockResolvedValue('renewed');
+  });
+
+  it.each(['lost', 'error'] as const)(
+    'aborts the lifecycle lease when renewal returns %s',
+    async (renewalResult) => {
+      vi.useFakeTimers();
+      mockRenewRedisLock.mockResolvedValueOnce(renewalResult);
+
+      try {
+        const lock = await acquireGithubPrReviewLifecycleLock('owner/repo', 42);
+
+        expect(lock).not.toBeNull();
+        await vi.advanceTimersByTimeAsync(40_000);
+
+        expect(mockRenewRedisLock).toHaveBeenCalledWith(120);
+        expect(lock!.signal.aborted).toBe(true);
+        expect(lock!.signal.reason).toBeInstanceOf(
+          GithubPrReviewLifecycleLockLostError,
+        );
+        await lock!();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('keeps the lifecycle lease active beyond its original TTL', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const lock = await acquireGithubPrReviewLifecycleLock('owner/repo', 42);
+
+      expect(lock).not.toBeNull();
+      await vi.advanceTimersByTimeAsync(150_000);
+
+      expect(mockRenewRedisLock).toHaveBeenCalledTimes(3);
+      expect(lock!.signal.aborted).toBe(false);
+      await lock!();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('aborts when a pending renewal outlives the lease deadline', async () => {
+    vi.useFakeTimers();
+    mockRenewRedisLock.mockReturnValueOnce(new Promise(() => {}));
+
+    try {
+      const lock = await acquireGithubPrReviewLifecycleLock('owner/repo', 42);
+
+      expect(lock).not.toBeNull();
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      expect(lock!.signal.aborted).toBe(true);
+      expect(lock!.signal.reason).toBeInstanceOf(
+        GithubPrReviewLifecycleLockLostError,
+      );
+      await lock!();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('publishes a queued check, persists its id, and supersedes the old head', async () => {
@@ -123,6 +218,50 @@ describe('GitHub PR review check lifecycle', () => {
     );
   });
 
+  it('does not overwrite linkage when a newer publisher wins during check creation', async () => {
+    mockFindFirstLinkage.mockResolvedValue({ githubCheckRunId: 10 });
+    mockCreateCheck.mockResolvedValue({ data: { id: 20 } });
+    mockDbUpdateReturning.mockResolvedValueOnce([]);
+
+    await publishGithubPrReviewCheck({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      headSha: '789abcd',
+      taskId: 'task-1',
+      runId: 2,
+    });
+
+    expect(mockDbUpdateReturning).toHaveBeenCalledOnce();
+    expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
+  });
+
+  it('does not persist a check after publication loses lifecycle ownership', async () => {
+    const ownership = new AbortController();
+    mockFindFirstLinkage.mockResolvedValue({ githubCheckRunId: 10 });
+    mockCreateCheck.mockImplementationOnce(async () => {
+      ownership.abort(new GithubPrReviewLifecycleLockLostError());
+      return { data: { id: 20 } };
+    });
+
+    await publishGithubPrReviewCheck({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      headSha: '789abcd',
+      taskId: 'task-1',
+      runId: 2,
+      signal: ownership.signal,
+    });
+
+    expect(mockCreateCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: { signal: ownership.signal },
+      }),
+    );
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
   it('marks the persisted check in progress when its worker starts', async () => {
     mockFindFirstLinkage.mockResolvedValue({
       githubCheckRunId: 20,
@@ -131,6 +270,7 @@ describe('GitHub PR review check lifecycle', () => {
 
     await markGithubPrReviewCheckInProgress({
       taskId: 'task-1',
+      runId: 2,
       gitHubToken: 'token',
     });
 
@@ -142,6 +282,147 @@ describe('GitHub PR review check lifecycle', () => {
         details_url: 'https://roomote.test/task/task-1',
       }),
     );
+  });
+
+  it.each([
+    ['completed', 'roomote-review:2'],
+    ['in_progress', 'roomote-review:3'],
+  ])('does not start a %s check owned by %s', async (status, externalId) => {
+    mockFindFirstLinkage.mockResolvedValue({
+      githubCheckRunId: 20,
+      repository: 'owner/repo',
+    });
+    mockGetTokenCheckRun.mockResolvedValueOnce({
+      data: { status, external_id: externalId },
+    });
+
+    await markGithubPrReviewCheckInProgress({
+      taskId: 'task-1',
+      runId: 2,
+      gitHubToken: 'token',
+    });
+
+    expect(mockUpdateCheckRun).not.toHaveBeenCalled();
+  });
+
+  it('transfers an in-progress check from the exited run to its fallback', async () => {
+    mockFindFirstLinkage.mockResolvedValue({
+      id: 'linkage-1',
+      githubCheckRunId: 20,
+      repository: 'owner/repo',
+    });
+    mockGetCheck.mockResolvedValueOnce({
+      data: {
+        external_id: 'roomote-review:100',
+        head_sha: '789abcd',
+        status: 'in_progress',
+      },
+    });
+
+    await transferGithubPrReviewCheckToRun({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      previousRunId: 100,
+      newRunId: 200,
+    });
+
+    expect(mockUpdateInstallationCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        check_run_id: 20,
+        external_id: 'roomote-review:200',
+      }),
+    );
+  });
+
+  it('replaces a completed check when ownership transfers to a fallback', async () => {
+    mockFindFirstLinkage.mockResolvedValue({
+      id: 'linkage-1',
+      githubCheckRunId: 20,
+      repository: 'owner/repo',
+    });
+    mockGetCheck.mockResolvedValueOnce({
+      data: {
+        external_id: 'roomote-review:100',
+        head_sha: '789abcd',
+        status: 'completed',
+      },
+    });
+    mockCreateCheck.mockResolvedValueOnce({ data: { id: 30 } });
+
+    await transferGithubPrReviewCheckToRun({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      previousRunId: 100,
+      newRunId: 200,
+    });
+
+    expect(mockCreateCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        head_sha: '789abcd',
+        external_id: 'roomote-review:200',
+        status: 'in_progress',
+      }),
+    );
+    expect(mockDbUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ githubCheckRunId: 30 }),
+    );
+  });
+
+  it('reconciles a clean terminal fallback after late ownership transfer', async () => {
+    mockFindFirstRun.mockResolvedValueOnce({ status: RunStatus.Completed });
+    mockFindFirstLinkage.mockResolvedValue({
+      id: 'linkage-1',
+      githubCheckRunId: 20,
+      githubReviewCommentId: 30,
+      repository: 'owner/repo',
+    });
+    mockGetCheck.mockResolvedValueOnce({
+      data: {
+        external_id: 'roomote-review:200',
+        head_sha: '789abcd',
+        status: 'in_progress',
+      },
+    });
+    mockGetIssueComment.mockResolvedValueOnce({
+      data: {
+        body: '<!-- roomote-review-summary sha=789abcd -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+      },
+    });
+
+    await reconcileGithubPrReviewCheckForRun({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      runId: 200,
+    });
+
+    expect(mockUpdateInstallationCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        check_run_id: 20,
+        status: 'completed',
+        conclusion: 'success',
+      }),
+    );
+  });
+
+  it('does not reconcile a fallback that is still active', async () => {
+    mockFindFirstRun.mockResolvedValueOnce({ status: RunStatus.Running });
+
+    await reconcileGithubPrReviewCheckForRun({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      runId: 200,
+    });
+
+    expect(mockGetCheck).not.toHaveBeenCalled();
+    expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
   });
 
   it('reconciles a worker that started before the queued check id was persisted', async () => {

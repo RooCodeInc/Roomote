@@ -25,7 +25,12 @@ import {
   setLatestInboundMessageId,
 } from '@roomote/communication/messages';
 import { reactionEmojiMatches } from '@roomote/communication/reaction-emoji';
-import { getTaskUrl, hasFastAgentSession } from '@roomote/cloud-agents/server';
+import {
+  buildFastAgentReactionExternalInputQuestion,
+  getTaskUrl,
+  hasFastAgentSession,
+  type FastAgentReactionExternalInput,
+} from '@roomote/cloud-agents/server';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   RunStatus,
@@ -37,8 +42,10 @@ import {
   consumeDiscordLinkCode,
   findDiscordInstallationByGuildId,
   findDiscordMappedUserId,
+  findFastAgentSessionForProviderMessage,
   findFastAgentSessionForProviderReply,
   isFastAgentProviderMessage,
+  queueFastAgentSurfaceReply,
   restoreDiscordLinkCode,
   upsertDiscordInstallation,
   upsertDiscordUserMapping,
@@ -46,7 +53,6 @@ import {
 } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../logging.js';
-import { hasCommunicationsFastModeDefault } from '../fast-agent-entry.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
@@ -309,7 +315,89 @@ async function processDiscordGatewayEvent(
       reaction.emoji.name,
     );
     if (!configuration) {
-      return { ok: true, ignored: 'reaction_not_configured' };
+      const channel = await resolveDiscordChannelContext(
+        resolved.provider,
+        reaction.channel_id,
+      );
+      const metadata = discordMetadataForChannel({
+        channel,
+        messageId: reaction.message_id,
+      });
+      const session = await findFastAgentSessionForProviderMessage({
+        provider: 'discord',
+        workspaceId: channel.guildId ?? 'dm',
+        channelId: metadata.communicationChannelId,
+        ...(metadata.communicationThreadId
+          ? { threadId: metadata.communicationThreadId }
+          : {}),
+        messageId: reaction.message_id,
+      });
+      if (!session) {
+        return { ok: true, ignored: 'reaction_not_configured' };
+      }
+
+      const senderUserId = await findDiscordMappedUserId(reaction.user_id);
+      if (!senderUserId) {
+        await promptDiscordAccountLink({
+          provider: resolved.provider,
+          applicationId: resolved.applicationId,
+          channel,
+          discordUserId: reaction.user_id,
+          replyToMessageId: reaction.message_id,
+        });
+        return { ok: true, ignored: 'discord_reactor_not_linked' };
+      }
+      if (session.userId !== senderUserId) {
+        return { ok: true, ignored: 'discord_fast_session_user_mismatch' };
+      }
+
+      const author = reaction.member?.user ?? {
+        id: reaction.user_id,
+        username: `Discord user ${reaction.user_id}`,
+      };
+      const senderDisplayName =
+        (typeof reaction.member?.nick === 'string'
+          ? reaction.member.nick
+          : undefined) ??
+        (typeof author.global_name === 'string'
+          ? author.global_name
+          : undefined) ??
+        author.username;
+      const reactionInput: FastAgentReactionExternalInput = {
+        type: 'reaction_added',
+        provider: 'discord',
+        reactions: [
+          {
+            name: reaction.emoji.name,
+            ...(reaction.emoji.id ? { id: reaction.emoji.id } : {}),
+          },
+        ],
+        reactor: {
+          externalUserId: reaction.user_id,
+          ...(senderDisplayName ? { displayName: senderDisplayName } : {}),
+        },
+        message: {
+          workspaceId: channel.guildId ?? 'dm',
+          channelId: metadata.communicationChannelId,
+          messageId: reaction.message_id,
+          ...(metadata.communicationThreadId
+            ? { threadId: metadata.communicationThreadId }
+            : {}),
+        },
+        eventId: event.eventId,
+      };
+      const queued = await queueFastAgentSurfaceReply({
+        sessionId: session.id,
+        userId: senderUserId,
+        senderDisplayName,
+        question: buildFastAgentReactionExternalInputQuestion(reactionInput),
+        currentMessageId: `discord-reaction:${event.eventId}`,
+        replyToMessageId: reaction.message_id,
+        externalInput: reactionInput,
+      });
+      return queued
+        ? { ok: true, fastReactionQueued: true }
+        : { ok: true, ignored: 'discord_fast_reaction_route_unavailable' };
     }
 
     const author = reaction.member?.user ?? {
@@ -699,6 +787,7 @@ async function processDiscordGatewayEvent(
     !channel.isDirectMessage &&
     !command &&
     !isDiscordBotMentioned(message, resolved.botUserId) &&
+    !repliedFastSession &&
     isRoomoteThread
   ) {
     const shouldRouteUnmentioned =
@@ -745,12 +834,11 @@ async function processDiscordGatewayEvent(
     userId: senderUserId,
   });
 
+  // Fast mode is unconditional for ordinary linked-human messages, including
+  // reaction summons: a configured emoji synthesizes a bot mention that enters
+  // the fast agent, matching Slack's call-roomote-via-emoji flow.
   const defaultFastMessage =
-    message != null &&
-    command == null &&
-    (await hasCommunicationsFastModeDefault(senderUserId))
-      ? message
-      : null;
+    message != null && command == null ? message : null;
 
   if (command?.name === 'goal') {
     if (!command.objective) {
@@ -811,7 +899,16 @@ async function processDiscordGatewayEvent(
         conversationId:
           repliedFastSession?.conversation.conversationId ?? channel.channelId,
         ...(repliedFastSession ? { createAnchoredThread: false } : {}),
+        // A reaction summon's synthesized message id is not a real Discord
+        // message; anchor replies on the reacted-on message instead.
+        ...(reactionTarget
+          ? { anchorMessageId: reactionTarget.messageId }
+          : {}),
         activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
+        directedAtRoomote:
+          channel.isDirectMessage ||
+          Boolean(repliedFastSession) ||
+          isDiscordBotMentioned(message, resolved.botUserId),
       });
       return { ok: true, fastAnswered: true, fastContinued: true };
     }
@@ -823,20 +920,44 @@ async function processDiscordGatewayEvent(
       )
     : '';
   if (defaultFastMessage && defaultFastQuestion) {
+    let fastQuestion = defaultFastQuestion;
+    if (reactionTarget) {
+      // Match Slack's emoji summon: inline the reacted-on message so the fast
+      // agent sees what it was asked to act on even without thread history.
+      try {
+        const targetMessage = await resolved.provider.getMessage({
+          channelId: reactionTarget.channelId,
+          messageId: reactionTarget.messageId,
+        });
+        if (targetMessage?.text) {
+          fastQuestion = `${defaultFastQuestion}\n\nMessage to act on:\n${targetMessage.text}`;
+        }
+      } catch (error) {
+        apiLogger.warn(
+          `[discord] Could not resolve emoji summon target ${reactionTarget.channelId}:${reactionTarget.messageId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
     await processDiscordFastAgentMessage({
       event,
-      question: defaultFastQuestion,
+      question: fastQuestion,
       sender,
       senderUserId,
       provider: resolved.provider,
       applicationId: resolved.applicationId,
       channel,
       metadata,
+      // A reaction summon anchors its fast conversation (and any created
+      // thread) on the reacted-on message, mirroring Slack threading under
+      // the reacted-on message; the synthesized message id is not a real
+      // Discord message.
       conversationId: getDiscordFastConversationId(
         channel,
-        defaultFastMessage.id,
+        reactionTarget?.messageId ?? defaultFastMessage.id,
       ),
+      ...(reactionTarget ? { anchorMessageId: reactionTarget.messageId } : {}),
       activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
+      directedAtRoomote: true,
     });
     return { ok: true, fastAnswered: true, fastDefaulted: true };
   }

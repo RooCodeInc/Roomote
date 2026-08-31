@@ -1,12 +1,24 @@
 import {
   db,
+  ensureSessionForFastConversation,
+  ensureSessionForTask,
   fastAgentConversations,
   fastAgentMessages,
   eq,
+  sessions,
+  taskFactory,
+  taskMessages,
+  taskRuns,
+  tasks,
   userFactory,
 } from '@roomote/db/server';
+import { ACP_ENVELOPE_EVENT_TYPES, TaskPayloadKind } from '@roomote/types';
 
-import { refreshFastAgentSessionTitle } from '../fast-agent-title';
+import {
+  refreshFastAgentSessionTitle,
+  refreshTaskSessionTitle,
+} from '../fast-agent-title';
+import { LLM_TITLE_LOCKED_CHECKPOINT } from '../../llm-task-title';
 
 const generateLlmTaskTitle = vi.hoisted(() => vi.fn());
 
@@ -15,18 +27,50 @@ vi.mock('../../llm-task-title', async (importOriginal) => ({
   generateLlmTaskTitle,
 }));
 
-async function createConversation(userId: string, conversationId: string) {
+async function createConversation(
+  userId: string,
+  conversationId: string,
+  surface: 'automation' | 'web' = 'web',
+) {
   const [conversation] = await db
     .insert(fastAgentConversations)
     .values({
       userId,
-      surface: 'web',
+      surface,
       workspaceId: userId,
       conversationId,
     })
     .returning();
 
+  await ensureSessionForFastConversation(db, conversation!.id);
+
   return conversation!;
+}
+
+async function createTaskSession() {
+  const task = await taskFactory.create({ title: 'New session' });
+  const session = await ensureSessionForTask(db, { taskId: task.id });
+  if (!session) throw new Error('Failed to create task Session');
+  const [run] = await db
+    .insert(taskRuns)
+    .values({
+      taskId: task.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: { repo: 'owner/repo' },
+    })
+    .returning({ id: taskRuns.id });
+  await db.insert(taskMessages).values({
+    taskId: task.id,
+    runId: run!.id,
+    ts: 1,
+    eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+    protocol: 'roomote_runtime',
+    contentBlocks: [
+      { type: 'text', text: 'Investigate session title refresh' },
+    ],
+    payload: {},
+  });
+  return { task, session };
 }
 
 async function insertMessage({
@@ -37,6 +81,7 @@ async function insertMessage({
   ts,
   eventType,
   metadata = { visibleInTranscript: true },
+  source = 'web',
 }: {
   conversationId: string;
   eventId: string;
@@ -45,6 +90,7 @@ async function insertMessage({
   ts: number;
   eventType: `roomote_runtime.${string}`;
   metadata?: Record<string, unknown>;
+  source?: 'automation' | 'web';
 }) {
   await db.insert(fastAgentMessages).values({
     conversationId,
@@ -57,7 +103,7 @@ async function insertMessage({
     contentBlocks: [{ type: 'text', text }],
     metadata,
     payload: {},
-    source: 'web',
+    source,
   });
 }
 
@@ -79,7 +125,7 @@ describe('refreshFastAgentSessionTitle', () => {
     });
     generateLlmTaskTitle.mockResolvedValue('Rotate the API keys');
 
-    await refreshFastAgentSessionTitle({
+    const refreshedTitle = await refreshFastAgentSessionTitle({
       sessionId: conversation.id,
       userId: user.id,
     });
@@ -87,12 +133,57 @@ describe('refreshFastAgentSessionTitle', () => {
     const updated = await db.query.fastAgentConversations.findFirst({
       where: eq(fastAgentConversations.id, conversation.id),
     });
+    const session = await db.query.sessions.findFirst({
+      where: eq(sessions.fastConversationId, conversation.id),
+    });
     expect(updated?.title).toBe('Rotate the API keys');
     expect(updated?.llmTitleCheckpoint).toBe(1);
+    expect(session?.title).toBe('Rotate the API keys');
+    expect(refreshedTitle).toBe('Rotate the API keys');
+    expect(session?.llmTitleCheckpoint).toBe(1);
     expect(generateLlmTaskTitle).toHaveBeenCalledWith({
       userId: user.id,
       taskId: null,
       messages: [{ role: 'user', text: 'How do I rotate the API keys?' }],
+    });
+  });
+
+  it('titles an automation-created session from its hidden initial prompt', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation(
+      user.id,
+      'automation-title',
+      'automation',
+    );
+    await insertMessage({
+      conversationId: conversation.id,
+      eventId: 'automation-event-1:user',
+      role: 'user',
+      text: '<platform_event>{"type":"automation_triggered","prompt":"Find actionable regressions."}</platform_event>',
+      ts: 1,
+      eventType: 'roomote_runtime.user_prompt',
+      metadata: {
+        visibleInTranscript: false,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+      },
+      source: 'automation',
+    });
+    generateLlmTaskTitle.mockResolvedValue('Find actionable regressions');
+
+    await refreshFastAgentSessionTitle({
+      sessionId: conversation.id,
+      userId: user.id,
+    });
+
+    const session = await db.query.sessions.findFirst({
+      where: eq(sessions.fastConversationId, conversation.id),
+    });
+    expect(session?.title).toBe('Find actionable regressions');
+    expect(generateLlmTaskTitle).toHaveBeenCalledWith({
+      userId: user.id,
+      taskId: null,
+      messages: [{ role: 'user', text: 'Find actionable regressions.' }],
     });
   });
 
@@ -107,15 +198,21 @@ describe('refreshFastAgentSessionTitle', () => {
       ts: 1,
       eventType: 'roomote_runtime.user_prompt',
     });
-    await insertMessage({
-      conversationId: conversation.id,
-      eventId: 'turn-2:user',
-      role: 'user',
-      text: '<platform_event>{}</platform_event>',
-      ts: 2,
-      eventType: 'roomote_runtime.user_prompt',
-      metadata: { visibleInTranscript: false },
-    });
+    for (const ts of [2, 3, 4]) {
+      await insertMessage({
+        conversationId: conversation.id,
+        eventId: `turn-${ts}:user`,
+        role: 'user',
+        text: '<platform_event>{}</platform_event>',
+        ts,
+        eventType: 'roomote_runtime.user_prompt',
+        metadata: {
+          visibleInTranscript: false,
+          turnSource: 'platform_event',
+          platformEventKind: 'delegated_task',
+        },
+      });
+    }
     await db
       .update(fastAgentConversations)
       .set({ title: 'Existing title', llmTitleCheckpoint: 1 })
@@ -155,5 +252,138 @@ describe('refreshFastAgentSessionTitle', () => {
       where: eq(fastAgentConversations.id, conversation.id),
     });
     expect(updated?.title).toBe('My name');
+  });
+
+  it('never overwrites a manually renamed unified Fast Session', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation(
+      user.id,
+      'title-unified-edited',
+    );
+    await insertMessage({
+      conversationId: conversation.id,
+      eventId: 'turn-1:user',
+      role: 'user',
+      text: 'A question',
+      ts: 1,
+      eventType: 'roomote_runtime.user_prompt',
+    });
+    await db
+      .update(sessions)
+      .set({
+        title: 'My unified Session title',
+        titleEditedByUserAt: new Date(),
+      })
+      .where(eq(sessions.fastConversationId, conversation.id));
+    generateLlmTaskTitle.mockResolvedValue('Generated Fast title');
+
+    await refreshFastAgentSessionTitle({
+      sessionId: conversation.id,
+      userId: user.id,
+    });
+
+    const session = await db.query.sessions.findFirst({
+      where: eq(sessions.fastConversationId, conversation.id),
+    });
+    expect(session?.title).toBe('My unified Session title');
+    expect(session?.llmTitleCheckpoint).toBe(0);
+  });
+
+  it('generates a task-only Session title independently from its task', async () => {
+    const { task, session } = await createTaskSession();
+    generateLlmTaskTitle.mockResolvedValue('Independent Session title');
+
+    await refreshTaskSessionTitle({
+      taskId: task.id,
+      mode: 'checkpoint',
+    });
+
+    const updatedSession = await db.query.sessions.findFirst({
+      where: eq(sessions.id, session.id),
+    });
+    const unchangedTask = await db.query.tasks.findFirst({
+      where: eq(tasks.id, task.id),
+    });
+    expect(updatedSession?.title).toBe('Independent Session title');
+    expect(updatedSession?.llmTitleCheckpoint).toBe(1);
+    expect(unchangedTask?.title).toBe('New session');
+  });
+
+  it('does not overwrite a manually renamed task-only Session', async () => {
+    const { task, session } = await createTaskSession();
+    await db
+      .update(sessions)
+      .set({
+        title: 'Manual Session title',
+        titleEditedByUserAt: new Date(),
+      })
+      .where(eq(sessions.id, session.id));
+
+    await refreshTaskSessionTitle({
+      taskId: task.id,
+      mode: 'checkpoint',
+    });
+
+    expect(generateLlmTaskTitle).not.toHaveBeenCalled();
+  });
+
+  it('preserves a Session rename that lands while title generation is running', async () => {
+    const { task, session } = await createTaskSession();
+    generateLlmTaskTitle.mockImplementationOnce(async () => {
+      await db
+        .update(sessions)
+        .set({
+          title: 'Concurrent manual title',
+          titleEditedByUserAt: new Date(),
+        })
+        .where(eq(sessions.id, session.id));
+      return 'Stale generated title';
+    });
+
+    await refreshTaskSessionTitle({
+      taskId: task.id,
+      mode: 'checkpoint',
+    });
+
+    const unchanged = await db.query.sessions.findFirst({
+      where: eq(sessions.id, session.id),
+    });
+    expect(unchanged?.title).toBe('Concurrent manual title');
+    expect(unchanged?.llmTitleCheckpoint).toBe(0);
+  });
+
+  it('locks a task-only Session title after completion refresh', async () => {
+    const { task, session } = await createTaskSession();
+    generateLlmTaskTitle.mockResolvedValueOnce('Completed Session title');
+
+    await refreshTaskSessionTitle({ taskId: task.id, mode: 'final' });
+
+    const updated = await db.query.sessions.findFirst({
+      where: eq(sessions.id, session.id),
+    });
+    expect(updated?.title).toBe('Completed Session title');
+    expect(updated?.llmTitleCheckpoint).toBe(LLM_TITLE_LOCKED_CHECKPOINT);
+
+    generateLlmTaskTitle.mockClear();
+    await refreshTaskSessionTitle({ taskId: task.id, mode: 'checkpoint' });
+    expect(generateLlmTaskTitle).not.toHaveBeenCalled();
+  });
+
+  it('leaves Fast-backed Session titles to the Fast transcript generator', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation(user.id, 'fast-owned-title');
+    const task = await taskFactory.create();
+    await ensureSessionForTask(db, {
+      taskId: task.id,
+      fastConversationId: conversation.id,
+      origin: 'fast_delegation',
+    });
+
+    await refreshTaskSessionTitle({
+      taskId: task.id,
+      mode: 'checkpoint',
+    });
+
+    expect(generateLlmTaskTitle).not.toHaveBeenCalled();
   });
 });

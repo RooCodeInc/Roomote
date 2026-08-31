@@ -52,6 +52,11 @@ import {
   useTaskSummary,
 } from '../hooks';
 
+import {
+  SandboxInfoPanel,
+  SandboxInfoRow,
+  SandboxInfoTable,
+} from '../../../SandboxInfoPanel';
 import { SidePanelHeader } from './SidePanelHeader';
 import { getTaskParticipants } from './task-participants';
 
@@ -299,296 +304,270 @@ export function TaskInfoPanel({
     PRODUCT_NAME;
 
   return (
-    <>
-      <SidePanelHeader title="Task Info" onClose={onClose} />
-      <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-4 py-4">
-        <div className="space-y-6">
-          <table className="text-sm">
-            <tbody>
-              <tr>
-                <td className="pr-4 py-1 align-top whitespace-nowrap">
-                  Creator
-                </td>
-                <td className="py-1">
-                  {task.user && task.attributionKind === 'user' ? (
-                    <>
-                      {task.user.imageUrl ? (
-                        <Image
-                          src={task.user.imageUrl}
-                          alt={taskCreatorDisplayName}
-                          width={40}
-                          height={40}
-                          className="mr-1 inline-block size-4 rounded-full"
-                        />
-                      ) : null}
-                      {taskCreatorDisplayName}
-                    </>
-                  ) : (
-                    taskCreatorDisplayName
-                  )}
-                </td>
-              </tr>
+    <SandboxInfoPanel
+      title="Task Info"
+      onClose={onClose}
+      header={<SidePanelHeader title="Task Info" onClose={onClose} />}
+    >
+      <SandboxInfoTable>
+        <tr>
+          <td className="pr-4 py-1 align-top whitespace-nowrap">Creator</td>
+          <td className="py-1">
+            {task.user && task.attributionKind === 'user' ? (
+              <>
+                {task.user.imageUrl ? (
+                  <Image
+                    src={task.user.imageUrl}
+                    alt={taskCreatorDisplayName}
+                    width={40}
+                    height={40}
+                    className="mr-1 inline-block size-4 rounded-full"
+                  />
+                ) : null}
+                {taskCreatorDisplayName}
+              </>
+            ) : (
+              taskCreatorDisplayName
+            )}
+          </td>
+        </tr>
 
-              {participants.length > 0 && (
-                <tr>
-                  <td className="pr-4 py-1 align-top whitespace-nowrap">
-                    Participants
-                  </td>
-                  <td className="py-1">
-                    <div className="flex flex-col gap-1.5">
-                      {participants.map((participant) => (
-                        <span
-                          key={participant.key}
-                          className="inline-flex items-center gap-1.5"
-                        >
-                          <Avatar
-                            imageUrl={participant.imageUrl}
-                            name={participant.name}
-                            email={participant.email}
-                            size="sm"
-                            alt={participant.displayName}
-                          />
-                          <span>{participant.displayName}</span>
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-              )}
-
-              {(taskRun.payload?.environmentId || taskRun.payload?.repo) && (
-                <tr>
-                  <td className="pr-4 py-1 align-top whitespace-nowrap">
-                    Workspace
-                  </td>
-                  <td className="py-1">
-                    <WorkspaceBadge
-                      environmentId={taskRun.payload.environmentId}
-                      repo={taskRun.payload.repo}
-                      iconClassName="text-muted-foreground"
-                    />
-                  </td>
-                </tr>
-              )}
-
-              <tr>
-                <td className="pr-4 py-1 align-top whitespace-nowrap">
-                  Sandbox Provider
-                </td>
-                <td className="py-1">
-                  <span className="inline-flex items-center gap-1.5">
-                    <SandboxProviderIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{sandboxProviderLabel}</span>
-                  </span>
-                </td>
-              </tr>
-
-              {taskModelLabel && (
-                <tr>
-                  <td className="pr-4 py-1 align-top whitespace-nowrap">
-                    Model
-                  </td>
-                  <td className="py-1">
-                    <span className="inline-flex items-center gap-1.5">
-                      <Brain className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="truncate">{taskModelLabel}</span>
-                      {taskRun.payload?.modelRoleOverrides && (
-                        <BasicTooltip content="Some model roles are customized for this task">
-                          <Badge variant="secondary">Customized</Badge>
-                        </BasicTooltip>
-                      )}
-                    </span>
-                  </td>
-                </tr>
-              )}
-
-              <tr>
-                <td className="pr-4 py-1 align-top whitespace-nowrap">
-                  Inference Cost
-                </td>
-                <td className="py-1">
-                  <span className="inline-flex items-center gap-1.5">
-                    <DollarSign className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{inferenceCostLabel}</span>
-                  </span>
-                </td>
-              </tr>
-
-              {showRuntimeRow && (
-                <tr>
-                  <td className="pr-4 py-1 align-top whitespace-nowrap">
-                    Runtime
-                  </td>
-                  <td className="py-1">
-                    <span className="inline-flex items-center gap-1.5">
-                      <HarnessIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="truncate">
-                        {HARNESS_LABELS[effectiveHarness]}
-                      </span>
-                    </span>
-                  </td>
-                </tr>
-              )}
-
-              {(taskRun.pullRequests?.length ?? 0) > 0 ? (
-                <tr>
-                  <td className="pr-4 py-1 align-top whitespace-nowrap">
-                    Pull Requests
-                  </td>
-                  <td className="py-1">
-                    <div className="flex max-w-72 flex-col items-start gap-2">
-                      {taskRun.pullRequests?.map((pullRequest) => (
-                        <PullRequestBadge
-                          key={`${pullRequest.repository}:${pullRequest.prNumber}`}
-                          repo={pullRequest.repository}
-                          prNumber={pullRequest.prNumber}
-                          url={pullRequest.prUrl}
-                          iconClassName="text-muted-foreground"
-                        />
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-              ) : taskRun.prRepo && taskRun.prNumber ? (
-                <tr>
-                  <td className="pr-4 py-1 align-top whitespace-nowrap">
-                    Pull Request
-                  </td>
-                  <td className="py-1">
-                    <PullRequestBadge
-                      repo={taskRun.prRepo}
-                      prNumber={taskRun.prNumber}
-                      iconClassName="text-muted-foreground"
-                    />
-                  </td>
-                </tr>
-              ) : null}
-
-              {linkedWorkItems.length > 0 ? (
-                <tr>
-                  <td className="pr-4 py-1 align-top whitespace-nowrap">
-                    Linked Work
-                  </td>
-                  <td className="py-1">
-                    <div className="flex max-w-72 flex-col gap-2">
-                      {linkedWorkItems.map((item, index) => (
-                        <LinkedWorkItemDisplay
-                          key={`${item.provider}:${item.repository ?? ''}:${item.identifier}:${item.url ?? ''}:${index}`}
-                          item={item}
-                        />
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-              ) : null}
-
-              <tr>
-                <td className="pr-4 py-1 align-top whitespace-nowrap">
-                  Started At
-                </td>
-                <td className="py-1">
-                  <span className="inline-flex items-center gap-1.5">
-                    <Calendar className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate">
-                      {formatStartedAt(taskRun.startedAt)}
-                    </span>
-                  </span>
-                </td>
-              </tr>
-
-              <tr>
-                <td className="pr-4 py-1 align-top whitespace-nowrap">
-                  Started From
-                </td>
-                <td className="py-1">
-                  <span className="inline-flex items-center gap-1.5">
-                    {startedFrom.brandIcon ? (
-                      startedFrom.brandIcon === 'slack' ? (
-                        <Slack className="size-3.5 shrink-0 text-muted-foreground" />
-                      ) : (
-                        <BrandIcon
-                          icon={startedFrom.brandIcon}
-                          name={startedFrom.label}
-                          className="size-3.5 shrink-0 text-muted-foreground"
-                        />
-                      )
-                    ) : (
-                      <Globe className="size-3.5 shrink-0 text-muted-foreground" />
-                    )}
-                    <span className="truncate">{startedFrom.label}</span>
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-
-          {taskRunError && (
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <h3 className="text-sm font-medium">Last Error</h3>
-                <CopyIconButton content={taskRunError} />
-              </div>
-              <p className="text-sm text-destructive whitespace-pre-wrap wrap-break-word">
-                {taskRunError}
-              </p>
-            </div>
-          )}
-
-          {summaryEnabled && (
-            <div className="pr-8">
-              <div className="mb-3 flex items-center gap-2">
-                <h3 className="font-medium">Summary</h3>
-              </div>
-
-              {isLoadingSummary ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Generating...</span>
-                </div>
-              ) : summary ? (
-                <>
-                  {isSummaryStale && (
-                    <div className="mb-3 rounded-md border-b border-muted pb-1 text-xs text-muted-foreground">
-                      <span>New messages since last summarized. </span>
-                      <Button
-                        variant="link"
-                        size="xs"
-                        className="relative top-0.5"
-                        onClick={() => regenerateSummary()}
-                      >
-                        <RefreshCcw className="mt-0.5 inline size-2.5" />
-                        Regenerate
-                      </Button>
-                    </div>
-                  )}
-                  <div
-                    className={cn(
-                      'text-sm leading-relaxed text-muted-foreground [&_p]:mb-2',
-                    )}
+        {participants.length > 0 && (
+          <tr>
+            <td className="pr-4 py-1 align-top whitespace-nowrap">
+              Participants
+            </td>
+            <td className="py-1">
+              <div className="flex flex-col gap-1.5">
+                {participants.map((participant) => (
+                  <span
+                    key={participant.key}
+                    className="inline-flex items-center gap-1.5"
                   >
-                    <Streamdown plugins={streamdownCodeMermaidCjkPlugins}>
-                      {summary}
-                    </Streamdown>
-                  </div>
-                </>
-              ) : summaryErrorMessage ? (
-                <div className="text-sm text-muted-foreground">
-                  <p>{summaryErrorMessage}</p>
+                    <Avatar
+                      imageUrl={participant.imageUrl}
+                      name={participant.name}
+                      email={participant.email}
+                      size="sm"
+                      alt={participant.displayName}
+                    />
+                    <span>{participant.displayName}</span>
+                  </span>
+                ))}
+              </div>
+            </td>
+          </tr>
+        )}
+
+        {(taskRun.payload?.environmentId || taskRun.payload?.repo) && (
+          <tr>
+            <td className="pr-4 py-1 align-top whitespace-nowrap">Workspace</td>
+            <td className="py-1">
+              <WorkspaceBadge
+                environmentId={taskRun.payload.environmentId}
+                repo={taskRun.payload.repo}
+                iconClassName="text-muted-foreground"
+              />
+            </td>
+          </tr>
+        )}
+
+        <tr>
+          <td className="pr-4 py-1 align-top whitespace-nowrap">
+            Sandbox Provider
+          </td>
+          <td className="py-1">
+            <span className="inline-flex items-center gap-1.5">
+              <SandboxProviderIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate">{sandboxProviderLabel}</span>
+            </span>
+          </td>
+        </tr>
+
+        {taskModelLabel && (
+          <tr>
+            <td className="pr-4 py-1 align-top whitespace-nowrap">Model</td>
+            <td className="py-1">
+              <span className="inline-flex items-center gap-1.5">
+                <Brain className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate">{taskModelLabel}</span>
+                {taskRun.payload?.modelRoleOverrides && (
+                  <BasicTooltip content="Some model roles are customized for this task">
+                    <Badge variant="secondary">Customized</Badge>
+                  </BasicTooltip>
+                )}
+              </span>
+            </td>
+          </tr>
+        )}
+
+        <SandboxInfoRow label="Inference Cost">
+          <span className="inline-flex items-center gap-1.5">
+            <DollarSign className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{inferenceCostLabel}</span>
+          </span>
+        </SandboxInfoRow>
+
+        {showRuntimeRow && (
+          <tr>
+            <td className="pr-4 py-1 align-top whitespace-nowrap">Runtime</td>
+            <td className="py-1">
+              <span className="inline-flex items-center gap-1.5">
+                <HarnessIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate">
+                  {HARNESS_LABELS[effectiveHarness]}
+                </span>
+              </span>
+            </td>
+          </tr>
+        )}
+
+        {(taskRun.pullRequests?.length ?? 0) > 0 ? (
+          <tr>
+            <td className="pr-4 py-1 align-top whitespace-nowrap">
+              Pull Requests
+            </td>
+            <td className="py-1">
+              <div className="flex max-w-72 flex-col items-start gap-2">
+                {taskRun.pullRequests?.map((pullRequest) => (
+                  <PullRequestBadge
+                    key={`${pullRequest.repository}:${pullRequest.prNumber}`}
+                    repo={pullRequest.repository}
+                    prNumber={pullRequest.prNumber}
+                    url={pullRequest.prUrl}
+                    iconClassName="text-muted-foreground"
+                  />
+                ))}
+              </div>
+            </td>
+          </tr>
+        ) : taskRun.prRepo && taskRun.prNumber ? (
+          <tr>
+            <td className="pr-4 py-1 align-top whitespace-nowrap">
+              Pull Request
+            </td>
+            <td className="py-1">
+              <PullRequestBadge
+                repo={taskRun.prRepo}
+                prNumber={taskRun.prNumber}
+                iconClassName="text-muted-foreground"
+              />
+            </td>
+          </tr>
+        ) : null}
+
+        {linkedWorkItems.length > 0 ? (
+          <tr>
+            <td className="pr-4 py-1 align-top whitespace-nowrap">
+              Linked Work
+            </td>
+            <td className="py-1">
+              <div className="flex max-w-72 flex-col gap-2">
+                {linkedWorkItems.map((item, index) => (
+                  <LinkedWorkItemDisplay
+                    key={`${item.provider}:${item.repository ?? ''}:${item.identifier}:${item.url ?? ''}:${index}`}
+                    item={item}
+                  />
+                ))}
+              </div>
+            </td>
+          </tr>
+        ) : null}
+
+        <SandboxInfoRow label="Started At">
+          <span className="inline-flex items-center gap-1.5">
+            <Calendar className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">
+              {formatStartedAt(taskRun.startedAt)}
+            </span>
+          </span>
+        </SandboxInfoRow>
+
+        <SandboxInfoRow label="Started From">
+          <span className="inline-flex items-center gap-1.5">
+            {startedFrom.brandIcon ? (
+              startedFrom.brandIcon === 'slack' ? (
+                <Slack className="size-3.5 shrink-0 text-muted-foreground" />
+              ) : (
+                <BrandIcon
+                  icon={startedFrom.brandIcon}
+                  name={startedFrom.label}
+                  className="size-3.5 shrink-0 text-muted-foreground"
+                />
+              )
+            ) : (
+              <Globe className="size-3.5 shrink-0 text-muted-foreground" />
+            )}
+            <span className="truncate">{startedFrom.label}</span>
+          </span>
+        </SandboxInfoRow>
+      </SandboxInfoTable>
+
+      {taskRunError && (
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className="text-sm font-medium">Last Error</h3>
+            <CopyIconButton content={taskRunError} />
+          </div>
+          <p className="text-sm text-destructive whitespace-pre-wrap wrap-break-word">
+            {taskRunError}
+          </p>
+        </div>
+      )}
+
+      {summaryEnabled && (
+        <div className="pr-8">
+          <div className="mb-3 flex items-center gap-2">
+            <h3 className="font-medium">Summary</h3>
+          </div>
+
+          {isLoadingSummary ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Generating...</span>
+            </div>
+          ) : summary ? (
+            <>
+              {isSummaryStale && (
+                <div className="mb-3 rounded-md border-b border-muted pb-1 text-xs text-muted-foreground">
+                  <span>New messages since last summarized. </span>
                   <Button
                     variant="link"
-                    size="sm"
+                    size="xs"
+                    className="relative top-0.5"
                     onClick={() => regenerateSummary()}
-                    className="mt-2"
                   >
-                    <RefreshCcw className="mt-0.5 inline size-4" />
-                    Try again
+                    <RefreshCcw className="mt-0.5 inline size-2.5" />
+                    Regenerate
                   </Button>
                 </div>
-              ) : null}
+              )}
+              <div
+                className={cn(
+                  'text-sm leading-relaxed text-muted-foreground [&_p]:mb-2',
+                )}
+              >
+                <Streamdown plugins={streamdownCodeMermaidCjkPlugins}>
+                  {summary}
+                </Streamdown>
+              </div>
+            </>
+          ) : summaryErrorMessage ? (
+            <div className="text-sm text-muted-foreground">
+              <p>{summaryErrorMessage}</p>
+              <Button
+                variant="link"
+                size="sm"
+                onClick={() => regenerateSummary()}
+                className="mt-2"
+              >
+                <RefreshCcw className="mt-0.5 inline size-4" />
+                Try again
+              </Button>
             </div>
-          )}
+          ) : null}
         </div>
-      </div>
-    </>
+      )}
+    </SandboxInfoPanel>
   );
 }

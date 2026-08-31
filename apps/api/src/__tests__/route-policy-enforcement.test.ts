@@ -306,7 +306,14 @@ describe('route policy enforcement', () => {
         request,
       );
       const publicBody = (await publicResponse.json()) as {
-        result?: { tools?: Array<{ name: string }> };
+        result?: {
+          tools?: Array<{
+            name: string;
+            inputSchema?: {
+              properties?: { action?: { enum?: string[] } };
+            };
+          }>;
+        };
       };
       expect(publicResponse.status).toBe(200);
       expect(publicBody.result?.tools?.map((tool) => tool.name)).toContain(
@@ -315,6 +322,114 @@ describe('route policy enforcement', () => {
       expect(publicBody.result?.tools?.map((tool) => tool.name)).toContain(
         'manage_custom_automations',
       );
+      const manageTasks = publicBody.result?.tools?.find(
+        (tool) => tool.name === 'manage_tasks',
+      );
+      expect(manageTasks?.inputSchema?.properties?.action?.enum).toEqual(
+        expect.arrayContaining([
+          'start',
+          'search',
+          'get_summary',
+          'get_messages',
+          'send_message',
+          'search_tasks',
+          'launch',
+        ]),
+      );
+
+      const sessionSearchResponse = await createApiApp().request(
+        'http://localhost/mcp',
+        {
+          ...request,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 3,
+            method: 'tools/call',
+            params: { name: 'manage_tasks', arguments: { action: 'search' } },
+          }),
+        },
+      );
+      const sessionSearchBody = (await sessionSearchResponse.json()) as {
+        result?: { structuredContent?: unknown };
+      };
+      expect(sessionSearchBody.result?.structuredContent).toMatchObject({
+        sessions: expect.any(Array),
+      });
+
+      const taskSearchResponse = await createApiApp().request(
+        'http://localhost/mcp',
+        {
+          ...request,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 4,
+            method: 'tools/call',
+            params: {
+              name: 'manage_tasks',
+              arguments: { action: 'search_tasks' },
+            },
+          }),
+        },
+      );
+      const taskSearchBody = (await taskSearchResponse.json()) as {
+        result?: { structuredContent?: unknown };
+      };
+      expect(taskSearchBody.result?.structuredContent).toMatchObject({
+        tasks: expect.any(Array),
+      });
+
+      const invalidTaskSearchResponse = await createApiApp().request(
+        'http://localhost/mcp',
+        {
+          ...request,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 5,
+            method: 'tools/call',
+            params: {
+              name: 'manage_tasks',
+              arguments: {
+                action: 'search_tasks',
+                status: 'needs_input',
+              },
+            },
+          }),
+        },
+      );
+      const invalidTaskSearchBody =
+        (await invalidTaskSearchResponse.json()) as {
+          result?: { isError?: boolean; structuredContent?: unknown };
+        };
+      expect(invalidTaskSearchBody.result?.isError).toBe(true);
+      expect(invalidTaskSearchBody.result?.structuredContent).toMatchObject({
+        error:
+          'status must be one of: active, completed, all when search resolves to tasks',
+      });
+
+      const invalidLegacySearchResponse = await createApiApp().request(
+        'http://localhost/mcp',
+        {
+          ...request,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 6,
+            method: 'tools/call',
+            params: {
+              name: 'manage_tasks',
+              arguments: {
+                action: 'search',
+                pullRequest: 'owner/repo#1',
+                status: 'needs_input',
+              },
+            },
+          }),
+        },
+      );
+      const invalidLegacySearchBody =
+        (await invalidLegacySearchResponse.json()) as {
+          result?: { isError?: boolean };
+        };
+      expect(invalidLegacySearchBody.result?.isError).toBe(true);
 
       const callResponse = await createApiApp().request(
         'http://localhost/mcp',

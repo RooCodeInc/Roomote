@@ -12,12 +12,15 @@ import {
 import {
   getTextFromContentBlocks,
   getImageUrisFromContentBlocks,
+  ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   resolveAcpTranscriptVisibility,
+  sanitizeEnvelopeFields,
 } from '@roomote/types';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
 import { visibleTaskHistoryCondition } from './helpers';
+import { getFastSessionMessagesForUser } from './fastSessionCommunication';
 import { logHandlerError } from '../utils';
 
 /**
@@ -62,7 +65,7 @@ export async function getTaskMessages(
     return c.json({ error: 'order must be one of: asc, desc' }, 400);
   }
 
-  const order = orderParam ?? 'asc';
+  const order: 'asc' | 'desc' = orderParam === 'desc' ? 'desc' : 'asc';
 
   try {
     const [task] = await db
@@ -72,6 +75,18 @@ export async function getTaskMessages(
       .limit(1);
 
     if (!task) {
+      const userId = c.get('mcpAuth').userId;
+      if (userId) {
+        const messages = await getFastSessionMessagesForUser({
+          sessionId: taskId,
+          userId,
+          limit,
+          order,
+        });
+        if (messages) {
+          return c.json({ messages, returned: messages.length });
+        }
+      }
       return c.json({ error: 'Task not found' }, 404);
     }
 
@@ -80,44 +95,69 @@ export async function getTaskMessages(
         ? [desc(taskMessages.ts), desc(taskMessages.createdAt)]
         : [asc(taskMessages.ts), asc(taskMessages.createdAt)];
 
-    let query = db
-      .select({
-        id: taskMessages.id,
-        taskId: taskMessages.taskId,
-        ts: taskMessages.ts,
-        eventType: taskMessages.eventType,
-        role: taskMessages.role,
-        contentBlocks: taskMessages.contentBlocks,
-        metadata: taskMessages.metadata,
-        payload: taskMessages.payload,
-        createdAt: taskMessages.createdAt,
-      })
-      .from(taskMessages)
-      .where(eq(taskMessages.taskId, taskId))
-      .orderBy(...orderBy);
+    const selectRows = () =>
+      db
+        .select({
+          id: taskMessages.id,
+          taskId: taskMessages.taskId,
+          ts: taskMessages.ts,
+          eventType: taskMessages.eventType,
+          role: taskMessages.role,
+          contentBlocks: taskMessages.contentBlocks,
+          metadata: taskMessages.metadata,
+          payload: taskMessages.payload,
+          createdAt: taskMessages.createdAt,
+        })
+        .from(taskMessages)
+        .where(eq(taskMessages.taskId, taskId))
+        .orderBy(...orderBy);
 
-    if (limit) {
-      query = query.limit(limit) as typeof query;
+    const toVisibleMessages = (rows: Awaited<ReturnType<typeof selectRows>>) =>
+      rows.flatMap((row) => {
+        const visibleInTranscript = resolveAcpTranscriptVisibility({
+          eventType: row.eventType,
+          contentBlocks: row.contentBlocks,
+          metadata: row.metadata,
+          payload: row.payload,
+        });
+        if (!visibleInTranscript) return [];
+        const sanitized = sanitizeEnvelopeFields(
+          row.eventType,
+          row.contentBlocks,
+          row.metadata,
+          row.payload,
+          { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
+        );
+        return [
+          {
+            id: row.id,
+            taskId: row.taskId,
+            ts: Number(row.ts),
+            eventType: row.eventType,
+            role: row.role,
+            text: getTextFromContentBlocks(sanitized.contentBlocks),
+            images: getImageUrisFromContentBlocks(sanitized.contentBlocks),
+            metadata: sanitized.metadata,
+            visibleInTranscript: true,
+          },
+        ];
+      });
+
+    let messages;
+    if (!limit) {
+      messages = toVisibleMessages(await selectRows());
+    } else {
+      messages = [] as ReturnType<typeof toVisibleMessages>;
+      const batchSize = Math.max(limit, 100);
+      let offset = 0;
+      while (messages.length < limit) {
+        const rows = await selectRows().limit(batchSize).offset(offset);
+        messages.push(...toVisibleMessages(rows));
+        offset += rows.length;
+        if (rows.length < batchSize) break;
+      }
+      messages = messages.slice(0, limit);
     }
-
-    const rows = await query;
-
-    const messages = rows.map((row) => ({
-      id: row.id,
-      taskId: row.taskId,
-      ts: Number(row.ts),
-      eventType: row.eventType,
-      role: row.role,
-      text: getTextFromContentBlocks(row.contentBlocks),
-      images: getImageUrisFromContentBlocks(row.contentBlocks),
-      metadata: row.metadata,
-      visibleInTranscript: resolveAcpTranscriptVisibility({
-        eventType: row.eventType,
-        contentBlocks: row.contentBlocks,
-        metadata: row.metadata,
-        payload: row.payload,
-      }),
-    }));
 
     return c.json({ messages, returned: messages.length });
   } catch (error) {

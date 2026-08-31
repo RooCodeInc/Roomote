@@ -51,6 +51,81 @@ describe('SlackNotifier', () => {
     process.env.SLACK_API_BASE_URL = originalBaseUrl;
   });
 
+  describe('setAgentSessionStatus', () => {
+    it('sets a titled agent session status through the Web API', async () => {
+      apiCallMock.mockResolvedValue({
+        ok: true,
+        title: 'Investigate Slack agent status',
+      });
+
+      await expect(
+        notifier.setAgentSessionStatus({
+          channel: 'C123',
+          threadTs: '100.001',
+          status: 'processing',
+          title: 'Investigate Slack agent status',
+        }),
+      ).resolves.toEqual({
+        ok: true,
+        title: 'Investigate Slack agent status',
+      });
+
+      expect(apiCallMock).toHaveBeenCalledWith('agents.sessions.setStatus', {
+        channel_id: 'C123',
+        thread_ts: '100.001',
+        status: 'processing',
+        title: 'Investigate Slack agent status',
+      });
+    });
+
+    it('treats Slack status rejections as best-effort failures', async () => {
+      apiCallMock.mockResolvedValue({ ok: false, error: 'feature_disabled' });
+
+      await expect(
+        notifier.setAgentSessionStatus({
+          channel: 'C123',
+          threadTs: '100.001',
+          status: 'active',
+        }),
+      ).resolves.toEqual({ ok: false });
+    });
+
+    it('renames an existing agent session through the Web API', async () => {
+      apiCallMock.mockResolvedValue({ ok: true });
+
+      await expect(
+        notifier.renameAgentSession({
+          channel: 'C123',
+          threadTs: '100.001',
+          title: 'Investigate Slack agent status',
+        }),
+      ).resolves.toEqual({ ok: true });
+
+      expect(apiCallMock).toHaveBeenCalledWith('agents.sessions.rename', {
+        channel_id: 'C123',
+        thread_ts: '100.001',
+        title: 'Investigate Slack agent status',
+      });
+    });
+
+    it('exposes invalid title rejections from Slack platform errors', async () => {
+      apiCallMock.mockRejectedValue(
+        Object.assign(new Error('An API error occurred: invalid_name'), {
+          code: 'slack_webapi_platform_error',
+          data: { ok: false, error: 'invalid_name' },
+        }),
+      );
+
+      await expect(
+        notifier.renameAgentSession({
+          channel: 'C123',
+          threadTs: '100.001',
+          title: 'Invalid title',
+        }),
+      ).resolves.toEqual({ ok: false, error: 'invalid_name' });
+    });
+  });
+
   describe('getDirectMessageUserId', () => {
     it('returns the user for a one-to-one direct message', async () => {
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
@@ -1168,6 +1243,14 @@ describe('SlackNotifier', () => {
         filetype: 'svg',
       };
 
+      const misleadingFilename: SlackFile = {
+        ...smallImage,
+        id: 'F5',
+        name: 'document.png',
+        mimetype: 'application/pdf',
+        filetype: 'pdf',
+      };
+
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
         ok: true,
         arrayBuffer: async () => new TextEncoder().encode('fake-image').buffer,
@@ -1178,6 +1261,7 @@ describe('SlackNotifier', () => {
         largeImage,
         textFile,
         svgFile,
+        misleadingFilename,
       ]);
 
       expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);

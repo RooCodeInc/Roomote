@@ -1,12 +1,6 @@
 'use client';
 
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { CircleSlash, TriangleAlert } from '@/components/system';
@@ -21,11 +15,12 @@ import {
 import { useTRPC } from '@/trpc/client';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useRecentTasks } from '@/hooks/useRecentTasks';
+import { truncatePageTitle } from '@/lib/page-title';
 
 import { FramedSurface } from '@/components/layout';
 import { EmptyState } from '@/components/system';
 
-import { useSandboxLayout } from '../../use-sandbox-layout';
+import { useResponsiveSandboxSidebar } from '../../use-sandbox-layout';
 
 import {
   HistoricalSandboxProvider,
@@ -45,7 +40,7 @@ import { TaskWorkspaceSkeleton } from './TaskWorkspaceSkeleton';
 
 export default function SandboxPage() {
   const { taskId: unresolvedTaskId } = useParams<{ taskId: string }>();
-  const { setSidebarVisible } = useSandboxLayout();
+  useResponsiveSandboxSidebar(unresolvedTaskId);
 
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -107,26 +102,6 @@ export default function SandboxPage() {
     });
   }, [queryClient, trpc]);
 
-  useLayoutEffect(() => {
-    const mobileQuery = window.matchMedia?.('(max-width: 767px)');
-
-    if (!mobileQuery?.matches) {
-      return;
-    }
-
-    setSidebarVisible(false);
-
-    const handleViewportChange = (event: MediaQueryListEvent) =>
-      setSidebarVisible(!event.matches);
-
-    mobileQuery.addEventListener('change', handleViewportChange);
-
-    return () => {
-      mobileQuery.removeEventListener('change', handleViewportChange);
-      setSidebarVisible(true);
-    };
-  }, [setSidebarVisible, unresolvedTaskId]);
-
   // Track this task as recently visited for command palette ordering.
   // Record immediately with the URL param so visits are captured even when the
   // session fails to initialise. If the resolved taskId differs (e.g. alias
@@ -144,11 +119,7 @@ export default function SandboxPage() {
     }
   }, [taskId, unresolvedTaskId, recordVisit]);
 
-  usePageTitle(
-    task && task.title.length > 60
-      ? `${task.title.slice(0, 60)}...`
-      : task?.title,
-  );
+  usePageTitle(truncatePageTitle(task?.title));
 
   useEffect(() => {
     if (sessionState !== 'interactive') {

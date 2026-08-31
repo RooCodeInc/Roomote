@@ -8,6 +8,7 @@ import {
   getTaskGoalForRun,
   isNotNull,
   releaseTaskGoalContinuationForRun,
+  sessionTasks,
   slackInstallations,
   taskPullRequests,
 } from '@roomote/db/server';
@@ -401,10 +402,15 @@ export const taskRunsRouter = router({
     .input(enqueueTaskInputSchema)
     .mutation(async ({ input }) => {
       const launchResult = await enqueueTask(input as EnqueueTaskInput);
+      const linkedSession = await db.query.sessionTasks.findFirst({
+        where: eq(sessionTasks.taskId, launchResult.taskId),
+        columns: { sessionId: true },
+      });
 
       return {
         id: launchResult.id,
         taskId: launchResult.taskId,
+        sessionId: linkedSession?.sessionId,
       };
     }),
   dequeue: runScoped(

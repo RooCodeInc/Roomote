@@ -490,6 +490,7 @@ export const dequeueTaskRun = async (
     ) {
       await markGithubPrReviewCheckInProgress({
         taskId: txResult.taskRun.taskId,
+        runId: txResult.taskRun.id,
         gitHubToken,
       });
     }

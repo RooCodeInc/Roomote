@@ -22,7 +22,40 @@ export type FastAgentPlatformEventVisibility = 'optional' | 'required';
 
 export type FastAgentPlatformEventHandling = 'default' | 'present_only';
 
-export type FastAgentPlatformEventKind = 'delegated_task' | 'automation';
+export type FastAgentPlatformEventKind =
+  | 'delegated_task'
+  | 'automation'
+  | 'setup';
+
+export type FastAgentReactionExternalInput = {
+  type: 'reaction_added';
+  provider: 'slack' | 'discord' | 'teams' | 'telegram';
+  reactions: Array<{ name: string; id?: string }>;
+  reactor: { externalUserId: string; displayName?: string };
+  message: {
+    workspaceId: string;
+    channelId: string;
+    messageId: string;
+    threadId?: string;
+    text?: string;
+  };
+  eventId: string;
+};
+
+export const FAST_AGENT_REACTION_INPUT_TYPE = 'reaction' as const;
+
+export type FastAgentHumanInput =
+  | { type: 'message' }
+  | {
+      type: typeof FAST_AGENT_REACTION_INPUT_TYPE;
+      externalInput: FastAgentReactionExternalInput;
+    };
+
+export function buildFastAgentReactionExternalInputQuestion(
+  input: FastAgentReactionExternalInput,
+): string {
+  return `<external_input>${JSON.stringify(input)}</external_input>`;
+}
 
 export type FastAgentSuggestedTask = {
   title: string;
@@ -53,6 +86,7 @@ export type FastAgentReaction = {
 
 export type LaunchFastAgentTask = (params: {
   prompt: string;
+  images?: string[];
   environmentId: string | null;
   model?: string | null;
   parentSessionId: string;
@@ -79,6 +113,12 @@ export type RetryFastAgentTaskStart = () => Promise<
   { success: true; runId: number } | { success: false; error: string }
 >;
 
+export type FastAgentTurnActivity = {
+  start: () => void;
+  settle: () => Promise<void>;
+  updateTitle?: (title: string | null) => void;
+};
+
 export type FastAgentMcpServerConfig = {
   url: string;
   headers: Record<string, string>;
@@ -94,6 +134,7 @@ export type FastAgentTurnAdapter = {
     reply: FastAgentReply,
   ) => Promise<FastAgentReplyHandle | void>;
   postReaction?: (reaction: FastAgentReaction) => Promise<void>;
+  activity?: FastAgentTurnActivity;
   retryTaskStart?: RetryFastAgentTaskStart;
   resolveMcpServerConfigs?: () => Promise<
     Record<string, FastAgentMcpServerConfig>

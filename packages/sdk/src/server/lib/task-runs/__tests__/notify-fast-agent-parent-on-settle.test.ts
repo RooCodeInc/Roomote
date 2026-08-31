@@ -1,40 +1,18 @@
 import type { TaskRun } from '@roomote/db/server';
 import { RunStatus, TaskRunErrorCode } from '@roomote/types';
 
-const mocks = vi.hoisted(() => {
-  class FastAgentParentEventDeliveryError extends Error {
-    readonly replyPosted: boolean;
-    readonly permanent: boolean;
-
-    constructor(
-      message: string,
-      options: { replyPosted: boolean; permanent?: boolean },
-    ) {
-      super(message);
-      this.replyPosted = options.replyPosted;
-      this.permanent = options.permanent ?? false;
-    }
-  }
-
-  return {
-    claimReturning: vi.fn(),
-    updateSet: vi.fn(),
-    recordLifecycle: vi.fn(),
-    deliverParentEvent: vi.fn(),
-    listPullRequests: vi.fn(),
-    getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
-    findTaskRun: vi.fn(),
-    canRetryFailedStart: vi.fn(),
-    enqueueTaskRelaunch: vi.fn(),
-    FastAgentParentEventDeliveryError,
-  };
-});
+const mocks = vi.hoisted(() => ({
+  claimReturning: vi.fn(),
+  updateSet: vi.fn(),
+  recordLifecycle: vi.fn(),
+  enqueueParentEvent: vi.fn(),
+  listPullRequests: vi.fn(),
+  getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
+  canRetryFailedStart: vi.fn(),
+}));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
-    query: {
-      taskRuns: { findFirst: mocks.findTaskRun },
-    },
     update: vi.fn(() => ({
       set: vi.fn((values: unknown) => {
         mocks.updateSet(values);
@@ -51,24 +29,20 @@ vi.mock('@roomote/db/server', () => ({
     strings: [...strings],
     values,
   })),
-  taskRuns: {
-    id: 'task_runs.id',
-    taskId: 'task_runs.task_id',
-    sourceRunId: 'task_runs.source_run_id',
-    result: 'task_runs.result',
-  },
+  taskRuns: { id: 'task_runs.id', result: 'task_runs.result' },
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   canRetryFailedStart: mocks.canRetryFailedStart,
-  enqueueTaskRelaunch: mocks.enqueueTaskRelaunch,
   getTaskUrl: mocks.getTaskUrl,
 }));
 
 vi.mock('../../fast-agent-parent-event', () => ({
-  deliverFastAgentParentEvent: mocks.deliverParentEvent,
   listFastAgentPullRequestContexts: mocks.listPullRequests,
-  FastAgentParentEventDeliveryError: mocks.FastAgentParentEventDeliveryError,
+}));
+
+vi.mock('../../fast-agent-parent-event-queue', () => ({
+  enqueueFastAgentParentEvent: mocks.enqueueParentEvent,
 }));
 
 import { notifyFastAgentParentOnSettle } from '../notify-fast-agent-parent-on-settle';
@@ -80,16 +54,6 @@ const fastParent = {
     workspaceId: 'T123',
     conversationId: '100.001',
     replyTarget: { channelId: 'C123', threadId: '100.001' },
-  },
-};
-
-const discordFastParent = {
-  sessionId: '22222222-2222-4222-8222-222222222222',
-  conversation: {
-    surface: 'discord' as const,
-    workspaceId: 'guild-1',
-    conversationId: 'interaction-1',
-    replyTarget: { channelId: 'channel-1' },
   },
 };
 
@@ -113,23 +77,21 @@ describe('notifyFastAgentParentOnSettle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
-    mocks.deliverParentEvent.mockResolvedValue(undefined);
+    mocks.enqueueParentEvent.mockResolvedValue({ queued: true });
     mocks.listPullRequests.mockResolvedValue([]);
     mocks.recordLifecycle.mockResolvedValue(undefined);
-    mocks.findTaskRun.mockResolvedValue(undefined);
     mocks.canRetryFailedStart.mockResolvedValue(false);
-    mocks.enqueueTaskRelaunch.mockResolvedValue({ id: 201 });
   });
 
-  it('passes child lifecycle state to the Fast orchestrator', async () => {
+  it('queues child lifecycle state and settles the source claim immediately', async () => {
     await notifyFastAgentParentOnSettle(
-      makeRun({ fastAgentParent: discordFastParent }),
+      makeRun({ fastAgentParent: fastParent }),
       RunStatus.Idle,
       'Implement the fix',
     );
 
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith({
-      parent: discordFastParent,
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith({
+      parent: fastParent,
       event: {
         type: 'task_settled',
         taskId: 'child-task',
@@ -140,16 +102,16 @@ describe('notifyFastAgentParentOnSettle', () => {
         pullRequests: [],
       },
     });
-    expect(mocks.getTaskUrl).toHaveBeenCalledWith({
-      taskId: 'child-task',
-      utm: {
-        source: 'discord',
-        campaign: 'fast-delegation-settle',
-      },
-    });
+    expect(
+      mocks.updateSet.mock.calls.some(([values]) => {
+        const result = (values as { result?: { strings?: string[] } }).result;
+        return result?.strings?.join('').includes('to_jsonb(now())') === true;
+      }),
+    ).toBe(true);
     expect(mocks.recordLifecycle).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
+        message: expect.stringContaining('Queued'),
         details: expect.objectContaining({
           reason: 'fast_agent_parent_settle_event',
         }),
@@ -157,7 +119,26 @@ describe('notifyFastAgentParentOnSettle', () => {
     );
   });
 
-  it('passes current pull request context with the completion event', async () => {
+  it('carries custom automation identity into the settlement event', async () => {
+    await notifyFastAgentParentOnSettle(
+      makeRun({
+        fastAgentParent: fastParent,
+        customAutomationId: 'automation-1',
+      }),
+      RunStatus.Completed,
+    );
+
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          type: 'task_settled',
+          customAutomationId: 'automation-1',
+        }),
+      }),
+    );
+  });
+
+  it('preserves pull request context in queue order', async () => {
     mocks.listPullRequests.mockResolvedValueOnce([
       {
         provider: 'github',
@@ -173,176 +154,45 @@ describe('notifyFastAgentParentOnSettle', () => {
     await notifyFastAgentParentOnSettle(
       makeRun({ fastAgentParent: fastParent }),
       RunStatus.Completed,
-      'Implement the fix',
     );
 
-    expect(mocks.listPullRequests).toHaveBeenCalledWith('child-task');
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
-          type: 'task_settled',
           pullRequests: [
-            expect.objectContaining({
-              repository: 'acme/web',
-              number: 42,
-              title: '[Fix] Keep the PR in the closeout',
-              url: 'https://github.com/acme/web/pull/42',
-              status: 'merged',
-            }),
+            expect.objectContaining({ repository: 'acme/web', number: 42 }),
           ],
         }),
       }),
     );
   });
 
-  it('lets the Fast parent retry an eligible failed startup', async () => {
-    vi.useFakeTimers();
-    mocks.canRetryFailedStart.mockResolvedValue(true);
-    let retryResult: unknown;
-    mocks.deliverParentEvent.mockImplementationOnce(
-      async (input: { retryTaskStart?: () => Promise<unknown> }) => {
-        retryResult = await input.retryTaskStart?.();
-      },
-    );
-
-    try {
-      const pending = notifyFastAgentParentOnSettle(
-        makeRun(
-          { fastAgentParent: fastParent },
-          {
-            error: 'Sandbox startup timed out while contacting the provider.',
-            errorCode: TaskRunErrorCode.DockerWorkerStartTimeout,
-          },
-        ),
-        RunStatus.Failed,
-      );
-
-      await vi.advanceTimersByTimeAsync(1_000);
-      await pending;
-
-      expect(mocks.enqueueTaskRelaunch).toHaveBeenCalledWith({
-        sourceRunId: 200,
-        actingUserId: 'user-1',
-      });
-      expect(mocks.canRetryFailedStart).toHaveBeenCalledWith(
-        expect.objectContaining({ status: RunStatus.Failed }),
-      );
-      expect(retryResult).toEqual({ success: true, runId: 201 });
-      expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          retryTaskStart: expect.any(Function),
-          event: expect.objectContaining({
-            error: 'Sandbox startup timed out while contacting the provider.',
-            errorCode: TaskRunErrorCode.DockerWorkerStartTimeout,
-          }),
-        }),
-      );
-      expect(mocks.recordLifecycle).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          details: expect.objectContaining({
-            reason: 'fast_agent_parent_startup_retry',
-            retryNumber: 1,
-            delayMs: 1_000,
-          }),
-        }),
-      );
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('reports the bounded startup retry budget to the Fast parent', async () => {
-    mocks.canRetryFailedStart.mockResolvedValue(true);
-    mocks.findTaskRun
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce({
-        sourceRunId: 100,
-        payload: { fastAgentParent: fastParent },
-      })
-      .mockResolvedValueOnce({
-        sourceRunId: null,
-        payload: { fastAgentParent: fastParent },
-      });
-    let retryResult: unknown;
-    mocks.deliverParentEvent.mockImplementationOnce(
-      async (input: { retryTaskStart?: () => Promise<unknown> }) => {
-        retryResult = await input.retryTaskStart?.();
-      },
-    );
-
-    await notifyFastAgentParentOnSettle(
-      makeRun(
-        { fastAgentParent: fastParent },
-        {
-          sourceRunId: 150,
-          error: 'HTTP 503 while starting the sandbox.',
-        },
-      ),
-      RunStatus.Failed,
-    );
-
-    expect(mocks.enqueueTaskRelaunch).not.toHaveBeenCalled();
-    expect(retryResult).toEqual({
-      success: false,
-      error: 'The failed-start retry limit has been reached.',
-    });
-  });
-
-  it('gives the Fast parent the full redacted error and error code', async () => {
+  it('stores failed-start retry capability as durable queue data', async () => {
     mocks.canRetryFailedStart.mockResolvedValue(true);
     await notifyFastAgentParentOnSettle(
       makeRun(
         { fastAgentParent: fastParent },
         {
           error:
-            'Invalid credential xoxb-1234567890-abcdefghijklmnop while loading https://provider.example/setup\nProvider configuration must be updated.',
+            'Invalid credential xoxb-1234567890-abcdefghijklmnop while starting.',
           errorCode: TaskRunErrorCode.DockerWorkerStartTimeout,
         },
       ),
       RunStatus.Failed,
     );
 
-    expect(mocks.enqueueTaskRelaunch).not.toHaveBeenCalled();
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
+        retryTaskStartRunId: 200,
         event: expect.objectContaining({
-          status: RunStatus.Failed,
-          error:
-            'Invalid credential [redacted] while loading https://provider.example/setup\nProvider configuration must be updated.',
+          error: 'Invalid credential [redacted] while starting.',
           errorCode: TaskRunErrorCode.DockerWorkerStartTimeout,
         }),
-        retryTaskStart: expect.any(Function),
       }),
     );
-    expect(mocks.enqueueTaskRelaunch).not.toHaveBeenCalled();
   });
 
-  it('reuses an already-queued retry when the parent event is redelivered', async () => {
-    mocks.canRetryFailedStart.mockResolvedValue(true);
-    mocks.findTaskRun.mockResolvedValueOnce({ id: 201 });
-    let retryResult: unknown;
-    mocks.deliverParentEvent.mockImplementationOnce(
-      async (input: { retryTaskStart?: () => Promise<unknown> }) => {
-        retryResult = await input.retryTaskStart?.();
-      },
-    );
-
-    await notifyFastAgentParentOnSettle(
-      makeRun(
-        { fastAgentParent: fastParent },
-        { error: 'Sandbox startup timed out.' },
-      ),
-      RunStatus.Failed,
-    );
-
-    expect(retryResult).toEqual({ success: true, runId: 201 });
-    expect(mocks.enqueueTaskRelaunch).not.toHaveBeenCalled();
-  });
-
-  it('does not offer retry control when failed-start eligibility rejects the run', async () => {
-    mocks.canRetryFailedStart.mockResolvedValue(false);
-
+  it('omits retry capability when failed-start eligibility rejects the run', async () => {
     await notifyFastAgentParentOnSettle(
       makeRun(
         { fastAgentParent: fastParent },
@@ -351,65 +201,27 @@ describe('notifyFastAgentParentOnSettle', () => {
       RunStatus.Failed,
     );
 
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
-      expect.not.objectContaining({ retryTaskStart: expect.any(Function) }),
-    );
-  });
-
-  it('passes terminal cancellation errors to the Fast parent', async () => {
-    await notifyFastAgentParentOnSettle(
-      makeRun(
-        { fastAgentParent: fastParent },
-        { error: 'The task was stopped because its sandbox was deleted.' },
-      ),
-      RunStatus.Canceled,
-    );
-
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: expect.objectContaining({
-          status: RunStatus.Canceled,
-          error: 'The task was stopped because its sandbox was deleted.',
-        }),
-      }),
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.not.objectContaining({ retryTaskStartRunId: expect.any(Number) }),
     );
   });
 
   it('does nothing for independently launched tasks', async () => {
     await notifyFastAgentParentOnSettle(makeRun({}), RunStatus.Completed);
-    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
   });
 
-  it('does not deliver twice when settlement is already claimed', async () => {
+  it('does not enqueue twice when settlement is already claimed', async () => {
     mocks.claimReturning.mockResolvedValueOnce([]);
     await notifyFastAgentParentOnSettle(
       makeRun({ fastAgentParent: fastParent }),
       RunStatus.Completed,
     );
-    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
   });
 
-  it('releases the claim when orchestrator delivery fails', async () => {
-    mocks.deliverParentEvent.mockRejectedValueOnce(new Error('model offline'));
-    await notifyFastAgentParentOnSettle(
-      makeRun({ fastAgentParent: fastParent }),
-      RunStatus.Completed,
-    );
-    expect(
-      mocks.updateSet.mock.calls.some(([values]) => {
-        const result = (values as { result?: { strings?: string[] } }).result;
-        return result?.strings?.join('').includes(' - ') === true;
-      }),
-    ).toBe(true);
-  });
-
-  it('keeps the claim when the failure happened after the Slack post', async () => {
-    mocks.deliverParentEvent.mockRejectedValueOnce(
-      new mocks.FastAgentParentEventDeliveryError('lifecycle write failed', {
-        replyPosted: true,
-      }),
-    );
-
+  it('releases the source claim only when durable admission fails', async () => {
+    mocks.enqueueParentEvent.mockRejectedValueOnce(new Error('database down'));
     await notifyFastAgentParentOnSettle(
       makeRun({ fastAgentParent: fastParent }),
       RunStatus.Completed,
@@ -419,12 +231,6 @@ describe('notifyFastAgentParentOnSettle', () => {
       mocks.updateSet.mock.calls.some(([values]) => {
         const result = (values as { result?: { strings?: string[] } }).result;
         return result?.strings?.join('').includes(' - ') === true;
-      }),
-    ).toBe(false);
-    expect(
-      mocks.updateSet.mock.calls.some(([values]) => {
-        const result = (values as { result?: { strings?: string[] } }).result;
-        return result?.strings?.join('').includes('to_jsonb(now())') === true;
       }),
     ).toBe(true);
   });

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { and, db, eq, taskRuns } from '@roomote/db/server';
 import { getFastAgentParentFromPayload } from '@roomote/types';
 
-import { deliverFastAgentParentEvent } from '../fast-agent-parent-event';
+import { enqueueFastAgentParentEvent } from '../fast-agent-parent-event-queue';
 
 type FastAgentChildChatReplyPurpose =
   | 'ack'
@@ -34,7 +34,7 @@ export async function relayFastAgentChildChatReply(input: {
     .update(`${parent.sessionId}:${run.id}:${input.deliverySignature}`)
     .digest('hex');
 
-  const delivery = await deliverFastAgentParentEvent({
+  await enqueueFastAgentParentEvent({
     parent,
     event: {
       type: 'child_message',
@@ -49,5 +49,5 @@ export async function relayFastAgentChildChatReply(input: {
     },
   });
 
-  return { relayed: delivery === 'delivered' };
+  return { relayed: true };
 }

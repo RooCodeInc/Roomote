@@ -1,16 +1,6 @@
 import { sanitizeSandboxPathString } from '@/lib';
 
-import {
-  type LucideIcon,
-  AlertCircle,
-  File as FileIcon,
-  FolderIcon,
-  Loader2,
-  Search,
-  SquarePen,
-  Terminal,
-  Wrench,
-} from '@/components/system';
+import { type LucideIcon, AlertCircle } from '@/components/system';
 import {
   Message,
   MessageContent,
@@ -22,11 +12,10 @@ import {
 import { messageAnchorId } from '../message-anchor';
 
 import { AcpToolDetails } from './AcpToolDetails';
-import { hidesExpandedToolResult } from './tool-detail-visibility';
-import type {
-  GroupedToolCallRenderBlock,
-  GroupedToolDisplayKind,
-} from './render-blocks';
+import type { GroupedToolCallRenderBlock } from './render-blocks';
+import { mcpIntegrationIconFor, toolIconForKey } from './tool-icons';
+import { resolveToolPresentation } from './tool-presentation';
+import { resolveToolPresentationPolicy } from './tool-presentation-policy';
 
 interface AcpGroupedToolMessageProps {
   group: GroupedToolCallRenderBlock;
@@ -53,7 +42,12 @@ export function AcpGroupedToolMessage({
     (item) =>
       item.msg.partial === true || item.msg.data.status === 'in_progress',
   );
-  const showExpandedDetails = group.items.length > 0;
+  const showExpandedDetails = group.items.some(
+    (item) =>
+      resolveToolPresentationPolicy(item.msg, {
+        showInternalMessages: showSubagentPayload,
+      }).detailMode === 'expandable',
+  );
 
   const toolState = hasFailed
     ? 'output-error'
@@ -61,10 +55,13 @@ export function AcpGroupedToolMessage({
       ? 'input-available'
       : 'output-available';
 
+  const firstPresentation = resolveToolPresentation(
+    group.items[0]!.msg.data,
+    group.items[0]!.msg.partial,
+  );
   const ToolIcon = groupedToolIcon({
-    displayKind: group.displayKind,
+    presentation: firstPresentation,
     hasFailed,
-    hasRunning,
   });
 
   return (
@@ -92,15 +89,20 @@ export function AcpGroupedToolMessage({
                 const sectionTitle = sanitizeSandboxPathString(
                   item.objectLabel,
                 );
-                const showItemDetails = !hidesExpandedToolResult(item.msg, {
-                  showSubagentPayload,
-                });
+                const showItemDetails =
+                  resolveToolPresentationPolicy(item.msg, {
+                    showInternalMessages: showSubagentPayload,
+                  }).detailMode === 'expandable';
+                const presentation = resolveToolPresentation(
+                  item.msg.data,
+                  item.msg.partial,
+                );
 
                 return (
                   <section key={item.msg.id} className="space-y-2">
                     <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium tracking-wide text-muted-foreground">
                       <GroupedToolItemIcon
-                        displayKind={item.displayKind}
+                        presentation={presentation}
                         className="size-3 shrink-0"
                       />
                       <span className="truncate">{sectionTitle}</span>
@@ -124,48 +126,24 @@ export function AcpGroupedToolMessage({
 }
 
 function groupedToolIcon(params: {
-  displayKind: GroupedToolDisplayKind;
-  hasRunning: boolean;
+  presentation: ReturnType<typeof resolveToolPresentation>;
   hasFailed: boolean;
 }): LucideIcon {
-  if (params.hasRunning) return Loader2;
   if (params.hasFailed) return AlertCircle;
-  return groupedDisplayKindIcon(params.displayKind);
+  return params.presentation.integrationIcon
+    ? mcpIntegrationIconFor(params.presentation.integrationIcon)
+    : toolIconForKey(params.presentation.iconKey);
 }
 
 function GroupedToolItemIcon({
-  displayKind,
+  presentation,
   className,
 }: {
-  displayKind: GroupedToolDisplayKind;
+  presentation: ReturnType<typeof resolveToolPresentation>;
   className?: string;
 }) {
-  const Icon = groupedDisplayKindIcon(displayKind);
+  const Icon = presentation.integrationIcon
+    ? mcpIntegrationIconFor(presentation.integrationIcon)
+    : toolIconForKey(presentation.iconKey);
   return <Icon className={className} />;
-}
-
-function groupedDisplayKindIcon(
-  displayKind: GroupedToolDisplayKind,
-): LucideIcon {
-  if (displayKind === 'search') {
-    return Search;
-  }
-
-  if (displayKind === 'list') {
-    return FolderIcon;
-  }
-
-  if (displayKind === 'read') {
-    return FileIcon;
-  }
-
-  if (displayKind === 'execute') {
-    return Terminal;
-  }
-
-  if (displayKind === 'edit') {
-    return SquarePen;
-  }
-
-  return Wrench;
 }

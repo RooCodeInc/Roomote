@@ -19,7 +19,7 @@ import {
   and,
   db,
   eq,
-  isBrainProviderConfigured,
+  isBrainEnabled,
   isNull,
   mcpConnections,
   resetBrainIngestionState,
@@ -238,10 +238,11 @@ export async function mintGbrainAccessToken(
 export async function resolveBrainConnection(
   role: 'agent' | 'ingest' | 'maintenance',
 ): Promise<{ baseUrl: string; token: string } | null> {
-  // Explicit R_BRAIN_* provider key only: the gateway token and R_GBRAIN_URL
-  // are template-generated plumbing on some platforms, so neither can carry
-  // the operator's intent to turn the Brain on.
-  if (!(await isBrainProviderConfigured())) {
+  // The Settings toggle (with its legacy R_BRAIN_* key fallback) is the one
+  // activation signal: the gateway token and R_GBRAIN_URL are
+  // template-generated plumbing on some platforms, so neither can carry the
+  // operator's intent to turn the Brain on.
+  if (!(await isBrainEnabled())) {
     return null;
   }
 

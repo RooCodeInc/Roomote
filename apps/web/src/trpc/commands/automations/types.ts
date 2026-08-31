@@ -156,6 +156,7 @@ export const MANAGER_REPORTING_AUTOMATION_KEYS = [
   'security_auditor',
   'code_quality_auditor',
   'ci_failure_triage',
+  'merge_announcer',
   'suggester',
   'announcer',
   'platform_issue_alerts',
@@ -313,4 +314,7 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   codeQualityAuditorDiscordChannel?: string | null;
   ciFailureTriageSlackChannel?: string | null;
   ciFailureTriageDiscordChannel?: string | null;
+  mergeAnnouncerTargetProvider?: CommunicationProvider | null;
+  mergeAnnouncerTargetMode?: 'channel' | 'direct_message';
+  mergeAnnouncerTargetChannelId?: string | null;
 }

@@ -1,10 +1,13 @@
 import { render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
+import { AlertCircle, FileIcon } from '@/components/system';
+
 import { AcpGroupedToolMessage } from '../AcpGroupedToolMessage';
 import type { GroupedToolCallRenderBlock } from '../render-blocks';
 
 const codeBlockSpy = vi.fn();
+const toolHeaderSpy = vi.fn();
 
 vi.mock('@/components/ai-elements', () => ({
   CodeBlock: (props: { code: string }) => {
@@ -16,21 +19,21 @@ vi.mock('@/components/ai-elements', () => ({
     <div>{children}</div>
   ),
   Tool: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  ToolHeader: ({
-    action,
-    object,
-  }: {
+  ToolHeader: (props: {
     action: string;
     object?: string;
     icon?: unknown;
     state?: string;
     collapsible?: boolean;
-  }) => (
-    <div>
-      {action}
-      {object ? ` ${object}` : ''}
-    </div>
-  ),
+  }) => {
+    toolHeaderSpy(props);
+    return (
+      <div>
+        {props.action}
+        {props.object ? ` ${props.object}` : ''}
+      </div>
+    );
+  },
   ToolContent: ({ children }: { children?: ReactNode }) => (
     <div>{children}</div>
   ),
@@ -118,17 +121,44 @@ function buildGroup(): GroupedToolCallRenderBlock {
 describe('AcpGroupedToolMessage', () => {
   beforeEach(() => {
     codeBlockSpy.mockClear();
+    toolHeaderSpy.mockClear();
   });
 
-  it('renders grouped header and per-file sections', () => {
+  it('keeps grouped read rows compact when no item has expandable details', () => {
     render(<AcpGroupedToolMessage group={buildGroup()} />);
 
     expect(screen.getByText('Exploring 2 files')).toBeInTheDocument();
-    expect(screen.getByText('file_a.txt')).toBeInTheDocument();
-    expect(screen.getByText('file_b.txt')).toBeInTheDocument();
-    expect(screen.getByText('file_a.txt').className).toContain('truncate');
-    expect(screen.getByText('file_b.txt').className).toContain('truncate');
-
+    expect(screen.queryByText('file_a.txt')).not.toBeInTheDocument();
+    expect(screen.queryByText('file_b.txt')).not.toBeInTheDocument();
     expect(codeBlockSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps the resolved group icon while the header renders running progress', () => {
+    const group = buildGroup();
+    group.items[0]!.msg.data.status = 'in_progress';
+
+    render(<AcpGroupedToolMessage group={group} />);
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: FileIcon,
+        state: 'input-available',
+      }),
+    );
+  });
+
+  it('keeps group failure presentation ahead of running progress', () => {
+    const group = buildGroup();
+    group.items[0]!.msg.data.status = 'in_progress';
+    group.items[1]!.msg.data.status = 'failed';
+
+    render(<AcpGroupedToolMessage group={group} />);
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: AlertCircle,
+        state: 'output-error',
+      }),
+    );
   });
 });

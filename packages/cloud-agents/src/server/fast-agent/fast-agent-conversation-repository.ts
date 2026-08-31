@@ -6,16 +6,33 @@ import {
   eq,
   fastAgentConversations,
   fastAgentMessages,
+  ensureSessionForFastConversation,
+  advanceSessionNotifiedCursor,
+  advanceSessionReadCursor,
+  getSessionForFastConversation,
+  isNull,
+  lt,
+  or,
+  sessions,
   sql,
+  touchSessionActivity,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
-import { fastAgentConversationSchema } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  fastAgentConversationSchema,
+} from '@roomote/types';
 
-import type { FastAgentConversation } from './fast-agent-conversation';
+import { FAST_RESPONDING_LEASE_MS } from './fast-agent-constants';
+import {
+  FAST_AGENT_REACTION_INPUT_TYPE,
+  type FastAgentConversation,
+} from './fast-agent-conversation';
 
 export type FastAgentConversationRecord = {
   id: string;
   userId: string;
+  title: string | null;
   conversation: FastAgentConversation;
   /**
    * Durable visible history for cold starts and provider retries. OpenCode,
@@ -26,16 +43,153 @@ export type FastAgentConversationRecord = {
   openCodeSessionId: string | null;
 };
 
+export type FastAgentConversationGetOrCreateResult =
+  FastAgentConversationRecord & {
+    created: boolean;
+  };
+
 export type FastAgentMessageWrite = Omit<
   CreateFastAgentMessage,
   'conversationId'
 >;
 
+export type FastAgentMessageUpsertResult = {
+  initialHumanTurn: boolean;
+};
+
+export const INTERRUPTED_INFERENCE_RETRY_MESSAGE =
+  'The inference retry was interrupted before it completed. Please send the request again.';
+
+function isLegacyPlatformEventMessage(message: ModelMessage): boolean {
+  if (message.role !== 'user') return false;
+
+  const text =
+    typeof message.content === 'string'
+      ? message.content
+      : message.content
+          .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+          .join('');
+  const normalized = text.trim();
+  return (
+    normalized.startsWith('<platform_event>') &&
+    normalized.endsWith('</platform_event>')
+  );
+}
+
+function activeInferenceRetryNoticeWhere() {
+  return and(
+    // The event slot also matches notices written before retry lifecycle
+    // metadata was introduced, so existing stale transcripts self-heal.
+    sql`${fastAgentMessages.eventId} LIKE ${'%:retry-notice%'}`,
+    sql`${fastAgentMessages.metadata}->>'purpose' = 'progress'`,
+    or(
+      sql`${fastAgentMessages.metadata}->>'inferenceRetryActive' = 'true'`,
+      sql`${fastAgentMessages.metadata}->>'inferenceRetryActive' IS NULL`,
+    ),
+  );
+}
+
+async function reconcileInferenceRetryNotices(
+  database: DatabaseOrTransaction,
+  conversationId: string,
+  requireExpiredLease: boolean,
+): Promise<number> {
+  await database.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
+  );
+
+  if (requireExpiredLease) {
+    const session = await getSessionForFastConversation(
+      database,
+      conversationId,
+    );
+    if (session?.respondingUntil && session.respondingUntil > new Date()) {
+      return 0;
+    }
+  }
+
+  const notices = await database
+    .select({
+      id: fastAgentMessages.id,
+      metadata: fastAgentMessages.metadata,
+      payload: fastAgentMessages.payload,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        activeInferenceRetryNoticeWhere(),
+      ),
+    );
+
+  for (const notice of notices) {
+    await database
+      .update(fastAgentMessages)
+      .set({
+        contentBlocks: [
+          { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
+        ],
+        metadata: {
+          ...(notice.metadata ?? {}),
+          visibleInTranscript: true,
+          purpose: 'closeout',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: false,
+        },
+        payload: { ...notice.payload, purpose: 'closeout' },
+        updatedAt: new Date(),
+      })
+      .where(eq(fastAgentMessages.id, notice.id));
+  }
+
+  return notices.length;
+}
+
+export async function reconcileFastAgentInferenceRetryNotices(
+  conversationId: string,
+): Promise<number> {
+  return db.transaction((tx) =>
+    reconcileInferenceRetryNotices(tx, conversationId, false),
+  );
+}
+
+export async function reconcileExpiredFastAgentInferenceRetryNotices(
+  limit = 100,
+): Promise<number> {
+  const candidates = await db
+    .selectDistinct({ conversationId: fastAgentMessages.conversationId })
+    .from(fastAgentMessages)
+    .innerJoin(
+      sessions,
+      eq(sessions.fastConversationId, fastAgentMessages.conversationId),
+    )
+    .where(
+      and(
+        activeInferenceRetryNoticeWhere(),
+        or(
+          isNull(sessions.respondingUntil),
+          lt(sessions.respondingUntil, new Date()),
+        ),
+      ),
+    )
+    .limit(limit);
+
+  let reconciled = 0;
+  for (const candidate of candidates) {
+    // The per-conversation lock and lease recheck prevent a renewed active
+    // turn from being reconciled after the candidate scan races with it.
+    reconciled += await db.transaction((tx) =>
+      reconcileInferenceRetryNotices(tx, candidate.conversationId, true),
+    );
+  }
+  return reconciled;
+}
+
 export interface FastAgentConversationRepository {
   getOrCreate(input: {
     userId: string;
     conversation: FastAgentConversation;
-  }): Promise<FastAgentConversationRecord>;
+  }): Promise<FastAgentConversationGetOrCreateResult>;
   findById(input: {
     id: string;
     fallbackConversation?: FastAgentConversation;
@@ -49,7 +203,7 @@ export interface FastAgentConversationRepository {
   upsertMessage(input: {
     conversationId: string;
     message: FastAgentMessageWrite;
-  }): Promise<void>;
+  }): Promise<FastAgentMessageUpsertResult>;
   setOpenCodeSession(input: {
     conversationId: string;
     openCodeSessionId: string;
@@ -65,6 +219,25 @@ function buildIdentityWhere(conversation: FastAgentConversation) {
     eq(fastAgentConversations.surface, conversation.surface),
     eq(fastAgentConversations.workspaceId, conversation.workspaceId),
     eq(fastAgentConversations.conversationId, conversation.conversationId),
+  );
+}
+
+function buildReplyTargetWhere(conversation: FastAgentConversation) {
+  if (!('replyTarget' in conversation) || !conversation.replyTarget.threadId) {
+    return null;
+  }
+
+  return and(
+    eq(fastAgentConversations.surface, conversation.surface),
+    eq(fastAgentConversations.workspaceId, conversation.workspaceId),
+    eq(
+      fastAgentConversations.currentReplyChannelId,
+      conversation.replyTarget.channelId,
+    ),
+    eq(
+      fastAgentConversations.currentReplyThreadId,
+      conversation.replyTarget.threadId,
+    ),
   );
 }
 
@@ -146,6 +319,7 @@ async function loadConversationRecord(
   return {
     id: record.id,
     userId: record.userId,
+    title: record.title,
     conversation,
     compatibilityMessages: record.compatibilityMessages as ModelMessage[],
     openCodeSessionId: record.openCodeSessionId,
@@ -164,8 +338,16 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           where: buildIdentityWhere(conversation),
         });
 
+        let created = false;
+        const replyTargetWhere = buildReplyTargetWhere(conversation);
+        if (!record && replyTargetWhere) {
+          record = await tx.query.fastAgentConversations.findFirst({
+            where: replyTargetWhere,
+          });
+        }
+
         if (!record) {
-          await tx
+          const [inserted] = await tx
             .insert(fastAgentConversations)
             .values({
               userId,
@@ -186,7 +368,9 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
                   : null,
               replyTargetVerified: true,
             })
-            .onConflictDoNothing();
+            .onConflictDoNothing()
+            .returning({ id: fastAgentConversations.id });
+          created = Boolean(inserted);
           record = await tx.query.fastAgentConversations.findFirst({
             where: buildIdentityWhere(conversation),
           });
@@ -219,7 +403,12 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           .where(eq(fastAgentConversations.id, record.id))
           .returning();
 
-        return loadConversationRecord(tx, updated?.id ?? record.id);
+        await ensureSessionForFastConversation(tx, updated?.id ?? record.id);
+
+        return {
+          ...(await loadConversationRecord(tx, updated?.id ?? record.id)),
+          created,
+        };
       });
     },
 
@@ -275,14 +464,24 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
     },
 
     async exists(conversation) {
-      const neutral = await db.query.fastAgentConversations.findFirst({
+      const exact = await db.query.fastAgentConversations.findFirst({
         where: buildIdentityWhere(conversation),
         columns: { id: true },
       });
-      if (neutral) {
+      if (exact) {
         return true;
       }
-      return false;
+
+      const replyTargetWhere = buildReplyTargetWhere(conversation);
+      if (!replyTargetWhere) {
+        return false;
+      }
+
+      const routed = await db.query.fastAgentConversations.findFirst({
+        where: replyTargetWhere,
+        columns: { id: true },
+      });
+      return Boolean(routed);
     },
 
     async appendVisibleMessages({ conversationId: requestedId, messages }) {
@@ -306,22 +505,87 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         if (!updated) {
           throw new Error('Fast conversation was not found.');
         }
+        const session = await getSessionForFastConversation(tx, conversationId);
+        if (session) {
+          await touchSessionActivity(
+            tx,
+            session.id,
+            Math.floor(Date.now() / 1000),
+            { recomputeStatus: false },
+          );
+        }
       });
     },
 
     async upsertMessage({ conversationId: requestedId, message }) {
-      await db.transaction(async (tx) => {
+      return db.transaction(async (tx) => {
         const conversationId = await resolveCanonicalId(tx, requestedId);
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
         );
         const [conversation] = await tx
-          .select({ id: fastAgentConversations.id })
+          .select({
+            id: fastAgentConversations.id,
+            compatibilityMessages: fastAgentConversations.compatibilityMessages,
+          })
           .from(fastAgentConversations)
           .where(eq(fastAgentConversations.id, conversationId))
           .limit(1);
         if (!conversation) {
           throw new Error('Fast conversation was not found.');
+        }
+
+        const isSubstantiveHumanPrompt =
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+          message.role === 'user' &&
+          message.metadata?.turnSource === 'human' &&
+          message.metadata?.inputKind !== FAST_AGENT_REACTION_INPUT_TYPE;
+        let initialHumanTurn = false;
+        if (isSubstantiveHumanPrompt) {
+          const [currentHumanPrompt] = await tx
+            .select({ id: fastAgentMessages.id })
+            .from(fastAgentMessages)
+            .where(
+              and(
+                eq(fastAgentMessages.conversationId, conversationId),
+                eq(fastAgentMessages.eventId, message.eventId),
+                eq(
+                  fastAgentMessages.eventType,
+                  ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+                ),
+                eq(fastAgentMessages.role, 'user'),
+                sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
+                sql`coalesce(${fastAgentMessages.metadata}->>'inputKind', 'message') <> ${FAST_AGENT_REACTION_INPUT_TYPE}`,
+              ),
+            )
+            .limit(1);
+          const [priorHumanPrompt] = await tx
+            .select({ id: fastAgentMessages.id })
+            .from(fastAgentMessages)
+            .where(
+              and(
+                eq(fastAgentMessages.conversationId, conversationId),
+                eq(
+                  fastAgentMessages.eventType,
+                  ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+                ),
+                eq(fastAgentMessages.role, 'user'),
+                sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
+                sql`coalesce(${fastAgentMessages.metadata}->>'inputKind', 'message') <> ${FAST_AGENT_REACTION_INPUT_TYPE}`,
+                sql`${fastAgentMessages.eventId} <> ${message.eventId}`,
+              ),
+            )
+            .limit(1);
+          const hasCompatibilityHumanPrompt = (
+            conversation.compatibilityMessages as ModelMessage[]
+          ).some(
+            (compatibilityMessage) =>
+              compatibilityMessage.role === 'user' &&
+              !isLegacyPlatformEventMessage(compatibilityMessage),
+          );
+          initialHumanTurn =
+            !priorHumanPrompt &&
+            (Boolean(currentHumanPrompt) || !hasCompatibilityHumanPrompt);
         }
 
         await tx
@@ -351,6 +615,44 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           .update(fastAgentConversations)
           .set({ updatedAt: sql`now()` })
           .where(eq(fastAgentConversations.id, conversationId));
+        const session = await getSessionForFastConversation(tx, conversationId);
+        if (session) {
+          await touchSessionActivity(
+            tx,
+            session.id,
+            Math.floor(message.ts / 1000),
+            {
+              recomputeStatus: false,
+              // An assistant message means the agent is still producing
+              // output; re-extend the responding lease so long turns do not
+              // expire it mid-stream.
+              ...(message.role === 'assistant'
+                ? {
+                    respondingUntil: new Date(
+                      Date.now() + FAST_RESPONDING_LEASE_MS,
+                    ),
+                  }
+                : {}),
+            },
+          );
+          const messageUserId = message.metadata?.userId;
+          if (message.role === 'user' && typeof messageUserId === 'string') {
+            await advanceSessionReadCursor(tx, {
+              sessionId: session.id,
+              userId: messageUserId,
+              eventAt: message.ts,
+              eventId: message.eventId,
+            });
+          } else if (message.role === 'assistant') {
+            await advanceSessionNotifiedCursor(tx, {
+              sessionId: session.id,
+              eventAt: message.ts,
+              eventId: message.eventId,
+            });
+          }
+        }
+
+        return { initialHumanTurn };
       });
     },
 

@@ -11,7 +11,7 @@ import type {
 
 const FAST_AGENT_CONTEXT_MANIFEST_VERSION = 1;
 
-type FastAgentSessionPath =
+export type FastAgentSessionPath =
   | 'warm'
   | 'cold_resume'
   | 'cold_rebuild'
@@ -37,6 +37,8 @@ const REQUIRED_SYSTEM_COMPONENTS = [
 
 type CaptureFastAgentInferenceContextInput = {
   userId: string;
+  sessionId: string;
+  turnId: string;
   systemPrompt: string;
   surface: FastAgentSurface;
   turnSource: FastAgentTurnSource;
@@ -129,6 +131,8 @@ export function captureFastAgentInferenceContext(
       attempt_number: input.attemptNumber,
       attempt_scope: input.attemptScope,
       provider_retry_attempt: input.providerRetryAttempt ?? null,
+      session_id_hash: sha256(input.sessionId),
+      turn_id_hash: sha256(input.turnId),
       release_present: input.releasePresent,
       environment_count: input.environmentCount,
       task_model_count: input.taskModelCount,
@@ -143,6 +147,89 @@ export function captureFastAgentInferenceContext(
       agent_context_present: input.agentContextPresent,
       input_image_count: input.inputImageCount,
       attached_image_count: input.attachedImageCount,
+    },
+  });
+}
+
+export function captureFastAgentInferenceAttemptOutcome(input: {
+  userId: string;
+  sessionId: string;
+  turnId: string;
+  surface: FastAgentSurface;
+  sessionPath: FastAgentSessionPath;
+  promptKind: FastAgentPromptKind;
+  attemptNumber: number;
+  outcome: 'success' | 'failure';
+  stage: 'model_resolution' | 'opencode_setup' | 'model_generation';
+  elapsedMs: number;
+  failureReason?: string;
+  failureRetryable?: boolean;
+  resolvedModel?: string;
+  providerRetryEventCount: number;
+}): void {
+  void captureEvent('fast_agent_inference_attempt_outcome', {
+    userId: input.userId,
+    properties: {
+      session_id_hash: sha256(input.sessionId),
+      turn_id_hash: sha256(input.turnId),
+      surface: input.surface,
+      session_path: input.sessionPath,
+      prompt_kind: input.promptKind,
+      attempt_number: input.attemptNumber,
+      outcome: input.outcome,
+      stage: input.stage,
+      elapsed_ms: input.elapsedMs,
+      failure_reason: input.failureReason ?? null,
+      failure_retryable: input.failureRetryable ?? null,
+      resolved_model: input.resolvedModel ?? null,
+      provider: input.resolvedModel?.split('/')[0] ?? null,
+      provider_retry_event_count: input.providerRetryEventCount,
+    },
+  });
+}
+
+/**
+ * Records bounded turn timings only. Identifiers, prompts, replies, repository
+ * context, URLs, and error details must never be added to this event.
+ */
+export function captureFastAgentTurnSettled(input: {
+  userId: string;
+  surface: FastAgentSurface;
+  turnSource: FastAgentTurnSource;
+  initialHumanTurn?: boolean;
+  sessionPath?: FastAgentSessionPath;
+  outcome: 'success' | 'failure';
+  serviceDurationMs: number;
+  firstResponseDurationMs?: number;
+  sandboxlessStartupDurationMs?: number;
+  inferenceToFirstResponseDurationMs?: number;
+  inferenceDurationMs?: number;
+  postInferenceDurationMs?: number;
+  visibleReplyCount: number;
+  openCodeProviderRetryEventCount: number;
+  roomoteInferenceRetryCount: number;
+}): void {
+  void captureEvent('fast_turn_settled', {
+    userId: input.userId,
+    properties: {
+      surface: input.surface,
+      turn_source: input.turnSource,
+      initial_human_turn: input.initialHumanTurn ?? null,
+      session_path: input.sessionPath ?? null,
+      outcome: input.outcome,
+      service_duration_ms: input.serviceDurationMs,
+      first_response_duration_ms: input.firstResponseDurationMs ?? null,
+      sandboxless_startup_duration_ms:
+        input.sandboxlessStartupDurationMs ?? null,
+      inference_to_first_response_duration_ms:
+        input.inferenceToFirstResponseDurationMs ?? null,
+      inference_duration_ms: input.inferenceDurationMs ?? null,
+      post_inference_duration_ms: input.postInferenceDurationMs ?? null,
+      had_assistant_response: input.firstResponseDurationMs !== undefined,
+      visible_reply_count: input.visibleReplyCount,
+      opencode_provider_retry_event_count:
+        input.openCodeProviderRetryEventCount,
+      roomote_inference_retry_count: input.roomoteInferenceRetryCount,
     },
   });
 }

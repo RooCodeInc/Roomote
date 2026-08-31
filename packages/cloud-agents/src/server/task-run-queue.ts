@@ -27,6 +27,7 @@ import {
   getDisplayModelProviderId,
   getTaskInitiatorLinkedUserId,
   getFastAgentParentFromPayload,
+  getTaskReportConsumerFromPayload,
   getPrimaryPortFromConfig,
   isConfiguredEnvValue,
   isReasoningEffort,
@@ -48,6 +49,7 @@ import {
   db,
   deploymentSettings,
   ensureAutomationRowsOnce,
+  ensureSessionForTask,
   isChatGptSubscriptionConnected,
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
@@ -69,6 +71,7 @@ import {
   recordSnapshotResumeEvent,
   resolveDefaultComputeProvider,
   resolveWorkspaceRepositoryProviders,
+  resolveWorkspaceSourceControlHost,
   sql,
 } from '@roomote/db/server';
 import { type Redis, getRedis } from '@roomote/redis';
@@ -102,6 +105,26 @@ enum TaskRunQueueKeys {
 }
 
 const SNAPSHOT_RESUME_ADVISORY_LOCK_NAMESPACE = 0x52534d45;
+
+/** True when the error (or any of its causes) is a Postgres deadlock (40P01). */
+function isPostgresDeadlockError(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    if (
+      typeof current === 'object' &&
+      current !== null &&
+      'code' in current &&
+      (current as { code?: unknown }).code === '40P01'
+    ) {
+      return true;
+    }
+    current =
+      typeof current === 'object' && current !== null && 'cause' in current
+        ? (current as { cause?: unknown }).cause
+        : undefined;
+  }
+  return false;
+}
 
 export class SnapshotResumeAlreadyExistsError extends Error {
   constructor(public readonly existingRunId: number) {
@@ -1385,7 +1408,6 @@ async function enqueueFreshLaunch(
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
   const linkedUserId = getTaskInitiatorLinkedUserId(initiator);
-
   await assertUserIsNotDeleted(linkedUserId);
 
   const requestedExistingTask = input.existingTaskId
@@ -1537,10 +1559,22 @@ async function enqueueFreshLaunch(
     githubUserId: 'githubUserId' in task ? task.githubUserId : null,
   };
 
+  const fastParent = getFastAgentParentFromPayload(
+    taskWithHarnessOverrides.payload,
+  );
+
   // Fresh runs are persisted atomically with either a new task or the existing
   // durable task they continue.
-  const { taskRun, createdRun, reusedTask } = await db.transaction(
-    async (tx) => {
+  const runPersistTransaction = () =>
+    db.transaction(async (tx) => {
+      if (fastParent) {
+        // Parallel launch_task calls from one Fast turn write the same
+        // session and conversation rows; serializing per parent conversation
+        // prevents lock-order deadlocks (40P01) between them.
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`fast-parent-launch:${fastParent.sessionId}`}, 0))`,
+        );
+      }
       const chatgptConnected = effectiveTaskModel.startsWith('openai/')
         ? await isChatGptSubscriptionConnected(tx)
         : false;
@@ -1637,6 +1671,14 @@ async function enqueueFreshLaunch(
         });
 
         if (activeRun) {
+          await ensureSessionForTask(tx, {
+            taskId: existingTask.id,
+            fastConversationId:
+              getFastAgentParentFromPayload(taskWithHarnessOverrides.payload)
+                ?.sessionId ?? null,
+            origin: 'follow_up',
+            existingTaskReused: true,
+          });
           return { taskRun: activeRun, createdRun: false, reusedTask: true };
         }
 
@@ -1685,6 +1727,17 @@ async function enqueueFreshLaunch(
         );
         taskId = createdTask.id;
       }
+
+      await ensureSessionForTask(tx, {
+        taskId,
+        fastConversationId: fastParent?.sessionId ?? null,
+        origin: fastParent
+          ? 'fast_delegation'
+          : existingTask
+            ? 'follow_up'
+            : 'direct_launch',
+        existingTaskReused: Boolean(existingTask),
+      });
 
       if (input.prLinkage) {
         const prLinkage = {
@@ -1795,12 +1848,38 @@ async function enqueueFreshLaunch(
         createdRun: true,
         reusedTask: Boolean(existingTask),
       };
-    },
-  );
+    });
+
+  let persisted: Awaited<ReturnType<typeof runPersistTransaction>>;
+  try {
+    persisted = await runPersistTransaction();
+  } catch (error) {
+    if (!isPostgresDeadlockError(error)) {
+      throw error;
+    }
+    // The aborted transaction persisted nothing, so one retry is safe and
+    // absorbs any remaining lock-order conflict with an unrelated writer.
+    console.warn(
+      `[task-run-queue] Retrying task persistence after a deadlock: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    persisted = await runPersistTransaction();
+  }
+  const { taskRun, createdRun, reusedTask } = persisted;
 
   if (!createdRun) {
     return taskRun;
   }
+
+  const delegated = Boolean(
+    reusedTask ||
+    getFastAgentParentFromPayload(taskWithHarnessOverrides.payload),
+  );
+  void captureEvent(delegated ? 'session_task_delegated' : 'session_created', {
+    ...(linkedUserId ? { userId: linkedUserId } : {}),
+    properties: { surface, outcome: 'created' },
+  });
 
   if (shouldCaptureTaskCreatedEvent(taskRun.payloadKind)) {
     // Anonymous analytics (no-op unless enabled): task creation with
@@ -2042,14 +2121,43 @@ async function stampWorkspaceSourceControlProviders(
   payload: FreshTask['payload'],
   workspace: ReturnType<typeof resolveTaskWorkspace>,
 ): Promise<void> {
-  const repositoryProviders = await resolveWorkspaceRepositoryProviders(
-    db,
-    workspace,
-  );
+  const [repositoryProviders, workspaceHost] = await Promise.all([
+    resolveWorkspaceRepositoryProviders(db, workspace),
+    resolveWorkspaceSourceControlHost(db, workspace),
+  ]);
+  const isAggregateWorkspace =
+    workspace.type === 'repository_set' ||
+    workspace.type === 'all_repositories';
+  const requiresCompleteCoverage =
+    isAggregateWorkspace || workspace.type === 'environment';
+  const expectedRepositoryCount =
+    workspace.type === 'repository_set'
+      ? new Set(workspace.repositories).size
+      : undefined;
+
+  if (requiresCompleteCoverage) {
+    payload.repositoryProviders = repositoryProviders;
+  }
+
+  if (
+    requiresCompleteCoverage &&
+    (Object.keys(repositoryProviders).length === 0 ||
+      (expectedRepositoryCount !== undefined &&
+        Object.keys(repositoryProviders).length !== expectedRepositoryCount))
+  ) {
+    payload.sourceControlProvider = undefined;
+    payload.sourceControlHost = undefined;
+    return;
+  }
+
   const providers = Object.values(repositoryProviders);
   const spansProviders = new Set(providers).size > 1;
 
-  if (spansProviders) {
+  if (requiresCompleteCoverage && !spansProviders) {
+    payload.sourceControlHost = workspaceHost;
+  }
+
+  if (spansProviders && !requiresCompleteCoverage) {
     payload.repositoryProviders = repositoryProviders;
   }
 
@@ -2326,6 +2434,13 @@ function inheritSnapshotResumeFastAgentParent(
   if (parent && !payload.fastAgentParent) {
     payload.fastAgentParent = parent;
   }
+  if (
+    parent &&
+    getTaskReportConsumerFromPayload(sourcePayload) === 'orchestrator' &&
+    !payload.reportConsumer
+  ) {
+    payload.reportConsumer = 'orchestrator';
+  }
 }
 
 function inheritSnapshotResumeFastAgentSession(
@@ -2480,11 +2595,8 @@ async function enqueueSnapshotResume(
       break;
     }
 
-    // Older resume rows may lack established source-control and Slack-parent
-    // stamps. New Fast session IDs always propagate from the immediate source.
+    // Older resume rows may lack established source-control stamps.
     inheritSnapshotResumeSourceControlStamps(task.payload, parentRun.payload);
-    inheritSnapshotResumeFastAgentParent(task.payload, parentRun.payload);
-    inheritSnapshotResumeCommunicationContext(task.payload, parentRun.payload);
 
     sourceTaskType = parentRun.payloadKind;
     parentRunId = parentRun.sourceRunId;
@@ -2551,6 +2663,7 @@ async function enqueueSnapshotResume(
         where: and(
           eq(taskRuns.sourceRunId, sourceRun.id),
           eq(taskRuns.kind, 'resume'),
+          isNull(taskRuns.canceledAt),
         ),
         columns: { id: true },
       });

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   and,
   attachCanonicalPrReviewActionMessage,
@@ -7,6 +9,8 @@ import {
   db,
   deferPrReviewDeliveries,
   eq,
+  fastAgentConversations,
+  fastAgentMessages,
   findPrReviewAutoPreference,
   lockPrReviewReference,
   persistPrReviewEvent,
@@ -15,6 +19,7 @@ import {
   prReviewNotificationDeliveries,
   prReviewNotificationUnitEvents,
   prReviewNotificationUnits,
+  releaseCanonicalPrReviewActionDispatch,
   runFactory,
   taskFactory,
   taskPullRequests,
@@ -666,6 +671,13 @@ describe('canonical PR review notification ownership', () => {
         payload: { fastAgentParent: unrelatedParent },
       }),
     ]);
+    await db.insert(taskPullRequests).values({
+      taskId: source.id,
+      sourceControlProvider: 'gitlab',
+      repository,
+      prNumber: 6,
+      prUrl: `https://gitlab.com/${repository}/-/merge_requests/6`,
+    });
     await upsertPrReviewAutoPreference({
       sourceControlProvider: 'github',
       repository,
@@ -674,6 +686,17 @@ describe('canonical PR review notification ownership', () => {
       sourceTaskId: source.id,
       sourceDestinationKey: '["slack","T-pref","C-pref:1"]',
     });
+    await expect(
+      db.query.taskPullRequests.findFirst({
+        where: and(
+          eq(taskPullRequests.taskId, source.id),
+          eq(taskPullRequests.sourceControlProvider, 'gitlab'),
+          eq(taskPullRequests.repository, repository),
+          eq(taskPullRequests.prNumber, 6),
+        ),
+        columns: { autoHandleFeedbackByUserId: true },
+      }),
+    ).resolves.toEqual({ autoHandleFeedbackByUserId: null });
     await db.delete(tasks).where(eq(tasks.id, source.id));
 
     await expect(
@@ -761,6 +784,13 @@ describe('canonical PR review notification ownership', () => {
     const task = await taskFactory.create({ initiatorUserId: user.id });
     const repository = `owner/action-${task.id}`;
     await associate(task.id, repository, 7);
+    await db.insert(taskPullRequests).values({
+      taskId: task.id,
+      sourceControlProvider: 'gitlab',
+      repository,
+      prNumber: 7,
+      prUrl: `https://gitlab.com/${repository}/-/merge_requests/7`,
+    });
     await persistPrReviewEvent(
       eventInput({
         repository,
@@ -848,5 +878,304 @@ describe('canonical PR review notification ownership', () => {
       sourceTaskId: task.id,
       sourceDestinationKey: task.id,
     });
+    await expect(
+      db.query.taskPullRequests.findFirst({
+        where: and(
+          eq(taskPullRequests.taskId, task.id),
+          eq(taskPullRequests.sourceControlProvider, 'gitlab'),
+          eq(taskPullRequests.repository, repository),
+          eq(taskPullRequests.prNumber, 7),
+        ),
+        columns: { autoHandleFeedbackByUserId: true },
+      }),
+    ).resolves.toEqual({ autoHandleFeedbackByUserId: null });
+  });
+
+  it('authorizes and atomically claims a web Fast action by destination', async () => {
+    const user = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    const repository = `owner/web-action-${task.id}`;
+    const destinationKey = '["web","user-1","session-1"]';
+    await Promise.all([
+      runFactory.create({
+        taskId: task.id,
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'web',
+              workspaceId: 'user-1',
+              conversationId: 'session-1',
+            },
+          },
+        },
+      }),
+      associate(task.id, repository, 8),
+    ]);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 8,
+        eventKey: `web-action-${task.id}`,
+      }),
+    );
+    const claim = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    expect(claim?.ownershipVersion).toBe('canonical');
+    if (!claim || claim.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+    });
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'prepared',
+      status: 'prompt_posting',
+      values: { followUpPrompt: 'Resolve the feedback.' },
+    });
+    await attachCanonicalPrReviewActionMessage(
+      claim.deliveryId,
+      claim.deliveryId,
+      claim.leaseToken,
+    );
+
+    await expect(
+      claimCanonicalPrReviewAction({
+        deliveryId: claim.deliveryId,
+        choice: 'yes',
+        actingUserId: user.id,
+        expectedDestinationKind: 'fast_conversation',
+        expectedDestinationKey: '["web","other","session"]',
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      claimCanonicalPrReviewAction({
+        deliveryId: claim.deliveryId,
+        choice: 'yes',
+        actingUserId: user.id,
+        expectedDestinationKind: 'fast_conversation',
+        expectedDestinationKey: destinationKey,
+      }),
+    ).resolves.toMatchObject({ taskId: task.id });
+    await expect(
+      releaseCanonicalPrReviewActionDispatch(claim.deliveryId),
+    ).resolves.toBe(true);
+    await expect(
+      db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.id, claim.deliveryId),
+        columns: { status: true, actingUserId: true, targetTaskId: true },
+      }),
+    ).resolves.toEqual({
+      status: 'awaiting_user_action',
+      actingUserId: null,
+      targetTaskId: null,
+    });
+    const concurrent = await Promise.all([
+      claimCanonicalPrReviewAction({
+        deliveryId: claim.deliveryId,
+        choice: 'yes',
+        actingUserId: user.id,
+        expectedDestinationKind: 'fast_conversation',
+        expectedDestinationKey: destinationKey,
+      }),
+      claimCanonicalPrReviewAction({
+        deliveryId: claim.deliveryId,
+        choice: 'yes',
+        actingUserId: user.id,
+        expectedDestinationKind: 'fast_conversation',
+        expectedDestinationKey: destinationKey,
+      }),
+    ]);
+    expect(concurrent.filter(Boolean)).toHaveLength(1);
+    expect(concurrent.find(Boolean)).toMatchObject({
+      destinationKind: 'fast_conversation',
+      destinationKey,
+      taskId: task.id,
+    });
+  });
+
+  const fastParentPayload = (conversationId: string) => ({
+    fastAgentParent: {
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: 'user-1',
+        conversationId,
+      },
+    },
+  });
+
+  const setUpSessionDelivery = async (input: {
+    conversationId: string;
+    prNumber: number;
+  }) => {
+    const task = await taskFactory.create();
+    const repository = `owner/supersede-${task.id}`;
+    await Promise.all([
+      runFactory.create({
+        taskId: task.id,
+        payload: fastParentPayload(input.conversationId),
+      }),
+      associate(task.id, repository, input.prNumber),
+    ]);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: input.prNumber,
+        eventKey: `supersede-${task.id}`,
+      }),
+    );
+    return repository;
+  };
+
+  const claimToPromptPosting = async (repository: string) => {
+    const claim = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    if (!claim || claim.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+    });
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'prepared',
+      status: 'prompt_posting',
+      values: { followUpPrompt: 'Resolve the feedback.' },
+    });
+    return claim;
+  };
+
+  const postAction = async (repository: string) => {
+    const claim = await claimToPromptPosting(repository);
+    await expect(
+      attachCanonicalPrReviewActionMessage(
+        claim.deliveryId,
+        claim.deliveryId,
+        claim.leaseToken,
+      ),
+    ).resolves.toBe(true);
+    return claim.deliveryId;
+  };
+
+  const deliveryStatusOf = async (deliveryId: string) =>
+    (
+      await db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.id, deliveryId),
+        columns: { status: true },
+      })
+    )?.status;
+
+  it('retires older awaiting actions in the same destination when a new one attaches', async () => {
+    const sessionConversation = `supersede-session-${randomUUID()}`;
+    const otherConversation = `supersede-other-${randomUUID()}`;
+
+    const [first, second, other] = await Promise.all(
+      [
+        { conversationId: sessionConversation, prNumber: 21 },
+        { conversationId: sessionConversation, prNumber: 22 },
+        { conversationId: otherConversation, prNumber: 23 },
+      ].map(setUpSessionDelivery),
+    );
+
+    const otherDeliveryId = await postAction(other!);
+    const firstDeliveryId = await postAction(first!);
+
+    // The rendered session card caches the offer status in the transcript
+    // message payload; retirement must dismiss it there too.
+    const user = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: `supersede-transcript-${randomUUID()}`,
+      })
+      .returning();
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: 'turn-1:assistant:0',
+      turnId: 'turn-1',
+      turnSeq: 1,
+      ts: 1,
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Resolve these CI failures?' }],
+      metadata: { visibleInTranscript: true },
+      payload: {
+        prReviewAction: { deliveryId: firstDeliveryId, status: 'pending' },
+      },
+      source: 'web',
+    });
+
+    const secondDeliveryId = await postAction(second!);
+
+    // The newest offer in the session stays actionable; the older one is
+    // retired, and a different conversation's offer is untouched.
+    await expect(deliveryStatusOf(firstDeliveryId)).resolves.toBe('dismissed');
+    await expect(deliveryStatusOf(secondDeliveryId)).resolves.toBe(
+      'awaiting_user_action',
+    );
+    await expect(deliveryStatusOf(otherDeliveryId)).resolves.toBe(
+      'awaiting_user_action',
+    );
+    await expect(
+      db.query.fastAgentMessages.findFirst({
+        where: eq(fastAgentMessages.conversationId, conversation!.id),
+        columns: { payload: true },
+      }),
+    ).resolves.toMatchObject({
+      payload: {
+        prReviewAction: { deliveryId: firstDeliveryId, status: 'dismissed' },
+      },
+    });
+  });
+
+  it('keeps exactly one awaiting offer when two actions attach concurrently', async () => {
+    const sessionConversation = `supersede-race-${randomUUID()}`;
+
+    const [firstRepository, secondRepository] = await Promise.all(
+      [
+        { conversationId: sessionConversation, prNumber: 31 },
+        { conversationId: sessionConversation, prNumber: 32 },
+      ].map(setUpSessionDelivery),
+    );
+    const firstClaim = await claimToPromptPosting(firstRepository!);
+    const secondClaim = await claimToPromptPosting(secondRepository!);
+
+    await expect(
+      Promise.all([
+        attachCanonicalPrReviewActionMessage(
+          firstClaim.deliveryId,
+          firstClaim.deliveryId,
+          firstClaim.leaseToken,
+        ),
+        attachCanonicalPrReviewActionMessage(
+          secondClaim.deliveryId,
+          secondClaim.deliveryId,
+          secondClaim.leaseToken,
+        ),
+      ]),
+    ).resolves.toEqual([true, true]);
+
+    const statuses = await Promise.all(
+      [firstClaim.deliveryId, secondClaim.deliveryId].map(deliveryStatusOf),
+    );
+    expect(statuses.filter((s) => s === 'awaiting_user_action')).toHaveLength(
+      1,
+    );
+    expect(statuses.filter((s) => s === 'dismissed')).toHaveLength(1);
   });
 });

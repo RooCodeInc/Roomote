@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 
 import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import type { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
+import type { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import {
   and,
   asc,
@@ -10,6 +12,7 @@ import {
   inArray,
   registerTrackedSuggestionCards,
   sql,
+  trackedMessages,
   workItems,
 } from '@roomote/db/server';
 import {
@@ -28,7 +31,7 @@ type PersistedFastAutomationSuggestion = FastAutomationSuggestion & {
 
 export function appendFastAutomationSuggestionInstruction(
   message: string,
-  surface: 'slack' | 'discord',
+  surface: 'slack' | 'discord' | 'teams' | 'telegram',
   hasSuggestions: boolean,
 ): string {
   if (!hasSuggestions) return message;
@@ -36,7 +39,9 @@ export function appendFastAutomationSuggestionInstruction(
   const instruction =
     surface === 'slack'
       ? "Want me to take one of these on? React with a :thumbsup: on a suggested task below and I'll start it."
-      : "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.";
+      : surface === 'telegram'
+        ? "Want me to take one of these on? Tap Start on a suggested task below and I'll launch it."
+        : "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.";
   return message.includes(instruction)
     ? message
     : `${message}\n\n${instruction}`;
@@ -148,7 +153,7 @@ function formatSuggestion(
 }
 
 async function trackSuggestion(params: {
-  surface: 'slack' | 'discord';
+  surface: 'slack' | 'discord' | 'teams' | 'telegram';
   channelId: string;
   messageId: string;
   threadId?: string;
@@ -170,6 +175,56 @@ async function trackSuggestion(params: {
       launchRouting: 'router',
     },
   ]);
+}
+
+async function claimSuggestionSend(params: {
+  surface: 'teams' | 'telegram';
+  channelId: string;
+  threadId?: string;
+  workItemId: string;
+  createdByUserId: string;
+  eventId: string;
+}): Promise<string | null> {
+  const [claim] = await db
+    .insert(trackedMessages)
+    .values({
+      surface: params.surface,
+      kind: 'suggestion_card',
+      dedupeKey: `${params.surface}:${params.channelId}:${params.eventId}:${params.workItemId}`,
+      channelId: params.channelId,
+      ...(params.threadId ? { threadTs: params.threadId } : {}),
+      workItemId: params.workItemId,
+      createdByUserId: params.createdByUserId,
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        suggestionKey: `${params.eventId}:${params.workItemId}`,
+        suggestionGroupKey: params.eventId,
+        launchRouting: 'router',
+      },
+    })
+    .onConflictDoNothing({
+      target: [trackedMessages.kind, trackedMessages.dedupeKey],
+    })
+    .returning({ id: trackedMessages.id });
+  return claim?.id ?? null;
+}
+
+async function finalizeSuggestionSend(params: {
+  claimId: string;
+  channelId: string;
+  messageId: string;
+  threadId?: string;
+}): Promise<void> {
+  await db
+    .update(trackedMessages)
+    .set({
+      dedupeKey: `${params.channelId}:${params.messageId}`,
+      channelId: params.channelId,
+      messageTs: params.messageId,
+      threadTs: params.threadId ?? null,
+      updatedAt: new Date(),
+    })
+    .where(eq(trackedMessages.id, params.claimId));
 }
 
 export async function postFastAutomationSuggestionsToSlack(params: {
@@ -250,6 +305,93 @@ export async function postFastAutomationSuggestionsToDiscord(params: {
       workItemId: suggestion.id,
       createdByUserId: params.createdByUserId,
       eventId: params.eventId,
+    });
+  }
+}
+
+export async function postFastAutomationSuggestionsToTeams(params: {
+  provider: Pick<TeamsCommunicationProvider, 'postMessage'>;
+  channelId: string;
+  serviceUrl: string;
+  threadId?: string;
+  eventId: string;
+  createdByUserId: string;
+  suggestions: FastAutomationSuggestion[];
+}): Promise<void> {
+  const suggestions = await persistFastAutomationSuggestions(params);
+  const trackedWorkItemIds = await findTrackedSuggestionWorkItemIds({
+    surface: 'teams',
+    workItemIds: suggestions.map((suggestion) => suggestion.id),
+  });
+  for (const suggestion of suggestions) {
+    if (trackedWorkItemIds.has(suggestion.id)) continue;
+
+    const claimId = await claimSuggestionSend({
+      surface: 'teams',
+      channelId: params.channelId,
+      ...(params.threadId ? { threadId: params.threadId } : {}),
+      workItemId: suggestion.id,
+      createdByUserId: params.createdByUserId,
+      eventId: params.eventId,
+    });
+    if (!claimId) continue;
+
+    const posted = await params.provider.postMessage({
+      channelId: params.channelId,
+      serviceUrl: params.serviceUrl,
+      ...(params.threadId
+        ? { threadId: params.threadId, replyToMessageId: params.threadId }
+        : {}),
+      text: formatSuggestion(suggestion),
+      textFormat: 'markdown',
+    });
+    await finalizeSuggestionSend({
+      claimId,
+      channelId: posted.channelId,
+      messageId: posted.messageId,
+      ...(posted.threadId ? { threadId: posted.threadId } : {}),
+    });
+  }
+}
+
+export async function postFastAutomationSuggestionsToTelegram(params: {
+  provider: Pick<TelegramCommunicationProvider, 'postMessage'>;
+  channelId: string;
+  threadId?: string;
+  eventId: string;
+  createdByUserId: string;
+  suggestions: FastAutomationSuggestion[];
+}): Promise<void> {
+  const suggestions = await persistFastAutomationSuggestions(params);
+  const trackedWorkItemIds = await findTrackedSuggestionWorkItemIds({
+    surface: 'telegram',
+    workItemIds: suggestions.map((suggestion) => suggestion.id),
+  });
+  for (const suggestion of suggestions) {
+    if (trackedWorkItemIds.has(suggestion.id)) continue;
+
+    const claimId = await claimSuggestionSend({
+      surface: 'telegram',
+      channelId: params.channelId,
+      ...(params.threadId ? { threadId: params.threadId } : {}),
+      workItemId: suggestion.id,
+      createdByUserId: params.createdByUserId,
+      eventId: params.eventId,
+    });
+    if (!claimId) continue;
+
+    const posted = await params.provider.postMessage({
+      channelId: params.channelId,
+      ...(params.threadId ? { threadId: params.threadId } : {}),
+      text: formatSuggestion(suggestion),
+      textFormat: 'markdown',
+      buttons: [[{ text: 'Start', callbackData: `idea:${suggestion.id}` }]],
+    });
+    await finalizeSuggestionSend({
+      claimId,
+      channelId: posted.channelId,
+      messageId: posted.messageId,
+      ...(posted.threadId ? { threadId: posted.threadId } : {}),
     });
   }
 }

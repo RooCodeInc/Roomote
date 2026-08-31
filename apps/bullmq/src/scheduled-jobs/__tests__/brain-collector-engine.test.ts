@@ -202,6 +202,43 @@ describe('runBrainCollectors', () => {
     );
   });
 
+  it('reports and continues collectors with pending historical scans', async () => {
+    const collect = vi
+      .fn<BrainCollector['collect']>()
+      .mockResolvedValueOnce({
+        pages: makePages(1),
+        nextSince: null,
+        historicalPending: true,
+      })
+      .mockResolvedValueOnce({ pages: [], nextSince: null });
+    const scanning = makeCollector({ collect });
+    const idleCollect = vi
+      .fn<BrainCollector['collect']>()
+      .mockResolvedValue({ pages: [], nextSince: null });
+    const idle = makeCollector({ collect: idleCollect });
+    const sink: BrainSink = vi.fn(async () => {});
+
+    const first = await runBrainCollectors(connection, {
+      sink,
+      collectors: [scanning, idle],
+    });
+    expect(first.historicalPendingCollectorIds).toEqual([scanning.id]);
+
+    // Continuation pass: only the mid-scan collector's collect phase reruns;
+    // the idle collector is not re-polled in the fast loop.
+    const second = await runBrainCollectors(connection, {
+      sink,
+      collectors: [scanning, idle],
+      includeIncremental: false,
+      continueCollectorIds: first.historicalPendingCollectorIds,
+    });
+
+    expect(collect).toHaveBeenCalledTimes(2);
+    expect(idleCollect).toHaveBeenCalledTimes(1);
+    // The scan settled, so nothing holds the loop open.
+    expect(second.historicalPendingCollectorIds).toEqual([]);
+  });
+
   it('persists partition progress only after every page lands', async () => {
     const partitionWatermark = new Date('2026-08-13T11:00:00Z');
     const partitionCursor = '{"page":2}';
@@ -524,7 +561,11 @@ describe('runBrainCollectors', () => {
         sink,
         collectors: [firstCollector, secondCollector],
       }),
-    ).resolves.toEqual({ backfillProgressed: false, interrupted: true });
+    ).resolves.toEqual({
+      backfillProgressed: false,
+      interrupted: true,
+      historicalPendingCollectorIds: [],
+    });
 
     expect(sink).toHaveBeenCalledTimes(1);
     expect(secondCollect).not.toHaveBeenCalled();
@@ -570,7 +611,11 @@ describe('runBrainCollectors', () => {
         sink,
         collectors: [firstCollector, secondCollector],
       }),
-    ).resolves.toEqual({ backfillProgressed: false, interrupted: false });
+    ).resolves.toEqual({
+      backfillProgressed: false,
+      interrupted: false,
+      historicalPendingCollectorIds: [],
+    });
 
     expect(secondCollect).toHaveBeenCalledTimes(1);
     expect(sink).toHaveBeenCalledTimes(1);
@@ -682,7 +727,40 @@ describe('runBrainCollectors deep backfill', () => {
     expect(result).toEqual({
       backfillProgressed: true,
       interrupted: false,
+      historicalPendingCollectorIds: [],
     });
+  });
+
+  it('persists dependent backfill state only after the step pages land', async () => {
+    const auxiliaryId = uniqueId('backfill-pending');
+    const backfill = vi
+      .fn<NonNullable<BrainCollector['backfill']>>()
+      .mockImplementation(async ({ cursor }) =>
+        cursor === null
+          ? {
+              pages: makePages(1, 'queued'),
+              nextCursor: 'c1',
+              done: false,
+              stateUpdates: [{ collectorId: auxiliaryId, cursor: 'remaining' }],
+            }
+          : { pages: [], nextCursor: cursor, done: false },
+      );
+    const collector = makeCollector({ backfill });
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {
+        throw new Error('write failed');
+      }),
+      collectors: [collector],
+    });
+    expect(syncStateStore.get(auxiliaryId)).toBeUndefined();
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {}),
+      collectors: [collector],
+    });
+    expect(syncStateStore.get(auxiliaryId)?.backfillCursor).toBe('remaining');
+    expect(syncStateStore.get(collector.id)?.backfillCursor).toBe('c1');
   });
 
   it('keeps the last landed cursor when the sink 429s mid-backfill', async () => {
@@ -713,7 +791,11 @@ describe('runBrainCollectors deep backfill', () => {
         sink,
         collectors: [collector],
       }),
-    ).resolves.toEqual({ backfillProgressed: false, interrupted: false });
+    ).resolves.toEqual({
+      backfillProgressed: false,
+      interrupted: false,
+      historicalPendingCollectorIds: [],
+    });
 
     // The first step's cursor landed; the failed second step's did not.
     expect(syncStateStore.get(collector.id)?.backfillCursor).toBe('c1');
@@ -862,6 +944,7 @@ describe('runBrainCollectors deep backfill', () => {
     expect(result).toEqual({
       backfillProgressed: false,
       interrupted: false,
+      historicalPendingCollectorIds: [],
     });
   });
 

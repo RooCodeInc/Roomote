@@ -10,7 +10,7 @@ import {
   stripLlmCitationArtifacts,
 } from '@roomote/types';
 import { type DequeuedTaskRun, sdk } from '@roomote/sdk/client';
-import { SLACK_LIVE_TASK_CARD_MESSAGES } from '@roomote/slack/client';
+import { SLACK_SESSION_LIVE_TASK_CARD_MESSAGES } from '@roomote/slack/client';
 
 import type { Harness } from '../sandbox-server';
 import type { HarnessInferenceUsageEvent } from '../sandbox-server/lib/harness';
@@ -314,7 +314,7 @@ export function subscribeHarnessCallbacks({
     for (const callbackTaskId of filteredCompletionCallbackIds) {
       await forwardCallbackEvent(callbackTaskId, {
         type: 'completion',
-        text: SLACK_LIVE_TASK_CARD_MESSAGES.completed,
+        text: SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.completed,
         ts: Date.now(),
         provisional: true,
       });

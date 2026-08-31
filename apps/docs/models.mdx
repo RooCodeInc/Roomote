@@ -28,11 +28,13 @@ Some hosting deployments provision **Roomote inference** with a limited,
 spend-capped credit grant during setup. It is separate from your own provider
 connections: in particular, you can add an OpenRouter key in **Settings >
 Models** even when Roomote inference is active. If the hosting deployment does
-not offer it, the option is not shown. Trial token usage and estimated model
-cost appear in task details and [Cost Analytics](/cost-analytics), while the
-remaining credit line reflects the hosted grant's authoritative limit. Its key
-is stored with your other provider credentials, so deleting the Roomote
-inference provider in **Settings > Models** disables it permanently.
+not offer it, the option is not shown. The Roomote Cloud trial includes $5 of
+inference, enough to complete several tasks before you connect your own
+provider. Trial token usage and estimated model cost appear in task details and
+[Cost Analytics](/cost-analytics), while the remaining credit line reflects the
+hosted grant's authoritative limit. Its key is stored with your other provider
+credentials, so deleting the Roomote inference provider in **Settings > Models**
+disables it permanently.
 
 For example, a deployment might use:
 
@@ -295,6 +297,11 @@ and **Reset to defaults** returns every role to the deployment configuration.
 You can also just ask the agent — for example "switch to Fable 5 with max
 reasoning for the rest of this task". The agent applies the same change
 through its task-management tool, subject to the same allowed-models list.
+
+Conversational Sessions expose the same model and reasoning choices in their
+composer. A selection is saved before the next message can be sent, persists
+across page refreshes, and applies to later Fast turns without changing a turn
+that is already running.
 
 ## Fast delegation and consultation
 

@@ -883,6 +883,26 @@ export type AcpToolCallPayloadKind =
   | string
   | null;
 
+/** Stable machine-level tool facts. User-facing labels and icons belong to UI clients. */
+export const ACP_TOOL_KINDS = {
+  execute: 'execute',
+  read: 'read',
+  search: 'search',
+  list: 'list',
+  edit: 'edit',
+  subagent: 'subagent',
+  task: 'task',
+  communication: 'communication',
+  memory: 'memory',
+  artifact: 'artifact',
+  widget: 'widget',
+  mcp: 'mcp',
+  tool: 'tool',
+} as const;
+
+export type KnownAcpToolKind =
+  (typeof ACP_TOOL_KINDS)[keyof typeof ACP_TOOL_KINDS];
+
 export interface AcpSessionUpdate extends Record<string, unknown> {
   sessionUpdate: string;
 }
@@ -1006,6 +1026,7 @@ export interface AcpToolResultPayload {
   kind: AcpToolCallPayloadKind;
   title: string | null;
   isExecute: boolean;
+  isRead?: boolean;
   isMcp: boolean;
   /** Trusted Roomote-native tool output persisted by the Fast runtime. */
   isRoomoteNativeTool?: boolean;

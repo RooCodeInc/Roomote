@@ -2,7 +2,11 @@ const captureEvent = vi.hoisted(() => vi.fn());
 
 vi.mock('@roomote/telemetry/server', () => ({ captureEvent }));
 
-import { captureFastAgentInferenceContext } from '../fast-agent-context-telemetry';
+import {
+  captureFastAgentInferenceAttemptOutcome,
+  captureFastAgentInferenceContext,
+  captureFastAgentTurnSettled,
+} from '../fast-agent-context-telemetry';
 
 describe('captureFastAgentInferenceContext', () => {
   beforeEach(() => {
@@ -12,6 +16,8 @@ describe('captureFastAgentInferenceContext', () => {
   it('records a privacy-safe component manifest for a complete warm turn', () => {
     captureFastAgentInferenceContext({
       userId: 'private-user-id',
+      sessionId: 'private-session-id',
+      turnId: 'private-turn-id',
       systemPrompt: 'private deployment prompt',
       surface: 'slack',
       turnSource: 'human',
@@ -49,6 +55,8 @@ describe('captureFastAgentInferenceContext', () => {
           prompt_kind: 'turn_delta',
           attempt_number: 1,
           attempt_scope: 'prompt_submission',
+          session_id_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          turn_id_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
           present_components: expect.arrayContaining([
             'current_turn',
             'native_history',
@@ -63,11 +71,15 @@ describe('captureFastAgentInferenceContext', () => {
     );
     const event = JSON.stringify(captureEvent.mock.calls[0]);
     expect(event).not.toContain('private deployment prompt');
+    expect(event).not.toContain('private-session-id');
+    expect(event).not.toContain('private-turn-id');
   });
 
   it('marks loader failures and rebuilt retry context explicitly', () => {
     captureFastAgentInferenceContext({
       userId: 'user-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
       systemPrompt: 'system',
       surface: 'automation',
       turnSource: 'platform_event',
@@ -115,5 +127,111 @@ describe('captureFastAgentInferenceContext', () => {
     const properties = captureEvent.mock.calls[0]?.[1]?.properties;
     expect(properties.present_components).not.toContain('integration_catalog');
     expect(properties.present_components).not.toContain('task_model_catalog');
+  });
+
+  it('records attempt outcomes without prompt or raw error content', () => {
+    captureFastAgentInferenceAttemptOutcome({
+      userId: 'user-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      surface: 'web',
+      sessionPath: 'cold_rebuild',
+      promptKind: 'bootstrap',
+      attemptNumber: 1,
+      outcome: 'failure',
+      stage: 'opencode_setup',
+      elapsedMs: 654,
+      failureReason: 'endpoint_unreachable',
+      failureRetryable: true,
+      resolvedModel: 'openrouter/openai/gpt-test',
+      providerRetryEventCount: 0,
+    });
+
+    expect(captureEvent).toHaveBeenCalledWith(
+      'fast_agent_inference_attempt_outcome',
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          outcome: 'failure',
+          stage: 'opencode_setup',
+          elapsed_ms: 654,
+          failure_reason: 'endpoint_unreachable',
+          failure_retryable: true,
+          resolved_model: 'openrouter/openai/gpt-test',
+          provider: 'openrouter',
+          provider_retry_event_count: 0,
+        }),
+      }),
+    );
+    expect(JSON.stringify(captureEvent.mock.calls[0])).not.toContain(
+      'session-1',
+    );
+    expect(JSON.stringify(captureEvent.mock.calls[0])).not.toContain('turn-1');
+  });
+
+  it('records identifier-free first-response and startup timings', () => {
+    captureFastAgentTurnSettled({
+      userId: 'private-user-id',
+      surface: 'web',
+      turnSource: 'human',
+      initialHumanTurn: true,
+      sessionPath: 'cold_rebuild',
+      outcome: 'success',
+      serviceDurationMs: 1_250,
+      firstResponseDurationMs: 900,
+      sandboxlessStartupDurationMs: 350,
+      inferenceToFirstResponseDurationMs: 550,
+      inferenceDurationMs: 700,
+      postInferenceDurationMs: 200,
+      visibleReplyCount: 1,
+      openCodeProviderRetryEventCount: 0,
+      roomoteInferenceRetryCount: 0,
+    });
+
+    expect(captureEvent).toHaveBeenCalledWith('fast_turn_settled', {
+      userId: 'private-user-id',
+      properties: {
+        surface: 'web',
+        turn_source: 'human',
+        initial_human_turn: true,
+        session_path: 'cold_rebuild',
+        outcome: 'success',
+        service_duration_ms: 1_250,
+        first_response_duration_ms: 900,
+        sandboxless_startup_duration_ms: 350,
+        inference_to_first_response_duration_ms: 550,
+        inference_duration_ms: 700,
+        post_inference_duration_ms: 200,
+        had_assistant_response: true,
+        visible_reply_count: 1,
+        opencode_provider_retry_event_count: 0,
+        roomote_inference_retry_count: 0,
+      },
+    });
+    expect(captureEvent.mock.calls[0]?.[1]?.properties).not.toHaveProperty(
+      'session_id',
+    );
+    expect(captureEvent.mock.calls[0]?.[1]?.properties).not.toHaveProperty(
+      'turn_id',
+    );
+  });
+
+  it('keeps an unavailable initial-turn classification explicit', () => {
+    captureFastAgentTurnSettled({
+      userId: 'private-user-id',
+      surface: 'web',
+      turnSource: 'human',
+      outcome: 'failure',
+      serviceDurationMs: 100,
+      visibleReplyCount: 0,
+      openCodeProviderRetryEventCount: 0,
+      roomoteInferenceRetryCount: 0,
+    });
+
+    expect(captureEvent).toHaveBeenCalledWith(
+      'fast_turn_settled',
+      expect.objectContaining({
+        properties: expect.objectContaining({ initial_human_turn: null }),
+      }),
+    );
   });
 });

@@ -10,6 +10,16 @@ specialized workflow.
 In the task prompt, type `/` to search the packaged skills available to
 Roomote, then select one to insert its slash invocation.
 
+In a Fast conversation, start a message with `$skill-name` to explicitly load
+a packaged or Settings skill. Roomote resolves Settings skills only from
+environments you can use. If different environments define different versions
+with the same name, Roomote asks which environment you mean.
+
+When you ask Fast which skills are available, its unscoped inventory includes
+packaged skills and Settings skills from every environment you can use.
+Repository-defined skills remain scoped to a specific environment or
+repository.
+
 Use Skills when the same guidance keeps showing up across tasks in an
 environment: a framework-specific review checklist, a release process, a
 design-system rule, a data workflow, or a repeatable debugging path.
@@ -90,10 +100,12 @@ Skills configured in Roomote settings are different:
   environments, even when the guidance is not checked into a repository.
 - **Repository-defined skills are codebase-level.** They apply when the task
   is working in that repository and the active workflow finds them relevant.
-- **Fast mode can discover repository-defined skills before starting a task.**
-  It reads only the checked-in skill Markdown from repositories in configured
+- **Fast mode can discover both kinds before starting a task.** It can load
+  Settings skills only from the selected or otherwise authorized environment,
+  and it reads repository skill Markdown only from repositories in configured
   environments. If the workflow needs a workspace, Fast starts a task in a
-  matching environment and the task loads its checked-out copy of the skill.
+  matching environment and the task loads the environment-scoped or checked-out
+  copy of the skill.
 - **Both are supplemental.** They help Roomote perform specialized work; they
   do not replace the built-in task flow, environment setup, or the user's
   prompt.
@@ -120,6 +132,9 @@ change.
 
 - **Roomote does not use the skill.** Make the description more specific and
   confirm the task is running in an environment where the skill is enabled.
+- **Fast cannot find `$skill-name`.** Confirm the skill is enabled in an
+  environment you can use and that the name after `$` exactly matches the
+  skill's invocation name.
 - **The skill applies too broadly.** Narrow the description or limit it to
   fewer environments.
 - **Two skills seem to overlap.** Keep the more specific one, or split the
