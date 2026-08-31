@@ -7,14 +7,14 @@ type SlackFastConversation = Extract<
   { surface: 'slack' }
 >;
 
-export type BoundSlackFastAutomationConversation = Omit<
+type BoundSlackFastAutomationConversation = Omit<
   SlackFastConversation,
   'replyTarget'
 > & {
   replyTarget: SlackFastConversation['replyTarget'] & { threadId: string };
 };
 
-export type BoundSlackFastAutomationRoot = {
+type BoundSlackFastAutomationRoot = {
   conversation: BoundSlackFastAutomationConversation;
   threadId: string;
   created: boolean;
