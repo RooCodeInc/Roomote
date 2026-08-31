@@ -3,8 +3,8 @@ import {
   type FastAgentSlackTaskLauncherParams,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
+import { buildSelectedTaskSessionUrl } from '@roomote/communication';
 import { RunStatus } from '@roomote/types';
-import { Env } from '@roomote/env';
 import { db, getSessionForTask } from '@roomote/db/server';
 import {
   buildSlackLiveTaskCardBlocks,
@@ -80,7 +80,11 @@ export function createFastAgentSlackLiveTaskLauncher(
     try {
       const linkedSession = await getSessionForTask(db, taskRun.taskId);
       destinationUrl = linkedSession
-        ? `${Env.R_APP_URL}/sessions/${linkedSession.id}?task=${taskRun.taskId}`
+        ? buildSelectedTaskSessionUrl({
+            taskUrl: context.taskUrl,
+            sessionId: linkedSession.id,
+            taskId: taskRun.taskId,
+          })
         : context.taskUrl;
       // A card for this task already exists (for example an idempotent
       // relaunch of the same task); keep updating it instead of posting
@@ -134,7 +138,7 @@ export function createFastAgentSlackLiveTaskLauncher(
       );
 
       if (!messageTs) {
-        await postTaskLink(context.taskUrl);
+        await postTaskLink(destinationUrl);
         return;
       }
 
