@@ -301,6 +301,9 @@ export function FastSessionTranscript({
   useEffect(() => {
     hasReceivedInitialSessionStateRef.current = false;
     const source = new EventSource(`/api/sessions/${sessionId}/stream`);
+    const onOpen = () => {
+      hasReceivedInitialSessionStateRef.current = false;
+    };
     const onMessages = (event: MessageEvent) => {
       try {
         const { messages, conversationResponding: responding } = JSON.parse(
@@ -379,9 +382,11 @@ export function FastSessionTranscript({
         // Ignore malformed frames.
       }
     };
+    source.addEventListener('open', onOpen);
     source.addEventListener('messages', onMessages);
     source.addEventListener('session', onSession);
     return () => {
+      source.removeEventListener('open', onOpen);
       source.removeEventListener('messages', onMessages);
       source.removeEventListener('session', onSession);
       source.close();

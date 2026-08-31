@@ -553,6 +553,14 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByText('1 task running')).toBeInTheDocument();
 
     act(() => {
+      FakeEventSource.instances[0]!.emit('open', null);
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: true,
+      });
+    });
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    act(() => {
       FakeEventSource.instances[0]!.emit('session', {
         conversationResponding: false,
       });
