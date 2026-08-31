@@ -538,6 +538,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     if (!provider) {
       return null;
     }
+    // Deterministic per-post identity: a re-run of the same inbound turn
+    // (crash between the provider accepting the email and the turn being
+    // marked consumed) replays the same key sequence, so retries cannot
+    // duplicate outbound emails.
+    let agentMailPostIndex = 0;
     return {
       conversation,
       adapter: {
@@ -556,6 +561,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             threadId: conversation.conversationId,
             text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'agentmail', sessionId: session.id, ...footerContext })}`,
             textFormat: 'markdown',
+            idempotencyKey: `agentmail:${conversation.conversationId}:fast-reply:${params.currentMessageId ?? 'turn'}:${agentMailPostIndex++}`,
           });
           await recordFastAgentConversationMessageBestEffort({
             sessionId: session.id,

@@ -94,9 +94,42 @@ export function isAgentMailMessageReceivedEvent(
  * Crude tag stripper for the HTML fallback body. Real sanitization happens
  * later in the pipeline — this only recovers readable text for routing.
  */
+function stripElementWithContent(html: string, tagName: string): string {
+  // Linear scan instead of a backtracking regex (CodeQL js/polynomial-redos,
+  // js/bad-tag-filter): find each opening tag, then the matching close tag
+  // allowing whitespace before '>', and cut the whole block.
+  const lower = html.toLowerCase();
+  const openToken = `<${tagName}`;
+  let result = '';
+  let cursor = 0;
+
+  for (;;) {
+    const openAt = lower.indexOf(openToken, cursor);
+    if (openAt === -1) {
+      result += html.slice(cursor);
+      return result;
+    }
+    result += html.slice(cursor, openAt);
+
+    const closePattern = `</${tagName}`;
+    const closeAt = lower.indexOf(closePattern, openAt);
+    if (closeAt === -1) {
+      // Unterminated block: drop the rest, matching sanitizer behavior.
+      return result;
+    }
+    const closeEnd = lower.indexOf('>', closeAt);
+    if (closeEnd === -1) {
+      return result;
+    }
+    cursor = closeEnd + 1;
+  }
+}
+
 function stripHtmlTags(html: string): string {
-  return html
-    .replace(/<(?:style|script)[^>]*>[\s\S]*?<\/(?:style|script)>/gi, ' ')
+  return stripElementWithContent(
+    stripElementWithContent(html, 'script'),
+    'style',
+  )
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(?:p|div|li|blockquote|h[1-6]|tr)>/gi, '\n')
     .replace(/<[^>]+>/g, ' ')

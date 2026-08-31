@@ -101,6 +101,12 @@ vi.mock('@roomote/communication/thread-reply-footer-state', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  resolveAgentMailReplyRoute: vi.fn(async () => ({
+    inboxId: 'inbox-1',
+    replyToMessageId: 'anchor-1',
+    recipientEmail: 'user@example.com',
+    subject: null,
+  })),
   createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(),
   createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(async () => {
     const { botToken } = await resolveTelegramRuntimeCredentialsMock();
@@ -220,7 +226,7 @@ describe('maybeSendCommunicationThreadReply (AgentMail)', () => {
       text: 'done',
       textFormat: 'markdown',
       idempotencyKey: expect.stringMatching(
-        /^agentmail:conversation-1:45-[0-9a-f-]{36}:thread-reply$/,
+        /^agentmail:conversation-1:45-[0-9a-f]{16}-anchor-1:thread-reply$/,
       ),
     });
     // Email is not live: no typing heartbeat is triggered.
@@ -228,9 +234,10 @@ describe('maybeSendCommunicationThreadReply (AgentMail)', () => {
     await expect(response!.json()).resolves.toEqual({ messageTs: 'msg-1' });
   });
 
-  it('mints a distinct Idempotency-Key per reply so identical texts both deliver', async () => {
-    // Two intentional identical-text replies in one run are distinct sends;
-    // the key only makes the provider's own HTTP retries of one send safe.
+  it('keys replies by run, text, and inbound anchor', async () => {
+    // A worker retry of the same tool call (same text, same inbound anchor)
+    // maps to the same key so a lost-response retry cannot double-send; a
+    // different reply text is a new logical send.
     await maybeSendCommunicationThreadReply({
       taskRun: agentmailTaskRun,
       parsedBody: { text: 'same reply', images: [] },
@@ -238,18 +245,18 @@ describe('maybeSendCommunicationThreadReply (AgentMail)', () => {
     await maybeSendCommunicationThreadReply({
       taskRun: agentmailTaskRun,
       parsedBody: { text: 'same reply', images: [] },
+    });
+    await maybeSendCommunicationThreadReply({
+      taskRun: agentmailTaskRun,
+      parsedBody: { text: 'different reply', images: [] },
     });
 
     const keys = agentmailPostMessageMock.mock.calls.map(
       ([input]) => input.idempotencyKey,
     );
-    expect(keys).toHaveLength(2);
-    expect(keys[0]).not.toBe(keys[1]);
-    for (const key of keys) {
-      expect(key).toMatch(
-        /^agentmail:conversation-1:45-[0-9a-f-]{36}:thread-reply$/,
-      );
-    }
+    expect(keys).toHaveLength(3);
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[2]).not.toBe(keys[0]);
   });
 
   it('requires an email conversation context', async () => {

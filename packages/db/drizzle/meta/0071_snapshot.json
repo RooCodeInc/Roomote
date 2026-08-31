@@ -1,5 +1,5 @@
 {
-  "id": "448b3f4b-af0b-452c-8c8c-e8c8ce7408f1",
+  "id": "4f685bf8-37eb-4bf0-8f1b-36dd98d90593",
   "prevId": "6a2acb2b-02f4-4a18-88fa-0a56e33481c0",
   "version": "7",
   "dialect": "postgresql",
@@ -4628,7 +4628,7 @@
       "checkConstraints": {
         "fast_agent_provider_messages_provider_v3_check": {
           "name": "fast_agent_provider_messages_provider_v3_check",
-          "value": "\"fast_agent_provider_messages\".\"provider\" in ('discord', 'slack', 'teams', 'telegram')"
+          "value": "\"fast_agent_provider_messages\".\"provider\" in ('discord', 'slack', 'teams', 'telegram', 'agentmail')"
         }
       },
       "isRLSEnabled": false

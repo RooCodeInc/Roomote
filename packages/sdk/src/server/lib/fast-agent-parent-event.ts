@@ -1379,6 +1379,10 @@ async function createAgentMailFastAgentParentTurn(
           threadId: conversation.conversationId,
           text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'agentmail', sessionId: params.parent.sessionId, ...params.footerContext })}`,
           textFormat: 'markdown',
+          // Durable parent events retry after crashes that may land AFTER the
+          // provider accepted the email; the event's stable identity makes
+          // the replay a no-op instead of a duplicate result email.
+          idempotencyKey: `agentmail:${conversation.conversationId}:parent-event:${createHash('sha256').update(buildEventClientMessageSeed(params.event)).digest('hex').slice(0, 24)}`,
         });
         await recordFastAgentConversationMessageBestEffort({
           sessionId: session.id,

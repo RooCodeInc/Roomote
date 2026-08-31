@@ -3496,7 +3496,7 @@ export const fastAgentProviderMessages = pgTable(
     ),
     check(
       'fast_agent_provider_messages_provider_v3_check',
-      sql`${table.provider} in ('discord', 'slack', 'teams', 'telegram')`,
+      sql`${table.provider} in ('discord', 'slack', 'teams', 'telegram', 'agentmail')`,
     ),
   ],
 );

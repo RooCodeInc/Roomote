@@ -20,6 +20,15 @@ const DEFAULT_AGENTMAIL_MAX_RETRIES = 2;
 const AGENTMAIL_RETRY_BASE_DELAY_MS = 250;
 const AGENTMAIL_ERROR_BODY_MAX_BYTES = 4_096;
 
+/** Loop instead of a suffix regex (CodeQL js/polynomial-redos). */
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 0x2f) {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
 /**
  * The durable reply anchor for one AgentMail conversation, resolved from
  * storage at send time. The adapter never trusts caller-supplied reply
@@ -68,9 +77,8 @@ export class AgentMailCommunicationProvider implements CommunicationProviderAdap
   private readonly maxRetries: number;
 
   constructor(private readonly options: AgentMailCommunicationProviderOptions) {
-    this.apiBaseUrl = (options.apiBaseUrl ?? getAgentMailApiBaseUrl()).replace(
-      /\/+$/,
-      '',
+    this.apiBaseUrl = trimTrailingSlashes(
+      options.apiBaseUrl ?? getAgentMailApiBaseUrl(),
     );
     this.fetchImpl = options.fetch ?? fetch;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_AGENTMAIL_TIMEOUT_MS;
@@ -393,9 +401,8 @@ export class AgentMailApiClient {
   private readonly timeoutMs: number;
 
   constructor(private readonly options: AgentMailApiClientOptions) {
-    this.apiBaseUrl = (options.apiBaseUrl ?? getAgentMailApiBaseUrl()).replace(
-      /\/+$/,
-      '',
+    this.apiBaseUrl = trimTrailingSlashes(
+      options.apiBaseUrl ?? getAgentMailApiBaseUrl(),
     );
     this.fetchImpl = options.fetch ?? fetch;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_AGENTMAIL_TIMEOUT_MS;

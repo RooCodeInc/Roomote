@@ -28,8 +28,9 @@ import {
   createTeamsCommunicationProviderFromRuntimeCredentials as createTeamsCommunicationProvider,
   createTelegramCommunicationProviderFromRuntimeCredentials as createTelegramCommunicationProvider,
   getCommunicationProviderAdapter,
+  resolveAgentMailReplyRoute,
 } from '@roomote/sdk/server';
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 
 import { THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE } from './chat-reply-helpers';
 import {
@@ -559,19 +560,23 @@ async function sendTelegramThreadReply(params: {
 /**
  * Email replies must be delivered at most once per logical reply, and the MCP
  * thread-reply request carries no client-supplied message id or dedupe nonce.
- * The stable per-reply identity is therefore derived from the run id plus a
- * digest of the reply text: an HTTP/provider retry of the same tool call maps
- * to the same Idempotency-Key while a genuinely new reply gets a new one.
+ * The stable identity is (run, reply text, current inbound anchor): a worker
+ * retry of the same tool call — including one whose first attempt succeeded
+ * but whose response was lost — maps to the same Idempotency-Key, while an
+ * intentional identical-text reply in a later turn has a different inbound
+ * anchor and therefore delivers.
  */
 function buildAgentMailThreadReplyIdempotencyKey(params: {
   conversationId: string;
   runId: number;
+  text: string;
+  inboundAnchor: string | null;
 }): string {
-  // Unique per handler invocation: two intentional identical-text replies in
-  // one run are distinct sends and must both deliver. The key's job is only
-  // to make the provider's own HTTP retries of THIS send replay-safe, so a
-  // per-call nonce is exactly the right identity.
-  return `agentmail:${params.conversationId}:${params.runId}-${randomUUID()}:thread-reply`;
+  const digest = createHash('sha256')
+    .update(params.text)
+    .digest('hex')
+    .slice(0, 16);
+  return `agentmail:${params.conversationId}:${params.runId}-${digest}-${params.inboundAnchor ?? 'none'}:thread-reply`;
 }
 
 async function sendAgentMailThreadReply(params: {
@@ -631,6 +636,10 @@ async function sendAgentMailThreadReply(params: {
     idempotencyKey: buildAgentMailThreadReplyIdempotencyKey({
       conversationId,
       runId: params.taskRun.id,
+      text,
+      inboundAnchor:
+        (await resolveAgentMailReplyRoute(conversationId))?.replyToMessageId ??
+        null,
     }),
   });
 

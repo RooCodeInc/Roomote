@@ -72,6 +72,7 @@ CREATE TABLE "agentmail_webhook_events" (
 	CONSTRAINT "agentmail_webhook_events_state_check" CHECK ("agentmail_webhook_events"."state" in ('received', 'queued', 'processing', 'processed', 'failed'))
 );
 --> statement-breakpoint
+ALTER TABLE "fast_agent_provider_messages" DROP CONSTRAINT "fast_agent_provider_messages_provider_v3_check";--> statement-breakpoint
 ALTER TABLE "sessions" DROP CONSTRAINT "sessions_source_surface_check";--> statement-breakpoint
 ALTER TABLE "tasks" DROP CONSTRAINT "tasks_surface_check";--> statement-breakpoint
 ALTER TABLE "agentmail_conversation_participants" ADD CONSTRAINT "agentmail_conversation_participants_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -88,5 +89,6 @@ CREATE INDEX "agentmail_conversations_owner_idx" ON "agentmail_conversations" US
 CREATE INDEX "agentmail_inbound_turns_drain_idx" ON "agentmail_inbound_turns" USING btree ("conversation_id","state","provider_timestamp","provider_message_id");--> statement-breakpoint
 CREATE INDEX "agentmail_user_mappings_user_id_idx" ON "agentmail_user_mappings" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "agentmail_webhook_events_state_idx" ON "agentmail_webhook_events" USING btree ("state","received_at");--> statement-breakpoint
+ALTER TABLE "fast_agent_provider_messages" ADD CONSTRAINT "fast_agent_provider_messages_provider_v3_check" CHECK ("fast_agent_provider_messages"."provider" in ('discord', 'slack', 'teams', 'telegram', 'agentmail'));--> statement-breakpoint
 ALTER TABLE "sessions" ADD CONSTRAINT "sessions_source_surface_check" CHECK ("sessions"."source_surface" in ('web', 'api', 'slack', 'teams', 'telegram', 'discord', 'agentmail', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'bitbucket', 'system', 'automation'));--> statement-breakpoint
 ALTER TABLE "tasks" ADD CONSTRAINT "tasks_surface_check" CHECK ("tasks"."surface" in ('web', 'api', 'slack', 'teams', 'telegram', 'discord', 'agentmail', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'bitbucket', 'system'));
