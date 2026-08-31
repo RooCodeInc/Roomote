@@ -2,6 +2,7 @@ import {
   getSessionMessages,
   getSessionSummary,
   searchSessions,
+  sendMessageToSession,
   startSession,
 } from './tasks-api-client.js';
 import { catchError, jsonResult } from './tool-result.js';
@@ -52,6 +53,19 @@ export async function handleGetSessionMessages(
   try {
     return jsonResult(
       await getSessionMessages(config, params.sessionId, params.limit),
+    );
+  } catch (error) {
+    return catchError(error);
+  }
+}
+
+export async function handleSendSessionMessage(
+  params: { sessionId: string; message: string },
+  config: RoomoteConfig,
+): Promise<ToolResult> {
+  try {
+    return jsonResult(
+      await sendMessageToSession(config, params.sessionId, params.message),
     );
   } catch (error) {
     return catchError(error);

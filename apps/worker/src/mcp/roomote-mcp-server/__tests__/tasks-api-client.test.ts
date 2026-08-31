@@ -17,6 +17,7 @@ import {
   getSessionMessages,
   getSessionSummary,
   searchSessions,
+  sendMessageToSession,
   startSession,
 } from '../tasks-api-client.js';
 import type { RoomoteConfig } from '../types.js';
@@ -47,6 +48,10 @@ describe('session API', () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ sessionId: 'session-1', messages: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true }),
       });
 
     await startSession(config, 'Investigate this');
@@ -57,6 +62,7 @@ describe('session API', () => {
     });
     await getSessionSummary(config, 'session-1');
     await getSessionMessages(config, 'session-1', 25);
+    await sendMessageToSession(config, 'session-1', 'Continue');
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
@@ -80,6 +86,14 @@ describe('session API', () => {
       4,
       'https://test-api.example.com/api/mcp/sessions/session-1/messages?limit=25',
       expect.any(Object),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      'https://test-api.example.com/api/mcp/sessions/session-1/send_message',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ message: 'Continue' }),
+      }),
     );
   });
 });

@@ -130,6 +130,23 @@ export async function getSessionMessages(
   );
 }
 
+export async function sendMessageToSession(
+  config: RoomoteConfig,
+  sessionId: string,
+  message: string,
+): Promise<SendMessageResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/sessions/${encodeURIComponent(sessionId)}/send_message`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    },
+    'Failed to send session message',
+  );
+}
+
 function buildSearchParams(
   params: Record<string, string | number | undefined>,
 ): string {

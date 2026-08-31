@@ -327,13 +327,56 @@ describe('route policy enforcement', () => {
       );
       expect(manageTasks?.inputSchema?.properties?.action?.enum).toEqual(
         expect.arrayContaining([
-          'start_session',
-          'search_sessions',
-          'get_session_summary',
-          'get_session_messages',
+          'start',
+          'search',
+          'get_summary',
+          'get_messages',
+          'send_message',
+          'search_tasks',
           'launch',
         ]),
       );
+
+      const sessionSearchResponse = await createApiApp().request(
+        'http://localhost/mcp',
+        {
+          ...request,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 3,
+            method: 'tools/call',
+            params: { name: 'manage_tasks', arguments: { action: 'search' } },
+          }),
+        },
+      );
+      const sessionSearchBody = (await sessionSearchResponse.json()) as {
+        result?: { structuredContent?: unknown };
+      };
+      expect(sessionSearchBody.result?.structuredContent).toMatchObject({
+        sessions: expect.any(Array),
+      });
+
+      const taskSearchResponse = await createApiApp().request(
+        'http://localhost/mcp',
+        {
+          ...request,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 4,
+            method: 'tools/call',
+            params: {
+              name: 'manage_tasks',
+              arguments: { action: 'search_tasks' },
+            },
+          }),
+        },
+      );
+      const taskSearchBody = (await taskSearchResponse.json()) as {
+        result?: { structuredContent?: unknown };
+      };
+      expect(taskSearchBody.result?.structuredContent).toMatchObject({
+        tasks: expect.any(Array),
+      });
 
       const callResponse = await createApiApp().request(
         'http://localhost/mcp',

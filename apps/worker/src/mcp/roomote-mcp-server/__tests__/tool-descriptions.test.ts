@@ -276,13 +276,13 @@ describe('roomote MCP tool descriptions', () => {
     const manageTasksTool = getRegisteredTool(registeredTools, 'manage_tasks');
 
     expect(manageTasksTool.config.description).toContain(
-      'Create and inspect Roomote sessions',
+      'Manage Roomote Sessions by default',
     );
     expect(manageTasksTool.config.description).not.toContain(
       'Not Slack-visible by itself',
     );
     expect(manageTasksTool.config.description).toContain(
-      'When the user provides an existing Roomote task URL or asks about an existing task, extract the task ID and use action "get_summary" for current status or action "get_messages" for transcript details before resorting to browser or task-UI navigation.',
+      'When the user provides an existing Roomote task URL, extract its task ID and pass taskId to get_summary or get_messages before resorting to browser navigation.',
     );
   });
 
@@ -309,27 +309,29 @@ describe('roomote MCP tool descriptions', () => {
     );
     expect(manageTasksTool.config.description).not.toContain('get_harness_log');
     expect(actionField.options).toEqual([
-      'start_session',
-      'search_sessions',
-      'get_session_summary',
-      'get_session_messages',
+      'start',
       'search',
       'get_summary',
-      'get_compute_logs',
       'get_messages',
+      'send_message',
+      'search_tasks',
+      'get_compute_logs',
       'launch',
       'cancel',
-      'send_message',
       'list_environments',
       'list_models',
       'update_models',
     ]);
     expect(taskIdField.description).toBe(
-      'The task ID; get_messages and send_message also accept a canonical Roomote session or Fast conversation ID when those actions are available',
+      'Optional concrete task ID. When provided to get_summary, get_messages, or send_message, targets that task instead of a Session. Required for task-only controls such as get_compute_logs and cancel.',
     );
     expect(limitField.description).toBe(
       'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages (task or Fast session)',
     );
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty(
+      'targetTasks',
+    );
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty('targetType');
   });
 
   it('keeps task model discovery beside task model switching', async () => {
@@ -344,14 +346,16 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
-  it('models Fast session communication inside manage_tasks', async () => {
+  it('models Session-first communication with natural task targeting', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const tool = getRegisteredTool(registeredTools, 'manage_tasks');
 
     expect(tool.config.description).toContain(
-      'For a Fast session, pass its canonical session ID as taskId.',
+      'Use action "get_messages" with sessionId for Session history, or taskId for a specific task transcript',
     );
-    expect(tool.config.description).toContain('Use start_session for new work');
+    expect(tool.config.description).toContain(
+      'Use start to begin new work in a Session',
+    );
     expect(
       registeredTools.some((candidate) => candidate.name === 'manage_sessions'),
     ).toBe(false);

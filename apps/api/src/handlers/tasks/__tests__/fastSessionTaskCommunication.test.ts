@@ -254,7 +254,7 @@ describe('Fast session communication through task routes', () => {
     );
   });
 
-  it('accepts the canonical unified Session ID for reads and sends', async () => {
+  it('requires canonical unified Session IDs to use Session routes', async () => {
     const owner = await userFactory.create();
     const fastSession = await createSession(owner.id);
     const session = await ensureSessionForFastConversation(db, fastSession.id);
@@ -266,10 +266,7 @@ describe('Fast session communication through task routes', () => {
 
     const app = createApp(userAuth(owner.id));
     const messagesResponse = await app.request(`/tasks/${session.id}/messages`);
-    expect(messagesResponse.status).toBe(200);
-    await expect(messagesResponse.json()).resolves.toMatchObject({
-      messages: [{ taskId: session.id, text: 'Unified session text' }],
-    });
+    expect(messagesResponse.status).toBe(404);
 
     const sendResponse = await app.request(
       `/tasks/${session.id}/send_message`,
@@ -279,13 +276,8 @@ describe('Fast session communication through task routes', () => {
         body: JSON.stringify({ message: 'Continue unified session' }),
       },
     );
-    expect(sendResponse.status).toBe(200);
-    expect(mocks.queueReply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionId: fastSession.id,
-        question: 'Continue unified session',
-      }),
-    );
+    expect(sendResponse.status).toBe(404);
+    expect(mocks.queueReply).not.toHaveBeenCalled();
   });
 
   it('uses the same Fast fallback for the worker steering route', async () => {

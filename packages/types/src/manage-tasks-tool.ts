@@ -3,48 +3,79 @@ import { z } from 'zod';
 import { SESSION_STATUSES, type SessionStatus } from './sessions';
 import type { RoomoteTranscriptMessage } from './task-messages';
 import type { TaskGoalStatus, TaskPhase, TaskState } from './task-runs';
-import {
-  ROOMOTE_TASK_INSPECTION_ACTIONS,
-  roomoteTaskInspectionFieldSchemas,
-} from './task-inspection-tool';
+import { roomoteTaskInspectionFieldSchemas } from './task-inspection-tool';
 
-export const ROOMOTE_SESSION_MANAGEMENT_ACTIONS = [
-  'start_session',
-  'search_sessions',
-  'get_session_summary',
-  'get_session_messages',
+export const ROOMOTE_SESSION_DEFAULT_ACTIONS = [
+  'start',
+  'search',
+  'get_summary',
+  'get_messages',
+  'send_message',
 ] as const;
 
 export const ROOMOTE_TASK_COMPATIBILITY_ACTIONS = [
-  ...ROOMOTE_TASK_INSPECTION_ACTIONS,
+  'search_tasks',
+  'get_compute_logs',
   'launch',
   'cancel',
-  'send_message',
   'list_environments',
 ] as const;
 
 export const ROOMOTE_MEMBER_MANAGEMENT_ACTIONS = [
-  ...ROOMOTE_SESSION_MANAGEMENT_ACTIONS,
+  ...ROOMOTE_SESSION_DEFAULT_ACTIONS,
   ...ROOMOTE_TASK_COMPATIBILITY_ACTIONS,
 ] as const;
 
+export const ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION =
+  'The Session or task action to perform. Call list_environments immediately before launch.';
+
+export function shouldSearchTasks(input: {
+  action: 'search' | 'search_tasks';
+  pullRequest?: string;
+  status?: string;
+}): boolean {
+  return (
+    input.action === 'search_tasks' ||
+    Boolean(input.pullRequest) ||
+    input.status === 'completed' ||
+    input.status === 'all'
+  );
+}
+
+export function resolveRoomoteCommunicationTarget(input: {
+  taskId?: string;
+  sessionId?: string;
+}): { kind: 'task' | 'session'; id: string } | null {
+  const taskId = input.taskId?.trim();
+  if (taskId) return { kind: 'task', id: taskId };
+  return input.sessionId ? { kind: 'session', id: input.sessionId } : null;
+}
+
 export const roomoteManagementFieldSchemas = {
   ...roomoteTaskInspectionFieldSchemas,
+  taskId: z
+    .string()
+    .optional()
+    .describe(
+      'Optional concrete task ID. When provided to get_summary, get_messages, or send_message, targets that task instead of a Session. Required for task-only controls such as get_compute_logs and cancel.',
+    ),
   sessionId: z
     .string()
     .uuid()
     .optional()
-    .describe('Canonical Roomote session ID for session inspection actions'),
-  sessionStatus: z
-    .enum(SESSION_STATUSES)
+    .describe(
+      'Canonical Roomote Session ID for get_summary, get_messages, or send_message when taskId is omitted',
+    ),
+  status: z
+    .enum([...SESSION_STATUSES, 'completed', 'all'])
     .optional()
-    .describe('Filter sessions by current status (for search_sessions)'),
+    .describe(
+      'Filter Sessions by active, needs_input, blocked, or ready for search; search_tasks also accepts completed or all',
+    ),
   message: z
     .string()
     .optional()
-    .describe(
-      'Message text for start_session or a follow-up message for send_message',
-    ),
+    .describe('Initial request for start, or follow-up text for send_message'),
   prompt: z
     .string()
     .optional()
@@ -68,10 +99,11 @@ export const roomoteManagementFieldSchemas = {
 } satisfies Record<string, z.ZodTypeAny>;
 
 export const ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION =
-  'Create and inspect Roomote sessions, with direct task operations retained for compatibility. ' +
-  'Use start_session for new work, search_sessions to find existing work, and get_session_summary or get_session_messages to inspect a session and its child tasks. ' +
-  'Use the task-oriented search, get_summary, get_compute_logs, get_messages, launch, cancel, and send_message actions only when a direct task operation is specifically required. ' +
-  'For get_messages and send_message, taskId may still be a task ID, canonical Roomote session ID, or Fast conversation ID during migration.';
+  'Manage Roomote Sessions by default, with direct task operations retained for compatibility. ' +
+  'Use start to begin new work in a Session and search to find Sessions. ' +
+  'Use get_summary, get_messages, or send_message with sessionId to continue an existing Session. ' +
+  'To communicate with a specific coding task instead, pass its concrete taskId to get_summary, get_messages, or send_message; taskId takes precedence when both IDs are present. ' +
+  'Use search_tasks, get_compute_logs, launch, cancel, list_models, or update_models only for explicit task-level inspection and control.';
 
 export interface RoomoteSessionChildTask {
   taskId: string;

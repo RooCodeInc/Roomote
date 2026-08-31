@@ -4,8 +4,11 @@ import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
   ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
+  ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION,
   ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
+  resolveRoomoteCommunicationTarget,
   roomoteManagementFieldSchemas,
+  shouldSearchTasks,
 } from '@roomote/types';
 
 import { environmentsRouter } from '../environments';
@@ -38,7 +41,9 @@ function invokeMemberApi(
 }
 
 const manageTasksInputSchema = {
-  action: z.enum(ROOMOTE_MEMBER_MANAGEMENT_ACTIONS),
+  action: z
+    .enum(ROOMOTE_MEMBER_MANAGEMENT_ACTIONS)
+    .describe(ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION),
   ...roomoteManagementFieldSchemas,
 } satisfies Record<string, z.ZodTypeAny>;
 
@@ -61,10 +66,10 @@ export function registerRoomoteMemberTools(
     },
     async (params) => {
       switch (params.action) {
-        case 'start_session': {
+        case 'start': {
           if (!params.message?.trim()) {
             return toolError({
-              error: 'message is required for start_session',
+              error: 'message is required for start',
             });
           }
           return resultFromApi(
@@ -75,10 +80,32 @@ export function registerRoomoteMemberTools(
             }),
           );
         }
-        case 'search_sessions': {
+        case 'search': {
+          if (
+            shouldSearchTasks({
+              action: 'search',
+              pullRequest: params.pullRequest,
+              status: params.status,
+            })
+          ) {
+            const query = new URLSearchParams();
+            if (params.query) query.set('query', params.query);
+            if (params.status) query.set('status', params.status);
+            if (params.pullRequest) {
+              query.set('pullRequest', params.pullRequest);
+            }
+            if (params.limit) {
+              query.set('limit', String(Math.min(params.limit, 100)));
+            }
+            if (params.cursor) query.set('cursor', params.cursor);
+            const suffix = query.size > 0 ? `?${query.toString()}` : '';
+            return resultFromApi(
+              await invokeMemberApi(auth, `/tasks${suffix}`),
+            );
+          }
           const query = new URLSearchParams();
           if (params.query) query.set('query', params.query);
-          if (params.sessionStatus) query.set('status', params.sessionStatus);
+          if (params.status) query.set('status', params.status);
           if (params.limit)
             query.set('limit', String(Math.min(params.limit, 100)));
           if (params.cursor) query.set('cursor', params.cursor);
@@ -87,28 +114,7 @@ export function registerRoomoteMemberTools(
             await invokeMemberApi(auth, `/sessions${suffix}`),
           );
         }
-        case 'get_session_summary':
-        case 'get_session_messages': {
-          if (!params.sessionId) {
-            return toolError({
-              error: `sessionId is required for ${params.action}`,
-            });
-          }
-          const actionPath =
-            params.action === 'get_session_summary' ? 'summary' : 'messages';
-          const query = new URLSearchParams();
-          if (params.action === 'get_session_messages' && params.limit) {
-            query.set('limit', String(params.limit));
-          }
-          const suffix = query.size > 0 ? `?${query.toString()}` : '';
-          return resultFromApi(
-            await invokeMemberApi(
-              auth,
-              `/sessions/${encodeURIComponent(params.sessionId)}/${actionPath}${suffix}`,
-            ),
-          );
-        }
-        case 'search': {
+        case 'search_tasks': {
           const query = new URLSearchParams();
           if (params.query) query.set('query', params.query);
           if (params.status) query.set('status', params.status);
@@ -120,18 +126,31 @@ export function registerRoomoteMemberTools(
           return resultFromApi(await invokeMemberApi(auth, `/tasks${suffix}`));
         }
         case 'get_summary':
-        case 'get_compute_logs':
         case 'get_messages': {
-          if (!params.taskId?.trim()) {
+          const target = resolveRoomoteCommunicationTarget(params);
+          if (!target) {
             return toolError({
-              error: `taskId is required for ${params.action}`,
+              error: `sessionId is required for ${params.action} when taskId is omitted`,
             });
           }
-          const actionPath = {
-            get_summary: 'summary',
-            get_compute_logs: 'compute_logs',
-            get_messages: 'messages',
-          }[params.action];
+          if (target.kind === 'task') {
+            const actionPath =
+              params.action === 'get_summary' ? 'summary' : 'messages';
+            const query = new URLSearchParams();
+            if (params.action === 'get_messages') {
+              query.set('order', 'desc');
+              if (params.limit) query.set('limit', String(params.limit));
+            }
+            const suffix = query.size > 0 ? `?${query.toString()}` : '';
+            return resultFromApi(
+              await invokeMemberApi(
+                auth,
+                `/tasks/${encodeURIComponent(target.id)}/${actionPath}${suffix}`,
+              ),
+            );
+          }
+          const actionPath =
+            params.action === 'get_summary' ? 'summary' : 'messages';
           const query = new URLSearchParams();
           if (params.action === 'get_messages') {
             query.set('order', 'desc');
@@ -141,7 +160,20 @@ export function registerRoomoteMemberTools(
           return resultFromApi(
             await invokeMemberApi(
               auth,
-              `/tasks/${encodeURIComponent(params.taskId)}/${actionPath}${suffix}`,
+              `/sessions/${encodeURIComponent(target.id)}/${actionPath}${suffix}`,
+            ),
+          );
+        }
+        case 'get_compute_logs': {
+          if (!params.taskId?.trim()) {
+            return toolError({
+              error: 'taskId is required for get_compute_logs',
+            });
+          }
+          return resultFromApi(
+            await invokeMemberApi(
+              auth,
+              `/tasks/${encodeURIComponent(params.taskId)}/compute_logs`,
             ),
           );
         }
@@ -186,16 +218,20 @@ export function registerRoomoteMemberTools(
           );
         }
         case 'send_message': {
-          if (!params.taskId?.trim()) {
-            return toolError({ error: 'taskId is required for send_message' });
-          }
           if (!params.message?.trim()) {
             return toolError({ error: 'message is required for send_message' });
+          }
+          const target = resolveRoomoteCommunicationTarget(params);
+          if (!target) {
+            return toolError({
+              error:
+                'sessionId is required for send_message when taskId is omitted',
+            });
           }
           return resultFromApi(
             await invokeMemberApi(
               auth,
-              `/tasks/${encodeURIComponent(params.taskId)}/send_message`,
+              `/${target.kind === 'task' ? 'tasks' : 'sessions'}/${encodeURIComponent(target.id)}/send_message`,
               {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },

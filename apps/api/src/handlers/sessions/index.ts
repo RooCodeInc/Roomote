@@ -38,7 +38,10 @@ import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
 import { logHandlerError } from '../utils';
 import { getLatestTaskRunsByTaskIds } from '../tasks/helpers';
-import { getFastSessionMessagesForUser } from '../tasks/fastSessionCommunication';
+import {
+  getFastSessionMessagesForUser,
+  sendMessageToFastSessionForUser,
+} from '../tasks/fastSessionCommunication';
 
 type SessionContext = Context<{
   Variables: Variables & { mcpAuth: McpAuth };
@@ -78,16 +81,48 @@ async function findAccessibleSession(userId: string, sessionId: string) {
     .from(sessions)
     .where(
       and(
-        or(
-          eq(sessions.id, sessionId),
-          eq(sessions.fastConversationId, sessionId),
-        ),
+        eq(sessions.id, sessionId),
         eq(sessions.visibility, 'visible'),
         sessionAccessCondition(userId),
       ),
     )
     .limit(1);
   return session ?? null;
+}
+
+async function sendSessionMessage(c: SessionContext): Promise<Response> {
+  const userId = c.get('mcpAuth').userId;
+  if (!userId) return c.json({ error: 'User context required' }, 403);
+  const sessionId = c.req.param('sessionId');
+  if (!sessionId) return c.json({ error: 'sessionId is required' }, 400);
+
+  let body: { message?: string };
+  try {
+    body = (await c.req.json()) as { message?: string };
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+  const message = body.message?.trim();
+  if (!message) return c.json({ error: 'message is required' }, 400);
+
+  try {
+    const session = await findAccessibleSession(userId, sessionId);
+    if (!session) return c.json({ error: 'Session not found' }, 404);
+    if (!session.fastConversationId) {
+      return c.json({ error: 'Session has no conversation to continue' }, 409);
+    }
+    const result = await sendMessageToFastSessionForUser({
+      sessionId: session.fastConversationId,
+      userId,
+      message,
+    });
+    if (result.success) return c.json(result);
+    const { status, ...errorBody } = result;
+    return c.json(errorBody, { status });
+  } catch (error) {
+    logHandlerError('sendSessionMessage', error);
+    return c.json({ error: 'Failed to send session message' }, 500);
+  }
 }
 
 async function getChildTasks(sessionIds: string[]) {
@@ -378,3 +413,4 @@ sessionsRouter.get('/', searchSessions);
 sessionsRouter.post('/', startSession);
 sessionsRouter.get('/:sessionId/summary', getSessionSummary);
 sessionsRouter.get('/:sessionId/messages', getSessionMessages);
+sessionsRouter.post('/:sessionId/send_message', sendSessionMessage);

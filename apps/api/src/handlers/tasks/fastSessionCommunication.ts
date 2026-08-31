@@ -7,7 +7,6 @@ import {
   desc,
   eq,
   fastAgentMessages,
-  sessions,
   sql,
 } from '@roomote/db/server';
 import {
@@ -24,24 +23,16 @@ import { z } from 'zod';
 
 const canonicalFastSessionIdSchema = z.string().uuid();
 
-async function resolveFastConversationId(sessionId: string) {
-  if (!canonicalFastSessionIdSchema.safeParse(sessionId).success) return null;
-  const [unifiedSession] = await db
-    .select({ fastConversationId: sessions.fastConversationId })
-    .from(sessions)
-    .where(eq(sessions.id, sessionId))
-    .limit(1);
-  return unifiedSession?.fastConversationId ?? sessionId;
-}
-
 export async function getFastSessionMessagesForUser(params: {
   sessionId: string;
   userId: string;
   limit?: number;
   order: 'asc' | 'desc';
 }) {
-  const fastConversationId = await resolveFastConversationId(params.sessionId);
-  if (!fastConversationId) return null;
+  if (!canonicalFastSessionIdSchema.safeParse(params.sessionId).success) {
+    return null;
+  }
+  const fastConversationId = params.sessionId;
   if (
     !(await canUserAccessFastAgentSession({
       sessionId: fastConversationId,
@@ -119,10 +110,10 @@ export async function sendMessageToFastSessionForUser(params: {
   | { success: true; result: { sessionId: string; queued: true } }
   | { success: false; status: 404 | 409; error: string }
 > {
-  const fastConversationId = await resolveFastConversationId(params.sessionId);
-  if (!fastConversationId) {
+  if (!canonicalFastSessionIdSchema.safeParse(params.sessionId).success) {
     return { success: false, status: 404, error: 'Task not found' };
   }
+  const fastConversationId = params.sessionId;
   if (
     !(await canUserAccessFastAgentSession({
       sessionId: fastConversationId,

@@ -206,6 +206,7 @@ describe('MCP session routes', () => {
       sourceTrigger: 'message',
     });
     createdSessionIds.push(session.id);
+    mocks.queueFastAgentSurfaceReply.mockResolvedValue(true);
     await db.insert(fastAgentMessages).values([
       {
         conversationId: conversation!.id,
@@ -263,5 +264,31 @@ describe('MCP session routes', () => {
     expect(body.messages[0]?.text).not.toBe('Unbounded output');
     expect(body.messages[0]?.metadata).toHaveProperty('truncation');
     expect(body.messages[1]?.text).toBe('Older message');
+
+    const sendResponse = await createApp(owner.id).request(
+      `/sessions/${session.id}/send_message`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'Continue this Session' }),
+      },
+    );
+    expect(sendResponse.status).toBe(200);
+    expect(mocks.queueFastAgentSurfaceReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: conversation!.id,
+        question: 'Continue this Session',
+      }),
+    );
+
+    const legacyIdResponse = await createApp(owner.id).request(
+      `/sessions/${conversation!.id}/send_message`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'Wrong identifier kind' }),
+      },
+    );
+    expect(legacyIdResponse.status).toBe(404);
   });
 });
