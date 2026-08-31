@@ -65,6 +65,9 @@ export function createLoggedProxyResponseBody(options: {
   logPrefix: string;
   getLogFields: () => Record<string, ProxyResponseLogFieldValue>;
   trackingContext?: LongLivedProxyStreamTrackingContext;
+  onComplete?: () => void;
+  onCancel?: () => void;
+  onError?: () => void;
 }): ReadableStream<Uint8Array> | null {
   const { body, logPrefix, getLogFields, trackingContext } = options;
 
@@ -113,6 +116,7 @@ export function createLoggedProxyResponseBody(options: {
           releaseTrackingIfNeeded();
           releaseReader();
           controller.close();
+          options.onComplete?.();
           return;
         }
 
@@ -132,6 +136,7 @@ export function createLoggedProxyResponseBody(options: {
         releaseTrackingIfNeeded();
         releaseReader();
         controller.error(error);
+        options.onError?.();
       }
     },
     async cancel(reason) {
@@ -143,6 +148,7 @@ export function createLoggedProxyResponseBody(options: {
 
       releaseTrackingIfNeeded();
       releaseReader();
+      options.onCancel?.();
     },
   });
 }

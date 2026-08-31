@@ -10,6 +10,7 @@ const {
   mockGetGitHubCopilotAccessToken,
   mockGetFreshXaiAccessToken,
   mockRecordLlmUsage,
+  mockEnqueueCloudInferenceUsage,
 } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
   mockResolveModelProviderEnvValue: vi.fn(),
@@ -17,6 +18,7 @@ const {
   mockGetGitHubCopilotAccessToken: vi.fn(),
   mockGetFreshXaiAccessToken: vi.fn(),
   mockRecordLlmUsage: vi.fn(),
+  mockEnqueueCloudInferenceUsage: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -38,6 +40,7 @@ vi.mock('@roomote/db/server', () => ({
   getFreshChatGptAccessToken: mockGetFreshChatGptAccessToken,
   getGitHubCopilotAccessToken: mockGetGitHubCopilotAccessToken,
   getFreshXaiAccessToken: mockGetFreshXaiAccessToken,
+  enqueueCloudInferenceUsage: mockEnqueueCloudInferenceUsage,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -965,6 +968,12 @@ describe('inference gateway', () => {
   });
 
   it('records a positive LiteLLM response cost without delaying the proxy', async () => {
+    vi.stubEnv(
+      'ROOMOTE_CLOUD_USAGE_URL',
+      'https://cloud.example/internal/v1/usage',
+    );
+    vi.stubEnv('ROOMOTE_CLOUD_TOKEN_ID', crypto.randomUUID());
+    vi.stubEnv('ROOMOTE_CLOUD_TOKEN_SECRET', 'derived-service-credential');
     stubUpstreamFetch(
       new Response('data: [DONE]\n\n', {
         headers: {
@@ -990,6 +999,7 @@ describe('inference gateway', () => {
     );
 
     expect(response.status).toBe(200);
+    await response.text();
     await vi.waitFor(() => {
       expect(mockRecordLlmUsage).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1000,6 +1010,15 @@ describe('inference gateway', () => {
           modelId: 'litellm/coding',
           costMicroUsd: 321,
           costSource: 'litellm_gateway',
+        }),
+      );
+      expect(mockEnqueueCloudInferenceUsage).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          provider: 'litellm',
+          modelId: 'litellm/coding',
+          providerReportedCostMicroUsd: 321,
+          credentialOwner: 'tenant',
         }),
       );
     });
@@ -1349,6 +1368,36 @@ describe('inference gateway', () => {
     );
     expect(response.headers.get('content-type')).toBe('text/event-stream');
     expect(await response.text()).toBe(upstreamBody);
+  });
+
+  it('does not delay or fail inference when the usage outbox write fails', async () => {
+    vi.stubEnv(
+      'ROOMOTE_CLOUD_USAGE_URL',
+      'https://cloud.example/internal/v1/usage',
+    );
+    vi.stubEnv('ROOMOTE_CLOUD_TOKEN_ID', crypto.randomUUID());
+    vi.stubEnv('ROOMOTE_CLOUD_TOKEN_SECRET', 'derived-service-credential');
+    mockEnqueueCloudInferenceUsage.mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+    stubUpstreamFetch(new Response('complete', { status: 200 }));
+
+    const response = await postMessages(createApp(createRunToken()));
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('complete');
+    await vi.waitFor(() =>
+      expect(mockEnqueueCloudInferenceUsage).toHaveBeenCalledOnce(),
+    );
+  });
+
+  it('does not enqueue central usage when Cloud collection is disabled', async () => {
+    stubUpstreamFetch(new Response('complete', { status: 200 }));
+
+    const response = await postMessages(createApp(createRunToken()));
+
+    expect(await response.text()).toBe('complete');
+    expect(mockEnqueueCloudInferenceUsage).not.toHaveBeenCalled();
   });
 
   it('does not change cache directives on non-streaming responses', async () => {

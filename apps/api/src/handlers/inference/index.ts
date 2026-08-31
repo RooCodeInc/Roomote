@@ -8,6 +8,7 @@ import {
 import {
   db,
   DevLoginInferencePlaceholderError,
+  enqueueCloudInferenceUsage,
   eq,
   taskRuns,
 } from '@roomote/db/server';
@@ -26,6 +27,44 @@ import {
   resolveGatewayUpstream,
   type GatewayUpstreamResolution,
 } from './registry';
+
+function enqueueCentralInferenceUsage(options: {
+  usageId: string;
+  provider: string;
+  modelId?: string | null;
+  startedAt: number;
+  outcome: 'succeeded' | 'provider_error' | 'transport_error' | 'canceled';
+  providerReportedCostMicroUsd?: number;
+}): void {
+  if (
+    !process.env.ROOMOTE_CLOUD_USAGE_URL ||
+    !process.env.ROOMOTE_CLOUD_TOKEN_ID ||
+    !process.env.ROOMOTE_CLOUD_TOKEN_SECRET
+  )
+    return;
+  void enqueueCloudInferenceUsage(db, {
+    kind: 'inference',
+    schemaVersion: 1,
+    usageId: options.usageId,
+    provider: options.provider,
+    modelId: options.modelId ?? null,
+    usageType: 'inference',
+    latencyMs: Math.max(0, Date.now() - options.startedAt),
+    outcome: options.outcome,
+    completedAt: new Date().toISOString(),
+    credentialOwner:
+      options.provider === ROOMOTE_INFERENCE_PROVIDER_ID ? 'roomote' : 'tenant',
+    providerReportedCostMicroUsd: options.providerReportedCostMicroUsd,
+  }).catch((error) => {
+    console.warn(
+      formatSingleLineLog('Failed to enqueue central inference usage', {
+        usageId: options.usageId,
+        provider: options.provider,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  });
+}
 
 /**
  * Client headers never forwarded upstream. The client's own credential
@@ -325,6 +364,7 @@ export const inference = new Hono<{ Variables: Variables }>();
 inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
   const startedAt = Date.now();
   const requestId = crypto.randomUUID();
+  const usageId = crypto.randomUUID();
   const method = c.req.method;
   const providerId = c.req.param('provider');
   const pathname = new URL(c.req.url).pathname;
@@ -447,6 +487,21 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
         ...(useDuplexHalf ? { duplex: 'half' as const } : {}),
       },
     );
+    const providerCost = Number(
+      upstreamResponse.headers.get('x-litellm-response-cost'),
+    );
+    const providerReportedCostMicroUsd =
+      Number.isFinite(providerCost) && providerCost > 0
+        ? Math.round(providerCost * 1_000_000)
+        : undefined;
+    const modelGroup = upstreamResponse.headers
+      .get('x-litellm-model-group')
+      ?.trim();
+    const modelId = modelGroup
+      ? providerId === 'litellm'
+        ? `litellm/${modelGroup}`
+        : modelGroup
+      : null;
 
     if (providerId === 'litellm') {
       recordLiteLlmResponseCost({
@@ -483,31 +538,56 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
       }
     }
 
-    return new Response(
-      createLoggedProxyResponseBody({
-        body: upstreamResponse.body,
-        logPrefix: `${logPrefix} Upstream response stream failed`,
-        getLogFields: () => ({
-          requestId,
-          method,
-          runId: auth.runId,
-          upstreamPath,
-          status: upstreamResponse.status,
-          elapsedMs: Date.now() - startedAt,
-        }),
-        trackingContext: {
-          route: `inference:${providerId}`,
-          method,
-          path: pathname,
-          requestId,
-        },
-      }),
-      {
+    let usageSettled = false;
+    const settleUsage = (
+      outcome: 'succeeded' | 'provider_error' | 'canceled',
+    ) => {
+      if (usageSettled) return;
+      usageSettled = true;
+      enqueueCentralInferenceUsage({
+        usageId,
+        provider: providerId,
+        modelId,
+        startedAt,
+        outcome,
+        providerReportedCostMicroUsd,
+      });
+    };
+    const responseBody = createLoggedProxyResponseBody({
+      body: upstreamResponse.body,
+      logPrefix: `${logPrefix} Upstream response stream failed`,
+      getLogFields: () => ({
+        requestId,
+        method,
+        runId: auth.runId,
+        upstreamPath,
         status: upstreamResponse.status,
-        headers: buildInferenceResponseHeaders(upstreamResponse.headers),
+        elapsedMs: Date.now() - startedAt,
+      }),
+      trackingContext: {
+        route: `inference:${providerId}`,
+        method,
+        path: pathname,
+        requestId,
       },
-    );
+      onComplete: () =>
+        settleUsage(upstreamResponse.ok ? 'succeeded' : 'provider_error'),
+      onError: () => settleUsage('provider_error'),
+      onCancel: () => settleUsage('canceled'),
+    });
+    if (!responseBody)
+      settleUsage(upstreamResponse.ok ? 'succeeded' : 'provider_error');
+    return new Response(responseBody, {
+      status: upstreamResponse.status,
+      headers: buildInferenceResponseHeaders(upstreamResponse.headers),
+    });
   } catch (error) {
+    enqueueCentralInferenceUsage({
+      usageId,
+      provider: providerId,
+      startedAt,
+      outcome: 'transport_error',
+    });
     console.error(
       formatSingleLineLog(`${logPrefix} Upstream fetch failed`, {
         requestId,

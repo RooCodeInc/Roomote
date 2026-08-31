@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   resolveRoomoteCloudBackend,
   resolveRoomoteCloudModalAppName,
@@ -408,6 +410,12 @@ export class RoomoteController extends BaseController {
   private buildSandboxTags(): Record<string, string> {
     return {
       app_environment: this.appEnv,
+      ...(Env.ROOMOTE_CLOUD_SLUG
+        ? {
+            roomote_deployment_id: Env.ROOMOTE_CLOUD_SLUG,
+            roomote_usage_id: randomUUID(),
+          }
+        : {}),
     };
   }
 

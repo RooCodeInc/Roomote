@@ -261,6 +261,7 @@ const serverSchema = {
   // pair above carries a derived per-tenant broker credential instead of
   // Modal workspace tokens.
   ROOMOTE_CLOUD_BROKER_URL: z.string().url().optional(),
+  ROOMOTE_CLOUD_USAGE_URL: z.string().url().optional(),
   MODAL_ENDPOINT: z.string().optional(),
   MODAL_ENVIRONMENT: z.string().optional(),
   MODAL_APP_NAME: z.string().optional(),
@@ -610,6 +611,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'ROOMOTE_CLOUD_BACKEND',
   'ROOMOTE_CLOUD_SLUG',
   'ROOMOTE_CLOUD_APP_NAME',
+  'ROOMOTE_CLOUD_USAGE_URL',
   'MODAL_ENDPOINT',
   'MODAL_ENVIRONMENT',
   'MODAL_APP_NAME',
