@@ -104,6 +104,7 @@ import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
 import {
   FastAgentProcessShutdownError,
+  markFastAgentShutdownCloseoutPending,
   markFastAgentShutdownCloseoutSettled,
 } from './fast-agent-turn-lock';
 import {
@@ -2233,6 +2234,9 @@ export async function answerFastAgentQuestion({
           executeMcpTool,
         );
         try {
+          if (signal) {
+            markFastAgentShutdownCloseoutPending(signal);
+          }
           const result = await runFastAgentInferenceWithRetries(
             async () => {
               const providerRetryAbortController = new AbortController();
