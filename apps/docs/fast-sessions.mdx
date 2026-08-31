@@ -38,11 +38,26 @@ Execution cards show their status, workspace, pull requests, artifacts, latest
 error, and cost. Select a card to open the lightweight details panel, or choose
 **Open full workspace** for terminal, logs, diff, and preview tools.
 
-The Sessions page supports list and board views, filters, pins, recent Sessions,
-and unread indicators. Search matches Session and task titles, repositories,
-and conversation text. Queries of at least three characters include transcript
-matches and show a highlighted excerpt. **Ready** is not a terminal state: you
-can reply or start another execution in the same Session later.
+When delegated tasks keep working after the conversation becomes idle, the
+timeline shows the live task count. Select that activity to open the **Tasks**
+panel. The **Artifacts** panel combines the latest uploaded outputs from every
+task in the Session, labels which task produced each item, and opens previews
+without leaving the Session. Individual task details continue to show their own
+artifacts.
+
+**Session info** shows the total inference cost for the conversation and its
+attached tasks. Open the cost breakdown to separate direct Session orchestration
+from each task's usage.
+
+The Sessions page supports list and board views, pins, recent Sessions, and
+unread indicators. Common scope, status, and time filters stay visible; turn on
+advanced filters for user, environment, pull request, model, and source. Active
+advanced filters remain visible until you clear them, and Roomote remembers the
+selected list or board view. Search matches Session and task titles,
+repositories, and conversation text. Queries of at least three characters
+include transcript matches and show a highlighted excerpt. **Ready** is not a
+terminal state: you can reply or start another execution in the same Session
+later.
 
 The transcript renders prompts, replies, and tool activity in real time with a
 generated title that updates as the Session evolves.

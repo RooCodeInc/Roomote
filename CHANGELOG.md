@@ -32,6 +32,8 @@ Roomote 1.0 makes Fast the default entry point for conversations, enables Memory
 - Finish setup in one Roomote Session that launches and tracks selected starter tasks, with clearer guidance about the value and limits of hosted trial inference.
 - Make Sessions the primary workspace for Roomote work, with dashboard launch and search, recent-session navigation, delegated execution details, artifacts, reviews, costs, stable titles, and responsive mobile layouts in one continuous conversation.
 - Browse current and previous Roomote releases directly in the update dialog, with the latest release expanded and newer remotely detected updates kept visible even when their notes are not yet available in the running image.
+- Open current and previous Roomote release notes directly from About Roomote in the existing in-app release-history dialog.
+- Follow delegated work more clearly in Sessions with live nested-task activity, a conversation-wide artifact gallery, cleaner task details and navigation, and modernized search, filter, board, and list controls.
 
 ### Patch changes
 
@@ -43,6 +45,9 @@ Roomote 1.0 makes Fast the default entry point for conversations, enables Memory
 - Keep Slack Fast thread titles synchronized with generated and manually edited Session titles instead of leaving conversations labeled `Thread`.
 - Show platform issue alerts sent directly to Slack deployment admins with the same actionable automation card used for configured alert destinations.
 - Keep expanded tool-call details readable in Task and Fast transcripts by wrapping long YAML values within the transcript instead of clipping or overflowing them.
+- Keep Session context accurate by including attached task inference spend in total costs, opening inline task links in their owning Session, and hiding running or artifact states when they no longer apply.
+- Keep Slack-backed Sessions and automations reliable by deferring silent custom-automation delivery, suppressing no-op placeholders, validating Fast titles without retry loops, restoring clear Configure actions, and using the correct Merge Announcer icon.
+- Restore required runtime dependencies in standalone deployment images while continuing to bundle in-app release history.
 
 ## 0.45.1 (2026-08-29)
 
