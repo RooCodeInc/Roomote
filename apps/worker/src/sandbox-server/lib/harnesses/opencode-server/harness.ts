@@ -281,6 +281,8 @@ interface ActiveOpenCodeSubagentWatchdog {
   // spawn's task tool part is still unsettled; cleared by settlement or by any
   // further child event. See handleChildSessionTerminal.
   settlementTimer: ReturnType<typeof setTimeout> | null;
+  settlementPending: boolean;
+  incompleteSettlementChecks: number;
   updatePayload: Record<string, unknown>;
   activitySeenChildToolCallIds: Set<string>;
   activityLastAction: string | null;
@@ -319,6 +321,7 @@ const DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS = 30_000;
 // toward waiting. Any further child event cancels the pending recovery, and
 // expiry re-verifies the child's state before acting.
 const DEFAULT_SUBAGENT_SETTLEMENT_GRACE_MS = 10 * 60_000;
+const MAX_INCOMPLETE_SUBAGENT_SETTLEMENT_RECHECKS = 1;
 const DEFAULT_VISUAL_PROOF_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_QUEUED_PROMPT_RETRY_DELAY_MS = 1_000;
 const MAX_PROGRESS_COMMAND_CHARS = 240;
@@ -2622,6 +2625,8 @@ export class OpenCodeServerHarness
       childSessionId: input.childSessionId,
       startedAtMs: Date.now(),
       settlementTimer: null,
+      settlementPending: false,
+      incompleteSettlementChecks: 0,
       updatePayload: input.updatePayload,
       activitySeenChildToolCallIds: new Set(),
       activityLastAction: null,
@@ -2794,10 +2799,11 @@ export class OpenCodeServerHarness
       return;
     }
 
-    if (watchdog.settlementTimer) {
+    if (watchdog.settlementPending) {
       return;
     }
 
+    watchdog.settlementPending = true;
     const timer = setTimeout(() => {
       void this.recoverUnsettledSpawn(eventKey);
     }, this.subagentSettlementGraceMs);
@@ -2811,16 +2817,20 @@ export class OpenCodeServerHarness
       ? this.activeSubagentWatchdogs.get(eventKey)
       : undefined;
 
-    if (watchdog?.settlementTimer) {
-      clearTimeout(watchdog.settlementTimer);
+    if (watchdog?.settlementPending) {
+      if (watchdog.settlementTimer) {
+        clearTimeout(watchdog.settlementTimer);
+      }
       watchdog.settlementTimer = null;
+      watchdog.settlementPending = false;
+      watchdog.incompleteSettlementChecks = 0;
     }
   }
 
   private async recoverUnsettledSpawn(eventKey: string): Promise<void> {
     const watchdog = this.activeSubagentWatchdogs.get(eventKey);
 
-    if (!watchdog) {
+    if (!watchdog?.settlementPending) {
       return;
     }
 
@@ -2832,14 +2842,11 @@ export class OpenCodeServerHarness
       return;
     }
 
-    // Verify before acting: abort only a child whose latest assistant message
-    // is completed — finished work with an unsettled spawn is a provable leak.
-    // An in-flight latest message means the child may still be producing (a
-    // silent revival whose busy transition we missed), and a failed lookup
-    // proves nothing; in both cases never abort — re-arm and check again.
-    // Bias: a false abort kills real work, an extra wait only delays recovery
-    // of an already-stuck spawn.
-    let childFinishedItsWork = false;
+    // A completed latest message proves the spawn leaked. An incomplete latest
+    // message can itself be stale after a provider timeout, so allow one extra
+    // grace window for a silent revival before trusting the terminal event.
+    // Failed lookups still prove nothing and keep waiting indefinitely.
+    let childState: 'finished' | 'incomplete' | 'unverified' = 'unverified';
 
     try {
       const messages = await this.client.messages({
@@ -2851,9 +2858,11 @@ export class OpenCodeServerHarness
         .reverse()
         .find((message) => message.info.role === 'assistant');
 
-      childFinishedItsWork =
+      childState =
         latestAssistantMessage === undefined ||
-        Boolean(latestAssistantMessage.info.time?.completed);
+        Boolean(latestAssistantMessage.info.time?.completed)
+          ? 'finished'
+          : 'incomplete';
     } catch (error) {
       this.logger.warn(
         `Could not verify OpenCode child session ${childSessionId} before recovering an unsettled spawn; leaving it running: ${
@@ -2862,14 +2871,26 @@ export class OpenCodeServerHarness
       );
     }
 
-    if (!childFinishedItsWork) {
-      if (this.disposed || !this.activeSubagentWatchdogs.has(eventKey)) {
+    if (
+      childState === 'unverified' ||
+      (childState === 'incomplete' &&
+        watchdog.incompleteSettlementChecks <
+          MAX_INCOMPLETE_SUBAGENT_SETTLEMENT_RECHECKS)
+    ) {
+      if (
+        this.disposed ||
+        !watchdog.settlementPending ||
+        !this.activeSubagentWatchdogs.has(eventKey)
+      ) {
         return;
       }
 
-      this.logger.warn(
-        `OpenCode subagent child session ${childSessionId} reported terminal but its latest assistant message is not completed; not aborting, re-checking in ${this.subagentSettlementGraceMs}ms toolCallId=${watchdog.toolCallId}`,
-      );
+      if (childState === 'incomplete') {
+        watchdog.incompleteSettlementChecks += 1;
+        this.logger.warn(
+          `OpenCode subagent child session ${childSessionId} reported terminal but its latest assistant message is not completed; not aborting, re-checking in ${this.subagentSettlementGraceMs}ms toolCallId=${watchdog.toolCallId}`,
+        );
+      }
       const timer = setTimeout(() => {
         void this.recoverUnsettledSpawn(eventKey);
       }, this.subagentSettlementGraceMs);
@@ -2880,7 +2901,10 @@ export class OpenCodeServerHarness
 
     // The spawn may have settled while the verification round-tripped; a
     // removed tracker means there is nothing left to recover.
-    if (!this.activeSubagentWatchdogs.has(eventKey)) {
+    if (
+      !watchdog.settlementPending ||
+      !this.activeSubagentWatchdogs.has(eventKey)
+    ) {
       return;
     }
 
@@ -2889,7 +2913,7 @@ export class OpenCodeServerHarness
     this.stopSubagentWatchdog(eventKey);
 
     this.logger.warn(
-      `OpenCode subagent child session ${childSessionId} finished but its task tool call did not settle within ${this.subagentSettlementGraceMs}ms toolCallId=${watchdog.toolCallId} agentType=${
+      `OpenCode subagent child session ${childSessionId} reported terminal but its task tool call did not settle after ${watchdog.incompleteSettlementChecks + 1} verification window(s) of ${this.subagentSettlementGraceMs}ms toolCallId=${watchdog.toolCallId} agentType=${
         watchdog.agentType ?? 'unknown'
       } title=${watchdog.title}; aborting the child session so the spawn settles`,
     );
