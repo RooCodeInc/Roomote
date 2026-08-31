@@ -12,6 +12,7 @@ import {
   buildFastAgentTurnLockKey,
   FastAgentProcessShutdownError,
   FastAgentTurnLockLostError,
+  markFastAgentShutdownCloseoutPending,
   markFastAgentShutdownCloseoutSettled,
 } from '../fast-agent-turn-lock';
 
@@ -204,8 +205,8 @@ describe('Fast conversation turn locking', () => {
     }
   });
 
-  it('aborts active turns and rejects a lock acquired during process shutdown', async () => {
-    const releaseRedisLocks = Array.from({ length: 2 }, () =>
+  it('releases pre-answer locks while waiting for active answer closeout during shutdown', async () => {
+    const releaseRedisLocks = Array.from({ length: 3 }, () =>
       Object.assign(vi.fn().mockResolvedValue(undefined), {
         renew: vi.fn().mockResolvedValue(true),
         renewDetailed: vi.fn().mockResolvedValue('renewed'),
@@ -214,6 +215,7 @@ describe('Fast conversation turn locking', () => {
     let finishSecondAcquisition: ((value: unknown) => void) | undefined;
     acquireRedisLockMock
       .mockResolvedValueOnce(releaseRedisLocks[0])
+      .mockResolvedValueOnce(releaseRedisLocks[1])
       .mockImplementationOnce(
         () =>
           new Promise((resolve) => {
@@ -228,12 +230,21 @@ describe('Fast conversation turn locking', () => {
         replyTarget: { channelId: 'channel-1', threadId: 'conversation-1' },
       },
     });
-    const queuedAcquisition = acquireFastAgentTurnLock({
+    const preAnswerLock = await acquireFastAgentTurnLock({
       conversation: {
         surface: 'discord',
         workspaceId: 'workspace-2',
         conversationId: 'conversation-2',
         replyTarget: { channelId: 'channel-2' },
+      },
+    });
+    markFastAgentShutdownCloseoutPending(firstLock!.signal);
+    const queuedAcquisition = acquireFastAgentTurnLock({
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'workspace-3',
+        conversationId: 'conversation-3',
+        replyTarget: { channelId: 'channel-3', threadId: 'conversation-3' },
       },
     });
     const shutdown = new FastAgentProcessShutdownError('SIGTERM');
@@ -244,14 +255,17 @@ describe('Fast conversation turn locking', () => {
     });
     await vi.waitFor(() => {
       expect(firstLock?.signal.reason).toBe(shutdown);
+      expect(preAnswerLock?.signal.reason).toBe(shutdown);
+      expect(releaseRedisLocks[1]).toHaveBeenCalledOnce();
     });
     expect(shutdownSettled).toBe(false);
     expect(releaseRedisLocks[0]).not.toHaveBeenCalled();
     markFastAgentShutdownCloseoutSettled(firstLock!.signal);
-    await expect(aborting).resolves.toBe(1);
+    await expect(aborting).resolves.toBe(2);
     expect(releaseRedisLocks[0]).toHaveBeenCalledOnce();
     await firstLock?.();
-    finishSecondAcquisition?.(releaseRedisLocks[1]);
+    await preAnswerLock?.();
+    finishSecondAcquisition?.(releaseRedisLocks[2]);
 
     await expect(queuedAcquisition).resolves.toBeNull();
     for (const releaseRedisLock of releaseRedisLocks) {

@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   captureInferenceContext: vi.fn(),
   captureInferenceAttemptOutcome: vi.fn(),
   captureTurnSettled: vi.fn(),
+  markShutdownCloseoutPending: vi.fn(),
+  markShutdownCloseoutSettled: vi.fn(),
   revokeMcpCapabilities: vi.fn(),
   reconcileRetryNotices: vi.fn(),
   getSessionForTask: vi.fn(),
@@ -164,6 +166,17 @@ vi.mock('../fast-agent-user-identity', () => ({
 
 vi.mock('../fast-agent-title', () => ({
   refreshFastAgentSessionTitle: mocks.refreshTitle,
+}));
+
+vi.mock('../fast-agent-turn-lock', () => ({
+  FastAgentProcessShutdownError: class extends Error {
+    constructor(public readonly signal: NodeJS.Signals) {
+      super(`Fast turn interrupted by API shutdown (${signal}).`);
+      this.name = 'FastAgentProcessShutdownError';
+    }
+  },
+  markFastAgentShutdownCloseoutPending: mocks.markShutdownCloseoutPending,
+  markFastAgentShutdownCloseoutSettled: mocks.markShutdownCloseoutSettled,
 }));
 
 import { buildFastSessionUrl } from '@roomote/communication';
@@ -1856,6 +1869,41 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     } finally {
       timeout.mockRestore();
     }
+  });
+
+  it('does not mark shutdown closeout pending while session setup is stalled', async () => {
+    const controller = new AbortController();
+    const shutdown = new FastAgentProcessShutdownError('SIGTERM');
+    let finishSessionSetup:
+      | ((session: {
+          id: string;
+          compatibilityMessages: never[];
+          openCodeSessionId: null;
+        }) => void)
+      | undefined;
+    mocks.getSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSessionSetup = resolve;
+        }),
+    );
+
+    const answer = answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks(),
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(mocks.getSession).toHaveBeenCalledOnce());
+
+    controller.abort(shutdown);
+    expect(mocks.markShutdownCloseoutPending).not.toHaveBeenCalled();
+
+    finishSessionSetup?.({
+      id: 'conversation-1',
+      compatibilityMessages: [],
+      openCodeSessionId: null,
+    });
+    await expect(answer).rejects.toBe(shutdown);
   });
 
   it('passes image data URLs to the Fast model as image-capable file input', async () => {
