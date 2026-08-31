@@ -167,6 +167,7 @@ async function readGitResource(
 
 export async function loadFastAgentSettingsMarketplaceSnapshot(
   source: string,
+  executeGit = runGit,
 ): Promise<SettingsSkillMarketplaceSnapshot> {
   const sourceSegments = source.split('/');
   if (
@@ -181,8 +182,8 @@ export async function loadFastAgentSettingsMarketplaceSnapshot(
   );
   const repositoryDirectory = join(directory, 'repository.git');
   try {
-    await runGit(['init', '--bare', repositoryDirectory]);
-    await runGit([
+    await executeGit(['init', '--bare', repositoryDirectory]);
+    await executeGit([
       '-C',
       repositoryDirectory,
       'fetch',
@@ -193,10 +194,10 @@ export async function loadFastAgentSettingsMarketplaceSnapshot(
       'HEAD',
     ]);
     const revision = (
-      await runGit(['-C', repositoryDirectory, 'rev-parse', 'FETCH_HEAD'])
+      await executeGit(['-C', repositoryDirectory, 'rev-parse', 'FETCH_HEAD'])
     ).trim();
-    const tree = parseGitTree(
-      await runGit([
+    const markdownCandidates = parseGitTree(
+      await executeGit([
         '-C',
         repositoryDirectory,
         'ls-tree',
@@ -224,6 +225,23 @@ export async function loadFastAgentSettingsMarketplaceSnapshot(
             : 1;
       })
       .slice(0, SETTINGS_SKILL_MAX_FILES);
+    const tree =
+      markdownCandidates.length === 0
+        ? []
+        : parseGitTree(
+            await executeGit([
+              '-C',
+              repositoryDirectory,
+              'ls-tree',
+              '-z',
+              '-l',
+              revision,
+              '--',
+              ...markdownCandidates.map((entry) => entry.path),
+            ]),
+          ).filter(
+            (entry) => entry.byteLength <= FAST_AGENT_SPILL_MAX_FILE_BYTES,
+          );
 
     const mainEntries = tree
       .filter(
@@ -239,10 +257,12 @@ export async function loadFastAgentSettingsMarketplaceSnapshot(
     const records: SettingsSkillMarketplaceSnapshot['records'] = [];
     const seenNames = new Set<string>();
     for (const main of mainEntries) {
-      const content = await readGitResource(
-        { directory: repositoryDirectory, revision },
-        main.path,
-      );
+      const content = await executeGit([
+        '-C',
+        repositoryDirectory,
+        'show',
+        `${revision}:${main.path}`,
+      ]);
       if (
         Buffer.byteLength(content, 'utf8') > FAST_AGENT_SPILL_MAX_FILE_BYTES
       ) {
@@ -441,25 +461,38 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
       }
     }
 
-    const selectedSources = [...sourceSelections.entries()].slice(
+    const sourceCandidates = [...sourceSelections.entries()]
+      .filter(([, selectionsByEnvironment]) =>
+        query.name
+          ? [...selectionsByEnvironment.values()].some(
+              (selection) => selection === 'all' || selection.has(query.name!),
+            )
+          : true,
+      )
+      .sort((left, right) => {
+        if (!query.name) return 0;
+        const hasExplicitSelection = (
+          selectionsByEnvironment: Map<string, 'all' | Set<string>>,
+        ) =>
+          [...selectionsByEnvironment.values()].some(
+            (selection) => selection !== 'all' && selection.has(query.name!),
+          );
+        return (
+          Number(hasExplicitSelection(right[1])) -
+          Number(hasExplicitSelection(left[1]))
+        );
+      });
+    const selectedSources = sourceCandidates.slice(
       0,
       SETTINGS_SKILL_MAX_SOURCES,
     );
-    if (sourceSelections.size > selectedSources.length) {
+    if (sourceCandidates.length > selectedSources.length) {
       warnings.push(
-        `Settings skill discovery omitted ${sourceSelections.size - selectedSources.length} marketplace sources after reaching the limit of ${SETTINGS_SKILL_MAX_SOURCES}.`,
+        `Settings skill discovery omitted ${sourceCandidates.length - selectedSources.length} marketplace sources after reaching the limit of ${SETTINGS_SKILL_MAX_SOURCES}.`,
       );
     }
     const marketplaceResults = await Promise.all(
       selectedSources.map(async ([source, selectionsByEnvironment]) => {
-        if (
-          query.name &&
-          ![...selectionsByEnvironment.values()].some(
-            (selection) => selection === 'all' || selection.has(query.name!),
-          )
-        ) {
-          return null;
-        }
         let snapshotPromise = this.marketplaceSnapshots.get(source);
         if (!snapshotPromise) {
           snapshotPromise = this.loadMarketplaceSnapshot(source);
@@ -477,7 +510,6 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
       }),
     );
     for (const result of marketplaceResults) {
-      if (!result) continue;
       const { selectionsByEnvironment, snapshot, source } = result;
       if (!snapshot) {
         warnings.push(`Settings skills could not be inspected for ${source}.`);
