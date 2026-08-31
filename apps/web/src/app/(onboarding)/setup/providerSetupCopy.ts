@@ -30,7 +30,7 @@ const PROVIDER_SETUP_COPY: Record<ProviderSetupCopyId, ProviderSetupCopy> = {
     setupLabel: 'Discord bot',
   },
   agentmail: {
-    creationHref: 'https://console.agentmail.to',
+    creationHref: 'https://console.agentmail.to/dashboard/api-keys',
     setupLabel: 'AgentMail API key',
   },
 };

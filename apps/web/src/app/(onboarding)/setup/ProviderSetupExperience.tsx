@@ -833,16 +833,18 @@ function GenericSetupExperience(props: ProviderSetupExperienceProps) {
             </a>
           </Button>
         </p>
-        <p className="text-sm text-muted-foreground">
-          If you need our logo,{' '}
-          <Link
-            className="underline underline-offset-4 hover:text-foreground"
-            href="/api/setup/roomote-logo"
-          >
-            download here
-          </Link>
-          .
-        </p>
+        {props.provider.id !== 'agentmail' && (
+          <p className="text-sm text-muted-foreground">
+            If you need our logo,{' '}
+            <Link
+              className="underline underline-offset-4 hover:text-foreground"
+              href="/api/setup/roomote-logo"
+            >
+              download here
+            </Link>
+            .
+          </p>
+        )}
       </NumberedStep>
 
       <NumberedStep number={2}>
