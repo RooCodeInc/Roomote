@@ -923,6 +923,26 @@ export async function transitionCanonicalPrReviewDelivery(input: {
   return rows.length === 1;
 }
 
+export async function checkpointCanonicalPrReviewAutoDispatchPost(input: {
+  deliveryId: string;
+  messageId: string;
+}): Promise<boolean> {
+  const rows = await db
+    .update(prReviewNotificationDeliveries)
+    .set({
+      providerMessageId: input.messageId,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(prReviewNotificationDeliveries.id, input.deliveryId),
+        eq(prReviewNotificationDeliveries.status, 'auto_dispatch_pending'),
+      ),
+    )
+    .returning({ id: prReviewNotificationDeliveries.id });
+  return rows.length === 1;
+}
+
 export async function deferCanonicalPrReviewDelivery(input: {
   deliveryId: string;
   leaseToken: string;

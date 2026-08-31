@@ -1994,19 +1994,19 @@ describe('prReviewNotificationJob', () => {
     expect(mockFinalize).toHaveBeenCalledTimes(1);
   });
 
-  it('does not repost a checkpointed continuation when completion is retried', async () => {
-    const deliveryId = '70707070-7070-4070-8070-707070707070';
+  it('retries a Slack continuation post that returns no message id', async () => {
+    const deliveryId = '73737373-7373-4373-8373-737373737373';
     const request = {
       ownershipVersion: 'canonical',
       deliveryId,
-      notificationUnitId: '71717171-7171-4171-8171-717171717171',
+      notificationUnitId: '74747474-7474-4474-8474-747474747474',
       deliveryState: 'auto_dispatch_pending',
       targetTaskId: 'task-1',
       actingUserId: 'user-1',
       destinationKey: 'task-1',
       dispatchKey: `pr-review-delivery:${deliveryId}`,
       deliveryIds: [deliveryId],
-      leaseToken: '72727272-7272-4272-8272-727272727272',
+      leaseToken: '75757575-7575-4575-8575-757575757575',
       events,
     };
     mockPrepareDelivery.mockResolvedValue({
@@ -2027,23 +2027,68 @@ describe('prReviewNotificationJob', () => {
       destinationKey: 'task-1',
     });
     mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 99 });
+    mockStickyFooterPost
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('999.888');
+
+    await expect(
+      prReviewNotificationJob(makeJob(request) as never),
+    ).rejects.toThrow('returned no message id');
+    await prReviewNotificationJob(makeJob(request) as never);
+
+    expect(mockStickyFooterPost).toHaveBeenCalledTimes(2);
+    expect(mockMarkCanonicalAutoDispatchPosted).toHaveBeenCalledTimes(1);
+    expect(mockCompleteCanonicalAutoDispatch).toHaveBeenCalledTimes(1);
+    expect(mockRequeuePending).toHaveBeenCalledTimes(1);
+    expect(mockFinalize).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not repost a checkpointed Telegram continuation when completion is retried', async () => {
+    const deliveryId = '70707070-7070-4070-8070-707070707070';
+    const request = {
+      ownershipVersion: 'canonical',
+      deliveryId,
+      notificationUnitId: '71717171-7171-4171-8171-717171717171',
+      deliveryState: 'auto_dispatch_pending',
+      targetTaskId: 'task-1',
+      actingUserId: 'user-1',
+      destinationKey: 'task-1',
+      dispatchKey: `pr-review-delivery:${deliveryId}`,
+      deliveryIds: [deliveryId],
+      leaseToken: '72727272-7272-4272-8272-727272727272',
+      events,
+    };
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'telegram',
+        channelId: '12345',
+        threadId: '111.222',
+      },
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockFindAutoHandlePrReviewFeedbackPreference.mockResolvedValue({
+      taskId: 'task-1',
+      userId: 'user-1',
+      destinationKey: 'task-1',
+    });
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 99 });
     mockCompleteCanonicalAutoDispatch
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
 
     await prReviewNotificationJob(makeJob(request) as never);
     await prReviewNotificationJob(
-      makeJob({ ...request, providerMessageId: '999.888' }) as never,
+      makeJob({ ...request, providerMessageId: '901' }) as never,
     );
 
-    expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
-    expect(mockStickyFooterPost).toHaveBeenCalledWith(
-      expect.objectContaining({ clientMsgId: deliveryId }),
-    );
+    expect(mockTelegramPostMessage).toHaveBeenCalledTimes(1);
     expect(mockMarkCanonicalAutoDispatchPosted).toHaveBeenCalledTimes(1);
     expect(mockMarkCanonicalAutoDispatchPosted).toHaveBeenCalledWith({
       request: expect.objectContaining({ deliveryId }),
-      messageId: '999.888',
+      messageId: '901',
     });
     expect(mockCompleteCanonicalAutoDispatch).toHaveBeenCalledTimes(2);
     expect(mockFinalize).toHaveBeenCalledTimes(1);

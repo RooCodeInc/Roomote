@@ -6,6 +6,7 @@ import type { TaskRun } from '@roomote/db/server';
 import {
   buildPrReviewEventKey,
   claimDuePrReviewDeliveries,
+  checkpointCanonicalPrReviewAutoDispatchPost,
   completePrReviewDeliveries,
   db,
   deferPrReviewDeliveries,
@@ -1022,19 +1023,12 @@ export async function markCanonicalPrReviewAutoDispatchPosted(input: {
   messageId: string;
 }): Promise<boolean> {
   const { request } = input;
-  if (
-    request.ownershipVersion !== 'canonical' ||
-    !request.deliveryId ||
-    !request.leaseToken
-  ) {
+  if (request.ownershipVersion !== 'canonical' || !request.deliveryId) {
     return true;
   }
-  return transitionCanonicalPrReviewDelivery({
+  return checkpointCanonicalPrReviewAutoDispatchPost({
     deliveryId: request.deliveryId,
-    leaseToken: request.leaseToken,
-    expected: 'auto_dispatch_pending',
-    status: 'auto_dispatch_pending',
-    values: { providerMessageId: input.messageId },
+    messageId: input.messageId,
   });
 }
 

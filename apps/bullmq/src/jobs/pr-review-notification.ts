@@ -914,8 +914,12 @@ ${delivery.text}`;
         text: autoHandledText,
         idempotencyKey: data.deliveryId,
       });
+      if (!autoHandledMessageTs) {
+        throw new Error(
+          `Continuation post for canonical delivery ${data.deliveryId} returned no message id`,
+        );
+      }
       if (
-        autoHandledMessageTs &&
         !(await markCanonicalPrReviewAutoDispatchPosted({
           request: data,
           messageId: autoHandledMessageTs,

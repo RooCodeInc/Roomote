@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   and,
   attachCanonicalPrReviewActionMessage,
+  checkpointCanonicalPrReviewAutoDispatchPost,
   claimCanonicalPrReviewAction,
   claimDueCanonicalPrReviewDeliveries,
   completeCanonicalPrReviewActionDispatch,
@@ -534,11 +535,16 @@ describe('canonical PR review notification ownership', () => {
       values: {
         followUpPrompt: 'Resolve feedback.',
         targetTaskId: task.id,
-        providerMessageId: '123.456',
       },
     });
     const dueAt = new Date(CLAIM_AT.getTime() + 60_000);
     await deferPrReviewDeliveries(first, dueAt);
+    await expect(
+      checkpointCanonicalPrReviewAutoDispatchPost({
+        deliveryId: first.deliveryId,
+        messageId: '123.456',
+      }),
+    ).resolves.toBe(true);
 
     expect(
       (
