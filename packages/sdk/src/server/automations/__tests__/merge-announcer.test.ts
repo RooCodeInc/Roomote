@@ -424,6 +424,48 @@ describe('handleMergeAnnouncerPush', () => {
     warn.mockRestore();
   });
 
+  it('validates image origin against the same redacted bounded body shown to the model', async () => {
+    const { dependencies, postMessage } = createDependencies();
+    const imageUrl = 'https://cdn.example.com/settings.png';
+    const body = `API_TOKEN=${'secret'.repeat(900)}
+![Settings screenshot](${imageUrl})`;
+    dependencies.generateAnnouncement.mockResolvedValue({
+      summary: 'Updates the saved settings experience.',
+      imageUrl,
+    });
+
+    await handleMergeAnnouncerPush(
+      createPayload({
+        pullRequest: {
+          number: 7,
+          url: 'https://github.com/acme/widgets/pull/7',
+          title: 'Update settings',
+          body,
+          changedFileCount: 1,
+          additions: 10,
+          deletions: 2,
+        },
+      }),
+      dependencies,
+    );
+
+    const prompt = dependencies.generateAnnouncement.mock.calls[0]?.[0];
+    expect(prompt).toContain('API_TOKEN=[redacted]');
+    expect(prompt).toContain(`![Settings screenshot](${imageUrl})`);
+    expect(dependencies.getAnonymousMediaType).toHaveBeenCalledWith(imageUrl);
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [
+          expect.objectContaining({
+            child_blocks: expect.arrayContaining([
+              expect.objectContaining({ type: 'image', image_url: imageUrl }),
+            ]),
+          }),
+        ],
+      }),
+    );
+  });
+
   it('retries a rejected Slack image announcement without the image', async () => {
     const { dependencies, postMessage } = createDependencies();
     const imageUrl = 'https://cdn.example.com/settings.png';

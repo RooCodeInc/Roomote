@@ -233,10 +233,6 @@ function getBoundedPullRequestBody(body: string | null | undefined): string {
     : '(No description provided.)';
 }
 
-function getRawBoundedPullRequestBody(body: string | null | undefined): string {
-  return body?.trim().slice(0, MAX_PULL_REQUEST_BODY_CHARS) ?? '';
-}
-
 function normalizeAnonymousImageUrl(value: string): string | null {
   try {
     const url = new URL(value.trim().replaceAll('&amp;', '&'));
@@ -313,7 +309,7 @@ async function resolveSelectedPullRequestImage(params: {
 }): Promise<{ url: string; altText: string } | null> {
   if (!params.selectedUrl || !params.body?.trim()) return null;
   const image = findPullRequestBodyImage(
-    getRawBoundedPullRequestBody(params.body),
+    getBoundedPullRequestBody(params.body),
     params.selectedUrl,
   );
   if (!image) return null;
