@@ -128,4 +128,24 @@ describe('SessionsFilters', () => {
     expect(replaceMock).toHaveBeenCalledWith('/sessions?view=board');
     expect(localStorage.getItem('roomote-sessions-view')).toBe('board');
   });
+
+  it('clears the search query from the URL when search is closed', () => {
+    searchParamsMock.current = new URLSearchParams(
+      'q=release+notes&view=board',
+    );
+    render(
+      <SessionsFilters {...baseProps} query="release notes" view="board" />,
+    );
+
+    const searchButton = screen.getByRole('button', {
+      name: 'Toggle session search',
+    });
+    expect(searchButton).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(searchButton);
+
+    expect(screen.queryByPlaceholderText('Search...')).not.toBeInTheDocument();
+    expect(searchButton).toHaveAttribute('aria-pressed', 'false');
+    expect(replaceMock).toHaveBeenCalledWith('/sessions?view=board');
+  });
 });

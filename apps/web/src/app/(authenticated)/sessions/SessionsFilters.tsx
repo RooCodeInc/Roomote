@@ -218,7 +218,7 @@ export function SessionsFilters({
       label: getSessionSurfaceLabel(value),
     })),
   ];
-  const isSearchActive = showSearch || Boolean(query);
+  const isSearchActive = showSearch;
 
   return (
     <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1">
@@ -368,7 +368,16 @@ export function SessionsFilters({
           aria-label="Toggle session search"
           aria-pressed={isSearchActive}
           title="Search sessions"
-          onClick={() => setShowSearch((current) => !current)}
+          onClick={() => {
+            if (showSearch) {
+              setShowSearch(false);
+              setSearchValue('');
+              if (searchParams.has('q')) updateNullableParam('q', null);
+              return;
+            }
+
+            setShowSearch(true);
+          }}
         >
           <Search />
         </Button>
