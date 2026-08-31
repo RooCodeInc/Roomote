@@ -159,24 +159,6 @@ export async function snapshot({
       error: message,
     });
 
-    // Mark the environment snapshot as failed so the UI stops showing "Snapshotting..."
-    try {
-      await sdk.environments.updateSnapshotStatus({
-        environmentId,
-        snapshotStatus: 'failed',
-      });
-    } catch (envError) {
-      captureWorkerException(envError, {
-        runId,
-        environmentId,
-        stage: 'snapshot.updateSnapshotStatus',
-      });
-
-      console.error(
-        `Failed to update environment snapshot status: ${envError instanceof Error ? envError.message : String(envError)}`,
-      );
-    }
-
     captureWorkerException(error, {
       runId,
       environmentId,
