@@ -435,7 +435,7 @@ describe('prReviewNotificationJob', () => {
     expect(mockSchedule).not.toHaveBeenCalled();
   });
 
-  it('passes triaged feedback to the Fast parent event path', async () => {
+  it('keeps the initial issue on the Fast parent path without a channel notification', async () => {
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
       taskId: 'task-1',
@@ -519,7 +519,7 @@ describe('prReviewNotificationJob', () => {
     });
   });
 
-  it('notifies the Fast parent before auto-dispatching opted-in feedback', async () => {
+  it('notifies the Fast parent and channel when subsequent opted-in feedback starts', async () => {
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
       taskId: 'task-1',
@@ -579,8 +579,33 @@ describe('prReviewNotificationJob', () => {
     expect(mockNotifyFastAgentParent.mock.invocationCallOrder[0]).toBeLessThan(
       mockDispatchFollowUp.mock.invocationCallOrder[0]!,
     );
+    expect(mockDispatchFollowUp.mock.invocationCallOrder[0]).toBeLessThan(
+      mockStickyFooterPost.mock.invocationCallOrder[0]!,
+    );
     expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
-    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        threadTs: '111.222',
+        taskId: 'task-1',
+        text: "New review feedback — I'm on it:\nAlice requested changes on owner/repo#42.",
+      }),
+    );
+    expect(mockRecordDelivery).toHaveBeenCalledTimes(1);
+    expect(mockRecordDelivery).toHaveBeenCalledWith({
+      runId: 1,
+      taskId: 'task-1',
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: "New review feedback — I'm on it:\nAlice requested changes on owner/repo#42.",
+      messageTs: '999.888',
+    });
+    expect(mockFinalize).toHaveBeenCalledTimes(1);
   });
 
   it('does not auto-dispatch when Fast-parent delivery fails', async () => {
@@ -1765,6 +1790,17 @@ describe('prReviewNotificationJob', () => {
     });
     expect(mockBeginCanonicalWebPrompt).not.toHaveBeenCalled();
     expect(mockAttachPendingPrReviewActionMessage).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockPostMessage).not.toHaveBeenCalled();
+    expect(mockTeamsPostMessage).not.toHaveBeenCalled();
+    expect(mockTelegramPostMessage).not.toHaveBeenCalled();
+    expect(mockDiscordPostMessage).not.toHaveBeenCalled();
+    expect(mockRecordDelivery).toHaveBeenCalledWith({
+      runId: 1,
+      taskId: 'task-1',
+      route: null,
+      text: "New review feedback — I'm on it:\nReview feedback remains.",
+    });
   });
 
   it('publishes an interactive web fallback after auto-dispatch retries expire', async () => {

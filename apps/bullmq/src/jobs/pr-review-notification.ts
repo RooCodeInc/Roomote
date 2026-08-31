@@ -904,22 +904,6 @@ ${delivery.text}`;
       }
     }
 
-    if (deliveredToFastParent && (!autoHandleUserId || autoHandledText)) {
-      await recordPrReviewNotificationDeliveryBestEffort({
-        runId: latestJob.id,
-        taskId: data.taskId,
-        route: null,
-        text: autoHandledText ?? textWithQuestion,
-      });
-      if (!webReviewActionDeliveryId) {
-        await finalizePrReviewNotificationRequest(data);
-      }
-      return;
-    }
-
-    // Once retries are exhausted, continue into the normal offer path even
-    // though the Fast parent already received the deduplicated summary.
-
     if (autoHandledText && delivery.route) {
       const messageTs = await postPrReviewNotification({
         taskId: data.taskId,
@@ -937,6 +921,22 @@ ${delivery.text}`;
       await finalizePrReviewNotificationRequest(data);
       return;
     }
+
+    if (deliveredToFastParent && (!autoHandleUserId || autoHandledText)) {
+      await recordPrReviewNotificationDeliveryBestEffort({
+        runId: latestJob.id,
+        taskId: data.taskId,
+        route: null,
+        text: autoHandledText ?? textWithQuestion,
+      });
+      if (!webReviewActionDeliveryId) {
+        await finalizePrReviewNotificationRequest(data);
+      }
+      return;
+    }
+
+    // Once retries are exhausted, continue into the normal offer path even
+    // though the Fast parent already received the deduplicated summary.
 
     // Chat delivery is optional (web-only tasks have no route). Task history is
     // always recorded so the web task view shows the self-review summary.
