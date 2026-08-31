@@ -2277,6 +2277,11 @@ export async function answerFastAgentQuestion({
                 error: `Model "${args.model}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
               };
             }
+            try {
+              await adapter.assertTaskLaunch?.();
+            } catch (error) {
+              return toolFailure(error);
+            }
             const signature = `launch_task:${JSON.stringify([
               args.prompt,
               args.environmentId ?? null,

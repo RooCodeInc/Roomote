@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { SourceControlProvider } from '@roomote/types';
@@ -157,7 +157,7 @@ function SetupSourceControlPanel({
  * Responsive wrapper: a static side panel on desktop and a controlled drawer
  * sheet on smaller screens, rendering the same trusted panel content.
  */
-export function SetupSourceControlPanelSurface({
+function SetupSourceControlPanelSurface({
   sourceControlSetup,
   onConnected,
   sessionId,
@@ -208,7 +208,7 @@ export function SetupSourceControlPanelSurface({
   );
 }
 
-export function useSetupSourceControlStatus(enabled: boolean) {
+function useSetupSourceControlStatus(enabled: boolean) {
   const trpc = useTRPC();
   const statusQuery = useQuery(
     trpc.setupNew.status.queryOptions(undefined, {
@@ -243,19 +243,4 @@ export function SetupSessionSourceControlPanel({
       />
     </div>
   );
-}
-
-export function useSetupRouteTransition({
-  sessionId,
-  completed,
-}: {
-  sessionId: string | null;
-  completed: boolean;
-}) {
-  const router = useRouter();
-  useEffect(() => {
-    if (sessionId && completed) {
-      router.replace(`/sessions/${sessionId}`);
-    }
-  }, [sessionId, completed, router]);
 }

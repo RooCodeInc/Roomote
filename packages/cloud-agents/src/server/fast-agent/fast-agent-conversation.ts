@@ -153,6 +153,11 @@ export type FastAgentInputPreset =
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
+  /**
+   * Optional surface-specific launch gate. Use this for durable product
+   * readiness conditions that the model prompt alone must not enforce.
+   */
+  assertTaskLaunch?: () => Promise<void>;
   postReply: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | void>;
   replaceReply?: (
     handle: FastAgentReplyHandle,

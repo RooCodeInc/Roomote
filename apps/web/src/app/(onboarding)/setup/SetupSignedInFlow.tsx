@@ -173,7 +173,6 @@ export function SetupSignedInFlow() {
   const conversationalSetupReady =
     status != null &&
     status.modelSetup.setupSatisfied &&
-    status.sourceControlSetup.setupSatisfied &&
     status.setupCompletedAt == null;
   const setupSessionId = setupSession?.sessionId ?? null;
 

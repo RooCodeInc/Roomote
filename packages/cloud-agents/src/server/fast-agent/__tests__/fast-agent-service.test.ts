@@ -3760,6 +3760,34 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('honors a surface launch gate before creating a task', async () => {
+    const assertTaskLaunch = vi.fn(async () => {
+      throw new Error('Connect source control before starting work.');
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>();
+    const adapter = callbacks({ assertTaskLaunch, launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix checkout.',
+            kickoffMessage: 'I’m starting on the checkout fix.',
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: 'Connect source control before starting work.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(assertTaskLaunch).toHaveBeenCalledOnce();
+    expect(launchTask).not.toHaveBeenCalled();
+  });
+
   it('delivers the kickoff when a surface launcher does not invoke the gate callback', async () => {
     mocks.getSessionForTask.mockResolvedValue({ id: 'session-discord' });
     const adapter = callbacks({
