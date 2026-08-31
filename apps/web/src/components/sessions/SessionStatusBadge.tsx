@@ -16,9 +16,15 @@ function getSessionStatusVariant(status: string) {
   return STATUS_VARIANTS[status as SessionStatus] ?? 'secondary';
 }
 
-export function SessionStatusBadge({ status }: { status: string }) {
+export function SessionStatusBadge({
+  status,
+  className,
+}: {
+  status: string;
+  className?: string;
+}) {
   return (
-    <Badge variant={getSessionStatusVariant(status)}>
+    <Badge variant={getSessionStatusVariant(status)} className={className}>
       {getSessionStatusLabel(status)}
     </Badge>
   );

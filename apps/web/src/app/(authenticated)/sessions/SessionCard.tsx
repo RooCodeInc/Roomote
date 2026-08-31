@@ -6,7 +6,7 @@ import {
   formatRepositoryName,
   getUserDisplayName,
 } from '@/lib';
-import { Avatar } from '@/components/system';
+import { Avatar, Spinner } from '@/components/system';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { SessionSearchSnippet } from '@/components/sessions/SessionSearchSnippet';
 import { getSessionSurfaceLabel } from '@/components/sessions/session-surfaces';
@@ -86,7 +86,11 @@ export function SessionCard({
           className="line-clamp-2"
         />
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <SessionStatusBadge status={status} />
+          {status === 'active' ? (
+            <Spinner />
+          ) : status === 'ready' ? null : (
+            <SessionStatusBadge status={status} className="capitalize" />
+          )}
           <span>{getSessionSurfaceLabel(session.sourceSurface)}</span>
           {primaryTask?.repositoryName ? (
             <span>{formatRepositoryName(primaryTask.repositoryName)}</span>
