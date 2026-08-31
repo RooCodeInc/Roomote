@@ -1,8 +1,10 @@
-import { render, screen } from '@testing-library/react';
+import type { ComponentProps } from 'react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import { RunStatus } from '@roomote/types';
 
 import type { Task } from '@/lib/server';
+import type { TaskBoardColumn } from '@/types';
 
 vi.mock('@/components/sandbox', () => ({
   WorkspaceBadge: ({ repo }: { repo?: string }) => <span>{repo}</span>,
@@ -24,6 +26,30 @@ vi.mock('./TaskAutomationIcon', () => ({
 }));
 
 import { TaskBoard } from './TaskBoard';
+
+type TaskBoardColumns = ComponentProps<typeof TaskBoard>['columns'];
+type TaskBoardColumnData = TaskBoardColumns[TaskBoardColumn];
+
+function createColumns(
+  overrides: Partial<
+    Record<TaskBoardColumn, Partial<TaskBoardColumnData>>
+  > = {},
+): TaskBoardColumns {
+  const createColumn = (column: TaskBoardColumn): TaskBoardColumnData => ({
+    tasks: [],
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    onShowMore: vi.fn(),
+    ...overrides[column],
+  });
+
+  return {
+    active: createColumn('active'),
+    'needs-input': createColumn('needs-input'),
+    blocked: createColumn('blocked'),
+    done: createColumn('done'),
+  };
+}
 
 function createTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -69,17 +95,21 @@ describe('TaskBoard', () => {
   it('keeps pull request badges independently clickable', () => {
     render(
       <TaskBoard
-        tasks={[
-          createTask({
-            taskRun: {
-              status: RunStatus.Running,
-              taskPhase: 'running',
-              payload: {},
-              prRepo: 'RooCodeInc/Roomote',
-              prNumber: 42,
-            } as Task['taskRun'],
-          }),
-        ]}
+        columns={createColumns({
+          active: {
+            tasks: [
+              createTask({
+                taskRun: {
+                  status: RunStatus.Running,
+                  taskPhase: 'running',
+                  payload: {},
+                  prRepo: 'RooCodeInc/Roomote',
+                  prNumber: 42,
+                } as Task['taskRun'],
+              }),
+            ],
+          },
+        })}
       />,
     );
 
@@ -89,44 +119,39 @@ describe('TaskBoard', () => {
     );
   });
 
-  it('groups tasks and keeps completed work bounded', () => {
-    const doneTasks = Array.from({ length: 8 }, (_, index) =>
-      createTask({
-        id: `done-${index}`,
-        title: `Completed task ${index + 1}`,
-        state: 'completed',
-        taskRun: {
-          status: RunStatus.Completed,
-          taskPhase: null,
-          payload: {},
-          prRepo: null,
-          prNumber: null,
-        } as Task['taskRun'],
-      }),
-    );
-
+  it('renders tasks in their server-assigned columns', () => {
     render(
       <TaskBoard
-        tasks={[
-          createTask(),
-          createTask({
-            id: 'needs-input',
-            title: 'Answer deployment question',
-            taskRun: {
-              status: RunStatus.Running,
-              taskPhase: 'waiting_for_user_input',
-              payload: {},
-              prRepo: null,
-              prNumber: null,
-            } as Task['taskRun'],
-          }),
-          createTask({
-            id: 'blocked',
-            title: 'Fix failed release',
-            state: 'failed',
-          }),
-          ...doneTasks,
-        ]}
+        columns={createColumns({
+          active: { tasks: [createTask()] },
+          'needs-input': {
+            tasks: [
+              createTask({
+                id: 'needs-input',
+                title: 'Answer deployment question',
+              }),
+            ],
+          },
+          blocked: {
+            tasks: [
+              createTask({
+                id: 'blocked',
+                title: 'Fix failed release',
+                state: 'failed',
+                goalBlockedReason: 'Release checks failed',
+              }),
+            ],
+          },
+          done: {
+            tasks: [
+              createTask({
+                id: 'done',
+                title: 'Completed task',
+                state: 'completed',
+              }),
+            ],
+          },
+        })}
       />,
     );
 
@@ -146,9 +171,38 @@ describe('TaskBoard', () => {
     ).toHaveAttribute('href', '/task/task-1');
     expect(screen.queryByText('Code')).not.toBeInTheDocument();
     expect(screen.queryByText('Discord')).not.toBeInTheDocument();
-    expect(
-      screen.getByText('2 older completed tasks hidden'),
-    ).toBeInTheDocument();
-    expect(screen.queryByText('Completed task 7')).not.toBeInTheDocument();
+    expect(screen.getByText('Release checks failed')).toBeInTheDocument();
+    expect(screen.getByText('Completed task')).toBeInTheDocument();
+  });
+
+  it('loads only the selected column', () => {
+    const showMoreActive = vi.fn();
+    const showMoreDone = vi.fn();
+
+    render(
+      <TaskBoard
+        columns={createColumns({
+          active: {
+            tasks: [createTask()],
+            hasNextPage: true,
+            onShowMore: showMoreActive,
+          },
+          done: {
+            hasNextPage: true,
+            onShowMore: showMoreDone,
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getAllByRole('button', { name: /^Show more/ })).toHaveLength(
+      2,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Show more done tasks' }),
+    );
+    expect(showMoreDone).toHaveBeenCalledOnce();
+    expect(showMoreActive).not.toHaveBeenCalled();
   });
 });

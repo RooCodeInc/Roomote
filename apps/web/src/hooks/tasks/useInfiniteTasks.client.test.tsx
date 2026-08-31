@@ -55,4 +55,25 @@ describe('useInfiniteTasks', () => {
     );
     expect(options.getNextPageParam({})).toBeUndefined();
   });
+
+  it('includes the board column in the query input', () => {
+    renderHook(() =>
+      useInfiniteTasks({
+        filters: [],
+        timePeriod: 'all',
+        boardColumn: 'needs-input',
+        pageSize: 6,
+      }),
+    );
+
+    expect(infiniteQueryOptionsMock).toHaveBeenCalledWith(
+      {
+        limit: 6,
+        filters: [],
+        timePeriod: 'all',
+        boardColumn: 'needs-input',
+      },
+      expect.objectContaining({ enabled: true }),
+    );
+  });
 });

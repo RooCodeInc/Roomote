@@ -375,23 +375,92 @@ export const Tasks = () => {
    * Tasks (Graceful Loading + Polling)
    */
 
-  const infiniteTasks = useInfiniteTasks({
+  const listTasksQuery = useInfiniteTasks({
     filters: effectiveFilters,
     timePeriod,
     pageSize: 50,
+    enabled: !isBoardView,
+  });
+  const activeTasksQuery = useInfiniteTasks({
+    filters: effectiveFilters,
+    timePeriod,
+    boardColumn: 'active',
+    pageSize: 6,
+    enabled: isBoardView,
+  });
+  const needsInputTasksQuery = useInfiniteTasks({
+    filters: effectiveFilters,
+    timePeriod,
+    boardColumn: 'needs-input',
+    pageSize: 6,
+    enabled: isBoardView,
+  });
+  const blockedTasksQuery = useInfiniteTasks({
+    filters: effectiveFilters,
+    timePeriod,
+    boardColumn: 'blocked',
+    pageSize: 6,
+    enabled: isBoardView,
+  });
+  const doneTasksQuery = useInfiniteTasks({
+    filters: effectiveFilters,
+    timePeriod,
+    boardColumn: 'done',
+    pageSize: 6,
+    enabled: isBoardView,
   });
 
-  const tasks = useMemo(
-    () => infiniteTasks.data?.pages.flatMap((page) => page.tasks) ?? [],
-    [infiniteTasks.data],
+  const listTasks = useMemo(
+    () => listTasksQuery.data?.pages.flatMap((page) => page.tasks) ?? [],
+    [listTasksQuery.data],
   );
-  const isPending = infiniteTasks.isPending;
-  const isError = infiniteTasks.isError && !infiniteTasks.data;
+  const activeTasks = useMemo(
+    () => activeTasksQuery.data?.pages.flatMap((page) => page.tasks) ?? [],
+    [activeTasksQuery.data],
+  );
+  const needsInputTasks = useMemo(
+    () => needsInputTasksQuery.data?.pages.flatMap((page) => page.tasks) ?? [],
+    [needsInputTasksQuery.data],
+  );
+  const blockedTasks = useMemo(
+    () => blockedTasksQuery.data?.pages.flatMap((page) => page.tasks) ?? [],
+    [blockedTasksQuery.data],
+  );
+  const doneTasks = useMemo(
+    () => doneTasksQuery.data?.pages.flatMap((page) => page.tasks) ?? [],
+    [doneTasksQuery.data],
+  );
+  const tasks = useMemo(
+    () =>
+      isBoardView
+        ? [...activeTasks, ...needsInputTasks, ...blockedTasks, ...doneTasks]
+        : listTasks,
+    [
+      activeTasks,
+      blockedTasks,
+      doneTasks,
+      isBoardView,
+      listTasks,
+      needsInputTasks,
+    ],
+  );
+  const isPending = isBoardView
+    ? activeTasksQuery.isPending ||
+      needsInputTasksQuery.isPending ||
+      blockedTasksQuery.isPending ||
+      doneTasksQuery.isPending
+    : listTasksQuery.isPending;
+  const isError = isBoardView
+    ? (activeTasksQuery.isError && !activeTasksQuery.data) ||
+      (needsInputTasksQuery.isError && !needsInputTasksQuery.data) ||
+      (blockedTasksQuery.isError && !blockedTasksQuery.data) ||
+      (doneTasksQuery.isError && !doneTasksQuery.data)
+    : listTasksQuery.isError && !listTasksQuery.data;
 
   const { showContent } = useGracefulLoading({
     isPending,
     data: tasks,
-    dependencies: [effectiveFilters, timePeriod],
+    dependencies: [effectiveFilters, timePeriod, isBoardView],
   });
 
   const tasksListRef = useRef<HTMLDivElement>(null);
@@ -727,7 +796,36 @@ export const Tasks = () => {
               className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
             >
               {isBoardView ? (
-                <TaskBoard tasks={tasks} />
+                <TaskBoard
+                  key={searchParamsString}
+                  columns={{
+                    active: {
+                      tasks: activeTasks,
+                      hasNextPage: activeTasksQuery.hasNextPage,
+                      isFetchingNextPage: activeTasksQuery.isFetchingNextPage,
+                      onShowMore: () => activeTasksQuery.fetchNextPage(),
+                    },
+                    'needs-input': {
+                      tasks: needsInputTasks,
+                      hasNextPage: needsInputTasksQuery.hasNextPage,
+                      isFetchingNextPage:
+                        needsInputTasksQuery.isFetchingNextPage,
+                      onShowMore: () => needsInputTasksQuery.fetchNextPage(),
+                    },
+                    blocked: {
+                      tasks: blockedTasks,
+                      hasNextPage: blockedTasksQuery.hasNextPage,
+                      isFetchingNextPage: blockedTasksQuery.isFetchingNextPage,
+                      onShowMore: () => blockedTasksQuery.fetchNextPage(),
+                    },
+                    done: {
+                      tasks: doneTasks,
+                      hasNextPage: doneTasksQuery.hasNextPage,
+                      isFetchingNextPage: doneTasksQuery.isFetchingNextPage,
+                      onShowMore: () => doneTasksQuery.fetchNextPage(),
+                    },
+                  }}
+                />
               ) : (
                 <div className="divide-y divide-card">
                   {tasks.map((task) => (
@@ -744,14 +842,14 @@ export const Tasks = () => {
                   ))}
                 </div>
               )}
-              {infiniteTasks.hasNextPage && (
+              {!isBoardView && listTasksQuery.hasNextPage && (
                 <div className="flex justify-center py-4">
                   <Button
                     variant="outline"
-                    onClick={() => infiniteTasks.fetchNextPage()}
-                    disabled={infiniteTasks.isFetchingNextPage}
+                    onClick={() => listTasksQuery.fetchNextPage()}
+                    disabled={listTasksQuery.isFetchingNextPage}
                   >
-                    {infiniteTasks.isFetchingNextPage ? (
+                    {listTasksQuery.isFetchingNextPage ? (
                       <Spinner />
                     ) : (
                       'Load more'
