@@ -95,57 +95,69 @@ export async function getTaskMessages(
         ? [desc(taskMessages.ts), desc(taskMessages.createdAt)]
         : [asc(taskMessages.ts), asc(taskMessages.createdAt)];
 
-    let query = db
-      .select({
-        id: taskMessages.id,
-        taskId: taskMessages.taskId,
-        ts: taskMessages.ts,
-        eventType: taskMessages.eventType,
-        role: taskMessages.role,
-        contentBlocks: taskMessages.contentBlocks,
-        metadata: taskMessages.metadata,
-        payload: taskMessages.payload,
-        createdAt: taskMessages.createdAt,
-      })
-      .from(taskMessages)
-      .where(eq(taskMessages.taskId, taskId))
-      .orderBy(...orderBy);
+    const selectRows = () =>
+      db
+        .select({
+          id: taskMessages.id,
+          taskId: taskMessages.taskId,
+          ts: taskMessages.ts,
+          eventType: taskMessages.eventType,
+          role: taskMessages.role,
+          contentBlocks: taskMessages.contentBlocks,
+          metadata: taskMessages.metadata,
+          payload: taskMessages.payload,
+          createdAt: taskMessages.createdAt,
+        })
+        .from(taskMessages)
+        .where(eq(taskMessages.taskId, taskId))
+        .orderBy(...orderBy);
 
-    if (limit) {
-      query = query.limit(limit) as typeof query;
-    }
-
-    const rows = await query;
-
-    const messages = rows.flatMap((row) => {
-      const visibleInTranscript = resolveAcpTranscriptVisibility({
-        eventType: row.eventType,
-        contentBlocks: row.contentBlocks,
-        metadata: row.metadata,
-        payload: row.payload,
-      });
-      if (!visibleInTranscript) return [];
-      const sanitized = sanitizeEnvelopeFields(
-        row.eventType,
-        row.contentBlocks,
-        row.metadata,
-        row.payload,
-        { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
-      );
-      return [
-        {
-          id: row.id,
-          taskId: row.taskId,
-          ts: Number(row.ts),
+    const toVisibleMessages = (rows: Awaited<ReturnType<typeof selectRows>>) =>
+      rows.flatMap((row) => {
+        const visibleInTranscript = resolveAcpTranscriptVisibility({
           eventType: row.eventType,
-          role: row.role,
-          text: getTextFromContentBlocks(sanitized.contentBlocks),
-          images: getImageUrisFromContentBlocks(sanitized.contentBlocks),
-          metadata: sanitized.metadata,
-          visibleInTranscript: true,
-        },
-      ];
-    });
+          contentBlocks: row.contentBlocks,
+          metadata: row.metadata,
+          payload: row.payload,
+        });
+        if (!visibleInTranscript) return [];
+        const sanitized = sanitizeEnvelopeFields(
+          row.eventType,
+          row.contentBlocks,
+          row.metadata,
+          row.payload,
+          { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
+        );
+        return [
+          {
+            id: row.id,
+            taskId: row.taskId,
+            ts: Number(row.ts),
+            eventType: row.eventType,
+            role: row.role,
+            text: getTextFromContentBlocks(sanitized.contentBlocks),
+            images: getImageUrisFromContentBlocks(sanitized.contentBlocks),
+            metadata: sanitized.metadata,
+            visibleInTranscript: true,
+          },
+        ];
+      });
+
+    let messages;
+    if (!limit) {
+      messages = toVisibleMessages(await selectRows());
+    } else {
+      messages = [] as ReturnType<typeof toVisibleMessages>;
+      const batchSize = Math.max(limit, 100);
+      let offset = 0;
+      while (messages.length < limit) {
+        const rows = await selectRows().limit(batchSize).offset(offset);
+        messages.push(...toVisibleMessages(rows));
+        offset += rows.length;
+        if (rows.length < batchSize) break;
+      }
+      messages = messages.slice(0, limit);
+    }
 
     return c.json({ messages, returned: messages.length });
   } catch (error) {

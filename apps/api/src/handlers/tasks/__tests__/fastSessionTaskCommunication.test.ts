@@ -21,6 +21,9 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   ensureSessionForFastConversation,
+  runFactory,
+  taskFactory,
+  taskMessages,
   userFactory,
 } from '@roomote/db/server';
 
@@ -147,6 +150,60 @@ describe('Fast session communication through task routes', () => {
         ],
       });
     }
+  });
+
+  it('continues past hidden rows to satisfy a limited task transcript', async () => {
+    const owner = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    const run = await runFactory.create({
+      taskId: task.id,
+      actingUserId: owner.id,
+    });
+    const messages: Array<typeof taskMessages.$inferInsert> = [
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 1,
+        eventType: 'roomote_runtime.assistant_text',
+        protocol: 'roomote_runtime',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Oldest visible' }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+      },
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 2,
+        eventType: 'roomote_runtime.assistant_text',
+        protocol: 'roomote_runtime',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Newest visible' }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+      },
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 3,
+        eventType: 'roomote_runtime.user_prompt',
+        protocol: 'roomote_runtime',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'Hidden prompt' }],
+        metadata: { visibleInTranscript: false },
+        payload: {},
+      },
+    ];
+    await db.insert(taskMessages).values(messages);
+
+    const response = await createApp(userAuth(owner.id)).request(
+      `/tasks/${task.id}/messages?limit=2&order=desc`,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      returned: 2,
+      messages: [{ text: 'Newest visible' }, { text: 'Oldest visible' }],
+    });
   });
 
   it('hides Fast sessions from bystanders and rejects absent or invalid IDs', async () => {
