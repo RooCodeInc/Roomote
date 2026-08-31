@@ -665,6 +665,7 @@ function buildFastAgentMessages({
   surface,
   reactionInput,
   turnSource,
+  slackRoomoteUserId,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -679,6 +680,7 @@ function buildFastAgentMessages({
   surface: FastAgentConversation['surface'];
   reactionInput: boolean;
   turnSource: FastAgentTurnSource;
+  slackRoomoteUserId?: string;
 }): {
   bootstrapMessages: ModelMessage[];
   turnMessages: ModelMessage[];
@@ -688,7 +690,11 @@ function buildFastAgentMessages({
   const normalizedQuestion = normalizeThreadText(question);
   const explicitSkillInvocationContext =
     turnSource === 'human' && !reactionInput
-      ? buildFastAgentExplicitSkillInvocationContext(question, surface)
+      ? buildFastAgentExplicitSkillInvocationContext(
+          question,
+          surface,
+          slackRoomoteUserId,
+        )
       : undefined;
   const contextualMessageTs = reactionInput ? undefined : currentMessageTs;
   const wrappedCurrentUserMessageText = reactionInput
@@ -829,6 +835,7 @@ export async function answerFastAgentQuestion({
   platformEventKind = 'delegated_task',
   allowSilentAmbientReply = false,
   platformEventTranscriptPayload,
+  slackRoomoteUserId,
 }: {
   question: string;
   images?: string[];
@@ -856,6 +863,7 @@ export async function answerFastAgentQuestion({
   /** True only for an unmentioned turn in a multi-human Fast conversation. */
   allowSilentAmbientReply?: boolean;
   platformEventTranscriptPayload?: Record<string, unknown>;
+  slackRoomoteUserId?: string;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
     currentMessageId,
@@ -1320,6 +1328,7 @@ export async function answerFastAgentQuestion({
       surface: conversation.surface,
       reactionInput,
       turnSource,
+      slackRoomoteUserId,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
       Env.RELEASE_PRODUCT_VERSION,

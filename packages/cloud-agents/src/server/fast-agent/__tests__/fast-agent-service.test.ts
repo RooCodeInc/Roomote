@@ -618,6 +618,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         'Please use the operations workflow for the concrete request below.',
         '<@ROOMOTE_ID> $handle-operations-ticket investigate the handoff',
       ].join('\n'),
+      slackRoomoteUserId: 'ROOMOTE_ID',
       adapter: callbacks(),
     });
 

@@ -11,12 +11,16 @@ describe('Fast explicit skill invocation parsing', () => {
       '<@ROOMOTE_ID> $handle-operations-ticket investigate the failed handoff',
     ].join('\n');
 
-    expect(parseFastAgentExplicitSkillInvocation(message, 'slack')).toBe(
-      'handle-operations-ticket',
-    );
-    expect(buildFastAgentExplicitSkillInvocationContext(message, 'slack')).toBe(
-      '<explicit_skill_invocation name="handle-operations-ticket" />',
-    );
+    expect(
+      parseFastAgentExplicitSkillInvocation(message, 'slack', 'ROOMOTE_ID'),
+    ).toBe('handle-operations-ticket');
+    expect(
+      buildFastAgentExplicitSkillInvocationContext(
+        message,
+        'slack',
+        'ROOMOTE_ID',
+      ),
+    ).toBe('<explicit_skill_invocation name="handle-operations-ticket" />');
   });
 
   it('preserves leading explicit invocation behavior on every surface', () => {
@@ -42,7 +46,27 @@ describe('Fast explicit skill invocation parsing', () => {
     ['a quoted dollar token', '<@ROOMOTE_ID> "$handle-operations-ticket"'],
   ])('ignores %s', (_label, message) => {
     expect(
-      parseFastAgentExplicitSkillInvocation(message, 'slack'),
+      parseFastAgentExplicitSkillInvocation(message, 'slack', 'ROOMOTE_ID'),
+    ).toBeUndefined();
+  });
+
+  it('ignores another user mention followed by a skill when Roomote is mentioned elsewhere', () => {
+    const message = [
+      '<@ROOMOTE_ID> please review this conversation.',
+      '<@U_OTHER> $handle-operations-ticket this is for you',
+    ].join('\n');
+
+    expect(
+      parseFastAgentExplicitSkillInvocation(message, 'slack', 'ROOMOTE_ID'),
+    ).toBeUndefined();
+  });
+
+  it('requires the Roomote Slack user ID for mention-based invocation', () => {
+    expect(
+      parseFastAgentExplicitSkillInvocation(
+        'Context <@ROOMOTE_ID> $handle-operations-ticket now',
+        'slack',
+      ),
     ).toBeUndefined();
   });
 
@@ -51,6 +75,7 @@ describe('Fast explicit skill invocation parsing', () => {
       parseFastAgentExplicitSkillInvocation(
         'Context first <@ROOMOTE_ID> $handle-operations-ticket now',
         'discord',
+        'ROOMOTE_ID',
       ),
     ).toBeUndefined();
   });
