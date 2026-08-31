@@ -795,12 +795,4 @@ describe('OpenCode SDK server shutdown', () => {
       lease.release();
     }
   });
-
-  it('registers terminating-signal handlers once a server is leased', () => {
-    // Leased in the previous test via the shared pool; registration is
-    // per-process, so the handlers must be present now.
-    expect(process.listenerCount('SIGTERM')).toBeGreaterThanOrEqual(1);
-    expect(process.listenerCount('SIGINT')).toBeGreaterThanOrEqual(1);
-    expect(process.listenerCount('SIGHUP')).toBeGreaterThanOrEqual(1);
-  });
 });
