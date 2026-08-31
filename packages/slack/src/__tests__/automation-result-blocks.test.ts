@@ -103,18 +103,10 @@ describe('automation result blocks', () => {
             url: 'https://app.example.com/task/1',
           },
           {
-            type: 'overflow',
+            type: 'button',
             action_id: 'late_bound_automation_configure',
-            options: [
-              {
-                text: {
-                  type: 'plain_text',
-                  text: 'Configure',
-                  emoji: false,
-                },
-                url: 'https://app.example.com/automations#custom-automation-1',
-              },
-            ],
+            text: { type: 'plain_text', text: 'Configure', emoji: false },
+            url: 'https://app.example.com/automations#custom-automation-1',
           },
         ],
       },
@@ -159,7 +151,7 @@ describe('automation result blocks', () => {
     ).toBe('Weekly · GPT 5.6 Max · $0.00 · 1d 2h 3m 4s');
   });
 
-  it('places additional actions before a custom Configure overflow', () => {
+  it('places additional actions before a custom Configure label', () => {
     const blocks = buildAutomationResultBlocks({
       title: 'Usage alert',
       iconUrl: 'https://app.example.com/automation-icons/battery-warning.png',
@@ -184,67 +176,14 @@ describe('automation result blocks', () => {
       elements: [
         expect.objectContaining({ action_id: 'manage_models' }),
         expect.objectContaining({
-          type: 'overflow',
           action_id: 'late_bound_automation_configure',
-          options: [
-            expect.objectContaining({
-              text: expect.objectContaining({ text: 'Configure alert' }),
-            }),
-          ],
+          text: expect.objectContaining({ text: 'Configure alert' }),
         }),
       ],
     });
   });
 
-  it('places Configure in the first available section accessory', () => {
-    const [container] = buildAutomationResultBlocks({
-      title: 'Merge Announcer',
-      iconUrl: 'https://app.example.com/automation-icons/git-merge.png',
-      configureUrl: 'https://app.example.com/automations#merge-announcer',
-      contentBlocks: [
-        {
-          type: 'section',
-          text: { type: 'mrkdwn', text: 'The release branch was updated.' },
-        },
-      ],
-      additionalActions: [
-        {
-          type: 'button',
-          action_id: 'view_changes',
-          text: { type: 'plain_text', text: 'View changes' },
-          url: 'https://github.com/acme/app/compare/one...two',
-        },
-      ],
-    });
-
-    expect(container?.type).toBe('container');
-    if (container?.type !== 'container') return;
-    expect(container.child_blocks).toEqual([
-      expect.objectContaining({
-        type: 'section',
-        accessory: {
-          type: 'overflow',
-          action_id: 'late_bound_automation_configure',
-          options: [
-            {
-              text: {
-                type: 'plain_text',
-                text: 'Configure',
-                emoji: false,
-              },
-              url: 'https://app.example.com/automations#merge-announcer',
-            },
-          ],
-        },
-      }),
-      expect.objectContaining({
-        type: 'actions',
-        elements: [expect.objectContaining({ action_id: 'view_changes' })],
-      }),
-    ]);
-  });
-
-  it('reserves action capacity for task and configure controls', () => {
+  it('reserves action capacity for task and configure buttons', () => {
     const blocks = buildAutomationResultBlocks({
       title: 'Audit',
       iconUrl: 'https://app.example.com/automation-icons/wrench.png',
