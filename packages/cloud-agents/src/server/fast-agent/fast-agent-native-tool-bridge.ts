@@ -449,7 +449,7 @@ import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
   description: "Ask structured questions, or use a trusted setup preset whose options Roomote supplies. Multiple-choice questions require explicit submission. The turn resumes from the persisted answer.",
-  args: z.union([z.object({
+  args: {
     questions: z.array(z.object({
       id: z.string().min(1).max(80),
       header: z.string().min(1).max(60),
@@ -459,10 +459,9 @@ export default {
         description: z.string().min(1).max(500),
       })).min(1).max(12).optional().describe("Present options as choices; omit for free-text"),
       multiple: z.boolean().optional().describe("Allow more than one option; defaults to false"),
-    })).min(1).max(4),
-  }), z.object({
-    preset: z.enum(["setup_source_control_provider", "setup_starter_tasks"]),
-  })]),
+    })).min(1).max(4).optional(),
+    preset: z.enum(["setup_source_control_provider", "setup_starter_tasks"]).optional().describe("Use exactly one trusted setup preset instead of questions"),
+  },
   execute: (args, context) => invoke("request_user_input", args, context),
 }
 `,
