@@ -40,6 +40,7 @@ import {
   createFastAgentDiscordTaskLauncher,
 } from './fast-agent-parent-event';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
+import { createAgentMailCommunicationProviderFromRuntimeCredentials } from './agentmail-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import { findTeamsConversationRoute } from '../automations/destination';
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
@@ -518,6 +519,43 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           });
           return handle;
         },
+      },
+    };
+  }
+
+  if (conversation.surface === 'agentmail') {
+    const provider =
+      await createAgentMailCommunicationProviderFromRuntimeCredentials();
+    if (!provider) {
+      return null;
+    }
+    return {
+      conversation,
+      adapter: {
+        launchTask: createFastAgentCommunicationTaskLauncher({
+          userId: params.userId,
+          conversation,
+        }),
+        // The adapter resolves the durable reply anchor and recipient from
+        // the conversation row; threadId carries the internal conversation
+        // id. A sent email is immutable, so replaceReply keeps the original
+        // message instead of editing (email is one final reply per turn,
+        // never a streamed draft).
+        postReply: async ({ message }) => {
+          const posted = await provider.postMessage({
+            channelId: conversation.replyTarget.channelId,
+            threadId: conversation.conversationId,
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'agentmail', sessionId: session.id, ...footerContext })}`,
+            textFormat: 'markdown',
+          });
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: posted.lastTextMessageId ?? posted.messageId,
+          });
+          return { messageId: posted.messageId };
+        },
+        replaceReply: async (handle) => handle,
       },
     };
   }
