@@ -99,13 +99,30 @@ describe('SlackNotifier', () => {
           threadTs: '100.001',
           title: 'Investigate Slack agent status',
         }),
-      ).resolves.toBe(true);
+      ).resolves.toEqual({ ok: true });
 
       expect(apiCallMock).toHaveBeenCalledWith('agents.sessions.rename', {
         channel_id: 'C123',
         thread_ts: '100.001',
         title: 'Investigate Slack agent status',
       });
+    });
+
+    it('exposes invalid title rejections from Slack platform errors', async () => {
+      apiCallMock.mockRejectedValue(
+        Object.assign(new Error('An API error occurred: invalid_name'), {
+          code: 'slack_webapi_platform_error',
+          data: { ok: false, error: 'invalid_name' },
+        }),
+      );
+
+      await expect(
+        notifier.renameAgentSession({
+          channel: 'C123',
+          threadTs: '100.001',
+          title: 'Invalid title',
+        }),
+      ).resolves.toEqual({ ok: false, error: 'invalid_name' });
     });
   });
 
