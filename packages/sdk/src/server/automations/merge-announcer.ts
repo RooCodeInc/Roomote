@@ -318,7 +318,7 @@ function buildMergeAnnouncerNotification(params: {
     ),
     slackBlocks: buildAutomationResultBlocks({
       title: 'Merge Announcer',
-      iconUrl: buildAutomationIconUrl('git-commit-vertical'),
+      iconUrl: buildAutomationIconUrl('git-merge'),
       configureUrl,
       subtitle: {
         type: 'plain_text',

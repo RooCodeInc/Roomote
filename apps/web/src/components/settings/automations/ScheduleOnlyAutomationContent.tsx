@@ -1,14 +1,13 @@
-import type { ReactNode } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import type { ScheduleOnlyBackgroundAutomationFrequency } from '@roomote/types';
+import { GitMergeIcon } from '@primer/octicons-react';
 
-import type { LucideIcon } from '@/components/system';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-  GitCommitVertical,
   SquarePen,
   Switch,
   TriangleAlert,
@@ -32,7 +31,7 @@ type ScheduleOnlyAutomationControl =
 type ScheduleOnlyAutomationUiDefinition = {
   description: string;
   details: readonly string[];
-  icon: LucideIcon;
+  icon: ComponentType<{ className?: string }>;
   control: ScheduleOnlyAutomationControl;
 };
 
@@ -97,7 +96,7 @@ export const SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS = {
       'Runs immediately from provider-deduplicated push webhooks, not on a daily or weekly batch schedule.',
       'Uses the helper model for a brief commit summary and posts through the configured automation destination or normal manager-channel fallback.',
     ],
-    icon: GitCommitVertical,
+    icon: GitMergeIcon,
     control: {
       kind: 'toggle',
       enabledFrequency: 'daily',

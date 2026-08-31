@@ -124,7 +124,6 @@ export {
   Maximize2,
   Medal,
   Menu,
-  Megaphone,
   MessageCirclePlus,
   MessageCircleQuestionMark,
   MessageSquareCode,
