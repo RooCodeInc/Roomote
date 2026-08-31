@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import type { BackgroundAutomationKey } from '@roomote/types';
+import { GitMergeIcon } from '@primer/octicons-react';
 
 import {
   BellElectric,
@@ -9,7 +10,6 @@ import {
   GitMergeConflict,
   GitPullRequest,
   Lightbulb,
-  Megaphone,
   MessagesSquare,
   Smile,
   SquarePen,
@@ -28,7 +28,7 @@ const AUTOMATION_ICONS: Partial<
   review_code: GitPullRequest,
   conflict_resolver: GitMergeConflict,
   suggester: Lightbulb,
-  announcer: Megaphone,
+  announcer: GitMergeIcon,
   call_roomote_via_emoji: Smile,
   slack_channel_auto_start: MessagesSquare,
   manager_stats: ChartColumnIncreasing,

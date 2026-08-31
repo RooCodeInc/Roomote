@@ -121,7 +121,7 @@ describe('handleMergeAnnouncerPush', () => {
           },
           icon: expect.objectContaining({
             image_url: expect.stringContaining(
-              '/automation-icons/git-commit-vertical.png',
+              '/automation-icons/git-merge.png',
             ),
           }),
           child_blocks: expect.arrayContaining([
