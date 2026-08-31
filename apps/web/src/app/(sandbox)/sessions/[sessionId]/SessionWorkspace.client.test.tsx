@@ -435,14 +435,15 @@ describe('SessionWorkspace', () => {
     },
   );
 
-  it('shows the Task artifact empty state in execution details', () => {
+  it('omits the Artifacts section from execution details when empty', () => {
     renderWorkspace({
       isMobile: false,
       selectedTaskId: singleTask.taskId,
       sessionOverride: { tasks: [singleTask] },
     });
 
-    expect(screen.getByText('No artifacts in this task yet.')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Artifacts' })).toBeNull();
+    expect(screen.queryByText('No artifacts in this task yet.')).toBeNull();
   });
 
   it('disables the Tasks panel button until the session has a task', () => {
