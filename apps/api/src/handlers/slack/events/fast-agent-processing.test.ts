@@ -219,6 +219,7 @@ describe('processFastAgentMessage', () => {
       slack: slack as never,
       userId: 'user-1',
       teamId: 'T123',
+      roomoteSlackUserId: 'UROOMOTE',
       activeTasks: [
         { taskId: 'task-1', title: 'Fix API' },
         { taskId: 'task-2', title: 'Update docs' },
@@ -228,6 +229,7 @@ describe('processFastAgentMessage', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         question: 'investigate this',
+        slackRoomoteUserId: 'UROOMOTE',
         currentMessageAgentContext: 'Slack block text:\nState: New',
         adapter: expect.objectContaining({ launchTask }),
         activeTasks: [

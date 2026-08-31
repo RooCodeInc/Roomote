@@ -55,7 +55,8 @@ export type FastAgentSkillSummary = {
   invocation?: string;
   name: string;
   repository?: string;
-  source: 'packaged' | 'repository';
+  settingsSource?: string;
+  source: 'packaged' | 'repository' | 'settings';
 };
 
 export type FastAgentSkillDocument = FastAgentSkillSummary & {
@@ -66,6 +67,7 @@ export type FastAgentSkillDocument = FastAgentSkillSummary & {
 };
 
 export type FastAgentSkillListResult = {
+  nextSourceOffset?: number;
   skills: FastAgentSkillSummary[];
   warnings: string[];
 };
@@ -74,8 +76,16 @@ type FastAgentSkillCatalog = FastAgentSkillListResult & {
   counts: {
     packaged: number;
     repository: number;
+    settings: number;
     total: number;
   };
+};
+
+export type FastAgentSkillQuery = {
+  environmentId?: string;
+  name?: string;
+  repositoryId?: string;
+  sourceOffset?: number;
 };
 
 export type FastAgentSkillScope =
@@ -84,6 +94,12 @@ export type FastAgentSkillScope =
 
 export type FastAgentRepositorySkillSource = {
   list(scope: FastAgentSkillScope): Promise<FastAgentSkillListResult>;
+  read(id: string, resource?: string): Promise<FastAgentSkillDocument>;
+  dispose?(): Promise<void>;
+};
+
+export type FastAgentSettingsSkillSource = {
+  list(query: FastAgentSkillQuery): Promise<FastAgentSkillListResult>;
   read(id: string, resource?: string): Promise<FastAgentSkillDocument>;
   dispose?(): Promise<void>;
 };
@@ -209,13 +225,14 @@ export class FastAgentSkillStore {
   constructor(
     rootDirectory?: string,
     private readonly repositorySkills?: FastAgentRepositorySkillSource,
+    private readonly settingsSkills?: FastAgentSettingsSkillSource,
   ) {
     this.rootDirectory = rootDirectory
       ? Promise.resolve(resolve(rootDirectory))
       : resolveDefaultSkillRoot();
   }
 
-  async list(scope?: FastAgentSkillScope): Promise<FastAgentSkillCatalog> {
+  async list(query: FastAgentSkillQuery = {}): Promise<FastAgentSkillCatalog> {
     const packaged = await Promise.all(
       FAST_AGENT_PACKAGED_SKILL_NAMES.map(async (name) => {
         const document = await this.readPackaged(name);
@@ -228,22 +245,67 @@ export class FastAgentSkillStore {
         };
       }),
     );
+    const scope = query.environmentId
+      ? ({ environmentId: query.environmentId } as const)
+      : query.repositoryId
+        ? ({ repositoryId: query.repositoryId } as const)
+        : undefined;
+    const packagedNames = new Set<string>(packaged.map((skill) => skill.name));
+    const packagedMatchIsAuthoritative =
+      !!query.name && packagedNames.has(query.name);
+    const settings =
+      !packagedMatchIsAuthoritative &&
+      (scope || query.name) &&
+      this.settingsSkills
+        ? await this.settingsSkills.list(query)
+        : { skills: [], warnings: [] };
     const repository =
-      scope && this.repositorySkills
+      !packagedMatchIsAuthoritative &&
+      (query.sourceOffset ?? 0) === 0 &&
+      scope &&
+      this.repositorySkills
         ? await this.repositorySkills.list(scope)
         : { skills: [], warnings: [] };
+    const filteredPackaged = query.name
+      ? packaged.filter((skill) => skill.name === query.name)
+      : packaged;
+    const filteredSettings = settings.skills.filter(
+      (skill) =>
+        (!query.name || skill.name === query.name) &&
+        !packagedNames.has(skill.name),
+    );
+    const settingsNames = new Set<string>(
+      filteredSettings.map((skill) => skill.name),
+    );
+    const filteredRepository = repository.skills.filter(
+      (skill) =>
+        (!query.name || skill.name === query.name) &&
+        !packagedNames.has(skill.name) &&
+        !settingsNames.has(skill.name),
+    );
     return {
       counts: {
-        packaged: packaged.length,
-        repository: repository.skills.length,
-        total: packaged.length + repository.skills.length,
+        packaged: filteredPackaged.length,
+        repository: filteredRepository.length,
+        settings: filteredSettings.length,
+        total:
+          filteredPackaged.length +
+          filteredSettings.length +
+          filteredRepository.length,
       },
-      skills: [...packaged, ...repository.skills].sort((left, right) =>
+      skills: [
+        ...filteredPackaged,
+        ...filteredSettings,
+        ...filteredRepository,
+      ].sort((left, right) =>
         left.name === right.name
           ? left.id.localeCompare(right.id)
           : left.name.localeCompare(right.name),
       ),
-      warnings: repository.warnings,
+      ...(settings.nextSourceOffset === undefined
+        ? {}
+        : { nextSourceOffset: settings.nextSourceOffset }),
+      warnings: [...settings.warnings, ...repository.warnings],
     };
   }
 
@@ -254,12 +316,19 @@ export class FastAgentSkillStore {
     if (id.startsWith('packaged:')) {
       return this.readPackaged(id.slice('packaged:'.length), requestedResource);
     }
+    if (id.startsWith('settings:')) {
+      if (!this.settingsSkills) throw new Error('Unknown skill.');
+      return this.settingsSkills.read(id, requestedResource);
+    }
     if (!this.repositorySkills) throw new Error('Unknown skill.');
     return this.repositorySkills.read(id, requestedResource);
   }
 
   async dispose(): Promise<void> {
-    await this.repositorySkills?.dispose?.();
+    await Promise.all([
+      this.repositorySkills?.dispose?.(),
+      this.settingsSkills?.dispose?.(),
+    ]);
   }
 
   private async readPackaged(

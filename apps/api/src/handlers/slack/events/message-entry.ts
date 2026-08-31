@@ -1641,6 +1641,7 @@ export function startFastAgentResponse(params: {
     run: ({ onAccepted, onRejected }) =>
       processFastAgentMessage({
         ...fastAgentParams,
+        roomoteSlackUserId: params.slackInstallation.botUserId ?? undefined,
         apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
         launchTask: createFastAgentSlackLiveTaskLauncher({
           slack: params.slack,
