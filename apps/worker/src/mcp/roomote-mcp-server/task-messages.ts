@@ -28,10 +28,9 @@ export async function handleGetTaskMessages(
   config: RoomoteConfig,
 ): Promise<ToolResult> {
   try {
-    const order = params.limit ? 'desc' : 'asc';
     const result = await getTaskMessages(config, params.taskId, {
       limit: params.limit,
-      order,
+      order: 'desc',
     });
 
     const messages = result.messages;

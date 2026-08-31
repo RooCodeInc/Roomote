@@ -89,6 +89,23 @@ export interface TaskMessageEnvelopeCore {
   payload?: TaskMessagePayload | null;
 }
 
+export interface RoomoteTranscriptMessage {
+  id: string;
+  taskId: string;
+  ts: number;
+  eventType: string;
+  role: TaskMessageRole;
+  text: string | null;
+  images: string[];
+  metadata: TaskMessageMetadata | null;
+  visibleInTranscript: boolean;
+}
+
+export interface RoomoteTranscriptMessagesResponse {
+  messages: RoomoteTranscriptMessage[];
+  returned: number;
+}
+
 export const TRANSCRIPT_VISIBILITY_METADATA_KEY = 'visibleInTranscript';
 
 /**

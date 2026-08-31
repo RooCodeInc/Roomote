@@ -12,7 +12,9 @@ import {
 import {
   getTextFromContentBlocks,
   getImageUrisFromContentBlocks,
+  ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   resolveAcpTranscriptVisibility,
+  sanitizeEnvelopeFields,
 } from '@roomote/types';
 
 import type { Variables } from '../../types';
@@ -79,7 +81,7 @@ export async function getTaskMessages(
           sessionId: taskId,
           userId,
           limit,
-          order: 'desc',
+          order,
         });
         if (messages) {
           return c.json({ messages, returned: messages.length });
@@ -115,22 +117,35 @@ export async function getTaskMessages(
 
     const rows = await query;
 
-    const messages = rows.map((row) => ({
-      id: row.id,
-      taskId: row.taskId,
-      ts: Number(row.ts),
-      eventType: row.eventType,
-      role: row.role,
-      text: getTextFromContentBlocks(row.contentBlocks),
-      images: getImageUrisFromContentBlocks(row.contentBlocks),
-      metadata: row.metadata,
-      visibleInTranscript: resolveAcpTranscriptVisibility({
+    const messages = rows.flatMap((row) => {
+      const visibleInTranscript = resolveAcpTranscriptVisibility({
         eventType: row.eventType,
         contentBlocks: row.contentBlocks,
         metadata: row.metadata,
         payload: row.payload,
-      }),
-    }));
+      });
+      if (!visibleInTranscript) return [];
+      const sanitized = sanitizeEnvelopeFields(
+        row.eventType,
+        row.contentBlocks,
+        row.metadata,
+        row.payload,
+        { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
+      );
+      return [
+        {
+          id: row.id,
+          taskId: row.taskId,
+          ts: Number(row.ts),
+          eventType: row.eventType,
+          role: row.role,
+          text: getTextFromContentBlocks(sanitized.contentBlocks),
+          images: getImageUrisFromContentBlocks(sanitized.contentBlocks),
+          metadata: sanitized.metadata,
+          visibleInTranscript: true,
+        },
+      ];
+    });
 
     return c.json({ messages, returned: messages.length });
   } catch (error) {

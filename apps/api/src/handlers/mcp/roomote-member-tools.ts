@@ -3,13 +3,14 @@ import { z } from 'zod';
 
 import {
   ALL_REPOSITORIES,
-  PRODUCT_NAME,
-  ROOMOTE_TASK_INSPECTION_ACTIONS,
-  roomoteTaskInspectionFieldSchemas,
+  ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
+  ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
+  roomoteManagementFieldSchemas,
 } from '@roomote/types';
 
 import { environmentsRouter } from '../environments';
 import { tasksRouter } from '../tasks';
+import { sessionsRouter } from '../sessions';
 import {
   invokeInProcessApi,
   toolError,
@@ -28,6 +29,7 @@ function invokeMemberApi(
     auth,
     mount: (app) => {
       app.route('/tasks', tasksRouter);
+      app.route('/sessions', sessionsRouter);
       app.route('/environments', environmentsRouter);
     },
     path,
@@ -36,19 +38,8 @@ function invokeMemberApi(
 }
 
 const manageTasksInputSchema = {
-  action: z.enum([
-    ...ROOMOTE_TASK_INSPECTION_ACTIONS,
-    'launch',
-    'cancel',
-    'send_message',
-    'list_environments',
-  ]),
-  ...roomoteTaskInspectionFieldSchemas,
-  message: z.string().optional(),
-  prompt: z.string().optional(),
-  environmentId: z.string().optional(),
-  branch: z.string().optional(),
-  notifyOnSettle: z.boolean().optional(),
+  action: z.enum(ROOMOTE_MEMBER_MANAGEMENT_ACTIONS),
+  ...roomoteManagementFieldSchemas,
 } satisfies Record<string, z.ZodTypeAny>;
 
 export function registerRoomoteMemberTools(
@@ -58,10 +49,8 @@ export function registerRoomoteMemberTools(
   server.registerTool(
     'manage_tasks',
     {
-      title: 'Manage Tasks',
-      description:
-        `Manage ${PRODUCT_NAME} tasks as the signed-in member. ` +
-        'Use list_environments immediately before launch, search for task history, inspect summaries/messages/compute logs, launch tasks, cancel active tasks, or send follow-up messages. For get_messages and send_message, taskId may be either a task ID or a canonical Fast session ID.',
+      title: 'Manage Sessions and Tasks',
+      description: ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
       inputSchema: manageTasksInputSchema,
       annotations: {
         readOnlyHint: false,
@@ -72,6 +61,53 @@ export function registerRoomoteMemberTools(
     },
     async (params) => {
       switch (params.action) {
+        case 'start_session': {
+          if (!params.message?.trim()) {
+            return toolError({
+              error: 'message is required for start_session',
+            });
+          }
+          return resultFromApi(
+            await invokeMemberApi(auth, '/sessions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ message: params.message }),
+            }),
+          );
+        }
+        case 'search_sessions': {
+          const query = new URLSearchParams();
+          if (params.query) query.set('query', params.query);
+          if (params.sessionStatus) query.set('status', params.sessionStatus);
+          if (params.limit)
+            query.set('limit', String(Math.min(params.limit, 100)));
+          if (params.cursor) query.set('cursor', params.cursor);
+          const suffix = query.size > 0 ? `?${query.toString()}` : '';
+          return resultFromApi(
+            await invokeMemberApi(auth, `/sessions${suffix}`),
+          );
+        }
+        case 'get_session_summary':
+        case 'get_session_messages': {
+          if (!params.sessionId) {
+            return toolError({
+              error: `sessionId is required for ${params.action}`,
+            });
+          }
+          const actionPath =
+            params.action === 'get_session_summary' ? 'summary' : 'messages';
+          const query = new URLSearchParams();
+          if (params.action === 'get_session_messages' && params.limit) {
+            query.set('limit', String(params.limit));
+          }
+          const suffix = query.size > 0 ? `?${query.toString()}` : '';
+          return resultFromApi(
+            await invokeMemberApi(
+              auth,
+              `/sessions/${encodeURIComponent(params.sessionId)}/${actionPath}${suffix}`,
+            ),
+          );
+        }
         case 'search': {
           const query = new URLSearchParams();
           if (params.query) query.set('query', params.query);

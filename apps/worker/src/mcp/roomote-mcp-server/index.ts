@@ -14,8 +14,9 @@ import {
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
-  ROOMOTE_TASK_INSPECTION_ACTIONS,
-  roomoteTaskInspectionFieldSchemas,
+  ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
+  ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
+  roomoteManagementFieldSchemas,
   sourceControlProviderSchema,
   taskArtifactTypeSchema,
   workspaceReadinessSchema,
@@ -79,6 +80,12 @@ import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
 import { handleManageCustomAutomations } from './custom-automations.js';
 import { handleManageGoal } from './goal.js';
+import {
+  handleGetSessionMessages,
+  handleGetSessionSummary,
+  handleSearchSessions,
+  handleStartSession,
+} from './sessions.js';
 
 export {
   taskSuggestionResultHasSubmittedSuggestions,
@@ -504,7 +511,8 @@ const ENVIRONMENT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const manageTasksToolDescription =
-  `Manage ${PRODUCT_NAME} tasks. ` +
+  ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION +
+  ' ' +
   `When the user provides an existing ${PRODUCT_NAME} task URL or asks about an existing task, extract the task ID and use action "get_summary" for current status or action "get_messages" for transcript details before resorting to browser or task-UI navigation. ` +
   'Always call action "list_environments" immediately before action "launch" so you can copy a valid environmentId. ' +
   'Use action "list_environments" to list launch targets (named environments and the org-wide target). ' +
@@ -521,44 +529,14 @@ const manageTasksToolDescription =
 const manageTasksInputSchema = {
   action: z
     .enum([
-      ...ROOMOTE_TASK_INSPECTION_ACTIONS,
-      'launch',
-      'cancel',
-      'send_message',
+      ...ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
       'list_models',
       'update_models',
-      'list_environments',
     ])
     .describe(
       'The task action to perform. Call "list_environments" immediately before "launch".',
     ),
-  ...roomoteTaskInspectionFieldSchemas,
-  taskId: z
-    .string()
-    .optional()
-    .describe(
-      'The task ID; for get_messages and send_message this may instead be a canonical Fast session ID',
-    ),
-  message: z
-    .string()
-    .optional()
-    .describe(
-      'Follow-up message text to send to a running task (required for send_message)',
-    ),
-  prompt: z
-    .string()
-    .optional()
-    .describe(
-      'Task description or instructions in natural language (required for launch)',
-    ),
-  environmentId: z
-    .string()
-    .optional()
-    .describe(
-      'Environment ID returned by "list_environments" (required for launch). ' +
-        'Call "list_environments" immediately before launching and copy one of the returned environmentId values.',
-    ),
-  branch: z.string().optional().describe('Branch to use (for launch)'),
+  ...roomoteManagementFieldSchemas,
   role: z
     .enum(['coding', 'helper', 'vision', 'codeReview', 'explore', 'planning'])
     .optional()
@@ -576,12 +554,6 @@ const manageTasksInputSchema = {
     .optional()
     .describe(
       'For update_models: desired reasoning level for the role ("extra high" maps to xhigh). A level qualifier trailing a model name ("Luna Max", "Sonnet high") is this field, not part of the model id — pass it here alongside the model. Omit to use the deployment default level.',
-    ),
-  notifyOnSettle: z
-    .boolean()
-    .optional()
-    .describe(
-      'For launch: when true, the platform sends a message into THIS task session when the launched task settles (completes, fails, is canceled, or goes idle), so you can wait for that notification instead of polling get_summary.',
     ),
 } satisfies Record<string, z.ZodTypeAny>;
 
@@ -620,7 +592,7 @@ roomoteMcpServer.registerTool(
 roomoteMcpServer.registerTool(
   'manage_tasks',
   {
-    title: 'Manage Tasks',
+    title: 'Manage Sessions and Tasks',
     description: manageTasksToolDescription,
     inputSchema: manageTasksInputSchema,
     annotations: {
@@ -637,6 +609,38 @@ roomoteMcpServer.registerTool(
     }
 
     switch (params.action) {
+      case 'start_session': {
+        if (!params.message?.trim()) {
+          return errorResult('message is required for start_session');
+        }
+        return handleStartSession(params.message, config);
+      }
+      case 'search_sessions': {
+        return handleSearchSessions(
+          {
+            query: params.query,
+            status: params.sessionStatus,
+            limit: params.limit ? Math.min(params.limit, 100) : undefined,
+            cursor: params.cursor,
+          },
+          config,
+        );
+      }
+      case 'get_session_summary': {
+        if (!params.sessionId) {
+          return errorResult('sessionId is required for get_session_summary');
+        }
+        return handleGetSessionSummary(params.sessionId, config);
+      }
+      case 'get_session_messages': {
+        if (!params.sessionId) {
+          return errorResult('sessionId is required for get_session_messages');
+        }
+        return handleGetSessionMessages(
+          { sessionId: params.sessionId, limit: params.limit },
+          config,
+        );
+      }
       case 'search': {
         return handleSearchTasks(
           {

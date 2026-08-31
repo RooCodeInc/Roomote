@@ -276,7 +276,7 @@ describe('roomote MCP tool descriptions', () => {
     const manageTasksTool = getRegisteredTool(registeredTools, 'manage_tasks');
 
     expect(manageTasksTool.config.description).toContain(
-      'Manage Roomote tasks.',
+      'Create and inspect Roomote sessions',
     );
     expect(manageTasksTool.config.description).not.toContain(
       'Not Slack-visible by itself',
@@ -309,6 +309,10 @@ describe('roomote MCP tool descriptions', () => {
     );
     expect(manageTasksTool.config.description).not.toContain('get_harness_log');
     expect(actionField.options).toEqual([
+      'start_session',
+      'search_sessions',
+      'get_session_summary',
+      'get_session_messages',
       'search',
       'get_summary',
       'get_compute_logs',
@@ -316,12 +320,12 @@ describe('roomote MCP tool descriptions', () => {
       'launch',
       'cancel',
       'send_message',
+      'list_environments',
       'list_models',
       'update_models',
-      'list_environments',
     ]);
     expect(taskIdField.description).toBe(
-      'The task ID; for get_messages and send_message this may instead be a canonical Fast session ID',
+      'The task ID; get_messages and send_message also accept a canonical Roomote session or Fast conversation ID when those actions are available',
     );
     expect(limitField.description).toBe(
       'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages (task or Fast session)',
@@ -347,6 +351,7 @@ describe('roomote MCP tool descriptions', () => {
     expect(tool.config.description).toContain(
       'For a Fast session, pass its canonical session ID as taskId.',
     );
+    expect(tool.config.description).toContain('Use start_session for new work');
     expect(
       registeredTools.some((candidate) => candidate.name === 'manage_sessions'),
     ).toBe(false);

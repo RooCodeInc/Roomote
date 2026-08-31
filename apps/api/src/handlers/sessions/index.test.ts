@@ -1,0 +1,267 @@
+const mocks = vi.hoisted(() => ({
+  getOrCreateFastAgentSession: vi.fn(),
+  getSessionForFastConversation: vi.fn(),
+  queueFastAgentSurfaceReply: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/cloud-agents/server')>()),
+  getOrCreateFastAgentSession: mocks.getOrCreateFastAgentSession,
+}));
+
+vi.mock('@roomote/sdk/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
+  queueFastAgentSurfaceReply: mocks.queueFastAgentSurfaceReply,
+}));
+
+vi.mock('@roomote/db/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/db/server')>()),
+  getSessionForFastConversation: mocks.getSessionForFastConversation,
+}));
+
+import { Hono } from 'hono';
+import {
+  ACP_UI_TOOL_OUTPUT_MAX_CHARS,
+  type AuthTokenContext,
+} from '@roomote/types';
+import {
+  db,
+  eq,
+  fastAgentConversations,
+  fastAgentMessages,
+  sessionFactory,
+  sessions,
+  sessionTasks,
+  taskFactory,
+  tasks,
+  userFactory,
+  users,
+} from '@roomote/db/server';
+
+import type { Variables } from '../../types';
+import { mcpAuthMiddleware } from '../mcp/middleware';
+import { sessionsRouter } from '.';
+
+const createdSessionIds: string[] = [];
+const createdTaskIds: string[] = [];
+const createdUserIds: string[] = [];
+const createdConversationIds: string[] = [];
+
+function createApp(userId: string) {
+  const app = new Hono<{ Variables: Variables }>();
+  app.use('*', async (c, next) => {
+    const auth: AuthTokenContext = { userId, tokenType: 'auth', version: 1 };
+    c.set('authContext', auth);
+    await next();
+  });
+  app.use('*', mcpAuthMiddleware);
+  app.route('/sessions', sessionsRouter);
+  return app;
+}
+
+afterEach(async () => {
+  while (createdSessionIds.length > 0) {
+    await db.delete(sessions).where(eq(sessions.id, createdSessionIds.pop()!));
+  }
+  while (createdTaskIds.length > 0) {
+    await db.delete(tasks).where(eq(tasks.id, createdTaskIds.pop()!));
+  }
+  while (createdConversationIds.length > 0) {
+    await db
+      .delete(fastAgentConversations)
+      .where(eq(fastAgentConversations.id, createdConversationIds.pop()!));
+  }
+  while (createdUserIds.length > 0) {
+    await db.delete(users).where(eq(users.id, createdUserIds.pop()!));
+  }
+  vi.clearAllMocks();
+});
+
+describe('MCP session routes', () => {
+  it('starts a unified session and queues its first turn', async () => {
+    const user = await userFactory.create();
+    createdUserIds.push(user.id);
+    const sessionId = crypto.randomUUID();
+    const fastConversationId = crypto.randomUUID();
+    mocks.getOrCreateFastAgentSession.mockResolvedValue({
+      id: fastConversationId,
+      created: true,
+    });
+    mocks.getSessionForFastConversation.mockResolvedValue({ id: sessionId });
+    mocks.queueFastAgentSurfaceReply.mockResolvedValue(true);
+
+    const response = await createApp(user.id).request('/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Investigate the failing deployment' }),
+    });
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toEqual({
+      sessionId,
+      fastConversationId,
+      queued: true,
+    });
+    expect(mocks.queueFastAgentSurfaceReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: fastConversationId,
+        userId: user.id,
+        question: 'Investigate the failing deployment',
+      }),
+    );
+  });
+
+  it('returns accessible sessions with nested child-task state', async () => {
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Release investigation',
+      sourceSurface: 'web',
+      sourceTrigger: 'message',
+    });
+    createdSessionIds.push(session.id);
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      title: 'Inspect release checks',
+      repositoryName: 'RooCodeInc/Roomote',
+    });
+    createdTaskIds.push(task.id);
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'fast_delegation',
+    });
+
+    const listResponse = await createApp(owner.id).request(
+      '/sessions?query=release',
+    );
+    expect(listResponse.status).toBe(200);
+    await expect(listResponse.json()).resolves.toMatchObject({
+      sessions: [
+        {
+          id: session.id,
+          title: 'Release investigation',
+          tasks: [
+            {
+              taskId: task.id,
+              title: 'Inspect release checks',
+              origin: 'fast_delegation',
+              latestRun: null,
+            },
+          ],
+        },
+      ],
+    });
+
+    const summaryResponse = await createApp(owner.id).request(
+      `/sessions/${session.id}/summary`,
+    );
+    expect(summaryResponse.status).toBe(200);
+    await expect(summaryResponse.json()).resolves.toMatchObject({
+      id: session.id,
+      tasks: [{ taskId: task.id }],
+    });
+  });
+
+  it('hides sessions from users who are not participants', async () => {
+    const owner = await userFactory.create();
+    const bystander = await userFactory.create();
+    createdUserIds.push(owner.id, bystander.id);
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+    });
+    createdSessionIds.push(session.id);
+
+    const response = await createApp(bystander.id).request(
+      `/sessions/${session.id}/summary`,
+    );
+    expect(response.status).toBe(404);
+    const messagesResponse = await createApp(bystander.id).request(
+      `/sessions/${session.id}/messages`,
+    );
+    expect(messagesResponse.status).toBe(404);
+  });
+
+  it('returns visible, sanitized session messages newest first', async () => {
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    createdConversationIds.push(conversation!.id);
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      fastConversationId: conversation!.id,
+      sourceSurface: 'web',
+      sourceTrigger: 'message',
+    });
+    createdSessionIds.push(session.id);
+    await db.insert(fastAgentMessages).values([
+      {
+        conversationId: conversation!.id,
+        eventId: 'visible-old',
+        turnId: 'turn-old',
+        turnSeq: 0,
+        ts: 1,
+        eventType: 'roomote_runtime.user_prompt',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'Older message' }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+        source: 'web',
+      },
+      {
+        conversationId: conversation!.id,
+        eventId: 'hidden-middle',
+        turnId: 'turn-hidden',
+        turnSeq: 0,
+        ts: 2,
+        eventType: 'roomote_runtime.user_prompt',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'Hidden message' }],
+        metadata: { visibleInTranscript: false },
+        payload: {},
+        source: 'web',
+      },
+      {
+        conversationId: conversation!.id,
+        eventId: 'visible-new',
+        turnId: 'turn-new',
+        turnSeq: 0,
+        ts: 3,
+        eventType: 'roomote_runtime.tool_result',
+        role: 'tool',
+        contentBlocks: [{ type: 'text', text: 'Unbounded output' }],
+        metadata: { visibleInTranscript: true },
+        payload: { output: 'x'.repeat(ACP_UI_TOOL_OUTPUT_MAX_CHARS + 100) },
+        source: 'web',
+      },
+    ]);
+
+    const response = await createApp(owner.id).request(
+      `/sessions/${session.id}/messages`,
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      returned: number;
+      messages: Array<{
+        text: string;
+        metadata: Record<string, unknown> | null;
+      }>;
+    };
+    expect(body.returned).toBe(2);
+    expect(body.messages[0]?.text).not.toBe('Unbounded output');
+    expect(body.messages[0]?.metadata).toHaveProperty('truncation');
+    expect(body.messages[1]?.text).toBe('Older message');
+  });
+});

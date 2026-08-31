@@ -10,6 +10,10 @@ import type {
   SuggestionPriority,
   TaskLaunchRequest,
   WorkspaceReadiness,
+  RoomoteSearchSessionsResponse,
+  RoomoteSessionMessagesResponse,
+  RoomoteSessionSummary,
+  RoomoteStartSessionResponse,
 } from '@roomote/types';
 import type {
   RoomoteConfig,
@@ -64,6 +68,66 @@ async function apiFetch<T>(
   }
 
   return (await response.json()) as T;
+}
+
+export async function startSession(
+  config: RoomoteConfig,
+  message: string,
+): Promise<RoomoteStartSessionResponse> {
+  return apiFetch(
+    config,
+    '/api/mcp/sessions',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    },
+    'Failed to start session',
+  );
+}
+
+export async function searchSessions(
+  config: RoomoteConfig,
+  params: {
+    query?: string;
+    status?: string;
+    limit?: number;
+    cursor?: string;
+  },
+): Promise<RoomoteSearchSessionsResponse> {
+  const qs = buildSearchParams(params);
+  return apiFetch(
+    config,
+    `/api/mcp/sessions${qs}`,
+    {},
+    'Failed to search sessions',
+  );
+}
+
+export async function getSessionSummary(
+  config: RoomoteConfig,
+  sessionId: string,
+): Promise<RoomoteSessionSummary> {
+  return apiFetch(
+    config,
+    `/api/mcp/sessions/${encodeURIComponent(sessionId)}/summary`,
+    {},
+    'Failed to get session summary',
+  );
+}
+
+export async function getSessionMessages(
+  config: RoomoteConfig,
+  sessionId: string,
+  limit?: number,
+): Promise<RoomoteSessionMessagesResponse> {
+  const qs = buildSearchParams({ limit });
+  return apiFetch(
+    config,
+    `/api/mcp/sessions/${encodeURIComponent(sessionId)}/messages${qs}`,
+    {},
+    'Failed to get session messages',
+  );
 }
 
 function buildSearchParams(

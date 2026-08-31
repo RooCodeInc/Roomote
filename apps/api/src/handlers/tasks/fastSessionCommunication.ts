@@ -7,6 +7,7 @@ import {
   desc,
   eq,
   fastAgentMessages,
+  sessions,
   sql,
 } from '@roomote/db/server';
 import {
@@ -23,18 +24,27 @@ import { z } from 'zod';
 
 const canonicalFastSessionIdSchema = z.string().uuid();
 
+async function resolveFastConversationId(sessionId: string) {
+  if (!canonicalFastSessionIdSchema.safeParse(sessionId).success) return null;
+  const [unifiedSession] = await db
+    .select({ fastConversationId: sessions.fastConversationId })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  return unifiedSession?.fastConversationId ?? sessionId;
+}
+
 export async function getFastSessionMessagesForUser(params: {
   sessionId: string;
   userId: string;
   limit?: number;
   order: 'asc' | 'desc';
 }) {
-  if (!canonicalFastSessionIdSchema.safeParse(params.sessionId).success) {
-    return null;
-  }
+  const fastConversationId = await resolveFastConversationId(params.sessionId);
+  if (!fastConversationId) return null;
   if (
     !(await canUserAccessFastAgentSession({
-      sessionId: params.sessionId,
+      sessionId: fastConversationId,
       userId: params.userId,
     }))
   ) {
@@ -68,7 +78,7 @@ export async function getFastSessionMessagesForUser(params: {
     .from(fastAgentMessages)
     .where(
       and(
-        eq(fastAgentMessages.conversationId, params.sessionId),
+        eq(fastAgentMessages.conversationId, fastConversationId),
         sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
       ),
     )
@@ -109,12 +119,13 @@ export async function sendMessageToFastSessionForUser(params: {
   | { success: true; result: { sessionId: string; queued: true } }
   | { success: false; status: 404 | 409; error: string }
 > {
-  if (!canonicalFastSessionIdSchema.safeParse(params.sessionId).success) {
+  const fastConversationId = await resolveFastConversationId(params.sessionId);
+  if (!fastConversationId) {
     return { success: false, status: 404, error: 'Task not found' };
   }
   if (
     !(await canUserAccessFastAgentSession({
-      sessionId: params.sessionId,
+      sessionId: fastConversationId,
       userId: params.userId,
     }))
   ) {
@@ -122,7 +133,7 @@ export async function sendMessageToFastSessionForUser(params: {
   }
 
   const queued = await queueFastAgentSurfaceReply({
-    sessionId: params.sessionId,
+    sessionId: fastConversationId,
     userId: params.userId,
     senderDisplayName: null,
     question: params.message,

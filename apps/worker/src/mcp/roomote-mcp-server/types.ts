@@ -4,6 +4,7 @@ import type {
   TaskArtifactType,
   TaskModelOption,
   TaskGoal,
+  RoomoteTranscriptMessagesResponse,
 } from '@roomote/types';
 
 export interface ArtifactConfig {
@@ -222,22 +223,7 @@ export interface CommunicationChannelMessagesResponse {
   messages: CommunicationLookupMessage[];
 }
 
-export interface TaskMessage {
-  id: string;
-  taskId: string;
-  ts: number;
-  eventType: string;
-  role: 'user' | 'assistant' | 'system' | 'tool' | null;
-  text: string | null;
-  images: string[];
-  metadata: Record<string, unknown> | null;
-  visibleInTranscript?: boolean;
-}
-
-export interface TaskMessagesResponse {
-  messages: TaskMessage[];
-  returned: number;
-}
+export type TaskMessagesResponse = RoomoteTranscriptMessagesResponse;
 
 export interface SendMessageResponse {
   success: boolean;

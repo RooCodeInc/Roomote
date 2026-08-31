@@ -20,6 +20,7 @@ import {
   db,
   fastAgentConversations,
   fastAgentMessages,
+  ensureSessionForFastConversation,
   userFactory,
 } from '@roomote/db/server';
 
@@ -135,12 +136,12 @@ describe('Fast session communication through task routes', () => {
         messages: [
           {
             taskId: session.id,
-            text: 'Newest text',
+            text: 'Participant text',
             visibleInTranscript: true,
           },
           {
             taskId: session.id,
-            text: 'Participant text',
+            text: 'Newest text',
             visibleInTranscript: true,
           },
         ],
@@ -192,6 +193,40 @@ describe('Fast session communication through task routes', () => {
         userId: participant.id,
         question: 'Continue this conversation',
         images: ['https://example.com/member.png'],
+      }),
+    );
+  });
+
+  it('accepts the canonical unified Session ID for reads and sends', async () => {
+    const owner = await userFactory.create();
+    const fastSession = await createSession(owner.id);
+    const session = await ensureSessionForFastConversation(db, fastSession.id);
+    await addMessage({
+      sessionId: fastSession.id,
+      eventId: 'unified-session-message',
+      text: 'Unified session text',
+    });
+
+    const app = createApp(userAuth(owner.id));
+    const messagesResponse = await app.request(`/tasks/${session.id}/messages`);
+    expect(messagesResponse.status).toBe(200);
+    await expect(messagesResponse.json()).resolves.toMatchObject({
+      messages: [{ taskId: session.id, text: 'Unified session text' }],
+    });
+
+    const sendResponse = await app.request(
+      `/tasks/${session.id}/send_message`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'Continue unified session' }),
+      },
+    );
+    expect(sendResponse.status).toBe(200);
+    expect(mocks.queueReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: fastSession.id,
+        question: 'Continue unified session',
       }),
     );
   });

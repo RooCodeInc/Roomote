@@ -306,7 +306,14 @@ describe('route policy enforcement', () => {
         request,
       );
       const publicBody = (await publicResponse.json()) as {
-        result?: { tools?: Array<{ name: string }> };
+        result?: {
+          tools?: Array<{
+            name: string;
+            inputSchema?: {
+              properties?: { action?: { enum?: string[] } };
+            };
+          }>;
+        };
       };
       expect(publicResponse.status).toBe(200);
       expect(publicBody.result?.tools?.map((tool) => tool.name)).toContain(
@@ -314,6 +321,18 @@ describe('route policy enforcement', () => {
       );
       expect(publicBody.result?.tools?.map((tool) => tool.name)).toContain(
         'manage_custom_automations',
+      );
+      const manageTasks = publicBody.result?.tools?.find(
+        (tool) => tool.name === 'manage_tasks',
+      );
+      expect(manageTasks?.inputSchema?.properties?.action?.enum).toEqual(
+        expect.arrayContaining([
+          'start_session',
+          'search_sessions',
+          'get_session_summary',
+          'get_session_messages',
+          'launch',
+        ]),
       );
 
       const callResponse = await createApiApp().request(
