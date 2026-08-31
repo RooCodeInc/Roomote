@@ -129,6 +129,7 @@ interface OpenCodeServerHarnessOptions {
   stopHookReminderStallTimeoutMs?: number;
   turnStallTimeoutMs?: number;
   subagentSettlementGraceMs?: number;
+  visualProofTimeoutMs?: number;
   queuedPromptRetryDelayMs?: number;
   /**
    * Max automatic continue attempts after a provider rate-limit session.error
@@ -318,11 +319,15 @@ const DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS = 30_000;
 // toward waiting. Any further child event cancels the pending recovery, and
 // expiry re-verifies the child's state before acting.
 const DEFAULT_SUBAGENT_SETTLEMENT_GRACE_MS = 10 * 60_000;
+const DEFAULT_VISUAL_PROOF_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_QUEUED_PROMPT_RETRY_DELAY_MS = 1_000;
 const MAX_PROGRESS_COMMAND_CHARS = 240;
 const FALLBACK_OPENCODE_STOP_HOOK_REMINDER =
   'Before finalizing, post a terminal chat-visible reply for the current turn.';
 const ROOMOTE_OPENCODE_VISUAL_AGENT_NAME = 'visual';
+const CAPTURE_VISUAL_PROOF_SKILL = 'capture-visual-proof';
+const VISUAL_PROOF_TIMEOUT_RECOVERY_PROMPT =
+  'The visual proof step exceeded its shared five-minute deadline. Do not retry capture or run further proof recovery. Return a blocked proof handoff with blocker type `proof capture timed out`, then continue the active parent workflow without visual proof.';
 // OpenCode's built-in tool for loading skills into the session.
 const OPENCODE_SKILL_TOOL = 'skill';
 // Hidden continuation submitted automatically after a turn that exited plan
@@ -1586,6 +1591,7 @@ export class OpenCodeServerHarness
   private readonly executeToolProgressIntervalMs: number;
   private readonly stopHookReminderStallTimeoutMs: number;
   private readonly subagentSettlementGraceMs: number;
+  private readonly visualProofTimeoutMs: number;
   private readonly queuedPromptRetryDelayMs: number;
   private readonly providerRateLimitMaxRetries: number;
   private readonly providerRateLimitBaseDelayMs: number;
@@ -1667,6 +1673,7 @@ export class OpenCodeServerHarness
   // via the OpenCode skill tool. Drives per-prompt agent selection so plan-mode
   // turns can run on the built-in read-only `plan` agent.
   private activeWorkflowSkill: string | null = null;
+  private visualProofTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private commandEnv: Record<string, string> | undefined;
   private stopHookReminderCount = 0;
   private terminalChatReplyDeliveryFailed = false;
@@ -1732,6 +1739,8 @@ export class OpenCodeServerHarness
       OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS;
     this.subagentSettlementGraceMs =
       options.subagentSettlementGraceMs ?? DEFAULT_SUBAGENT_SETTLEMENT_GRACE_MS;
+    this.visualProofTimeoutMs =
+      options.visualProofTimeoutMs ?? DEFAULT_VISUAL_PROOF_TIMEOUT_MS;
     this.queuedPromptRetryDelayMs =
       options.queuedPromptRetryDelayMs ?? DEFAULT_QUEUED_PROMPT_RETRY_DELAY_MS;
     this.providerRateLimitMaxRetries =
@@ -1932,6 +1941,7 @@ export class OpenCodeServerHarness
     this.clearReplayAbortErrorSuppression();
     this.clearQueuedPromptRetryTimer();
     this.clearProviderErrorRecoveryState();
+    this.clearVisualProofTimeout();
     this.clearAllExecuteToolProgress();
     void this.cleanupVisualAttachmentDirectories();
     this.rejectEventStreamReady?.(
@@ -2128,6 +2138,7 @@ export class OpenCodeServerHarness
       case TaskCommandName.CloseTask:
         this.currentWorkflowPhase = null;
         this.activeWorkflowSkill = null;
+        this.clearVisualProofTimeout();
         this.inFlight = false;
         this.prompts.clear();
         this.clearQueuedPromptRetryTimer();
@@ -2188,6 +2199,7 @@ export class OpenCodeServerHarness
     this.ignoreNextQueuedDrainSessionIdle = false;
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
     this.activeWorkflowSkill = null;
+    this.clearVisualProofTimeout();
     this.cancelRequestedBeforeSession = false;
     this.resetSessionCreateAbortController();
 
@@ -2350,6 +2362,7 @@ export class OpenCodeServerHarness
   }
 
   private async handleCancelTask(command?: CancelTaskCommand): Promise<void> {
+    this.clearVisualProofTimeout();
     const sessionId = this.sessionId;
 
     if (!sessionId) {
@@ -3652,8 +3665,67 @@ export class OpenCodeServerHarness
 
     this.activeWorkflowSkill = transition.nextSkill;
 
+    if (transition.nextSkill === CAPTURE_VISUAL_PROOF_SKILL) {
+      this.startVisualProofTimeout();
+    } else {
+      this.clearVisualProofTimeout();
+    }
+
     if (transition.queueContinuation) {
       this.enqueuePlanExitContinuation();
+    }
+  }
+
+  private startVisualProofTimeout(): void {
+    if (this.visualProofTimeoutTimer) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      this.visualProofTimeoutTimer = null;
+      void this.recoverVisualProofTimeout();
+    }, this.visualProofTimeoutMs);
+    timer.unref?.();
+    this.visualProofTimeoutTimer = timer;
+  }
+
+  private clearVisualProofTimeout(): void {
+    if (!this.visualProofTimeoutTimer) {
+      return;
+    }
+
+    clearTimeout(this.visualProofTimeoutTimer);
+    this.visualProofTimeoutTimer = null;
+  }
+
+  private async recoverVisualProofTimeout(): Promise<void> {
+    if (
+      this.disposed ||
+      !this.inFlight ||
+      this.activeWorkflowSkill !== CAPTURE_VISUAL_PROOF_SKILL
+    ) {
+      return;
+    }
+
+    this.logger.warn(
+      `OpenCode visual proof step exceeded its shared ${this.visualProofTimeoutMs}ms deadline; aborting the current proof turn and resuming with a blocked proof handoff`,
+    );
+    // The replay is a parent-workflow continuation, not a new proof attempt.
+    this.activeWorkflowSkill = null;
+    const queuedId = this.prompts.enqueue({
+      text: VISUAL_PROOF_TIMEOUT_RECOVERY_PROMPT,
+      visibleInTranscript: false,
+    });
+    this.prompts.prioritize(queuedId);
+
+    try {
+      await this.interruptForQueuedReplay();
+    } catch (error) {
+      this.logger.error(
+        `Failed to recover the timed-out OpenCode visual proof step: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 
