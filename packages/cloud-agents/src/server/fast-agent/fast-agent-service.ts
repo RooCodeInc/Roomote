@@ -2578,12 +2578,14 @@ export async function answerFastAgentQuestion({
           try {
             const posted = await adapter.postReply(reply);
             diagnostics.recordVisibleReply();
+            const retryEvent = inferenceRetryCanonicalEvent;
             await persistAssistantReply({
               reply,
-              event: allocateCanonicalEvent(
-                `assistant:${nextAssistantOrdinal++}`,
-              ),
+              event:
+                retryEvent ??
+                allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
               platformMessageId: posted?.messageId,
+              inferenceRetryNotice: Boolean(retryEvent),
             });
           } catch (postError) {
             console.error(

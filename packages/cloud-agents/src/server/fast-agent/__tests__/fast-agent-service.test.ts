@@ -1827,6 +1827,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   it('posts a terminal closeout when API shutdown interrupts silent retry backoff', async () => {
     const controller = new AbortController();
     const shutdown = new FastAgentProcessShutdownError('SIGTERM');
+    const expectedCloseout =
+      'The inference retry was interrupted before it completed. Please send the request again.';
     const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
     const originalSetTimeout = globalThis.setTimeout;
     let shouldAbort = true;
@@ -1856,16 +1858,31 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(postReply).toHaveBeenCalledOnce();
       expect(postReply).toHaveBeenCalledWith({
         purpose: 'closeout',
-        message:
-          'The inference retry was interrupted before it completed. Please send the request again.',
+        message: expectedCloseout,
       });
-      expect(mocks.upsertMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: expect.objectContaining({
-            metadata: expect.objectContaining({ purpose: 'closeout' }),
-          }),
-        }),
-      );
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites.at(-1)).toMatchObject({
+        contentBlocks: [
+          {
+            type: 'text',
+            text: expectedCloseout,
+          },
+        ],
+        metadata: {
+          visibleInTranscript: true,
+          purpose: 'closeout',
+          platformMessageId: 'closeout-1',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: false,
+        },
+      });
+      expect(
+        mocks.upsertMessage.mock.calls
+          .map(([input]) => input.message.eventId)
+          .filter((eventId) => eventId.startsWith('100.2:assistant:')),
+      ).toHaveLength(0);
     } finally {
       timeout.mockRestore();
     }
