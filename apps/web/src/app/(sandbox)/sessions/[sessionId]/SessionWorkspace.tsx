@@ -37,6 +37,9 @@ import {
   Image,
   Info,
   Loader2Icon,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Slack,
   VideoIcon,
   X,
@@ -128,6 +131,12 @@ export type SessionInfo = {
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
   inferenceCostMicroUsd: number;
+  inferenceCostBreakdown: {
+    directInferenceCostMicroUsd: number;
+    tasks: Array<
+      Pick<SessionTaskSummary, 'taskId' | 'title' | 'inferenceCostMicroUsd'>
+    >;
+  };
   createdAt: Date;
   status: string | null;
   tasks: SessionTaskSummary[];
@@ -491,10 +500,59 @@ function SessionInfoPanel({
             </span>
           </SandboxInfoRow>
           <SandboxInfoRow label="Inference Cost">
-            <span className="inline-flex items-center gap-1.5">
-              <DollarSign className="size-3.5 shrink-0 text-muted-foreground" />
-              {inferenceCostLabel}
-            </span>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Show inference cost breakdown"
+                  className="inline-flex cursor-pointer items-center gap-1.5 underline decoration-dotted underline-offset-4"
+                >
+                  <DollarSign className="size-3.5 shrink-0 text-muted-foreground" />
+                  {inferenceCostLabel}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                side="bottom"
+                align="end"
+                collisionPadding={16}
+                className="max-h-80 w-[calc(100vw-2rem)] max-w-80 overflow-y-auto"
+              >
+                <p className="mb-3 text-sm font-medium">
+                  Inference cost breakdown
+                </p>
+                <dl className="space-y-2 text-xs">
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-muted-foreground">Direct session</dt>
+                    <dd className="shrink-0 font-medium tabular-nums">
+                      $
+                      {formatInferenceCost(
+                        session.inferenceCostBreakdown
+                          .directInferenceCostMicroUsd,
+                      )}
+                    </dd>
+                  </div>
+                  {session.inferenceCostBreakdown.tasks.map((task) => (
+                    <div
+                      key={task.taskId}
+                      className="flex items-start justify-between gap-4"
+                    >
+                      <dt className="min-w-0 break-words text-muted-foreground">
+                        {task.title}
+                      </dt>
+                      <dd className="shrink-0 font-medium tabular-nums">
+                        ${formatInferenceCost(task.inferenceCostMicroUsd)}
+                      </dd>
+                    </div>
+                  ))}
+                  <div className="flex items-start justify-between gap-4 border-t pt-2">
+                    <dt className="font-medium">Total</dt>
+                    <dd className="shrink-0 font-medium tabular-nums">
+                      ${inferenceCostLabel}
+                    </dd>
+                  </div>
+                </dl>
+              </PopoverContent>
+            </Popover>
           </SandboxInfoRow>
           <SandboxInfoRow label="Started At">
             <span className="inline-flex items-center gap-1.5">

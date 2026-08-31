@@ -127,6 +127,10 @@ const session: SessionInfo = {
   model: 'model-1',
   reasoningEffort: null,
   inferenceCostMicroUsd: 1_000_000,
+  inferenceCostBreakdown: {
+    directInferenceCostMicroUsd: 1_000_000,
+    tasks: [],
+  },
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   status: 'needs_input',
   tasks: [],
@@ -332,6 +336,46 @@ describe('SessionWorkspace', () => {
     expect(
       screen.getByRole('button', { name: 'Close session info' }),
     ).toBeInTheDocument();
+  });
+
+  it('shows direct and per-task inference costs, including zero-cost tasks', () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: {
+        inferenceCostMicroUsd: 3_500_000,
+        inferenceCostBreakdown: {
+          directInferenceCostMicroUsd: 1_000_000,
+          tasks: [
+            {
+              taskId: 'task-costly',
+              title: 'Implement session totals',
+              inferenceCostMicroUsd: 2_500_000,
+            },
+            {
+              taskId: 'task-zero',
+              title: 'Zero-cost audit',
+              inferenceCostMicroUsd: 0,
+            },
+          ],
+        },
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
+
+    const costTrigger = screen.getByRole('button', {
+      name: 'Show inference cost breakdown',
+    });
+    expect(costTrigger).toHaveTextContent('3.50');
+    fireEvent.click(costTrigger);
+
+    expect(screen.getByText('Inference cost breakdown')).toBeInTheDocument();
+    expect(screen.getByText('Direct session')).toBeInTheDocument();
+    expect(screen.getByText('Implement session totals')).toBeInTheDocument();
+    expect(screen.getByText('Zero-cost audit')).toBeInTheDocument();
+    expect(screen.getByText('$1.00')).toBeInTheDocument();
+    expect(screen.getByText('$2.50')).toBeInTheDocument();
+    expect(screen.getByText('$0.00')).toBeInTheDocument();
+    expect(screen.getByText('$3.50')).toBeInTheDocument();
   });
 
   it.each([false, true])(
