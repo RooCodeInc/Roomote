@@ -249,6 +249,59 @@ describe('publishFastAgentRequestUserInput', () => {
     );
   });
 
+  it('reuses a root bound by a concurrent closeout while waiting for the lock', async () => {
+    const pendingConversation = {
+      ...parent.conversation,
+      conversationId: 'automation-1:occurrence-1',
+      replyTarget: { channelId: 'C123' },
+    };
+    const pendingSession = {
+      id: parent.sessionId,
+      userId: 'u1',
+      conversation: pendingConversation,
+      messages: [],
+    };
+    mocks.findRun.mockResolvedValue({
+      id: 42,
+      taskId: 'task-1',
+      payload: {
+        fastAgentParent: {
+          ...parent,
+          conversation: pendingConversation,
+        },
+        customAutomationId: 'automation-1',
+      },
+    });
+    mocks.findSession
+      .mockResolvedValueOnce(pendingSession)
+      .mockResolvedValueOnce({
+        ...pendingSession,
+        conversation: {
+          ...pendingConversation,
+          replyTarget: { channelId: 'C123', threadId: '100.001' },
+        },
+      });
+    mocks.postMessage.mockResolvedValueOnce('101.001');
+
+    await expect(publishFastAgentRequestUserInput(input)).resolves.toEqual({
+      published: true,
+      messageTs: '101.001',
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledOnce();
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        thread_ts: '100.001',
+        blocks: [{ type: 'section' }],
+      }),
+    );
+    expect(
+      mocks.acquireRootBindingLock.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.findSession.mock.invocationCallOrder[1]!);
+    expect(mocks.bindSession).not.toHaveBeenCalled();
+  });
+
   it('preserves a different outstanding request instead of replacing it', async () => {
     mocks.getPending.mockResolvedValueOnce({
       requestId: 'request-other',

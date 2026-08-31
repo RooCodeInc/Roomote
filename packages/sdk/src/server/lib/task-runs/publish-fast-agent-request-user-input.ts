@@ -105,42 +105,59 @@ export async function publishFastAgentRequestUserInput(input: {
       channelId,
     });
     try {
-      const text = `${automation.name} needs input to continue.`;
-      threadId = await slack.postMessage({
-        channel: channelId,
-        ...buildCustomAutomationSlackMessage({
-          automationId: customAutomationId,
-          automationName: automation.name,
-          text,
-          contentBlocks: [{ type: 'markdown', text }],
-          sessionId: session.id,
-          taskUrl: getTaskUrl({
-            taskId: input.taskId,
-            utm: {
-              source: 'slack',
-              campaign: 'fast-automation-request-input',
-            },
-          }),
-        }),
-        unfurl_links: false,
-        unfurl_media: false,
-        client_msg_id: buildSlackClientMessageId(
-          `fast-automation-input-root:${session.id}`,
-        ),
+      const canonicalSession = await fastAgentConversationRepository.findById({
+        id: session.id,
+        fallbackConversation: session.conversation,
       });
-      if (!threadId) {
-        throw new Error(
-          'Slack did not create the Fast automation input thread.',
-        );
+      if (
+        !canonicalSession ||
+        canonicalSession.conversation.surface !== 'slack'
+      ) {
+        return { published: false };
       }
 
-      await fastAgentConversationRepository.getOrCreate({
-        userId: session.userId,
-        conversation: {
-          ...session.conversation,
-          replyTarget: { ...replyTarget, threadId },
-        },
-      });
+      threadId = canonicalSession.conversation.replyTarget.threadId;
+      if (!threadId) {
+        const text = `${automation.name} needs input to continue.`;
+        threadId = await slack.postMessage({
+          channel: channelId,
+          ...buildCustomAutomationSlackMessage({
+            automationId: customAutomationId,
+            automationName: automation.name,
+            text,
+            contentBlocks: [{ type: 'markdown', text }],
+            sessionId: session.id,
+            taskUrl: getTaskUrl({
+              taskId: input.taskId,
+              utm: {
+                source: 'slack',
+                campaign: 'fast-automation-request-input',
+              },
+            }),
+          }),
+          unfurl_links: false,
+          unfurl_media: false,
+          client_msg_id: buildSlackClientMessageId(
+            `fast-automation-input-root:${session.id}`,
+          ),
+        });
+        if (!threadId) {
+          throw new Error(
+            'Slack did not create the Fast automation input thread.',
+          );
+        }
+
+        await fastAgentConversationRepository.getOrCreate({
+          userId: canonicalSession.userId,
+          conversation: {
+            ...canonicalSession.conversation,
+            replyTarget: {
+              ...canonicalSession.conversation.replyTarget,
+              threadId,
+            },
+          },
+        });
+      }
     } finally {
       await releaseRootBindingLock().catch(() => {});
     }
