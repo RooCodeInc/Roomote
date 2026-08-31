@@ -47,6 +47,13 @@ tables, and plans directly in the transcript. Widget HTML is sanitized and
 sandboxed in the web view; chat surfaces receive only the widget's text
 fallback.
 
+Fast can use bounded context from the current conversation, access enabled MCP
+servers and permitted user-scoped integrations, and delegate repository work to
+Roomote tasks. It does not implicitly read unrelated conversations or inspect
+repository contents without delegating to a task. Deployment admins can manage
+custom automations through Fast, and requests spanning every repository can be
+delegated to an all-repositories environment.
+
 ## Reply to a session
 
 Conversational Sessions have a reply box at the bottom of the transcript;
@@ -55,12 +62,10 @@ that live on another surface, Roomote posts the answer back into the originating
 thread with a quoted copy of your web message, so the conversation stays in one
 place for everyone following it there.
 
-Fast replies across Slack, Discord, Microsoft Teams, and Telegram link back to
-the Session view. Slack and Discord can also resume Fast directly from chat.
-Microsoft Teams replies continue the same Session after Roomote verifies the
-tenant, installation, conversation, and linked user. Telegram currently uses
-the Session view for Fast follow-ups because its inbound webhook route does not
-yet carry Fast Session identity.
+Fast replies from Slack, Discord, Microsoft Teams, and Telegram link back to the
+Session view. Replies in a Fast-owned thread, topic, chat, or direct message
+continue that Session. Existing task-only conversations continue or resume the
+task instead.
 
 ## Execution access
 
