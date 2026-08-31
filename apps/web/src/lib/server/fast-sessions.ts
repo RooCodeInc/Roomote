@@ -19,6 +19,7 @@ import {
   or,
   sessions,
   sql,
+  taskArtifacts,
   taskRuns,
   tasks,
   users,
@@ -33,6 +34,15 @@ type FastSessionTaskSummary = {
   taskId: string;
   title: string;
   inferenceCostMicroUsd: number;
+  artifacts: Array<{
+    id: string;
+    path: string;
+    version: number;
+    artifactType: string;
+    contentType: string;
+    size: number;
+    createdAt: Date;
+  }>;
   latestRun: {
     status: (typeof taskRuns.$inferSelect)['status'];
     taskPhase: (typeof taskRuns.$inferSelect)['taskPhase'];
@@ -264,10 +274,36 @@ export async function getFastSessionTasks(
     )
     .orderBy(desc(latestRunPerTask.latestRunId));
 
+  const taskIds = rows.map((row) => row.taskId);
+  const artifactRows = taskIds.length
+    ? await db
+        .select({
+          taskId: taskArtifacts.taskId,
+          id: taskArtifacts.id,
+          path: taskArtifacts.path,
+          version: taskArtifacts.version,
+          artifactType: taskArtifacts.artifactType,
+          contentType: taskArtifacts.contentType,
+          size: taskArtifacts.size,
+          createdAt: taskArtifacts.createdAt,
+        })
+        .from(taskArtifacts)
+        .where(
+          and(
+            inArray(taskArtifacts.taskId, taskIds),
+            eq(taskArtifacts.uploaded, true),
+          ),
+        )
+        .orderBy(desc(taskArtifacts.createdAt))
+    : [];
+
   return rows.map((row) => ({
     taskId: row.taskId,
     title: row.title,
     inferenceCostMicroUsd: Number(row.inferenceCostMicroUsd),
+    artifacts: artifactRows
+      .filter((artifact) => artifact.taskId === row.taskId)
+      .map(({ taskId: _taskId, ...artifact }) => artifact),
     latestRun: {
       status: row.status,
       taskPhase: row.taskPhase,

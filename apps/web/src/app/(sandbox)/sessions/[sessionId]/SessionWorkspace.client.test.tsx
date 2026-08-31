@@ -21,6 +21,7 @@ const {
   searchParamsState,
   routerReplaceMock,
   artifactQueryState,
+  artifactQueryInputs,
 } = vi.hoisted(() => ({
   useMediaQueryMock: vi.fn(),
   sessionQueryState: { data: null as unknown },
@@ -28,6 +29,11 @@ const {
   searchParamsState: { value: '' },
   routerReplaceMock: vi.fn(),
   artifactQueryState: { dataByPath: {} as Record<string, unknown> },
+  artifactQueryInputs: [] as Array<{
+    taskId: string;
+    path: string;
+    version?: number;
+  }>,
 }));
 
 vi.mock('usehooks-ts', () => ({
@@ -78,7 +84,13 @@ vi.mock('@/trpc/client', () => ({
           options?: Record<string, unknown>,
         ) => ({
           queryKey: ['artifacts', 'byPath', input],
-          queryFn: async () => artifactQueryState.dataByPath[input.path],
+          queryFn: async () => {
+            artifactQueryInputs.push(input);
+            return (
+              artifactQueryState.dataByPath[`${input.taskId}:${input.path}`] ??
+              artifactQueryState.dataByPath[input.path]
+            );
+          },
           ...options,
         }),
       },
@@ -181,7 +193,7 @@ function renderWorkspace({
   children?: ReactNode;
   sessionOverride?: Partial<SessionInfo>;
   queriedTasks?: SessionInfo['tasks'];
-  queriedFastTasks?: Array<NonNullable<SessionInfo['taskCards']>[number]>;
+  queriedFastTasks?: NonNullable<SessionInfo['taskCards']>;
   selectedTaskId?: string;
   searchParams?: string;
 }) {
@@ -254,6 +266,7 @@ function RunningTaskCount() {
 describe('SessionWorkspace', () => {
   beforeEach(() => {
     routerReplaceMock.mockClear();
+    artifactQueryInputs.length = 0;
     artifactQueryState.dataByPath = {
       'tmp/capture-visual-proof/sidebar-alignment.png': {
         id: 'artifact-image',
@@ -542,29 +555,41 @@ describe('SessionWorkspace', () => {
                 {
                   id: 'artifact-image',
                   path: 'tmp/capture-visual-proof/sidebar-alignment.png',
+                  version: 2,
                   artifactType: 'visual-proof',
                   contentType: 'image/png',
+                  size: 1024,
+                  createdAt: new Date('2026-01-02T00:00:00.000Z'),
                   thumbnailUrl: '/api/artifacts/artifact-image/raw?sig=test',
                 },
                 {
                   id: 'artifact-file',
                   path: 'plans/sidebar.md',
+                  version: 1,
                   artifactType: 'plan',
                   contentType: 'text/markdown',
+                  size: 512,
+                  createdAt: new Date('2026-01-01T00:00:00.000Z'),
                 },
                 {
                   id: 'artifact-image-older',
                   path: 'tmp/capture-visual-proof/sidebar-alignment.png',
+                  version: 1,
                   artifactType: 'visual-proof',
                   contentType: 'image/png',
+                  size: 1024,
+                  createdAt: new Date('2026-01-03T00:00:00.000Z'),
                   thumbnailUrl:
                     '/api/artifacts/artifact-image-older/raw?sig=test',
                 },
                 {
                   id: 'artifact-video',
                   path: 'recordings/session-walkthrough.webm',
+                  version: 1,
                   artifactType: 'visual-proof',
                   contentType: 'video/webm',
+                  size: 2048,
+                  createdAt: new Date('2026-01-01T00:00:00.000Z'),
                   previewUrl: '/api/artifacts/artifact-video/raw?sig=test',
                 },
               ],
@@ -644,6 +669,126 @@ describe('SessionWorkspace', () => {
     },
   );
 
+  it('navigates to an empty session Artifacts panel and back', () => {
+    renderWorkspace({ isMobile: false });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Artifacts' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('No artifacts in this session yet.')).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close artifacts' }));
+    expect(screen.queryByText('No artifacts in this session yet.')).toBeNull();
+  });
+
+  it('aggregates latest artifacts per task and preserves duplicate paths across tasks', async () => {
+    const sharedPath = 'reports/result.md';
+    const firstTask = {
+      ...singleTask,
+      title: 'First execution',
+      artifacts: [
+        {
+          id: 'first-latest',
+          path: sharedPath,
+          version: 2,
+          artifactType: 'plan' as const,
+          contentType: 'text/markdown',
+          size: 200,
+          createdAt: new Date('2026-01-03T00:00:00.000Z'),
+        },
+        {
+          id: 'first-older',
+          path: sharedPath,
+          version: 1,
+          artifactType: 'plan' as const,
+          contentType: 'text/markdown',
+          size: 100,
+          createdAt: new Date('2026-01-04T00:00:00.000Z'),
+        },
+      ],
+    };
+    const secondTask = {
+      ...singleTask,
+      taskId: 'task-2',
+      title: 'Second execution',
+      artifacts: [
+        {
+          id: 'second-latest',
+          path: sharedPath,
+          version: 1,
+          artifactType: 'plan' as const,
+          contentType: 'text/markdown',
+          size: 300,
+          createdAt: new Date('2026-01-02T00:00:00.000Z'),
+        },
+      ],
+    };
+    artifactQueryState.dataByPath[`task-1:${sharedPath}`] = {
+      id: 'first-latest',
+      taskId: 'task-1',
+      path: sharedPath,
+      version: 2,
+      artifactType: 'plan',
+      contentType: 'text/markdown',
+      size: 200,
+      createdAt: new Date('2026-01-03T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/first-latest/download',
+    };
+    artifactQueryState.dataByPath[`task-2:${sharedPath}`] = {
+      id: 'second-latest',
+      taskId: 'task-2',
+      path: sharedPath,
+      version: 1,
+      artifactType: 'plan',
+      contentType: 'text/markdown',
+      size: 300,
+      createdAt: new Date('2026-01-02T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/second-latest/download',
+    };
+
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { tasks: [firstTask, secondTask] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+
+    expect(
+      screen.getByRole('button', {
+        name: 'Open Result from First execution',
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', {
+        name: 'Open Result from Second execution',
+      }),
+    ).toBeVisible();
+    expect(screen.getAllByText('Result')).toHaveLength(2);
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Open Result from First execution',
+      }),
+    );
+    expect(
+      await screen.findByText(`Artifact preview: ${sharedPath}`),
+    ).toBeVisible();
+    expect(artifactQueryInputs).toContainEqual({
+      taskId: 'task-1',
+      path: sharedPath,
+      version: 2,
+    });
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to artifacts' }));
+    expect(
+      screen.getByRole('button', {
+        name: 'Open Result from Second execution',
+      }),
+    ).toBeVisible();
+  });
+
   it('enables and populates the Tasks panel from refreshed session tasks', async () => {
     const delegatedTask = {
       taskId: 'task-2',
@@ -676,6 +821,40 @@ describe('SessionWorkspace', () => {
     ).toBeInTheDocument();
   });
 
+  it('populates the Artifacts panel from refreshed Fast-session tasks', async () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { taskSource: 'fast', taskCards: [] },
+      queriedFastTasks: [
+        {
+          taskId: 'fast-task-1',
+          title: 'Fast execution',
+          latestRun: null,
+          artifacts: [
+            {
+              id: 'fast-artifact-1',
+              path: 'reports/fast-result.md',
+              version: 1,
+              artifactType: 'plan',
+              contentType: 'text/markdown',
+              size: 200,
+              createdAt: new Date('2026-01-02T00:00:00.000Z'),
+            },
+          ],
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'Open Fast Result from Fast execution',
+      }),
+    ).toBeVisible();
+    expect(screen.queryByText('No artifacts in this session yet.')).toBeNull();
+  });
+
   it('counts only canonically running tasks and updates when they finish', async () => {
     const task = (
       taskId: string,
@@ -688,6 +867,7 @@ describe('SessionWorkspace', () => {
         status,
         taskPhase,
       },
+      artifacts: [],
     });
     const { queryClient } = renderWorkspace({
       isMobile: false,

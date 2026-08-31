@@ -651,6 +651,7 @@ describe('unified Session queries', () => {
       {
         taskId: task.id,
         path: 'screenshots/result.png',
+        version: 2,
         contentType: 'image/png',
         size: 123,
         uploaded: true,
@@ -684,7 +685,11 @@ describe('unified Session queries', () => {
         taskId: task.id,
         title: 'Delegated work',
         artifacts: [
-          expect.objectContaining({ path: 'screenshots/result.png' }),
+          expect.objectContaining({
+            path: 'screenshots/result.png',
+            version: 2,
+            createdAt: expect.any(Date),
+          }),
         ],
       }),
     ]);
@@ -708,6 +713,77 @@ describe('unified Session queries', () => {
     expect(taskEvent).not.toHaveProperty('task.latestRun');
     expect(taskEvent).not.toHaveProperty('task.artifacts');
     expect(taskEvent).not.toHaveProperty('task.pullRequests');
+  });
+
+  it('hydrates uploaded artifacts for every associated task without collapsing shared paths', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Artifact session',
+    });
+    const firstTask = await taskFactory.create({
+      initiatorUserId: owner.id,
+      title: 'First task',
+    });
+    const secondTask = await taskFactory.create({
+      initiatorUserId: owner.id,
+      title: 'Second task',
+    });
+    await db.insert(sessionTasks).values([
+      { sessionId: session.id, taskId: firstTask.id, origin: 'direct_launch' },
+      {
+        sessionId: session.id,
+        taskId: secondTask.id,
+        origin: 'fast_delegation',
+      },
+    ]);
+    await db.insert(taskArtifacts).values([
+      {
+        taskId: firstTask.id,
+        path: 'reports/result.md',
+        version: 2,
+        contentType: 'text/markdown',
+        size: 200,
+        uploaded: true,
+      },
+      {
+        taskId: secondTask.id,
+        path: 'reports/result.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 100,
+        uploaded: true,
+      },
+      {
+        taskId: secondTask.id,
+        path: 'reports/pending.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 0,
+        uploaded: false,
+      },
+    ]);
+
+    const detail = await getSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(detail?.tasks).toEqual([
+      expect.objectContaining({
+        taskId: firstTask.id,
+        artifacts: [
+          expect.objectContaining({ path: 'reports/result.md', version: 2 }),
+        ],
+      }),
+      expect.objectContaining({
+        taskId: secondTask.id,
+        artifacts: [
+          expect.objectContaining({ path: 'reports/result.md', version: 1 }),
+        ],
+      }),
+    ]);
   });
 
   it('resolves the latest external event from visible messages only', async () => {

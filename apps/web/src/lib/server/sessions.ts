@@ -741,6 +741,8 @@ async function getSessionTasks(sessionId: string) {
           artifactType: taskArtifacts.artifactType,
           contentType: taskArtifacts.contentType,
           size: taskArtifacts.size,
+          version: taskArtifacts.version,
+          createdAt: taskArtifacts.createdAt,
         })
         .from(taskArtifacts)
         .where(
