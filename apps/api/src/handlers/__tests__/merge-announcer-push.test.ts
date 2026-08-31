@@ -43,24 +43,27 @@ describe('Merge announcer push normalization', () => {
     });
   });
 
-  it('extracts Markdown and HTML images and prefers screenshot-like alt text', () => {
-    expect(
-      selectRepresentativeGitHubPullRequestImage(`
+  it('extracts Markdown and HTML images and prefers screenshot-like alt text', async () => {
+    await expect(
+      selectRepresentativeGitHubPullRequestImage(
+        `
 ![Architecture](https://user-images.githubusercontent.com/1/architecture.png)
 <img src="https://github.com/user-attachments/assets/product-preview" alt="Product screenshot after save">
-`),
-    ).toEqual({
+`,
+        async () => 'image/png',
+      ),
+    ).resolves.toEqual({
       url: 'https://github.com/user-attachments/assets/product-preview',
       altText: 'Product screenshot after save',
     });
   });
 
-  it('selects a Markdown image when it is the only eligible candidate', () => {
-    expect(
+  it('selects a Markdown image when it is the only eligible candidate', async () => {
+    await expect(
       selectRepresentativeGitHubPullRequestImage(
         '![Updated settings](https://user-images.githubusercontent.com/1/settings.png)',
       ),
-    ).toEqual({
+    ).resolves.toEqual({
       url: 'https://user-images.githubusercontent.com/1/settings.png',
       altText: 'Updated settings',
     });
@@ -68,18 +71,18 @@ describe('Merge announcer push normalization', () => {
 
   it.each(['png', 'jpg', 'jpeg', 'gif'])(
     'accepts Slack-supported .%s images',
-    (extension) => {
+    async (extension) => {
       const url = `https://raw.githubusercontent.com/acme/widgets/main/screenshot.${extension}`;
-      expect(
+      await expect(
         selectRepresentativeGitHubPullRequestImage(
           `![Product screenshot](${url})`,
         ),
-      ).toEqual({ url, altText: 'Product screenshot' });
+      ).resolves.toEqual({ url, altText: 'Product screenshot' });
     },
   );
 
-  it('rejects badges, icons, unsafe URLs, and unsupported media', () => {
-    expect(
+  it('rejects badges, icons, unsafe URLs, and unsupported media', async () => {
+    await expect(
       selectRepresentativeGitHubPullRequestImage(`
 ![Build badge](https://user-images.githubusercontent.com/1/build.png)
 <img alt="App icon" src="https://github.com/user-attachments/assets/icon">
@@ -90,7 +93,43 @@ describe('Merge announcer push normalization', () => {
 ![Walkthrough screenshot](https://raw.githubusercontent.com/acme/widgets/main/walkthrough.mp4)
 ![Uploaded video screenshot](https://github.com/user-attachments/assets/walkthrough.mp4)
 `),
-    ).toBeNull();
+    ).resolves.toBeNull();
+  });
+
+  it('rejects extensionless GitHub attachment videos by media type', async () => {
+    const fetchMediaType = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, {
+        status: 200,
+        headers: { 'content-type': 'video/mp4' },
+      }),
+    );
+    try {
+      await expect(
+        selectRepresentativeGitHubPullRequestImage(
+          '![Walkthrough screenshot](https://github.com/user-attachments/assets/opaque-video)',
+        ),
+      ).resolves.toBeNull();
+      expect(fetchMediaType).toHaveBeenCalledWith(expect.any(URL), {
+        method: 'HEAD',
+        redirect: 'manual',
+        signal: expect.any(AbortSignal),
+      });
+    } finally {
+      fetchMediaType.mockRestore();
+    }
+  });
+
+  it('falls back after an extensionless attachment has an unsupported media type', async () => {
+    await expect(
+      selectRepresentativeGitHubPullRequestImage(
+        `![Product screenshot](https://github.com/user-attachments/assets/opaque-video)
+![Updated settings](https://raw.githubusercontent.com/acme/widgets/main/settings.png)`,
+        vi.fn().mockResolvedValue('video/mp4'),
+      ),
+    ).resolves.toEqual({
+      url: 'https://raw.githubusercontent.com/acme/widgets/main/settings.png',
+      altText: 'Updated settings',
+    });
   });
 
   it('enriches GitHub merge pushes with bounded PR metadata and file stats', async () => {
@@ -149,6 +188,7 @@ describe('Merge announcer push normalization', () => {
 
     const enriched = await enrichGitHubMergeAnnouncerEvent(payload, event, {
       getInstallationOctokit: getInstallationOctokit as never,
+      getPublicMediaType: vi.fn().mockResolvedValue('image/png'),
     });
 
     expect(getInstallationOctokit).toHaveBeenCalledWith({ installationId: 99 });

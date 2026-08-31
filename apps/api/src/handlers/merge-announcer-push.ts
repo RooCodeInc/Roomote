@@ -15,6 +15,9 @@ const MAX_GITHUB_PULL_REQUEST_CANDIDATES = 3;
 const MAX_GITHUB_CHANGED_FILES = 20;
 const MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES = 20;
 const MAX_GITHUB_PULL_REQUEST_IMAGE_ALT_CHARS = 200;
+const MAX_GITHUB_IMAGE_MEDIA_TYPE_CHECKS = 2;
+const MAX_GITHUB_IMAGE_REDIRECTS = 3;
+const GITHUB_IMAGE_MEDIA_TYPE_TIMEOUT_MS = 3_000;
 const MARKDOWN_IMAGE_PATTERN =
   /!\[([^\]]*)\]\(\s*(?:<([^>\n]+)>|([^\s)\n]+))(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/gu;
 const HTML_IMAGE_PATTERN = /<img\b[^>]*>/giu;
@@ -24,6 +27,11 @@ const SCREENSHOT_LIKE_IMAGE_TEXT =
   /\b(?:after|before|demo|desktop|mobile|preview|screen(?:[ -]?shot)?|ui)\b/iu;
 const REJECTED_IMAGE_TEXT = /\b(?:avatar|badge|coverage|icon|logo|shield)\b/iu;
 const SUPPORTED_SLACK_IMAGE_EXTENSION = /\.(?:gif|jpe?g|png)$/iu;
+const SUPPORTED_SLACK_IMAGE_MEDIA_TYPES = new Set([
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+]);
 const EXTENSION_REQUIRED_GITHUB_IMAGE_HOSTS = new Set([
   'raw.githubusercontent.com',
   'user-images.githubusercontent.com',
@@ -62,6 +70,58 @@ function isAllowedPublicGitHubImageUrl(value: string): boolean {
   }
 }
 
+function isExtensionlessGitHubAttachmentUrl(value: string): boolean {
+  const url = new URL(value);
+  return (
+    url.hostname.toLowerCase() === 'github.com' &&
+    url.pathname.startsWith('/user-attachments/assets/') &&
+    !url.pathname.includes('.')
+  );
+}
+
+function isAllowedGitHubImageRedirect(url: URL): boolean {
+  const hostname = url.hostname.toLowerCase();
+  return (
+    url.protocol === 'https:' &&
+    !url.username &&
+    !url.password &&
+    (hostname === 'github.com' || hostname.endsWith('.githubusercontent.com'))
+  );
+}
+
+async function getPublicGitHubMediaType(value: string): Promise<string | null> {
+  let url = new URL(value);
+  const signal = AbortSignal.timeout(GITHUB_IMAGE_MEDIA_TYPE_TIMEOUT_MS);
+  for (
+    let redirects = 0;
+    redirects <= MAX_GITHUB_IMAGE_REDIRECTS;
+    redirects++
+  ) {
+    const response = await fetch(url, {
+      method: 'HEAD',
+      redirect: 'manual',
+      signal,
+    });
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      if (!location || redirects === MAX_GITHUB_IMAGE_REDIRECTS) return null;
+      url = new URL(location, url);
+      if (!isAllowedGitHubImageRedirect(url)) return null;
+      continue;
+    }
+    if (!response.ok) return null;
+
+    return (
+      response.headers
+        .get('content-type')
+        ?.split(';', 1)[0]
+        ?.trim()
+        .toLowerCase() ?? null
+    );
+  }
+  return null;
+}
+
 function normalizePullRequestImageCandidate(
   candidate: PullRequestImageCandidate,
 ): PullRequestImageCandidate | null {
@@ -79,9 +139,12 @@ function normalizePullRequestImageCandidate(
   };
 }
 
-export function selectRepresentativeGitHubPullRequestImage(
+export async function selectRepresentativeGitHubPullRequestImage(
   body: string | null | undefined,
-): MergeAnnouncerPullRequestContext['representativeImage'] | null {
+  resolveMediaType: (
+    url: string,
+  ) => Promise<string | null> = getPublicGitHubMediaType,
+): Promise<MergeAnnouncerPullRequestContext['representativeImage'] | null> {
   if (!body?.trim()) return null;
 
   const candidates: PullRequestImageCandidate[] = [];
@@ -101,7 +164,7 @@ export function selectRepresentativeGitHubPullRequestImage(
     });
   }
 
-  const selected = candidates
+  const rankedCandidates = candidates
     .sort((a, b) => a.position - b.position)
     .slice(0, MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES)
     .map(normalizePullRequestImageCandidate)
@@ -111,9 +174,38 @@ export function selectRepresentativeGitHubPullRequestImage(
         Number(SCREENSHOT_LIKE_IMAGE_TEXT.test(b.altText)) -
         Number(SCREENSHOT_LIKE_IMAGE_TEXT.test(a.altText));
       return screenshotScoreDifference || a.position - b.position;
-    })[0];
+    });
 
-  return selected ? { url: selected.url, altText: selected.altText } : null;
+  const mediaTypeResults = await Promise.allSettled(
+    rankedCandidates
+      .filter((candidate) => isExtensionlessGitHubAttachmentUrl(candidate.url))
+      .slice(0, MAX_GITHUB_IMAGE_MEDIA_TYPE_CHECKS)
+      .map(async (candidate) => ({
+        url: candidate.url,
+        mediaType: await resolveMediaType(candidate.url),
+      })),
+  );
+  const mediaTypes = new Map(
+    mediaTypeResults.flatMap((result) =>
+      result.status === 'fulfilled'
+        ? [[result.value.url, result.value.mediaType] as const]
+        : [],
+    ),
+  );
+
+  for (const candidate of rankedCandidates) {
+    if (isExtensionlessGitHubAttachmentUrl(candidate.url)) {
+      const mediaType = mediaTypes.get(candidate.url);
+      if (
+        !mediaType ||
+        !SUPPORTED_SLACK_IMAGE_MEDIA_TYPES.has(mediaType.toLowerCase())
+      ) {
+        continue;
+      }
+    }
+    return { url: candidate.url, altText: candidate.altText };
+  }
+  return null;
 }
 
 function getPullRequestNumberFromCommitMessage(
@@ -161,11 +253,13 @@ type GitHubPushWebhook = {
 
 type GitHubMergeAnnouncerDependencies = {
   getInstallationOctokit: typeof getInstallationOctokit;
+  getPublicMediaType: typeof getPublicGitHubMediaType;
   selectRepresentativeImage: typeof selectRepresentativeGitHubPullRequestImage;
 };
 
 const githubMergeAnnouncerDependencies: GitHubMergeAnnouncerDependencies = {
   getInstallationOctokit,
+  getPublicMediaType: getPublicGitHubMediaType,
   selectRepresentativeImage: selectRepresentativeGitHubPullRequestImage,
 };
 
@@ -276,7 +370,10 @@ export async function enrichGitHubMergeAnnouncerEvent(
     if (payload.repository?.private === false) {
       try {
         representativeImage =
-          dependencies.selectRepresentativeImage(pullRequest.body) ?? undefined;
+          (await dependencies.selectRepresentativeImage(
+            pullRequest.body,
+            dependencies.getPublicMediaType,
+          )) ?? undefined;
       } catch (error) {
         console.warn(
           `[mergeAnnouncer] Failed to select a pull request image for ${payload.repository.full_name}#${pullRequest.number}: ${error instanceof Error ? error.message : String(error)}`,
