@@ -2517,6 +2517,46 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('settles the turn after a terminal reply even when the native prompt never returns', async () => {
+    let promptSignal: AbortSignal | undefined;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        promptSignal = options.signal;
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'clarification',
+            message: 'Which repository should I use?',
+          }),
+        ).resolves.toMatchObject({ success: true, closed: true });
+        return await new Promise<string>((_resolve, reject) => {
+          options.signal?.addEventListener(
+            'abort',
+            () => reject(options.signal?.reason),
+            { once: true },
+          );
+        });
+      },
+    );
+    const settleActivity = vi.fn(() => new Promise<void>(() => undefined));
+    const adapter = {
+      ...callbacks(),
+      activity: { start: vi.fn(), settle: settleActivity },
+    };
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe('Which repository should I use?');
+
+    expect(promptSignal?.aborted).toBe(true);
+    expect(settleActivity).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'clarification',
+      message: 'Which repository should I use?',
+    });
+  });
+
   it('launches two tasks, keeps the turn open, messages a child, and posts a closeout', async () => {
     let taskNumber = 0;
     const order: string[] = [];

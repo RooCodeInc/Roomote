@@ -895,6 +895,23 @@ export async function answerFastAgentQuestion({
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
   let closed = false;
+  const terminalReplyAbortController = new AbortController();
+  let terminalReplyAbortScheduled = false;
+  const scheduleTerminalReplyAbort = () => {
+    if (
+      terminalReplyAbortScheduled ||
+      terminalReplyAbortController.signal.aborted
+    ) {
+      return;
+    }
+    terminalReplyAbortScheduled = true;
+    const timer = setTimeout(() => {
+      terminalReplyAbortController.abort(
+        new Error('Fast turn settled after a terminal reply.'),
+      );
+    }, 0);
+    timer.unref();
+  };
   let inferenceRetryReply: FastAgentReplyHandle | undefined;
   let inferenceRetryMessageIndex: number | undefined;
   let inferenceRetryCanonicalEvent:
@@ -2090,6 +2107,7 @@ export async function answerFastAgentQuestion({
     const executeNativeTool = async (
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
+      const wasClosed = closed;
       const canonicalToolEvent = await beginCanonicalToolEvent({
         title: call.name,
         args: call.args,
@@ -2111,6 +2129,15 @@ export async function answerFastAgentQuestion({
           call.sessionId,
         );
         throw error;
+      } finally {
+        if (!wasClosed && closed) {
+          // A closeout, clarification, reaction closeout, or deliberate ignore
+          // is the terminal result of this Fast turn. Let the native tool
+          // response finish first, then cancel the still-open OpenCode prompt
+          // so a model that keeps reasoning after its terminal action cannot
+          // retain the conversation lock and block the user's next message.
+          scheduleTerminalReplyAbort();
+        }
       }
     };
 
@@ -2236,9 +2263,11 @@ export async function answerFastAgentQuestion({
           const result = await runFastAgentInferenceWithRetries(
             async () => {
               const providerRetryAbortController = new AbortController();
-              const promptSignal = signal
-                ? AbortSignal.any([signal, providerRetryAbortController.signal])
-                : providerRetryAbortController.signal;
+              const promptSignal = AbortSignal.any([
+                ...(signal ? [signal] : []),
+                terminalReplyAbortController.signal,
+                providerRetryAbortController.signal,
+              ]);
               let providerRetryTimeout:
                 | ReturnType<typeof setTimeout>
                 | undefined;
@@ -2392,6 +2421,27 @@ export async function answerFastAgentQuestion({
                 });
                 return result;
               } catch (error) {
+                if (closed && terminalReplyAbortController.signal.aborted) {
+                  captureFastAgentInferenceAttemptOutcome({
+                    userId,
+                    sessionId: session.id,
+                    turnId,
+                    surface: conversation.surface,
+                    sessionPath: attemptSessionPath,
+                    promptKind,
+                    attemptNumber: inferenceAttemptNumber,
+                    outcome: 'success',
+                    stage: !resolvedInferenceModel
+                      ? 'model_resolution'
+                      : promptStarted
+                        ? 'model_generation'
+                        : 'opencode_setup',
+                    elapsedMs: Date.now() - attemptStartedAt,
+                    resolvedModel: resolvedInferenceModel,
+                    providerRetryEventCount,
+                  });
+                  return '';
+                }
                 const failure = classifyNonTaskInferenceError(error);
                 const attemptStage = !resolvedInferenceModel
                   ? 'model_resolution'
@@ -2499,9 +2549,16 @@ export async function answerFastAgentQuestion({
         }
       },
     });
-    const promptText = await promptTextPromise.finally(() => {
-      diagnostics.markInferenceFinished();
-    });
+    const promptText = await promptTextPromise
+      .catch((error) => {
+        if (closed && terminalReplyAbortController.signal.aborted) {
+          return '';
+        }
+        throw error;
+      })
+      .finally(() => {
+        diagnostics.markInferenceFinished();
+      });
 
     throwIfTurnCancelled();
     if (!closed) {
@@ -2662,7 +2719,10 @@ export async function answerFastAgentQuestion({
         });
       }
     }
-    await adapter.activity?.settle().catch((error) => {
+    // Surface activity is cosmetic and provider-owned. A stalled Slack status
+    // request must never retain the conversation lock after the reply and
+    // canonical transcript are already settled.
+    void adapter.activity?.settle().catch((error) => {
       console.warn(
         `[Fast Agent] Failed to settle surface activity: ${formatErrorForLog(error)}`,
       );
