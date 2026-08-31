@@ -31,7 +31,6 @@ import { StepSourceControlProvider } from './StepSourceControlProvider';
 import { StepSourceControlConfig } from './StepSourceControlConfig';
 import { StepSourceControlConnect } from './StepSourceControlConnect';
 import { useSetupFlow } from './hooks';
-import { SetupConversationalSetup } from './SetupConversationalSetup';
 import { StepInvoke } from './StepInvoke';
 import { LoadingSetupFlow, stepTransitionVariants } from './SetupBootstrapFlow';
 
@@ -49,6 +48,16 @@ export function SetupSignedInFlow() {
     useState<SetupModelProviderId | null>(null);
   const trackWelcomeSeen = useMutation(
     trpc.setupNew.trackWelcomeSeen.mutationOptions(),
+  );
+  const {
+    data: setupSession,
+    isPending: isSetupSessionPending,
+    isError: isSetupSessionError,
+    mutate: createSetupSession,
+  } = useMutation(
+    trpc.setup.getOrCreateSession.mutationOptions({
+      onError: (error) => toast.error(error.message),
+    }),
   );
   const {
     data: setupStatus,
@@ -193,6 +202,42 @@ export function SetupSignedInFlow() {
     if (status?.setupNewState.modelProvider) setPendingModelProvider(null);
   }, [status?.setupNewState.modelProvider]);
 
+  const conversationalSetupReady =
+    status != null &&
+    status.modelSetup.setupSatisfied &&
+    (status.computeSetup.setupSatisfied ||
+      (status.setupNewState.computeProvider != null &&
+        isSetupProvisionableComputeProvider(
+          status.setupNewState.computeProvider,
+        ) &&
+        getSetupNewComputeProvisioningState(
+          status.setupNewState,
+          status.setupNewState.computeProvider,
+        )?.status === 'building')) &&
+    status.computeSetup.selectedProvider != null &&
+    status.setupCompletedAt == null;
+  const setupSessionId = setupSession?.sessionId ?? null;
+
+  useEffect(() => {
+    if (!conversationalSetupReady) return;
+
+    if (setupSessionId) {
+      router.replace(`/sessions/${setupSessionId}`);
+      return;
+    }
+
+    if (!isSetupSessionPending && !isSetupSessionError) {
+      createSetupSession();
+    }
+  }, [
+    conversationalSetupReady,
+    createSetupSession,
+    isSetupSessionError,
+    isSetupSessionPending,
+    router,
+    setupSessionId,
+  ]);
+
   if (!isSignedIn || !isAdmin) return null;
   if (isError)
     return (
@@ -244,24 +289,8 @@ export function SetupSignedInFlow() {
     );
   }
 
-  // Deterministic bootstrap owns the flow until authentication, inference,
-  // and a usable compute path are confirmed. From there, the conversational
-  // setup session replaces the remaining wizard steps directly.
-  const conversationalSetupReady =
-    status.modelSetup.setupSatisfied &&
-    (status.computeSetup.setupSatisfied ||
-      (status.setupNewState.computeProvider != null &&
-        isSetupProvisionableComputeProvider(
-          status.setupNewState.computeProvider,
-        ) &&
-        getSetupNewComputeProvisioningState(
-          status.setupNewState,
-          status.setupNewState.computeProvider,
-        )?.status === 'building')) &&
-    status.computeSetup.selectedProvider != null &&
-    status.setupCompletedAt == null;
   if (conversationalSetupReady) {
-    return <SetupConversationalSetup />;
+    return <LoadingSetupFlow />;
   }
 
   const removeSourceControlSyncMarker = () => {
