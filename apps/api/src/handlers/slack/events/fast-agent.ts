@@ -243,7 +243,7 @@ export async function processFastAgentMessage(params: {
       ? await resolveActiveTasks()
       : activeTasks;
     const footerContext = await resolveFastSessionReplyFooterContext({
-      taskIds: resolvedActiveTasks.map((task) => task.taskId),
+      sessionId: session.id,
     });
     const responseText = await answerFastAgentQuestion({
       question,

@@ -66,6 +66,14 @@ vi.mock('@roomote/sdk/server', () => ({
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
 
+vi.mock('@roomote/communication', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/communication')>()),
+  resolveFastSessionReplyFooterContext: vi.fn(async () => ({
+    linkedPrs: [],
+    livePreviewUrl: null,
+  })),
+}));
+
 vi.mock('../helpers/thread-posting.js', () => ({
   postSlackThreadMarkdownMessage: mocks.postThreadMessage,
 }));

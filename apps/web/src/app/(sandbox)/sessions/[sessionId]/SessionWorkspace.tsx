@@ -1,7 +1,13 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useCallback, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -17,6 +23,7 @@ import {
   humanizeFilename,
 } from '@/lib';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
+import { PullRequestBadge } from '@/components/sandbox';
 import {
   getSessionSurfaceBrandIcon,
   getSessionSurfaceLabel,
@@ -159,6 +166,74 @@ export type SessionInfo = {
     }
   >;
 };
+
+type SessionHeaderPullRequest = {
+  repository: string;
+  number: number;
+  url: string;
+};
+
+const TERMINAL_PULL_REQUEST_STATUSES = new Set(['closed', 'merged']);
+
+const SessionPullRequestsContext = createContext<SessionHeaderPullRequest[]>(
+  [],
+);
+
+function getSessionPullRequests(
+  tasks: Array<Pick<SessionTaskSummary, 'pullRequests'>>,
+): SessionHeaderPullRequest[] {
+  const pullRequests: SessionHeaderPullRequest[] = [];
+  const identities = new Set<string>();
+  const urls = new Set<string>();
+
+  for (const task of tasks) {
+    for (const pullRequest of task.pullRequests) {
+      if (
+        !pullRequest.repository ||
+        pullRequest.number === null ||
+        (pullRequest.status &&
+          TERMINAL_PULL_REQUEST_STATUSES.has(pullRequest.status))
+      ) {
+        continue;
+      }
+
+      const identity = `${pullRequest.repository.toLowerCase()}:${pullRequest.number}`;
+      const url = pullRequest.url.trim();
+      if (identities.has(identity) || urls.has(url)) continue;
+
+      identities.add(identity);
+      urls.add(url);
+      pullRequests.push({
+        repository: pullRequest.repository,
+        number: pullRequest.number,
+        url,
+      });
+    }
+  }
+
+  return pullRequests;
+}
+
+export function SessionHeaderExtras({ status }: { status: string | null }) {
+  const pullRequests = useContext(SessionPullRequestsContext);
+
+  if (pullRequests.length === 0 && !status) return null;
+
+  return (
+    <div className="flex max-w-full min-w-0 flex-wrap items-center justify-end gap-x-4 gap-y-2 text-xs text-muted-foreground">
+      {pullRequests.map((pullRequest) => (
+        <PullRequestBadge
+          key={`${pullRequest.repository}:${pullRequest.number}`}
+          repo={pullRequest.repository}
+          prNumber={pullRequest.number}
+          url={pullRequest.url}
+          iconClassName="text-muted-foreground"
+        />
+      ))}
+      {status ? <SessionStatusBadge status={status} /> : null}
+    </div>
+  );
+}
 
 function SessionArtifactCard({
   artifact,
@@ -663,6 +738,7 @@ export function SessionWorkspace({
   const fastTasks = currentFastTasks ?? session.taskCards ?? [];
   const taskCards = isFastTaskSource ? fastTasks : sessionTasks;
   const artifactTasks = isFastTaskSource ? fastTasks : sessionTasks;
+  const sessionPullRequests = getSessionPullRequests(sessionTasks);
   const runningTasks = taskCards.filter((task) =>
     isActivelyRunningTask(task.latestRun?.status, task.latestRun?.taskPhase),
   );
@@ -780,11 +856,13 @@ export function SessionWorkspace({
         <ResponsiveWorkspacePanels
           isPanelOpen={panelOpen}
           main={
-            <SessionRunningTaskCountContext.Provider value={runningTaskCount}>
-              <OpenSessionTasksPanelContext.Provider value={openTasksPanel}>
-                {children}
-              </OpenSessionTasksPanelContext.Provider>
-            </SessionRunningTaskCountContext.Provider>
+            <SessionPullRequestsContext.Provider value={sessionPullRequests}>
+              <SessionRunningTaskCountContext.Provider value={runningTaskCount}>
+                <OpenSessionTasksPanelContext.Provider value={openTasksPanel}>
+                  {children}
+                </OpenSessionTasksPanelContext.Provider>
+              </SessionRunningTaskCountContext.Provider>
+            </SessionPullRequestsContext.Provider>
           }
           panel={panelContent}
         />

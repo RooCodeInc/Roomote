@@ -199,9 +199,8 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     };
   }
 
-  const activeTasks = await getActiveFastAgentTasks(session.id);
   const footerContext = await resolveFastSessionReplyFooterContext({
-    taskIds: activeTasks.map((task) => task.taskId),
+    sessionId: session.id,
   });
 
   if (conversation.surface === 'slack') {

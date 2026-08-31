@@ -1444,7 +1444,7 @@ async function createFastAgentParentTurn(params: {
   const pullRequests =
     params.event.type === 'task_settled' ? params.event.pullRequests : [];
   const footerContext = await resolveFastSessionReplyFooterContext({
-    taskIds: 'taskId' in params.event ? [params.event.taskId] : [],
+    sessionId: params.parent.sessionId,
     pullRequest,
     pullRequests,
   });

@@ -59,6 +59,9 @@ vi.mock('./FastSessionTranscript', () => ({
 }));
 vi.mock('./SessionWorkspace', () => ({
   SessionWorkspace: sessionWorkspaceMock,
+  SessionHeaderExtras: ({ status }: { status: string | null }) => (
+    <div data-testid="session-header-extras">{status}</div>
+  ),
 }));
 vi.mock('./SessionReadTracker', () => ({
   SessionReadTracker: () => null,

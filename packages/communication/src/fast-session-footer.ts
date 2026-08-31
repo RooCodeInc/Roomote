@@ -1,4 +1,13 @@
 import { Env } from '@roomote/env';
+import {
+  and,
+  db,
+  eq,
+  getSessionForFastConversation,
+  isNull,
+  sessionTasks,
+  tasks,
+} from '@roomote/db/server';
 
 import {
   buildThreadReplyFooterText,
@@ -51,13 +60,22 @@ function collectFastSessionLinkedPrs(params: {
 }
 
 export async function resolveFastSessionReplyFooterContext(params: {
-  taskIds?: readonly string[];
+  sessionId: string;
   pullRequest?: FastSessionPullRequestReference | null;
   pullRequests?: readonly FastSessionPullRequestReference[];
 }): Promise<FastSessionReplyFooterContext> {
-  const taskIds = [...new Set(params.taskIds ?? [])];
+  const session = await getSessionForFastConversation(db, params.sessionId);
+  const linkedTasks = session
+    ? await db
+        .select({ taskId: sessionTasks.taskId })
+        .from(sessionTasks)
+        .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+        .where(
+          and(eq(sessionTasks.sessionId, session.id), isNull(tasks.deletedAt)),
+        )
+    : [];
   const contexts = await Promise.all(
-    taskIds.map((taskId) =>
+    linkedTasks.map(({ taskId }) =>
       resolveThreadReplyFooterContext({
         taskId,
         prRepo: null,
