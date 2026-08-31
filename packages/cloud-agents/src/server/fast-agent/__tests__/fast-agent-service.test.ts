@@ -659,6 +659,58 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('keeps injected follow-ups in a clean-session retry bootstrap', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce({
+          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+          createdAt: new Date('2026-08-31T12:00:00.000Z'),
+          parent: { sessionId: 'conversation-1' },
+          event: {
+            type: 'human_follow_up',
+            eventId: '100.3',
+            currentMessageId: '100.3',
+            userId: 'user-1',
+            question: 'Use the corrected requirement.',
+          },
+        })
+        .mockResolvedValue(undefined);
+      let failFirstAttempt: ((error: Error) => void) | undefined;
+      let attempt = 0;
+      mocks.generateText.mockImplementation(
+        async (params, _session, options) => {
+          attempt += 1;
+          options.onModelResolved?.('openrouter/openai/gpt-5.4');
+          await options.onSessionReady(`opencode-session-${attempt}`);
+          options.onPromptStarted?.();
+          if (attempt === 1) {
+            options.onNativeSteerReady?.(mocks.nativeSteer);
+            return await new Promise<string>((_resolve, reject) => {
+              failFirstAttempt = reject;
+            });
+          }
+          expect(params.prompt).toContain('Use the corrected requirement.');
+          return 'Recovered answer';
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      failFirstAttempt?.(new TypeError('fetch failed'));
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await expect(resultPromise).resolves.toBe('Recovered answer');
+      expect(mocks.generateText).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('starts and settles surface activity around a successful turn', async () => {
     const activity = {
       start: vi.fn(),
