@@ -3,6 +3,22 @@ import { getTaskReportConsumerFromPayload } from '@roomote/types';
 import { standardTask } from '../standardTask';
 
 describe('standardTask reporting consumer', () => {
+  it('normalizes the legacy persisted consumer value', () => {
+    expect(
+      getTaskReportConsumerFromPayload({
+        reportConsumer: 'fast-orchestrator',
+      }),
+    ).toBe('orchestrator');
+  });
+
+  it('falls back to direct-user for unknown consumer values', () => {
+    expect(
+      getTaskReportConsumerFromPayload({
+        reportConsumer: 'unknown-consumer',
+      }),
+    ).toBe('direct-user');
+  });
+
   it('does not infer report ownership from Fast routing metadata', () => {
     expect(
       getTaskReportConsumerFromPayload({

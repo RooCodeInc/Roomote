@@ -86,7 +86,12 @@ export type FastAgentParent = z.infer<typeof fastAgentParentSchema>;
 
 export type TaskReportConsumer = 'direct-user' | 'orchestrator';
 
-export const taskReportConsumerSchema = z.enum(['direct-user', 'orchestrator']);
+export const taskReportConsumerSchema = z
+  .enum(['direct-user', 'orchestrator', 'fast-orchestrator'])
+  .transform(
+    (consumer): TaskReportConsumer =>
+      consumer === 'fast-orchestrator' ? 'orchestrator' : consumer,
+  );
 
 /**
  * A delegated Fast child keeps its parent's coordinates for lifecycle routing,
