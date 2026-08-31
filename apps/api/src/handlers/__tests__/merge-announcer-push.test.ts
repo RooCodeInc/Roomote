@@ -5,6 +5,7 @@ import {
   normalizeGiteaPush,
   normalizeGitHubPush,
   normalizeGitLabPush,
+  selectRepresentativeGitHubPullRequestImage,
 } from '../merge-announcer-push';
 import { adoPushWebhookSchema } from '../ado/types';
 import { bitbucketPushWebhookSchema } from '../bitbucket/types';
@@ -42,6 +43,41 @@ describe('Merge announcer push normalization', () => {
     });
   });
 
+  it('extracts Markdown and HTML images and prefers screenshot-like alt text', () => {
+    expect(
+      selectRepresentativeGitHubPullRequestImage(`
+![Architecture](https://user-images.githubusercontent.com/1/architecture.png)
+<img src="https://github.com/user-attachments/assets/product-preview" alt="Product screenshot after save">
+`),
+    ).toEqual({
+      url: 'https://github.com/user-attachments/assets/product-preview',
+      altText: 'Product screenshot after save',
+    });
+  });
+
+  it('selects a Markdown image when it is the only eligible candidate', () => {
+    expect(
+      selectRepresentativeGitHubPullRequestImage(
+        '![Updated settings](https://user-images.githubusercontent.com/1/settings.png)',
+      ),
+    ).toEqual({
+      url: 'https://user-images.githubusercontent.com/1/settings.png',
+      altText: 'Updated settings',
+    });
+  });
+
+  it('rejects badges, icons, unsafe URLs, and unsupported image hosts', () => {
+    expect(
+      selectRepresentativeGitHubPullRequestImage(`
+![Build badge](https://user-images.githubusercontent.com/1/build.png)
+<img alt="App icon" src="https://github.com/user-attachments/assets/icon">
+![Screenshot](http://user-images.githubusercontent.com/1/screenshot.png)
+![Preview](https://example.com/preview.png)
+![UI screenshot](https://raw.githubusercontent.com/acme/widgets/main/screenshot.svg)
+`),
+    ).toBeNull();
+  });
+
   it('enriches GitHub merge pushes with bounded PR metadata and file stats', async () => {
     const payload = {
       ref: 'refs/heads/main',
@@ -51,6 +87,7 @@ describe('Merge announcer push normalization', () => {
         id: 1,
         full_name: 'acme/widgets',
         html_url: 'https://github.com/acme/widgets',
+        private: false,
       },
       commits: [{ id: 'abcdef1234567890', message: 'Merge pull request #7' }],
     };
@@ -66,7 +103,9 @@ describe('Merge announcer push normalization', () => {
         number: 7,
         html_url: 'https://github.com/acme/widgets/pull/7',
         title: 'Ship widget export',
-        body: 'Adds the export and updates validation.',
+        body: `Adds the export and updates validation.
+
+![Product screenshot](https://github.com/user-attachments/assets/product-preview)`,
         merged_at: '2026-08-29T12:00:00Z',
         merge_commit_sha: payload.after,
         base: { ref: 'main' },
@@ -120,10 +159,16 @@ describe('Merge announcer push normalization', () => {
       number: 7,
       url: 'https://github.com/acme/widgets/pull/7',
       title: 'Ship widget export',
-      body: 'Adds the export and updates validation.',
+      body: `Adds the export and updates validation.
+
+![Product screenshot](https://github.com/user-attachments/assets/product-preview)`,
       changedFileCount: 24,
       additions: 120,
       deletions: 15,
+      representativeImage: {
+        url: 'https://github.com/user-attachments/assets/product-preview',
+        altText: 'Product screenshot',
+      },
       changedFiles: [
         {
           path: 'src/widget.ts',
@@ -468,6 +513,115 @@ describe('Merge announcer push normalization', () => {
       expect.stringContaining('Failed to fetch changed files'),
     );
     warn.mockRestore();
+  });
+
+  it('keeps verified PR context when image selection fails', async () => {
+    const payload = {
+      ref: 'refs/heads/main',
+      after: 'abcdef1234567890',
+      installation: { id: 99 },
+      repository: {
+        id: 1,
+        full_name: 'acme/widgets',
+        private: false,
+      },
+      commits: [{ id: 'abcdef1234567890', message: 'Merge pull request #7' }],
+    };
+    const event = normalizeGitHubPush(payload)!;
+    const selectRepresentativeImage = vi.fn(() => {
+      throw new Error('image parser unavailable');
+    });
+    const getInstallationOctokit = vi.fn().mockResolvedValue({
+      rest: {
+        repos: {
+          listPullRequestsAssociatedWithCommit: vi.fn().mockResolvedValue({
+            data: [{ number: 7, base: { ref: 'main' } }],
+          }),
+        },
+        pulls: {
+          get: vi.fn().mockResolvedValue({
+            data: {
+              number: 7,
+              html_url: 'https://github.com/acme/widgets/pull/7',
+              title: 'Ship widget export',
+              body: '![Screenshot](https://github.com/user-attachments/assets/demo)',
+              merge_commit_sha: payload.after,
+              base: { ref: 'main' },
+              changed_files: 1,
+              additions: 20,
+              deletions: 4,
+            },
+          }),
+          listFiles: vi.fn().mockResolvedValue({ data: [] }),
+        },
+      },
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const enriched = await enrichGitHubMergeAnnouncerEvent(payload, event, {
+      getInstallationOctokit: getInstallationOctokit as never,
+      selectRepresentativeImage,
+    });
+
+    expect(selectRepresentativeImage).toHaveBeenCalledOnce();
+    expect(enriched.pullRequest).toMatchObject({
+      number: 7,
+      title: 'Ship widget export',
+    });
+    expect(enriched.pullRequest).not.toHaveProperty('representativeImage');
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to select a pull request image'),
+    );
+    warn.mockRestore();
+  });
+
+  it('does not select images for private repositories', async () => {
+    const payload = {
+      ref: 'refs/heads/main',
+      after: 'abcdef1234567890',
+      installation: { id: 99 },
+      repository: {
+        id: 1,
+        full_name: 'acme/widgets',
+        private: true,
+      },
+      commits: [{ id: 'abcdef1234567890', message: 'Merge pull request #7' }],
+    };
+    const event = normalizeGitHubPush(payload)!;
+    const selectRepresentativeImage = vi.fn();
+    const getInstallationOctokit = vi.fn().mockResolvedValue({
+      rest: {
+        repos: {
+          listPullRequestsAssociatedWithCommit: vi.fn().mockResolvedValue({
+            data: [{ number: 7, base: { ref: 'main' } }],
+          }),
+        },
+        pulls: {
+          get: vi.fn().mockResolvedValue({
+            data: {
+              number: 7,
+              html_url: 'https://github.com/acme/widgets/pull/7',
+              title: 'Ship widget export',
+              body: '![Screenshot](https://github.com/user-attachments/assets/demo)',
+              merge_commit_sha: payload.after,
+              base: { ref: 'main' },
+              changed_files: 1,
+              additions: 20,
+              deletions: 4,
+            },
+          }),
+          listFiles: vi.fn().mockResolvedValue({ data: [] }),
+        },
+      },
+    });
+
+    const enriched = await enrichGitHubMergeAnnouncerEvent(payload, event, {
+      getInstallationOctokit: getInstallationOctokit as never,
+      selectRepresentativeImage,
+    });
+
+    expect(selectRepresentativeImage).not.toHaveBeenCalled();
+    expect(enriched.pullRequest).not.toHaveProperty('representativeImage');
   });
 
   it('rejects associated PRs whose merge SHA is not the pushed tip', async () => {

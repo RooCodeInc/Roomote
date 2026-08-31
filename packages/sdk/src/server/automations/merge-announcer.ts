@@ -62,6 +62,10 @@ export type MergeAnnouncerPullRequestContext = {
   changedFileCount: number;
   additions: number;
   deletions: number;
+  representativeImage?: {
+    url: string;
+    altText: string;
+  };
   changedFiles?: Array<{
     path: string;
     status: string;
@@ -332,6 +336,15 @@ function buildMergeAnnouncerNotification(params: {
             text: slackSummary,
           },
         },
+        ...(params.event.pullRequest?.representativeImage
+          ? [
+              {
+                type: 'image' as const,
+                image_url: params.event.pullRequest.representativeImage.url,
+                alt_text: params.event.pullRequest.representativeImage.altText,
+              },
+            ]
+          : []),
       ],
       additionalActions,
     }),

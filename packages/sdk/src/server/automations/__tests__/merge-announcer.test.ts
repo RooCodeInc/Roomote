@@ -226,6 +226,74 @@ describe('handleMergeAnnouncerPush', () => {
     );
   });
 
+  it('includes one representative PR image in the Slack announcement', async () => {
+    const { dependencies, postMessage } = createDependencies();
+
+    await handleMergeAnnouncerPush(
+      createPayload({
+        pullRequest: {
+          number: 7,
+          url: 'https://github.com/acme/widgets/pull/7',
+          title: 'Ship widget export',
+          changedFileCount: 2,
+          additions: 20,
+          deletions: 4,
+          representativeImage: {
+            url: 'https://github.com/user-attachments/assets/product-preview',
+            altText: 'Product screenshot after save',
+          },
+        },
+      }),
+      dependencies,
+    );
+
+    const postedBlocks = postMessage.mock.calls[0]?.[0]?.blocks;
+    expect(postedBlocks).toEqual([
+      expect.objectContaining({
+        type: 'container',
+        child_blocks: expect.arrayContaining([
+          {
+            type: 'image',
+            image_url:
+              'https://github.com/user-attachments/assets/product-preview',
+            alt_text: 'Product screenshot after save',
+          },
+        ]),
+      }),
+    ]);
+    const container = postedBlocks?.[0];
+    expect(
+      container?.child_blocks?.filter(
+        (block: { type?: string }) => block.type === 'image',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('omits the Slack image block when PR context has no image', async () => {
+    const { dependencies, postMessage } = createDependencies();
+
+    await handleMergeAnnouncerPush(
+      createPayload({
+        pullRequest: {
+          number: 7,
+          url: 'https://github.com/acme/widgets/pull/7',
+          title: 'Ship widget export',
+          changedFileCount: 2,
+          additions: 20,
+          deletions: 4,
+        },
+      }),
+      dependencies,
+    );
+
+    const container = postMessage.mock.calls[0]?.[0]?.blocks?.[0];
+    expect(
+      container?.child_blocks?.some(
+        (block: { type?: string }) => block.type === 'image',
+      ),
+    ).toBe(false);
+  });
+
   it('falls back to the pushed commit when no compare URL is available', async () => {
     const { dependencies, postMessage } = createDependencies();
 

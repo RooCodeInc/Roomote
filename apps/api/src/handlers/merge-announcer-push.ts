@@ -13,6 +13,104 @@ import type { GitLabPushWebhook } from './gitlab/types';
 const MAX_GITHUB_ASSOCIATED_PULL_REQUESTS = 10;
 const MAX_GITHUB_PULL_REQUEST_CANDIDATES = 3;
 const MAX_GITHUB_CHANGED_FILES = 20;
+const MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES = 20;
+const MAX_GITHUB_PULL_REQUEST_IMAGE_ALT_CHARS = 200;
+const MARKDOWN_IMAGE_PATTERN =
+  /!\[([^\]]*)\]\(\s*(?:<([^>\n]+)>|([^\s)\n]+))(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/gu;
+const HTML_IMAGE_PATTERN = /<img\b[^>]*>/giu;
+const HTML_ATTRIBUTE_PATTERN =
+  /\b(src|alt)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/giu;
+const SCREENSHOT_LIKE_IMAGE_TEXT =
+  /\b(?:after|before|demo|desktop|mobile|preview|screen(?:[ -]?shot)?|ui)\b/iu;
+const REJECTED_IMAGE_TEXT = /\b(?:avatar|badge|coverage|icon|logo|shield)\b/iu;
+const ALLOWED_GITHUB_IMAGE_HOSTS = new Set([
+  'camo.githubusercontent.com',
+  'raw.githubusercontent.com',
+  'user-images.githubusercontent.com',
+]);
+
+type PullRequestImageCandidate = {
+  url: string;
+  altText: string;
+  position: number;
+};
+
+function getHtmlImageAttribute(tag: string, name: 'src' | 'alt'): string {
+  for (const match of tag.matchAll(HTML_ATTRIBUTE_PATTERN)) {
+    if (match[1]?.toLowerCase() !== name) continue;
+    return match[2] ?? match[3] ?? match[4] ?? '';
+  }
+  return '';
+}
+
+function isAllowedPublicGitHubImageUrl(value: string): boolean {
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== 'https:' || url.username || url.password) return false;
+    if (/\.(?:ico|svg)$/iu.test(url.pathname)) return false;
+    if (ALLOWED_GITHUB_IMAGE_HOSTS.has(url.hostname.toLowerCase())) return true;
+    return (
+      url.hostname.toLowerCase() === 'github.com' &&
+      url.pathname.startsWith('/user-attachments/assets/')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function normalizePullRequestImageCandidate(
+  candidate: PullRequestImageCandidate,
+): PullRequestImageCandidate | null {
+  const altText = candidate.altText.trim().replaceAll(/\s+/gu, ' ');
+  const url = candidate.url.trim().replaceAll('&amp;', '&');
+  if (!isAllowedPublicGitHubImageUrl(url)) return null;
+  if (REJECTED_IMAGE_TEXT.test(`${altText} ${url}`)) return null;
+
+  return {
+    url,
+    altText:
+      altText.slice(0, MAX_GITHUB_PULL_REQUEST_IMAGE_ALT_CHARS) ||
+      'Pull request image',
+    position: candidate.position,
+  };
+}
+
+export function selectRepresentativeGitHubPullRequestImage(
+  body: string | null | undefined,
+): MergeAnnouncerPullRequestContext['representativeImage'] | null {
+  if (!body?.trim()) return null;
+
+  const candidates: PullRequestImageCandidate[] = [];
+  for (const match of body.matchAll(MARKDOWN_IMAGE_PATTERN)) {
+    candidates.push({
+      altText: match[1] ?? '',
+      url: match[2] ?? match[3] ?? '',
+      position: match.index,
+    });
+  }
+  for (const match of body.matchAll(HTML_IMAGE_PATTERN)) {
+    const tag = match[0];
+    candidates.push({
+      altText: getHtmlImageAttribute(tag, 'alt'),
+      url: getHtmlImageAttribute(tag, 'src'),
+      position: match.index,
+    });
+  }
+
+  const selected = candidates
+    .sort((a, b) => a.position - b.position)
+    .slice(0, MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES)
+    .map(normalizePullRequestImageCandidate)
+    .filter((candidate): candidate is PullRequestImageCandidate => !!candidate)
+    .sort((a, b) => {
+      const screenshotScoreDifference =
+        Number(SCREENSHOT_LIKE_IMAGE_TEXT.test(b.altText)) -
+        Number(SCREENSHOT_LIKE_IMAGE_TEXT.test(a.altText));
+      return screenshotScoreDifference || a.position - b.position;
+    })[0];
+
+  return selected ? { url: selected.url, altText: selected.altText } : null;
+}
 
 function getPullRequestNumberFromCommitMessage(
   message: string | undefined,
@@ -53,15 +151,18 @@ type GitHubPushWebhook = {
     full_name: string;
     default_branch?: string | null;
     html_url?: string | null;
+    private?: boolean;
   };
 };
 
 type GitHubMergeAnnouncerDependencies = {
   getInstallationOctokit: typeof getInstallationOctokit;
+  selectRepresentativeImage: typeof selectRepresentativeGitHubPullRequestImage;
 };
 
 const githubMergeAnnouncerDependencies: GitHubMergeAnnouncerDependencies = {
   getInstallationOctokit,
+  selectRepresentativeImage: selectRepresentativeGitHubPullRequestImage,
 };
 
 export function normalizeGitHubPush(
@@ -91,8 +192,12 @@ export function normalizeGitHubPush(
 export async function enrichGitHubMergeAnnouncerEvent(
   payload: GitHubPushWebhook,
   event: MergeAnnouncerPushEvent,
-  dependencies: GitHubMergeAnnouncerDependencies = githubMergeAnnouncerDependencies,
+  dependencyOverrides: Partial<GitHubMergeAnnouncerDependencies> = {},
 ): Promise<MergeAnnouncerPushEvent> {
+  const dependencies = {
+    ...githubMergeAnnouncerDependencies,
+    ...dependencyOverrides,
+  };
   const installationId = payload.installation?.id;
   const after = payload.after?.trim();
   const [owner, repo] = payload.repository?.full_name.split('/') ?? [];
@@ -163,6 +268,18 @@ export async function enrichGitHubMergeAnnouncerEvent(
       return event;
     }
 
+    let representativeImage: MergeAnnouncerPullRequestContext['representativeImage'];
+    if (payload.repository?.private === false) {
+      try {
+        representativeImage =
+          dependencies.selectRepresentativeImage(pullRequest.body) ?? undefined;
+      } catch (error) {
+        console.warn(
+          `[mergeAnnouncer] Failed to select a pull request image for ${payload.repository.full_name}#${pullRequest.number}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
     let changedFiles: MergeAnnouncerPullRequestContext['changedFiles'];
     try {
       const { data: files } = await octokit.rest.pulls.listFiles({
@@ -194,6 +311,7 @@ export async function enrichGitHubMergeAnnouncerEvent(
         changedFileCount: pullRequest.changed_files,
         additions: pullRequest.additions,
         deletions: pullRequest.deletions,
+        ...(representativeImage ? { representativeImage } : {}),
         ...(changedFiles ? { changedFiles } : {}),
       },
     };
