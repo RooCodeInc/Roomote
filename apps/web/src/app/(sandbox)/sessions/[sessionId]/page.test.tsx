@@ -228,7 +228,7 @@ describe('Session detail page', () => {
     );
   });
 
-  it('resolves the unified session first and renders its Fast transcript', async () => {
+  it('hydrates a direct Session route without seeding the response lease', async () => {
     authorizeMock.mockResolvedValue({
       success: true,
       userId: 'user-1',
@@ -310,10 +310,12 @@ describe('Session detail page', () => {
         sessionId: '6a1f8f1e-0000-4000-8000-000000000005',
         canReply: true,
         initialTitle: 'Session title',
-        initialConversationResponding: true,
         fallbackTitle: 'Session title',
       }),
       undefined,
+    );
+    expect(transcriptMock.mock.calls[0]?.[0]).not.toHaveProperty(
+      'initialConversationResponding',
     );
     expect(transcriptMock.mock.calls[0]?.[0]).not.toHaveProperty(
       'timelineExtras',
