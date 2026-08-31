@@ -108,10 +108,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Use `list_skills`');
     expect(prompt).toContain('settings-defined playbook');
     expect(prompt).toContain('repository-defined method');
-    expect(prompt).toContain('without arguments to list packaged skills only');
     expect(prompt).toContain(
-      'never inspects repositories or environment settings',
+      'without arguments for the complete packaged and Settings inventory',
     );
+    expect(prompt).toContain('this never inspects repositories');
     expect(prompt).toContain(
       'A trusted runtime-derived `<explicit_skill_invocation name="..." />` marker',
     );

@@ -58,6 +58,104 @@ function marketplaceSnapshot({
 }
 
 describe('RemoteFastAgentSettingsSkillSource', () => {
+  it('limits an unscoped broad listing to authorized environments', async () => {
+    const source = new RemoteFastAgentSettingsSkillSource({
+      allowedEnvironmentIds: ['environment-1', 'environment-2'],
+      resolveEnvironments: vi.fn().mockResolvedValue([
+        {
+          id: 'environment-2',
+          config: environmentConfig({
+            manualSkills: [
+              {
+                name: 'thermonuclear',
+                description: 'Environment two variant.',
+                content: '# Environment two',
+              },
+            ],
+          }),
+        },
+        {
+          id: 'inaccessible-environment',
+          config: environmentConfig({
+            manualSkills: [
+              {
+                name: 'private-playbook',
+                description: 'Must not be visible.',
+                content: '# Private',
+              },
+            ],
+          }),
+        },
+        {
+          id: 'environment-1',
+          config: environmentConfig({
+            manualSkills: [
+              {
+                name: 'thermonuclear',
+                description: 'Environment one variant.',
+                content: '# Environment one',
+              },
+            ],
+          }),
+        },
+      ]),
+    });
+
+    const catalog = await source.list({});
+
+    expect(catalog.skills).toHaveLength(2);
+    expect(catalog.skills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          environmentIds: ['environment-1'],
+          name: 'thermonuclear',
+        }),
+        expect.objectContaining({
+          environmentIds: ['environment-2'],
+          name: 'thermonuclear',
+        }),
+      ]),
+    );
+    expect(catalog.skills).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'private-playbook' }),
+      ]),
+    );
+  });
+
+  it('keeps broad marketplace discovery bounded with an omission warning', async () => {
+    const skills = Object.fromEntries(
+      Array.from({ length: 9 }, (_, index) => [
+        `owner/source-${index + 1}`,
+        'all',
+      ]),
+    );
+    const loadMarketplaceSnapshot = vi
+      .fn()
+      .mockImplementation(async (source: string) =>
+        marketplaceSnapshot({ name: `skill-${source.at(-1)}`, source }),
+      );
+    const source = new RemoteFastAgentSettingsSkillSource({
+      allowedEnvironmentIds: ['environment-1'],
+      loadMarketplaceSnapshot,
+      resolveEnvironments: vi.fn().mockResolvedValue([
+        {
+          id: 'environment-1',
+          config: environmentConfig({ skills }),
+        },
+      ]),
+    });
+
+    const catalog = await source.list({});
+
+    expect(loadMarketplaceSnapshot).toHaveBeenCalledTimes(8);
+    expect(catalog.skills).toHaveLength(8);
+    expect(catalog.warnings).toEqual([
+      'Settings skill discovery omitted 1 marketplace sources after reaching the limit of 8.',
+    ]);
+    expect(catalog.nextSourceOffset).toBeUndefined();
+  });
+
   it('lists and loads only manual skills from authorized environments', async () => {
     const source = new RemoteFastAgentSettingsSkillSource({
       allowedEnvironmentIds: ['environment-1'],

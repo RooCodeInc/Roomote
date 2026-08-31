@@ -10,6 +10,8 @@ describe('SessionCard', () => {
         session={{
           id: 'session-1',
           title: 'Update homepage background',
+          ownerKind: 'user',
+          ownerAutomation: null,
           ownerName: 'Test User',
           ownerEmail: 'test@example.com',
           ownerImageUrl: null,
@@ -20,6 +22,13 @@ describe('SessionCard', () => {
           executionCount: 1,
           inferenceCostMicroUsd: 10_000,
           unread: false,
+          pullRequests: [
+            {
+              repository: 'RooCodeInc/Roomote',
+              number: 1939,
+              url: 'https://github.com/RooCodeInc/Roomote/pull/1939',
+            },
+          ],
           tasks: [
             {
               taskId: 'task-1',
@@ -34,8 +43,14 @@ describe('SessionCard', () => {
     expect(
       screen.getByRole('link', { name: /Update homepage background/ }),
     ).toHaveAttribute('href', '/sessions/session-1');
+    expect(screen.getByText('Test User')).toBeInTheDocument();
+    expect(screen.getByText('started a session')).toBeInTheDocument();
     expect(screen.getByText('Web')).toBeInTheDocument();
     expect(screen.getByText('$0.01')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Roomote#1939' })).toHaveAttribute(
+      'href',
+      'https://github.com/RooCodeInc/Roomote/pull/1939',
+    );
     expect(screen.queryByText('Roomote')).not.toBeInTheDocument();
     expect(screen.queryByText('1 execution')).not.toBeInTheDocument();
   });
@@ -48,6 +63,8 @@ describe('SessionCard', () => {
         session={{
           id: 'session-2',
           title: 'Prepare release notes',
+          ownerKind: 'user',
+          ownerAutomation: null,
           ownerName: 'Test User',
           ownerEmail: 'test@example.com',
           ownerImageUrl: null,
@@ -58,6 +75,7 @@ describe('SessionCard', () => {
           executionCount: 0,
           inferenceCostMicroUsd: 0,
           unread: false,
+          pullRequests: [],
           searchSnippet: '...preserve the Heliotrope detail before release.',
           tasks: [],
         }}
@@ -75,6 +93,8 @@ describe('SessionCard', () => {
     const session = {
       id: 'session-3',
       title: 'Review customer feedback',
+      ownerKind: 'user' as const,
+      ownerAutomation: null,
       ownerName: 'Test User',
       ownerEmail: 'test@example.com',
       ownerImageUrl: null,
@@ -85,6 +105,7 @@ describe('SessionCard', () => {
       executionCount: 0,
       inferenceCostMicroUsd: 0,
       unread: true,
+      pullRequests: [],
       tasks: [],
     };
 
@@ -101,6 +122,8 @@ describe('SessionCard', () => {
     const session = {
       id: 'session-4',
       title: 'Review status indicators',
+      ownerKind: 'user' as const,
+      ownerAutomation: null,
       ownerName: 'Test User',
       ownerEmail: 'test@example.com',
       ownerImageUrl: null,
@@ -111,13 +134,17 @@ describe('SessionCard', () => {
       executionCount: 0,
       inferenceCostMicroUsd: 0,
       unread: false,
+      pullRequests: [],
       tasks: [],
     };
 
     const { container, rerender } = render(
       <SessionCard session={session} viewerUserId="user-1" />,
     );
-    expect(container.querySelector('.animate-spin')).toBeInTheDocument();
+    const spinner = container.querySelector('.animate-spin');
+    expect(spinner).toBeInTheDocument();
+    expect(spinner?.parentElement).toHaveTextContent('Web');
+    expect(spinner?.parentElement).not.toHaveTextContent('started a session');
     expect(screen.queryByText('active')).not.toBeInTheDocument();
     expect(screen.getByText('Active')).toHaveClass('sr-only');
 
@@ -145,5 +172,34 @@ describe('SessionCard', () => {
       />,
     );
     expect(screen.getByText('blocked')).toHaveClass('capitalize');
+  });
+
+  it('labels automation-owned sessions with the automation actor', () => {
+    render(
+      <SessionCard
+        viewerUserId="user-1"
+        session={{
+          id: 'session-5',
+          title: 'Triage recent errors',
+          ownerKind: 'automation',
+          ownerAutomation: 'sentry_triage',
+          ownerName: null,
+          ownerEmail: null,
+          ownerImageUrl: null,
+          ownerUserId: null,
+          sourceSurface: 'automation',
+          activityAt: Date.now() / 1000,
+          cachedStatus: 'ready',
+          executionCount: 1,
+          inferenceCostMicroUsd: 0,
+          unread: false,
+          pullRequests: [],
+          tasks: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Sentry Triage')).toBeInTheDocument();
+    expect(screen.getByText('started a session')).toBeInTheDocument();
   });
 });

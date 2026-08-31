@@ -16,6 +16,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  like,
   llmUsageEvents,
   lt,
   or,
@@ -31,10 +32,16 @@ import {
   tasks,
   users,
 } from '@roomote/db/server';
-import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  LINEAR_SESSION_ACTOR_PREFIX,
+  type BackgroundAutomationKey,
+} from '@roomote/types';
 import { syncFastAgentSlackTitleBestEffort } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
+import { parseCreatorFilterValue } from '@/lib/task-creator-filter';
+import { getSessionPullRequests } from '@/lib/session-pull-requests';
 
 import { getFastSessionById } from './fast-sessions';
 
@@ -112,7 +119,9 @@ function decodeCursor(cursor?: string | null) {
     : null;
 }
 
-function taskExistsCondition(condition?: ReturnType<typeof eq>) {
+function taskExistsCondition(
+  condition?: ReturnType<typeof eq> | ReturnType<typeof and>,
+) {
   return exists(
     db
       .select({ one: sql`1` })
@@ -126,6 +135,43 @@ function taskExistsCondition(condition?: ReturnType<typeof eq>) {
         ),
       ),
   );
+}
+
+function sessionCreatorCondition(value: string) {
+  const creator = parseCreatorFilterValue(value);
+
+  switch (creator.kind) {
+    case 'automation':
+      return creator.externalId
+        ? taskExistsCondition(
+            and(
+              eq(
+                tasks.initiatorAutomation,
+                creator.key as BackgroundAutomationKey,
+              ),
+              eq(tasks.actorExternalId, creator.externalId),
+            ),
+          )
+        : eq(sessions.ownerAutomation, creator.key as BackgroundAutomationKey);
+    case 'external':
+      return taskExistsCondition(
+        and(
+          eq(tasks.initiatorKind, 'user'),
+          isNull(tasks.initiatorUserId),
+          eq(tasks.actorExternalId, creator.externalId),
+        ),
+      );
+    case 'linearAgent':
+      return taskExistsCondition(
+        and(
+          eq(tasks.initiatorKind, 'user'),
+          isNull(tasks.initiatorUserId),
+          like(tasks.actorExternalId, `${LINEAR_SESSION_ACTOR_PREFIX}%`),
+        ),
+      );
+    case 'user':
+      return eq(sessions.ownerUserId, creator.userId);
+  }
 }
 
 function buildSessionSearch(query: string | null | undefined) {
@@ -339,7 +385,7 @@ function listConditions(
     isNull(sessions.archivedAt),
     input.ids ? inArray(sessions.id, input.ids) : undefined,
     input.status ? eq(sessions.cachedStatus, input.status) : undefined,
-    input.user ? eq(sessions.ownerUserId, input.user) : undefined,
+    input.user ? sessionCreatorCondition(input.user) : undefined,
     input.source
       ? eq(sessions.sourceSurface, input.source as never)
       : undefined,
@@ -467,6 +513,7 @@ async function hydrateSessionRows(
   const ids = rows.map((row) => row.id);
   const [
     linkedTasks,
+    linkedPullRequests,
     participants,
     directSessionUsage,
     attachedTaskUsage,
@@ -491,6 +538,23 @@ async function hydrateSessionRows(
         .where(
           and(inArray(sessionTasks.sessionId, ids), isNull(tasks.deletedAt)),
         ),
+    db
+      .select({
+        sessionId: sessionTasks.sessionId,
+        url: taskPullRequests.prUrl,
+        number: taskPullRequests.prNumber,
+        repository: taskPullRequests.repository,
+        status: taskPullRequests.status,
+      })
+      .from(sessionTasks)
+      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+      .innerJoin(
+        taskPullRequests,
+        eq(taskPullRequests.taskId, sessionTasks.taskId),
+      )
+      .where(
+        and(inArray(sessionTasks.sessionId, ids), isNull(tasks.deletedAt)),
+      ),
     db
       .select({
         sessionId: sessionParticipants.sessionId,
@@ -615,6 +679,13 @@ async function hydrateSessionRows(
     return {
       ...row,
       tasks: tasksForSession,
+      pullRequests: getSessionPullRequests([
+        {
+          pullRequests: linkedPullRequests
+            .filter((pullRequest) => pullRequest.sessionId === row.id)
+            .map(({ sessionId: _sessionId, ...pullRequest }) => pullRequest),
+        },
+      ]),
       executionCount: tasksForSession.length,
       participants: sessionParticipantsRows,
       directInferenceCostMicroUsd,
