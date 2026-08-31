@@ -7,7 +7,7 @@ import {
   sanitizeSandboxPathString,
 } from '@/lib';
 
-import { AlertCircle, Loader2 } from '@/components/system';
+import { AlertCircle } from '@/components/system';
 import {
   Message,
   MessageContent,
@@ -59,11 +59,9 @@ export function AcpToolMessage({
   const presentation = resolveToolPresentation(msg.data, msg.partial);
   const ToolIcon = isFailed
     ? AlertCircle
-    : isRunning
-      ? Loader2
-      : presentation.integrationIcon
-        ? mcpIntegrationIconFor(presentation.integrationIcon)
-        : toolIconForKey(presentation.iconKey);
+    : presentation.integrationIcon
+      ? mcpIntegrationIconFor(presentation.integrationIcon)
+      : toolIconForKey(presentation.iconKey);
 
   const visualProofMedia = resolveVisualProofMediaForToolMessage(
     msg,

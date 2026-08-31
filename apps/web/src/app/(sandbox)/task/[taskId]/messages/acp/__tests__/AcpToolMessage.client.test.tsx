@@ -7,7 +7,14 @@ import {
 } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
-import { Bot, FileIcon, Search, SquarePen, Wrench } from '@/components/system';
+import {
+  AlertCircle,
+  Bot,
+  FileIcon,
+  Search,
+  SquarePen,
+  Wrench,
+} from '@/components/system';
 
 import { AcpToolMessage } from '../AcpToolMessage';
 import { mcpIntegrationIconFor } from '../tool-icons';
@@ -146,6 +153,55 @@ describe('AcpToolMessage', () => {
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         icon: SquarePen,
+      }),
+    );
+  });
+
+  it('keeps the resolved tool icon while the header renders running progress', () => {
+    render(
+      <AcpToolMessage msg={buildMessage('edit', { status: 'in_progress' })} />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: SquarePen,
+        state: 'input-available',
+      }),
+    );
+  });
+
+  it('keeps a known MCP brand icon while the header renders running progress', () => {
+    render(
+      <AcpToolMessage
+        msg={buildMessage('mcp', {
+          status: 'in_progress',
+          isMcp: true,
+          mcpServerName: 'sentry',
+          mcpToolName: 'search_issues',
+          serverName: 'sentry',
+          toolName: 'search_issues',
+        })}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: mcpIntegrationIconFor('sentry'),
+        state: 'input-available',
+      }),
+    );
+  });
+
+  it('keeps failure presentation ahead of partial progress', () => {
+    const msg = buildMessage('edit', { status: 'failed' });
+    msg.partial = true;
+
+    render(<AcpToolMessage msg={msg} />);
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: AlertCircle,
+        state: 'output-error',
       }),
     );
   });

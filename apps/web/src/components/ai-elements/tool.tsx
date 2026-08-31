@@ -13,6 +13,7 @@ import {
   CollapsibleContent,
   CollapsibleIconTrigger,
   CollapsibleTrigger,
+  Spinner,
 } from '@/components/system';
 
 type ToolState =
@@ -78,6 +79,7 @@ export const ToolHeader = ({
     state === 'input-streaming' ||
     state === 'input-available' ||
     state === 'output-error';
+  const isRunning = state === 'input-streaming' || state === 'input-available';
 
   const inner = (
     <div
@@ -86,7 +88,9 @@ export const ToolHeader = ({
         !collapsible && 'cursor-default',
       )}
     >
-      {collapsible ? (
+      {isRunning ? (
+        <Spinner size="sm" className="shrink-0" />
+      ) : collapsible ? (
         <CollapsibleIconTrigger icon={ActionIcon} />
       ) : (
         <ActionIcon className="size-3 shrink-0" />
