@@ -2375,7 +2375,10 @@ export async function answerFastAgentQuestion({
           boundSubagentSessionIDs.clear();
         };
         let promptForAttempt = selectedPrompt;
-        let imageFilesForAttempt = imageFiles;
+        let imageFilesForAttempt =
+          sessionPath === 'fallback_rebuild'
+            ? [...imageFiles, ...injectedHumanFollowUpFiles]
+            : imageFiles;
         let promptKind: FastAgentPromptKind =
           sessionPath === 'warm' || sessionPath === 'cold_resume'
             ? 'turn_delta'

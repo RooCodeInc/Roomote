@@ -735,6 +735,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             currentMessageId: '100.3',
             userId: 'user-1',
             question: 'Preserve this fallback correction.',
+            images: ['data:image/png;base64,aGVsbG8='],
           },
         })
         .mockResolvedValue(undefined);
@@ -752,6 +753,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             });
           }
           expect(params.prompt).toContain('Preserve this fallback correction.');
+          expect(params.files).toEqual([
+            {
+              mime: 'image/png',
+              url: 'data:image/png;base64,aGVsbG8=',
+            },
+          ]);
           return 'Fallback recovered';
         },
       );
