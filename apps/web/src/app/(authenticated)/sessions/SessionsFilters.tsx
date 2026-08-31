@@ -20,6 +20,7 @@ import {
   Button,
   ChevronDown,
   Columns3,
+  CornerDownLeftIcon,
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
@@ -155,6 +156,7 @@ export function SessionsFilters({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [showSearch, setShowSearch] = useState(Boolean(query));
+  const [searchValue, setSearchValue] = useState(query);
   const hasAdvancedUrlFilters = ADVANCED_FILTER_PARAMS.some((param) =>
     searchParams.has(param),
   );
@@ -176,6 +178,7 @@ export function SessionsFilters({
   }, []);
 
   useEffect(() => {
+    setSearchValue(query);
     if (query) setShowSearch(true);
   }, [query]);
 
@@ -215,6 +218,7 @@ export function SessionsFilters({
       label: getSessionSurfaceLabel(value),
     })),
   ];
+  const isSearchActive = showSearch || Boolean(query);
 
   return (
     <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1">
@@ -304,9 +308,9 @@ export function SessionsFilters({
 
       <div className="ml-auto flex items-center gap-2">
         <Button
-          variant="ghost"
+          variant={advancedFiltersVisible ? 'default' : 'ghost'}
           size="sm"
-          className={cn('size-8', advancedFiltersVisible && 'bg-accent')}
+          className="size-8"
           aria-label="Toggle advanced filters"
           aria-pressed={advancedFiltersVisible}
           disabled={hasAdvancedUrlFilters}
@@ -326,38 +330,48 @@ export function SessionsFilters({
         >
           <SlidersHorizontal />
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className={cn('size-8', (showSearch || query) && 'bg-accent')}
-          aria-label="Toggle session search"
-          aria-pressed={showSearch}
-          title="Search sessions"
-          onClick={() => setShowSearch((current) => !current)}
-        >
-          <Search />
-        </Button>
         {showSearch ? (
           <form
+            className="relative"
             onSubmit={(event) => {
               event.preventDefault();
-              const form = new FormData(event.currentTarget);
-              updateNullableParam(
-                'q',
-                String(form.get('q') ?? '').trim() || null,
-              );
+              updateNullableParam('q', searchValue.trim() || null);
             }}
           >
             <Input
               ref={searchInputRef}
               name="q"
-              defaultValue={query}
+              value={searchValue}
+              onChange={(event) => setSearchValue(event.target.value)}
               aria-label="Search sessions"
               placeholder="Search..."
-              className="h-8 w-40 sm:w-48"
+              className="h-8 w-40 pr-9 sm:w-48"
             />
+            {searchValue ? (
+              <Button
+                type="submit"
+                variant="bare"
+                size="icon"
+                aria-label="Submit session search"
+                title="Press Enter to search"
+                className="absolute top-0 right-0 size-8 text-muted-foreground"
+              >
+                <CornerDownLeftIcon />
+              </Button>
+            ) : null}
           </form>
         ) : null}
+        <Button
+          variant={isSearchActive ? 'default' : 'ghost'}
+          size="sm"
+          className="size-8"
+          aria-label="Toggle session search"
+          aria-pressed={isSearchActive}
+          title="Search sessions"
+          onClick={() => setShowSearch((current) => !current)}
+        >
+          <Search />
+        </Button>
         <div className="flex items-center rounded-lg border border-border p-0.5">
           <Button
             variant={view === 'list' ? 'default' : 'ghost'}

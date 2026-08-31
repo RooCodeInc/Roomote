@@ -75,15 +75,18 @@ describe('SessionsFilters', () => {
 
   it('hides advanced filters by default and persists their visibility', async () => {
     const { unmount } = render(<SessionsFilters {...baseProps} />);
+    const advancedFiltersButton = screen.getByRole('button', {
+      name: 'Toggle advanced filters',
+    });
 
     expect(
       screen.queryByTestId('advanced-task-filters'),
     ).not.toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Toggle advanced filters' }),
-    );
+    expect(advancedFiltersButton).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(advancedFiltersButton);
 
     expect(screen.getByTestId('advanced-task-filters')).toBeInTheDocument();
+    expect(advancedFiltersButton).toHaveAttribute('aria-pressed', 'true');
     expect(
       localStorage.getItem('roomote-sessions-advanced-filters-visible'),
     ).toBe('true');
@@ -95,14 +98,31 @@ describe('SessionsFilters', () => {
     );
   });
 
-  it('expands the compact search input and switches views with icon buttons', () => {
+  it('expands search to the left, shows a submit hint, and switches views', () => {
     render(<SessionsFilters {...baseProps} />);
+    const searchButton = screen.getByRole('button', {
+      name: 'Toggle session search',
+    });
 
     expect(screen.queryByPlaceholderText('Search...')).not.toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Toggle session search' }),
+    expect(searchButton).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(searchButton);
+
+    const searchInput = screen.getByPlaceholderText('Search...');
+    expect(searchInput).toHaveFocus();
+    expect(searchInput.compareDocumentPosition(searchButton)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
     );
-    expect(screen.getByPlaceholderText('Search...')).toHaveFocus();
+    expect(searchButton).toHaveAttribute('aria-pressed', 'true');
+    expect(
+      screen.queryByRole('button', { name: 'Submit session search' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(searchInput, { target: { value: 'release notes' } });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Submit session search' }),
+    );
+    expect(replaceMock).toHaveBeenCalledWith('/sessions?q=release+notes');
 
     fireEvent.click(screen.getByRole('button', { name: 'Board view' }));
     expect(replaceMock).toHaveBeenCalledWith('/sessions?view=board');
