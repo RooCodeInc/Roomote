@@ -382,11 +382,23 @@ describe('Session detail page', () => {
         taskId: 'task-1',
         title: 'Delegated task',
         inferenceCostMicroUsd: 200_000,
+        artifacts: [
+          {
+            id: 'artifact-1',
+            path: 'reports/result.md',
+            version: 1,
+            artifactType: 'plan',
+            contentType: 'text/markdown',
+            size: 200,
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          },
+        ],
       },
       {
         taskId: 'task-2',
         title: 'Zero-cost task',
         inferenceCostMicroUsd: 0,
+        artifacts: [],
       },
     ]);
 
