@@ -251,10 +251,9 @@ ${
       }
 ${
   platformEventKind === 'external_input' && surface === 'slack'
-    ? `- A \`reaction_added\` input is a user response to the reacted-to message and surrounding conversation. Treat it as substantive conversational input, not as ignorable noise, and interpret the emoji in that context rather than in isolation.
-- When the reaction's meaning is clear in context, respond or act through the normal tools exactly as if the user had typed that response. This includes approval to proceed, an answer to a question, or a request implied by the reacted-to message and conversation.
-- The reaction authorizes only what the context clearly identifies. It does not authorize broader work or waive normal clarification or confirmation safeguards for ambiguous, destructive, irreversible, or externally consequential actions.
-- If the meaning is ambiguous between materially different actions, ask a brief clarification rather than guessing. A simple acknowledgement or sentiment that calls for no reply may close silently with \`ignore_event\`, but never ignore a reaction merely because it is an emoji.`
+    ? `- For a \`reaction_added\` input, infer intent from the reacted-to message and the surrounding conversation; do not interpret the emoji in isolation.
+- Treat an \`arrow_forward\` reaction as approval to proceed when the reacted-to message presents one concrete actionable item and the conversation makes that item unambiguous. Carry out the item through the normal tools; do not call \`ignore_event\`, merely acknowledge it, or restate it.
+- The reaction is approval for that unambiguous item, including its ordinary external effects; it does not authorize broader work or waive an independently required confirmation for destructive or irreversible steps. If the target presents no concrete item or multiple plausible items remain, do not invent approval; ask for clarification when useful, or apply the narrow ignore rule above.`
     : ''
 }
 ${
