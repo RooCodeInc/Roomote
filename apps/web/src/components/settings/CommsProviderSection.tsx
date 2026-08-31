@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { SetupAuthProviderStatus } from '@roomote/types';
+import type { AgentMailCommsStatus } from '@/trpc/commands/comms';
 
 import { useTRPC } from '@/trpc/client';
 import {
@@ -23,7 +24,11 @@ import {
   ProviderSetupExperience,
 } from '@/app/(onboarding)/setup/ProviderSetupExperience';
 
-type CommsProviderId = SetupAuthProviderStatus['id'] | 'telegram' | 'discord';
+type CommsProviderId =
+  | SetupAuthProviderStatus['id']
+  | 'telegram'
+  | 'discord'
+  | 'agentmail';
 type TelegramWebhookStatus = {
   status: 'connected' | 'mismatch' | 'stale_updates' | 'unregistered' | 'error';
   registeredUrl: string | null;
@@ -37,6 +42,7 @@ type CommsProviderStatus = Omit<SetupAuthProviderStatus, 'id'> & {
   telegramWebhook?: TelegramWebhookStatus | null;
   telegramBotUsername?: string | null;
   discord?: import('@/trpc/commands/comms').DiscordCommsStatus | null;
+  agentmail?: AgentMailCommsStatus | null;
 };
 
 const TELEGRAM_WEBHOOK_STATUS_COPY: Record<
@@ -77,6 +83,7 @@ import {
   DialogTitle,
   ExternalLink,
   Info,
+  Mail,
   Plug,
   RefreshCw,
   Spinner,
@@ -255,6 +262,70 @@ function TeamsBotStatus() {
           </Button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+const AGENTMAIL_WEBHOOK_STATUS_COPY: Record<
+  'connected' | 'mismatch' | 'unregistered' | 'error',
+  { label: string; tone: 'ok' | 'warn' }
+> = {
+  connected: { label: 'Webhook connected', tone: 'ok' },
+  mismatch: {
+    label:
+      'Webhook points at a different URL — save again to re-register it for this deployment',
+    tone: 'warn',
+  },
+  unregistered: {
+    label:
+      'Webhook not registered yet — it is registered automatically when you save',
+    tone: 'warn',
+  },
+  error: {
+    label: 'Could not check the AgentMail webhook status',
+    tone: 'warn',
+  },
+};
+
+function AgentMailSetupStatus({
+  status,
+}: {
+  status: NonNullable<CommsProviderStatus['agentmail']>;
+}) {
+  const webhookCopy = AGENTMAIL_WEBHOOK_STATUS_COPY[status.webhook.status];
+
+  return (
+    <div className="space-y-2 mt-4">
+      {status.inboxAddress ? (
+        <div className="flex items-start gap-2">
+          <Mail className="size-4 mt-0.5 shrink-0" />
+          <p className="text-sm">
+            Inbox:{' '}
+            <span className="break-all font-mono">{status.inboxAddress}</span>
+          </p>
+        </div>
+      ) : null}
+      <div className="flex items-start gap-2">
+        {webhookCopy.tone === 'ok' ? (
+          <Check className="inline size-4 mt-0.5 shrink-0 text-green-600" />
+        ) : (
+          <Info className="inline size-4 mt-0.5 shrink-0 text-amber-600" />
+        )}
+        <p className="text-sm">
+          {status.webhook.status === 'error'
+            ? (status.webhook.errorMessage ??
+              AGENTMAIL_WEBHOOK_STATUS_COPY.error.label)
+            : webhookCopy.label}
+          {status.webhook.registeredUrl ? (
+            <>
+              {' '}
+              <span className="break-all font-mono">
+                {status.webhook.registeredUrl}
+              </span>
+            </>
+          ) : null}
+        </p>
+      </div>
     </div>
   );
 }
@@ -529,11 +600,15 @@ export function CommsProviderSection({
     <>
       <Section
         icon={
-          <BrandIcon
-            icon={getProviderIconId(provider.id)}
-            name=""
-            className="size-4 shrink-0"
-          />
+          provider.id === 'agentmail' ? (
+            <Mail className="size-4 shrink-0" />
+          ) : (
+            <BrandIcon
+              icon={getProviderIconId(provider.id)}
+              name=""
+              className="size-4 shrink-0"
+            />
+          )
         }
         title={provider.label}
         action={
@@ -579,7 +654,9 @@ export function CommsProviderSection({
                   ? 'Roomote generates a webhook secret automatically, registers the webhook when you save, and defaults Telegram task launches to the admin who saves this configuration.'
                   : !provider.runtimeSatisfied && provider.id === 'discord'
                     ? 'Roomote validates the token, derives the bot identity, and registers /new, /goal, /link, and /help when you save.'
-                    : undefined
+                    : !provider.runtimeSatisfied && provider.id === 'agentmail'
+                      ? 'Roomote validates the API key, provisions an inbox automatically when the address is left blank, and registers the AgentMail webhook when you save.'
+                      : undefined
               }
               onCreateSlackApp={(configToken) =>
                 createSlackApp.mutate({ configToken })
@@ -648,6 +725,9 @@ export function CommsProviderSection({
               )}
               {provider.id === 'discord' && provider.discord && (
                 <DiscordSetupStatus status={provider.discord} />
+              )}
+              {provider.id === 'agentmail' && provider.agentmail && (
+                <AgentMailSetupStatus status={provider.agentmail} />
               )}
               {provider.id === 'microsoft' &&
                 (hasConfiguredValues || teamsBotConfigured) && (

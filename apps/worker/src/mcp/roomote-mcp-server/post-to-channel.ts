@@ -74,6 +74,12 @@ export async function handlePostToChannel(
 ): Promise<ToolResult> {
   const provider =
     process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim().toLowerCase();
+  if (provider === 'agentmail') {
+    // Email is inbound-initiated: tasks reply in the originating thread only.
+    return errorResult(
+      'Channel posts are not supported for email; email tasks are inbound-initiated. Reply in the originating email thread with send_chat_reply instead.',
+    );
+  }
   const rawChannel = input.channel.trim();
   if (!rawChannel) {
     return errorResult('channel is required');

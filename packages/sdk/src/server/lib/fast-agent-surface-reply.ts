@@ -550,8 +550,44 @@ async function runFastAgentSurfaceReply(
     return false;
   }
 
-  const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
   try {
+    await runFastAgentSurfaceReplyWithSignal(params, release.signal);
+    return true;
+  } finally {
+    await release().catch(() => {});
+  }
+}
+
+/**
+ * Run one surface turn while the CALLER owns the Fast turn lock. Durable
+ * queue drainers (AgentMail inbound turns) hold the lock across a whole
+ * ordered drain, so the per-turn acquire in `runFastAgentSurfaceReply` would
+ * deadlock; this awaited variant mirrors `deliverFastAgentParentEventWithLock`.
+ */
+export async function continueFastAgentSurfaceReplyWithLock(
+  params: FastAgentSurfaceReplyParams,
+  turnSignal: AbortSignal,
+): Promise<boolean> {
+  const delivery = await buildFastAgentSurfaceReplyDelivery(params);
+  if (!delivery) {
+    return false;
+  }
+
+  await runFastAgentSurfaceReplyWithSignal({ ...params, delivery }, turnSignal);
+  return true;
+}
+
+async function runFastAgentSurfaceReplyWithSignal(
+  params: FastAgentSurfaceReplyParams & {
+    delivery: FastAgentSurfaceReplyDelivery;
+  },
+  turnSignal: AbortSignal,
+): Promise<void> {
+  const { delivery } = params;
+  const release = { signal: turnSignal };
+
+  const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
+  {
     const activeTasks = params.externalInput
       ? await getActiveFastAgentTasks(params.sessionId)
       : undefined;
@@ -584,9 +620,6 @@ async function runFastAgentSurfaceReply(
         ...delivery.adapter,
       },
     });
-    return true;
-  } finally {
-    await release().catch(() => {});
   }
 }
 

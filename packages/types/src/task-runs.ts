@@ -65,6 +65,7 @@ export const TASK_SURFACES = [
   'teams',
   'telegram',
   'discord',
+  'agentmail',
   'linear',
   'github',
   'gitlab',
@@ -291,6 +292,7 @@ export const TRACKED_MESSAGE_SURFACES = [
   'teams',
   'telegram',
   'discord',
+  'agentmail',
 ] as const;
 export type TrackedMessageSurface = (typeof TRACKED_MESSAGE_SURFACES)[number];
 

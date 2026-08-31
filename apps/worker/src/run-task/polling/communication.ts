@@ -79,6 +79,9 @@ export function createCommunicationMessageInterval({
     }
 
     try {
+      // AgentMail (email) is deliberately excluded: email cannot render
+      // interactive request_user_input prompts, so no answers are ever
+      // queued for it (clarifications go through send_chat_reply instead).
       if (
         provider === 'discord' ||
         provider === 'telegram' ||
@@ -286,7 +289,9 @@ export function createCommunicationMessageInterval({
         ) {
           // Telegram, Teams, and Discord turns feed the same satisfaction
           // machinery as Slack so ack/closeout enforcement and current-turn
-          // reactions work.
+          // reactions work. AgentMail (email) is deliberately excluded:
+          // email must never get the ack/silence heartbeats that machinery
+          // enforces, and it has no reactions.
           recordChatTurnStart({
             turnMessageTs: message.ts,
             allowReaction: message.turnPolicy?.reactionsAllowed,

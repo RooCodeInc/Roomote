@@ -219,6 +219,29 @@ export {
   type RuntimeCommunicationProviderAdapter,
 } from './lib/communication-providers';
 
+export { createAgentMailCommunicationProviderFromRuntimeCredentials } from './lib/agentmail-communication';
+
+export {
+  advanceAgentMailInboundAnchor,
+  normalizeEmailAddress,
+  recordAgentMailOutboundMessage,
+  resolveAgentMailReplyRoute,
+  resolveAgentMailSenderUserId,
+  resolveOrCreateAgentMailConversation,
+  type AgentMailConversationRow,
+  type AgentMailReplyRouteData,
+} from './lib/agentmail/conversation-store';
+
+export {
+  AGENTMAIL_WEBHOOK_EVENT_QUEUE_NAME,
+  AgentMailConversationBusyError,
+  drainAgentMailInboundTurns,
+  processAgentMailWebhookEvent,
+  recordAgentMailWebhookEvent,
+  recoverPendingAgentMailWork,
+  type AgentMailWebhookEventJob,
+} from './lib/agentmail/inbound';
+
 export {
   findTelegramPrimaryChatId,
   TELEGRAM_PRIMARY_CHAT_ENV_VAR_NAME,

@@ -231,6 +231,38 @@ export function buildTeamsMessageInstructions(): string {
   return buildChatProviderMessageInstructions('teams');
 }
 
+/**
+ * Email cadence differs deliberately from the chat providers: every reply
+ * lands in someone's inbox and spends the deployment's daily send quota, so
+ * the default is roughly two emails per task (an acknowledgement and the
+ * result), batched updates, and no reactions or play-by-play.
+ */
+export function buildAgentMailMessageInstructions(): string {
+  return `
+<email_message_instructions>
+  <email_input_format>
+    <context>This task originates from an email thread. Incoming follow-ups arrive as provider-neutral chat message blocks containing the sender's new message text with quoted history already stripped.</context>
+    <rule>When present, a \`<thread_context>...</thread_context>\` block contains earlier messages from the email thread for conversational context. Treat it as background, not as the latest instruction.</rule>
+  </email_input_format>
+
+  <email_cadence>
+    <context>Email is a low-frequency surface, not chat. Every \`send_chat_reply\` becomes a new email in the recipient's inbox.</context>
+    <rule>Aim for two emails per task: one brief acknowledgement that work has started (with the task link), then one reply carrying the result. Send nothing in between unless the work is genuinely blocked on the user's input.</rule>
+    <rule>Never send progress updates, phase transitions, heartbeat messages, or internal-milestone narration over email. Task UI commentary covers those.</rule>
+    <rule>Batch related content into one reply instead of sending several small emails in a burst.</rule>
+    <rule>Emoji reactions are not available on email; never attempt \`send_chat_reaction_emoji\`.</rule>
+    <rule>Questions are acceptable email: when the next step genuinely depends on the user's answer, one clear reply asking the question (or \`request_user_input\` for structured/private input, paired with a brief reply saying work is paused) is correct.</rule>
+    <rule>The closeout reply leads with the answer or result, links the PR or task where relevant, and reads as a complete, self-contained email: the recipient may open it hours later without surrounding context.</rule>
+  </email_cadence>
+
+  <email_message_style>
+    <rule>Write like a considerate colleague's email: a short opening line with the outcome, then only the detail the reader needs. Standard Markdown renders as formatted email HTML.</rule>
+    <rule>Do not include greetings/signatures boilerplate; the thread carries identity. Keep subject continuity by replying in-thread (automatic).</rule>
+  </email_message_style>
+</email_message_instructions>
+`.trim();
+}
+
 function formatWorkspaceReadinessContext({
   workspaceReadiness,
   readinessMessage,

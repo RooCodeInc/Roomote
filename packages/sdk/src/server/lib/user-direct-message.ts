@@ -145,6 +145,9 @@ export async function findUserDirectMessageDestination(
       return findTelegramUserDirectMessageDestination(userId);
     case 'discord':
       return findDiscordUserDirectMessageDestination(userId);
+    case 'agentmail':
+      // Email is inbound-initiated in v1: no unsolicited direct messages.
+      return null;
   }
 
   return null;
@@ -193,6 +196,9 @@ export async function hasUserDirectMessageIdentity(
           columns: { discordUserId: true },
         }),
       );
+    case 'agentmail':
+      // Email is inbound-initiated in v1: no unsolicited direct messages.
+      return false;
   }
 }
 
@@ -363,6 +369,9 @@ export async function sendUserDirectMessage({
       return sendTelegramUserDirectMessage(userId, text, logContext);
     case 'discord':
       return sendDiscordUserDirectMessage(userId, text, logContext);
+    case 'agentmail':
+      // Email is inbound-initiated in v1: no unsolicited direct messages.
+      return false;
   }
 }
 

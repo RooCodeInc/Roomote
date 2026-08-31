@@ -3,8 +3,10 @@ import { createHash } from 'node:crypto';
 import {
   DiscordBotTokenValidationError,
   discordGatewaySessions,
+  invalidateAgentMailRuntimeCredentialsCache,
   invalidateDiscordRuntimeCredentialsCache,
   normalizeDiscordBotToken,
+  resolveAgentMailRuntimeCredentials,
   resolveDiscordGatewaySecret,
   resolveDiscordRuntimeCredentials,
   validateDiscordBotToken,
@@ -24,6 +26,10 @@ import {
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
+  AgentMailApiClient,
+  type AgentMailWebhook,
+} from '@roomote/communication/agentmail-provider';
+import {
   discordChannelRequiresTag,
   DiscordCommunicationProvider,
   DISCORD_REQUIRED_TAG_FORUM_ERROR,
@@ -39,6 +45,7 @@ import {
 } from '@roomote/sdk/server';
 
 import { Env } from '@/lib/server/env';
+import { buildDeploymentAppName } from '@/lib/server/deployment-app-name';
 import { DISCORD_INSTALL_PERMISSIONS } from '@/lib/discord-install';
 import {
   buildSetupAuthStatus,
@@ -64,12 +71,13 @@ import {
   invalidateTeamsBotCredentialCheckCache,
 } from '../teams/bot-credential-check';
 
-type AdditionalCommsProviderId = 'telegram' | 'discord';
+type AdditionalCommsProviderId = 'telegram' | 'discord' | 'agentmail';
 type CommsProviderId = SetupAuthProviderId | AdditionalCommsProviderId;
 export const COMMS_PROVIDER_IDS = [
   ...SETUP_AUTH_PROVIDER_IDS,
   'telegram',
   'discord',
+  'agentmail',
 ] as const;
 
 type AdditionalCommsProviderDefinition = {
@@ -119,12 +127,34 @@ const ADDITIONAL_COMMS_PROVIDERS: Record<
       },
     ],
   },
+  agentmail: {
+    id: 'agentmail',
+    label: 'Email (AgentMail)',
+    fields: [
+      {
+        envVarName: 'R_AGENTMAIL_API_KEY',
+        acceptedEnvVarNames: ['R_AGENTMAIL_API_KEY'],
+        label: 'AgentMail API Key',
+        secret: true,
+      },
+      {
+        envVarName: 'R_AGENTMAIL_INBOX_ID',
+        acceptedEnvVarNames: ['R_AGENTMAIL_INBOX_ID'],
+        label: 'Inbox Email Address',
+        required: false,
+      },
+    ],
+  },
 };
 
 function isAdditionalCommsProviderId(
   provider: CommsProviderId,
 ): provider is AdditionalCommsProviderId {
-  return provider === 'telegram' || provider === 'discord';
+  return (
+    provider === 'telegram' ||
+    provider === 'discord' ||
+    provider === 'agentmail'
+  );
 }
 
 function getCommsProviderDefinition(provider: CommsProviderId) {
@@ -149,6 +179,7 @@ export type CommsProviderStatus = Omit<
   telegramWebhook?: TelegramWebhookStatus | null;
   telegramBotUsername?: string | null;
   discord?: DiscordCommsStatus | null;
+  agentmail?: AgentMailCommsStatus | null;
 };
 
 export type CommsStatus = Omit<SetupAuthStatus, 'providers'> & {
@@ -163,6 +194,18 @@ type TelegramWebhookStatus = {
   lastErrorMessage: string | null;
   pendingUpdateCount: number;
   lastErrorAtMs: number | null;
+};
+
+type AgentMailWebhookStatus = {
+  status: 'connected' | 'mismatch' | 'unregistered' | 'error';
+  registeredUrl: string | null;
+  expectedUrl: string;
+  errorMessage: string | null;
+};
+
+export type AgentMailCommsStatus = {
+  inboxAddress: string | null;
+  webhook: AgentMailWebhookStatus;
 };
 
 type DiscordGatewayPhase =
@@ -579,6 +622,294 @@ export async function repairTelegramWebhookCommand(auth: UserAuthSuccess) {
   return { repaired: true };
 }
 
+const AGENTMAIL_API_TIMEOUT_MS = 5_000;
+const AGENTMAIL_WEBHOOK_CLIENT_ID = 'roomote-agentmail-webhook';
+const AGENTMAIL_INBOX_HASH_LENGTH = 6;
+
+function buildExpectedAgentMailWebhookUrl(): string {
+  return new URL('/api/webhooks/agentmail', Env.R_APP_URL).toString();
+}
+
+function createAgentMailApiClient(apiKey: string) {
+  return new AgentMailApiClient({
+    apiKey,
+    timeoutMs: AGENTMAIL_API_TIMEOUT_MS,
+  });
+}
+
+/** Map AgentMail API / network failures into admin-facing setup copy. */
+function classifyAgentMailSetupError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+  const errorName = error instanceof Error ? error.name : '';
+
+  if (
+    errorName === 'TimeoutError' ||
+    errorName === 'AbortError' ||
+    lower.includes('aborted') ||
+    lower.includes('timeout') ||
+    lower.includes('timed out')
+  ) {
+    return 'Could not reach the AgentMail API (timed out). Check connectivity and save again.';
+  }
+
+  if (
+    lower.includes('fetch failed') ||
+    lower.includes('econnrefused') ||
+    lower.includes('enotfound') ||
+    lower.includes('econnreset') ||
+    lower.includes('network') ||
+    lower.includes('certificate') ||
+    lower.includes('getaddrinfo')
+  ) {
+    return 'Could not reach the AgentMail API. Check connectivity and save again.';
+  }
+
+  if (
+    lower.includes('(401)') ||
+    lower.includes('(403)') ||
+    lower.includes('unauthorized') ||
+    lower.includes('forbidden') ||
+    lower.includes('invalid api key')
+  ) {
+    return 'AgentMail rejected this API key. Copy a fresh API key from the AgentMail console and save again.';
+  }
+
+  return message.trim() || 'Could not connect to AgentMail.';
+}
+
+function findRoomoteAgentMailWebhook(
+  webhooks: readonly AgentMailWebhook[] | undefined,
+): AgentMailWebhook | null {
+  return (
+    webhooks?.find(
+      (webhook) => webhook['client_id'] === AGENTMAIL_WEBHOOK_CLIENT_ID,
+    ) ?? null
+  );
+}
+
+/**
+ * Propose a deterministic inbox username for this deployment: the shared
+ * deployment app name plus a short hash of the full public hostname so
+ * truncated app names cannot collide across deployments. The same hash keys
+ * the createInbox client id, which makes inbox creation idempotent across
+ * re-saves.
+ */
+function buildAgentMailInboxProposal(publicAppUrl: string): {
+  username: string;
+  clientId: string;
+} {
+  const hostname = new URL(publicAppUrl).hostname;
+  const hostHash = createHash('sha256')
+    .update(hostname)
+    .digest('hex')
+    .slice(0, AGENTMAIL_INBOX_HASH_LENGTH);
+  const username = `${buildDeploymentAppName(publicAppUrl).toLowerCase()}-${hostHash}`;
+
+  return { username, clientId: `roomote-${hostHash}` };
+}
+
+function normalizeAgentMailInboxAddress(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim().toLowerCase();
+  return normalized || null;
+}
+
+async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
+  const credentials = await resolveAgentMailRuntimeCredentials();
+  if (!credentials.apiKey) return null;
+
+  const expectedUrl = buildExpectedAgentMailWebhookUrl();
+  const client = createAgentMailApiClient(credentials.apiKey);
+
+  try {
+    const { webhooks } = await client.listWebhooks();
+    const webhook = findRoomoteAgentMailWebhook(webhooks);
+    const registeredUrl = webhook?.url ?? null;
+
+    return {
+      inboxAddress: credentials.inboxId,
+      webhook: {
+        status: !webhook
+          ? 'unregistered'
+          : registeredUrl === expectedUrl
+            ? 'connected'
+            : 'mismatch',
+        registeredUrl,
+        expectedUrl,
+        errorMessage: null,
+      },
+    };
+  } catch (error) {
+    return {
+      inboxAddress: credentials.inboxId,
+      webhook: {
+        status: 'error',
+        registeredUrl: null,
+        expectedUrl,
+        errorMessage: classifyAgentMailSetupError(error),
+      },
+    };
+  }
+}
+
+type AgentMailReconcileResult = {
+  inboxAddress: string;
+  webhookUrl: string;
+  webhookSecret: string | null;
+};
+
+/**
+ * Reconcile the AgentMail account against this deployment before persisting
+ * anything: validate the API key, adopt or provision the inbox, and converge
+ * the webhook registration on this deployment's URL. Every step is idempotent
+ * (inbox and webhook creation are keyed by client id), so a partial failure
+ * is fixed by saving again. Failures throw with admin-facing copy and abort
+ * the save so credentials are never persisted half-configured.
+ */
+async function reconcileAgentMailSetup(input: {
+  enteredApiKey: string | null;
+  enteredInboxId: string | null;
+}): Promise<AgentMailReconcileResult> {
+  invalidateAgentMailRuntimeCredentialsCache();
+  const existing = await resolveAgentMailRuntimeCredentials();
+  const apiKey = input.enteredApiKey ?? existing.apiKey;
+
+  if (!apiKey) {
+    throw new Error(
+      'Enter the required Email (AgentMail) configuration values to continue.',
+    );
+  }
+
+  const client = createAgentMailApiClient(apiKey);
+
+  // Prove the key authenticates with the cheapest read before touching
+  // anything else, so a bad key fails with a clear message instead of a
+  // confusing inbox or webhook error.
+  try {
+    await client.listInboxes();
+  } catch (error) {
+    throw new Error(classifyAgentMailSetupError(error));
+  }
+
+  const requestedInboxId =
+    normalizeAgentMailInboxAddress(input.enteredInboxId) ?? existing.inboxId;
+  let inboxAddress: string;
+
+  if (requestedInboxId) {
+    try {
+      const inbox = await client.getInbox(requestedInboxId);
+      inboxAddress =
+        normalizeAgentMailInboxAddress(
+          typeof inbox.inbox_id === 'string' ? inbox.inbox_id : null,
+        ) ?? requestedInboxId;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/\(404\)|not found/iu.test(message)) {
+        throw new Error(
+          `AgentMail could not find the inbox ${requestedInboxId} with this API key. Check the inbox email address, or clear it to let Roomote create one.`,
+        );
+      }
+      throw new Error(classifyAgentMailSetupError(error));
+    }
+  } else {
+    const proposal = buildAgentMailInboxProposal(Env.R_APP_URL);
+    try {
+      const inbox = await client.createInbox({
+        username: proposal.username,
+        clientId: proposal.clientId,
+      });
+      const createdAddress = normalizeAgentMailInboxAddress(
+        typeof inbox.inbox_id === 'string' ? inbox.inbox_id : null,
+      );
+      if (!createdAddress) {
+        throw new Error('AgentMail created an inbox but returned no inbox id.');
+      }
+      inboxAddress = createdAddress;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/\(409\)|already exists|already taken/iu.test(message)) {
+        throw new Error(
+          `The email address ${proposal.username} is already taken at AgentMail. Enter an inbox email address of your own in the Inbox Email Address field and save again.`,
+        );
+      }
+      throw new Error(classifyAgentMailSetupError(error));
+    }
+  }
+
+  // Converge the deployment's webhook (found by client id) on the current
+  // URL. The webhook secret only exists where AgentMail returns it, so a
+  // registration we can no longer verify deliveries for is recreated.
+  const webhookUrl = buildExpectedAgentMailWebhookUrl();
+  let webhookSecret = existing.webhookSecret;
+
+  try {
+    const { webhooks } = await client.listWebhooks();
+    const existingWebhook = findRoomoteAgentMailWebhook(webhooks);
+
+    if (existingWebhook) {
+      if (existingWebhook.url !== webhookUrl) {
+        await client.updateWebhook(existingWebhook.webhook_id, {
+          url: webhookUrl,
+        });
+      }
+      const apiSecret =
+        typeof existingWebhook.secret === 'string' &&
+        existingWebhook.secret.trim()
+          ? existingWebhook.secret.trim()
+          : null;
+      if (apiSecret) {
+        webhookSecret = apiSecret;
+      }
+      if (!webhookSecret) {
+        await client.deleteWebhook(existingWebhook.webhook_id);
+        const created = await client.createWebhook({
+          url: webhookUrl,
+          clientId: AGENTMAIL_WEBHOOK_CLIENT_ID,
+          inboxIds: [inboxAddress],
+          eventTypes: ['message.received'],
+        });
+        webhookSecret =
+          typeof created.secret === 'string' && created.secret.trim()
+            ? created.secret.trim()
+            : null;
+      }
+    } else {
+      const created = await client.createWebhook({
+        url: webhookUrl,
+        clientId: AGENTMAIL_WEBHOOK_CLIENT_ID,
+        inboxIds: [inboxAddress],
+        eventTypes: ['message.received'],
+      });
+      webhookSecret =
+        typeof created.secret === 'string' && created.secret.trim()
+          ? created.secret.trim()
+          : webhookSecret;
+    }
+  } catch (error) {
+    throw new Error(classifyAgentMailSetupError(error));
+  }
+
+  return { inboxAddress, webhookUrl, webhookSecret };
+}
+
+/** Deleting the webhook must never block a disconnect. */
+async function deleteAgentMailWebhookBestEffort(): Promise<void> {
+  try {
+    const credentials = await resolveAgentMailRuntimeCredentials();
+    if (!credentials.apiKey) return;
+    const client = createAgentMailApiClient(credentials.apiKey);
+    const { webhooks } = await client.listWebhooks();
+    const webhook = findRoomoteAgentMailWebhook(webhooks);
+    if (webhook) {
+      await client.deleteWebhook(webhook.webhook_id);
+    }
+  } catch {
+    // Best effort only.
+  }
+}
+
 type DiscordRegistrationResult = {
   registered: boolean;
   guildCount: number;
@@ -814,15 +1145,19 @@ function withAdditionalCommsProviders(
   status: SetupAuthStatus,
   options: {
     persistedEnvVarNames: string[];
+    persistedEnvVarValues: Record<string, string>;
     telegramWebhook: TelegramWebhookStatus | null;
     discord: DiscordCommsStatus | null;
+    agentmail: AgentMailCommsStatus | null;
     invocationIdentities: InvocationIdentity[];
   },
 ): CommsStatus {
   const {
     persistedEnvVarNames,
+    persistedEnvVarValues,
     telegramWebhook,
     discord,
+    agentmail,
     invocationIdentities,
   } = options;
   const telegramBotUsername =
@@ -838,7 +1173,10 @@ function withAdditionalCommsProviders(
       ...field,
       runtimeSatisfied: isRuntime(field.envVarName),
       savedSatisfied: isSaved(field.envVarName),
-      savedValue: null,
+      savedValue:
+        field.secret === true
+          ? null
+          : (persistedEnvVarValues[field.envVarName]?.trim() ?? null),
       satisfiedByEnvVarName: isSatisfied(field.envVarName)
         ? field.envVarName
         : null,
@@ -861,6 +1199,7 @@ function withAdditionalCommsProviders(
         ? { telegramWebhook, telegramBotUsername }
         : {}),
       ...(definition.id === 'discord' ? { discord } : {}),
+      ...(definition.id === 'agentmail' ? { agentmail } : {}),
     };
   };
 
@@ -871,6 +1210,7 @@ function withAdditionalCommsProviders(
       ...status.providers,
       buildProviderStatus(ADDITIONAL_COMMS_PROVIDERS.telegram),
       buildProviderStatus(ADDITIONAL_COMMS_PROVIDERS.discord),
+      buildProviderStatus(ADDITIONAL_COMMS_PROVIDERS.agentmail),
     ],
   };
 }
@@ -882,15 +1222,20 @@ export async function getCommsStatusCommand(
 
   const [
     persistedEnvVarNames,
-    nonSecretAuthEnvValues,
+    nonSecretEnvValues,
     telegramWebhook,
     discord,
+    agentmail,
     invocationIdentities,
   ] = await Promise.all([
     getPersistedEnvironmentVariableNames(),
-    getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
+    getPersistedEnvironmentVariableValues([
+      ...NON_SECRET_AUTH_ENV_VAR_NAMES,
+      'R_AGENTMAIL_INBOX_ID',
+    ]),
     getTelegramWebhookStatus(),
     getDiscordCommsStatus(),
+    getAgentMailCommsStatus(),
     resolveInvocationIdentities(),
   ]);
 
@@ -898,12 +1243,14 @@ export async function getCommsStatusCommand(
     buildSetupAuthStatus({
       runtimeEnv: process.env,
       persistedEnvVarNames,
-      persistedEnvVarValues: nonSecretAuthEnvValues,
+      persistedEnvVarValues: nonSecretEnvValues,
     }),
     {
       persistedEnvVarNames,
+      persistedEnvVarValues: nonSecretEnvValues,
       telegramWebhook,
       discord,
+      agentmail,
       invocationIdentities,
     },
   );
@@ -940,6 +1287,18 @@ export async function saveCommsAuthConfigCommand(
   if (input.provider === 'microsoft') {
     await assertTeamsBotCredentialsAuthenticate(input.values);
   }
+
+  // AgentMail saves are a reconcile: validate the key, adopt or provision the
+  // inbox, and converge the webhook before anything is persisted, so the
+  // stored configuration always includes the final inbox address and the
+  // webhook secret AgentMail issued.
+  const agentmailSetup =
+    input.provider === 'agentmail'
+      ? await reconcileAgentMailSetup({
+          enteredApiKey: input.values?.R_AGENTMAIL_API_KEY?.trim() || null,
+          enteredInboxId: input.values?.R_AGENTMAIL_INBOX_ID?.trim() || null,
+        })
+      : null;
 
   await db.transaction(async (tx) => {
     const persistedEnvVarNames = await getPersistedEnvironmentVariableNames(tx);
@@ -1054,6 +1413,28 @@ export async function saveCommsAuthConfigCommand(
       }
     }
 
+    if (input.provider === 'agentmail' && agentmailSetup) {
+      // Persist the reconciled inbox address (which may have just been
+      // provisioned) instead of whatever was typed, plus the webhook secret
+      // AgentMail issued for delivery verification.
+      const inboxIndex = valuesToSave.findIndex(
+        (value) => value.name === 'R_AGENTMAIL_INBOX_ID',
+      );
+      if (inboxIndex >= 0) {
+        valuesToSave.splice(inboxIndex, 1);
+      }
+      valuesToSave.push({
+        name: 'R_AGENTMAIL_INBOX_ID',
+        value: agentmailSetup.inboxAddress,
+      });
+      if (agentmailSetup.webhookSecret) {
+        valuesToSave.push({
+          name: 'R_AGENTMAIL_WEBHOOK_SECRET',
+          value: agentmailSetup.webhookSecret,
+        });
+      }
+    }
+
     const hasConfiguredAuthEnvVar = (name: string) =>
       Boolean(process.env[name]?.trim()) ||
       persistedEnvVarNames.includes(name) ||
@@ -1119,6 +1500,10 @@ export async function saveCommsAuthConfigCommand(
     invalidateDiscordRuntimeCredentialsCache();
   }
 
+  if (input.provider === 'agentmail') {
+    invalidateAgentMailRuntimeCredentialsCache();
+  }
+
   // Registration talks to the Telegram Bot API, so it runs after the
   // transaction commits; a registration failure must not roll back the
   // saved configuration.
@@ -1135,6 +1520,14 @@ export async function saveCommsAuthConfigCommand(
   return {
     telegramWebhook,
     ...(discord ? { discord } : {}),
+    ...(agentmailSetup
+      ? {
+          agentmail: {
+            inboxAddress: agentmailSetup.inboxAddress,
+            webhookUrl: agentmailSetup.webhookUrl,
+          },
+        }
+      : {}),
   };
 }
 
@@ -1151,6 +1544,14 @@ export async function clearCommsAuthConfigCommand(
   if (input.provider === 'telegram') {
     // Clean up the retired field for existing installations.
     fieldEnvVarNames.push('R_TELEGRAM_BOT_USERNAME');
+  }
+
+  if (input.provider === 'agentmail') {
+    // The webhook secret is provisioned server-side rather than entered, so
+    // it is not a field; remove it with the credentials, and best-effort
+    // unregister the webhook while the API key is still available.
+    fieldEnvVarNames.push('R_AGENTMAIL_WEBHOOK_SECRET');
+    await deleteAgentMailWebhookBestEffort();
   }
 
   if (fieldEnvVarNames.length === 0) {
@@ -1176,6 +1577,10 @@ export async function clearCommsAuthConfigCommand(
 
   if (input.provider === 'discord') {
     invalidateDiscordRuntimeCredentialsCache();
+  }
+
+  if (input.provider === 'agentmail') {
+    invalidateAgentMailRuntimeCredentialsCache();
   }
 }
 

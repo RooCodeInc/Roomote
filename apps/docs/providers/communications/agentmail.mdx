@@ -1,0 +1,71 @@
+---
+title: Email (AgentMail)
+icon: '/logo/integrations/agentmail.svg'
+description: Connect an AgentMail inbox so Roomote can receive tasks and reply over email.
+---
+
+Email is a deployment-owned communications provider backed by
+[AgentMail](https://agentmail.to), an email API. It is not a Roomote sign-in
+provider.
+
+Roomote can receive email sent to a dedicated deployment inbox, start tasks
+from those messages, and reply in the same email thread. AgentMail delivers
+inbound mail through a `message.received` webhook, so Roomote must be reachable
+at a stable public HTTPS URL. Each deployment brings its own AgentMail account
+and API key.
+
+## Connect an AgentMail inbox
+
+Create an AgentMail account and API key at
+[console.agentmail.to](https://console.agentmail.to). In the Roomote UI
+(**Settings > Communications > Email (AgentMail)**), paste the API key, then
+save. Roomote proposes a deployment inbox address such as
+`roomote-yourhost-a1b2c3@agentmail.to`; edit the address before creation, or
+supply the address of an existing AgentMail inbox instead. On save, Roomote
+creates the inbox and registers the `message.received` webhook automatically.
+The connected inbox address and the registered webhook URL are shown in
+settings.
+
+For self-hosted env-var configuration instead of the UI, all values are
+optional overrides of the settings UI:
+
+```sh
+# Optional — configure email entirely from settings when unset:
+# R_AGENTMAIL_API_KEY=<agentmail-api-key>
+# R_AGENTMAIL_WEBHOOK_SECRET=<webhook-secret>
+# R_AGENTMAIL_INBOX_ID=<inbox-address>
+```
+
+AgentMail's free tier allows 3 inboxes and 100 emails per day and adds a
+"Sent via AgentMail" footer to outbound mail. Custom domains, with
+AgentMail-managed SPF/DKIM/DMARC, require a paid AgentMail plan. For
+production use, a paid plan with a custom domain is recommended.
+
+## Email Roomote
+
+Send an email to the deployment inbox from an email address on your Roomote
+account. The address must be verified. Roomote replies in the same email
+thread, and follow-up emails in that thread continue the same conversation; a
+running delegated task receives them as follow-ups. Start a new request with a
+new email so it opens a new thread.
+
+Only verified account email addresses are recognized automatically. Mail from
+an unknown address receives one polite refusal per thread and is otherwise
+ignored. Forwarding a Roomote email thread to someone else does not give them
+access to the original conversation or task; their message starts a separate
+conversation of their own.
+
+Email is deliberately low-frequency: expect roughly two emails per task, an
+acknowledgment and the result, plus questions when the agent genuinely needs
+input. Roomote does not send play-by-play progress messages over email.
+
+## Limitations
+
+In this first version:
+
+- email is inbound-initiated only; Roomote never emails first, so
+  notifications, automation reports, and direct messages are not delivered
+  over email
+- reactions are not supported
+- attachments from inbound email are not yet processed
+- each deployment has one inbox

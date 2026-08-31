@@ -73,6 +73,7 @@ export function getPrBodyAttributionLine({
     | 'teams'
     | 'telegram'
     | 'discord'
+    | 'agentmail'
     | 'linear'
     | 'github'
     | 'gitlab'
@@ -170,6 +171,7 @@ function buildPrBodyAttributionLine({
     | 'teams'
     | 'telegram'
     | 'discord'
+    | 'agentmail'
     | 'linear'
     | 'github'
     | 'gitlab'
@@ -220,7 +222,10 @@ function buildPrBodyAttributionLine({
     taskSurface === 'slack' ||
     taskSurface === 'teams' ||
     taskSurface === 'telegram' ||
-    taskSurface === 'discord';
+    taskSurface === 'discord' ||
+    // Email threads have no public permalink, so agentmail gets the chat
+    // phrasing with no conversation link.
+    taskSurface === 'agentmail';
   const taskLinkLabel = isChatSurface ? 'the web UI' : 'View the task';
   const taskLink = safeTaskUrl
     ? `[${taskLinkLabel}](${safeTaskUrl})`

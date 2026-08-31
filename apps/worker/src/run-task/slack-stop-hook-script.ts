@@ -15,6 +15,9 @@ function getChatSurfaceLabel() {
   if (provider === 'discord') {
     return 'Discord';
   }
+  if (provider === 'agentmail') {
+    return 'email thread';
+  }
   return (process.env.ROOMOTE_SLACK_CHANNEL || '').trim() ? 'Slack' : 'chat';
 }
 

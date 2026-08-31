@@ -48,6 +48,7 @@ import {
   Info,
   LayoutGrid,
   Loader2Icon,
+  Mail,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -666,6 +667,8 @@ function SessionInfoPanel({
             <span className="inline-flex items-center gap-1.5">
               {session.surface === 'slack' ? (
                 <Slack className="size-3.5 shrink-0 text-muted-foreground" />
+              ) : session.surface === 'agentmail' ? (
+                <Mail className="size-3.5 shrink-0 text-muted-foreground" />
               ) : surfaceBrandIcon ? (
                 <BrandIcon
                   icon={surfaceBrandIcon}

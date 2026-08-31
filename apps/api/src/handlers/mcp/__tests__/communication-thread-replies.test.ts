@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '@roomote/sdk/server';
 
 const {
+  agentmailPostMessageMock,
+  resolveAgentMailAdapterMock,
   buildThreadReplyImagesMock,
   clearLatestUserMessageForReplyQuoteIfIdMock,
   discordAddReactionMock,
@@ -21,6 +23,8 @@ const {
   upsertBackgroundAutomationSlackThreadMock,
   withThreadReplyFooterLockMock,
 } = vi.hoisted(() => ({
+  agentmailPostMessageMock: vi.fn(),
+  resolveAgentMailAdapterMock: vi.fn(),
   buildThreadReplyImagesMock: vi.fn(),
   clearLatestUserMessageForReplyQuoteIfIdMock: vi.fn(),
   discordAddReactionMock: vi.fn(),
@@ -118,6 +122,9 @@ vi.mock('@roomote/sdk/server', () => ({
         }
       : null;
   }),
+  getCommunicationProviderAdapter: vi.fn(async () =>
+    resolveAgentMailAdapterMock(),
+  ),
 }));
 
 vi.mock('../chat-reply-helpers.js', () => ({
@@ -176,6 +183,128 @@ const discordTaskRun = {
     communicationMessageId: 'message-1',
   },
 };
+
+const agentmailTaskRun = {
+  id: 45,
+  taskId: 'task-4',
+  prRepo: null,
+  prNumber: null,
+  payload: {
+    communicationProvider: 'agentmail',
+    communicationChannelId: 'inbox-1',
+    communicationThreadId: 'conversation-1',
+  },
+};
+
+describe('maybeSendCommunicationThreadReply (AgentMail)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolveAgentMailAdapterMock.mockReturnValue({
+      postMessage: agentmailPostMessageMock,
+    });
+    agentmailPostMessageMock.mockResolvedValue({ messageId: 'msg-1' });
+  });
+
+  it('replies through the durable conversation route with a stable Idempotency-Key', async () => {
+    const response = await maybeSendCommunicationThreadReply({
+      taskRun: agentmailTaskRun,
+      parsedBody: { text: 'done', images: [] },
+    });
+
+    expect(response).not.toBeNull();
+    expect(response?.status).toBe(200);
+    expect(agentmailPostMessageMock).toHaveBeenCalledTimes(1);
+    expect(agentmailPostMessageMock).toHaveBeenCalledWith({
+      channelId: 'inbox-1',
+      threadId: 'conversation-1',
+      text: 'done',
+      textFormat: 'markdown',
+      idempotencyKey: expect.stringMatching(
+        /^agentmail:conversation-1:45-[0-9a-f]{16}:thread-reply$/,
+      ),
+    });
+    // Email is not live: no typing heartbeat is triggered.
+    expect(sendChatActionMock).not.toHaveBeenCalled();
+    await expect(response!.json()).resolves.toEqual({ messageTs: 'msg-1' });
+  });
+
+  it('derives the same Idempotency-Key for a retried identical reply and a new one otherwise', async () => {
+    await maybeSendCommunicationThreadReply({
+      taskRun: agentmailTaskRun,
+      parsedBody: { text: 'same reply', images: [] },
+    });
+    await maybeSendCommunicationThreadReply({
+      taskRun: agentmailTaskRun,
+      parsedBody: { text: 'same reply', images: [] },
+    });
+    await maybeSendCommunicationThreadReply({
+      taskRun: agentmailTaskRun,
+      parsedBody: { text: 'different reply', images: [] },
+    });
+
+    const keys = agentmailPostMessageMock.mock.calls.map(
+      ([input]) => input.idempotencyKey,
+    );
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[2]).not.toBe(keys[0]);
+  });
+
+  it('requires an email conversation context', async () => {
+    const response = await maybeSendCommunicationThreadReply({
+      taskRun: {
+        ...agentmailTaskRun,
+        payload: {
+          communicationProvider: 'agentmail',
+          communicationChannelId: 'inbox-1',
+        },
+      },
+      parsedBody: { text: 'done', images: [] },
+    });
+
+    expect(response?.status).toBe(403);
+    expect(agentmailPostMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 when AgentMail credentials are not configured', async () => {
+    resolveAgentMailAdapterMock.mockReturnValue(null);
+
+    const response = await maybeSendCommunicationThreadReply({
+      taskRun: agentmailTaskRun,
+      parsedBody: { text: 'done', images: [] },
+    });
+
+    expect(response?.status).toBe(503);
+    expect(agentmailPostMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('requires text and does not attempt image-only email replies', async () => {
+    const response = await maybeSendCommunicationThreadReply({
+      taskRun: agentmailTaskRun,
+      parsedBody: { images: [{ artifactId: 'artifact-1' }] },
+    });
+
+    expect(response?.status).toBe(400);
+    expect(agentmailPostMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('reports reactions as unsupported gracefully', async () => {
+    const response = await maybeAddCommunicationReaction({
+      taskRun: agentmailTaskRun,
+      parsedBody: {
+        channel: 'inbox-1',
+        messageTs: 'msg-1',
+        name: '👀',
+      },
+    });
+
+    expect(response).not.toBeNull();
+    expect(response?.status).toBe(400);
+    await expect(response!.json()).resolves.toEqual({
+      error:
+        'AgentMail does not support reactions. Email has no reactions; send a reply instead.',
+    });
+  });
+});
 
 describe('maybeSendCommunicationThreadReply (Discord)', () => {
   beforeEach(() => {

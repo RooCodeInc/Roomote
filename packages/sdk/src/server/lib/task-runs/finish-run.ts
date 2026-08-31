@@ -20,6 +20,7 @@ import {
   TASK_STARTUP_FAILURE_TEXT,
 } from '@roomote/communication/chat-messages';
 import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import { createAgentMailCommunicationProviderFromRuntimeCredentials } from '../agentmail-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../telegram-communication';
 import { Env, isBrainConfigured } from '@roomote/env';
@@ -558,6 +559,22 @@ export const finishRun = async ({
     }
   }
 
+  if (
+    status === RunStatus.Failed &&
+    !task.slackThreadTs &&
+    getCommunicationProviderFromTaskPayload(run.payload) === 'agentmail'
+  ) {
+    try {
+      await sendAgentMailFailureNotification(run, channelProviderError);
+    } catch (err) {
+      console.error(
+        `[finishRun] Failed to send email failure notification for run ${id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
   const linkedEnvironmentDefinitionId =
     status === RunStatus.Idle && run.taskPhase === 'waiting_for_prompt'
       ? await resolveSetupCompletionEnvironmentDefinitionId(run)
@@ -1078,6 +1095,64 @@ async function sendTelegramFailureNotification(
   console.log(
     `[finishRun] Sent Telegram failure notification for run ${run.id}`,
   );
+}
+
+/**
+ * Post the terminal failure result back into the originating email
+ * conversation when an email-launched run fails. Mirrors the Telegram path:
+ * same result-text composition (failure text, error details, task link), no
+ * reactions, no typing indicators, no topic-name updates. The adapter
+ * resolves the actual reply anchor and recipient from the durable
+ * agentmail_conversations row; the payload thread id is the INTERNAL
+ * conversation id. The Idempotency-Key is stable per run so a finish-run
+ * retry can never double-send the email.
+ */
+async function sendAgentMailFailureNotification(
+  run: FinishedRun,
+  error?: string,
+): Promise<void> {
+  const provider =
+    await createAgentMailCommunicationProviderFromRuntimeCredentials();
+  if (!provider) {
+    console.warn(
+      `[finishRun] AgentMail credentials are not configured, skipping email failure notification for run ${run.id}`,
+    );
+    return;
+  }
+
+  const channelId = getCommunicationChannelFromTaskPayload(run.payload);
+  const conversationId = getCommunicationThreadIdFromTaskPayload(run.payload);
+  if (!channelId || !conversationId) {
+    console.warn(
+      `[finishRun] Missing email conversation metadata for run ${run.id}, skipping email failure notification`,
+    );
+    return;
+  }
+
+  const failureText = hasReachedTaskRuntime(run)
+    ? TASK_RUNTIME_FAILURE_TEXT
+    : TASK_STARTUP_FAILURE_TEXT;
+  const taskUrl = getTaskUrl({
+    taskId: run.taskId,
+    utm: { campaign: run.payloadKind, source: 'agentmail' },
+  });
+  const text = [
+    failureText,
+    error ? `**Error details:** ${error}` : null,
+    taskUrl ? formatMarkdownLink('Open the task', taskUrl) : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join('\n\n');
+
+  await provider.postMessage({
+    channelId,
+    threadId: conversationId,
+    text,
+    textFormat: 'markdown',
+    idempotencyKey: `agentmail:${conversationId}:finish-run:${run.id}`,
+  });
+
+  console.log(`[finishRun] Sent email failure notification for run ${run.id}`);
 }
 
 async function sendDiscordFailureNotification(
