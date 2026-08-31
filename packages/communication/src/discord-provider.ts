@@ -1223,7 +1223,8 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
             {
               type: 3,
               name: 'request',
-              description: 'What would you like Roomote to do?',
+              description:
+                'Describe the task, or run /help for prompt starters',
               required: true,
             },
           ],

@@ -173,6 +173,13 @@ const DISCORD_HELP_MESSAGE = [
   '`/link code:<code>` — link this Discord account in a DM with me.',
   '`/help` — show this message.',
   '',
+  '**Prompt starters**',
+  '`Review PR #123, address actionable feedback, and update the PR.`',
+  '`Investigate the latest CI failure, fix it, and open a draft PR.`',
+  '`Find the smallest fix for <issue>, test it, and open a draft PR.`',
+  '',
+  'Copy a starter into `/new`, then replace the details for your task.',
+  '',
   'Follow up by sending another message in the task thread.',
 ].join('\n');
 
