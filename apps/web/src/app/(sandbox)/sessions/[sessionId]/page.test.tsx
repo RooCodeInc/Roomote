@@ -239,13 +239,15 @@ describe('Session detail page', () => {
       ownerImageUrl: null,
       sourceSurface: 'slack',
       fastConversationId: '6a1f8f1e-0000-4000-8000-000000000005',
-      inferenceCostMicroUsd: 0,
+      directInferenceCostMicroUsd: 100_000,
+      inferenceCostMicroUsd: 300_000,
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       status: 'active',
       tasks: [
         {
           taskId: 'task-1',
           title: 'Delegated task',
+          inferenceCostMicroUsd: 200_000,
         },
       ],
     });
@@ -285,6 +287,16 @@ describe('Session detail page', () => {
           id: '6a1f8f1e-0000-4000-8000-000000000002',
           status: 'active',
           tasks: [expect.objectContaining({ taskId: 'task-1' })],
+          inferenceCostMicroUsd: 300_000,
+          inferenceCostBreakdown: {
+            directInferenceCostMicroUsd: 100_000,
+            tasks: [
+              expect.objectContaining({
+                taskId: 'task-1',
+                inferenceCostMicroUsd: 200_000,
+              }),
+            ],
+          },
         }),
       }),
       undefined,
@@ -317,6 +329,7 @@ describe('Session detail page', () => {
       ownerImageUrl: null,
       sourceSurface: 'web',
       fastConversationId: null,
+      directInferenceCostMicroUsd: 0,
       inferenceCostMicroUsd: 0,
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       status: 'completed',
@@ -324,6 +337,7 @@ describe('Session detail page', () => {
         {
           taskId: 'task-2',
           title: 'Delegated task',
+          inferenceCostMicroUsd: 0,
         },
       ],
     });
@@ -355,13 +369,23 @@ describe('Session detail page', () => {
       surface: 'slack',
       model: null,
       reasoningEffort: null,
-      inferenceCostMicroUsd: 0,
+      directInferenceCostMicroUsd: 100_000,
+      inferenceCostMicroUsd: 100_000,
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       messages: [],
       hasOlderMessages: false,
     });
     getFastSessionTasksMock.mockResolvedValue([
-      { taskId: 'task-1', title: 'Delegated task' },
+      {
+        taskId: 'task-1',
+        title: 'Delegated task',
+        inferenceCostMicroUsd: 200_000,
+      },
+      {
+        taskId: 'task-2',
+        title: 'Zero-cost task',
+        inferenceCostMicroUsd: 0,
+      },
     ]);
 
     renderToStaticMarkup(
@@ -389,7 +413,24 @@ describe('Session detail page', () => {
         session: expect.objectContaining({
           id: '6a1f8f1e-0000-4000-8000-000000000005',
           taskSource: 'fast',
-          taskCards: [expect.objectContaining({ taskId: 'task-1' })],
+          taskCards: expect.arrayContaining([
+            expect.objectContaining({ taskId: 'task-1' }),
+            expect.objectContaining({ taskId: 'task-2' }),
+          ]),
+          inferenceCostMicroUsd: 300_000,
+          inferenceCostBreakdown: {
+            directInferenceCostMicroUsd: 100_000,
+            tasks: [
+              expect.objectContaining({
+                taskId: 'task-1',
+                inferenceCostMicroUsd: 200_000,
+              }),
+              expect.objectContaining({
+                taskId: 'task-2',
+                inferenceCostMicroUsd: 0,
+              }),
+            ],
+          },
         }),
       }),
       undefined,

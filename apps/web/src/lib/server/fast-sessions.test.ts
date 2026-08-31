@@ -4,6 +4,7 @@ import {
   eq,
   fastAgentConversations,
   fastAgentMessages,
+  llmUsageEvents,
   runFactory,
   sessions,
   taskFactory,
@@ -148,10 +149,105 @@ describe('Fast session queries', () => {
         fastAgentSessionId: session.id,
       },
     });
+    const zeroCostTask = await taskFactory.create({
+      title: 'Zero cost task',
+      state: 'active',
+    });
+    await runFactory.create({
+      taskId: zeroCostTask.id,
+      payload: {
+        repo: 'acme/widgets',
+        description: 'Another delegated Fast task',
+        fastAgentSessionId: session.id,
+      },
+    });
+    await db.insert(llmUsageEvents).values({
+      eventKey: `fast-task-cost-${crypto.randomUUID()}`,
+      taskId: delegatedTask.id,
+      costSource: 'missing',
+      costMicroUsd: 750_000,
+    });
 
-    await expect(
-      getFastSessionTasks({ userId: owner.id, isAdmin: false }, session.id),
-    ).resolves.toEqual([{ taskId: delegatedTask.id, title: 'Delegated task' }]);
+    const result = await getFastSessionTasks(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(result).toHaveLength(2);
+    expect(result).toEqual(
+      expect.arrayContaining([
+        {
+          taskId: delegatedTask.id,
+          title: 'Delegated task',
+          inferenceCostMicroUsd: 750_000,
+        },
+        {
+          taskId: zeroCostTask.id,
+          title: 'Zero cost task',
+          inferenceCostMicroUsd: 0,
+        },
+      ]),
+    );
+  });
+
+  it('keeps task-linked usage out of the legacy Fast direct cost', async () => {
+    const owner = await userFactory.create();
+    const nativeSessionId = `native-${crypto.randomUUID()}`;
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'direct-cost-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await db
+      .update(fastAgentConversations)
+      .set({ openCodeSessionId: nativeSessionId })
+      .where(eq(fastAgentConversations.id, session.id));
+    const task = await taskFactory.create({ title: 'Delegated task' });
+    await runFactory.create({
+      taskId: task.id,
+      payload: {
+        repo: 'acme/widgets',
+        description: 'Delegated Fast task',
+        fastAgentSessionId: session.id,
+      },
+    });
+    await db.insert(llmUsageEvents).values([
+      {
+        eventKey: `fast-direct-${crypto.randomUUID()}`,
+        harnessSessionId: nativeSessionId,
+        messageId: `message-${crypto.randomUUID()}`,
+        costSource: 'missing',
+        costMicroUsd: 250_000,
+      },
+      {
+        eventKey: `fast-task-${crypto.randomUUID()}`,
+        harnessSessionId: nativeSessionId,
+        messageId: `message-${crypto.randomUUID()}`,
+        taskId: task.id,
+        costSource: 'missing',
+        costMicroUsd: 500_000,
+      },
+    ]);
+
+    const detail = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+    const taskCosts = await getFastSessionTasks(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(detail).toMatchObject({
+      directInferenceCostMicroUsd: 250_000,
+      inferenceCostMicroUsd: 250_000,
+    });
+    expect(taskCosts).toEqual([
+      expect.objectContaining({
+        taskId: task.id,
+        inferenceCostMicroUsd: 500_000,
+      }),
+    ]);
   });
 
   it('reads canonical messages in timestamp and turn sequence order', async () => {
