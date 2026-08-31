@@ -362,35 +362,29 @@ function SessionTaskPanel({
             ))}
           </section>
         ) : null}
-        <section className="space-y-3 @container">
-          <h3 className="font-medium">Artifacts</h3>
-          {latestArtifacts.length ? (
-            <>
-              {artifactSections.map(({ label, artifacts }) =>
-                artifacts.length ? (
-                  <div key={label} className="space-y-2">
-                    <h4 className="text-xs font-medium text-muted-foreground">
-                      {label}
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4 @[500px]:grid-cols-3">
-                      {artifacts.map((artifact) => (
-                        <SessionArtifactCard
-                          key={artifact.id}
-                          artifact={artifact}
-                          onOpen={() => setSelectedArtifactPath(artifact.path)}
-                        />
-                      ))}
-                    </div>
+        {latestArtifacts.length ? (
+          <section className="space-y-3 @container">
+            <h3 className="font-medium">Artifacts</h3>
+            {artifactSections.map(({ label, artifacts }) =>
+              artifacts.length ? (
+                <div key={label} className="space-y-2">
+                  <h4 className="text-xs font-medium text-muted-foreground">
+                    {label}
+                  </h4>
+                  <div className="grid grid-cols-2 gap-4 @[500px]:grid-cols-3">
+                    {artifacts.map((artifact) => (
+                      <SessionArtifactCard
+                        key={artifact.id}
+                        artifact={artifact}
+                        onOpen={() => setSelectedArtifactPath(artifact.path)}
+                      />
+                    ))}
                   </div>
-                ) : null,
-              )}
-            </>
-          ) : (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              No artifacts in this task yet.
-            </p>
-          )}
-        </section>
+                </div>
+              ) : null,
+            )}
+          </section>
+        ) : null}
         {task.canAccessDetails === false ? null : (
           <Button asChild className="w-full">
             <Link
