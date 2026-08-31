@@ -75,6 +75,7 @@ import {
   type NonTaskOpenCodeCompletedMessage,
 } from '../non-task-provider-usage';
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
+import { RemoteFastAgentSettingsSkillSource } from './fast-agent-settings-skill-source';
 import {
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   reconcileFastAgentInferenceRetryNotices,
@@ -2125,6 +2126,11 @@ export async function answerFastAgentQuestion({
         const skillStore = new FastAgentSkillStore(
           undefined,
           new RemoteFastAgentRepositorySkillSource({
+            allowedEnvironmentIds: availableEnvironments.map(
+              (environment) => environment.id,
+            ),
+          }),
+          new RemoteFastAgentSettingsSkillSource({
             allowedEnvironmentIds: availableEnvironments.map(
               (environment) => environment.id,
             ),
