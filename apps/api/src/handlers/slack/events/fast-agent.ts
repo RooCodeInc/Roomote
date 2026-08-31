@@ -2,6 +2,7 @@ import {
   getOrCreateFastAgentSession,
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  fastAgentConversationRepository,
   hasFastAgentSession,
   type FastAgentActiveTask,
   type LaunchFastAgentTask,
@@ -11,7 +12,9 @@ import {
   resolveFastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
+  acquireSlackFastRootBindingLock,
   buildSlackThreadReplyFooterBlock,
+  createFastAgentSlackSessionActivity,
   getSlackThreadReplyFooterMessageTs,
   withSlackThreadReplyFooterLock,
   resolveCurrentSlackMessageFiles,
@@ -95,7 +98,7 @@ export async function processFastAgentMessage(params: {
     directedAtRoomote = false,
   } = params;
   const threadId = event.thread_ts || event.ts;
-  const conversation = {
+  const incomingConversation = {
     surface: 'slack' as const,
     workspaceId: teamId,
     conversationId: threadId,
@@ -105,7 +108,7 @@ export async function processFastAgentMessage(params: {
     },
   };
   const releaseFastAgentLock = await acquireFastAgentTurnLock({
-    conversation,
+    conversation: incomingConversation,
   });
 
   if (!releaseFastAgentLock) {
@@ -124,11 +127,50 @@ export async function processFastAgentMessage(params: {
   const baseQuestion = extractFastQuestion(normalizedText, continuation) ?? '';
 
   let didAddProcessingReaction = false;
+  let releaseCanonicalFastAgentLock: Awaited<
+    ReturnType<typeof acquireFastAgentTurnLock>
+  > = null;
 
   try {
-    // A false routing result can become stale while waiting for the turn lock.
-    const hasExistingConversation =
-      isExistingConversation || (await hasFastAgentSession(conversation));
+    // Resolve route-based aliases only after serializing the inbound Slack
+    // thread. Delayed automation roots retain their original conversation
+    // identity, so their canonical session has a separate turn lock.
+    const releaseRootBindingLock = await acquireSlackFastRootBindingLock({
+      teamId,
+      channelId: event.channel,
+    });
+    const { hasExistingConversation, session } = await (async () => {
+      try {
+        return {
+          hasExistingConversation:
+            isExistingConversation ||
+            (await hasFastAgentSession(incomingConversation)),
+          session: await getOrCreateFastAgentSession({
+            userId,
+            conversation: incomingConversation,
+          }),
+        };
+      } finally {
+        await releaseRootBindingLock().catch(() => {});
+      }
+    })();
+    const conversation = session.conversation;
+    if (
+      conversation.surface !== incomingConversation.surface ||
+      conversation.workspaceId !== incomingConversation.workspaceId ||
+      conversation.conversationId !== incomingConversation.conversationId
+    ) {
+      releaseCanonicalFastAgentLock = await acquireFastAgentTurnLock({
+        conversation,
+      });
+      if (!releaseCanonicalFastAgentLock) {
+        console.error(
+          `[SlackWebhook] Canonical Fast turn lock did not become available for session ${session.id}`,
+        );
+        return;
+      }
+    }
+
     if (!hasExistingConversation) {
       didAddProcessingReaction = await slack.addReaction({
         channel: event.channel,
@@ -137,11 +179,8 @@ export async function processFastAgentMessage(params: {
       });
     }
 
-    // Resolved ahead of the turn so replies can carry the session footer;
-    // the service's own getOrCreate finds this same row.
-    const session = await getOrCreateFastAgentSession({ userId, conversation });
     params.onAccepted?.(() =>
-      releaseFastAgentLock.abort(
+      (releaseCanonicalFastAgentLock ?? releaseFastAgentLock).abort(
         new Error('Fast suggestion launch settlement failed.'),
       ),
     );
@@ -216,7 +255,7 @@ export async function processFastAgentMessage(params: {
       apiBaseUrl,
       conversation,
       currentMessageId: event.ts,
-      signal: releaseFastAgentLock.signal,
+      signal: (releaseCanonicalFastAgentLock ?? releaseFastAgentLock).signal,
       senderExternalId: event.user,
       senderDisplayName:
         currentMessage?.user === event.user
@@ -229,6 +268,16 @@ export async function processFastAgentMessage(params: {
         hasOtherHumanParticipant &&
         !directedAtRoomote,
       adapter: {
+        activity: createFastAgentSlackSessionActivity({
+          slack,
+          workspaceId: teamId,
+          channel: event.channel,
+          threadTs: threadId,
+          title: session.title,
+          resolveTitle: async () =>
+            (await fastAgentConversationRepository.findById({ id: session.id }))
+              ?.title,
+        }),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId,
@@ -379,6 +428,7 @@ export async function processFastAgentMessage(params: {
         })
         .catch(() => {});
     }
+    await releaseCanonicalFastAgentLock?.().catch(() => {});
     await releaseFastAgentLock().catch(() => {});
   }
 }

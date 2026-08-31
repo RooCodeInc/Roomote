@@ -94,13 +94,19 @@ export async function getArtifactByPathCommand(
     'application/xhtml+xml',
     'application/x-httpd-php',
   ]);
+  const normalizedContentType =
+    artifact.contentType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
+  const extension = artifact.path.split('.').pop()?.toLowerCase();
+  const hasHtmlExtension =
+    extension === 'html' || extension === 'htm' || extension === 'xhtml';
 
   const isTextBased =
-    artifact.contentType.startsWith('text/') ||
-    artifact.contentType.includes('markdown') ||
-    artifact.contentType.includes('+xml') ||
-    artifact.contentType.includes('+json') ||
-    textBasedApplicationTypes.has(artifact.contentType);
+    normalizedContentType.startsWith('text/') ||
+    normalizedContentType.includes('markdown') ||
+    normalizedContentType.includes('+xml') ||
+    normalizedContentType.includes('+json') ||
+    textBasedApplicationTypes.has(normalizedContentType) ||
+    hasHtmlExtension;
 
   if (isTextBased && artifact.size <= MAX_TEXT_PREVIEW_BYTES) {
     try {

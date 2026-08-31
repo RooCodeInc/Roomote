@@ -202,6 +202,17 @@ export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/te
 export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib/telegram-communication';
 
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
+export { syncFastAgentSlackTitleBestEffort } from './lib/fast-agent-slack-title-sync';
+
+export {
+  buildFastAgentParentEventKey,
+  drainFastAgentParentEvents,
+  enqueueFastAgentParentEvent,
+  FastAgentParentBusyError,
+  FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
+  recoverPendingFastAgentParentEvents,
+  type FastAgentParentEventQueueRequest,
+} from './lib/fast-agent-parent-event-queue';
 
 export {
   getCommunicationProviderAdapter,

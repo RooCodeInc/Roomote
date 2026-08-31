@@ -130,6 +130,28 @@ describe('Fast conversation repository', () => {
     expect(rows).toEqual([{ id: sessions[0]!.id }]);
   });
 
+  it('returns the persisted Fast conversation title', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    await db
+      .update(fastAgentConversations)
+      .set({ title: 'Investigate Slack agent status' })
+      .where(eq(fastAgentConversations.id, session.id));
+
+    await expect(
+      fastAgentConversationRepository.findById({ id: session.id }),
+    ).resolves.toMatchObject({ title: 'Investigate Slack agent status' });
+    await expect(
+      fastAgentConversationRepository.getOrCreate({
+        userId: user.id,
+        conversation: slackConversation,
+      }),
+    ).resolves.toMatchObject({ title: 'Investigate Slack agent status' });
+  });
+
   it('keeps identity stable while updating the current reply destination', async () => {
     const user = await createUser();
     const discordConversation = {
@@ -160,6 +182,51 @@ describe('Fast conversation repository', () => {
 
     expect(moved.id).toBe(original.id);
     expect(resolved?.conversation).toEqual(movedConversation);
+  });
+
+  it('resolves a delayed Slack root to the original Fast session', async () => {
+    const user = await createUser();
+    const pendingConversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-delayed-root',
+      conversationId: 'automation-1:occurrence-1',
+      replyTarget: { channelId: 'channel-delayed-root' },
+    };
+    const pending = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: pendingConversation,
+    });
+    await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: {
+        ...pendingConversation,
+        replyTarget: {
+          ...pendingConversation.replyTarget,
+          threadId: 'root-delayed-root',
+        },
+      },
+    });
+    const inboundConversation = {
+      surface: 'slack' as const,
+      workspaceId: pendingConversation.workspaceId,
+      conversationId: 'root-delayed-root',
+      replyTarget: {
+        channelId: pendingConversation.replyTarget.channelId,
+        threadId: 'root-delayed-root',
+      },
+    };
+
+    expect(await hasFastAgentSession(inboundConversation)).toBe(true);
+    const resumed = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: inboundConversation,
+    });
+
+    expect(resumed.id).toBe(pending.id);
+    expect(resumed.conversation).toMatchObject({
+      conversationId: pendingConversation.conversationId,
+      replyTarget: inboundConversation.replyTarget,
+    });
   });
 
   it('isolates identical external identities by provider', async () => {

@@ -280,7 +280,7 @@ describe('customAutomationsJob', () => {
     );
   });
 
-  it('creates a Slack thread for a channel-backed Fast automation', async () => {
+  it('starts a channel-backed Fast automation without posting to Slack', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {
         ...automation,
@@ -297,62 +297,54 @@ describe('customAutomationsJob', () => {
     await customAutomationsJob();
 
     expect(db.query.slackInstallationChannels.findFirst).toHaveBeenCalled();
-    expect(fastMocks.slackPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: 'C123',
-        client_msg_id: 'client-message-id',
-        text: 'Flaky tests is running.',
-        blocks: [
-          expect.objectContaining({
-            type: 'context',
-            elements: expect.arrayContaining([
-              expect.objectContaining({ text: 'Flaky tests' }),
-            ]),
-          }),
-          { type: 'markdown', text: '**Flaky tests** is running.' },
-          expect.objectContaining({
-            type: 'actions',
-            elements: [
-              expect.objectContaining({
-                action_id: 'late_bound_automation_configure',
-              }),
-            ],
-          }),
-        ],
-      }),
-    );
-    expect(fastMocks.slackUpdateMessage).toHaveBeenCalledWith({
-      channel: 'C123',
-      ts: '100.001',
-      message: expect.objectContaining({
-        blocks: expect.arrayContaining([
-          expect.objectContaining({
-            type: 'actions',
-            elements: [
-              expect.objectContaining({
-                action_id: 'late_bound_automation_view_session',
-                text: expect.objectContaining({ text: 'Follow' }),
-                url: expect.stringContaining(
-                  '/sessions/33333333-3333-4333-8333-333333333333',
-                ),
-              }),
-              expect.objectContaining({
-                action_id: 'late_bound_automation_configure',
-              }),
-            ],
-          }),
-        ]),
-      }),
-    });
+    expect(fastMocks.slackPostMessage).not.toHaveBeenCalled();
     expect(fastMocks.getSession).toHaveBeenCalledWith({
       userId: 'user-1',
       conversation: {
         surface: 'slack',
         workspaceId: 'T123',
-        conversationId: '100.001',
-        replyTarget: { channelId: 'C123', threadId: '100.001' },
+        conversationId: expect.stringContaining(`${automation.id}:`),
+        replyTarget: { channelId: 'C123' },
       },
     });
+    expect(fastMocks.deliverParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.not.objectContaining({
+          rootMessageId: expect.anything(),
+        }),
+      }),
+    );
+  });
+
+  it('records a Fast Slack startup failure without posting an error report', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+    vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+      teamId: 'T123',
+    } as never);
+    fastMocks.deliverParentEvent.mockRejectedValueOnce(
+      new Error('parent turn failed'),
+    );
+
+    const result = await customAutomationsJob();
+
+    expect(result.errors).toEqual(['Flaky tests: parent turn failed']);
+    expect(fastMocks.slackPostMessage).not.toHaveBeenCalled();
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        id: automation.id,
+        status: 'failed',
+        error: 'parent turn failed',
+      }),
+    );
   });
 
   it('preserves Discord channel thread delivery for Fast automations', async () => {
@@ -450,16 +442,14 @@ describe('customAutomationsJob', () => {
       'slack',
       'user-1',
     );
-    expect(fastMocks.slackPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ channel: 'D123' }),
-    );
+    expect(fastMocks.slackPostMessage).not.toHaveBeenCalled();
     expect(fastMocks.getSession).toHaveBeenCalledWith({
       userId: 'user-1',
       conversation: {
         surface: 'slack',
         workspaceId: 'T123',
-        conversationId: '100.001',
-        replyTarget: { channelId: 'D123', threadId: '100.001' },
+        conversationId: expect.stringContaining(`${automation.id}:`),
+        replyTarget: { channelId: 'D123' },
       },
     });
     expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(

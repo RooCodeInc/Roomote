@@ -109,6 +109,12 @@ export type RetryFastAgentTaskStart = () => Promise<
   { success: true; runId: number } | { success: false; error: string }
 >;
 
+export type FastAgentTurnActivity = {
+  start: () => void;
+  settle: () => Promise<void>;
+  updateTitle?: (title: string | null) => void;
+};
+
 export type FastAgentMcpServerConfig = {
   url: string;
   headers: Record<string, string>;
@@ -124,6 +130,7 @@ export type FastAgentTurnAdapter = {
     reply: FastAgentReply,
   ) => Promise<FastAgentReplyHandle | void>;
   postReaction?: (reaction: FastAgentReaction) => Promise<void>;
+  activity?: FastAgentTurnActivity;
   retryTaskStart?: RetryFastAgentTaskStart;
   resolveMcpServerConfigs?: () => Promise<
     Record<string, FastAgentMcpServerConfig>

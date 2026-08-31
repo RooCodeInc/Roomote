@@ -29,6 +29,7 @@ import type { FastAgentConversation } from './fast-agent-conversation';
 export type FastAgentConversationRecord = {
   id: string;
   userId: string;
+  title: string | null;
   conversation: FastAgentConversation;
   /**
    * Durable visible history for cold starts and provider retries. OpenCode,
@@ -218,6 +219,25 @@ function buildIdentityWhere(conversation: FastAgentConversation) {
   );
 }
 
+function buildReplyTargetWhere(conversation: FastAgentConversation) {
+  if (!('replyTarget' in conversation) || !conversation.replyTarget.threadId) {
+    return null;
+  }
+
+  return and(
+    eq(fastAgentConversations.surface, conversation.surface),
+    eq(fastAgentConversations.workspaceId, conversation.workspaceId),
+    eq(
+      fastAgentConversations.currentReplyChannelId,
+      conversation.replyTarget.channelId,
+    ),
+    eq(
+      fastAgentConversations.currentReplyThreadId,
+      conversation.replyTarget.threadId,
+    ),
+  );
+}
+
 function identityMatches(
   record: Pick<
     typeof fastAgentConversations.$inferSelect,
@@ -296,6 +316,7 @@ async function loadConversationRecord(
   return {
     id: record.id,
     userId: record.userId,
+    title: record.title,
     conversation,
     compatibilityMessages: record.compatibilityMessages as ModelMessage[],
     openCodeSessionId: record.openCodeSessionId,
@@ -315,6 +336,13 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         });
 
         let created = false;
+        const replyTargetWhere = buildReplyTargetWhere(conversation);
+        if (!record && replyTargetWhere) {
+          record = await tx.query.fastAgentConversations.findFirst({
+            where: replyTargetWhere,
+          });
+        }
+
         if (!record) {
           const [inserted] = await tx
             .insert(fastAgentConversations)
@@ -433,14 +461,24 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
     },
 
     async exists(conversation) {
-      const neutral = await db.query.fastAgentConversations.findFirst({
+      const exact = await db.query.fastAgentConversations.findFirst({
         where: buildIdentityWhere(conversation),
         columns: { id: true },
       });
-      if (neutral) {
+      if (exact) {
         return true;
       }
-      return false;
+
+      const replyTargetWhere = buildReplyTargetWhere(conversation);
+      if (!replyTargetWhere) {
+        return false;
+      }
+
+      const routed = await db.query.fastAgentConversations.findFirst({
+        where: replyTargetWhere,
+        columns: { id: true },
+      });
+      return Boolean(routed);
     },
 
     async appendVisibleMessages({ conversationId: requestedId, messages }) {

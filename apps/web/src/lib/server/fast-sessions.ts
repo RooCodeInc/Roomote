@@ -19,6 +19,7 @@ import {
   or,
   sessions,
   sql,
+  taskArtifacts,
   taskRuns,
   tasks,
   users,
@@ -32,6 +33,20 @@ type FastSessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
 type FastSessionTaskSummary = {
   taskId: string;
   title: string;
+  inferenceCostMicroUsd: number;
+  artifacts: Array<{
+    id: string;
+    path: string;
+    version: number;
+    artifactType: string;
+    contentType: string;
+    size: number;
+    createdAt: Date;
+  }>;
+  latestRun: {
+    status: (typeof taskRuns.$inferSelect)['status'];
+    taskPhase: (typeof taskRuns.$inferSelect)['taskPhase'];
+  };
 };
 
 export type FastSessionMessage = Pick<
@@ -222,6 +237,8 @@ export async function getFastSessionTasks(
         taskId: taskRuns.taskId,
         title: tasks.title,
         latestRunId: taskRuns.id,
+        status: taskRuns.status,
+        taskPhase: taskRuns.taskPhase,
       })
       .from(taskRuns)
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
@@ -234,14 +251,64 @@ export async function getFastSessionTasks(
       .orderBy(taskRuns.taskId, desc(taskRuns.id)),
   );
 
-  return db
+  const rows = await db
     .with(latestRunPerTask)
     .select({
       taskId: latestRunPerTask.taskId,
       title: latestRunPerTask.title,
+      status: latestRunPerTask.status,
+      taskPhase: latestRunPerTask.taskPhase,
+      inferenceCostMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
     })
     .from(latestRunPerTask)
+    .leftJoin(
+      llmUsageEvents,
+      eq(llmUsageEvents.taskId, latestRunPerTask.taskId),
+    )
+    .groupBy(
+      latestRunPerTask.taskId,
+      latestRunPerTask.title,
+      latestRunPerTask.latestRunId,
+      latestRunPerTask.status,
+      latestRunPerTask.taskPhase,
+    )
     .orderBy(desc(latestRunPerTask.latestRunId));
+
+  const taskIds = rows.map((row) => row.taskId);
+  const artifactRows = taskIds.length
+    ? await db
+        .select({
+          taskId: taskArtifacts.taskId,
+          id: taskArtifacts.id,
+          path: taskArtifacts.path,
+          version: taskArtifacts.version,
+          artifactType: taskArtifacts.artifactType,
+          contentType: taskArtifacts.contentType,
+          size: taskArtifacts.size,
+          createdAt: taskArtifacts.createdAt,
+        })
+        .from(taskArtifacts)
+        .where(
+          and(
+            inArray(taskArtifacts.taskId, taskIds),
+            eq(taskArtifacts.uploaded, true),
+          ),
+        )
+        .orderBy(desc(taskArtifacts.createdAt))
+    : [];
+
+  return rows.map((row) => ({
+    taskId: row.taskId,
+    title: row.title,
+    inferenceCostMicroUsd: Number(row.inferenceCostMicroUsd),
+    artifacts: artifactRows
+      .filter((artifact) => artifact.taskId === row.taskId)
+      .map(({ taskId: _taskId, ...artifact }) => artifact),
+    latestRun: {
+      status: row.status,
+      taskPhase: row.taskPhase,
+    },
+  }));
 }
 
 function sanitizeFastSessionMessageRow<
@@ -399,26 +466,32 @@ export async function getFastSessionById(
   // Fast usage events carry the OpenCode session id; a conversation can span
   // several (cold rebuilds), so sum across every session id the transcript
   // references plus the current one.
-  const [usage] = await db
+  const [directUsage] = await db
     .select({
       costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
     })
     .from(llmUsageEvents)
     .where(
-      sql`${llmUsageEvents.harnessSessionId} in (
-        select distinct ${fastAgentMessages.nativeSessionId}
-        from ${fastAgentMessages}
-        where ${fastAgentMessages.conversationId} = ${session.id}
-          and ${fastAgentMessages.nativeSessionId} is not null
-        union
-        select ${session.openCodeSessionId}::text
-      )`,
+      and(
+        isNull(llmUsageEvents.taskId),
+        sql`${llmUsageEvents.harnessSessionId} in (
+          select distinct ${fastAgentMessages.nativeSessionId}
+          from ${fastAgentMessages}
+          where ${fastAgentMessages.conversationId} = ${session.id}
+            and ${fastAgentMessages.nativeSessionId} is not null
+          union
+          select ${session.openCodeSessionId}::text
+        )`,
+      ),
     );
+
+  const directInferenceCostMicroUsd = Number(directUsage?.costMicroUsd ?? 0);
 
   return {
     ...session,
     messages,
     hasOlderMessages,
-    inferenceCostMicroUsd: Number(usage?.costMicroUsd ?? 0),
+    directInferenceCostMicroUsd,
+    inferenceCostMicroUsd: directInferenceCostMicroUsd,
   };
 }

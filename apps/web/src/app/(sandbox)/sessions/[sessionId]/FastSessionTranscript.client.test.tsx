@@ -7,7 +7,11 @@ import {
 } from '@testing-library/react';
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
-import { FastSessionTranscript } from './FastSessionTranscript';
+import {
+  FastSessionTranscript,
+  pendingResponseReducer,
+} from './FastSessionTranscript';
+import { SessionRunningTaskCountContext } from './session-task-panel-context';
 
 const {
   replyMutate,
@@ -15,6 +19,7 @@ const {
   updateModelSelectionMutate,
   preparePromptAttachments,
   openTaskPanel,
+  openTasksPanel,
   narrationState,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
@@ -22,6 +27,7 @@ const {
   updateModelSelectionMutate: vi.fn(),
   preparePromptAttachments: vi.fn(),
   openTaskPanel: vi.fn(),
+  openTasksPanel: vi.fn(),
   narrationState: { enabled: false },
 }));
 
@@ -92,8 +98,10 @@ vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
   }),
 }));
 
-vi.mock('./session-task-panel-context', () => ({
+vi.mock('./session-task-panel-context', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./session-task-panel-context')>()),
   useOpenSessionTaskPanel: () => openTaskPanel,
+  useOpenSessionTasksPanel: () => openTasksPanel,
 }));
 
 vi.mock('../../task/[taskId]/messages/acp/DelegatedTaskCard', () => ({
@@ -147,6 +155,7 @@ beforeEach(() => {
   );
   narrationState.enabled = false;
   openTaskPanel.mockReset();
+  openTasksPanel.mockReset();
   vi.stubGlobal('EventSource', FakeEventSource);
 });
 
@@ -188,6 +197,404 @@ describe('FastSessionTranscript', () => {
     nativeSessionId: role === 'assistant' ? 'opencode-1' : null,
     nativeMessageId: null,
     createdAt: new Date(ts),
+  });
+
+  describe('pendingResponseReducer', () => {
+    const emptyState = {
+      pendingAfter: null,
+      latestVisibleResponse: null,
+      optimisticRollback: null,
+    };
+
+    it('uses the same ordering and visibility rules for hydration and streamed messages', () => {
+      const hydrated = pendingResponseReducer(emptyState, {
+        type: 'hydrate',
+        messages: [
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'Question',
+            ts: 2,
+          }),
+          textMessage({
+            id: 'hidden-1',
+            role: 'assistant',
+            text: 'Internal activity',
+            ts: 3,
+            visible: false,
+          }),
+        ],
+      });
+
+      const afterStaleOutput = pendingResponseReducer(hydrated, {
+        type: 'messages',
+        newEventIds: new Set(),
+        messages: [
+          textMessage({
+            id: 'stale-assistant',
+            role: 'assistant',
+            text: 'Earlier output',
+            ts: 2,
+            turnSeq: -1,
+          }),
+        ],
+      });
+      expect(afterStaleOutput.pendingAfter?.id).toBe('user-1');
+
+      const afterVisibleOutput = pendingResponseReducer(afterStaleOutput, {
+        type: 'messages',
+        newEventIds: new Set(['assistant-1:event']),
+        messages: [
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Answer',
+            ts: 3,
+          }),
+        ],
+      });
+      expect(afterVisibleOutput.pendingAfter).toBeNull();
+
+      const afterStaleUserReplay = pendingResponseReducer(afterVisibleOutput, {
+        type: 'messages',
+        newEventIds: new Set(),
+        messages: [
+          textMessage({
+            id: 'stale-user',
+            role: 'user',
+            text: 'Replayed question',
+            ts: 2,
+          }),
+        ],
+      });
+      expect(afterStaleUserReplay.pendingAfter).toBeNull();
+    });
+
+    it('keeps a tied new user pending when the same batch replays the latest response', () => {
+      const latestResponse = textMessage({
+        id: 'assistant-1',
+        role: 'assistant',
+        text: 'Answer',
+        ts: 2,
+      });
+      const hydrated = pendingResponseReducer(emptyState, {
+        type: 'hydrate',
+        messages: [latestResponse],
+      });
+      const nextUser = textMessage({
+        id: 'user-2',
+        role: 'user',
+        text: 'Follow up',
+        ts: latestResponse.ts,
+      });
+
+      const next = pendingResponseReducer(hydrated, {
+        type: 'messages',
+        messages: [nextUser, latestResponse],
+        newEventIds: new Set([nextUser.eventId]),
+      });
+
+      expect(next.pendingAfter?.id).toBe(nextUser.id);
+    });
+
+    it('restores an optimistic fallback only while that message owns pending state', () => {
+      const earlierPending = pendingResponseReducer(emptyState, {
+        type: 'hydrate',
+        messages: [
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'Earlier question',
+            ts: 1,
+          }),
+        ],
+      });
+      const optimistic = textMessage({
+        id: 'optimistic-1',
+        role: 'user',
+        text: 'Later question',
+        ts: 2,
+      });
+      const optimisticPending = pendingResponseReducer(earlierPending, {
+        type: 'optimistic',
+        message: optimistic,
+      });
+
+      expect(
+        pendingResponseReducer(optimisticPending, {
+          type: 'rollbackOptimistic',
+          optimisticId: optimistic.id,
+        }).pendingAfter?.id,
+      ).toBe('user-1');
+
+      const resolved = pendingResponseReducer(optimisticPending, {
+        type: 'messages',
+        newEventIds: new Set(['assistant-1:event']),
+        messages: [
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Answer',
+            ts: 3,
+          }),
+        ],
+      });
+      expect(
+        pendingResponseReducer(resolved, {
+          type: 'rollbackOptimistic',
+          optimisticId: optimistic.id,
+        }).pendingAfter,
+      ).toBeNull();
+    });
+  });
+
+  it.each([
+    [1, '1 task running'],
+    [2, '2 tasks running'],
+  ])('shows the running task count as %s', (runningTaskCount, label) => {
+    render(
+      <SessionRunningTaskCountContext.Provider value={runningTaskCount}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent(label);
+    expect(status.closest('.chat-reasoning-message')).toHaveClass(
+      'is-assistant',
+    );
+  });
+
+  it('removes the running task indicator when the count returns to zero', () => {
+    const { rerender } = render(
+      <SessionRunningTaskCountContext.Provider value={1}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    rerender(
+      <SessionRunningTaskCountContext.Provider value={0}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+
+    expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('opens the tasks panel from a keyboard-focusable activity button', () => {
+    render(
+      <SessionRunningTaskCountContext.Provider value={1}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+
+    const button = screen.getByRole('button', {
+      name: '1 task running. Open tasks',
+    });
+    button.focus();
+    expect(button).toHaveFocus();
+    expect(button).toHaveAttribute('type', 'button');
+    fireEvent.click(button);
+
+    expect(openTasksPanel).toHaveBeenCalledOnce();
+  });
+
+  it('shows the task indicator only after the session response finishes', () => {
+    render(
+      <SessionRunningTaskCountContext.Provider value={1}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+          ]}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+
+    expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Tasks launched',
+            ts: 2,
+          }),
+        ],
+      });
+    });
+
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+  });
+
+  it('suppresses nested task activity while the session is responding', () => {
+    render(
+      <SessionRunningTaskCountContext.Provider value={1}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          initialConversationResponding
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+
+    expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Tasks launched and still responding',
+            ts: 2,
+          }),
+        ],
+      });
+    });
+    expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: false,
+      });
+    });
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+  });
+
+  it('applies streamed parent activity with visible output atomically', () => {
+    render(
+      <SessionRunningTaskCountContext.Provider value={1}>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Start tasks',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Tasks launched',
+              ts: 2,
+            }),
+          ]}
+          initialConversationResponding={false}
+          canReply
+        />
+      </SessionRunningTaskCountContext.Provider>,
+    );
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        conversationResponding: true,
+        messages: [
+          textMessage({
+            id: 'assistant-2',
+            role: 'assistant',
+            text: 'Parent output is streaming',
+            ts: 3,
+          }),
+        ],
+      });
+    });
+
+    expect(screen.getByText('Parent output is streaming')).toBeInTheDocument();
+    expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
   });
 
   it('shows Thinking while the initial Fast turn is awaiting output', () => {
@@ -425,14 +832,19 @@ describe('FastSessionTranscript', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders retired and late-click states without actionable controls', async () => {
+  it('hides dismissed offers and renders late-click states without controls', async () => {
     const { rerender } = render(
       <FastSessionTranscript
         sessionId="22222222-2222-4222-8222-222222222222"
         initialMessages={[reviewOfferMessage('dismissed')]}
       />,
     );
-    expect(screen.getByText('Review action dismissed.')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Would you like me to resolve these issues?'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('pr-review-action-offer'),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Resolve these issues' }),
     ).not.toBeInTheDocument();

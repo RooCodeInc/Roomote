@@ -13,6 +13,7 @@ import type {
   WorkObjectMetadataEntity,
 } from './types';
 import { WebClient } from '@slack/web-api';
+import type { WebAPIPlatformError } from '@slack/web-api';
 import { convertSlackLinksToMarkdown } from './markdown-converter';
 import { logSlackError, slackDebug } from './logging';
 import { SlackChannelDiscovery } from './slack-channel-discovery';
@@ -52,6 +53,18 @@ type SlackApiThreadMessage = {
     name?: string;
   };
 };
+
+export type SlackAgentSessionRenameResult =
+  | { ok: true }
+  | { ok: false; error?: string };
+
+function getSlackPlatformError(error: unknown): string | undefined {
+  const platformError = error as Partial<WebAPIPlatformError>;
+  return platformError?.code === 'slack_webapi_platform_error' &&
+    typeof platformError.data?.error === 'string'
+    ? platformError.data.error
+    : undefined;
+}
 
 type SlackApiThreadResponse = {
   ok: boolean;
@@ -234,6 +247,87 @@ export class SlackNotifier {
     }
 
     return this.client;
+  }
+
+  public async setAgentSessionStatus({
+    channel,
+    threadTs,
+    status,
+    title,
+  }: {
+    channel: string;
+    threadTs: string;
+    status: 'active' | 'processing' | 'suspended' | 'closed';
+    title?: string;
+  }): Promise<{ ok: boolean; title?: string }> {
+    try {
+      const response = await this.getClient().apiCall(
+        'agents.sessions.setStatus',
+        {
+          channel_id: channel,
+          thread_ts: threadTs,
+          status,
+          ...(title ? { title } : {}),
+        },
+      );
+      if (response.ok) {
+        const responseTitle = (response as { title?: unknown }).title;
+        return {
+          ok: true,
+          ...(typeof responseTitle === 'string'
+            ? { title: responseTitle }
+            : {}),
+        };
+      }
+
+      console.warn(
+        `[setAgentSessionStatus] Slack rejected status=${status} channel=${channel} thread=${threadTs} error=${response.error ?? 'unknown_error'}`,
+      );
+      return { ok: false };
+    } catch (error) {
+      console.warn(
+        `[setAgentSessionStatus] Slack status=${status} failed for channel=${channel} thread=${threadTs}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return { ok: false };
+    }
+  }
+
+  public async renameAgentSession({
+    channel,
+    threadTs,
+    title,
+  }: {
+    channel: string;
+    threadTs: string;
+    title: string;
+  }): Promise<SlackAgentSessionRenameResult> {
+    try {
+      const response = await this.getClient().apiCall(
+        'agents.sessions.rename',
+        {
+          channel_id: channel,
+          thread_ts: threadTs,
+          title,
+        },
+      );
+      if (response.ok) return { ok: true };
+
+      const responseError =
+        typeof response.error === 'string' ? response.error : undefined;
+      console.warn(
+        `[renameAgentSession] Slack rejected channel=${channel} thread=${threadTs} error=${responseError ?? 'unknown_error'}`,
+      );
+      return { ok: false, ...(responseError ? { error: responseError } : {}) };
+    } catch (error) {
+      const platformError = getSlackPlatformError(error);
+      console.warn(
+        `[renameAgentSession] Slack rename failed for channel=${channel} thread=${threadTs}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return {
+        ok: false,
+        ...(platformError ? { error: platformError } : {}),
+      };
+    }
   }
 
   private getChannelDiscovery(): SlackChannelDiscovery {

@@ -38,6 +38,12 @@ import {
   updateFastSessionPrReviewOfferStatus,
 } from '@/lib/server/fast-sessions';
 import { handleWebPrReviewAction } from '@/lib/server/pr-review-actions';
+import {
+  currentEpochSeconds,
+  signArtifactId,
+} from '@/lib/server/artifact-signature';
+
+const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
 
 /**
  * Persist the session's model settings when the caller sent an explicit
@@ -371,7 +377,31 @@ export async function getFastSessionTasksCommand(
   auth: UserAuthSuccess,
   sessionId: string,
 ) {
-  return getFastSessionTasks(auth, sessionId);
+  const tasks = await getFastSessionTasks(auth, sessionId);
+  if (!tasks) return null;
+
+  const artifactSignatureTimestamp =
+    Math.floor(
+      currentEpochSeconds() / ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS,
+    ) * ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS;
+
+  return tasks.map((task) => ({
+    ...task,
+    artifacts: task.artifacts.map((artifact) => {
+      const isImage = artifact.contentType.startsWith('image/');
+      const isVideo = artifact.contentType.startsWith('video/');
+      const previewUrl =
+        isImage || isVideo
+          ? `/api/artifacts/${artifact.id}/raw?sig=${signArtifactId(artifact.id, artifactSignatureTimestamp)}&ts=${artifactSignatureTimestamp}`
+          : undefined;
+
+      return {
+        ...artifact,
+        thumbnailUrl: isImage ? previewUrl : undefined,
+        previewUrl: isVideo ? previewUrl : undefined,
+      };
+    }),
+  }));
 }
 
 export async function updateFastSessionModelSelectionCommand(

@@ -25,6 +25,7 @@ import {
 } from '@roomote/communication';
 import {
   createFastAgentSlackLiveTaskLauncher,
+  createFastAgentSlackSessionActivity,
   getSlackThreadReplyFooterMessageTs,
   postSlackThreadMessageWithFooterText,
   withSlackThreadReplyFooterLock,
@@ -111,7 +112,7 @@ export type FastAgentSurfaceReplyDelivery = {
   conversation: FastAgentConversation;
   adapter: Pick<
     FastAgentTurnAdapter,
-    'launchTask' | 'postReply' | 'replaceReply'
+    'activity' | 'launchTask' | 'postReply' | 'replaceReply'
   >;
 };
 
@@ -204,6 +205,10 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   });
 
   if (conversation.surface === 'slack') {
+    const threadId = conversation.replyTarget.threadId;
+    if (!threadId) {
+      return null;
+    }
     const installation = await db.query.slackInstallations.findFirst({
       where: and(
         eq(slackInstallations.isActive, true),
@@ -226,6 +231,16 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     return {
       conversation,
       adapter: {
+        activity: createFastAgentSlackSessionActivity({
+          slack,
+          workspaceId: conversation.workspaceId,
+          channel: conversation.replyTarget.channelId,
+          threadTs: threadId,
+          title: session.title,
+          resolveTitle: async () =>
+            (await fastAgentConversationRepository.findById({ id: session.id }))
+              ?.title,
+        }),
         launchTask: createFastAgentSlackLiveTaskLauncher({
           slack,
           userId: params.userId,
@@ -234,7 +249,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             ? { teamDomain: installation.teamDomain }
             : {}),
           channelId: conversation.replyTarget.channelId,
-          threadTs: conversation.replyTarget.threadId,
+          threadTs: threadId,
         }),
         postReply: async ({ message }) => {
           const quote = pendingQuote;
@@ -242,7 +257,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           const messageTs = await postSlackThreadMessageWithFooterText({
             slack,
             channel: conversation.replyTarget.channelId,
-            threadTs: conversation.replyTarget.threadId,
+            threadTs: threadId,
             text: quote ? `${quote}\n${message}` : message,
             bodyBlocks: [
               ...(quote
@@ -278,11 +293,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           // concurrent relocation cannot slip in between them.
           const updated = await withSlackThreadReplyFooterLock({
             channel: conversation.replyTarget.channelId,
-            threadTs: conversation.replyTarget.threadId,
+            threadTs: threadId,
             fn: async () => {
               const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
                 conversation.replyTarget.channelId,
-                conversation.replyTarget.threadId,
+                threadId,
               ).catch(() => null);
               return slack.updateMessage({
                 channel: conversation.replyTarget.channelId,

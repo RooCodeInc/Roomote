@@ -4,10 +4,12 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { useReducedMotion } from 'motion/react';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   getImageUrisFromContentBlocks,
@@ -36,7 +38,11 @@ import {
   type SessionPromptSubmission,
 } from './SessionPromptInput';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
-import { useOpenSessionTaskPanel } from './session-task-panel-context';
+import {
+  useOpenSessionTaskPanel,
+  useOpenSessionTasksPanel,
+  useSessionRunningTaskCount,
+} from './session-task-panel-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { truncatePageTitle } from '@/lib/page-title';
@@ -55,6 +61,26 @@ type TranscriptMessage = Omit<FastSessionMessage, 'createdAt'> & {
 };
 
 type TranscriptOrder = Pick<TranscriptMessage, 'id' | 'ts' | 'turnSeq'>;
+
+type PendingResponseState = {
+  pendingAfter: TranscriptOrder | null;
+  latestVisibleResponse: TranscriptOrder | null;
+  optimisticRollback: {
+    optimisticId: string;
+    pendingAfter: TranscriptOrder | null;
+  } | null;
+};
+
+type PendingResponseAction =
+  | { type: 'hydrate'; messages: TranscriptMessage[] }
+  | {
+      type: 'messages';
+      messages: TranscriptMessage[];
+      newEventIds: ReadonlySet<string>;
+    }
+  | { type: 'optimistic'; message: TranscriptOrder }
+  | { type: 'commitOptimistic'; optimisticId: string }
+  | { type: 'rollbackOptimistic'; optimisticId: string };
 
 function compareTranscriptOrder(a: TranscriptOrder, b: TranscriptOrder) {
   if (a.ts !== b.ts) return a.ts - b.ts;
@@ -79,23 +105,80 @@ function isVisibleResponseActivity(message: TranscriptMessage) {
   );
 }
 
-function getPendingResponseOrder(messages: TranscriptMessage[]) {
-  let pendingAfter: TranscriptOrder | null =
-    messages.length === 0 ? { id: '', ts: 0, turnSeq: -1 } : null;
+export function pendingResponseReducer(
+  state: PendingResponseState,
+  action: PendingResponseAction,
+): PendingResponseState {
+  if (action.type === 'hydrate' || action.type === 'messages') {
+    let pendingAfter =
+      action.type === 'hydrate'
+        ? action.messages.length === 0
+          ? { id: '', ts: 0, turnSeq: -1 }
+          : null
+        : state.pendingAfter;
+    let latestVisibleResponse =
+      action.type === 'hydrate' ? null : state.latestVisibleResponse;
 
-  for (const message of [...messages].sort(compareTranscriptMessages)) {
-    if (message.role === 'user') {
-      pendingAfter = message;
-    } else if (
-      pendingAfter !== null &&
-      compareTranscriptOrder(message, pendingAfter) >= 0 &&
-      isVisibleResponseActivity(message)
-    ) {
-      pendingAfter = null;
+    for (const message of [...action.messages].sort(
+      compareTranscriptMessages,
+    )) {
+      const pendingThreshold = pendingAfter ?? latestVisibleResponse;
+      const isNewMessage =
+        action.type === 'hydrate' || action.newEventIds.has(message.eventId);
+      if (
+        message.role === 'user' &&
+        isNewMessage &&
+        (action.type === 'hydrate' ||
+          pendingThreshold === null ||
+          message.ts >= pendingThreshold.ts)
+      ) {
+        pendingAfter = message;
+      } else if (isNewMessage && isVisibleResponseActivity(message)) {
+        if (
+          latestVisibleResponse === null ||
+          compareTranscriptOrder(message, latestVisibleResponse) >= 0
+        ) {
+          latestVisibleResponse = message;
+        }
+        if (
+          pendingAfter !== null &&
+          compareTranscriptOrder(message, pendingAfter) >= 0
+        ) {
+          pendingAfter = null;
+        }
+      }
     }
+
+    return { ...state, pendingAfter, latestVisibleResponse };
   }
 
-  return pendingAfter;
+  if (action.type === 'optimistic') {
+    return {
+      pendingAfter: action.message,
+      latestVisibleResponse: state.latestVisibleResponse,
+      optimisticRollback: {
+        optimisticId: action.message.id,
+        pendingAfter: state.pendingAfter,
+      },
+    };
+  }
+
+  if (state.optimisticRollback?.optimisticId !== action.optimisticId) {
+    return state;
+  }
+
+  if (action.type === 'commitOptimistic') {
+    return { ...state, optimisticRollback: null };
+  }
+
+  return {
+    pendingAfter:
+      state.pendingAfter?.id === action.optimisticId
+        ? state.optimisticRollback.pendingAfter
+        : state.pendingAfter,
+    latestVisibleResponse: state.latestVisibleResponse,
+    optimisticRollback: null,
+  };
 }
 
 function ThinkingMessage() {
@@ -110,12 +193,54 @@ function ThinkingMessage() {
   );
 }
 
+function RunningTasksMessage({
+  count,
+  onOpenTasks,
+}: {
+  count: number;
+  onOpenTasks: () => void;
+}) {
+  const shouldReduceMotion = useReducedMotion();
+  const label = `${count} ${count === 1 ? 'task' : 'tasks'} running`;
+
+  return (
+    <Message from="assistant" className="chat-reasoning-message">
+      <MessageContent>
+        <span role="status" aria-live="polite">
+          <button
+            type="button"
+            className="w-fit cursor-pointer rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            aria-label={`${label}. Open tasks`}
+            onClick={onOpenTasks}
+          >
+            {shouldReduceMotion ? (
+              <span className="text-sm font-light text-muted-foreground">
+                {label}
+              </span>
+            ) : (
+              <Shimmer
+                as="span"
+                className="text-sm font-light"
+                duration={3}
+                spread={1}
+              >
+                {label}
+              </Shimmer>
+            )}
+          </button>
+        </span>
+      </MessageContent>
+    </Message>
+  );
+}
+
 export function FastSessionTranscript({
   sessionId,
   initialMessages,
   hasOlderMessages,
   canReply,
   initialTitle = null,
+  initialConversationResponding = null,
   fallbackTitle = 'New session',
   sessionModel = null,
   sessionReasoningEffort = null,
@@ -129,6 +254,7 @@ export function FastSessionTranscript({
   hasOlderMessages?: boolean;
   canReply?: boolean;
   initialTitle?: string | null;
+  initialConversationResponding?: boolean | null;
   fallbackTitle?: string;
   sessionModel?: string | null;
   sessionReasoningEffort?: ReasoningEffort | null;
@@ -139,6 +265,8 @@ export function FastSessionTranscript({
 }) {
   const trpcClient = useTRPCClient();
   const openTaskPanel = useOpenSessionTaskPanel();
+  const openTasksPanel = useOpenSessionTasksPanel();
+  const runningTaskCount = useSessionRunningTaskCount();
   const { enabled: narrationModeEnabled } = useNarrationMode();
   const displayMode = narrationModeEnabled ? 'narration' : 'default';
   const [serverMessages, setServerMessages] = useState<
@@ -151,25 +279,45 @@ export function FastSessionTranscript({
     TranscriptMessage[]
   >([]);
   const [isSending, setIsSending] = useState(false);
-  const [pendingResponseAfter, setPendingResponseAfter] =
-    useState<TranscriptOrder | null>(() =>
-      getPendingResponseOrder(initialMessages),
-    );
+  const [pendingResponseState, dispatchPendingResponse] = useReducer(
+    pendingResponseReducer,
+    initialMessages,
+    (messages) =>
+      pendingResponseReducer(
+        {
+          pendingAfter: null,
+          latestVisibleResponse: null,
+          optimisticRollback: null,
+        },
+        { type: 'hydrate', messages },
+      ),
+  );
   const [replyError, setReplyError] = useState<string | null>(null);
   const [title, setTitle] = useState<string | null>(initialTitle);
+  const [conversationResponding, setConversationResponding] = useState<
+    boolean | null
+  >(initialConversationResponding);
   usePageTitle(truncatePageTitle(title ?? fallbackTitle));
 
   useEffect(() => {
     const source = new EventSource(`/api/sessions/${sessionId}/stream`);
     const onMessages = (event: MessageEvent) => {
       try {
-        const { messages } = JSON.parse(event.data) as {
+        const { messages, conversationResponding: responding } = JSON.parse(
+          event.data,
+        ) as {
           messages: TranscriptMessage[];
+          conversationResponding?: boolean | null;
         };
+        if (responding !== undefined) {
+          setConversationResponding(responding);
+        }
         const previous = serverMessagesRef.current;
-        const canonicalUserMessages = messages.filter(
-          (message) =>
-            message.role === 'user' && !previous.has(message.eventId),
+        const canonicalMessages = messages.filter(
+          (message) => !previous.has(message.eventId),
+        );
+        const canonicalUserMessages = canonicalMessages.filter(
+          (message) => message.role === 'user',
         );
         const next = new Map(previous);
         for (const message of messages) {
@@ -177,24 +325,12 @@ export function FastSessionTranscript({
         }
         serverMessagesRef.current = next;
         setServerMessages(next);
-        setPendingResponseAfter((current) => {
-          let pendingAfter = current;
-          for (const message of [...messages].sort(compareTranscriptMessages)) {
-            if (
-              message.role === 'user' &&
-              (pendingAfter === null ||
-                compareTranscriptOrder(message, pendingAfter) >= 0)
-            ) {
-              pendingAfter = message;
-            } else if (
-              isVisibleResponseActivity(message) &&
-              pendingAfter !== null &&
-              compareTranscriptOrder(message, pendingAfter) >= 0
-            ) {
-              pendingAfter = null;
-            }
-          }
-          return pendingAfter;
+        dispatchPendingResponse({
+          type: 'messages',
+          messages,
+          newEventIds: new Set(
+            canonicalMessages.map((message) => message.eventId),
+          ),
         });
 
         if (canonicalUserMessages.length > 0) {
@@ -217,10 +353,16 @@ export function FastSessionTranscript({
     };
     const onSession = (event: MessageEvent) => {
       try {
-        const { title: nextTitle } = JSON.parse(event.data) as {
-          title: string | null;
+        const update = JSON.parse(event.data) as {
+          title?: string;
+          conversationResponding?: boolean | null;
         };
-        setTitle(nextTitle);
+        if (update.title !== undefined) {
+          setTitle(update.title);
+        }
+        if (update.conversationResponding !== undefined) {
+          setConversationResponding(update.conversationResponding);
+        }
       } catch {
         // Ignore malformed frames.
       }
@@ -286,7 +428,6 @@ export function FastSessionTranscript({
       setIsSending(true);
       setReplyError(null);
       let optimisticId: string | null = null;
-      let previousPendingResponse: TranscriptOrder | null = null;
       try {
         const prepared = await preparePromptAttachments({
           text: message.text.trim(),
@@ -328,10 +469,7 @@ export function FastSessionTranscript({
           createdAt: new Date(),
         };
         setOptimisticMessages((previous) => [...previous, optimistic]);
-        setPendingResponseAfter((current) => {
-          previousPendingResponse = current;
-          return optimistic;
-        });
+        dispatchPendingResponse({ type: 'optimistic', message: optimistic });
         await trpcClient.fastSessions.reply.mutate({
           sessionId,
           text: prepared.text,
@@ -341,6 +479,10 @@ export function FastSessionTranscript({
             : {}),
           model: message.model ?? null,
           reasoningEffort: message.reasoningEffort ?? null,
+        });
+        dispatchPendingResponse({
+          type: 'commitOptimistic',
+          optimisticId,
         });
         return true;
       } catch (error) {
@@ -353,9 +495,12 @@ export function FastSessionTranscript({
         setReplyError(
           error instanceof Error ? error.message : 'Failed to send message',
         );
-        setPendingResponseAfter((current) =>
-          current?.id === optimisticId ? previousPendingResponse : current,
-        );
+        if (optimisticId) {
+          dispatchPendingResponse({
+            type: 'rollbackOptimistic',
+            optimisticId,
+          });
+        }
         return false;
       } finally {
         setIsSending(false);
@@ -403,20 +548,27 @@ export function FastSessionTranscript({
             onSuppress={suppressMessage}
             onOpenDelegatedTask={openTaskPanel ?? undefined}
           />
-          {pendingResponseAfter !== null ? <ThinkingMessage /> : null}
+          {pendingResponseState.pendingAfter !== null ? (
+            <ThinkingMessage />
+          ) : !isSending &&
+            conversationResponding !== true &&
+            runningTaskCount > 0 &&
+            openTasksPanel ? (
+            <RunningTasksMessage
+              count={runningTaskCount}
+              onOpenTasks={openTasksPanel}
+            />
+          ) : null}
           {reviewOffers.map((offer) => (
-            <div
+            <PrReviewActionOffer
               key={offer.deliveryId}
               className="mt-3 rounded-lg border border-border/70 bg-muted/40 px-3 py-3"
-            >
-              <p className="mb-2 text-sm">{offer.question}</p>
-              <PrReviewActionOffer
-                offer={offer}
-                onAction={(choice) =>
-                  handleReviewAction(offer.deliveryId, choice)
-                }
-              />
-            </div>
+              offer={offer}
+              showQuestion
+              onAction={(choice) =>
+                handleReviewAction(offer.deliveryId, choice)
+              }
+            />
           ))}
         </ConversationContent>
         <ConversationScrollButton />

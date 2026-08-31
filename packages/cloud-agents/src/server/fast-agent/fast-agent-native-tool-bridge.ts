@@ -314,14 +314,14 @@ import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
   description: ${JSON.stringify(
-    `Render presentational HTML in the web transcript. ${SHOW_WIDGET_THEME_GUIDANCE} ${SHOW_WIDGET_FIXED_CANVAS_GUIDANCE} On Slack or Discord, textFallback is posted instead; use request_user_input for questions.`,
+    `Render presentational HTML in the web transcript. ${SHOW_WIDGET_THEME_GUIDANCE} ${SHOW_WIDGET_FIXED_CANVAS_GUIDANCE} On Slack or Discord, textFallback is posted as a chat preview with a link to open the rendered widget; use request_user_input for questions.`,
   )},
   args: {
     html: z.string().min(1).max(${SHOW_WIDGET_MAX_HTML_CHARS}).describe("Compact semantic HTML that fully fits the fixed canvas; avoid long prose, large lists, and dense data"),
     title: z.string().max(${SHOW_WIDGET_MAX_TITLE_CHARS}).optional(),
     css: z.string().max(${SHOW_WIDGET_MAX_CSS_CHARS}).optional().describe("Optional CSS using --rw-* theme variables; do not mask overflow with clipping or scroll containers"),
     height: z.number().finite().optional().describe(${JSON.stringify(SHOW_WIDGET_HEIGHT_DESCRIPTION)}),
-    textFallback: z.string().max(${SHOW_WIDGET_MAX_TEXT_FALLBACK_CHARS}).optional(),
+    textFallback: z.string().max(${SHOW_WIDGET_MAX_TEXT_FALLBACK_CHARS}).optional().describe("Optional chat preview shown on Slack or Discord with a link to open the rendered widget"),
   },
   execute: (args, context) => invoke("show_widget", args, context),
 }

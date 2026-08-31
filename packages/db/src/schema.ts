@@ -79,6 +79,7 @@ import type {
   UserRole,
   RepositoryAutomationSignals,
   McpToolAccessMode,
+  FastAgentParent,
   FastAgentSurface,
   ReasoningEffort,
   SessionStatus,
@@ -3118,6 +3119,48 @@ export const fastAgentConversations = pgTable(
 );
 
 /**
+ * fast_agent_parent_events
+ *
+ * Durable admission queue for lifecycle events returning from delegated tasks
+ * to their Fast parent conversation. Producers persist and acknowledge these
+ * rows without waiting for the parent turn lock; the BullMQ drainer later
+ * processes each conversation in creation order under one active-turn lock.
+ */
+export const fastAgentParentEvents = pgTable(
+  'fast_agent_parent_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    eventKey: text('event_key').notNull().unique(),
+    parent: jsonb('parent').notNull().$type<FastAgentParent>(),
+    event: jsonb('event').notNull().$type<Record<string, unknown>>(),
+    retryTaskStartRunId: integer('retry_task_start_run_id').references(
+      () => taskRuns.id,
+      { onDelete: 'set null' },
+    ),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    deliveredAt: timestamp('delivered_at'),
+    discardedAt: timestamp('discarded_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('fast_agent_parent_events_pending_idx').on(
+      table.conversationId,
+      table.deliveredAt,
+      table.discardedAt,
+      table.createdAt,
+    ),
+    index('fast_agent_parent_events_retry_run_idx').on(
+      table.retryTaskStartRunId,
+    ),
+  ],
+);
+
+/**
  * fast_agent_messages
  *
  * Forward-only canonical Fast/OpenCode transcript events. During the N-1
@@ -3252,9 +3295,24 @@ export const fastAgentConversationsRelations = relations(
       references: [users.id],
     }),
     messages: many(fastAgentMessages),
+    parentEvents: many(fastAgentParentEvents),
     providerMessages: many(fastAgentProviderMessages),
     prFeedbackDeliveries: many(fastAgentPrFeedbackDeliveries),
     session: one(sessions),
+  }),
+);
+
+export const fastAgentParentEventsRelations = relations(
+  fastAgentParentEvents,
+  ({ one }) => ({
+    conversation: one(fastAgentConversations, {
+      fields: [fastAgentParentEvents.conversationId],
+      references: [fastAgentConversations.id],
+    }),
+    retryTaskStartRun: one(taskRuns, {
+      fields: [fastAgentParentEvents.retryTaskStartRunId],
+      references: [taskRuns.id],
+    }),
   }),
 );
 

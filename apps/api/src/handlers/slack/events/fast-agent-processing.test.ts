@@ -1,8 +1,12 @@
 const mocks = vi.hoisted(() => ({
   acquireLock: vi.fn(),
+  acquireRootBindingLock: vi.fn(),
   hasSession: vi.fn(),
   releaseLock: vi.fn(),
+  releaseRootBindingLock: vi.fn(),
   answerQuestion: vi.fn(),
+  findConversation: vi.fn(),
+  getSession: vi.fn(),
   postThreadMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
 }));
@@ -25,6 +29,7 @@ vi.mock('@roomote/redis', async (importOriginal) => {
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  fastAgentConversationRepository: { findById: mocks.findConversation },
   extractPromptTextAttachments: vi.fn(
     async (inputs: Array<{ filename: string; bytes: Uint8Array }>) => ({
       attachmentTexts: inputs.map(
@@ -35,9 +40,12 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     }),
   ),
   hasFastAgentSession: mocks.hasSession,
-  getOrCreateFastAgentSession: vi
-    .fn()
-    .mockResolvedValue({ id: 'fast-session-1' }),
+  getOrCreateFastAgentSession: mocks.getSession,
+}));
+
+vi.mock('@roomote/slack', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/slack')>()),
+  acquireSlackFastRootBindingLock: mocks.acquireRootBindingLock,
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({
@@ -72,12 +80,30 @@ const processFastAgentMessage = (
   params: Omit<ProcessFastAgentMessageParams, 'launchTask'>,
 ) => processFastAgentMessageImpl({ ...params, launchTask });
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+  return { promise, resolve };
+}
+
 describe('processFastAgentMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
+    mocks.acquireRootBindingLock.mockResolvedValue(
+      mocks.releaseRootBindingLock,
+    );
     mocks.hasSession.mockResolvedValue(false);
+    mocks.getSession.mockImplementation(
+      async ({ conversation }: { conversation: unknown }) => ({
+        id: 'fast-session-1',
+        conversation,
+      }),
+    );
     mocks.releaseLock.mockResolvedValue(undefined);
+    mocks.releaseRootBindingLock.mockResolvedValue(undefined);
     mocks.postThreadMessage.mockResolvedValue({
       status: 'posted',
       messageId: '101.001',
@@ -202,6 +228,84 @@ describe('processFastAgentMessage', () => {
         ],
       }),
     );
+  });
+
+  it('resumes the canonical Fast session bound to a delayed Slack root', async () => {
+    const canonicalConversation = {
+      surface: 'slack' as const,
+      workspaceId: 'T123',
+      conversationId: 'automation-1:occurrence-1',
+      replyTarget: { channelId: 'C123', threadId: '100.001' },
+    };
+    mocks.hasSession.mockResolvedValue(true);
+    mocks.getSession.mockResolvedValue({
+      id: 'fast-session-1',
+      conversation: canonicalConversation,
+    });
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: 'continue',
+        thread_ts: '100.001',
+        ts: '100.002',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+    });
+
+    expect(mocks.acquireLock).toHaveBeenCalledWith({
+      conversation: canonicalConversation,
+    });
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ conversation: canonicalConversation }),
+    );
+  });
+
+  it('waits for root binding before resolving an immediate reply session', async () => {
+    const bindingLock = createDeferred<() => Promise<void>>();
+    mocks.acquireRootBindingLock.mockReturnValueOnce(bindingLock.promise);
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    const processing = processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: 'continue',
+        thread_ts: '100.001',
+        ts: '100.002',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.acquireRootBindingLock).toHaveBeenCalledOnce();
+    });
+    expect(mocks.getSession).not.toHaveBeenCalled();
+
+    bindingLock.resolve(mocks.releaseRootBindingLock);
+    await processing;
+
+    expect(mocks.getSession).toHaveBeenCalledOnce();
   });
 
   it('lets the Fast model answer a bare !fast invocation', async () => {

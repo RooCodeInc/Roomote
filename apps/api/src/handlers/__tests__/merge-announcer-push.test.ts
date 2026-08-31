@@ -193,6 +193,196 @@ describe('Merge announcer push normalization', () => {
     });
   });
 
+  it.each([
+    'fix: keep Session artifacts in execution details (#1896)',
+    'Merge pull request #1896 from RooCodeInc/fix/session-artifacts',
+  ])(
+    'uses a verified PR number from the tip commit while GitHub associations settle: %s',
+    async (message) => {
+      const payload = {
+        ref: 'refs/heads/develop',
+        after: 'd17604dc8bbca8a20ebe1d68f722f72889c95c5e',
+        installation: { id: 99 },
+        repository: {
+          id: 1,
+          full_name: 'RooCodeInc/Roomote',
+          default_branch: 'develop',
+        },
+        commits: [
+          {
+            id: 'd17604dc8bbca8a20ebe1d68f722f72889c95c5e',
+            message,
+          },
+        ],
+      };
+      const event = normalizeGitHubPush(payload)!;
+      const listPullRequestsAssociatedWithCommit = vi.fn().mockResolvedValue({
+        data: [],
+      });
+      const get = vi.fn().mockResolvedValue({
+        data: {
+          number: 1896,
+          html_url: 'https://github.com/RooCodeInc/Roomote/pull/1896',
+          title: '[Improve] Keep Session artifacts in execution details',
+          body: 'Open artifacts inside the execution-details panel without leaving the Session.',
+          merge_commit_sha: payload.after,
+          base: { ref: 'develop' },
+          changed_files: 2,
+          additions: 271,
+          deletions: 100,
+        },
+      });
+      const listFiles = vi.fn().mockResolvedValue({
+        data: [
+          {
+            filename:
+              'apps/web/src/app/(sandbox)/sessions/[sessionId]/SessionWorkspace.tsx',
+            status: 'modified',
+            additions: 92,
+            deletions: 9,
+          },
+        ],
+      });
+      const getInstallationOctokit = vi.fn().mockResolvedValue({
+        rest: {
+          repos: { listPullRequestsAssociatedWithCommit },
+          pulls: { get, listFiles },
+        },
+      });
+
+      const enriched = await enrichGitHubMergeAnnouncerEvent(payload, event, {
+        getInstallationOctokit: getInstallationOctokit as never,
+      });
+
+      expect(listPullRequestsAssociatedWithCommit).toHaveBeenCalledOnce();
+      expect(get).toHaveBeenCalledWith({
+        owner: 'RooCodeInc',
+        repo: 'Roomote',
+        pull_number: 1896,
+      });
+      expect(enriched.pullRequest).toEqual({
+        number: 1896,
+        url: 'https://github.com/RooCodeInc/Roomote/pull/1896',
+        title: '[Improve] Keep Session artifacts in execution details',
+        body: 'Open artifacts inside the execution-details panel without leaving the Session.',
+        changedFileCount: 2,
+        additions: 271,
+        deletions: 100,
+        changedFiles: [
+          {
+            path: 'apps/web/src/app/(sandbox)/sessions/[sessionId]/SessionWorkspace.tsx',
+            status: 'modified',
+            additions: 92,
+            deletions: 9,
+          },
+        ],
+      });
+    },
+  );
+
+  it('rejects a PR number from the tip commit when its merge SHA does not match', async () => {
+    const payload = {
+      ref: 'refs/heads/main',
+      after: 'abcdef1234567890',
+      installation: { id: 99 },
+      repository: { id: 1, full_name: 'acme/widgets' },
+      commits: [{ id: 'abcdef1234567890', message: 'Ship widget (#7)' }],
+    };
+    const event = normalizeGitHubPush(payload)!;
+    const getInstallationOctokit = vi.fn().mockResolvedValue({
+      rest: {
+        repos: {
+          listPullRequestsAssociatedWithCommit: vi
+            .fn()
+            .mockResolvedValue({ data: [] }),
+        },
+        pulls: {
+          get: vi.fn().mockResolvedValue({
+            data: {
+              merge_commit_sha: 'different-sha',
+              base: { ref: 'main' },
+            },
+          }),
+          listFiles: vi.fn(),
+        },
+      },
+    });
+
+    await expect(
+      enrichGitHubMergeAnnouncerEvent(payload, event, {
+        getInstallationOctokit: getInstallationOctokit as never,
+      }),
+    ).resolves.toBe(event);
+  });
+
+  it('does not infer a PR number when GitHub returns associated candidates', async () => {
+    const payload = {
+      ref: 'refs/heads/main',
+      after: 'abcdef1234567890',
+      installation: { id: 99 },
+      repository: { id: 1, full_name: 'acme/widgets' },
+      commits: [{ id: 'abcdef1234567890', message: 'Ship widget (#9)' }],
+    };
+    const event = normalizeGitHubPush(payload)!;
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        merge_commit_sha: 'different-sha',
+        base: { ref: 'main' },
+      },
+    });
+    const getInstallationOctokit = vi.fn().mockResolvedValue({
+      rest: {
+        repos: {
+          listPullRequestsAssociatedWithCommit: vi.fn().mockResolvedValue({
+            data: [{ number: 7, base: { ref: 'main' } }],
+          }),
+        },
+        pulls: { get, listFiles: vi.fn() },
+      },
+    });
+
+    await expect(
+      enrichGitHubMergeAnnouncerEvent(payload, event, {
+        getInstallationOctokit: getInstallationOctokit as never,
+      }),
+    ).resolves.toBe(event);
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(get).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'widgets',
+      pull_number: 7,
+    });
+  });
+
+  it('does not infer a PR number from a commit other than the pushed tip', async () => {
+    const payload = {
+      ref: 'refs/heads/main',
+      after: 'abcdef1234567890',
+      installation: { id: 99 },
+      repository: { id: 1, full_name: 'acme/widgets' },
+      commits: [{ id: 'different-sha', message: 'Ship widget (#7)' }],
+    };
+    const event = normalizeGitHubPush(payload)!;
+    const get = vi.fn();
+    const getInstallationOctokit = vi.fn().mockResolvedValue({
+      rest: {
+        repos: {
+          listPullRequestsAssociatedWithCommit: vi
+            .fn()
+            .mockResolvedValue({ data: [] }),
+        },
+        pulls: { get, listFiles: vi.fn() },
+      },
+    });
+
+    await expect(
+      enrichGitHubMergeAnnouncerEvent(payload, event, {
+        getInstallationOctokit: getInstallationOctokit as never,
+      }),
+    ).resolves.toBe(event);
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it('keeps commit-only context when GitHub PR enrichment fails', async () => {
     const payload = {
       ref: 'refs/heads/main',

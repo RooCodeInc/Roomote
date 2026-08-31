@@ -145,12 +145,16 @@ describe('background automation registry', () => {
   });
 
   it('registers Merge announcer as a provider-neutral push automation with cross-provider delivery', () => {
+    expect(
+      getTriggerableBackgroundAutomationDescriptorByKey('announcer')?.slackIcon,
+    ).toBe('git-merge');
+
     const descriptor =
       getTriggerableBackgroundAutomationDescriptorByKey('merge_announcer');
 
     expect(descriptor).toMatchObject({
       label: 'Merge announcer',
-      slackIcon: 'git-commit-vertical',
+      slackIcon: 'git-merge',
       scheduleModes: ['off', 'daily'],
       usesManagerChannel: true,
       supportedCommunicationProviders: [

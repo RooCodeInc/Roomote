@@ -89,6 +89,17 @@ export function buildFastSessionUrl(
   return url.toString();
 }
 
+export function buildSelectedTaskSessionUrl(params: {
+  taskUrl: string;
+  sessionId: string;
+  taskId: string;
+}): string {
+  const url = new URL(params.taskUrl);
+  url.pathname = `/sessions/${params.sessionId}`;
+  url.searchParams.set('task', params.taskId);
+  return url.toString();
+}
+
 /**
  * The Fast-session variant of the task thread-reply footer: always the plain
  * "Reply or use the web app." shape, linking to the session view.

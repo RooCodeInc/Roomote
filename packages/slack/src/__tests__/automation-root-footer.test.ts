@@ -77,6 +77,15 @@ describe('refreshAutomationRootFooter', () => {
               child_blocks: [
                 {
                   type: 'section',
+                  block_id: 'roomote_automation_result_settings',
+                  text: { type: 'plain_text', text: '\u200B' },
+                  accessory: {
+                    type: 'button',
+                    action_id: 'late_bound_automation_configure',
+                  },
+                },
+                {
+                  type: 'section',
                   text: { type: 'mrkdwn', text: 'Finished.' },
                 },
                 {
@@ -134,6 +143,11 @@ describe('refreshAutomationRootFooter', () => {
         id?.includes('automation_configure'),
       ),
     ).toEqual(['late_bound_automation_configure']);
+    expect(blocks[0]?.child_blocks).not.toContainEqual(
+      expect.objectContaining({
+        block_id: 'roomote_automation_result_settings',
+      }),
+    );
     expect(
       actionIds.filter((id: string | undefined) => id?.includes('view_pr')),
     ).toHaveLength(24);

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   postMessageDetailed: vi.fn(),
   updateMessage: vi.fn(),
   settleSlackLiveTaskCardForRun: vi.fn(),
+  taskUrl: 'https://roomote.example/task/task-1',
 }));
 
 // Contract-faithful stand-in for the cloud-agents launcher (hook ordering is
@@ -39,7 +40,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
         taskUrl?: string;
       }) => Promise<void>;
     }) => {
-      const taskUrl = 'https://roomote.example/task/task-1';
+      const taskUrl = mocks.taskUrl;
       await input.postKickoff({ taskId: 'task-1', taskUrl });
       await afterKickoff?.(
         { id: 42, taskId: 'task-1' },
@@ -111,6 +112,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     mocks.setSlackLiveTaskStreamData.mockResolvedValue(undefined);
     mocks.updateMessage.mockResolvedValue(true);
     mocks.settleSlackLiveTaskCardForRun.mockResolvedValue(undefined);
+    mocks.taskUrl = 'https://roomote.example/task/task-1';
   });
 
   const taskLinkFallback = {
@@ -193,6 +195,8 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
 
   it('links the card to the session when the task already has one', async () => {
     mocks.getSessionForTask.mockResolvedValue({ id: 'session-1' });
+    mocks.taskUrl =
+      'https://roomote.example/task/task-1?utm_source=slack&utm_medium=link&utm_campaign=fast-delegation';
 
     await createLauncher()({
       prompt: 'Add a regression test',
@@ -201,7 +205,8 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       postKickoff: vi.fn(),
     });
 
-    const sessionUrl = 'https://roomote.example/sessions/session-1?task=task-1';
+    const sessionUrl =
+      'https://roomote.example/sessions/session-1?utm_source=slack&utm_medium=link&utm_campaign=fast-delegation&task=task-1';
     expect(mocks.postMessageDetailed).toHaveBeenCalledWith(
       expect.objectContaining({
         blocks: [
@@ -294,7 +299,10 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
   });
 
   it('still launches the task and posts the task link when the card path throws', async () => {
+    mocks.getSessionForTask.mockResolvedValue({ id: 'session-1' });
     mocks.getSlackLiveTaskStreamData.mockRejectedValue(new Error('redis down'));
+    mocks.taskUrl =
+      'https://roomote.example/task/task-1?utm_source=slack&utm_medium=link&utm_campaign=fast-delegation';
 
     await expect(
       createLauncher()({
@@ -305,7 +313,18 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       }),
     ).resolves.toMatchObject({ success: true, taskId: 'task-1' });
     expect(mocks.postMessageDetailed).not.toHaveBeenCalled();
-    expect(mocks.postMessage).toHaveBeenCalledWith(taskLinkFallback);
+    const sessionUrl =
+      'https://roomote.example/sessions/session-1?utm_source=slack&utm_medium=link&utm_campaign=fast-delegation&task=task-1';
+    expect(mocks.postMessage).toHaveBeenCalledWith({
+      ...taskLinkFallback,
+      text: `Open in Roomote: ${sessionUrl}`,
+      blocks: [
+        {
+          type: 'markdown',
+          text: `[Open in Roomote](${sessionUrl})`,
+        },
+      ],
+    });
     expect(mocks.setSlackLiveTaskStreamData).not.toHaveBeenCalled();
   });
 

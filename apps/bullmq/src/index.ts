@@ -50,6 +50,7 @@ import { startActivePrReviewFollowUpQueue } from './active-pr-review-follow-up-q
 import { startPullRequestMergeabilityCheckQueue } from './pull-request-mergeability-check-queue';
 import { startTaskSleepQueue } from './task-sleep-queue';
 import { startAutomationRecommendationsQueue } from './automation-recommendations-queue';
+import { startFastAgentParentEventQueue } from './fast-agent-parent-event-queue';
 
 // Resolve auto-generated auth keypairs before any queue worker starts so
 // scheduled jobs that sign tokens observe the resolved keys.
@@ -187,6 +188,11 @@ const {
   worker: pullRequestMergeabilityCheckWorker,
   queueEvents: pullRequestMergeabilityCheckQueueEvents,
 } = startPullRequestMergeabilityCheckQueue();
+const {
+  queue: fastAgentParentEventQueue,
+  worker: fastAgentParentEventWorker,
+  queueEvents: fastAgentParentEventQueueEvents,
+} = await startFastAgentParentEventQueue();
 
 const serverAdapter = new HonoAdapter(serveStatic);
 
@@ -226,6 +232,7 @@ createBullBoard({
     new BullMQAdapter(pullRequestMergeabilityCheckQueue, {
       readOnlyMode: false,
     }),
+    new BullMQAdapter(fastAgentParentEventQueue, { readOnlyMode: false }),
   ],
   serverAdapter,
 });
@@ -399,6 +406,9 @@ async function gracefulShutdown() {
     await pullRequestMergeabilityCheckWorker.close();
     await pullRequestMergeabilityCheckQueueEvents.close();
     await pullRequestMergeabilityCheckQueue.close();
+    await fastAgentParentEventWorker.close();
+    await fastAgentParentEventQueueEvents.close();
+    await fastAgentParentEventQueue.close();
     await discordGatewaySupervisor.stop();
     await closeRedis();
   } catch (error) {

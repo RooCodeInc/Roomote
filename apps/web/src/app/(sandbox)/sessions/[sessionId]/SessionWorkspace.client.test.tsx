@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { RunStatus } from '@roomote/types';
 import {
   act,
   fireEvent,
@@ -10,7 +11,11 @@ import {
 
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
 import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
-import { useOpenSessionTaskPanel } from './session-task-panel-context';
+import {
+  useOpenSessionTaskPanel,
+  useOpenSessionTasksPanel,
+  useSessionRunningTaskCount,
+} from './session-task-panel-context';
 
 const {
   useMediaQueryMock,
@@ -18,12 +23,20 @@ const {
   fastTaskQueryState,
   searchParamsState,
   routerReplaceMock,
+  artifactQueryState,
+  artifactQueryInputs,
 } = vi.hoisted(() => ({
   useMediaQueryMock: vi.fn(),
   sessionQueryState: { data: null as unknown },
   fastTaskQueryState: { data: null as unknown },
   searchParamsState: { value: '' },
   routerReplaceMock: vi.fn(),
+  artifactQueryState: { dataByPath: {} as Record<string, unknown> },
+  artifactQueryInputs: [] as Array<{
+    taskId: string;
+    path: string;
+    version?: number;
+  }>,
 }));
 
 vi.mock('usehooks-ts', () => ({
@@ -67,7 +80,33 @@ vi.mock('@/trpc/client', () => ({
         }),
       },
     },
+    artifacts: {
+      byPath: {
+        queryOptions: (
+          input: { taskId: string; path: string; version?: number },
+          options?: Record<string, unknown>,
+        ) => ({
+          queryKey: ['artifacts', 'byPath', input],
+          queryFn: async () => {
+            artifactQueryInputs.push(input);
+            return (
+              artifactQueryState.dataByPath[`${input.taskId}:${input.path}`] ??
+              artifactQueryState.dataByPath[input.path]
+            );
+          },
+          ...options,
+        }),
+      },
+    },
   }),
+}));
+
+vi.mock('@/components/tasks/ArtifactViewerContent', () => ({
+  ArtifactViewerContent: ({
+    artifact,
+  }: {
+    artifact: { path: string } | null;
+  }) => <div>Artifact preview: {artifact?.path}</div>,
 }));
 
 vi.mock('./NestedTaskSidePanel', () => ({
@@ -105,6 +144,10 @@ const session: SessionInfo = {
   model: 'model-1',
   reasoningEffort: null,
   inferenceCostMicroUsd: 1_000_000,
+  inferenceCostBreakdown: {
+    directInferenceCostMicroUsd: 1_000_000,
+    tasks: [],
+  },
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   status: 'needs_input',
   tasks: [],
@@ -153,9 +196,7 @@ function renderWorkspace({
   children?: ReactNode;
   sessionOverride?: Partial<SessionInfo>;
   queriedTasks?: SessionInfo['tasks'];
-  queriedFastTasks?: Array<
-    Pick<SessionInfo['tasks'][number], 'taskId' | 'title'>
-  >;
+  queriedFastTasks?: NonNullable<SessionInfo['taskCards']>;
   selectedTaskId?: string;
   searchParams?: string;
 }) {
@@ -200,6 +241,7 @@ function renderWorkspace({
 
   return {
     ...result,
+    queryClient,
     resizeToMobile() {
       mediaQuery.matches = true;
       act(() =>
@@ -219,9 +261,79 @@ function OpenNestedTask() {
   );
 }
 
+function RunningTaskCount() {
+  const count = useSessionRunningTaskCount();
+  return <output aria-label="Running task count">{count}</output>;
+}
+
+function OpenTasksPanel() {
+  const openTasksPanel = useOpenSessionTasksPanel();
+  return (
+    <button type="button" onClick={openTasksPanel ?? undefined}>
+      Open tasks
+    </button>
+  );
+}
+
 describe('SessionWorkspace', () => {
   beforeEach(() => {
     routerReplaceMock.mockClear();
+    artifactQueryInputs.length = 0;
+    artifactQueryState.dataByPath = {
+      'tmp/capture-visual-proof/sidebar-alignment.png': {
+        id: 'artifact-image',
+        taskId: 'task-1',
+        path: 'tmp/capture-visual-proof/sidebar-alignment.png',
+        version: 1,
+        artifactType: 'visual-proof',
+        contentType: 'image/png',
+        size: 1024,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        downloadUrl: '/api/artifacts/artifact-image/download',
+      },
+      'plans/sidebar.md': {
+        id: 'artifact-file',
+        taskId: 'task-1',
+        path: 'plans/sidebar.md',
+        version: 1,
+        artifactType: 'plan',
+        contentType: 'text/markdown',
+        size: 512,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        downloadUrl: '/api/artifacts/artifact-file/download',
+        content: '# Sidebar',
+      },
+      'recordings/session-walkthrough.webm': {
+        id: 'artifact-video',
+        taskId: 'task-1',
+        path: 'recordings/session-walkthrough.webm',
+        version: 1,
+        artifactType: 'visual-proof',
+        contentType: 'video/webm',
+        size: 2048,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        downloadUrl: '/api/artifacts/artifact-video/download',
+      },
+    };
+  });
+
+  it('orders panel controls as tasks, artifacts, then session info', () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    const tasks = screen.getByRole('button', { name: 'Tasks' });
+    const artifacts = screen.getByRole('button', { name: 'Artifacts' });
+    const sessionInfo = screen.getByRole('button', { name: 'Session info' });
+
+    expect(tasks.compareDocumentPosition(artifacts)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(artifacts.compareDocumentPosition(sessionInfo)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(artifacts.querySelector('svg')).toHaveClass('lucide-layout-grid');
   });
 
   it('matches the task sidebar replacement behavior and controls on mobile', () => {
@@ -274,6 +386,46 @@ describe('SessionWorkspace', () => {
     expect(
       screen.getByRole('button', { name: 'Close session info' }),
     ).toBeInTheDocument();
+  });
+
+  it('shows direct and per-task inference costs, including zero-cost tasks', () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: {
+        inferenceCostMicroUsd: 3_500_000,
+        inferenceCostBreakdown: {
+          directInferenceCostMicroUsd: 1_000_000,
+          tasks: [
+            {
+              taskId: 'task-costly',
+              title: 'Implement session totals',
+              inferenceCostMicroUsd: 2_500_000,
+            },
+            {
+              taskId: 'task-zero',
+              title: 'Zero-cost audit',
+              inferenceCostMicroUsd: 0,
+            },
+          ],
+        },
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
+
+    const costTrigger = screen.getByRole('button', {
+      name: 'Show inference cost breakdown',
+    });
+    expect(costTrigger).toHaveTextContent('3.50');
+    fireEvent.click(costTrigger);
+
+    expect(screen.getByText('Inference cost breakdown')).toBeInTheDocument();
+    expect(screen.getByText('Direct session')).toBeInTheDocument();
+    expect(screen.getByText('Implement session totals')).toBeInTheDocument();
+    expect(screen.getByText('Zero-cost audit')).toBeInTheDocument();
+    expect(screen.getByText('$1.00')).toBeInTheDocument();
+    expect(screen.getByText('$2.50')).toBeInTheDocument();
+    expect(screen.getByText('$0.00')).toBeInTheDocument();
+    expect(screen.getByText('$3.50')).toBeInTheDocument();
   });
 
   it.each([false, true])(
@@ -377,14 +529,15 @@ describe('SessionWorkspace', () => {
     },
   );
 
-  it('shows the Task artifact empty state in execution details', () => {
+  it('omits the Artifacts section from execution details when empty', () => {
     renderWorkspace({
       isMobile: false,
       selectedTaskId: singleTask.taskId,
       sessionOverride: { tasks: [singleTask] },
     });
 
-    expect(screen.getByText('No artifacts in this task yet.')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Artifacts' })).toBeNull();
+    expect(screen.queryByText('No artifacts in this task yet.')).toBeNull();
   });
 
   it('disables the Tasks panel button until the session has a task', () => {
@@ -411,98 +564,260 @@ describe('SessionWorkspace', () => {
     expect(screen.getByText('Nested panel task-1')).toBeInTheDocument();
   });
 
-  it('groups latest artifact previews and file links in execution details', () => {
+  it.each([false, true])(
+    'groups artifacts and opens image and file previews inside execution details when isMobile=%s',
+    async (isMobile) => {
+      renderWorkspace({
+        isMobile,
+        selectedTaskId: 'task-1',
+        sessionOverride: {
+          tasks: [
+            {
+              taskId: 'task-1',
+              title: 'Capture sidebar proof',
+              workflow: 'standard',
+              state: 'completed',
+              repositoryName: 'RooCodeInc/Roomote',
+              latestOutput: null,
+              inferenceCostMicroUsd: 0,
+              canAccessDetails: true,
+              latestRun: null,
+              artifacts: [
+                {
+                  id: 'artifact-image',
+                  path: 'tmp/capture-visual-proof/sidebar-alignment.png',
+                  version: 2,
+                  artifactType: 'visual-proof',
+                  contentType: 'image/png',
+                  size: 1024,
+                  createdAt: new Date('2026-01-02T00:00:00.000Z'),
+                  thumbnailUrl: '/api/artifacts/artifact-image/raw?sig=test',
+                },
+                {
+                  id: 'artifact-file',
+                  path: 'plans/sidebar.md',
+                  version: 1,
+                  artifactType: 'plan',
+                  contentType: 'text/markdown',
+                  size: 512,
+                  createdAt: new Date('2026-01-01T00:00:00.000Z'),
+                },
+                {
+                  id: 'artifact-image-older',
+                  path: 'tmp/capture-visual-proof/sidebar-alignment.png',
+                  version: 1,
+                  artifactType: 'visual-proof',
+                  contentType: 'image/png',
+                  size: 1024,
+                  createdAt: new Date('2026-01-03T00:00:00.000Z'),
+                  thumbnailUrl:
+                    '/api/artifacts/artifact-image-older/raw?sig=test',
+                },
+                {
+                  id: 'artifact-video',
+                  path: 'recordings/session-walkthrough.webm',
+                  version: 1,
+                  artifactType: 'visual-proof',
+                  contentType: 'video/webm',
+                  size: 2048,
+                  createdAt: new Date('2026-01-01T00:00:00.000Z'),
+                  previewUrl: '/api/artifacts/artifact-video/raw?sig=test',
+                },
+              ],
+              pullRequests: [],
+            },
+          ],
+        },
+      });
+
+      expect(
+        screen.getByRole('heading', { name: 'Screenshots' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: 'Files' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: 'Videos' }),
+      ).toBeInTheDocument();
+
+      const imageButton = screen.getByRole('button', {
+        name: /Sidebar Alignment/,
+      });
+      const thumbnail = screen.getByRole('img', { name: 'Sidebar Alignment' });
+      expect(thumbnail).toHaveAttribute(
+        'src',
+        '/api/artifacts/artifact-image/raw?sig=test',
+      );
+      fireEvent.error(thumbnail);
+      expect(
+        screen.queryByRole('img', { name: 'Sidebar Alignment' }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Sidebar' })).toBeVisible();
+      expect(
+        screen.queryByText('tmp/capture-visual-proof/sidebar-alignment.png'),
+      ).not.toBeInTheDocument();
+      const videoPreview = screen.getByLabelText(
+        'Video preview: Session Walkthrough',
+      );
+      expect(videoPreview).toHaveAttribute(
+        'src',
+        '/api/artifacts/artifact-video/raw?sig=test',
+      );
+      fireEvent.error(videoPreview);
+      expect(
+        screen.queryByLabelText('Video preview: Session Walkthrough'),
+      ).not.toBeInTheDocument();
+
+      fireEvent.click(imageButton);
+      expect(
+        await screen.findByText(
+          'Artifact preview: tmp/capture-visual-proof/sidebar-alignment.png',
+        ),
+      ).toBeVisible();
+      expect(routerReplaceMock).not.toHaveBeenCalled();
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Back to artifacts' }),
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Sidebar' }));
+      expect(
+        await screen.findByText('Artifact preview: plans/sidebar.md'),
+      ).toBeVisible();
+      expect(routerReplaceMock).not.toHaveBeenCalled();
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Back to artifacts' }),
+      );
+      fireEvent.click(
+        screen.getByRole('button', { name: /Session Walkthrough/ }),
+      );
+      expect(
+        await screen.findByText(
+          'Artifact preview: recordings/session-walkthrough.webm',
+        ),
+      ).toBeVisible();
+      expect(routerReplaceMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('navigates to an empty session Artifacts panel and back', () => {
+    renderWorkspace({ isMobile: false });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Artifacts' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('No artifacts in this session yet.')).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close artifacts' }));
+    expect(screen.queryByText('No artifacts in this session yet.')).toBeNull();
+  });
+
+  it('aggregates latest artifacts per task and preserves duplicate paths across tasks', async () => {
+    const sharedPath = 'reports/result.md';
+    const firstTask = {
+      ...singleTask,
+      title: 'First execution',
+      artifacts: [
+        {
+          id: 'first-latest',
+          path: sharedPath,
+          version: 2,
+          artifactType: 'plan' as const,
+          contentType: 'text/markdown',
+          size: 200,
+          createdAt: new Date('2026-01-03T00:00:00.000Z'),
+        },
+        {
+          id: 'first-older',
+          path: sharedPath,
+          version: 1,
+          artifactType: 'plan' as const,
+          contentType: 'text/markdown',
+          size: 100,
+          createdAt: new Date('2026-01-04T00:00:00.000Z'),
+        },
+      ],
+    };
+    const secondTask = {
+      ...singleTask,
+      taskId: 'task-2',
+      title: 'Second execution',
+      artifacts: [
+        {
+          id: 'second-latest',
+          path: sharedPath,
+          version: 1,
+          artifactType: 'plan' as const,
+          contentType: 'text/markdown',
+          size: 300,
+          createdAt: new Date('2026-01-02T00:00:00.000Z'),
+        },
+      ],
+    };
+    artifactQueryState.dataByPath[`task-1:${sharedPath}`] = {
+      id: 'first-latest',
+      taskId: 'task-1',
+      path: sharedPath,
+      version: 2,
+      artifactType: 'plan',
+      contentType: 'text/markdown',
+      size: 200,
+      createdAt: new Date('2026-01-03T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/first-latest/download',
+    };
+    artifactQueryState.dataByPath[`task-2:${sharedPath}`] = {
+      id: 'second-latest',
+      taskId: 'task-2',
+      path: sharedPath,
+      version: 1,
+      artifactType: 'plan',
+      contentType: 'text/markdown',
+      size: 300,
+      createdAt: new Date('2026-01-02T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/second-latest/download',
+    };
+
     renderWorkspace({
       isMobile: false,
-      selectedTaskId: 'task-1',
-      sessionOverride: {
-        tasks: [
-          {
-            taskId: 'task-1',
-            title: 'Capture sidebar proof',
-            workflow: 'standard',
-            state: 'completed',
-            repositoryName: 'RooCodeInc/Roomote',
-            latestOutput: null,
-            inferenceCostMicroUsd: 0,
-            canAccessDetails: true,
-            latestRun: null,
-            artifacts: [
-              {
-                id: 'artifact-image',
-                path: 'tmp/capture-visual-proof/sidebar-alignment.png',
-                artifactType: 'visual-proof',
-                contentType: 'image/png',
-                thumbnailUrl: '/api/artifacts/artifact-image/raw?sig=test',
-              },
-              {
-                id: 'artifact-file',
-                path: 'plans/sidebar.md',
-                artifactType: 'plan',
-                contentType: 'text/markdown',
-              },
-              {
-                id: 'artifact-image-older',
-                path: 'tmp/capture-visual-proof/sidebar-alignment.png',
-                artifactType: 'visual-proof',
-                contentType: 'image/png',
-                thumbnailUrl:
-                  '/api/artifacts/artifact-image-older/raw?sig=test',
-              },
-              {
-                id: 'artifact-video',
-                path: 'recordings/session-walkthrough.webm',
-                artifactType: 'visual-proof',
-                contentType: 'video/webm',
-                previewUrl: '/api/artifacts/artifact-video/raw?sig=test',
-              },
-            ],
-            pullRequests: [],
-          },
-        ],
-      },
+      sessionOverride: { tasks: [firstTask, secondTask] },
     });
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
 
     expect(
-      screen.getByRole('heading', { name: 'Screenshots' }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Files' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Videos' })).toBeInTheDocument();
+      screen.getByRole('button', {
+        name: 'Open Result from First execution',
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', {
+        name: 'Open Result from Second execution',
+      }),
+    ).toBeVisible();
+    expect(screen.getAllByText('Result')).toHaveLength(2);
 
-    const imageLink = screen.getByRole('link', {
-      name: /Sidebar Alignment/,
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Open Result from First execution',
+      }),
+    );
+    expect(
+      await screen.findByText(`Artifact preview: ${sharedPath}`),
+    ).toBeVisible();
+    expect(artifactQueryInputs).toContainEqual({
+      taskId: 'task-1',
+      path: sharedPath,
+      version: 2,
     });
-    expect(imageLink).toHaveAttribute(
-      'href',
-      '/task/task-1/artifacts/tmp%2Fcapture-visual-proof%2Fsidebar-alignment.png?returnTo=%2Fsessions%2Fsession-1%3Ftask%3Dtask-1',
-    );
-    const thumbnail = screen.getByRole('img', { name: 'Sidebar Alignment' });
-    expect(thumbnail).toHaveAttribute(
-      'src',
-      '/api/artifacts/artifact-image/raw?sig=test',
-    );
-    fireEvent.error(thumbnail);
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to artifacts' }));
     expect(
-      screen.queryByRole('img', { name: 'Sidebar Alignment' }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Sidebar' })).toHaveAttribute(
-      'href',
-      '/task/task-1/artifacts/plans%2Fsidebar.md?returnTo=%2Fsessions%2Fsession-1%3Ftask%3Dtask-1',
-    );
-    expect(
-      screen.queryByText('tmp/capture-visual-proof/sidebar-alignment.png'),
-    ).not.toBeInTheDocument();
-    const videoPreview = screen.getByLabelText(
-      'Video preview: Session Walkthrough',
-    );
-    expect(videoPreview).toHaveAttribute(
-      'src',
-      '/api/artifacts/artifact-video/raw?sig=test',
-    );
-    fireEvent.error(videoPreview);
-    expect(
-      screen.queryByLabelText('Video preview: Session Walkthrough'),
-    ).not.toBeInTheDocument();
+      screen.getByRole('button', {
+        name: 'Open Result from Second execution',
+      }),
+    ).toBeVisible();
   });
 
   it('enables and populates the Tasks panel from refreshed session tasks', async () => {
@@ -535,6 +850,119 @@ describe('SessionWorkspace', () => {
         name: 'View coding task: Refreshed coding task',
       }),
     ).toBeInTheDocument();
+  });
+
+  it('opens the Tasks panel from transcript context', async () => {
+    renderWorkspace({
+      isMobile: false,
+      children: <OpenTasksPanel />,
+      sessionOverride: { taskSource: 'fast', taskCards: [] },
+      queriedFastTasks: [
+        {
+          taskId: 'task-2',
+          title: 'Running coding task',
+          latestRun: {
+            status: RunStatus.Running,
+            taskPhase: 'running',
+          },
+          artifacts: [],
+        },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Tasks' })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open tasks' }));
+
+    expect(
+      screen.getByRole('button', {
+        name: 'View coding task: Running coding task',
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('populates the Artifacts panel from refreshed Fast-session tasks', async () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { taskSource: 'fast', taskCards: [] },
+      queriedFastTasks: [
+        {
+          taskId: 'fast-task-1',
+          title: 'Fast execution',
+          latestRun: null,
+          artifacts: [
+            {
+              id: 'fast-artifact-1',
+              path: 'reports/fast-result.md',
+              version: 1,
+              artifactType: 'plan',
+              contentType: 'text/markdown',
+              size: 200,
+              createdAt: new Date('2026-01-02T00:00:00.000Z'),
+            },
+          ],
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'Open Fast Result from Fast execution',
+      }),
+    ).toBeVisible();
+    expect(screen.queryByText('No artifacts in this session yet.')).toBeNull();
+  });
+
+  it('counts only canonically running tasks and updates when they finish', async () => {
+    const task = (
+      taskId: string,
+      status: RunStatus,
+      taskPhase: string | null,
+    ): NonNullable<SessionInfo['taskCards']>[number] => ({
+      taskId,
+      title: taskId,
+      latestRun: {
+        status,
+        taskPhase,
+      },
+      artifacts: [],
+    });
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      children: <RunningTaskCount />,
+      sessionOverride: { taskSource: 'fast', taskCards: [] },
+      queriedFastTasks: [
+        task('booting', RunStatus.Pending, null),
+        task('working', RunStatus.Running, 'running'),
+        task('waiting', RunStatus.Running, 'waiting_for_user_input'),
+        task('finished', RunStatus.Completed, null),
+      ],
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('status', { name: 'Running task count' }),
+      ).toHaveTextContent('2'),
+    );
+
+    act(() => {
+      queryClient.setQueryData(
+        ['fastSessions', 'tasks', session.id],
+        [
+          task('booting', RunStatus.Completed, null),
+          task('working', RunStatus.Idle, 'waiting_for_prompt'),
+        ],
+      );
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('status', { name: 'Running task count' }),
+      ).toHaveTextContent('0'),
+    );
   });
 
   it('opens delegated tasks in the existing session side-panel slot', () => {

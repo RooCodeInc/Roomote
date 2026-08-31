@@ -29,6 +29,10 @@ import {
   isBrainEnabled,
   touchSessionActivity,
 } from '@roomote/db/server';
+import {
+  buildFastSessionUrl,
+  buildSelectedTaskSessionUrl,
+} from '@roomote/communication';
 import { Env } from '@roomote/env';
 import { z } from 'zod';
 
@@ -1179,6 +1183,14 @@ export async function answerFastAgentQuestion({
   };
 
   try {
+    adapter.activity?.start();
+  } catch (error) {
+    console.warn(
+      `[Fast Agent] Failed to start surface activity: ${formatErrorForLog(error)}`,
+    );
+  }
+
+  try {
     if (titleEligibleHumanInput) {
       turnVisibleMessages.push(
         buildUserTextMessage(normalizeThreadText(question)),
@@ -1252,6 +1264,7 @@ export async function answerFastAgentQuestion({
           visibleInTranscript: titleEligibleHumanInput,
           turnSource,
           inputKind: resolvedInputKind,
+          ...(platformEvent ? { platformEventKind } : {}),
           userId,
           ...(senderDisplayName ? { userName: senderDisplayName } : {}),
           ...(senderDisplayName ? { senderDisplayName } : {}),
@@ -1265,8 +1278,13 @@ export async function answerFastAgentQuestion({
     diagnostics.recordInitialHumanTurn(
       titleEligibleHumanInput ? userMessageResult?.initialHumanTurn : false,
     );
-    if (titleEligibleHumanInput) {
-      void refreshFastAgentSessionTitle({ sessionId: session.id, userId });
+    if (
+      titleEligibleHumanInput ||
+      (platformEvent && platformEventKind === 'automation')
+    ) {
+      void refreshFastAgentSessionTitle({ sessionId: session.id, userId }).then(
+        (title) => adapter.activity?.updateTitle?.(title),
+      );
     }
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
     const resolvedActiveTasks = [
@@ -1789,7 +1807,7 @@ export async function answerFastAgentQuestion({
                 throwIfTurnCancelled();
                 await postReply({
                   purpose: 'progress',
-                  message: result.textFallback,
+                  message: `${result.textFallback}\n\n[View widget](${buildFastSessionUrl(conversation.surface, session.id)})`,
                 });
                 completedChatReplySignatures.add(signature);
               }
@@ -1853,7 +1871,12 @@ export async function answerFastAgentQuestion({
                 );
               }
               const destinationUrl = linkedSession
-                ? `${Env.R_APP_URL}/sessions/${linkedSession.id}?task=${task.taskId}`
+                ? buildSelectedTaskSessionUrl({
+                    taskUrl:
+                      task.taskUrl ?? `${Env.R_APP_URL}/task/${task.taskId}`,
+                    sessionId: linkedSession.id,
+                    taskId: task.taskId,
+                  })
                 : task.taskUrl;
               // The delegated task's live Slack card owns the workspace
               // startup status; the kickoff is a permanent thread message
@@ -2600,6 +2623,11 @@ export async function answerFastAgentQuestion({
         });
       }
     }
+    await adapter.activity?.settle().catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to settle surface activity: ${formatErrorForLog(error)}`,
+      );
+    });
     diagnostics.finish();
   }
 }

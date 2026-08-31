@@ -27,12 +27,16 @@ vi.mock('../../llm-task-title', async (importOriginal) => ({
   generateLlmTaskTitle,
 }));
 
-async function createConversation(userId: string, conversationId: string) {
+async function createConversation(
+  userId: string,
+  conversationId: string,
+  surface: 'automation' | 'web' = 'web',
+) {
   const [conversation] = await db
     .insert(fastAgentConversations)
     .values({
       userId,
-      surface: 'web',
+      surface,
       workspaceId: userId,
       conversationId,
     })
@@ -77,6 +81,7 @@ async function insertMessage({
   ts,
   eventType,
   metadata = { visibleInTranscript: true },
+  source = 'web',
 }: {
   conversationId: string;
   eventId: string;
@@ -85,6 +90,7 @@ async function insertMessage({
   ts: number;
   eventType: `roomote_runtime.${string}`;
   metadata?: Record<string, unknown>;
+  source?: 'automation' | 'web';
 }) {
   await db.insert(fastAgentMessages).values({
     conversationId,
@@ -97,7 +103,7 @@ async function insertMessage({
     contentBlocks: [{ type: 'text', text }],
     metadata,
     payload: {},
-    source: 'web',
+    source,
   });
 }
 
@@ -119,7 +125,7 @@ describe('refreshFastAgentSessionTitle', () => {
     });
     generateLlmTaskTitle.mockResolvedValue('Rotate the API keys');
 
-    await refreshFastAgentSessionTitle({
+    const refreshedTitle = await refreshFastAgentSessionTitle({
       sessionId: conversation.id,
       userId: user.id,
     });
@@ -133,11 +139,51 @@ describe('refreshFastAgentSessionTitle', () => {
     expect(updated?.title).toBe('Rotate the API keys');
     expect(updated?.llmTitleCheckpoint).toBe(1);
     expect(session?.title).toBe('Rotate the API keys');
+    expect(refreshedTitle).toBe('Rotate the API keys');
     expect(session?.llmTitleCheckpoint).toBe(1);
     expect(generateLlmTaskTitle).toHaveBeenCalledWith({
       userId: user.id,
       taskId: null,
       messages: [{ role: 'user', text: 'How do I rotate the API keys?' }],
+    });
+  });
+
+  it('titles an automation-created session from its hidden initial prompt', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation(
+      user.id,
+      'automation-title',
+      'automation',
+    );
+    await insertMessage({
+      conversationId: conversation.id,
+      eventId: 'automation-event-1:user',
+      role: 'user',
+      text: '<platform_event>{"type":"automation_triggered","prompt":"Find actionable regressions."}</platform_event>',
+      ts: 1,
+      eventType: 'roomote_runtime.user_prompt',
+      metadata: {
+        visibleInTranscript: false,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+      },
+      source: 'automation',
+    });
+    generateLlmTaskTitle.mockResolvedValue('Find actionable regressions');
+
+    await refreshFastAgentSessionTitle({
+      sessionId: conversation.id,
+      userId: user.id,
+    });
+
+    const session = await db.query.sessions.findFirst({
+      where: eq(sessions.fastConversationId, conversation.id),
+    });
+    expect(session?.title).toBe('Find actionable regressions');
+    expect(generateLlmTaskTitle).toHaveBeenCalledWith({
+      userId: user.id,
+      taskId: null,
+      messages: [{ role: 'user', text: 'Find actionable regressions.' }],
     });
   });
 
@@ -152,15 +198,21 @@ describe('refreshFastAgentSessionTitle', () => {
       ts: 1,
       eventType: 'roomote_runtime.user_prompt',
     });
-    await insertMessage({
-      conversationId: conversation.id,
-      eventId: 'turn-2:user',
-      role: 'user',
-      text: '<platform_event>{}</platform_event>',
-      ts: 2,
-      eventType: 'roomote_runtime.user_prompt',
-      metadata: { visibleInTranscript: false },
-    });
+    for (const ts of [2, 3, 4]) {
+      await insertMessage({
+        conversationId: conversation.id,
+        eventId: `turn-${ts}:user`,
+        role: 'user',
+        text: '<platform_event>{}</platform_event>',
+        ts,
+        eventType: 'roomote_runtime.user_prompt',
+        metadata: {
+          visibleInTranscript: false,
+          turnSource: 'platform_event',
+          platformEventKind: 'delegated_task',
+        },
+      });
+    }
     await db
       .update(fastAgentConversations)
       .set({ title: 'Existing title', llmTitleCheckpoint: 1 })
