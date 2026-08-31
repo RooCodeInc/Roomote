@@ -61,6 +61,18 @@ describe('Fast explicit skill invocation parsing', () => {
     ).toBeUndefined();
   });
 
+  it('finds the verified Roomote invocation after another mention invocation', () => {
+    const message = [
+      '<@U_OTHER> $triage this is for you.',
+      'More context follows before the Roomote request.',
+      '<@ROOMOTE_ID> $handle-operations-ticket investigate the handoff',
+    ].join('\n');
+
+    expect(
+      parseFastAgentExplicitSkillInvocation(message, 'slack', 'ROOMOTE_ID'),
+    ).toBe('handle-operations-ticket');
+  });
+
   it('requires the Roomote Slack user ID for mention-based invocation', () => {
     expect(
       parseFastAgentExplicitSkillInvocation(
