@@ -7,9 +7,12 @@ vi.mock('@roomote/redis', () => ({
 }));
 
 import {
+  abortActiveFastAgentTurns,
   acquireFastAgentTurnLock,
   buildFastAgentTurnLockKey,
+  FastAgentProcessShutdownError,
   FastAgentTurnLockLostError,
+  markFastAgentShutdownCloseoutSettled,
 } from '../fast-agent-turn-lock';
 
 describe('Fast conversation turn locking', () => {
@@ -199,5 +202,70 @@ describe('Fast conversation turn locking', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('aborts active turns and rejects a lock acquired during process shutdown', async () => {
+    const releaseRedisLocks = Array.from({ length: 2 }, () =>
+      Object.assign(vi.fn().mockResolvedValue(undefined), {
+        renew: vi.fn().mockResolvedValue(true),
+        renewDetailed: vi.fn().mockResolvedValue('renewed'),
+      }),
+    );
+    let finishSecondAcquisition: ((value: unknown) => void) | undefined;
+    acquireRedisLockMock
+      .mockResolvedValueOnce(releaseRedisLocks[0])
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishSecondAcquisition = resolve;
+          }),
+      );
+    const firstLock = await acquireFastAgentTurnLock({
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'workspace-1',
+        conversationId: 'conversation-1',
+        replyTarget: { channelId: 'channel-1', threadId: 'conversation-1' },
+      },
+    });
+    const queuedAcquisition = acquireFastAgentTurnLock({
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'workspace-2',
+        conversationId: 'conversation-2',
+        replyTarget: { channelId: 'channel-2' },
+      },
+    });
+    const shutdown = new FastAgentProcessShutdownError('SIGTERM');
+
+    let shutdownSettled = false;
+    const aborting = abortActiveFastAgentTurns(shutdown).finally(() => {
+      shutdownSettled = true;
+    });
+    await vi.waitFor(() => {
+      expect(firstLock?.signal.reason).toBe(shutdown);
+    });
+    expect(shutdownSettled).toBe(false);
+    expect(releaseRedisLocks[0]).not.toHaveBeenCalled();
+    markFastAgentShutdownCloseoutSettled(firstLock!.signal);
+    await expect(aborting).resolves.toBe(1);
+    expect(releaseRedisLocks[0]).toHaveBeenCalledOnce();
+    await firstLock?.();
+    finishSecondAcquisition?.(releaseRedisLocks[1]);
+
+    await expect(queuedAcquisition).resolves.toBeNull();
+    for (const releaseRedisLock of releaseRedisLocks) {
+      expect(releaseRedisLock).toHaveBeenCalledOnce();
+    }
+    await expect(
+      acquireFastAgentTurnLock({
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'workspace-3',
+          conversationId: 'conversation-3',
+          replyTarget: { channelId: 'channel-3', threadId: 'conversation-3' },
+        },
+      }),
+    ).resolves.toBeNull();
   });
 });

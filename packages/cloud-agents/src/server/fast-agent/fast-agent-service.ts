@@ -103,6 +103,10 @@ import {
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
 import {
+  FastAgentProcessShutdownError,
+  markFastAgentShutdownCloseoutSettled,
+} from './fast-agent-turn-lock';
+import {
   captureFastAgentInferenceAttemptOutcome,
   captureFastAgentInferenceContext,
   type FastAgentPromptKind,
@@ -2540,17 +2544,45 @@ export async function answerFastAgentQuestion({
       terminalError,
     );
     if (signal?.aborted) {
-      if (canonicalConversationId) {
-        fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
-      }
-      if (inferenceRetryReply) {
-        await replaceInferenceRetryReply(
-          {
-            purpose: 'closeout',
+      const shutdownInterrupted =
+        terminalError instanceof FastAgentProcessShutdownError;
+      try {
+        if (canonicalConversationId) {
+          fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
+        }
+        if (inferenceRetryReply) {
+          await replaceInferenceRetryReply(
+            {
+              purpose: 'closeout',
+              message: INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+            },
+            true,
+          );
+        } else if (shutdownInterrupted && !closed) {
+          const reply = {
+            purpose: 'closeout' as const,
             message: INTERRUPTED_INFERENCE_RETRY_MESSAGE,
-          },
-          true,
-        );
+          };
+          try {
+            const posted = await adapter.postReply(reply);
+            diagnostics.recordVisibleReply();
+            await persistAssistantReply({
+              reply,
+              event: allocateCanonicalEvent(
+                `assistant:${nextAssistantOrdinal++}`,
+              ),
+              platformMessageId: posted?.messageId,
+            });
+          } catch (postError) {
+            console.error(
+              `[Fast Agent] Failed to post shutdown closeout: ${formatErrorForLog(postError)}`,
+            );
+          }
+        }
+      } finally {
+        if (shutdownInterrupted) {
+          markFastAgentShutdownCloseoutSettled(signal);
+        }
       }
       throw signal.reason instanceof Error ? signal.reason : error;
     }
