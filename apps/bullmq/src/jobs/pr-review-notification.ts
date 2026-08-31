@@ -766,6 +766,7 @@ export const prReviewNotificationJob = async (
     }
 
     let autoHandledText: string | null = null;
+    let autoHandledRunId: number | null = null;
     const ownsAutoHandleDispatch =
       directAutoHandleRoute !== null || deliveredToFastParent;
     if (
@@ -822,17 +823,7 @@ export const prReviewNotificationJob = async (
       );
 
       if (dispatched.outcome !== 'unavailable') {
-        if (
-          !(await completeCanonicalPrReviewAutoDispatch({
-            request: data,
-            runId: dispatched.runId,
-          }))
-        ) {
-          console.log(
-            `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its completion fence after dispatch`,
-          );
-          return;
-        }
+        autoHandledRunId = dispatched.runId;
         autoHandledText = `New review feedback — I'm on it:
 ${delivery.text}`;
         console.log(
@@ -904,19 +895,35 @@ ${delivery.text}`;
       }
     }
 
+    let autoHandledMessageTs: string | null = null;
     if (autoHandledText && delivery.route) {
-      const messageTs = await postPrReviewNotification({
+      autoHandledMessageTs = await postPrReviewNotification({
         taskId: data.taskId,
         route: delivery.route,
         text: autoHandledText,
       });
+    }
 
+    if (
+      autoHandledRunId !== null &&
+      !(await completeCanonicalPrReviewAutoDispatch({
+        request: data,
+        runId: autoHandledRunId,
+      }))
+    ) {
+      console.log(
+        `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its completion fence after dispatch`,
+      );
+      return;
+    }
+
+    if (autoHandledText && delivery.route) {
       await recordPrReviewNotificationDeliveryBestEffort({
         runId: latestJob.id,
         taskId: data.taskId,
         route: delivery.route,
         text: autoHandledText,
-        ...(messageTs ? { messageTs } : {}),
+        ...(autoHandledMessageTs ? { messageTs: autoHandledMessageTs } : {}),
       });
       await finalizePrReviewNotificationRequest(data);
       return;

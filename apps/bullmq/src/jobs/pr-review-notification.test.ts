@@ -1930,6 +1930,66 @@ describe('prReviewNotificationJob', () => {
     });
   });
 
+  it('keeps canonical auto-dispatch retryable until the continuation post succeeds', async () => {
+    const deliveryId = '67676767-6767-4767-8767-676767676767';
+    const dispatchKey = `pr-review-delivery:${deliveryId}`;
+    const request = {
+      ownershipVersion: 'canonical',
+      deliveryId,
+      notificationUnitId: '68686868-6868-4868-8868-686868686868',
+      deliveryState: 'auto_dispatch_pending',
+      targetTaskId: 'task-1',
+      actingUserId: 'user-1',
+      destinationKey: 'task-1',
+      dispatchKey,
+      deliveryIds: [deliveryId],
+      leaseToken: '69696969-6969-4969-8969-696969696969',
+      events,
+    };
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockFindAutoHandlePrReviewFeedbackPreference.mockResolvedValue({
+      taskId: 'task-1',
+      userId: 'user-1',
+      destinationKey: 'task-1',
+    });
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 99 });
+    mockStickyFooterPost
+      .mockRejectedValueOnce(new Error('slack down'))
+      .mockResolvedValueOnce('999.888');
+
+    await expect(
+      prReviewNotificationJob(makeJob(request) as never),
+    ).rejects.toThrow('slack down');
+
+    expect(mockCompleteCanonicalAutoDispatch).not.toHaveBeenCalled();
+    expect(mockRequeuePending).toHaveBeenCalled();
+
+    await prReviewNotificationJob(makeJob(request) as never);
+
+    expect(mockDispatchFollowUp).toHaveBeenCalledTimes(2);
+    expect(mockDispatchFollowUp).toHaveBeenLastCalledWith(
+      expect.objectContaining({ idempotencyKey: dispatchKey }),
+    );
+    expect(mockStickyFooterPost).toHaveBeenCalledTimes(2);
+    expect(mockCompleteCanonicalAutoDispatch).toHaveBeenCalledTimes(1);
+    expect(mockCompleteCanonicalAutoDispatch).toHaveBeenCalledWith({
+      request: expect.objectContaining({ deliveryId }),
+      runId: 99,
+    });
+    expect(mockFinalize).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps a reclaimed prompt on the interactive path', async () => {
     const deliveryId = '77777777-7777-4777-8777-777777777777';
     mockPrepareDelivery.mockResolvedValue({
