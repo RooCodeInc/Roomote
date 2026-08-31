@@ -643,6 +643,14 @@ function createAgentMailApiClient(apiKey: string) {
 }
 
 /** Map AgentMail API / network failures into admin-facing setup copy. */
+/**
+ * AgentMail keys carry fine-grained permissions
+ * (https://docs.agentmail.to/core-concepts/permissions); this is the full set
+ * the channel needs across setup, inbound processing, and replies.
+ */
+const AGENTMAIL_REQUIRED_PERMISSIONS =
+  'inbox_read, inbox_create, webhook_read, webhook_create, webhook_update, webhook_delete, message_read, message_send';
+
 function classifyAgentMailSetupError(
   error: unknown,
   operation:
@@ -685,8 +693,8 @@ function classifyAgentMailSetupError(
     lower.includes('invalid api key')
   ) {
     return operation === 'validating the API key'
-      ? 'AgentMail rejected this API key. Copy a fresh API key from the AgentMail console and save again.'
-      : `AgentMail refused permission while ${operation} (${message.includes('(403)') ? '403 Forbidden' : '401 Unauthorized'}). The key may lack that permission or your AgentMail plan may not allow it — enter an existing inbox address of your own, or create a key with full permissions.`;
+      ? `AgentMail rejected this API key. Create a key in the AgentMail console with these permissions (or full access) and save again: ${AGENTMAIL_REQUIRED_PERMISSIONS}.`
+      : `AgentMail refused permission while ${operation} (${message.includes('(403)') ? '403 Forbidden' : '401 Unauthorized'}). Create a key with these permissions (or full access) and save again: ${AGENTMAIL_REQUIRED_PERMISSIONS}.`;
   }
 
   return `AgentMail failed while ${operation}: ${message.trim() || 'could not connect.'}`;
@@ -842,6 +850,17 @@ async function reconcileAgentMailSetup(input: {
   } catch (error) {
     throw new Error(
       classifyAgentMailSetupError(error, 'validating the API key'),
+    );
+  }
+
+  // Webhook permissions are the ones default console keys most often lack;
+  // prove them during validation so the failure names the missing permission
+  // before any inbox work happens.
+  try {
+    await client.listWebhooks();
+  } catch (error) {
+    throw new Error(
+      classifyAgentMailSetupError(error, 'configuring the webhook'),
     );
   }
 

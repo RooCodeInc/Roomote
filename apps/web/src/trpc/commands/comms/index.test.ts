@@ -902,7 +902,7 @@ describe('comms commands', () => {
           values: { R_AGENTMAIL_API_KEY: 'bad-key' },
         }),
       ).rejects.toThrow(
-        'AgentMail rejected this API key. Copy a fresh API key from the AgentMail console and save again.',
+        /AgentMail rejected this API key\. Create a key in the AgentMail console with these permissions .* webhook_create/,
       );
 
       expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();

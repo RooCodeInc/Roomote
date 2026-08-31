@@ -18,6 +18,12 @@ and API key.
 
 Create an AgentMail account and API key at
 [console.agentmail.to](https://console.agentmail.to). In the Roomote UI
+
+The API key must carry these AgentMail permissions (or be a full-access
+key): `inbox_read`, `inbox_create`, `webhook_read`, `webhook_create`,
+`webhook_update`, `webhook_delete`, `message_read`, and `message_send`.
+Keys with fewer permissions fail at save time with an error naming the
+refused step.
 (**Settings > Communications > Email (AgentMail)**), paste the API key, then
 save. Roomote proposes a deployment inbox address such as
 `roomote-yourhost-a1b2c3@agentmail.to`; edit the address before creation, or

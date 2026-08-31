@@ -655,7 +655,7 @@ export function CommsProviderSection({
                   : !provider.runtimeSatisfied && provider.id === 'discord'
                     ? 'Roomote validates the token, derives the bot identity, and registers /new, /goal, /link, and /help when you save.'
                     : !provider.runtimeSatisfied && provider.id === 'agentmail'
-                      ? 'Roomote validates the API key, provisions an inbox automatically when the address is left blank, and registers the AgentMail webhook when you save.'
+                      ? 'Roomote validates the API key, adopts or provisions an inbox, and registers the AgentMail webhook when you save. The key needs these AgentMail permissions (or full access): inbox_read, inbox_create, webhook_read, webhook_create, webhook_update, webhook_delete, message_read, message_send.'
                       : undefined
               }
               onCreateSlackApp={(configToken) =>
