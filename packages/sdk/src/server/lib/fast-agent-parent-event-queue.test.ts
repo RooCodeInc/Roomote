@@ -91,6 +91,7 @@ import {
   enqueueFastAgentParentEvent,
   FastAgentParentBusyError,
 } from './fast-agent-parent-event-queue';
+import type { FastAgentParentEvent } from './fast-agent-parent-event';
 
 const parent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
@@ -111,7 +112,7 @@ const event = {
   message: 'Done.',
 };
 
-function pendingRow(id: string, queuedEvent = event) {
+function pendingRow(id: string, queuedEvent: FastAgentParentEvent = event) {
   return {
     id,
     conversationId: parent.sessionId,
@@ -196,6 +197,43 @@ describe('Fast parent event durable queue', () => {
       maxWaitMs: 0,
     });
     expect(mocks.deliver).not.toHaveBeenCalled();
+  });
+
+  it('delivers a durable human follow-up after response finalization releases the lock', async () => {
+    const humanFollowUp = {
+      type: 'human_follow_up' as const,
+      eventId: '100.003',
+      currentMessageId: '100.003',
+      userId: 'user-2',
+      question: 'Use the corrected requirement.',
+    };
+    const row = pendingRow('human-follow-up', humanFollowUp);
+    mocks.findPending
+      // The first wakeup overlaps the response finalization window.
+      .mockResolvedValueOnce(row)
+      // The retry acquires the released lock and drains the same durable row.
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(undefined);
+    mocks.acquireLock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(mocks.releaseLock);
+
+    const request = {
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    };
+    await expect(drainFastAgentParentEvents(request)).rejects.toBeInstanceOf(
+      FastAgentParentBusyError,
+    );
+    await drainFastAgentParentEvents(request);
+
+    expect(mocks.deliver).toHaveBeenCalledOnce();
+    expect(mocks.deliver).toHaveBeenCalledWith(
+      { parent, event: humanFollowUp },
+      mocks.releaseLock,
+    );
+    expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });
 
   it('keeps later events pending when the head has a transient failure', async () => {

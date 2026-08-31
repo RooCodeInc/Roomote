@@ -213,6 +213,10 @@ export {
   recoverPendingFastAgentParentEvents,
   type FastAgentParentEventQueueRequest,
 } from './lib/fast-agent-parent-event-queue';
+export {
+  admitFastAgentHumanFollowUp,
+  type FastAgentHumanFollowUpAdmission,
+} from './lib/fast-agent-human-follow-up';
 
 export {
   getCommunicationProviderAdapter,

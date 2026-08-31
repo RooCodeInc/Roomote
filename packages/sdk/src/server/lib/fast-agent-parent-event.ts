@@ -51,6 +51,7 @@ import {
   TaskPayloadKind,
   exitedRunStatuses,
   type FastAgentConversation,
+  type FastAgentHumanFollowUpEvent,
   type FastAgentParent,
   type PullRequestStatus,
   type RunStatus,
@@ -124,6 +125,7 @@ export type FastAgentPullRequestContext = {
 };
 
 export type FastAgentParentEvent =
+  | FastAgentHumanFollowUpEvent
   | {
       type: 'automation_triggered';
       eventId: string;
@@ -320,6 +322,8 @@ export function buildEventClientMessageSeed(
   event: FastAgentParentEvent,
 ): string {
   switch (event.type) {
+    case 'human_follow_up':
+      return `fast-parent-human-follow-up:${event.eventId}`;
     case 'automation_triggered':
       return `fast-parent-automation:${event.eventId}`;
     case 'child_message':
@@ -1544,14 +1548,30 @@ export async function deliverFastAgentParentEventWithLock(
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops
     // every deployment MCP server from parent-event turns.
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
+    const humanFollowUp =
+      params.event.type === 'human_follow_up' ? params.event : null;
     await answerFastAgentQuestion({
-      question: `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
-      userId: parentTurn.userId,
+      question:
+        humanFollowUp?.question ??
+        `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
+      ...(humanFollowUp?.images ? { images: humanFollowUp.images } : {}),
+      userId: humanFollowUp?.userId ?? parentTurn.userId,
       conversation: parentTurn.conversation,
-      currentMessageId: buildEventClientMessageSeed(params.event),
+      currentMessageId:
+        humanFollowUp?.currentMessageId ??
+        buildEventClientMessageSeed(params.event),
       apiBaseUrl,
       signal: turnSignal,
-      turnSource: 'platform_event',
+      ...(humanFollowUp?.senderDisplayName
+        ? { senderDisplayName: humanFollowUp.senderDisplayName }
+        : {}),
+      ...(humanFollowUp?.senderExternalId
+        ? { senderExternalId: humanFollowUp.senderExternalId }
+        : {}),
+      turnSource: humanFollowUp ? 'human' : 'platform_event',
+      ...(humanFollowUp
+        ? { currentDurableHumanFollowUpEventId: humanFollowUp.eventId }
+        : {}),
       platformEventHandling:
         params.event.type === 'pull_request_feedback' ||
         params.event.type === 'pull_request_conflict_detected'

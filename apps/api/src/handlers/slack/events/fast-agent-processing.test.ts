@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   postThreadMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
+  admitHumanFollowUp: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -62,6 +63,7 @@ vi.mock('@roomote/cloud-agents', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
@@ -117,6 +119,10 @@ describe('processFastAgentMessage', () => {
       messageId: '101.001',
     });
     mocks.recordProviderMessage.mockResolvedValue(undefined);
+    mocks.admitHumanFollowUp.mockResolvedValue({
+      kind: 'turn',
+      turnLock: mocks.releaseLock,
+    });
     mocks.answerQuestion.mockImplementation(
       async ({
         adapter,
@@ -130,6 +136,49 @@ describe('processFastAgentMessage', () => {
         return 'Doing well.';
       },
     );
+  });
+
+  it('durably queues a follow-up instead of waiting on an active turn lock', async () => {
+    const abort = vi.fn().mockResolvedValue(undefined);
+    const onAccepted = vi.fn();
+    mocks.acquireLock.mockResolvedValue(null);
+    mocks.hasSession.mockResolvedValue(true);
+    mocks.admitHumanFollowUp.mockResolvedValue({ kind: 'queued', abort });
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: 'Use the corrected requirement',
+        ts: '100.003',
+        thread_ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+      isExistingConversation: true,
+      onAccepted,
+    });
+
+    expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          type: 'human_follow_up',
+          eventId: '100.003',
+          question: 'Use the corrected requirement',
+        }),
+      }),
+    );
+    expect(onAccepted).toHaveBeenCalledWith(abort);
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
   });
 
   it('replaces a Fast retry notice in place', async () => {
@@ -274,9 +323,13 @@ describe('processFastAgentMessage', () => {
       continuation: true,
     });
 
-    expect(mocks.acquireLock).toHaveBeenCalledWith({
-      conversation: canonicalConversation,
-    });
+    expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent: expect.objectContaining({
+          conversation: canonicalConversation,
+        }),
+      }),
+    );
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({ conversation: canonicalConversation }),
     );
@@ -926,6 +979,7 @@ describe('processFastAgentMessage', () => {
         conversationId: '100.001',
         replyTarget: { channelId: 'D123', threadId: '100.001' },
       },
+      maxWaitMs: 0,
     });
     expect(mocks.acquireLock.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.hasSession.mock.invocationCallOrder[0]!,

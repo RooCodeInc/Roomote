@@ -43,6 +43,7 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import { findTeamsConversationRoute } from '../automations/destination';
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
+import { admitFastAgentHumanFollowUp } from './fast-agent-human-follow-up';
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
@@ -542,13 +543,33 @@ async function runFastAgentSurfaceReply(
   },
 ): Promise<boolean> {
   const { delivery } = params;
+  const admission = params.externalInput
+    ? null
+    : await admitFastAgentHumanFollowUp({
+        parent: {
+          sessionId: params.sessionId,
+          conversation: delivery.conversation,
+        },
+        event: {
+          type: 'human_follow_up',
+          eventId: params.currentMessageId,
+          currentMessageId: params.currentMessageId,
+          userId: params.userId,
+          question: params.question,
+          ...(params.images?.length ? { images: params.images } : {}),
+          ...(params.senderDisplayName
+            ? { senderDisplayName: params.senderDisplayName }
+            : {}),
+        },
+      });
+  if (admission?.kind === 'queued') return true;
 
-  const release = await acquireFastAgentTurnLock({
-    conversation: delivery.conversation,
-  });
-  if (!release) {
-    return false;
-  }
+  const release =
+    admission?.turnLock ??
+    (await acquireFastAgentTurnLock({
+      conversation: delivery.conversation,
+    }));
+  if (!release) return false;
 
   const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
   try {
