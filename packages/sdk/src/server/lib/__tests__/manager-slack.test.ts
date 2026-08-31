@@ -60,19 +60,19 @@ describe('manager slack helpers', () => {
           alt_text: 'Suggest Ideas automation icon',
         },
         child_blocks: [
-          expect.objectContaining({
-            type: 'section',
-            block_id: 'roomote_automation_result_settings',
-            accessory: expect.objectContaining({
-              action_id: 'late_bound_automation_configure',
-              accessibility_label: 'Configure Suggest Ideas automation',
-              url: 'https://app.example.com/automations#suggest-ideas',
-            }),
-          }),
           {
             type: 'section',
             text: { type: 'mrkdwn', text: 'Hello managers' },
           },
+          expect.objectContaining({
+            type: 'actions',
+            elements: [
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+                url: 'https://app.example.com/automations#suggest-ideas',
+              }),
+            ],
+          }),
         ],
       }),
     ]);
@@ -105,15 +105,6 @@ describe('manager slack helpers', () => {
             },
           ],
         },
-        expect.objectContaining({
-          type: 'section',
-          block_id: 'roomote_automation_result_settings',
-          accessory: expect.objectContaining({
-            action_id: 'late_bound_automation_configure',
-            accessibility_label: 'Configure Weekly scan automation',
-            url: 'https://app.example.com/automations#custom-automation-automation-1',
-          }),
-        }),
         { type: 'markdown', text: 'Found two regressions.' },
         {
           type: 'actions',
@@ -125,6 +116,10 @@ describe('manager slack helpers', () => {
               url: expect.stringMatching(
                 /\/sessions\/session-1\?utm_source=slack&utm_medium=link&utm_campaign=slack\.fast_reply$/,
               ),
+            }),
+            expect.objectContaining({
+              action_id: 'late_bound_automation_configure',
+              url: 'https://app.example.com/automations#custom-automation-automation-1',
             }),
           ],
         },
@@ -151,27 +146,6 @@ describe('manager slack helpers', () => {
     ).toContainEqual({ type: 'markdown', text });
   });
 
-  it('bounds custom automation settings labels for Slack', () => {
-    const automationName = 'A'.repeat(100);
-
-    expect(
-      buildCustomAutomationSlackMessage({
-        automationId: 'automation-1',
-        automationName,
-        text: 'Finished.',
-      }).blocks,
-    ).toContainEqual(
-      expect.objectContaining({
-        block_id: 'roomote_automation_result_settings',
-        accessory: expect.objectContaining({
-          action_id: 'late_bound_automation_configure',
-          accessibility_label: `Configure ${'A'.repeat(65)}`,
-          url: 'https://app.example.com/automations#custom-automation-automation-1',
-        }),
-      }),
-    );
-  });
-
   it('joins a generated summary with an optional action footer', () => {
     expect(
       buildAutomationRootSummaryText({
@@ -194,9 +168,6 @@ describe('manager slack helpers', () => {
       type: 'container',
       title: { text: 'Suggest Ideas' },
       child_blocks: [
-        expect.objectContaining({
-          block_id: 'roomote_automation_result_settings',
-        }),
         {
           type: 'section',
           text: {
@@ -204,6 +175,7 @@ describe('manager slack helpers', () => {
             text: '- Do the important thing\n\nReact on a thread item to start it.',
           },
         },
+        { type: 'actions' },
       ],
     });
   });
