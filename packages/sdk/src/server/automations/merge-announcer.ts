@@ -12,7 +12,10 @@ import {
   type AutomationRuntime,
 } from '@roomote/db/server';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
-import { buildAutomationResultBlocks } from '@roomote/slack';
+import {
+  buildAutomationResultBlocks,
+  SlackPostDeliveryError,
+} from '@roomote/slack';
 import {
   MERGE_ANNOUNCER_SETTINGS_HASH,
   type SourceControlProvider,
@@ -532,7 +535,14 @@ export async function handleMergeAnnouncerPush(
         }),
       });
     } catch (error) {
-      if (destination.provider !== 'slack' || !representativeImage) throw error;
+      if (
+        destination.provider !== 'slack' ||
+        !representativeImage ||
+        !(error instanceof SlackPostDeliveryError) ||
+        error.slackErrorCode !== 'invalid_blocks'
+      ) {
+        throw error;
+      }
       console.warn(
         `${LOG_PREFIX} Slack image delivery failed for ${repository.fullName}; retrying without the image: ${error instanceof Error ? error.message : String(error)}`,
       );

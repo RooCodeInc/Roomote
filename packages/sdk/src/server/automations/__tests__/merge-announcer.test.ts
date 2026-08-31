@@ -1,4 +1,5 @@
 import type { AutomationRuntime } from '@roomote/db/server';
+import { SlackPostDeliveryError } from '@roomote/slack';
 
 import {
   handleMergeAnnouncerPush,
@@ -332,7 +333,9 @@ describe('handleMergeAnnouncerPush', () => {
   it('retries a rejected Slack image announcement without the image', async () => {
     const { dependencies, postMessage } = createDependencies();
     postMessage
-      .mockRejectedValueOnce(new Error('invalid_blocks'))
+      .mockRejectedValueOnce(
+        new SlackPostDeliveryError({ slackErrorCode: 'invalid_blocks' }),
+      )
       .mockResolvedValueOnce(undefined);
 
     const result = await handleMergeAnnouncerPush(
@@ -371,6 +374,38 @@ describe('handleMergeAnnouncerPush', () => {
         (block: { type?: string }) => block.type === 'image',
       ),
     ).toBe(false);
+  });
+
+  it('does not retry an ambiguous Slack transport failure', async () => {
+    const { dependencies, postMessage } = createDependencies();
+    postMessage.mockRejectedValueOnce(
+      new SlackPostDeliveryError({ transportError: true }),
+    );
+
+    const result = await handleMergeAnnouncerPush(
+      createPayload({
+        pullRequest: {
+          number: 7,
+          url: 'https://github.com/acme/widgets/pull/7',
+          title: 'Update settings',
+          changedFileCount: 1,
+          additions: 10,
+          deletions: 2,
+          imageCandidates: [
+            {
+              id: 'image-1',
+              url: 'https://cdn.example.com/settings.png',
+              altText: 'Settings screenshot',
+              surroundingText: 'Updated settings after save.',
+            },
+          ],
+        },
+      }),
+      dependencies,
+    );
+
+    expect(result).toMatchObject({ status: 'error' });
+    expect(postMessage).toHaveBeenCalledOnce();
   });
 
   it('omits the Slack image block when PR context has no image', async () => {
