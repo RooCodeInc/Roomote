@@ -448,6 +448,7 @@ export async function brainCollectorsJob(): Promise<void> {
   }
 
   let includeIncremental = true;
+  let continueCollectorIds: string[] = [];
 
   await drainBrainHistoricalIngestion({
     async runPass() {
@@ -461,13 +462,20 @@ export async function brainCollectorsJob(): Promise<void> {
 
       const collectorResult = await runBrainCollectors(connection, {
         includeIncremental,
+        continueCollectorIds,
       });
       includeIncremental = false;
+      // Collectors mid-scan (a sweep, reconcile, or discovery walk) keep
+      // their collect phase running across continuation passes; the list
+      // empties as scans settle, letting the loop end.
+      continueCollectorIds =
+        collectorResult.historicalPendingCollectorIds ?? [];
 
       return {
         progressed:
           pullRequestFactsResult.progressed ||
-          collectorResult.backfillProgressed,
+          collectorResult.backfillProgressed ||
+          continueCollectorIds.length > 0,
         interrupted: collectorResult.interrupted,
       };
     },
