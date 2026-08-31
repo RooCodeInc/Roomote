@@ -94,6 +94,7 @@ import { attachTelegramMediaToQueuedMessage } from './attachments.js';
 import {
   claimTelegramLinkNudge,
   claimTelegramUpdate,
+  releaseTelegramUpdateClaim,
   rememberTelegramImplicitTopic,
   verifyTelegramWebhookSecret,
 } from './webhook-gate.js';
@@ -594,14 +595,20 @@ telegram.post('/', async (c) => {
         .trim() ||
       message.from?.username?.trim() ||
       null;
-    const continued = await continueFastAgentSurfaceReply({
-      sessionId: fastSession.id,
-      userId: senderUserId,
-      senderDisplayName,
-      question,
-      currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
-      ...(fastMessage.images ? { images: fastMessage.images } : {}),
-    });
+    let continued: boolean;
+    try {
+      continued = await queueFastAgentSurfaceReply({
+        sessionId: fastSession.id,
+        userId: senderUserId,
+        senderDisplayName,
+        question,
+        currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
+        ...(fastMessage.images ? { images: fastMessage.images } : {}),
+      });
+    } catch (error) {
+      await releaseTelegramUpdateClaim(update.update_id).catch(() => {});
+      throw error;
+    }
     if (!continued) {
       apiLogger.warn(
         `[telegram] Fast session ${fastSession.id} could not resolve an active delivery route`,

@@ -358,6 +358,7 @@ type FastAgentParentTurn = {
 type FastAgentParentTurnParams = {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
+  actorUserId?: string;
   onReplyPosted: () => void;
   footerContext: FastSessionReplyFooterContext;
 };
@@ -426,6 +427,7 @@ function createFastAgentAutomationTaskLauncher(params: {
 async function createAutomationFastAgentParentTurn(params: {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
+  actorUserId?: string;
   onReplyPosted: () => void;
 }): Promise<FastAgentParentTurn> {
   const fallbackConversation = params.parent.conversation;
@@ -443,13 +445,14 @@ async function createAutomationFastAgentParentTurn(params: {
       { replyPosted: false, permanent: true },
     );
   }
+  const actorUserId = params.actorUserId ?? session.userId;
 
   return {
-    userId: session.userId,
+    userId: actorUserId,
     conversation: session.conversation,
     adapter: {
       launchTask: createFastAgentAutomationTaskLauncher({
-        userId: session.userId,
+        userId: actorUserId,
         conversation: session.conversation,
         automationId: session.conversation.workspaceId,
         automationName:
@@ -468,6 +471,7 @@ async function createAutomationFastAgentParentTurn(params: {
 async function createWebFastAgentParentTurn(params: {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
+  actorUserId?: string;
   onReplyPosted: () => void;
 }): Promise<FastAgentParentTurn> {
   const fallbackConversation = params.parent.conversation;
@@ -485,13 +489,14 @@ async function createWebFastAgentParentTurn(params: {
       { replyPosted: false, permanent: true },
     );
   }
+  const actorUserId = params.actorUserId ?? session.userId;
 
   return {
-    userId: session.userId,
+    userId: actorUserId,
     conversation: session.conversation,
     adapter: {
       launchTask: createFastAgentWebTaskLauncher({
-        userId: session.userId,
+        userId: actorUserId,
         conversation: session.conversation,
       }),
       // Web replies are read from the canonical transcript; posting is the
@@ -536,6 +541,7 @@ async function createSlackFastAgentParentTurn(
     );
   }
 
+  const actorUserId = params.actorUserId ?? session.userId;
   const conversation = session.conversation;
   const slack = new SlackNotifier(installation.botAccessToken);
   const threadId = conversation.replyTarget.threadId;
@@ -570,7 +576,7 @@ async function createSlackFastAgentParentTurn(
   }
 
   return {
-    userId: session.userId,
+    userId: actorUserId,
     conversation,
     adapter: {
       ...(pendingAutomationRoot
@@ -592,7 +598,7 @@ async function createSlackFastAgentParentTurn(
           }),
       launchTask: pendingAutomationRoot
         ? createFastAgentAutomationTaskLauncher({
-            userId: session.userId,
+            userId: actorUserId,
             conversation,
             automationId: customAutomationId ?? conversation.conversationId,
             automationName,
@@ -600,7 +606,7 @@ async function createSlackFastAgentParentTurn(
           })
         : createFastAgentSlackLiveTaskLauncher({
             slack,
-            userId: session.userId,
+            userId: actorUserId,
             teamId: conversation.workspaceId,
             ...(installation.teamDomain
               ? { teamDomain: installation.teamDomain }
@@ -697,7 +703,7 @@ async function createSlackFastAgentParentTurn(
               );
             }
             await fastAgentConversationRepository.getOrCreate({
-              userId: session.userId,
+              userId: actorUserId,
               conversation: {
                 ...conversation,
                 replyTarget: {
@@ -729,7 +735,7 @@ async function createSlackFastAgentParentTurn(
               channelId: conversation.replyTarget.channelId,
               threadTs: messageTs,
               eventId: params.event.eventId,
-              createdByUserId: session.userId,
+              createdByUserId: actorUserId,
               suggestions,
             });
           }
@@ -772,7 +778,7 @@ async function createSlackFastAgentParentTurn(
               channelId: conversation.replyTarget.channelId,
               threadTs: rootMessageId,
               eventId: params.event.eventId,
-              createdByUserId: session.userId,
+              createdByUserId: actorUserId,
               suggestions,
             });
           }
@@ -1030,14 +1036,15 @@ async function createDiscordFastAgentParentTurn(
     );
   }
 
+  const actorUserId = params.actorUserId ?? session.userId;
   const conversation = session.conversation;
   return {
-    userId: session.userId,
+    userId: actorUserId,
     conversation,
     adapter: {
       launchTask: createFastAgentDiscordTaskLauncher({
         provider,
-        userId: session.userId,
+        userId: actorUserId,
         conversation,
       }),
       postReply: async ({
@@ -1110,7 +1117,7 @@ async function createDiscordFastAgentParentTurn(
                 ? { threadId: conversation.replyTarget.threadId }
                 : {}),
               eventId: params.event.eventId,
-              createdByUserId: session.userId,
+              createdByUserId: actorUserId,
               suggestions,
             });
           }
@@ -1224,6 +1231,7 @@ async function createTeamsFastAgentParentTurn(
       { replyPosted: false, permanent: true },
     );
   }
+  const actorUserId = params.actorUserId ?? session.userId;
   const conversation = session.conversation;
   const route = await findTeamsConversationRoute(
     conversation.replyTarget.channelId,
@@ -1240,11 +1248,11 @@ async function createTeamsFastAgentParentTurn(
     );
   }
   return {
-    userId: session.userId,
+    userId: actorUserId,
     conversation,
     adapter: {
       launchTask: createFastAgentCommunicationTaskLauncher({
-        userId: session.userId,
+        userId: actorUserId,
         conversation,
         serviceUrl,
       }),
@@ -1294,7 +1302,7 @@ async function createTeamsFastAgentParentTurn(
                 ? { threadId: conversation.replyTarget.threadId }
                 : {}),
               eventId: params.event.eventId,
-              createdByUserId: session.userId,
+              createdByUserId: actorUserId,
               suggestions,
             });
           }
@@ -1327,7 +1335,7 @@ async function createTeamsFastAgentParentTurn(
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
             eventId: params.event.eventId,
-            createdByUserId: session.userId,
+            createdByUserId: actorUserId,
             suggestions,
           });
         }
@@ -1363,13 +1371,14 @@ async function createTelegramFastAgentParentTurn(
       { replyPosted: false, permanent: true },
     );
   }
+  const actorUserId = params.actorUserId ?? session.userId;
   const conversation = session.conversation;
   return {
-    userId: session.userId,
+    userId: actorUserId,
     conversation,
     adapter: {
       launchTask: createFastAgentCommunicationTaskLauncher({
-        userId: session.userId,
+        userId: actorUserId,
         conversation,
       }),
       postReply: async ({
@@ -1416,7 +1425,7 @@ async function createTelegramFastAgentParentTurn(
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
             eventId: params.event.eventId,
-            createdByUserId: session.userId,
+            createdByUserId: actorUserId,
             suggestions,
           });
         }
@@ -1430,6 +1439,7 @@ async function createTelegramFastAgentParentTurn(
 async function createFastAgentParentTurn(params: {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
+  actorUserId?: string;
   onReplyPosted: () => void;
 }): Promise<FastAgentParentTurn> {
   if (params.parent.conversation.surface === 'automation') {
@@ -1525,9 +1535,12 @@ export async function deliverFastAgentParentEventWithLock(
       }
     }
 
+    const humanFollowUp =
+      params.event.type === 'human_follow_up' ? params.event : null;
     const parentTurn = await createFastAgentParentTurn({
       parent: params.parent,
       event: params.event,
+      ...(humanFollowUp ? { actorUserId: humanFollowUp.userId } : {}),
       onReplyPosted: () => {
         replyPosted = true;
       },
@@ -1548,8 +1561,6 @@ export async function deliverFastAgentParentEventWithLock(
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops
     // every deployment MCP server from parent-event turns.
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
-    const humanFollowUp =
-      params.event.type === 'human_follow_up' ? params.event : null;
     await answerFastAgentQuestion({
       question:
         humanFollowUp?.question ??

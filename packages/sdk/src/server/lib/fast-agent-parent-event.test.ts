@@ -411,6 +411,14 @@ describe('deliverFastAgentParentEvent', () => {
         signal: mocks.releaseTurnLock.signal,
       }),
     );
+    expect(mocks.createLauncher).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-2' }),
+    );
+    const answerInput = mocks.answerQuestion.mock.calls[0]?.[0];
+    await answerInput.adapter.resolveMcpServerConfigs();
+    expect(mocks.resolveUserMcpServerConfigs).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-2' }),
+    );
   });
 
   it('passes a canonical review offer into the web transcript payload', async () => {
