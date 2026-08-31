@@ -254,9 +254,7 @@ export class FastAgentSkillStore {
     const packagedMatchIsAuthoritative =
       !!query.name && packagedNames.has(query.name);
     const settings =
-      !packagedMatchIsAuthoritative &&
-      (scope || query.name) &&
-      this.settingsSkills
+      !packagedMatchIsAuthoritative && this.settingsSkills
         ? await this.settingsSkills.list(query)
         : { skills: [], warnings: [] };
     const repository =
