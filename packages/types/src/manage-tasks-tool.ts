@@ -29,6 +29,8 @@ export const ROOMOTE_MEMBER_MANAGEMENT_ACTIONS = [
 export const ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION =
   'The Session or task action to perform. Call list_environments immediately before launch.';
 
+export const ROOMOTE_TASK_ID_PATTERN = /^[0-9a-z]{13}$/;
+
 export function shouldSearchTasks(input: {
   action: 'search' | 'search_tasks';
   pullRequest?: string;
@@ -62,7 +64,11 @@ export function resolveRoomoteCommunicationTarget(input: {
   sessionId?: string;
 }): { kind: 'task' | 'session'; id: string } | null {
   const taskId = input.taskId?.trim();
-  if (taskId) return { kind: 'task', id: taskId };
+  if (taskId) {
+    return ROOMOTE_TASK_ID_PATTERN.test(taskId)
+      ? { kind: 'task', id: taskId }
+      : null;
+  }
   return input.sessionId ? { kind: 'session', id: input.sessionId } : null;
 }
 
@@ -70,6 +76,10 @@ export const roomoteManagementFieldSchemas = {
   ...roomoteTaskInspectionFieldSchemas,
   taskId: z
     .string()
+    .regex(
+      ROOMOTE_TASK_ID_PATTERN,
+      'taskId must be a 13-character lowercase alphanumeric Roomote task ID',
+    )
     .optional()
     .describe(
       'Optional concrete task ID. When provided to get_summary, get_messages, or send_message, targets that task instead of a Session. Required for task-only controls such as get_compute_logs and cancel.',
