@@ -66,14 +66,29 @@ describe('Merge announcer push normalization', () => {
     });
   });
 
-  it('rejects badges, icons, unsafe URLs, and unsupported image hosts', () => {
+  it.each(['png', 'jpg', 'jpeg', 'gif'])(
+    'accepts Slack-supported .%s images',
+    (extension) => {
+      const url = `https://raw.githubusercontent.com/acme/widgets/main/screenshot.${extension}`;
+      expect(
+        selectRepresentativeGitHubPullRequestImage(
+          `![Product screenshot](${url})`,
+        ),
+      ).toEqual({ url, altText: 'Product screenshot' });
+    },
+  );
+
+  it('rejects badges, icons, unsafe URLs, and unsupported media', () => {
     expect(
       selectRepresentativeGitHubPullRequestImage(`
 ![Build badge](https://user-images.githubusercontent.com/1/build.png)
 <img alt="App icon" src="https://github.com/user-attachments/assets/icon">
 ![Screenshot](http://user-images.githubusercontent.com/1/screenshot.png)
 ![Preview](https://example.com/preview.png)
+![Camo preview](https://camo.githubusercontent.com/opaque-image)
 ![UI screenshot](https://raw.githubusercontent.com/acme/widgets/main/screenshot.svg)
+![Walkthrough screenshot](https://raw.githubusercontent.com/acme/widgets/main/walkthrough.mp4)
+![Uploaded video screenshot](https://github.com/user-attachments/assets/walkthrough.mp4)
 `),
     ).toBeNull();
   });

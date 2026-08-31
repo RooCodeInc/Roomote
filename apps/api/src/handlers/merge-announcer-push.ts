@@ -23,8 +23,8 @@ const HTML_ATTRIBUTE_PATTERN =
 const SCREENSHOT_LIKE_IMAGE_TEXT =
   /\b(?:after|before|demo|desktop|mobile|preview|screen(?:[ -]?shot)?|ui)\b/iu;
 const REJECTED_IMAGE_TEXT = /\b(?:avatar|badge|coverage|icon|logo|shield)\b/iu;
-const ALLOWED_GITHUB_IMAGE_HOSTS = new Set([
-  'camo.githubusercontent.com',
+const SUPPORTED_SLACK_IMAGE_EXTENSION = /\.(?:gif|jpe?g|png)$/iu;
+const EXTENSION_REQUIRED_GITHUB_IMAGE_HOSTS = new Set([
   'raw.githubusercontent.com',
   'user-images.githubusercontent.com',
 ]);
@@ -47,11 +47,15 @@ function isAllowedPublicGitHubImageUrl(value: string): boolean {
   try {
     const url = new URL(value.trim());
     if (url.protocol !== 'https:' || url.username || url.password) return false;
-    if (/\.(?:ico|svg)$/iu.test(url.pathname)) return false;
-    if (ALLOWED_GITHUB_IMAGE_HOSTS.has(url.hostname.toLowerCase())) return true;
+    const hostname = url.hostname.toLowerCase();
+    if (EXTENSION_REQUIRED_GITHUB_IMAGE_HOSTS.has(hostname)) {
+      return SUPPORTED_SLACK_IMAGE_EXTENSION.test(url.pathname);
+    }
     return (
-      url.hostname.toLowerCase() === 'github.com' &&
-      url.pathname.startsWith('/user-attachments/assets/')
+      hostname === 'github.com' &&
+      url.pathname.startsWith('/user-attachments/assets/') &&
+      (!url.pathname.includes('.') ||
+        SUPPORTED_SLACK_IMAGE_EXTENSION.test(url.pathname))
     );
   } catch {
     return false;
