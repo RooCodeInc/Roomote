@@ -37,6 +37,7 @@ import {
   Button,
   Calendar,
   DollarSign,
+  ExternalLink,
   FileText,
   Globe,
   Image,
@@ -383,122 +384,119 @@ function SessionTaskPanel({
     { label: 'Files', artifacts: fileArtifacts },
   ];
 
-  if (selectedArtifact) {
-    return (
-      <SessionArtifactViewer
-        entry={selectedArtifact}
-        closeLabel="Close execution details"
-        onBack={() => setSelectedArtifact(null)}
-        onClose={onClose}
-      />
-    );
-  }
-
   return (
-    <>
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b-2 border-card px-4 py-2">
-        <h2 className="truncate text-sm font-medium">Execution details</h2>
-        <BasicTooltip content="Close">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Close execution details"
-            onClick={onClose}
-          >
-            <X />
-          </Button>
-        </BasicTooltip>
-      </div>
-      <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-4 text-sm">
-        {tasks.length > 1 ? (
-          <Select value={task.taskId} onValueChange={onSelect}>
-            <SelectTrigger aria-label="Choose execution">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {tasks.map((item) => (
-                <SelectItem key={item.taskId} value={item.taskId}>
-                  {item.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : null}
-        <div className="space-y-1">
-          <h3 className="font-medium">{task.title}</h3>
-          <p className="text-muted-foreground capitalize">{task.state}</p>
-          {task.repositoryName ? (
-            <p className="text-muted-foreground">
-              {formatRepositoryName(task.repositoryName)}
-            </p>
-          ) : null}
-        </div>
-        {task.canAccessDetails === false ? (
-          <p className="rounded-md border bg-muted p-3 text-muted-foreground">
-            Execution details require task access.
-          </p>
-        ) : null}
-        {task.latestRun?.error ? (
-          <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-destructive">
-            {task.latestRun.error}
+    <FramedSurface
+      frameClassName="p-0"
+      surfaceClassName="relative flex flex-col overflow-hidden"
+    >
+      {selectedArtifact ? (
+        <SessionArtifactViewer
+          entry={selectedArtifact}
+          closeLabel="Close task details"
+          onBack={() => setSelectedArtifact(null)}
+          onClose={onClose}
+        />
+      ) : (
+        <>
+          <SandboxSidePanelHeader
+            title={task.title}
+            closeLabel="Close task details"
+            onClose={onClose}
+            actions={
+              task.canAccessDetails === false ? null : (
+                <Button asChild variant="ghost" size="sm">
+                  <Link
+                    href={`/task/${task.taskId}?returnTo=${encodeURIComponent(`/sessions/${sessionId}?task=${task.taskId}`)}`}
+                  >
+                    Go to task
+                    <ExternalLink />
+                  </Link>
+                </Button>
+              )
+            }
+          />
+          <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-4 text-sm">
+            {tasks.length > 1 ? (
+              <Select value={task.taskId} onValueChange={onSelect}>
+                <SelectTrigger aria-label="Choose task">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {tasks.map((item) => (
+                    <SelectItem key={item.taskId} value={item.taskId}>
+                      {item.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
+            <div className="space-y-1">
+              <p className="text-muted-foreground capitalize">{task.state}</p>
+              {task.repositoryName ? (
+                <p className="text-muted-foreground">
+                  {formatRepositoryName(task.repositoryName)}
+                </p>
+              ) : null}
+            </div>
+            {task.canAccessDetails === false ? (
+              <p className="rounded-md border bg-muted p-3 text-muted-foreground">
+                Task details require task access.
+              </p>
+            ) : null}
+            {task.latestRun?.error ? (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-destructive">
+                {task.latestRun.error}
+              </div>
+            ) : null}
+            {task.pullRequests.length ? (
+              <section className="space-y-2">
+                <h3 className="font-medium">Pull requests</h3>
+                {task.pullRequests.map((pullRequest) => (
+                  <a
+                    key={pullRequest.id}
+                    href={pullRequest.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block truncate text-primary hover:underline"
+                  >
+                    {pullRequest.repository}#{pullRequest.number}
+                  </a>
+                ))}
+              </section>
+            ) : null}
+            {latestArtifacts.length ? (
+              <section className="space-y-3 @container">
+                <h3 className="font-medium">Artifacts</h3>
+                {artifactSections.map(({ label, artifacts }) =>
+                  artifacts.length ? (
+                    <div key={label} className="space-y-2">
+                      <h4 className="text-xs font-medium text-muted-foreground">
+                        {label}
+                      </h4>
+                      <div className="grid grid-cols-2 gap-4 @[500px]:grid-cols-3">
+                        {artifacts.map((artifact) => (
+                          <SessionArtifactCard
+                            key={artifact.id}
+                            artifact={artifact}
+                            onOpen={() =>
+                              setSelectedArtifact(
+                                latestArtifactEntries.find(
+                                  (entry) => entry.artifact.id === artifact.id,
+                                ) ?? null,
+                              )
+                            }
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : null,
+                )}
+              </section>
+            ) : null}
           </div>
-        ) : null}
-        {task.pullRequests.length ? (
-          <section className="space-y-2">
-            <h3 className="font-medium">Pull requests</h3>
-            {task.pullRequests.map((pullRequest) => (
-              <a
-                key={pullRequest.id}
-                href={pullRequest.url}
-                target="_blank"
-                rel="noreferrer"
-                className="block truncate text-primary hover:underline"
-              >
-                {pullRequest.repository}#{pullRequest.number}
-              </a>
-            ))}
-          </section>
-        ) : null}
-        {latestArtifacts.length ? (
-          <section className="space-y-3 @container">
-            <h3 className="font-medium">Artifacts</h3>
-            {artifactSections.map(({ label, artifacts }) =>
-              artifacts.length ? (
-                <div key={label} className="space-y-2">
-                  <h4 className="text-xs font-medium text-muted-foreground">
-                    {label}
-                  </h4>
-                  <div className="grid grid-cols-2 gap-4 @[500px]:grid-cols-3">
-                    {artifacts.map((artifact) => (
-                      <SessionArtifactCard
-                        key={artifact.id}
-                        artifact={artifact}
-                        onOpen={() =>
-                          setSelectedArtifact(
-                            latestArtifactEntries.find(
-                              (entry) => entry.artifact.id === artifact.id,
-                            ) ?? null,
-                          )
-                        }
-                      />
-                    ))}
-                  </div>
-                </div>
-              ) : null,
-            )}
-          </section>
-        ) : null}
-        {task.canAccessDetails === false ? null : (
-          <Button asChild className="w-full">
-            <Link
-              href={`/task/${task.taskId}?returnTo=${encodeURIComponent(`/sessions/${sessionId}?task=${task.taskId}`)}`}
-            >
-              Open full workspace
-            </Link>
-          </Button>
-        )}
-      </div>
-    </>
+        </>
+      )}
+    </FramedSurface>
   );
 }
 
