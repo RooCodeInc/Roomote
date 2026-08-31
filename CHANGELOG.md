@@ -54,6 +54,7 @@ Roomote 1.0 makes Fast the default entry point for conversations, enables Memory
 - Let Fast mode discover, load, and explicitly invoke environment-scoped Settings skills while preserving built-in skill precedence and bounded access.
 - Complete large Notion historical discovery scans in the fast continuation loop instead of spreading database-row traversal across weeks of scheduled passes.
 - Keep tasks moving when visual proof takes too long by applying one five-minute deadline across capture, retries, and recovery before returning a graceful proof blocker.
+- Include authorized Settings skills in Fast mode's unscoped skill inventory.
 
 ## 0.45.1 (2026-08-29)
 
