@@ -868,9 +868,6 @@ export async function answerFastAgentQuestion({
   platformEventTranscriptPayload?: Record<string, unknown>;
   slackRoomoteUserId?: string;
 }): Promise<string> {
-  if (signal) {
-    markFastAgentShutdownCloseoutPending(signal);
-  }
   const turnId = buildFastAgentTurnId({
     currentMessageId,
     conversation,
@@ -2237,6 +2234,9 @@ export async function answerFastAgentQuestion({
           executeMcpTool,
         );
         try {
+          if (signal) {
+            markFastAgentShutdownCloseoutPending(signal);
+          }
           const result = await runFastAgentInferenceWithRetries(
             async () => {
               const providerRetryAbortController = new AbortController();
