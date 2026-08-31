@@ -1378,7 +1378,7 @@ export async function showTaskConfiguration({
         }
 
         console.log(
-          `[SlackRouting] Started task immediately for thread ${threadId} because all repositories is the only available workspace`,
+          `[SlackRouting] Started task immediately for thread ${threadId} because all repositories are the only available workspace`,
         );
 
         return startResult.response;
