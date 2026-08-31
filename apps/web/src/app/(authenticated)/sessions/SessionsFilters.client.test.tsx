@@ -1,13 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { replaceMock } = vi.hoisted(() => ({
+const { replaceMock, searchParamsMock } = vi.hoisted(() => ({
   replaceMock: vi.fn(),
+  searchParamsMock: { current: new URLSearchParams() },
 }));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/sessions',
   useRouter: () => ({ replace: replaceMock }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParamsMock.current,
 }));
 
 vi.mock('@/components/tasks', () => ({
@@ -30,7 +31,46 @@ const baseProps = {
 describe('SessionsFilters', () => {
   beforeEach(() => {
     replaceMock.mockReset();
+    searchParamsMock.current = new URLSearchParams();
     localStorage.clear();
+  });
+
+  it.each(['user', 'repository', 'pullRequest', 'model', 'source'])(
+    'shows advanced filters when the URL supplies %s without changing the saved preference',
+    (param) => {
+      localStorage.setItem(
+        'roomote-sessions-advanced-filters-visible',
+        'false',
+      );
+      searchParamsMock.current = new URLSearchParams(`${param}=active`);
+
+      render(<SessionsFilters {...baseProps} />);
+
+      expect(screen.getByTestId('advanced-task-filters')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Toggle advanced filters' }),
+      ).toBeDisabled();
+      expect(
+        localStorage.getItem('roomote-sessions-advanced-filters-visible'),
+      ).toBe('false');
+    },
+  );
+
+  it('restores the saved hidden preference after URL filters are removed', () => {
+    localStorage.setItem('roomote-sessions-advanced-filters-visible', 'false');
+    searchParamsMock.current = new URLSearchParams('source=slack');
+    const { rerender } = render(
+      <SessionsFilters {...baseProps} source="slack" />,
+    );
+
+    expect(screen.getByTestId('advanced-task-filters')).toBeInTheDocument();
+
+    searchParamsMock.current = new URLSearchParams();
+    rerender(<SessionsFilters {...baseProps} />);
+
+    expect(
+      screen.queryByTestId('advanced-task-filters'),
+    ).not.toBeInTheDocument();
   });
 
   it('hides advanced filters by default and persists their visibility', async () => {

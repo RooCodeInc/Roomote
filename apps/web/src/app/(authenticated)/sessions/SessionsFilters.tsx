@@ -35,6 +35,13 @@ import {
 const ADVANCED_FILTERS_STORAGE_KEY =
   'roomote-sessions-advanced-filters-visible';
 const SESSIONS_VIEW_STORAGE_KEY = 'roomote-sessions-view';
+const ADVANCED_FILTER_PARAMS = [
+  'user',
+  'repository',
+  'pullRequest',
+  'model',
+  'source',
+] as const;
 
 const activeFilterStyle =
   'text-accent-foreground font-medium border-b-2 border-accent-foreground focus-visible:border-accent-foreground rounded-none';
@@ -148,6 +155,10 @@ export function SessionsFilters({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [showSearch, setShowSearch] = useState(Boolean(query));
+  const hasAdvancedUrlFilters = ADVANCED_FILTER_PARAMS.some((param) =>
+    searchParams.has(param),
+  );
+  const advancedFiltersVisible = hasAdvancedUrlFilters || showAdvancedFilters;
 
   const updateParams = useCallback(
     (mutate: (params: URLSearchParams) => void) => {
@@ -251,7 +262,7 @@ export function SessionsFilters({
         showTaskType={false}
       />
 
-      {showAdvancedFilters ? (
+      {advancedFiltersVisible ? (
         <>
           <TaskFilters
             userId={userId ?? 'all'}
@@ -295,17 +306,23 @@ export function SessionsFilters({
         <Button
           variant="ghost"
           size="sm"
-          className={cn('size-8', showAdvancedFilters && 'bg-accent')}
+          className={cn('size-8', advancedFiltersVisible && 'bg-accent')}
           aria-label="Toggle advanced filters"
-          aria-pressed={showAdvancedFilters}
-          title="Advanced filters"
-          onClick={() =>
+          aria-pressed={advancedFiltersVisible}
+          disabled={hasAdvancedUrlFilters}
+          title={
+            hasAdvancedUrlFilters
+              ? 'Clear active filters to hide advanced filters'
+              : 'Advanced filters'
+          }
+          onClick={() => {
+            if (hasAdvancedUrlFilters) return;
             setShowAdvancedFilters((current) => {
               const next = !current;
               writeStoredPreference(ADVANCED_FILTERS_STORAGE_KEY, String(next));
               return next;
-            })
-          }
+            });
+          }}
         >
           <SlidersHorizontal />
         </Button>
