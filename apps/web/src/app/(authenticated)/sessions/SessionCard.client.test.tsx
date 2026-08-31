@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { SessionCard } from './SessionCard';
 
 describe('SessionCard', () => {
-  it('links to the transcript without implicitly selecting execution details', () => {
+  it('links to the transcript without repository or execution metadata', () => {
     render(
       <SessionCard
         viewerUserId="user-1"
@@ -18,7 +18,7 @@ describe('SessionCard', () => {
           activityAt: Date.now() / 1000,
           cachedStatus: 'active',
           executionCount: 1,
-          inferenceCostMicroUsd: 0,
+          inferenceCostMicroUsd: 10_000,
           unread: false,
           tasks: [
             {
@@ -34,6 +34,10 @@ describe('SessionCard', () => {
     expect(
       screen.getByRole('link', { name: /Update homepage background/ }),
     ).toHaveAttribute('href', '/sessions/session-1');
+    expect(screen.getByText('Web')).toBeInTheDocument();
+    expect(screen.getByText('$0.01')).toBeInTheDocument();
+    expect(screen.queryByText('Roomote')).not.toBeInTheDocument();
+    expect(screen.queryByText('1 execution')).not.toBeInTheDocument();
   });
 
   it('shows a contextual matching transcript snippet', () => {
