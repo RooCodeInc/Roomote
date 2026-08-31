@@ -29,7 +29,10 @@ import {
   isBrainEnabled,
   touchSessionActivity,
 } from '@roomote/db/server';
-import { buildFastSessionUrl } from '@roomote/communication';
+import {
+  buildFastSessionUrl,
+  buildSelectedTaskSessionUrl,
+} from '@roomote/communication';
 import { Env } from '@roomote/env';
 import { z } from 'zod';
 
@@ -1830,7 +1833,12 @@ export async function answerFastAgentQuestion({
                 );
               }
               const destinationUrl = linkedSession
-                ? `${Env.R_APP_URL}/sessions/${linkedSession.id}?task=${task.taskId}`
+                ? buildSelectedTaskSessionUrl({
+                    taskUrl:
+                      task.taskUrl ?? `${Env.R_APP_URL}/task/${task.taskId}`,
+                    sessionId: linkedSession.id,
+                    taskId: task.taskId,
+                  })
                 : task.taskUrl;
               // The delegated task's live Slack card owns the workspace
               // startup status; the kickoff is a permanent thread message

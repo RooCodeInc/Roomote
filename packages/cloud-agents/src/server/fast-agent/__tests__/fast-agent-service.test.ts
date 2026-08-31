@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   captureTurnSettled: vi.fn(),
   revokeMcpCapabilities: vi.fn(),
   reconcileRetryNotices: vi.fn(),
+  getSessionForTask: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
         agent?: string;
@@ -90,7 +91,7 @@ vi.mock('@roomote/db/server', () => ({
   isBrainEnabled: mocks.isBrainEnabled,
   db: {},
   getSessionForFastConversation: vi.fn().mockResolvedValue(null),
-  getSessionForTask: vi.fn().mockResolvedValue(null),
+  getSessionForTask: mocks.getSessionForTask,
   touchSessionActivity: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -230,6 +231,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.nativeExecutor = undefined;
     mocks.mcpExecutor = undefined;
     mocks.mcpCapabilityAvailable = false;
+    mocks.getSessionForTask.mockResolvedValue(null);
     mocks.getNativeRuntime.mockImplementation(async () => {
       mocks.mcpCapabilityAvailable = true;
       return {
@@ -2484,11 +2486,44 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('delivers the kickoff when a surface launcher does not invoke the gate callback', async () => {
+    mocks.getSessionForTask.mockResolvedValue({ id: 'session-discord' });
     const adapter = callbacks({
       launchTask: vi.fn(async () => ({
         success: true as const,
         taskId: 'task-discord',
-        taskUrl: 'https://roomote.example/task-discord',
+        taskUrl:
+          'https://roomote.example/task/task-discord?utm_source=discord&utm_medium=link&utm_campaign=discord.thread_start',
+      })),
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Fix checkout.',
+          kickoffMessage: 'I’m delegating the Discord checkout fix.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      kickoff: true,
+      purpose: 'progress',
+      message:
+        'I’m delegating the Discord checkout fix.\n\n[Open in Roomote](https://roomote.example/sessions/session-discord?utm_source=discord&utm_medium=link&utm_campaign=discord.thread_start&task=task-discord)',
+    });
+  });
+
+  it('keeps the attributed task URL when a legacy task has no linked session', async () => {
+    const taskUrl =
+      'https://roomote.example/task/task-discord?utm_source=discord&utm_medium=link&utm_campaign=discord.thread_start';
+    const adapter = callbacks({
+      launchTask: vi.fn(async () => ({
+        success: true as const,
+        taskId: 'task-discord',
+        taskUrl,
       })),
     });
     mocks.generateText.mockImplementation(
@@ -2505,7 +2540,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await answerFastAgentQuestion({ ...baseParams, adapter });
 
     expect(adapter.postReply).toHaveBeenCalledWith(
-      expect.objectContaining({ kickoff: true, purpose: 'progress' }),
+      expect.objectContaining({
+        message: `I’m delegating the Discord checkout fix.\n\n[Open in Roomote](${taskUrl})`,
+      }),
     );
   });
 
