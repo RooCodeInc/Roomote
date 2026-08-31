@@ -31,6 +31,70 @@ The definition is declarative and reproducible: the same YAML produces the same
 workspace shape for every task, and it is easy to review in a pull request or
 regenerate from scratch.
 
+## Keep definitions in source control
+
+Environment definitions are plain YAML, so any team can store them in a git
+repository and review changes through pull requests. On Roomote Cloud, apply a
+reviewed change by pasting the file into the environment editor's **YAML** view.
+Applying the change is manual: Roomote Cloud does not read or sync environment
+files from your repository.
+
+A typical repository layout is:
+
+```text
+.roomote/
+  environments/
+    web.yaml
+    api.yaml
+docker-compose.override.yml
+```
+
+### Self-hosted only: automatic file-based reconciliation
+
+Self-hosted deployments can apply checked-in files automatically at API
+startup. Mount the directory read-only into the Roomote API container and point
+`ROOMOTE_ENVIRONMENTS_DIR` at the mounted path:
+
+```yaml
+services:
+  api:
+    environment:
+      ROOMOTE_ENVIRONMENTS_DIR: /roomote/environments
+    volumes:
+      - ./.roomote/environments:/roomote/environments:ro
+```
+
+Commit the definition and Compose override, deploy that revision, and recreate
+the API container so the new mount is attached. On later definition-only
+changes, restart the API. At startup, Roomote reads every `*.yaml`, `*.yml`, and
+`*.json` file in the directory. It creates missing environments and updates
+existing ones by `name`. Repositories in a definition must already be linked to
+the deployment; otherwise Roomote skips that definition and reports the reason
+in the API logs.
+
+The files remain authoritative: edits made in the UI are recorded in version
+history but are overwritten the next time the API starts. Removing a definition
+does not delete its environment. It removes the managed marker and returns the
+environment to normal manual management.
+
+<Warning>
+  Do not commit secrets in an environment definition. Values under `env`,
+  command `env`, MCP server headers, and similar fields are stored as part of
+  the definition. Add sensitive values under **Settings > Environments >
+  Deployment Environment Variables** instead.
+</Warning>
+
+After deployment, open **Settings > Environments** and confirm that each
+environment has the **Managed from file** badge. API startup logs also report
+which definitions were created, updated, unchanged, or skipped.
+
+The startup provisioning mechanism does not clone or poll a separate
+configuration repository. A self-hosted deployment must check out the files and
+mount them, or supply their contents through `ROOMOTE_ENVIRONMENTS_YAML`. See
+[Environments](/environments#provision-environments-declaratively) for
+reconciliation behavior and [Self-hosting](/self-hosting) for deployment
+options.
+
 ## Relationship to Dev Containers
 
 If you have used [Dev Containers](https://containers.dev), the environment
