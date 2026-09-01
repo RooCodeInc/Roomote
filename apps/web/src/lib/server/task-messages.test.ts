@@ -91,7 +91,7 @@ describe('getTaskSuggestableMessages', () => {
       },
     ]);
 
-    const messages = await getTaskSuggestableMessages({ taskId: task.id });
+    const messages = await getTaskSuggestableMessages(task.id);
 
     expect(messages).toHaveLength(60);
     expect(messages[0]?.text).toBe('message-1');

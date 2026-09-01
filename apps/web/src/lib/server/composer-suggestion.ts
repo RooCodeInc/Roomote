@@ -50,6 +50,8 @@ const SUGGESTABLE_EVENT_TYPES = new Set<string>([
 /** The minimal message shape the suggestion prompt is built from; both task
  * envelopes and fast-session rows reduce to it. */
 type SuggestableMessage = {
+  /** Stable row id; the newest assistant id keys the generation cache. */
+  id?: string | number;
   eventType: string;
   role?: string | null;
   text?: string | null;
@@ -182,15 +184,22 @@ export async function suggestNextComposerMessage({
     const conversationText = buildConversationText(suggestable);
     // One generation per completed agent turn: only a new assistant message
     // mints a fresh cache key, so user messages sent mid-turn keep reusing
-    // (and, client-side, keep hiding) the previous suggestion.
-    const assistantCount = suggestable.filter(
+    // (and, client-side, keep hiding) the previous suggestion. The newest
+    // assistant id keys the cache rather than a count: history fetches are
+    // bounded, so a within-window count would stop advancing once the
+    // conversation outgrows the window.
+    const assistantMessages = suggestable.filter(
       (m) => m.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-    ).length;
+    );
+    const newestAssistant = assistantMessages.at(-1);
+    const generationKey = String(
+      newestAssistant?.id ?? assistantMessages.length,
+    );
 
     const generator = unstable_cache(
       (prompt: string) =>
         generateSuggestion(prompt, userId, taskId, fastConversationId),
-      ['composer-suggestion', cacheScope, String(assistantCount)],
+      ['composer-suggestion', cacheScope, generationKey],
       {
         revalidate: CACHE_TTL_SECONDS,
         tags: [`composer-suggestion:${cacheScope}`],

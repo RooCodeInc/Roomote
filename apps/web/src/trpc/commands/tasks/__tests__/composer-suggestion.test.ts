@@ -1,6 +1,4 @@
-import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
-
-import type { UserAuthSuccess, TaskMessageEnvelope } from '@/types';
+import type { UserAuthSuccess } from '@/types';
 
 const { mockGetTaskSuggestableMessages, mockGenerateTrackedNonTaskObject } =
   vi.hoisted(() => ({
@@ -25,23 +23,24 @@ vi.mock('next/cache', () => ({
 
 import { getComposerSuggestionCommand } from '../composer-suggestion';
 
-function envelope(
-  overrides: Partial<TaskMessageEnvelope> & {
-    id: string;
-    eventType: string;
-    role: string;
-    text?: string;
-  },
-): TaskMessageEnvelope {
+type SuggestableRow = {
+  id: string;
+  eventType: string;
+  role: string;
+  text: string | null;
+};
+
+function userRow(id: string, text: string): SuggestableRow {
+  return { id, eventType: 'roomote_runtime.user_prompt', role: 'user', text };
+}
+
+function assistantRow(id: string, text: string): SuggestableRow {
   return {
-    taskId: 'task-1',
-    ts: 1,
-    createdAt: 1,
-    contentBlocks: [],
-    metadata: {},
-    payload: {},
-    ...overrides,
-  } as unknown as TaskMessageEnvelope;
+    id,
+    eventType: 'roomote_runtime.assistant_message',
+    role: 'assistant',
+    text,
+  };
 }
 
 const auth = {
@@ -66,12 +65,7 @@ describe('getComposerSuggestionCommand', () => {
 
   it('returns null when the conversation is too short', async () => {
     mockGetTaskSuggestableMessages.mockResolvedValue([
-      envelope({
-        id: 'm1',
-        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-        role: 'user',
-        text: 'Fix the login redirect',
-      }),
+      userRow('m1', 'Fix the login redirect'),
     ]);
 
     await expect(
@@ -82,27 +76,17 @@ describe('getComposerSuggestionCommand', () => {
 
   it('generates a suggestion from user and assistant messages only', async () => {
     mockGetTaskSuggestableMessages.mockResolvedValue([
-      envelope({
-        id: 'm1',
-        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-        role: 'user',
-        text: 'Fix the login redirect',
-      }),
-      envelope({
+      userRow('m1', 'Fix the login redirect'),
+      {
         id: 'm2',
         eventType: 'roomote_runtime.tool_call',
         role: 'assistant',
         text: 'tool output that must not leak into the prompt',
-      }),
-      envelope({
-        id: 'm3',
-        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-        role: 'assistant',
-        text: 'Done. The redirect now preserves the return URL.',
-      }),
+      },
+      assistantRow('m3', 'Done. The redirect now preserves the return URL.'),
     ]);
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: { suggestion: 'Add a test covering the return URL' },
+      object: { suggestion: 'Add a return URL test' },
     });
 
     const result = await getComposerSuggestionCommand(auth, {
@@ -110,7 +94,7 @@ describe('getComposerSuggestionCommand', () => {
     });
 
     expect(result).toEqual({
-      suggestion: 'Add a test covering the return URL',
+      suggestion: 'Add a return URL test',
       messageCount: 2,
     });
 
@@ -134,19 +118,9 @@ describe('getComposerSuggestionCommand', () => {
     const filler = 'x'.repeat(20_000);
     mockGetTaskSuggestableMessages.mockResolvedValue([
       ...Array.from({ length: 4 }, (_, i) =>
-        envelope({
-          id: `old-${i}`,
-          eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-          role: 'assistant',
-          text: `Old message ${i} ${filler}`,
-        }),
+        assistantRow(`old-${i}`, `Old message ${i} ${filler}`),
       ),
-      envelope({
-        id: 'newest',
-        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-        role: 'user',
-        text: 'Newest instruction',
-      }),
+      userRow('newest', 'Newest instruction'),
     ]);
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
       object: { suggestion: 'Ship it' },
@@ -165,18 +139,8 @@ describe('getComposerSuggestionCommand', () => {
 
   it('normalizes wrapping quotes and collapses whitespace', async () => {
     mockGetTaskSuggestableMessages.mockResolvedValue([
-      envelope({
-        id: 'm1',
-        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-        role: 'user',
-        text: 'Fix it',
-      }),
-      envelope({
-        id: 'm2',
-        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-        role: 'assistant',
-        text: 'Fixed',
-      }),
+      userRow('m1', 'Fix it'),
+      assistantRow('m2', 'Fixed'),
     ]);
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
       object: { suggestion: '"Now update\n the docs"' },
@@ -192,18 +156,8 @@ describe('getComposerSuggestionCommand', () => {
 
   it('passes through a null suggestion when the model is not confident', async () => {
     mockGetTaskSuggestableMessages.mockResolvedValue([
-      envelope({
-        id: 'm1',
-        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-        role: 'user',
-        text: 'Fix it',
-      }),
-      envelope({
-        id: 'm2',
-        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-        role: 'assistant',
-        text: 'Fixed',
-      }),
+      userRow('m1', 'Fix it'),
+      assistantRow('m2', 'Fixed'),
     ]);
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
       object: { suggestion: null },
@@ -216,18 +170,8 @@ describe('getComposerSuggestionCommand', () => {
 
   it('discards suggestions that overshoot the word budget', async () => {
     mockGetTaskSuggestableMessages.mockResolvedValue([
-      envelope({
-        id: 'm1',
-        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-        role: 'user',
-        text: 'Fix it',
-      }),
-      envelope({
-        id: 'm2',
-        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-        role: 'assistant',
-        text: 'Fixed',
-      }),
+      userRow('m1', 'Fix it'),
+      assistantRow('m2', 'Fixed'),
     ]);
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
       object: {
@@ -246,18 +190,8 @@ describe('getComposerSuggestionCommand', () => {
       .spyOn(console, 'error')
       .mockImplementation(() => {});
     mockGetTaskSuggestableMessages.mockResolvedValue([
-      envelope({
-        id: 'm1',
-        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-        role: 'user',
-        text: 'Fix it',
-      }),
-      envelope({
-        id: 'm2',
-        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-        role: 'assistant',
-        text: 'Fixed',
-      }),
+      userRow('m1', 'Fix it'),
+      assistantRow('m2', 'Fixed'),
     ]);
     mockGenerateTrackedNonTaskObject.mockRejectedValue(
       new Error('provider unavailable'),

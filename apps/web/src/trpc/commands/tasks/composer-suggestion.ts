@@ -20,7 +20,7 @@ export async function getComposerSuggestionCommand(
   }
 
   try {
-    const messages = await getTaskSuggestableMessages({ taskId: input.taskId });
+    const messages = await getTaskSuggestableMessages(input.taskId);
 
     return await suggestNextComposerMessage({
       messages,
