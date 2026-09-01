@@ -5,7 +5,10 @@ import {
   TaskPayloadKind,
 } from '@roomote/types';
 
-import { getTaskMessageEnvelopes } from './task-messages';
+import {
+  getTaskMessageEnvelopes,
+  getTaskSuggestableMessages,
+} from './task-messages';
 
 describe('getTaskMessageEnvelopes', () => {
   it('preserves a missing user identity for automation prompts', async () => {
@@ -41,5 +44,63 @@ describe('getTaskMessageEnvelopes', () => {
       userEmail: null,
       userImageUrl: null,
     });
+  });
+});
+
+describe('getTaskSuggestableMessages', () => {
+  it('returns only the newest 60 visible conversational messages', async () => {
+    const task = await taskFactory.create({
+      id: 'task-composer-suggestion-history',
+      title: 'Composer suggestion history',
+    });
+    const run = await runFactory.create({ taskId: task.id });
+
+    await db.insert(taskMessages).values([
+      ...Array.from({ length: 61 }, (_, index) => ({
+        runId: run.id,
+        taskId: task.id,
+        ts: index + 1,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant' as const,
+        protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+        contentBlocks: [{ type: 'text' as const, text: `message-${index}` }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+      })),
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 62,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user' as const,
+        protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+        contentBlocks: [{ type: 'text' as const, text: 'hidden prompt' }],
+        metadata: { visibleInTranscript: false },
+        payload: {},
+      },
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 63,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+        role: 'assistant' as const,
+        protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+        contentBlocks: [{ type: 'text' as const, text: 'tool payload' }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+      },
+    ]);
+
+    const messages = await getTaskSuggestableMessages({ taskId: task.id });
+
+    expect(messages).toHaveLength(60);
+    expect(messages[0]?.text).toBe('message-1');
+    expect(messages.at(-1)?.text).toBe('message-60');
+    expect(messages.map((message) => message.text)).not.toContain(
+      'hidden prompt',
+    );
+    expect(messages.map((message) => message.text)).not.toContain(
+      'tool payload',
+    );
   });
 });

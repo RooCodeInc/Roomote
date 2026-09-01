@@ -6,8 +6,7 @@ import {
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 import { z } from 'zod';
 
-// Maximum number of recent messages included in the suggestion prompt.
-const MAX_MESSAGES = 60;
+import { COMPOSER_SUGGESTION_HISTORY_LIMIT } from './composer-suggestion-history';
 
 // Maximum character count for the conversation text.
 const MAX_CONVERSATION_CHARS = 60_000;
@@ -62,7 +61,7 @@ function getSuggestableMessages<T extends SuggestableMessage>(
   return messages
     .filter((m) => m.text && m.text.trim().length > 0)
     .filter((m) => SUGGESTABLE_EVENT_TYPES.has(m.eventType))
-    .slice(-MAX_MESSAGES);
+    .slice(-COMPOSER_SUGGESTION_HISTORY_LIMIT);
 }
 
 /**

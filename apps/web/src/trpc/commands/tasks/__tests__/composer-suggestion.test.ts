@@ -2,14 +2,14 @@ import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import type { UserAuthSuccess, TaskMessageEnvelope } from '@/types';
 
-const { mockGetTaskMessageEnvelopes, mockGenerateTrackedNonTaskObject } =
+const { mockGetTaskSuggestableMessages, mockGenerateTrackedNonTaskObject } =
   vi.hoisted(() => ({
-    mockGetTaskMessageEnvelopes: vi.fn(),
+    mockGetTaskSuggestableMessages: vi.fn(),
     mockGenerateTrackedNonTaskObject: vi.fn(),
   }));
 
-vi.mock('@/lib/server', () => ({
-  getTaskMessageEnvelopes: mockGetTaskMessageEnvelopes,
+vi.mock('@/lib/server/task-messages', () => ({
+  getTaskSuggestableMessages: mockGetTaskSuggestableMessages,
 }));
 
 vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
@@ -60,12 +60,12 @@ describe('getComposerSuggestionCommand', () => {
     await expect(
       getComposerSuggestionCommand(flagOffAuth, { taskId: 'task-1' }),
     ).resolves.toEqual({ suggestion: null, messageCount: 0 });
-    expect(mockGetTaskMessageEnvelopes).not.toHaveBeenCalled();
+    expect(mockGetTaskSuggestableMessages).not.toHaveBeenCalled();
     expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
   });
 
   it('returns null when the conversation is too short', async () => {
-    mockGetTaskMessageEnvelopes.mockResolvedValue([
+    mockGetTaskSuggestableMessages.mockResolvedValue([
       envelope({
         id: 'm1',
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
@@ -81,7 +81,7 @@ describe('getComposerSuggestionCommand', () => {
   });
 
   it('generates a suggestion from user and assistant messages only', async () => {
-    mockGetTaskMessageEnvelopes.mockResolvedValue([
+    mockGetTaskSuggestableMessages.mockResolvedValue([
       envelope({
         id: 'm1',
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
@@ -132,7 +132,7 @@ describe('getComposerSuggestionCommand', () => {
 
   it('keeps the newest messages when the transcript exceeds the character budget', async () => {
     const filler = 'x'.repeat(20_000);
-    mockGetTaskMessageEnvelopes.mockResolvedValue([
+    mockGetTaskSuggestableMessages.mockResolvedValue([
       ...Array.from({ length: 4 }, (_, i) =>
         envelope({
           id: `old-${i}`,
@@ -164,7 +164,7 @@ describe('getComposerSuggestionCommand', () => {
   });
 
   it('normalizes wrapping quotes and collapses whitespace', async () => {
-    mockGetTaskMessageEnvelopes.mockResolvedValue([
+    mockGetTaskSuggestableMessages.mockResolvedValue([
       envelope({
         id: 'm1',
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
@@ -191,7 +191,7 @@ describe('getComposerSuggestionCommand', () => {
   });
 
   it('passes through a null suggestion when the model is not confident', async () => {
-    mockGetTaskMessageEnvelopes.mockResolvedValue([
+    mockGetTaskSuggestableMessages.mockResolvedValue([
       envelope({
         id: 'm1',
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
@@ -215,7 +215,7 @@ describe('getComposerSuggestionCommand', () => {
   });
 
   it('discards suggestions that overshoot the word budget', async () => {
-    mockGetTaskMessageEnvelopes.mockResolvedValue([
+    mockGetTaskSuggestableMessages.mockResolvedValue([
       envelope({
         id: 'm1',
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
@@ -245,7 +245,7 @@ describe('getComposerSuggestionCommand', () => {
     const consoleErrorSpy = vi
       .spyOn(console, 'error')
       .mockImplementation(() => {});
-    mockGetTaskMessageEnvelopes.mockResolvedValue([
+    mockGetTaskSuggestableMessages.mockResolvedValue([
       envelope({
         id: 'm1',
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,

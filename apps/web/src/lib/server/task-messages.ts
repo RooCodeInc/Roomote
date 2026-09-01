@@ -1,4 +1,5 @@
 import {
+  ACP_ENVELOPE_EVENT_TYPES,
   type AcpEventType,
   sanitizeEnvelopeFields,
   inferAcpMessageKind,
@@ -12,9 +13,12 @@ import {
   asc,
   and,
   db,
+  desc,
   eq,
+  inArray,
   like,
   not,
+  sql,
   taskMessages,
   tasks,
   users,
@@ -22,6 +26,7 @@ import {
 
 import type { TaskMessageEnvelope } from '@/types';
 import { getUserDisplayName } from '@/lib/user-display-name';
+import { COMPOSER_SUGGESTION_HISTORY_LIMIT } from './composer-suggestion-history';
 
 export async function getTaskMessageEnvelopes({
   taskId,
@@ -100,4 +105,64 @@ export async function getTaskMessageEnvelopes({
         undefined,
     };
   });
+}
+
+/**
+ * Fetch the newest bounded, transcript-visible user/assistant history used by
+ * composer suggestions. Filtering and limiting happen before text extraction,
+ * so tool payloads and older transcript rows never leave Postgres.
+ */
+export async function getTaskSuggestableMessages({
+  taskId,
+}: {
+  taskId: string;
+}): Promise<
+  Array<{ eventType: string; role: string | null; text: string | null }>
+> {
+  const rows = await db
+    .select({
+      eventType: taskMessages.eventType,
+      role: taskMessages.role,
+      contentBlocks: taskMessages.contentBlocks,
+      metadata: taskMessages.metadata,
+      payload: taskMessages.payload,
+    })
+    .from(taskMessages)
+    .where(
+      and(
+        eq(taskMessages.taskId, taskId),
+        eq(taskMessages.protocol, ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL),
+        inArray(taskMessages.eventType, [
+          ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        ]),
+        sql`coalesce(${taskMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+      ),
+    )
+    .orderBy(
+      desc(taskMessages.createdAt),
+      desc(taskMessages.ts),
+      desc(taskMessages.id),
+    )
+    .limit(COMPOSER_SUGGESTION_HISTORY_LIMIT);
+
+  return rows
+    .filter((row) =>
+      resolveAcpTranscriptVisibility({
+        eventType: row.eventType,
+        contentBlocks: row.contentBlocks,
+        metadata: (row.metadata as Record<string, unknown> | null) ?? null,
+        payload: (row.payload as Record<string, unknown> | null) ?? null,
+      }),
+    )
+    .reverse()
+    .map((row) => ({
+      eventType: row.eventType,
+      role: row.role,
+      text:
+        extractAcpMessageText(
+          row.contentBlocks,
+          (row.payload as Record<string, unknown> | null) ?? null,
+        ) ?? null,
+    }));
 }

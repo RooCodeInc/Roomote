@@ -142,6 +142,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       taskHistory?.reduce(
         (count, message) =>
           SUGGESTION_HISTORY_EVENT_TYPES.has(message.eventType) &&
+          message.visibleInTranscript !== false &&
           message.text?.trim()
             ? count + 1
             : count,

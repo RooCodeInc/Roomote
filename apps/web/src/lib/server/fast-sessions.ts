@@ -27,6 +27,7 @@ import {
 import type { FastAgentMessage } from '@roomote/db';
 
 import type { UserAuthSuccess } from '@/types';
+import { COMPOSER_SUGGESTION_HISTORY_LIMIT } from './composer-suggestion-history';
 
 type FastSessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
 
@@ -399,13 +400,14 @@ export async function getFastSessionSuggestableMessages(
       ),
     )
     .orderBy(
-      asc(fastAgentMessages.ts),
-      asc(fastAgentMessages.turnSeq),
-      asc(fastAgentMessages.createdAt),
-      asc(fastAgentMessages.id),
-    );
+      desc(fastAgentMessages.ts),
+      desc(fastAgentMessages.turnSeq),
+      desc(fastAgentMessages.createdAt),
+      desc(fastAgentMessages.id),
+    )
+    .limit(COMPOSER_SUGGESTION_HISTORY_LIMIT);
 
-  return rows.map((row) => ({
+  return rows.reverse().map((row) => ({
     eventType: row.eventType,
     role: row.role,
     text:
