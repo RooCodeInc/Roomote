@@ -975,6 +975,13 @@ export async function processSlackChannelAutoStartTask(params: {
             event,
             slackInstallation.botUserId,
           ),
+          delegatedTaskInitiator: {
+            kind: 'automation',
+            key: 'slack_channel_auto_start',
+            ...(typeof event.user === 'string'
+              ? { actor: { externalId: event.user } }
+              : {}),
+          },
           processingReactionName: ackEmoji,
           errorLogPrefix: `❌ Background fast-agent response failed for configured channel auto-start thread ${threadId}:`,
         });
@@ -1546,6 +1553,13 @@ async function processAutomatedAppMentionTask(params: {
         teamId,
         continuation: true,
         directedAtRoomote: true,
+        delegatedTaskInitiator: {
+          kind: 'automation',
+          key: 'slack_channel_auto_start',
+          ...(typeof event.user === 'string'
+            ? { actor: { externalId: event.user } }
+            : {}),
+        },
         resolveActiveTasks: () =>
           resolveFastAgentReplyTasks({
             slack,
@@ -1724,9 +1738,13 @@ export function startFastAgentResponse(params: {
   processingReactionName: string;
   isExistingConversation?: boolean;
   directedAtRoomote?: boolean;
+  /** Attribution for tasks Fast delegates from this turn; automation-identity
+   * turns pass their automation initiator so delegated work keeps automation
+   * provenance instead of appearing installer-initiated. */
+  delegatedTaskInitiator?: TaskInitiator;
   errorLogPrefix: string;
 }): Promise<FastAgentStartResult> {
-  const { errorLogPrefix, ...fastAgentParams } = params;
+  const { errorLogPrefix, delegatedTaskInitiator, ...fastAgentParams } = params;
   return startAcceptedFastAgentTurn({
     run: ({ onAccepted, onRejected }) =>
       processFastAgentMessage({
@@ -1737,6 +1755,9 @@ export function startFastAgentResponse(params: {
           slack: params.slack,
           userId: params.userId,
           teamId: params.teamId,
+          ...(delegatedTaskInitiator
+            ? { initiator: delegatedTaskInitiator }
+            : {}),
           ...(params.slackInstallation.teamDomain
             ? { teamDomain: params.slackInstallation.teamDomain }
             : {}),

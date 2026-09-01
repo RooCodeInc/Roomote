@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   postRoutingDebug: vi.fn(),
   automationLaunchIdentity: vi.fn(),
   processFastAgentMessage: vi.fn(),
+  liveTaskLauncher: vi.fn(() => vi.fn()),
   logWarn: vi.fn(),
 }));
 
@@ -48,7 +49,7 @@ vi.mock('@roomote/redis', async (importOriginal) => ({
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
-  createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
+  createFastAgentSlackLiveTaskLauncher: mocks.liveTaskLauncher,
   startAutoRoutedSlackTask: mocks.startTask,
 }));
 
@@ -286,6 +287,15 @@ describe('Slack channel auto-start failures', () => {
         userId: 'installer-1',
         continuation: true,
         event: expect.objectContaining({ user: 'UBOT' }),
+      }),
+    );
+    expect(mocks.liveTaskLauncher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initiator: {
+          kind: 'automation',
+          key: 'slack_channel_auto_start',
+          actor: { externalId: 'U123' },
+        },
       }),
     );
     expect(mocks.startTask).not.toHaveBeenCalled();

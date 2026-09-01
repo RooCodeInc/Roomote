@@ -502,6 +502,11 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
       expect.objectContaining({
         senderUserId: 'installer-1',
         directedAtRoomote: true,
+        delegatedTaskInitiator: {
+          kind: 'automation',
+          key: 'slack_channel_auto_start',
+          actor: { externalId: 'alert-bot', displayName: 'alerts' },
+        },
       }),
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();

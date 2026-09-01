@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   processAttachments: vi.fn(),
   automationLaunchIdentity: vi.fn(),
   processFastAgentMessage: vi.fn(),
+  liveTaskLauncher: vi.fn(() => vi.fn()),
   lookupSlackUserMapping: vi.fn(),
 }));
 
@@ -32,7 +33,7 @@ vi.mock('@roomote/redis', async (importOriginal) => ({
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
-  createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
+  createFastAgentSlackLiveTaskLauncher: mocks.liveTaskLauncher,
   startAutoRoutedSlackTask: mocks.startTask,
 }));
 
@@ -134,6 +135,15 @@ describe('automated Slack message mentions', () => {
           channel: 'C123',
           user: 'U_INSTALLER',
         }),
+      }),
+    );
+    expect(mocks.liveTaskLauncher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initiator: {
+          kind: 'automation',
+          key: 'slack_channel_auto_start',
+          actor: { externalId: 'U_WORKFLOW' },
+        },
       }),
     );
     expect(mocks.startTask).not.toHaveBeenCalled();

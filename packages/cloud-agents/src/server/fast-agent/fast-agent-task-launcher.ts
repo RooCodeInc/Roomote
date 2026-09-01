@@ -131,6 +131,10 @@ export type FastAgentSlackTaskLauncherParams = {
   channelId: string;
   threadTs: string;
   messageId?: string;
+  /** Attribution override for delegated tasks; automation-identity Fast
+   * turns pass their automation initiator so delegated work is not
+   * persisted as user-initiated by the launch owner. */
+  initiator?: TaskInitiator;
   /** Opt the child into the native Slack task card in the parent thread. */
   liveTaskStream?: boolean;
 } & FastAgentTaskLaunchHooks;
@@ -149,6 +153,7 @@ export function createFastAgentSlackTaskLauncher(
   return createFastAgentTaskLauncher({
     userId: params.userId,
     surface: 'slack',
+    ...(params.initiator ? { initiator: params.initiator } : {}),
     taskUrlCampaign: 'fast-delegation',
     afterKickoff: params.afterKickoff,
     onQueueFailure: params.onQueueFailure,

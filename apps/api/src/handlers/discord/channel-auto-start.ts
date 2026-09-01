@@ -421,6 +421,7 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
             metadata,
             conversationId: getDiscordFastConversationId(channel, message.id),
             directedAtRoomote: true,
+            delegatedTaskInitiator: initiator,
           });
 
           if (fastStart.accepted) {
