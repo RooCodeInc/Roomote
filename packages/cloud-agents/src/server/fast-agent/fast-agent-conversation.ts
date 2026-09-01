@@ -90,12 +90,11 @@ export type LaunchFastAgentTask = (params: {
   images?: string[];
   environmentId: string | null;
   branch?: string;
-  launchIdempotencyKey?: string;
-  model?: string | null;
-  parentSessionId: string;
   /** Optional launch idempotency key persisted in the standard task-run
    * payload; a partial unique index makes concurrent retries converge. */
   launchIdempotencyKey?: string;
+  model?: string | null;
+  parentSessionId: string;
   postKickoff: (task: {
     taskId: string;
     taskUrl?: string;

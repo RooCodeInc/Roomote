@@ -305,6 +305,7 @@ import {
   getOrCreateSetupSessionCommand,
   getSetupSessionStatusCommand,
   notifySetupSourceControlSynchronized,
+  persistSetupRecommendationApplicationReceipt,
   reconcileSetupPlatformEvents,
   submitSetupSessionUserInputCommand,
 } from '../commands/setup/setup-session';
@@ -555,11 +556,23 @@ const automationsRouter = createRouter({
     .mutation(({ ctx: { auth }, input }) =>
       setSetupRecommendationEnabledCommand(auth, input),
     ),
-  applyRecommendations: protectedProcedure.mutation(({ ctx: { auth } }) =>
-    applySetupRecommendationsCommand(auth),
+  applyRecommendations: protectedProcedure.mutation(
+    async ({ ctx: { auth } }) => {
+      const batch = await applySetupRecommendationsCommand(auth);
+      await persistSetupRecommendationApplicationReceipt(auth, batch, 'saved');
+      return batch;
+    },
   ),
-  skipRecommendations: protectedProcedure.mutation(({ ctx: { auth } }) =>
-    skipSetupRecommendationsCommand(auth),
+  skipRecommendations: protectedProcedure.mutation(
+    async ({ ctx: { auth } }) => {
+      const batch = await skipSetupRecommendationsCommand(auth);
+      await persistSetupRecommendationApplicationReceipt(
+        auth,
+        batch,
+        'skipped',
+      );
+      return batch;
+    },
   ),
   runRecommendationNow: protectedProcedure
     .input(z.object({ id: z.string().min(1) }))

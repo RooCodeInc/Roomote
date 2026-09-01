@@ -17,6 +17,7 @@ import {
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  AUTOMATION_RECOMMENDATION_CATALOG,
   createSetupNewSetupSession,
   isSetupStarterTaskId,
   normalizeSetupNewState,
@@ -24,6 +25,7 @@ import {
   RunStatus,
   type AcpRequestUserInputAnswers,
   type AcpRequestUserInputPayload,
+  type AutomationRecommendationBatch,
   type SetupStarterTaskId,
 } from '@roomote/types';
 import { captureEvent } from '@roomote/telemetry/server';
@@ -33,6 +35,14 @@ import { SETUP_STARTER_TASKS } from '@/lib/setup-starter-tasks';
 import { assertAdmin } from './shared';
 import { completeSetupCommand } from './index';
 import { getSetupNewStatusCommand } from '../setup-new';
+import {
+  buildSetupReceiptMessage,
+  formatComputeReadinessReceipt,
+  formatRecommendationApplicationReceipt,
+  formatSourceConnectionReceipt,
+  formatStarterSelectionReceipt,
+  type SetupReceiptKind,
+} from './setup-receipts';
 import {
   scheduleWebFastAgentTurn,
   submitFastSessionUserInputCommand,
@@ -123,6 +133,44 @@ async function findSetupSessionConversation(
     )
     .limit(1);
   return row ? { ...row, workflowVersion: setupSession.workflowVersion } : null;
+}
+
+async function persistSetupSessionReceipt(
+  auth: UserAuthSuccess,
+  input: {
+    kind: SetupReceiptKind;
+    fingerprint: string;
+    text: string;
+    payload?: Record<string, unknown>;
+    ts?: number;
+  },
+  conversation?: SetupSessionConversation,
+): Promise<boolean> {
+  const setupConversation =
+    conversation ?? (await findSetupSessionConversation(auth));
+  if (!setupConversation) return false;
+
+  const receipt = buildSetupReceiptMessage({
+    sessionId: setupConversation.sessionId,
+    workflowVersion: setupConversation.workflowVersion,
+    userId: auth.userId,
+    ...input,
+  });
+  const inserted = await db
+    .insert(fastAgentMessages)
+    .values({
+      conversationId: setupConversation.fastConversationId,
+      ...receipt,
+    })
+    .onConflictDoNothing({
+      target: [fastAgentMessages.conversationId, fastAgentMessages.eventId],
+    })
+    .returning({ id: fastAgentMessages.id });
+
+  // Deliberately do not call appendFastAgentVisibleMessages: canonical history
+  // renders this receipt, while model/OpenCode compatibility history remains
+  // authoritative structured setup events only.
+  return inserted.length > 0;
 }
 
 function buildSetupEventTurnId(input: {
@@ -386,6 +434,57 @@ export async function reconcileSetupPlatformEvents(
     hasSuccessfulStarterLaunch,
   });
 
+  const connected = status.sourceControlSetup.providers.filter(
+    (provider) => provider.connected,
+  );
+  const synchronized = connected.filter(
+    (provider) => (provider.repositoryCount ?? 0) > 0,
+  );
+  if (synchronized.length > 0) {
+    const repositoryCount = synchronized.reduce(
+      (total, provider) => total + (provider.repositoryCount ?? 0),
+      0,
+    );
+    const fingerprint = synchronized
+      .map((provider) => provider.provider)
+      .sort()
+      .join(',');
+    await persistSetupSessionReceipt(
+      auth,
+      {
+        kind: 'source_connection',
+        fingerprint,
+        text: formatSourceConnectionReceipt({
+          providerLabels: synchronized.map((provider) => provider.label),
+          repositoryCount,
+        }),
+        payload: {
+          providers: synchronized.map((provider) => ({
+            provider: provider.provider,
+            repositoryCount: provider.repositoryCount ?? 0,
+          })),
+        },
+      },
+      conversation,
+    );
+  }
+  if (state.computeProvider && status.computeSetup.setupSatisfied) {
+    const providerLabel =
+      status.computeSetup.providers.find(
+        (provider) => provider.provider === state.computeProvider,
+      )?.label ?? state.computeProvider;
+    await persistSetupSessionReceipt(
+      auth,
+      {
+        kind: 'compute_readiness',
+        fingerprint: state.computeProvider,
+        text: formatComputeReadinessReceipt(providerLabel),
+        payload: { provider: state.computeProvider },
+      },
+      conversation,
+    );
+  }
+
   const events: Array<Parameters<typeof scheduleSetupPlatformEvent>[1]> = [
     {
       kind: 'session_creation',
@@ -410,9 +509,6 @@ export async function reconcileSetupPlatformEvents(
       payload: { provider: state.sourceControlProvider },
     });
   }
-  const connected = status.sourceControlSetup.providers.filter(
-    (provider) => provider.connected,
-  );
   if (connected.length > 0) {
     events.push({
       kind: 'source_connection',
@@ -488,6 +584,34 @@ export async function notifySetupSourceControlSynchronized(
   const { startSetupRecommendationsCommand } = await import('../setup-new');
   await startSetupRecommendationsCommand(auth);
   await reconcileSetupPlatformEvents(auth);
+}
+
+export async function persistSetupRecommendationApplicationReceipt(
+  auth: UserAuthSuccess,
+  batch: AutomationRecommendationBatch | null,
+  action: 'saved' | 'skipped',
+): Promise<void> {
+  if (!batch) return;
+  const enabledRecommendations = batch.recommendations.filter(
+    (recommendation) => recommendation.enabled,
+  );
+  const enabledTitles = enabledRecommendations.map(
+    (recommendation) =>
+      AUTOMATION_RECOMMENDATION_CATALOG.find(
+        (candidate) => candidate.id === recommendation.candidateId,
+      )?.title ?? recommendation.candidateId,
+  );
+  await persistSetupSessionReceipt(auth, {
+    kind: 'recommendation_application',
+    fingerprint: `${batch.inputFingerprint}:${action}`,
+    text: formatRecommendationApplicationReceipt({ action, enabledTitles }),
+    payload: {
+      action,
+      recommendationIds: enabledRecommendations.map(
+        (recommendation) => recommendation.id,
+      ),
+    },
+  });
 }
 
 export async function findDeploymentSetupSessionId(): Promise<string | null> {
@@ -718,7 +842,7 @@ async function persistSetupPresetResponse(input: {
           }),
         },
       ],
-      metadata: { visibleInTranscript: true },
+      metadata: { visibleInTranscript: false },
       payload: {
         requestId: input.request.payload.requestId,
         sessionId: input.fastConversationId,
@@ -729,6 +853,29 @@ async function persistSetupPresetResponse(input: {
       },
       source: 'web',
     });
+    await tx
+      .insert(fastAgentMessages)
+      .values({
+        conversationId: input.fastConversationId,
+        ...buildSetupReceiptMessage({
+          sessionId: setupSession.sessionId,
+          workflowVersion: setupSession.workflowVersion,
+          userId: input.auth.userId,
+          kind: 'starter_selection',
+          fingerprint: input.request.payload.requestId,
+          text: formatStarterSelectionReceipt(
+            taskIds.map(
+              (taskId) =>
+                SETUP_STARTER_TASKS.find((task) => task.id === taskId)!.title,
+            ),
+          ),
+          payload: { taskIds },
+          ts: now.getTime(),
+        }),
+      })
+      .onConflictDoNothing({
+        target: [fastAgentMessages.conversationId, fastAgentMessages.eventId],
+      });
   });
 
   if (completedSetup) {

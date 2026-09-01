@@ -12,6 +12,7 @@ import {
 import { useReducedMotion } from 'motion/react';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  SETUP_RECEIPT_INPUT_KIND,
   getImageUrisFromContentBlocks,
   getTextFromContentBlocks,
   inferAcpMessageKind,
@@ -132,6 +133,7 @@ export function pendingResponseReducer(
         action.type === 'hydrate' || action.newEventIds.has(message.eventId);
       if (
         message.role === 'user' &&
+        message.metadata?.inputKind !== SETUP_RECEIPT_INPUT_KIND &&
         isNewMessage &&
         (action.type === 'hydrate' ||
           pendingThreshold === null ||

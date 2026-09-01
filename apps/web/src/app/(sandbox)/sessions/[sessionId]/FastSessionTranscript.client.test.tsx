@@ -5,7 +5,10 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
-import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  SETUP_RECEIPT_INPUT_KIND,
+} from '@roomote/types';
 
 import {
   FastSessionTranscript,
@@ -181,6 +184,7 @@ describe('FastSessionTranscript', () => {
     ts,
     visible = true,
     turnSeq = role === 'user' ? 0 : 1,
+    inputKind,
   }: {
     id: string;
     role: 'user' | 'assistant';
@@ -188,6 +192,7 @@ describe('FastSessionTranscript', () => {
     ts: number;
     visible?: boolean;
     turnSeq?: number;
+    inputKind?: string;
   }) => ({
     id,
     eventId: `${id}:event`,
@@ -200,7 +205,10 @@ describe('FastSessionTranscript', () => {
         : ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
     role,
     contentBlocks: [{ type: 'text' as const, text }],
-    metadata: { visibleInTranscript: visible },
+    metadata: {
+      visibleInTranscript: visible,
+      ...(inputKind ? { inputKind } : {}),
+    },
     payload: {},
     source: 'web',
     nativeSessionId: role === 'assistant' ? 'opencode-1' : null,
@@ -214,6 +222,24 @@ describe('FastSessionTranscript', () => {
       latestVisibleResponse: null,
       optimisticRollback: null,
     };
+
+    it('does not treat transcript-only setup receipts as pending model input', () => {
+      const receipt = textMessage({
+        id: 'setup-receipt',
+        role: 'user',
+        text: 'Sandbox configured with Modal.',
+        ts: 2,
+        inputKind: SETUP_RECEIPT_INPUT_KIND,
+      });
+
+      const next = pendingResponseReducer(emptyState, {
+        type: 'messages',
+        newEventIds: new Set([receipt.eventId]),
+        messages: [receipt],
+      });
+
+      expect(next.pendingAfter).toBeNull();
+    });
 
     it('uses the same ordering and visibility rules for hydration and streamed messages', () => {
       const hydrated = pendingResponseReducer(emptyState, {

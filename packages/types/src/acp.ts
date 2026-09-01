@@ -74,6 +74,13 @@ export function normalizeAcpReasoningText(text: string): string {
 
 export const ACP_LOGICAL_EVENT_ID_KEY = 'logicalEventId' as const;
 
+/**
+ * Canonical transcript-only record of a trusted setup-card action. These
+ * messages are visible as user choices but are never submitted to the model
+ * or mirrored into Fast Agent compatibility history.
+ */
+export const SETUP_RECEIPT_INPUT_KIND = 'setup_receipt' as const;
+
 export interface AcpLogicalEventIdParts {
   sessionId: string | null | undefined;
   turnId?: string | null | undefined;
