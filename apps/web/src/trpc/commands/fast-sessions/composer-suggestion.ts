@@ -9,6 +9,7 @@ import {
   type ComposerSuggestionResult,
   suggestNextComposerMessage,
 } from '@/lib/server/composer-suggestion';
+import { computeTaskStateRevision } from '@/lib/composer-suggestion-task-state';
 
 // Bound the task context so a session with many delegations stays cheap.
 const MAX_CONTEXT_TASKS = 20;
@@ -21,12 +22,12 @@ const MAX_CONTEXT_TASKS = 20;
 async function buildSessionTaskContext(
   auth: UserAuthSuccess,
   sessionId: string,
-): Promise<string | null> {
+): Promise<{ context: string | null; revision: string | null }> {
   try {
     const tasks = await getFastSessionTasks(auth, sessionId);
 
     if (!tasks || tasks.length === 0) {
-      return null;
+      return { context: null, revision: null };
     }
 
     const lines = tasks.slice(0, MAX_CONTEXT_TASKS).map((task) => {
@@ -41,16 +42,19 @@ async function buildSessionTaskContext(
       return `- ${title} (${state}${artifacts})`;
     });
 
-    return [
-      'Tasks the agent has delegated in this session, with their current status:',
-      ...lines,
-    ].join('\n');
+    return {
+      context: [
+        'Tasks the agent has delegated in this session, with their current status:',
+        ...lines,
+      ].join('\n'),
+      revision: computeTaskStateRevision(tasks),
+    };
   } catch (error) {
     console.error(
       'Error loading session tasks for composer suggestion:',
       error,
     );
-    return null;
+    return { context: null, revision: null };
   }
 }
 
@@ -75,7 +79,7 @@ export async function getFastSessionComposerSuggestionCommand(
       return { suggestion: null, messageCount: 0 };
     }
 
-    const [messages, context] = await Promise.all([
+    const [messages, taskContext] = await Promise.all([
       getFastSessionSuggestableMessages(session.id),
       buildSessionTaskContext(auth, session.id),
     ]);
@@ -85,7 +89,8 @@ export async function getFastSessionComposerSuggestionCommand(
       cacheScope: `session:${session.id}`,
       userId: auth.userId ?? null,
       fastConversationId: session.id,
-      context,
+      context: taskContext.context,
+      contextRevision: taskContext.revision,
     });
   } catch (error) {
     console.error(

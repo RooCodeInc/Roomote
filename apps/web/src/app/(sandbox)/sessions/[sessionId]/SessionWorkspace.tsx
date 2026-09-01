@@ -7,6 +7,7 @@ import {
   useContext,
   useState,
   type ReactNode,
+  useMemo,
 } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
@@ -33,6 +34,7 @@ import {
   getSessionSurfaceLabel,
 } from '@/components/sessions/session-surfaces';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
+import { computeTaskStateRevision } from '@/lib/composer-suggestion-task-state';
 import { useTRPC } from '@/trpc/client';
 import { FramedSurface, WorkspaceSurface } from '@/components/layout';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
@@ -80,6 +82,7 @@ import {
   OpenSessionTaskPanelContext,
   OpenSessionTasksPanelContext,
   SessionRunningTaskCountContext,
+  SessionTaskStateRevisionContext,
 } from './session-task-panel-context';
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
 import { useArtifactByPath } from '../../task/[taskId]/hooks/use-artifact-by-path';
@@ -698,6 +701,10 @@ export function SessionWorkspace({
     isActivelyRunningTask(task.latestRun?.status, task.latestRun?.taskPhase),
   );
   const runningTaskCount = runningTasks.length;
+  const taskStateRevision = useMemo(
+    () => computeTaskStateRevision(taskCards),
+    [taskCards],
+  );
   const singleRunningTaskId =
     runningTaskCount === 1 ? runningTasks[0]?.taskId : null;
   const selectedTaskId = searchParams.get('task');
@@ -813,9 +820,13 @@ export function SessionWorkspace({
           main={
             <SessionPullRequestsContext.Provider value={sessionPullRequests}>
               <SessionRunningTaskCountContext.Provider value={runningTaskCount}>
-                <OpenSessionTasksPanelContext.Provider value={openTasksPanel}>
-                  {children}
-                </OpenSessionTasksPanelContext.Provider>
+                <SessionTaskStateRevisionContext.Provider
+                  value={taskStateRevision}
+                >
+                  <OpenSessionTasksPanelContext.Provider value={openTasksPanel}>
+                    {children}
+                  </OpenSessionTasksPanelContext.Provider>
+                </SessionTaskStateRevisionContext.Provider>
               </SessionRunningTaskCountContext.Provider>
             </SessionPullRequestsContext.Provider>
           }
