@@ -94,18 +94,16 @@ export async function enqueueFastAgentParentEvent(params: {
     })
     .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
 
-  try {
-    await addWakeupJob({
-      conversationId: params.parent.sessionId,
-      eventKey,
-    });
-  } catch (error) {
+  void addWakeupJob({
+    conversationId: params.parent.sessionId,
+    eventKey,
+  }).catch((error) => {
     // Admission is already durable. BullMQ startup and its periodic recovery
     // sweep recreate the wakeup without making the child task wait or retry.
     console.error(
       `[FastAgentParentEventQueue] Persisted ${eventKey}, but its immediate wakeup failed: ${error instanceof Error ? error.message : String(error)}`,
     );
-  }
+  });
 
   return { eventKey, queued: true };
 }

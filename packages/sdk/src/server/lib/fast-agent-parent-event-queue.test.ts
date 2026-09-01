@@ -151,13 +151,38 @@ describe('Fast parent event durable queue', () => {
     expect(mocks.insertOnConflict.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.queueAdd.mock.invocationCallOrder[0]!,
     );
+    await vi.waitFor(() => expect(errorSpy).toHaveBeenCalledOnce());
     errorSpy.mockRestore();
+  });
+
+  it('acknowledges durable admission without waiting for BullMQ', async () => {
+    mocks.queueAdd.mockReturnValueOnce(new Promise(() => {}));
+
+    await expect(
+      enqueueFastAgentParentEvent({ parent, event }),
+    ).resolves.toEqual(expect.objectContaining({ queued: true }));
+
+    expect(mocks.insertOnConflict).toHaveBeenCalledOnce();
+    expect(mocks.queueAdd).toHaveBeenCalledOnce();
   });
 
   it('builds a stable BullMQ-safe idempotency key', () => {
     const first = buildFastAgentParentEventKey({ parent, event });
     expect(buildFastAgentParentEventKey({ parent, event })).toBe(first);
     expect(first).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('uses the stable event key as the sole durable admission claim', async () => {
+    const eventKey = buildFastAgentParentEventKey({ parent, event });
+
+    await enqueueFastAgentParentEvent({ parent, event });
+
+    expect(mocks.insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({ eventKey }),
+    );
+    expect(mocks.insertOnConflict).toHaveBeenCalledWith({
+      target: 'event_key',
+    });
   });
 
   it('drains one parent in durable creation order under one turn lock', async () => {
@@ -197,6 +222,82 @@ describe('Fast parent event durable queue', () => {
       maxWaitMs: 0,
     });
     expect(mocks.deliver).not.toHaveBeenCalled();
+  });
+
+  it('admits a PR-open event before retrying delivery for a busy parent', async () => {
+    const pullRequestOpened = {
+      type: 'pull_request_opened' as const,
+      taskId: 'child-task',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/child-task',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: '[Fix] Keep delivery asynchronous',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'draft' as const,
+      },
+    };
+    const row = pendingRow('pr-opened', pullRequestOpened);
+    mocks.findPending.mockResolvedValueOnce(row);
+    mocks.acquireLock.mockResolvedValueOnce(null);
+
+    await expect(
+      enqueueFastAgentParentEvent({ parent, event: pullRequestOpened }),
+    ).resolves.toEqual(expect.objectContaining({ queued: true }));
+    await expect(
+      drainFastAgentParentEvents({
+        conversationId: parent.sessionId,
+        eventKey: row.eventKey,
+      }),
+    ).rejects.toBeInstanceOf(FastAgentParentBusyError);
+
+    expect(mocks.insertOnConflict).toHaveBeenCalled();
+    expect(mocks.deliver).not.toHaveBeenCalled();
+  });
+
+  it('delivers PR-open before a later task-settled event', async () => {
+    const pullRequestOpened = {
+      type: 'pull_request_opened' as const,
+      taskId: 'child-task',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/child-task',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: '[Fix] Keep delivery ordered',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'draft' as const,
+      },
+    };
+    const taskSettled = {
+      type: 'task_settled' as const,
+      taskId: 'child-task',
+      runId: 42,
+      status: 'idle' as const,
+      taskUrl: 'https://roomote.example/task/child-task',
+      pullRequests: [pullRequestOpened.pullRequest],
+    };
+    const first = pendingRow('pr-opened', pullRequestOpened);
+    const second = pendingRow('task-settled', taskSettled);
+    mocks.findPending
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second)
+      .mockResolvedValueOnce(undefined);
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: first.eventKey,
+    });
+
+    expect(
+      mocks.deliver.mock.calls.map(([params]) => params.event.type),
+    ).toEqual(['pull_request_opened', 'task_settled']);
   });
 
   it('delivers a durable human follow-up after response finalization releases the lock', async () => {

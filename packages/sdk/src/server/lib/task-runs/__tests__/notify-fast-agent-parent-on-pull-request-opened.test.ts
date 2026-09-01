@@ -1,74 +1,24 @@
 import type { TaskRun } from '@roomote/db/server';
 
 const mocks = vi.hoisted(() => {
-  class FastAgentParentEventDeliveryError extends Error {
-    readonly replyPosted: boolean;
-    readonly permanent: boolean;
-
-    constructor(
-      message: string,
-      options: { replyPosted: boolean; permanent?: boolean },
-    ) {
-      super(message);
-      this.replyPosted = options.replyPosted;
-      this.permanent = options.permanent ?? false;
-    }
-  }
-
   return {
-    claimReturning: vi.fn(),
-    findClaimRun: vi.fn(),
-    updateSet: vi.fn(),
-    inArray: vi.fn((...args: unknown[]) => args),
-    not: vi.fn((...args: unknown[]) => args),
     recordLifecycle: vi.fn(),
-    deliverParentEvent: vi.fn(),
+    enqueueParentEvent: vi.fn(),
     getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
-    FastAgentParentEventDeliveryError,
   };
 });
 
 vi.mock('@roomote/db/server', () => ({
-  db: {
-    query: {
-      taskRuns: { findFirst: mocks.findClaimRun },
-    },
-    update: vi.fn(() => ({
-      set: vi.fn((values: unknown) => {
-        mocks.updateSet(values);
-        return {
-          where: vi.fn(() => ({ returning: mocks.claimReturning })),
-        };
-      }),
-    })),
-  },
-  and: vi.fn((...args: unknown[]) => args),
-  asc: vi.fn((value: unknown) => value),
-  desc: vi.fn((value: unknown) => value),
-  eq: vi.fn((...args: unknown[]) => args),
-  inArray: mocks.inArray,
-  not: mocks.not,
+  db: {},
   recordTaskRunLifecycleEvent: mocks.recordLifecycle,
-  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
-    strings: [...strings],
-    values,
-  })),
-  taskRuns: {
-    id: 'task_runs.id',
-    taskId: 'task_runs.task_id',
-    createdAt: 'task_runs.created_at',
-    result: 'task_runs.result',
-    status: 'task_runs.status',
-  },
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   getTaskUrl: mocks.getTaskUrl,
 }));
 
-vi.mock('../../fast-agent-parent-event', () => ({
-  deliverFastAgentParentEvent: mocks.deliverParentEvent,
-  FastAgentParentEventDeliveryError: mocks.FastAgentParentEventDeliveryError,
+vi.mock('../../fast-agent-parent-event-queue', () => ({
+  enqueueFastAgentParentEvent: mocks.enqueueParentEvent,
 }));
 
 import { notifyFastAgentParentOnPullRequestOpened } from '../notify-fast-agent-parent-on-pull-request-opened';
@@ -116,9 +66,7 @@ const pullRequest = {
 describe('notifyFastAgentParentOnPullRequestOpened', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
-    mocks.findClaimRun.mockResolvedValue({ id: 200 });
-    mocks.deliverParentEvent.mockResolvedValue(undefined);
+    mocks.enqueueParentEvent.mockResolvedValue({ queued: true });
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
 
@@ -130,9 +78,8 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
       pullRequest,
     });
 
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith({
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith({
       parent: discordFastParent,
-      lockWaitMs: 30_000,
       event: {
         type: 'pull_request_opened',
         taskId: 'child-task',
@@ -150,10 +97,6 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
         campaign: 'fast-delegation-pr-opened',
       },
     });
-    expect(mocks.inArray).toHaveBeenCalledWith(
-      'task_runs.status',
-      expect.arrayContaining(['completed', 'failed', 'canceled']),
-    );
     expect(mocks.recordLifecycle).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -172,7 +115,7 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
       pullRequest,
     });
 
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.not.objectContaining({
           untrustedTaskGeneratedContext: expect.anything(),
@@ -187,6 +130,36 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
       pullRequest,
     });
 
-    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('fails only when durable queue admission fails', async () => {
+    mocks.enqueueParentEvent.mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+
+    await expect(
+      notifyFastAgentParentOnPullRequestOpened({
+        run: makeRun({ fastAgentParent: fastParent }),
+        pullRequest,
+      }),
+    ).rejects.toThrow('database unavailable');
+    expect(mocks.recordLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('does not fail admitted events when lifecycle recording fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.recordLifecycle.mockRejectedValueOnce(
+      new Error('lifecycle unavailable'),
+    );
+
+    await expect(
+      notifyFastAgentParentOnPullRequestOpened({
+        run: makeRun({ fastAgentParent: fastParent }),
+        pullRequest,
+      }),
+    ).resolves.toBeUndefined();
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledOnce();
+    errorSpy.mockRestore();
   });
 });
