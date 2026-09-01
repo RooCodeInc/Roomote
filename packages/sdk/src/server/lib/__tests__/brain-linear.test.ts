@@ -237,14 +237,14 @@ describe('Linear issue collection', () => {
     const result = await collectBrainLinearIssues({ now, limit: 100 });
 
     expect(result.stateUpdates[0]).toEqual({
-      collectorId: 'linear-issues:entity-census-v2:incremental',
+      collectorId: 'linear-issues:entity-census-v3:incremental',
       watermark: new Date('2026-08-20T11:59:59.000Z'),
       cursor: null,
     });
   });
 
   it('re-arms a completed census after one day', async () => {
-    mocks.syncState.set('linear-issues:entity-census-v2', {
+    mocks.syncState.set('linear-issues:entity-census-v3', {
       backfillCompletedAt: new Date('2026-08-19T11:00:00.000Z'),
     });
     mocks.listIssues.mockResolvedValue({
@@ -258,7 +258,7 @@ describe('Linear issue collection', () => {
     });
 
     expect(result.stateUpdates).toContainEqual({
-      collectorId: 'linear-issues:entity-census-v2',
+      collectorId: 'linear-issues:entity-census-v3',
       cursor: null,
       backfillCompletedAt: null,
     });
@@ -338,5 +338,30 @@ describe('Linear issue census', () => {
     await expect(
       backfillBrainLinearIssuesStep({ cursor, limit: 100 }),
     ).resolves.toMatchObject({ pages: [], done: true });
+  });
+
+  it('retains the v2 inventory so the v3 census retires old private pages', async () => {
+    mocks.staleItems = [
+      {
+        itemId: 'private-issue',
+        slug: 'linear/org/issues/private-issue',
+      },
+    ];
+
+    const result = await backfillBrainLinearIssuesStep({
+      cursor: JSON.stringify({
+        phase: 'retire',
+        sweepStartedAt: '2026-08-20T12:00:00.000Z',
+      }),
+      limit: 100,
+    });
+
+    expect(result.pageRetirements).toEqual([
+      {
+        collectorId: 'linear-issues:entity-census-v2',
+        itemId: 'private-issue',
+        slug: 'linear/org/issues/private-issue',
+      },
+    ]);
   });
 });

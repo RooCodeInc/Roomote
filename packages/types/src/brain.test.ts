@@ -63,7 +63,7 @@ describe('resolveBrainSourceIdForCollector', () => {
       resolveBrainSourceIdForCollector('github-issues:occurrence-date-v3'),
     ).toBe('github-issues');
     expect(
-      resolveBrainSourceIdForCollector('linear-issues:entity-census-v2'),
+      resolveBrainSourceIdForCollector('linear-issues:entity-census-v3'),
     ).toBe('linear-issues');
   });
 

@@ -30,6 +30,9 @@ const INITIAL_INCREMENTAL_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
 const REPLAY_OVERLAP_MS = 1_000;
 const CENSUS_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 const INCREMENTAL_STATE_ID = `${BRAIN_COLLECTOR_IDS.linearIssues}:incremental`;
+// Keep the existing inventory across replay-version bumps so a v3 census can
+// retire private pages that were tracked by the v2 collector.
+const LINEAR_ISSUE_INVENTORY_ID = 'linear-issues:entity-census-v2';
 
 export type BrainLinearPage = {
   slug: string;
@@ -333,7 +336,7 @@ function pagesAndItems(input: {
 
     pages.push(page);
     itemUpdates.push({
-      collectorId: BRAIN_COLLECTOR_IDS.linearIssues,
+      collectorId: LINEAR_ISSUE_INVENTORY_ID,
       itemId: issue.id,
       slug: page.slug,
       lastSeenAt: input.seenAt,
@@ -448,7 +451,7 @@ export async function backfillBrainLinearIssuesStep(input: {
     if (cursor.phase === 'retire') {
       const stale = await listBrainCollectorItemsBefore(
         db,
-        BRAIN_COLLECTOR_IDS.linearIssues,
+        LINEAR_ISSUE_INVENTORY_ID,
         sweepStartedAt,
         Math.min(input.limit, RETIREMENT_BATCH_SIZE),
       );
@@ -461,7 +464,7 @@ export async function backfillBrainLinearIssuesStep(input: {
         nextCursor: input.cursor,
         done: false,
         pageRetirements: stale.map((item) => ({
-          collectorId: BRAIN_COLLECTOR_IDS.linearIssues,
+          collectorId: LINEAR_ISSUE_INVENTORY_ID,
           itemId: item.itemId,
           slug: item.slug,
         })),

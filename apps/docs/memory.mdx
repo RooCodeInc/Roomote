@@ -24,6 +24,7 @@ Roomote fills Memory from what it can already see:
 - **public Discord server channels and active public threads** the Roomote bot
   can read
 - **GitHub issues** in connected repositories
+- **Linear issues** belonging to public teams in the connected workspace
 - **Notion pages** explicitly shared with the deployment's Notion integration
   including readable database property values such as status, dates, people,
   labels, relations, and formula or rollup results
@@ -64,6 +65,11 @@ public channel is what designates that channel as a source, so the corpus stays
 inside what your team has already made visible company-wide. Slack directory
 cards contain names, handles, and job titles, but never copy profile email,
 status, timezone, or avatar fields into Memory.
+
+Linear collection includes only issues belonging to public teams. Issues in
+private teams are excluded even when the deployment's Linear app can read them,
+and an authoritative visibility census removes a previously collected page if
+its issue moves to a private team.
 
 Discord collection follows the server's permission model: Roomote includes only
 channels visible to the server's `@everyone` role where the bot also has **View

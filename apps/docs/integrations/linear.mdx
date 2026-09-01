@@ -71,17 +71,18 @@ previews.
 
 ## Brain context
 
-The Brain keeps one durable page per visible Linear issue, including its current
-workflow state, team, project, priority, labels, assignee, description, and a
-bounded set of recent comments. When available, issue pages also include cycle,
+The Brain keeps one durable page per Linear issue that belongs to a public team,
+including its current workflow state, team, project, priority, labels, assignee,
+description, and a bounded set of recent comments. Issues in private teams are
+never added to the shared Brain. When available, issue pages also include cycle,
 estimate, start date, parent, and related-issue context. Collection uses the same
 workspace connection configured above; it does not require another Linear token.
 
 Roomote refreshes changed issues incrementally and periodically checks the full
 visible issue set. Archived issues remain available as historical context. If an
-issue is deleted or the connected app can no longer see it, Roomote removes its
-page only after a complete visibility check, avoiding deletion from a partial or
-failed API response.
+issue is deleted, moves to a private team, or the connected app can no longer see
+it, Roomote removes its page only after a complete visibility check, avoiding
+deletion from a partial or failed API response.
 
 <Tip>
   Put acceptance criteria and relevant repository links directly in the Linear

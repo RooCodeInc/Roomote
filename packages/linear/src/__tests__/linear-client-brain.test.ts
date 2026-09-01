@@ -26,6 +26,7 @@ describe('LinearClient.listIssuesForBrain', () => {
               updatedAt: '2026-08-02T00:00:00.000Z',
               startedAt: '2026-08-01T12:00:00.000Z',
               cycle: { name: 'August', number: 12 },
+              team: { key: 'ENG', name: 'Engineering', private: false },
               parent: {
                 id: 'parent-1',
                 identifier: 'ENG-0',
@@ -89,6 +90,7 @@ describe('LinearClient.listIssuesForBrain', () => {
         first: 100,
         after: 'cursor-1',
         filter: {
+          team: { private: { eq: false } },
           updatedAt: {
             gte: '2026-08-01T00:00:00.000Z',
             lte: '2026-08-03T00:00:00.000Z',
@@ -121,6 +123,42 @@ describe('LinearClient.listIssuesForBrain', () => {
       ],
       pageInfo: { hasNextPage: true, endCursor: 'cursor-2' },
     });
+    expect(rawRequest.mock.calls[0]?.[0]).toContain(
+      'team { key name private }',
+    );
+  });
+
+  it('drops private-team issues even if Linear returns one', async () => {
+    rawRequest.mockResolvedValue({
+      data: {
+        issues: {
+          nodes: [
+            {
+              id: 'private-issue',
+              identifier: 'SEC-1',
+              title: 'Private incident',
+              url: 'https://linear.app/acme/issue/SEC-1',
+              createdAt: '2026-08-01T00:00:00.000Z',
+              updatedAt: '2026-08-02T00:00:00.000Z',
+              team: { key: 'SEC', name: 'Security', private: true },
+            },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    });
+
+    const result = await createLinearClient('token').listIssuesForBrain({
+      first: 50,
+    });
+
+    expect(result.issues).toEqual([]);
+    expect(rawRequest).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        filter: { team: { private: { eq: false } } },
+      }),
+    );
   });
 
   it('supports stable creation-time pagination for visibility censuses', async () => {
@@ -144,6 +182,7 @@ describe('LinearClient.listIssuesForBrain', () => {
       expect.objectContaining({
         filter: {
           createdAt: { lte: '2026-08-20T12:00:00.000Z' },
+          team: { private: { eq: false } },
         },
       }),
     );

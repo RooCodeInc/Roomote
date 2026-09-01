@@ -90,7 +90,7 @@ export class LinearClient {
             archivedAt
             dueDate
             state { name type }
-            team { key name }
+            team { key name private }
             project { name }
             cycle { name number }
             parent { id identifier title }
@@ -124,26 +124,20 @@ export class LinearClient {
     const response = await this.client.client.rawRequest(query, {
       first: Math.max(1, Math.min(input.first, 100)),
       after: input.after ?? null,
-      filter:
-        input.createdBefore || input.updatedAfter || input.updatedBefore
+      filter: {
+        team: { private: { eq: false } },
+        ...(input.createdBefore
+          ? { createdAt: { lte: input.createdBefore } }
+          : {}),
+        ...(input.updatedAfter || input.updatedBefore
           ? {
-              ...(input.createdBefore
-                ? { createdAt: { lte: input.createdBefore } }
-                : {}),
-              ...(input.updatedAfter || input.updatedBefore
-                ? {
-                    updatedAt: {
-                      ...(input.updatedAfter
-                        ? { gte: input.updatedAfter }
-                        : {}),
-                      ...(input.updatedBefore
-                        ? { lte: input.updatedBefore }
-                        : {}),
-                    },
-                  }
-                : {}),
+              updatedAt: {
+                ...(input.updatedAfter ? { gte: input.updatedAfter } : {}),
+                ...(input.updatedBefore ? { lte: input.updatedBefore } : {}),
+              },
             }
-          : null,
+          : {}),
+      },
     });
     const data = response.data as {
       issues?: {
@@ -164,7 +158,7 @@ export class LinearClient {
           archivedAt?: string | null;
           dueDate?: string | null;
           state?: { name: string; type: string } | null;
-          team?: { key: string; name: string } | null;
+          team?: { key: string; name: string; private: boolean } | null;
           project?: { name: string } | null;
           cycle?: { name?: string | null; number: number } | null;
           parent?: {
@@ -207,61 +201,65 @@ export class LinearClient {
     const connection = data.issues;
 
     return {
-      issues: (connection?.nodes ?? []).map((issue) => ({
-        id: issue.id,
-        identifier: issue.identifier,
-        title: issue.title,
-        description: issue.description ?? null,
-        url: issue.url,
-        priority: issue.priority ?? null,
-        priorityLabel: issue.priorityLabel ?? null,
-        estimate: issue.estimate ?? null,
-        createdAt: issue.createdAt,
-        updatedAt: issue.updatedAt,
-        startedAt: issue.startedAt ?? null,
-        completedAt: issue.completedAt ?? null,
-        canceledAt: issue.canceledAt ?? null,
-        archivedAt: issue.archivedAt ?? null,
-        dueDate: issue.dueDate ?? null,
-        state: issue.state ?? null,
-        team: issue.team ?? null,
-        project: issue.project ?? null,
-        cycle: issue.cycle
-          ? { name: issue.cycle.name ?? null, number: issue.cycle.number }
-          : null,
-        parent: issue.parent ?? null,
-        creator: issue.creator ?? null,
-        assignee: issue.assignee ?? null,
-        labels: (issue.labels?.nodes ?? [])
-          .map((label) => label.name)
-          .sort((a, b) => a.localeCompare(b)),
-        relationships: [
-          ...(issue.relations?.nodes ?? []).map((relation) => ({
-            type: relation.type,
-            direction: 'outbound' as const,
-            issue: relation.relatedIssue,
+      issues: (connection?.nodes ?? [])
+        .filter((issue) => issue.team?.private === false)
+        .map((issue) => ({
+          id: issue.id,
+          identifier: issue.identifier,
+          title: issue.title,
+          description: issue.description ?? null,
+          url: issue.url,
+          priority: issue.priority ?? null,
+          priorityLabel: issue.priorityLabel ?? null,
+          estimate: issue.estimate ?? null,
+          createdAt: issue.createdAt,
+          updatedAt: issue.updatedAt,
+          startedAt: issue.startedAt ?? null,
+          completedAt: issue.completedAt ?? null,
+          canceledAt: issue.canceledAt ?? null,
+          archivedAt: issue.archivedAt ?? null,
+          dueDate: issue.dueDate ?? null,
+          state: issue.state ?? null,
+          team: issue.team
+            ? { key: issue.team.key, name: issue.team.name }
+            : null,
+          project: issue.project ?? null,
+          cycle: issue.cycle
+            ? { name: issue.cycle.name ?? null, number: issue.cycle.number }
+            : null,
+          parent: issue.parent ?? null,
+          creator: issue.creator ?? null,
+          assignee: issue.assignee ?? null,
+          labels: (issue.labels?.nodes ?? [])
+            .map((label) => label.name)
+            .sort((a, b) => a.localeCompare(b)),
+          relationships: [
+            ...(issue.relations?.nodes ?? []).map((relation) => ({
+              type: relation.type,
+              direction: 'outbound' as const,
+              issue: relation.relatedIssue,
+            })),
+            ...(issue.inverseRelations?.nodes ?? []).map((relation) => ({
+              type: relation.type,
+              direction: 'inbound' as const,
+              issue: relation.issue,
+            })),
+          ],
+          relationshipsTruncated:
+            issue.relations?.pageInfo?.hasNextPage === true ||
+            issue.inverseRelations?.pageInfo?.hasNextPage === true,
+          comments: (issue.comments?.nodes ?? []).map((comment) => ({
+            id: comment.id,
+            body: comment.body,
+            createdAt: comment.createdAt,
+            updatedAt: comment.updatedAt,
+            author:
+              comment.user?.name ??
+              comment.externalUser?.name ??
+              comment.botActor?.name ??
+              null,
           })),
-          ...(issue.inverseRelations?.nodes ?? []).map((relation) => ({
-            type: relation.type,
-            direction: 'inbound' as const,
-            issue: relation.issue,
-          })),
-        ],
-        relationshipsTruncated:
-          issue.relations?.pageInfo?.hasNextPage === true ||
-          issue.inverseRelations?.pageInfo?.hasNextPage === true,
-        comments: (issue.comments?.nodes ?? []).map((comment) => ({
-          id: comment.id,
-          body: comment.body,
-          createdAt: comment.createdAt,
-          updatedAt: comment.updatedAt,
-          author:
-            comment.user?.name ??
-            comment.externalUser?.name ??
-            comment.botActor?.name ??
-            null,
         })),
-      })),
       pageInfo: {
         hasNextPage: connection?.pageInfo?.hasNextPage ?? false,
         endCursor: connection?.pageInfo?.endCursor ?? null,
