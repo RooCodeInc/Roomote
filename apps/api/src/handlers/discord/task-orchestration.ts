@@ -83,6 +83,9 @@ export async function startNewDiscordTask(input: {
   requesterDiscordUserId: string;
   /** Absent only for automation-owned channel auto-start launches. */
   launchOwnerUserId?: string;
+  /** Attribution override; takes precedence over the default user initiator
+   * (and over `channelAutoStart.initiator` when both are set). */
+  initiator?: TaskInitiator;
   queuedMessage: QueuedCommunicationMessage;
   metadata: DiscordEventCommunicationMetadata;
   channel: DiscordChannelContext;
@@ -364,9 +367,11 @@ export async function startNewDiscordTask(input: {
     const launched = await launchDiscordTask({
       provider: input.provider,
       launchOwnerUserId: input.launchOwnerUserId,
-      ...(input.channelAutoStart
-        ? { initiator: input.channelAutoStart.initiator }
-        : {}),
+      ...(input.initiator
+        ? { initiator: input.initiator }
+        : input.channelAutoStart
+          ? { initiator: input.channelAutoStart.initiator }
+          : {}),
       ...(agentPromptText ? { agentPromptText } : {}),
       queuedMessage: {
         ...input.queuedMessage,
