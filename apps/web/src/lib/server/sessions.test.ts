@@ -1,4 +1,5 @@
 import {
+  automations,
   db,
   eq,
   ensureSessionForFastConversation,
@@ -11,6 +12,7 @@ import {
   taskArtifacts,
   taskFactory,
   taskMessages,
+  taskPullRequests,
   tasks,
   userFactory,
 } from '@roomote/db/server';
@@ -42,7 +44,7 @@ describe('unified Session queries', () => {
     syncFastSlackTitle.mockReset();
     syncFastSlackTitle.mockResolvedValue(undefined);
   });
-  it('scopes list and detail reads to owners, participants, and admins', async () => {
+  it('opens detail reads to everyone but scopes the list like tasks', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
     const session = await sessionFactory.create({
@@ -51,6 +53,7 @@ describe('unified Session queries', () => {
       title: 'Visible Session',
     });
 
+    // Anyone with the link can open the Session.
     await expect(
       findAccessibleSession({ userId: owner.id, isAdmin: false }, session.id),
     ).resolves.toMatchObject({ id: session.id });
@@ -59,19 +62,30 @@ describe('unified Session queries', () => {
         { userId: stranger.id, isAdmin: false },
         session.id,
       ),
-    ).resolves.toBeNull();
-    await expect(
-      findAccessibleSession({ userId: stranger.id, isAdmin: true }, session.id),
     ).resolves.toMatchObject({ id: session.id });
 
-    const list = await getSessions(
+    // The list defaults mirror /tasks: admins see everything, other users
+    // see only Sessions they own or participate in.
+    const ownerList = await getSessions(
       { userId: owner.id, isAdmin: false },
       { scope: 'all' },
     );
-    expect(list.sessions.map((row) => row.id)).toContain(session.id);
+    expect(ownerList.sessions.map((row) => row.id)).toContain(session.id);
+    const strangerList = await getSessions(
+      { userId: stranger.id, isAdmin: false },
+      { scope: 'all' },
+    );
+    expect(strangerList.sessions.map((row) => row.id)).not.toContain(
+      session.id,
+    );
+    const adminList = await getSessions(
+      { userId: stranger.id, isAdmin: true },
+      { scope: 'all' },
+    );
+    expect(adminList.sessions.map((row) => row.id)).toContain(session.id);
   });
 
-  it('filters recent-session lookups by id without bypassing access scope', async () => {
+  it('filters recent-session lookups by id without bypassing list scope', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
     const included = await sessionFactory.create({
@@ -86,22 +100,97 @@ describe('unified Session queries', () => {
       title: 'Newer but not included',
       activityAt: 300,
     });
-    const inaccessible = await sessionFactory.create({
+    const otherOwned = await sessionFactory.create({
       ownerKind: 'user',
       ownerUserId: stranger.id,
-      title: 'Inaccessible Session',
+      title: 'Outside the list scope',
       activityAt: 200,
     });
 
     const result = await getSessions(
       { userId: owner.id, isAdmin: false },
-      { ids: [included.id, inaccessible.id] },
+      { ids: [included.id, otherOwned.id] },
     );
 
     expect(result.sessions.map((session) => session.id)).toEqual([included.id]);
   });
 
-  it('lists only distinct visible sources available to the current user', async () => {
+  it('filters Session owners by automation creator values', async () => {
+    const user = await userFactory.create();
+    await db
+      .insert(automations)
+      .values({ key: 'sentry_triage' })
+      .onConflictDoNothing();
+    const automationSession = await sessionFactory.create({
+      ownerKind: 'automation',
+      ownerAutomation: 'sentry_triage',
+      title: 'Automation Session',
+    });
+    const userSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: user.id,
+      title: 'User Session',
+    });
+
+    const result = await getSessions(
+      { userId: user.id, isAdmin: true },
+      {
+        ids: [automationSession.id, userSession.id],
+        user: 'automation:sentry_triage',
+      },
+    );
+
+    expect(result.sessions.map((session) => session.id)).toEqual([
+      automationSession.id,
+    ]);
+  });
+
+  it('includes active pull requests from linked tasks in Session rows', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+    });
+    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+    await db.insert(taskPullRequests).values([
+      {
+        taskId: task.id,
+        prUrl: 'https://github.com/RooCodeInc/Roomote/pull/1939',
+        prNumber: 1939,
+        repository: 'RooCodeInc/Roomote',
+        sourceControlProvider: 'github',
+        status: 'open',
+      },
+      {
+        taskId: task.id,
+        prUrl: 'https://github.com/RooCodeInc/Roomote/pull/1900',
+        prNumber: 1900,
+        repository: 'RooCodeInc/Roomote',
+        sourceControlProvider: 'github',
+        status: 'merged',
+      },
+    ]);
+
+    const result = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { ids: [session.id] },
+    );
+
+    expect(result.sessions[0]?.pullRequests).toEqual([
+      {
+        repository: 'RooCodeInc/Roomote',
+        number: 1939,
+        url: 'https://github.com/RooCodeInc/Roomote/pull/1939',
+      },
+    ]);
+  });
+
+  it('lists only distinct visible sources within the list scope', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
     await sessionFactory.create({
@@ -761,12 +850,20 @@ describe('unified Session queries', () => {
       initiatorUserId: owner.id,
       title: 'Second task',
     });
+    // Explicit attachedAt values: rows inserted in one statement share a
+    // timestamp, which makes the attachedAt ordering below nondeterministic.
     await db.insert(sessionTasks).values([
-      { sessionId: session.id, taskId: firstTask.id, origin: 'direct_launch' },
+      {
+        sessionId: session.id,
+        taskId: firstTask.id,
+        origin: 'direct_launch',
+        attachedAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
       {
         sessionId: session.id,
         taskId: secondTask.id,
         origin: 'fast_delegation',
+        attachedAt: new Date('2026-01-01T00:00:01.000Z'),
       },
     ]);
     await db.insert(taskArtifacts).values([

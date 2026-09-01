@@ -4,7 +4,9 @@ import {
   environments,
   environmentRepositoryMappings,
   deploymentSettings,
+  and,
   eq,
+  isNull,
 } from '@roomote/db/server';
 
 import type {
@@ -332,7 +334,7 @@ export async function getAvailableEnvironments(): Promise<
       description: environments.description,
     })
     .from(environments)
-    .where(eq(environments.isEval, false));
+    .where(and(eq(environments.isEval, false), isNull(environments.userId)));
 
   // Get repository names for each environment.
   const result: RoutableEnvironment[] = [];

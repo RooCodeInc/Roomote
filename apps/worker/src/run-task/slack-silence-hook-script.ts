@@ -238,8 +238,6 @@ function isSubagentRestrictedSlackPostingTool(input) {
 }
 
 function isSlackSatisfactionTool(input, state) {
-  const toolName =
-    input && typeof input.tool_name === 'string' ? input.tool_name : '';
   const currentTurnMessageTs = trimString(state && state.currentTurnMessageTs);
   const currentTurnSupportsReactionShortcut =
     SLACK_MESSAGE_TS_REGEX.test(currentTurnMessageTs) &&
@@ -247,8 +245,6 @@ function isSlackSatisfactionTool(input, state) {
 
   return (
     isSendChatReplyTool(input) ||
-    toolName.endsWith('add_reaction_to_slack_message') ||
-    toolName.includes('/add_reaction_to_slack_message') ||
     (isSlackReactionShortcutTool(input) && currentTurnSupportsReactionShortcut)
   );
 }

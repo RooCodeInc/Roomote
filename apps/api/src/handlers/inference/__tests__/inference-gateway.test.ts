@@ -1284,6 +1284,7 @@ describe('inference gateway', () => {
     const response = await postMessages(
       createApp(createRunToken()),
       '/api/inference/opencode-go/v1/responses',
+      { 'user-agent': 'opencode/1.18.10' },
     );
 
     expect(response.status).toBe(200);
@@ -1296,6 +1297,7 @@ describe('inference gateway', () => {
 
     const headers = new Headers(init.headers);
     expect(headers.get('authorization')).toBe('Bearer provider-secret-key');
+    expect(headers.get('user-agent')).toBe('roomote opencode/1.18.10');
   });
 
   it('preserves the query string on upstream requests', async () => {

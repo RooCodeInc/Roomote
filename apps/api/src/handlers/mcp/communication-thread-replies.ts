@@ -21,6 +21,7 @@ import {
   getCommunicationMessageIdFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
   getCommunicationServiceUrlFromTaskPayload,
+  getCommunicationTeamIdFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
 } from '@roomote/types';
 import {
@@ -1024,6 +1025,57 @@ function addAgentMailReaction(): Response {
   );
 }
 
+async function addSlackReaction(params: {
+  taskRun: { id: number; payload: unknown };
+  parsedBody: { channel: string; messageTs: string; name: string };
+}): Promise<Response> {
+  const channelId = getCommunicationChannelFromTaskPayload(
+    params.taskRun.payload,
+  );
+  if (!channelId || params.parsedBody.channel !== channelId) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'Slack reactions are only available for the channel this session was launched from',
+      }),
+      { status: 403 },
+    );
+  }
+  const provider = await getCommunicationProviderAdapter('slack', {
+    slackTeamId: getCommunicationTeamIdFromTaskPayload(params.taskRun.payload),
+  });
+  if (!provider || provider.provider !== 'slack') {
+    return new Response(
+      JSON.stringify({
+        error: 'No active Slack installation found for this workspace',
+      }),
+      { status: 404 },
+    );
+  }
+  try {
+    const result = await provider.addReaction({
+      channelId,
+      messageId: params.parsedBody.messageTs,
+      name: params.parsedBody.name,
+    });
+    return new Response(
+      JSON.stringify({
+        channelId: result.channelId,
+        messageTs: result.messageId,
+        name: result.name,
+      }),
+      { headers: { 'content-type': 'application/json' } },
+    );
+  } catch (error) {
+    return new Response(
+      JSON.stringify({
+        error: `Slack reaction failed: ${error instanceof Error ? error.message : String(error)}`,
+      }),
+      { status: 502 },
+    );
+  }
+}
+
 export async function maybeSendCommunicationThreadReply(params: {
   taskRun: CommunicationReplyTaskRun;
   parsedBody: ParsedThreadReplyBody;
@@ -1051,6 +1103,8 @@ export async function maybeAddCommunicationReaction(params: {
   parsedBody: { channel: string; messageTs: string; name: string };
 }): Promise<Response | null> {
   switch (getCommunicationProviderFromTaskPayload(params.taskRun.payload)) {
+    case 'slack':
+      return addSlackReaction(params);
     case 'teams':
       return addTeamsReaction(params);
     case 'telegram':

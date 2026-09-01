@@ -25,7 +25,8 @@ import {
 import type { Variables } from './types';
 import { resolveApiCorsOrigin } from './cors';
 import { createSingleLineWarnLogger } from './logging';
-import { captureApiException } from './monitoring/sentry';
+import { captureApiException, flushApiSentry } from './monitoring/sentry';
+import { installApiGracefulShutdown } from './graceful-shutdown';
 import {
   requestObservabilityMiddleware,
   routePolicyMiddleware,
@@ -286,6 +287,7 @@ export async function startApiServer({
   const app = createApiApp();
   const server = createAdaptorServer({ fetch: app.fetch });
   const address = await listen(server, { port, hostname });
+  installApiGracefulShutdown(server, { flushSentry: flushApiSentry });
 
   if (Env.NODE_ENV === 'development') {
     showRoutes(app);

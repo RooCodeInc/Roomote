@@ -3,12 +3,19 @@ import { getTaskReportConsumerFromPayload } from '@roomote/types';
 import { standardTask } from '../standardTask';
 
 describe('standardTask reporting consumer', () => {
-  it('normalizes the legacy persisted consumer value', () => {
+  it('does not infer report ownership from Fast routing metadata', () => {
     expect(
       getTaskReportConsumerFromPayload({
-        reportConsumer: 'fast-orchestrator',
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'web',
+            workspaceId: 'workspace-1',
+            conversationId: 'conversation-1',
+          },
+        },
       }),
-    ).toBe('orchestrator');
+    ).toBe('direct-user');
   });
 
   it('gives orchestrator-owned coding tasks an internal factual report contract', () => {

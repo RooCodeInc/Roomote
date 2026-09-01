@@ -27,6 +27,7 @@ import {
   getDisplayModelProviderId,
   getTaskInitiatorLinkedUserId,
   getFastAgentParentFromPayload,
+  getTaskReportConsumerFromPayload,
   getPrimaryPortFromConfig,
   isConfiguredEnvValue,
   isReasoningEffort,
@@ -2433,7 +2434,11 @@ function inheritSnapshotResumeFastAgentParent(
   if (parent && !payload.fastAgentParent) {
     payload.fastAgentParent = parent;
   }
-  if (parent && !payload.reportConsumer) {
+  if (
+    parent &&
+    getTaskReportConsumerFromPayload(sourcePayload) === 'orchestrator' &&
+    !payload.reportConsumer
+  ) {
     payload.reportConsumer = 'orchestrator';
   }
 }
@@ -2590,11 +2595,8 @@ async function enqueueSnapshotResume(
       break;
     }
 
-    // Older resume rows may lack established source-control and Slack-parent
-    // stamps. New Fast session IDs always propagate from the immediate source.
+    // Older resume rows may lack established source-control stamps.
     inheritSnapshotResumeSourceControlStamps(task.payload, parentRun.payload);
-    inheritSnapshotResumeFastAgentParent(task.payload, parentRun.payload);
-    inheritSnapshotResumeCommunicationContext(task.payload, parentRun.payload);
 
     sourceTaskType = parentRun.payloadKind;
     parentRunId = parentRun.sourceRunId;

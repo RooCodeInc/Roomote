@@ -91,8 +91,12 @@ export function normalizeGitHubPush(
 export async function enrichGitHubMergeAnnouncerEvent(
   payload: GitHubPushWebhook,
   event: MergeAnnouncerPushEvent,
-  dependencies: GitHubMergeAnnouncerDependencies = githubMergeAnnouncerDependencies,
+  dependencyOverrides: Partial<GitHubMergeAnnouncerDependencies> = {},
 ): Promise<MergeAnnouncerPushEvent> {
+  const dependencies = {
+    ...githubMergeAnnouncerDependencies,
+    ...dependencyOverrides,
+  };
   const installationId = payload.installation?.id;
   const after = payload.after?.trim();
   const [owner, repo] = payload.repository?.full_name.split('/') ?? [];

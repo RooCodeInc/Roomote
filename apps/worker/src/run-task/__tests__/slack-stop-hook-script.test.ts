@@ -519,41 +519,6 @@ describe('SLACK_STOP_HOOK_SCRIPT', () => {
     );
   });
 
-  it('blocks Stop when the current Slack turn only has a recent successful reaction', () => {
-    const stateFilePath = path.join(
-      fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-stop-state-')),
-      'state.json',
-    );
-    tempDirs.push(path.dirname(stateFilePath));
-    fs.writeFileSync(
-      stateFilePath,
-      JSON.stringify({
-        currentTurnMessageTs: 'user-111.222',
-        satisfiedTurnMessageTs: 'user-111.222',
-        messageTs: 'user-111.222',
-        tool: 'add_reaction_to_slack_message',
-        recordedAtMs: Date.now(),
-      }),
-      'utf8',
-    );
-
-    const result = runHook({
-      env: {
-        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
-      },
-    });
-
-    expect(result.status).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({
-      decision: 'block',
-      reason: reminder,
-    });
-    expect(result.stderr).toContain('decision="block"');
-    expect(result.stderr).toContain(
-      'reason="current_turn_nonterminal_reaction"',
-    );
-  });
-
   it('blocks Stop when the current Slack turn only has a recent shortcut reaction', () => {
     const stateFilePath = path.join(
       fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-stop-state-')),

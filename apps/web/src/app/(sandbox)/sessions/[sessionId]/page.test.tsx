@@ -7,6 +7,7 @@ const {
   getFastSessionTasksMock,
   getSessionByIdCommandMock,
   transcriptMock,
+  sessionTaskTimelineMock,
   sessionWorkspaceMock,
 } = vi.hoisted(() => ({
   authorizeMock: vi.fn(),
@@ -18,6 +19,9 @@ const {
       <div data-testid="transcript">{footer}</div>
     ),
   ),
+  sessionTaskTimelineMock: vi.fn(() => (
+    <div data-testid="session-task-timeline" />
+  )),
   sessionWorkspaceMock: vi.fn(({ children }: { children: ReactNode }) => (
     <main data-testid="workspace-surface">{children}</main>
   )),
@@ -56,6 +60,9 @@ vi.mock('@/components/layout', () => ({
 }));
 vi.mock('./FastSessionTranscript', () => ({
   FastSessionTranscript: transcriptMock,
+}));
+vi.mock('./SessionTaskTimeline', () => ({
+  SessionTaskTimeline: sessionTaskTimelineMock,
 }));
 vi.mock('./SessionWorkspace', () => ({
   SessionWorkspace: sessionWorkspaceMock,
@@ -228,7 +235,7 @@ describe('Session detail page', () => {
     );
   });
 
-  it('resolves the unified session first and renders its Fast transcript', async () => {
+  it('hydrates a direct Session route without seeding the response lease', async () => {
     authorizeMock.mockResolvedValue({
       success: true,
       userId: 'user-1',
@@ -310,10 +317,12 @@ describe('Session detail page', () => {
         sessionId: '6a1f8f1e-0000-4000-8000-000000000005',
         canReply: true,
         initialTitle: 'Session title',
-        initialConversationResponding: true,
         fallbackTitle: 'Session title',
       }),
       undefined,
+    );
+    expect(transcriptMock.mock.calls[0]?.[0]).not.toHaveProperty(
+      'initialConversationResponding',
     );
     expect(transcriptMock.mock.calls[0]?.[0]).not.toHaveProperty(
       'timelineExtras',
@@ -358,6 +367,19 @@ describe('Session detail page', () => {
     expect(getFastSessionByIdMock).not.toHaveBeenCalled();
     expect(transcriptMock).not.toHaveBeenCalled();
     expect(html).toContain('Task-only session');
+    expect(html).toContain('session-task-timeline');
+    expect(sessionTaskTimelineMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: '6a1f8f1e-0000-4000-8000-000000000004',
+        initialTasks: [
+          expect.objectContaining({
+            taskId: 'task-2',
+            title: 'Delegated task',
+          }),
+        ],
+      }),
+      undefined,
+    );
   });
 
   it('falls back to the Fast conversation lookup when no session row exists', async () => {

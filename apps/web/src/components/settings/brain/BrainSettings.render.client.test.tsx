@@ -375,16 +375,6 @@ describe('BrainSettings', () => {
     expect(mutations.setEnabled).toHaveBeenCalledWith({ enabled: true });
   });
 
-  it('notes when enablement still comes from the legacy provider key', () => {
-    state.query.data = buildSettings({ enabledFromLegacyKey: true });
-
-    render(<BrainSettings />);
-
-    expect(
-      screen.getByText(/enabled by a configured Memory provider key/),
-    ).toBeInTheDocument();
-  });
-
   it('stops at the explanation on a deployment with no Brain', () => {
     state.query.data = buildSettings({
       status: 'not_configured',

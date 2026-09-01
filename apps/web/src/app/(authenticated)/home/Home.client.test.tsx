@@ -334,6 +334,7 @@ describe('Home', () => {
     mockUseLaunchTaskModels.mockReturnValue({
       data: {
         defaultModelId: 'openrouter/openai/gpt-5.4',
+        defaultFastModelId: 'openrouter/anthropic/claude-haiku-4.5',
         models: [
           {
             id: 'openrouter/openai/gpt-5.4',
@@ -352,7 +353,7 @@ describe('Home', () => {
     });
   });
 
-  it('renders without an agent selector and starts a Fast session for Auto submissions', async () => {
+  it('leaves an untouched Fast session on the orchestration default', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     expect(
@@ -364,6 +365,9 @@ describe('Home', () => {
     expect(screen.queryByText(/Select agent /)).not.toBeInTheDocument();
     // Auto was retired from the picker (identical to Fast); Fast is offered.
     expect(screen.getByTestId('allow-auto')).toHaveTextContent('false');
+    expect(screen.getByTestId('selected-model-id')).toHaveTextContent(
+      'openrouter/anthropic/claude-haiku-4.5',
+    );
     expect(mockUseCreateStandardTaskRun).toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Use auto workspace' }));
@@ -373,7 +377,7 @@ describe('Home', () => {
       expect(mockStartFastSession).toHaveBeenCalledWith({
         text: 'Test prompt',
         images: undefined,
-        model: 'openrouter/openai/gpt-5.4',
+        model: undefined,
       });
     });
 
@@ -466,7 +470,7 @@ describe('Home', () => {
       expect(mockStartFastSession).toHaveBeenCalledWith({
         text: '',
         images: ['data:image/png;base64,image-1'],
-        model: 'openrouter/openai/gpt-5.4',
+        model: undefined,
       });
     });
     expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
@@ -641,7 +645,7 @@ describe('Home', () => {
     });
   });
 
-  it('opens a new task session on the transcript', async () => {
+  it('opens the task view for a direct environment launch', async () => {
     mockUseCreateStandardTaskRun.mockImplementation(
       (options: { onSuccess: (result: unknown) => void }) => ({
         isPending: false,
@@ -665,7 +669,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith('/sessions/session-1');
+      expect(mockPush).toHaveBeenCalledWith('/task/task-4');
     });
   });
 
@@ -949,7 +953,7 @@ describe('Home', () => {
       expect(mockStartFastSession).toHaveBeenCalledWith({
         text: 'Test prompt',
         images: undefined,
-        model: 'openrouter/openai/gpt-5.4',
+        model: undefined,
       });
     });
     expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();

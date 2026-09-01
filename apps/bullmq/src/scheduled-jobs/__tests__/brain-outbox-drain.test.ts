@@ -334,12 +334,45 @@ describe('collector continuation orchestration', () => {
     expect(mockRunBrainCollectors).toHaveBeenNthCalledWith(
       1,
       expect.anything(),
-      { includeIncremental: true },
+      { includeIncremental: true, continueCollectorIds: [] },
     );
     expect(mockRunBrainCollectors).toHaveBeenNthCalledWith(
       2,
       expect.anything(),
-      { includeIncremental: false },
+      { includeIncremental: false, continueCollectorIds: [] },
+    );
+  });
+
+  it('feeds pending historical scans back into continuation passes', async () => {
+    vi.useFakeTimers();
+    mockRunBrainCollectors
+      .mockResolvedValueOnce({
+        backfillProgressed: false,
+        interrupted: false,
+        historicalPendingCollectorIds: ['notion-pages'],
+      })
+      .mockResolvedValueOnce({
+        backfillProgressed: false,
+        interrupted: false,
+        historicalPendingCollectorIds: [],
+      });
+
+    try {
+      const job = brainCollectorsJob();
+      await vi.runAllTimersAsync();
+      await job;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // The mid-scan collector holds the loop open for one more pass and is
+    // handed back so only its collect phase reruns; a settled second pass
+    // ends the loop.
+    expect(mockRunBrainCollectors).toHaveBeenCalledTimes(2);
+    expect(mockRunBrainCollectors).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      { includeIncremental: false, continueCollectorIds: ['notion-pages'] },
     );
   });
 

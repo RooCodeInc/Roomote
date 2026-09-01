@@ -7,10 +7,7 @@ export const CHAT_REPLY_SATISFACTION_STATE_FILE_ENV =
 const SLACK_MESSAGE_TS_REGEX = /^\d+\.\d+$/;
 const TELEGRAM_MESSAGE_ID_REGEX = /^\d+$/;
 
-type ChatReplySatisfactionTool =
-  | 'send_chat_reply'
-  | 'send_chat_reaction_emoji'
-  | 'add_reaction_to_slack_message';
+type ChatReplySatisfactionTool = 'send_chat_reply' | 'send_chat_reaction_emoji';
 
 export type ChatReplyPurpose =
   | 'ack'
@@ -277,9 +274,7 @@ export function recordChatReplySatisfaction(input: {
   const currentTurnMessageTs = trimString(existingState.currentTurnMessageTs);
   const currentTurnReactionsAllowed =
     existingState.currentTurnReactionsAllowed !== false;
-  const isCurrentTurnReactionTool =
-    input.tool === 'send_chat_reaction_emoji' ||
-    input.tool === 'add_reaction_to_slack_message';
+  const isCurrentTurnReactionTool = input.tool === 'send_chat_reaction_emoji';
   const satisfiesCurrentTurn =
     currentTurnMessageTs &&
     (isCurrentTurnReactionTool

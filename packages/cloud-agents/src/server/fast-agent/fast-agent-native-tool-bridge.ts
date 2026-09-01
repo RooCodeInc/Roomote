@@ -52,6 +52,7 @@ import {
   isRoomoteTaskSandboxHost,
   shouldOverrideFastProjectConfigForTaskSandbox,
 } from './fast-agent-runtime-context';
+import { buildFastAgentToolFilter } from './fast-agent-tool-policy';
 
 export {
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -384,7 +385,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "List packaged Roomote skills and optionally settings-defined and repository-defined skills without filesystem access. Omit scope and name for packaged skills only. Provide an exact name to find packaged and settings skills across authorized environments without inspecting repositories, following nextSourceOffset with sourceOffset until no continuation remains. Provide exactly one of environmentId or repositoryId to include settings and repository skills from that scope. Returns source counts plus exact IDs, task invocation names, descriptions, repositories, settings sources, and environment IDs for load_skill and task routing.",
+  description: "List packaged Roomote skills and authorized settings-defined skills, plus optionally repository-defined skills, without filesystem access. Omit scope and name for the complete packaged and Settings inventory across authorized environments; this does not inspect repositories. Provide an exact name to find packaged and settings skills across authorized environments without inspecting repositories, following nextSourceOffset with sourceOffset until no continuation remains. Provide exactly one of environmentId or repositoryId to include settings and repository skills from that scope. Returns source counts plus exact IDs, task invocation names, descriptions, repositories, settings sources, and environment IDs for load_skill and task routing.",
   args: {
     environmentId: z.string().min(1).optional().describe("Exact environment ID from the system prompt; mutually exclusive with repositoryId"),
     name: z.string().min(1).optional().describe("Exact skill invocation name; an unscoped lookup checks packaged and settings skills only"),
@@ -1206,6 +1207,17 @@ export async function getFastAgentNativeToolRuntime(
   writeFileSync(
     join(runtime.directory, 'opencode.json'),
     JSON.stringify({
+      // Keep the parent's fail-closed filter on its agent rather than on the
+      // session. OpenCode copies session deny rules into task-created child
+      // sessions, which would otherwise give advisor and judge the parent's
+      // wildcard deny and hide their actor-authorized MCP tools.
+      agent: {
+        build: {
+          tools: buildFastAgentToolFilter(
+            integrations.map((integration) => integration.id),
+          ),
+        },
+      },
       mcp: Object.fromEntries(
         integrations.map((integration) => [
           integration.id,

@@ -19,6 +19,9 @@ export const CHAT_CHANNELS_TOOL = {
     'List the communication channels Roomote is connected to or can currently discover, grouped by platform. Returns channel IDs and platform-specific workspace context so another chat tool can target the right channel. Some platforms do not support channel enumeration and report that limitation explicitly.',
 } as const;
 
+export const CHAT_CHANNEL_POST_TOOL_NAME = 'post_to_channel';
+export const CHAT_REACTION_EMOJI_TOOL_NAME = 'send_chat_reaction_emoji';
+
 export const CHAT_MESSAGE_CONTEXT_TOOL = {
   name: 'get_chat_message_context',
   title: 'Get Chat Message Context',

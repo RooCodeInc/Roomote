@@ -12,12 +12,29 @@ vi.mock('next/navigation', () => ({
 }));
 
 vi.mock('@/components/tasks', () => ({
-  TaskFilters: ({ showTimePeriod }: { showTimePeriod?: boolean }) =>
-    showTimePeriod === false ? (
-      <div data-testid="advanced-task-filters">Advanced task filters</div>
-    ) : (
-      <div data-testid="time-filter">Time filter</div>
-    ),
+  TaskFilters: ({
+    showTimePeriod,
+    showUser = true,
+    userId,
+    onUserChange,
+  }: {
+    showTimePeriod?: boolean;
+    showUser?: boolean;
+    userId: string | null;
+    onUserChange: (value: string | null) => void;
+  }) => (
+    <div
+      data-testid={
+        showTimePeriod === false ? 'advanced-task-filters' : 'time-filter'
+      }
+      data-show-user={String(showUser)}
+      data-user-id={userId}
+    >
+      <button onClick={() => onUserChange('automation:sentry_triage')}>
+        Choose automation
+      </button>
+    </div>
+  ),
 }));
 
 import { SessionsFilters } from './SessionsFilters';
@@ -35,7 +52,7 @@ describe('SessionsFilters', () => {
     localStorage.clear();
   });
 
-  it.each(['user', 'repository', 'pullRequest', 'model', 'source'])(
+  it.each(['repository', 'pullRequest', 'model', 'source'])(
     'shows advanced filters when the URL supplies %s without changing the saved preference',
     (param) => {
       localStorage.setItem(
@@ -55,6 +72,33 @@ describe('SessionsFilters', () => {
       ).toBe('false');
     },
   );
+
+  it('shows the user and automation filter with the primary controls', () => {
+    render(<SessionsFilters {...baseProps} />);
+
+    expect(screen.getByTestId('time-filter')).toHaveAttribute(
+      'data-show-user',
+      'true',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose automation' }));
+    expect(replaceMock).toHaveBeenCalledWith(
+      '/sessions?user=automation%3Asentry_triage',
+    );
+  });
+
+  it('keeps a selected user filter in the primary controls', () => {
+    searchParamsMock.current = new URLSearchParams('user=user-1');
+
+    render(<SessionsFilters {...baseProps} userId="user-1" />);
+
+    expect(screen.getByTestId('time-filter')).toHaveAttribute(
+      'data-user-id',
+      'user-1',
+    );
+    expect(
+      screen.queryByTestId('advanced-task-filters'),
+    ).not.toBeInTheDocument();
+  });
 
   it('restores the saved hidden preference after URL filters are removed', () => {
     localStorage.setItem('roomote-sessions-advanced-filters-visible', 'false');

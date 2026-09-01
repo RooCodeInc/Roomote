@@ -168,10 +168,13 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(bridgeSource).toContain('metadata: payload.metadata ?? {}');
     expect(spillReadSource).toContain('never pass filesystem paths');
     expect(skillListSource).toContain(
-      'settings-defined and repository-defined skills',
+      'authorized settings-defined skills, plus optionally repository-defined skills',
     );
     expect(skillListSource).toContain(
       'an exact name to find packaged and settings skills',
+    );
+    expect(skillListSource).toContain(
+      'complete packaged and Settings inventory across authorized environments',
     );
     expect(skillListSource).toContain('environmentId: z.string()');
     expect(skillListSource).toContain('repositoryId: z.string()');
@@ -644,6 +647,7 @@ describe('Fast native OpenCode tool bridge', () => {
     const config = JSON.parse(
       await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
     ) as {
+      agent: { build: { tools: Record<string, boolean> } };
       mcp: Record<string, { url: string; headers: Record<string, string> }>;
     };
     const executor = vi.fn(async ({ args }) => ({ matches: [args.query] }));
@@ -653,6 +657,25 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(config.mcp.github!.headers.Authorization).not.toContain(
       runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN,
     );
+    expect(config.agent.build.tools).toMatchObject({
+      '*': false,
+      task: true,
+      'github_*': true,
+    });
+    const serverConfig = JSON.parse(
+      buildOpenCodeCliEnv(runtime.env, {
+        preserveReasoning: true,
+        promptOnlySubagents: true,
+      }).OPENCODE_CONFIG_CONTENT ?? '{}',
+    ) as {
+      agent: Record<string, { tools: Record<string, boolean> }>;
+    };
+    expect(serverConfig.agent.advisor!.tools).toMatchObject({
+      '*': true,
+      task: false,
+      roomote_manage_custom_automations: false,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: false,
+    });
     const unbind = bindFastAgentMcpToolExecutor(
       runtime.mcpCapability,
       executor,

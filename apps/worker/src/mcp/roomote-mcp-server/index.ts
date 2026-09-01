@@ -70,7 +70,6 @@ import { handlePostToChannel } from './post-to-channel.js';
 import { handleGetChatChannelMessages } from './get-chat-channel-messages.js';
 import { handleListChatChannels } from './list-chat-channels.js';
 import { handleGetChatMessageContext } from './get-chat-message-context.js';
-import { handleAddReactionToSlackMessage } from './add-reaction-to-slack-message.js';
 import { handleSendChatReactionEmoji } from './send-chat-reaction-emoji.js';
 import { handleReportPlatformIssue } from './report-platform-issue.js';
 import { handleManageSourceControl } from './source-control.js';
@@ -1570,10 +1569,7 @@ if (shouldRegisterSlackThreadReplyTool() || isFastAgentChild()) {
 
 function recordSuccessfulSlackTurnSatisfactionResult(
   result: ToolResult,
-  tool:
-    | 'send_chat_reply'
-    | 'send_chat_reaction_emoji'
-    | 'add_reaction_to_slack_message',
+  tool: 'send_chat_reply' | 'send_chat_reaction_emoji',
   options: {
     replyPurpose?: ChatReplyPurpose;
     sessionId?: string;
@@ -1849,60 +1845,6 @@ if (shouldRegisterChannelPostTool()) {
       },
     );
   }
-
-  roomoteMcpServer.registerTool(
-    'add_reaction_to_slack_message',
-    {
-      title: 'Add Reaction To Slack Message',
-      description:
-        'Slack-visible: adds an emoji reaction to a specific Slack message. ' +
-        'Use this when the user explicitly wants a reaction added to a known Slack message and you already have the channel and message timestamp. ' +
-        'The channel can be a channel ID, channel name, or Slack channel mention like C123ABC456, #eng, eng, or <#C123ABC456>.',
-      inputSchema: {
-        channel: z
-          .string()
-          .describe(
-            'Slack channel ID, channel name, or Slack channel mention that contains the target message',
-          ),
-        messageTs: nonEmptyStringSchema.describe(
-          'Non-empty Slack message timestamp for the message to react to',
-        ),
-        name: nonEmptyStringSchema.describe(
-          'Non-empty Slack emoji name without surrounding colons, for example eyes or white_check_mark',
-        ),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: false,
-      },
-    },
-    async (params, extra): Promise<ToolResult> => {
-      const roomoteConfig = getRoomoteConfig();
-      if (!roomoteConfig) {
-        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-      }
-
-      const result = await handleAddReactionToSlackMessage(
-        {
-          channel: params.channel,
-          messageTs: params.messageTs,
-          name: params.name,
-        },
-        roomoteConfig,
-      );
-
-      recordSuccessfulSlackTurnSatisfactionResult(
-        result,
-        'add_reaction_to_slack_message',
-        {
-          sessionId: extra.sessionId,
-        },
-      );
-      return result;
-    },
-  );
 }
 
 async function main() {

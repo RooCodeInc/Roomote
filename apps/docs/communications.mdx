@@ -59,13 +59,18 @@ also needs an environment that can run the suggestion's target repository.
 Configured **Call Roomote via emoji** automations are separate from these
 suggestion reactions.
 
+When the suggestion is not pinned to an execution target, Fast-capable chat
+surfaces start it in Fast so Roomote can answer or delegate as needed. A pinned
+environment, repository-only surface, or provider without Fast support starts
+the coding task directly.
+
 ## React to Roomote replies
 
 When you react to a Roomote reply in an active Fast conversation, Roomote can
-use that reaction as context. The linked user who owns the Fast conversation
-must add the reaction. Roomote posts a text reply when the reaction warrants a
-response and otherwise stays silent; it does not react to the reaction event
-itself.
+use that reaction as context, including as an answer to a question it asked.
+The linked user who owns the Fast conversation must add the reaction. Roomote
+posts a text reply when the reaction warrants a response and otherwise stays
+silent; it does not react to the reaction event itself.
 
 | Provider | Fast reply reactions | Provider limits |
 | --- | --- | --- |

@@ -69,8 +69,12 @@ function createLogger() {
 }
 
 const SETTLEMENT_GRACE_MS = 10_000;
+const VISUAL_PROOF_TIMEOUT_MS = 5_000;
 
-function createHarness(client = new FakeOpenCodeServerClient()) {
+function createHarness(
+  client = new FakeOpenCodeServerClient(),
+  options: { visualProofTimeoutMs?: number } = {},
+) {
   const logger = createLogger();
   const harness = new OpenCodeServerHarness({
     client: client as unknown as OpenCodeServerClient,
@@ -79,9 +83,26 @@ function createHarness(client = new FakeOpenCodeServerClient()) {
     model: TEST_OPENCODE_MODEL,
     eventStreamReadyTimeoutMs: 100,
     subagentSettlementGraceMs: SETTLEMENT_GRACE_MS,
+    visualProofTimeoutMs: options.visualProofTimeoutMs,
   });
 
   return { client, harness, logger };
+}
+
+function createSkillToolPart(name: string) {
+  return {
+    id: `prt_skill_${name}`,
+    sessionID: 'ses_1',
+    messageID: 'msg_1',
+    type: 'tool',
+    tool: 'skill',
+    callID: `call_skill_${name}`,
+    state: {
+      status: 'completed',
+      input: { name },
+      output: `<skill_content name="${name}">instructions</skill_content>`,
+    },
+  };
 }
 
 async function connectHarness(
@@ -847,6 +868,173 @@ describe('OpenCode subagent settlement recovery', () => {
       await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
 
       expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('OpenCode visual proof deadline', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('bounds the entire visual proof workflow and resumes with a timeout handoff', async () => {
+    const client = new FakeOpenCodeServerClient();
+    const { harness, logger } = createHarness(client, {
+      visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+    });
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part: createSkillToolPart('capture-visual-proof') },
+      });
+
+      await vi.advanceTimersByTimeAsync(VISUAL_PROOF_TIMEOUT_MS - 1);
+      expect(client.abort).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.waitFor(() =>
+        expect(client.promptAsync).toHaveBeenCalledTimes(2),
+      );
+
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_1' }),
+      );
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        request: {
+          parts: expect.arrayContaining([
+            expect.objectContaining({
+              text: expect.stringContaining('proof capture timed out'),
+            }),
+          ]),
+        },
+      });
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('shared 5000ms deadline'),
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('clears the deadline before the parent starts a follow-up delivery turn', async () => {
+    const client = new FakeOpenCodeServerClient();
+    const { harness } = createHarness(client, {
+      visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+    });
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part: createSkillToolPart('capture-visual-proof') },
+      });
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Continue delivery.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() =>
+        expect(client.promptAsync).toHaveBeenCalledTimes(2),
+      );
+
+      await vi.advanceTimersByTimeAsync(VISUAL_PROOF_TIMEOUT_MS);
+
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not reset the deadline for a delegated capture retry', async () => {
+    const client = new FakeOpenCodeServerClient();
+    const { harness } = createHarness(client, {
+      visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+    });
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part: createSkillToolPart('capture-visual-proof') },
+      });
+
+      await vi.advanceTimersByTimeAsync(4_000);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({
+            callId: 'call_task_1',
+            status: 'error',
+            metadata: { sessionId: 'ses_child_1' },
+          }),
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({
+            callId: 'call_task_2',
+            status: 'running',
+            metadata: { sessionId: 'ses_child_2' },
+          }),
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(client.abort).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_1' }),
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not let settlement recovery extend the shared deadline', async () => {
+    const client = new FakeOpenCodeServerClient();
+    const { harness } = createHarness(client, {
+      visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+    });
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part: createSkillToolPart('capture-visual-proof') },
+      });
+
+      await vi.advanceTimersByTimeAsync(4_000);
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(client.abort).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_1' }),
+      );
+      expect(client.messages).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
     }

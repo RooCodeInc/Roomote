@@ -100,12 +100,7 @@ export type FastAgentParent = z.infer<typeof fastAgentParentSchema>;
 
 export type TaskReportConsumer = 'direct-user' | 'orchestrator';
 
-export const taskReportConsumerSchema = z
-  .enum(['direct-user', 'orchestrator', 'fast-orchestrator'])
-  .transform(
-    (consumer): TaskReportConsumer =>
-      consumer === 'fast-orchestrator' ? 'orchestrator' : consumer,
-  );
+export const taskReportConsumerSchema = z.enum(['direct-user', 'orchestrator']);
 
 /**
  * A delegated Fast child keeps its parent's coordinates for lifecycle routing,
@@ -152,9 +147,5 @@ export function getTaskReportConsumerFromPayload(
     }
   }
 
-  // Existing orchestrator-owned tasks still need the report contract when
-  // they resume or settle after an upgrade.
-  return getFastAgentParentFromPayload(payload)
-    ? 'orchestrator'
-    : 'direct-user';
+  return 'direct-user';
 }

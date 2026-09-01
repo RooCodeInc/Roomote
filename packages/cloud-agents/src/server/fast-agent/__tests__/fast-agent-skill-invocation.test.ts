@@ -26,10 +26,17 @@ describe('Fast explicit skill invocation parsing', () => {
   it('preserves leading explicit invocation behavior on every surface', () => {
     expect(
       parseFastAgentExplicitSkillInvocation(
-        '$handle-operations-ticket investigate this',
+        '$thermonuclear investigate this',
         'web',
       ),
-    ).toBe('handle-operations-ticket');
+    ).toBe('thermonuclear');
+    expect(
+      parseFastAgentExplicitSkillInvocation(
+        '<@ROOMOTE_ID> $thermonuclear investigate this',
+        'slack',
+        'ROOMOTE_ID',
+      ),
+    ).toBe('thermonuclear');
   });
 
   it.each([

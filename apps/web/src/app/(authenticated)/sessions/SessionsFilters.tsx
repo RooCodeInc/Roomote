@@ -37,7 +37,6 @@ const ADVANCED_FILTERS_STORAGE_KEY =
   'roomote-sessions-advanced-filters-visible';
 const SESSIONS_VIEW_STORAGE_KEY = 'roomote-sessions-view';
 const ADVANCED_FILTER_PARAMS = [
-  'user',
   'repository',
   'pullRequest',
   'model',
@@ -244,12 +243,14 @@ export function SessionsFilters({
         }
       />
       <TaskFilters
-        userId="all"
+        userId={userId ?? 'all'}
         repositoryName={null}
         pullRequest={null}
         model={null}
         timePeriod={timePeriod}
-        onUserChange={() => undefined}
+        onUserChange={(value) =>
+          updateNullableParam('user', value && value !== 'all' ? value : null)
+        }
         onRepositoryChange={() => undefined}
         onPullRequestChange={() => undefined}
         onModelChange={() => undefined}
@@ -259,7 +260,6 @@ export function SessionsFilters({
             else params.set('period', String(period));
           })
         }
-        showUser={false}
         showRepository={false}
         showPullRequest={false}
         showModel={false}
@@ -288,6 +288,7 @@ export function SessionsFilters({
             }
             onModelChange={(value) => updateNullableParam('model', value)}
             onTimePeriodChange={() => undefined}
+            showUser={false}
             showTimePeriod={false}
             showTaskType={false}
           />

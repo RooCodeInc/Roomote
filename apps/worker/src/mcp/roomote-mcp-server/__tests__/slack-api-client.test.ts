@@ -1,6 +1,6 @@
 import {
+  addReactionToChatMessage,
   getChatChannelMessages,
-  addReactionToSlackMessage,
   clearSlackReplyQuote,
   getChatMessageContext,
   postToChannel,
@@ -343,7 +343,7 @@ describe('reply quote helpers', () => {
   });
 });
 
-describe('addReactionToSlackMessage', () => {
+describe('addReactionToChatMessage', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
@@ -359,7 +359,7 @@ describe('addReactionToSlackMessage', () => {
       }),
     });
 
-    const result = await addReactionToSlackMessage(config, {
+    const result = await addReactionToChatMessage(config, {
       channel: '#eng',
       messageTs: '111.222',
       name: 'eyes',
@@ -397,13 +397,13 @@ describe('addReactionToSlackMessage', () => {
     });
 
     await expect(
-      addReactionToSlackMessage(config, {
+      addReactionToChatMessage(config, {
         channel: 'C123',
         messageTs: '111.222',
         name: 'eyes',
       }),
     ).rejects.toThrow(
-      'Failed to add Slack reaction: 502 Slack reactions.add failed for channel C123 at 111.222.',
+      'Failed to add chat reaction: 502 Slack reactions.add failed for channel C123 at 111.222.',
     );
   });
 });

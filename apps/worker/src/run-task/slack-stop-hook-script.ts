@@ -362,10 +362,7 @@ function getTerminalCurrentTurnFailureReason(state) {
     return 'current_turn_nonterminal_request_user_input';
   }
 
-  if (
-    tool === 'send_chat_reaction_emoji' ||
-    tool === 'add_reaction_to_slack_message'
-  ) {
+  if (tool === 'send_chat_reaction_emoji') {
     return 'current_turn_nonterminal_reaction';
   }
 
