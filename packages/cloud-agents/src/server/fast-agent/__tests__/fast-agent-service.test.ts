@@ -237,6 +237,7 @@ import {
   FastAgentProcessShutdownError,
   FastAgentTurnLockLostError,
 } from '../fast-agent-turn-lock';
+import { FAST_RESPONDING_LEASE_RENEW_MS } from '../fast-agent-constants';
 
 const baseParams = {
   question: 'What does this service do?',
@@ -2605,6 +2606,55 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
     } finally {
       timeout.mockRestore();
+    }
+  });
+
+  it('renews the responding lease on wall clock while a long turn executes', async () => {
+    vi.useFakeTimers();
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
+    let finishInference: (() => void) | undefined;
+    mocks.generateText.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          finishInference = () => resolve('All done.');
+        }),
+    );
+    const leaseExtensions = () =>
+      mocks.touchSessionActivity.mock.calls.filter(
+        ([, , , update]) => update?.respondingUntil instanceof Date,
+      );
+
+    try {
+      const answer = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(leaseExtensions()).toHaveLength(1);
+
+      // No assistant message persists during this stretch; only the
+      // wall-clock renewal keeps the lease ahead of the reconciler.
+      await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS);
+      expect(leaseExtensions()).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS);
+      expect(leaseExtensions()).toHaveLength(3);
+
+      finishInference?.();
+      await vi.advanceTimersByTimeAsync(0);
+      await answer;
+
+      // Settling the turn clears the lease and stops the renewal timer.
+      expect(mocks.touchSessionActivity).toHaveBeenLastCalledWith(
+        expect.anything(),
+        'session-1',
+        expect.any(Number),
+        { respondingUntil: null },
+      );
+      const settledCalls = mocks.touchSessionActivity.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS * 2);
+      expect(mocks.touchSessionActivity.mock.calls).toHaveLength(settledCalls);
+    } finally {
+      vi.useRealTimers();
     }
   });
 

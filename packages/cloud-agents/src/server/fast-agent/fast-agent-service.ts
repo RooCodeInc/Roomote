@@ -61,6 +61,7 @@ import { getAvailableEnvironments, type RoutableEnvironment } from '../router';
 import {
   FAST_AGENT_MODEL_ROLE,
   FAST_RESPONDING_LEASE_MS,
+  FAST_RESPONDING_LEASE_RENEW_MS,
 } from './fast-agent-constants';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import {
@@ -1054,6 +1055,7 @@ export async function answerFastAgentQuestion({
   let nativeSteer: NonTaskOpenCodeNativeSteer | undefined;
   let activeToolExecutions = 0;
   let humanSteerPollTimer: ReturnType<typeof setInterval> | undefined;
+  let respondingLeaseRenewalTimer: ReturnType<typeof setInterval> | undefined;
   let activeHumanSteerPoll = Promise.resolve();
   const injectedHumanFollowUpIds = new Set<string>();
   const humanFollowUpTurnSeqs = new Map<string, number>();
@@ -1558,6 +1560,22 @@ export async function answerFastAgentQuestion({
         `[sessions] Failed to mark Fast Session active: ${formatErrorForLog(error)}`,
       );
     });
+    // Assistant-message persists extend the lease as a side effect, but a
+    // turn can spend longer than the lease inside tool calls or a streaming
+    // stretch without persisting one, and the expired-lease reconciler would
+    // then stamp its live retry notice as interrupted. Renew on wall clock
+    // for as long as this owner is executing; the tick stops renewing the
+    // moment ownership is aborted so a fenced-off owner cannot extend a
+    // successor's lease.
+    respondingLeaseRenewalTimer = setInterval(() => {
+      if (signal?.aborted) return;
+      void setFastSessionResponding(session.id, true).catch((error) => {
+        console.warn(
+          `[sessions] Failed to renew Fast Session responding lease: ${formatErrorForLog(error)}`,
+        );
+      });
+    }, FAST_RESPONDING_LEASE_RENEW_MS);
+    respondingLeaseRenewalTimer.unref();
     durableOpenCodeSessionId = session.openCodeSessionId;
     activeOpenCodeSessionId = session.openCodeSessionId;
     diagnostics.setCanonicalConversationId(session.id);
@@ -3136,6 +3154,8 @@ export async function answerFastAgentQuestion({
     }
     return lastVisibleMessage || message;
   } finally {
+    if (respondingLeaseRenewalTimer) clearInterval(respondingLeaseRenewalTimer);
+    respondingLeaseRenewalTimer = undefined;
     signal?.removeEventListener('abort', stopHumanSteerPolling);
     stopHumanSteerPolling();
     await activeHumanSteerPoll;
