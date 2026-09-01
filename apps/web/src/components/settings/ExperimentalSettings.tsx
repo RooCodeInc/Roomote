@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -16,6 +17,7 @@ function prettifyFlagId(id: string): string {
 }
 
 export function ExperimentalSettings() {
+  const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const queryKey = trpc.featureFlags.getExperimental.queryKey();
@@ -38,6 +40,7 @@ export function ExperimentalSettings() {
         value: nextValue,
       });
       queryClient.setQueryData<ExperimentalFlag[]>(queryKey, updated);
+      router.refresh();
       toast.success(
         `${prettifyFlagId(flag.id)} ${nextValue ? 'enabled' : 'disabled'}`,
       );
