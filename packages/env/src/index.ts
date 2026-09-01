@@ -548,6 +548,12 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_BRAIN_OPENROUTER_API_KEY',
   'R_BRAIN_OPENAI_API_KEY',
   'R_TRIAL_OPENROUTER_API_KEY',
+  // Cloud clears managed-email variables with empty strings on disable;
+  // an empty enum flag must fall back to its default, not fail boot.
+  'R_EMAIL_CHANNEL_ENABLED',
+  'R_AGENTMAIL_API_KEY',
+  'R_AGENTMAIL_WEBHOOK_SECRET',
+  'R_AGENTMAIL_INBOX_ID',
   'R_BRAIN_EMBEDDINGS_UPSTREAM_URL',
   'R_BRAIN_INFERENCE_UPSTREAM_API_KEY',
   'R_BRAIN_GATEWAY_TOKEN',
