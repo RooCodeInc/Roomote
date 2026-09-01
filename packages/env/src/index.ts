@@ -147,6 +147,12 @@ const serverSchema = {
   // feature is off and the endpoint 404s.
   R_ELEVENLABS_API_KEY: z.string().min(1).optional(),
   R_ELEVENLABS_VOICE_ID: z.string().min(1).optional(),
+  // OpenAI key for the live voice conversation feature (realtime
+  // transcription + spoken replies in the web app). Falls back to the
+  // deployment's general OPENAI_API_KEY when unset. The key stays on the
+  // control plane: the browser only ever receives short-lived ephemeral
+  // realtime tokens and synthesized audio, never the key itself.
+  R_VOICE_OPENAI_API_KEY: z.string().min(1).optional(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -573,6 +579,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS',
   'R_ELEVENLABS_API_KEY',
   'R_ELEVENLABS_VOICE_ID',
+  'R_VOICE_OPENAI_API_KEY',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',

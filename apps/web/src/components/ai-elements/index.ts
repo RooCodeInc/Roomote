@@ -4,6 +4,7 @@ export * from './collapsible-content';
 export * from './conversation';
 export * from './context';
 export * from './custom-link';
+export * from './live-voice';
 export * from './message';
 export * from './message-ui-options';
 export * from './prompt-input';

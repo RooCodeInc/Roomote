@@ -17,6 +17,7 @@ export {
   ArrowUpFromLine,
   ArrowUpRightIcon,
   AtSignIcon,
+  AudioLines,
   BookOpenText,
   BookCopy,
   BookMarked,

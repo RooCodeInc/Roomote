@@ -29,6 +29,7 @@ import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
+  LiveVoiceStatusBar,
   Message,
   MessageContent,
   MessageUiOptionsProvider,
@@ -39,8 +40,10 @@ import {
   type SlackMentionScope,
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
+import { useLiveVoice } from '@/hooks/useLiveVoice';
 import {
   SessionPromptInput,
+  type SessionModelSelection,
   type SessionPromptSubmission,
 } from './SessionPromptInput';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
@@ -739,6 +742,116 @@ export function FastSessionTranscript({
     [sessionId, trpcClient],
   );
 
+  // --- Live voice conversation -------------------------------------------
+
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const modelSelectionRef = useRef<SessionModelSelection>({
+    model: sessionModel,
+    reasoningEffort: sessionReasoningEffort,
+  });
+  /** Assistant messages at or before this ts have already been spoken. */
+  const lastSpokenTsRef = useRef(0);
+  const previousPendingRef = useRef<typeof pendingResponseState.pendingAfter>(
+    pendingResponseState.pendingAfter,
+  );
+  const pendingUtterancesRef = useRef<string[]>([]);
+  const [utteranceQueueVersion, setUtteranceQueueVersion] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    trpcClient.voice.status
+      .query()
+      .then((voiceStatus) => {
+        if (!cancelled) {
+          setVoiceEnabled(voiceStatus.enabled);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [trpcClient]);
+
+  const enqueueVoiceUtterance = useCallback((text: string) => {
+    pendingUtterancesRef.current.push(text);
+    setUtteranceQueueVersion((version) => version + 1);
+  }, []);
+
+  const liveVoice = useLiveVoice({ onUtterance: enqueueVoiceUtterance });
+
+  // Utterances queue rather than dropping when one lands while the previous
+  // reply is still in flight; the queue drains as each send settles.
+  useEffect(() => {
+    if (isSending) {
+      return;
+    }
+
+    const next = pendingUtterancesRef.current.shift();
+
+    if (next === undefined) {
+      return;
+    }
+
+    void sendReply({
+      text: next,
+      files: [],
+      model: modelSelectionRef.current.model,
+      reasoningEffort: modelSelectionRef.current.reasoningEffort,
+    });
+  }, [isSending, utteranceQueueVersion, sendReply]);
+
+  // Speak the agent's reply once it settles: when the pending-response state
+  // clears, every not-yet-spoken assistant message since the last spoken one
+  // is read aloud as a single reply.
+  const liveVoiceActive = liveVoice.active;
+  const speakRef = useRef(liveVoice.speak);
+  speakRef.current = liveVoice.speak;
+
+  useEffect(() => {
+    const wasPending = previousPendingRef.current !== null;
+    previousPendingRef.current = pendingResponseState.pendingAfter;
+
+    if (
+      !liveVoiceActive ||
+      !wasPending ||
+      pendingResponseState.pendingAfter !== null
+    ) {
+      return;
+    }
+
+    const unspoken = messages.filter(
+      (message) =>
+        message.role !== 'user' &&
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+        message.metadata?.visibleInTranscript !== false &&
+        message.ts > lastSpokenTsRef.current,
+    );
+    const texts = unspoken
+      .map((message) => getTextFromContentBlocks(message.contentBlocks)?.trim())
+      .filter((text): text is string => Boolean(text));
+
+    if (texts.length === 0) {
+      return;
+    }
+
+    lastSpokenTsRef.current = Math.max(
+      ...unspoken.map((message) => message.ts),
+    );
+    speakRef.current(texts.join('\n\n'));
+  }, [pendingResponseState.pendingAfter, liveVoiceActive, messages]);
+
+  const handleVoiceToggle = useCallback(() => {
+    if (liveVoice.active) {
+      liveVoice.stop();
+      return;
+    }
+
+    // Replies that predate the conversation stay silent.
+    lastSpokenTsRef.current = Date.now();
+    pendingUtterancesRef.current = [];
+    void liveVoice.start();
+  }, [liveVoice]);
+
   return (
     <MessageUiOptionsProvider
       value={{ displayMode, hidePrReviewActions: true }}
@@ -816,6 +929,18 @@ export function FastSessionTranscript({
         </Conversation>
         {canReply && !pendingInputRequest ? (
           <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card outline-0 outline-offset-[-2px] outline-accent-foreground transition-[background-color,border-color,outline-width] has-[textarea:focus]:outline-2 @[56rem]:rounded-t-lg">
+            {liveVoice.status !== 'idle' ? (
+              <LiveVoiceStatusBar
+                status={liveVoice.status}
+                interimTranscript={liveVoice.interimTranscript}
+                thinking={
+                  pendingResponseState.pendingAfter !== null ||
+                  conversationResponding === true
+                }
+                error={liveVoice.error}
+                onStop={liveVoice.stop}
+              />
+            ) : null}
             <SessionPromptInput
               sessionId={sessionId}
               isBusy={isSending}
@@ -832,6 +957,18 @@ export function FastSessionTranscript({
               initialReasoningEffort={sessionReasoningEffort}
               defaultModelId={defaultModelId}
               defaultReasoningEffort={defaultReasoningEffort}
+              voice={
+                voiceEnabled
+                  ? {
+                      enabled: true,
+                      active: liveVoice.active,
+                      onToggle: handleVoiceToggle,
+                    }
+                  : undefined
+              }
+              onModelSelectionChange={(selection) => {
+                modelSelectionRef.current = selection;
+              }}
             />
             {replyError ? (
               <p className="px-4 pb-2 text-xs text-destructive">{replyError}</p>

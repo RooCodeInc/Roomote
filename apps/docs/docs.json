@@ -58,7 +58,8 @@
           "goal-mode",
           "fast-sessions",
           "memory",
-          "file-attachments"
+          "file-attachments",
+          "voice"
         ]
       },
       {
