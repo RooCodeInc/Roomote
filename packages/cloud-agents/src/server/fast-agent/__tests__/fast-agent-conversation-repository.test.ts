@@ -701,6 +701,52 @@ describe('Fast conversation repository', () => {
     });
   });
 
+  it('reveals a quiet durable retry marker after its turn is orphaned', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-stale:retry-notice:0',
+        turnId: 'turn-stale',
+        turnSeq: 1,
+        ts: 100,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying automatically…' }],
+        metadata: {
+          visibleInTranscript: false,
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
+        },
+        payload: { purpose: 'progress' },
+        source: 'web',
+      },
+    });
+
+    await expect(
+      reconcileFastAgentInferenceRetryNotices(session.id),
+    ).resolves.toBe(1);
+
+    const [notice] = await db
+      .select()
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.conversationId, session.id));
+    expect(notice?.contentBlocks).toEqual([
+      { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
+    ]);
+    expect(notice?.metadata).toMatchObject({
+      visibleInTranscript: true,
+      purpose: 'closeout',
+      inferenceRetryNotice: true,
+      inferenceRetryActive: false,
+    });
+  });
+
   it('reconciles only retry notices whose session lease is inactive', async () => {
     const user = await createUser();
     const expired = await fastAgentConversationRepository.getOrCreate({

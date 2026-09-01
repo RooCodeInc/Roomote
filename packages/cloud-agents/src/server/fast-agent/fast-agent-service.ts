@@ -104,6 +104,7 @@ import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
 import {
   FastAgentProcessShutdownError,
+  FastAgentTurnLockLostError,
   markFastAgentShutdownCloseoutPending,
   markFastAgentShutdownCloseoutSettled,
 } from './fast-agent-turn-lock';
@@ -1415,9 +1416,24 @@ export async function answerFastAgentQuestion({
       notice: FastAgentInferenceRetryNotice,
     ) => {
       inferenceRetryAttempted = true;
-      if (platformEvent) {
-        return;
-      }
+      const message = formatFastAgentInferenceRetryNotice(notice);
+      const reply = { purpose: 'progress' as const, message };
+
+      // Silence is a presentation choice, not permission to keep recovery
+      // entirely in memory. Persist the first retry immediately so an owner
+      // crash during quiet backoff leaves a durable marker for the expired-
+      // lease reconciler to turn into a terminal interruption.
+      inferenceRetryCanonicalEvent ??= allocateCanonicalEvent(
+        `retry-notice:${nextRetryNoticeOrdinal++}`,
+      );
+      await persistAssistantReply({
+        reply,
+        event: inferenceRetryCanonicalEvent,
+        inferenceRetryNotice: true,
+        visibleInTranscript: false,
+      });
+
+      if (platformEvent) return;
 
       // Stay silent while recovery is short enough that a standard task
       // would absorb it invisibly. A notice is only worth interrupting the
@@ -1431,7 +1447,6 @@ export async function answerFastAgentQuestion({
         return;
       }
 
-      const message = formatFastAgentInferenceRetryNotice(notice);
       if (reportedInferenceNotices.has(message)) {
         return;
       }
@@ -1439,16 +1454,10 @@ export async function answerFastAgentQuestion({
       reportedInferenceNotices.add(message);
       // Deliberately not the postReply closure: a system retry notice must
       // not satisfy the model's acknowledgement gate or close the turn.
-      const reply = { purpose: 'progress' as const, message };
       if (!(await replaceInferenceRetryReply(reply))) {
         inferenceRetryReply = (await adapter.postReply(reply)) || undefined;
         inferenceRetryMessageIndex = turnVisibleMessages.length;
         turnVisibleMessages.push(buildAssistantTextMessage(message));
-        // Ordinal-suffixed so a second retry episode in the same turn gets
-        // its own row instead of overwriting the first notice's upsert slot.
-        inferenceRetryCanonicalEvent ??= allocateCanonicalEvent(
-          `retry-notice:${nextRetryNoticeOrdinal++}`,
-        );
         await persistAssistantReply({
           reply,
           event: inferenceRetryCanonicalEvent,
@@ -2550,11 +2559,13 @@ export async function answerFastAgentQuestion({
     if (signal?.aborted) {
       const shutdownInterrupted =
         terminalError instanceof FastAgentProcessShutdownError;
+      const lockOwnershipLost =
+        terminalError instanceof FastAgentTurnLockLostError;
       try {
         if (canonicalConversationId) {
           fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
         }
-        if (inferenceRetryReply) {
+        if (!lockOwnershipLost && inferenceRetryReply) {
           await replaceInferenceRetryReply(
             {
               purpose: 'closeout',
@@ -2570,12 +2581,14 @@ export async function answerFastAgentQuestion({
           try {
             const posted = await adapter.postReply(reply);
             diagnostics.recordVisibleReply();
+            const retryEvent = inferenceRetryCanonicalEvent;
             await persistAssistantReply({
               reply,
-              event: allocateCanonicalEvent(
-                `assistant:${nextAssistantOrdinal++}`,
-              ),
+              event:
+                retryEvent ??
+                allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
               platformMessageId: posted?.messageId,
+              inferenceRetryNotice: Boolean(retryEvent),
             });
           } catch (postError) {
             console.error(
@@ -2648,7 +2661,15 @@ export async function answerFastAgentQuestion({
     }
     return lastVisibleMessage || message;
   } finally {
-    if (canonicalConversationId) {
+    // Once Redis reports ownership loss, this invocation is fenced off from
+    // the canonical lease/retry state below. A successor may already own and
+    // have renewed the Session lease; clearing it or reconciling the prior
+    // retry here would let the stale owner write an interruption over the
+    // successor. The new owner reconciles on entry, or the lease-gated
+    // scheduled reconciler repairs the marker later when no successor appears.
+    const lockOwnershipLost =
+      signal?.aborted && signal.reason instanceof FastAgentTurnLockLostError;
+    if (canonicalConversationId && !lockOwnershipLost) {
       await setFastSessionResponding(canonicalConversationId, false).catch(
         (error) => {
           console.warn(
