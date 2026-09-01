@@ -1,5 +1,6 @@
 import {
   type AcpEventType,
+  ACP_ENVELOPE_EVENT_TYPES,
   sanitizeEnvelopeFields,
   inferAcpMessageKind,
   extractAcpMessageText,
@@ -12,9 +13,12 @@ import {
   asc,
   and,
   db,
+  desc,
   eq,
+  inArray,
   like,
   not,
+  sql,
   taskMessages,
   tasks,
   users,
@@ -22,6 +26,68 @@ import {
 
 import type { TaskMessageEnvelope } from '@/types';
 import { getUserDisplayName } from '@/lib/user-display-name';
+import { MAX_SUGGESTION_HISTORY_MESSAGES } from '@/lib/server/composer-suggestion';
+
+/**
+ * The newest persisted conversational history for composer suggestions,
+ * reduced to the minimal shape the suggestion prompt is built from. Bounded
+ * in SQL so long tasks never load their full transcript, filtered to
+ * user/assistant events, and restricted to transcript-visible entries so
+ * hidden continuation/setup prompts cannot influence the suggestion.
+ */
+export async function getTaskSuggestableMessages(taskId: string): Promise<
+  Array<{
+    id: string;
+    eventType: string;
+    role: string | null;
+    text: string | null;
+  }>
+> {
+  const rows = await db
+    .select({
+      id: taskMessages.id,
+      eventType: taskMessages.eventType,
+      role: taskMessages.role,
+      contentBlocks: taskMessages.contentBlocks,
+      metadata: taskMessages.metadata,
+      payload: taskMessages.payload,
+    })
+    .from(taskMessages)
+    .where(
+      and(
+        eq(taskMessages.taskId, taskId),
+        eq(taskMessages.protocol, ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL),
+        inArray(taskMessages.eventType, [
+          ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        ]),
+        sql`coalesce(${taskMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+      ),
+    )
+    .orderBy(desc(taskMessages.createdAt), desc(taskMessages.ts))
+    .limit(MAX_SUGGESTION_HISTORY_MESSAGES);
+
+  return rows
+    .reverse()
+    .filter((row) =>
+      resolveAcpTranscriptVisibility({
+        eventType: row.eventType as AcpEventType,
+        contentBlocks: row.contentBlocks,
+        metadata: (row.metadata as Record<string, unknown> | null) ?? null,
+        payload: (row.payload as Record<string, unknown> | null) ?? null,
+      }),
+    )
+    .map((row) => ({
+      id: row.id,
+      eventType: row.eventType,
+      role: row.role,
+      text:
+        extractAcpMessageText(
+          row.contentBlocks,
+          (row.payload as Record<string, unknown> | null) ?? null,
+        ) ?? null,
+    }));
+}
 
 export async function getTaskMessageEnvelopes({
   taskId,

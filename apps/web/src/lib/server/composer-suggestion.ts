@@ -7,7 +7,9 @@ import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 import { z } from 'zod';
 
 // Maximum number of recent messages included in the suggestion prompt.
-const MAX_MESSAGES = 60;
+// History queries bound their fetches to this too, so long conversations
+// never load their full transcript for a suggestion.
+export const MAX_SUGGESTION_HISTORY_MESSAGES = 60;
 
 // Maximum character count for the conversation text.
 const MAX_CONVERSATION_CHARS = 60_000;
@@ -51,6 +53,8 @@ const SUGGESTABLE_EVENT_TYPES = new Set<string>([
 /** The minimal message shape the suggestion prompt is built from; both task
  * envelopes and fast-session rows reduce to it. */
 type SuggestableMessage = {
+  /** Stable row id; the newest assistant id keys the generation cache. */
+  id?: string | number;
   eventType: string;
   role?: string | null;
   text?: string | null;
@@ -62,7 +66,7 @@ function getSuggestableMessages<T extends SuggestableMessage>(
   return messages
     .filter((m) => m.text && m.text.trim().length > 0)
     .filter((m) => SUGGESTABLE_EVENT_TYPES.has(m.eventType))
-    .slice(-MAX_MESSAGES);
+    .slice(-MAX_SUGGESTION_HISTORY_MESSAGES);
 }
 
 /**
@@ -183,15 +187,22 @@ export async function suggestNextComposerMessage({
     const conversationText = buildConversationText(suggestable);
     // One generation per completed agent turn: only a new assistant message
     // mints a fresh cache key, so user messages sent mid-turn keep reusing
-    // (and, client-side, keep hiding) the previous suggestion.
-    const assistantCount = suggestable.filter(
+    // (and, client-side, keep hiding) the previous suggestion. The newest
+    // assistant id keys the cache rather than a count: history fetches are
+    // bounded, so a within-window count would stop advancing once the
+    // conversation outgrows the window.
+    const assistantMessages = suggestable.filter(
       (m) => m.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-    ).length;
+    );
+    const newestAssistant = assistantMessages.at(-1);
+    const generationKey = String(
+      newestAssistant?.id ?? assistantMessages.length,
+    );
 
     const generator = unstable_cache(
       (prompt: string) =>
         generateSuggestion(prompt, userId, taskId, fastConversationId),
-      ['composer-suggestion', cacheScope, String(assistantCount)],
+      ['composer-suggestion', cacheScope, generationKey],
       {
         revalidate: CACHE_TTL_SECONDS,
         tags: [`composer-suggestion:${cacheScope}`],

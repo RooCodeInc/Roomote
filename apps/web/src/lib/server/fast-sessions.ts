@@ -28,6 +28,8 @@ import type { FastAgentMessage } from '@roomote/db';
 
 import type { UserAuthSuccess } from '@/types';
 
+import { MAX_SUGGESTION_HISTORY_MESSAGES } from '@/lib/server/composer-suggestion';
+
 type FastSessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
 
 type FastSessionTaskSummary = {
@@ -372,16 +374,23 @@ export async function getFastSessionMessagesSince(
 }
 
 /**
- * The persisted user/assistant conversation reduced to the minimal shape the
- * composer-suggestion prompt is built from. Tool events never leave the DB.
+ * The newest persisted user/assistant conversation reduced to the minimal
+ * shape the composer-suggestion prompt is built from. Bounded in SQL so long
+ * sessions never load their full transcript; tool events never leave the DB.
  */
 export async function getFastSessionSuggestableMessages(
   sessionId: string,
 ): Promise<
-  Array<{ eventType: string; role: string | null; text: string | null }>
+  Array<{
+    id: string;
+    eventType: string;
+    role: string | null;
+    text: string | null;
+  }>
 > {
   const rows = await db
     .select({
+      id: fastAgentMessages.id,
       eventType: fastAgentMessages.eventType,
       role: fastAgentMessages.role,
       contentBlocks: fastAgentMessages.contentBlocks,
@@ -399,13 +408,15 @@ export async function getFastSessionSuggestableMessages(
       ),
     )
     .orderBy(
-      asc(fastAgentMessages.ts),
-      asc(fastAgentMessages.turnSeq),
-      asc(fastAgentMessages.createdAt),
-      asc(fastAgentMessages.id),
-    );
+      desc(fastAgentMessages.ts),
+      desc(fastAgentMessages.turnSeq),
+      desc(fastAgentMessages.createdAt),
+      desc(fastAgentMessages.id),
+    )
+    .limit(MAX_SUGGESTION_HISTORY_MESSAGES);
 
-  return rows.map((row) => ({
+  return rows.reverse().map((row) => ({
+    id: row.id,
     eventType: row.eventType,
     role: row.role,
     text:

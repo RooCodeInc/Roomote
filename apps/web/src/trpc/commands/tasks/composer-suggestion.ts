@@ -1,6 +1,6 @@
 import type { UserAuthSuccess } from '@/types';
 
-import { getTaskMessageEnvelopes } from '@/lib/server';
+import { getTaskSuggestableMessages } from '@/lib/server';
 import {
   type ComposerSuggestionResult,
   suggestNextComposerMessage,
@@ -20,7 +20,7 @@ export async function getComposerSuggestionCommand(
   }
 
   try {
-    const messages = await getTaskMessageEnvelopes({ taskId: input.taskId });
+    const messages = await getTaskSuggestableMessages(input.taskId);
 
     return await suggestNextComposerMessage({
       messages,
