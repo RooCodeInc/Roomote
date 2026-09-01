@@ -19,6 +19,8 @@ describe('parseProviderRetryNotice', () => {
         delayMs: 5_000,
         retryAtMs: 1_700_000_000_000,
         errorSummary: 'Too many requests',
+        providerId: 'openrouter',
+        modelId: 'openrouter/anthropic/claude-sonnet-4',
       }),
     ).toEqual({
       kind: 'rate_limit',
@@ -27,6 +29,8 @@ describe('parseProviderRetryNotice', () => {
       delayMs: 5_000,
       retryAtMs: 1_700_000_000_000,
       errorSummary: 'Too many requests',
+      providerId: 'openrouter',
+      modelId: 'openrouter/anthropic/claude-sonnet-4',
     });
   });
 

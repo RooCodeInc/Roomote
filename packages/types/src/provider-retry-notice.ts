@@ -1,4 +1,6 @@
 import { asBoolean, asFiniteNumber, asRecord, asString } from './primitives';
+import { getModelProviderLabel } from './model-provider-config';
+import { getTaskModelDisplayName, getTaskModelProviderId } from './task-models';
 
 export const PROVIDER_RETRY_NOTICE_PAYLOAD_KEY = 'providerRetryNotice' as const;
 export const TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY =
@@ -36,7 +38,32 @@ export type ProviderRetryNotice = {
   retryAtMs?: number;
   /** Short human-readable provider error, without the retry instruction. */
   errorSummary?: string;
+  /** Effective provider route used by the failed request. */
+  providerId?: string;
+  /** Effective qualified model id used by the failed request. */
+  modelId?: string;
 };
+
+export function getProviderRetryIdentityLabel(
+  notice: Pick<ProviderRetryNotice, 'modelId' | 'providerId'>,
+): string | null {
+  const modelId = notice.modelId?.trim();
+  if (!modelId) {
+    return null;
+  }
+
+  const providerId =
+    notice.providerId?.trim() || getTaskModelProviderId(modelId);
+  const displayName = getTaskModelDisplayName(modelId);
+  const providerPrefix = providerId ? `${providerId}/` : '';
+  const modelLabel =
+    displayName === modelId &&
+    providerPrefix &&
+    modelId.startsWith(providerPrefix)
+      ? modelId.slice(providerPrefix.length)
+      : displayName;
+  return `${modelLabel} via ${getModelProviderLabel(providerId)}`;
+}
 
 export function isProviderRetryNoticeKind(
   value: unknown,
@@ -73,6 +100,8 @@ export function parseProviderRetryNotice(
   const delayMs = asFiniteNumber(record.delayMs);
   const retryAtMs = asFiniteNumber(record.retryAtMs);
   const errorSummary = asString(record.errorSummary)?.trim();
+  const providerId = asString(record.providerId)?.trim();
+  const modelId = asString(record.modelId)?.trim();
   const showAttempt = asBoolean(record.showAttempt);
 
   return {
@@ -87,6 +116,8 @@ export function parseProviderRetryNotice(
       ? { retryAtMs: Math.trunc(retryAtMs) }
       : {}),
     ...(errorSummary && errorSummary.length > 0 ? { errorSummary } : {}),
+    ...(providerId && providerId.length <= 128 ? { providerId } : {}),
+    ...(modelId && modelId.length <= 256 ? { modelId } : {}),
   };
 }
 

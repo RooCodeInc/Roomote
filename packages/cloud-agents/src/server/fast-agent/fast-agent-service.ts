@@ -18,9 +18,13 @@ import {
   buildInferenceProviderRecoveryPrompt,
   fastAgentHumanFollowUpEventSchema,
   formatErrorForLog,
+  getProviderRetryIdentityLabel,
+  getTaskModelProviderId,
   resolveInferenceProviderRetryDelayMs,
   isMemoryMcpServer,
+  PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
   truncateAcpOutputText,
+  type ProviderRetryNotice,
   type ReasoningEffort,
   type RunStatus,
   type TaskMessageContentBlock,
@@ -426,6 +430,7 @@ type FastAgentInferenceRetryNotice = {
   attemptNumber: number;
   maxAttempts?: number;
   delayMs?: number;
+  retryAtMs?: number;
 };
 
 type FastAgentInferenceRetryOptions = {
@@ -494,6 +499,7 @@ function resolveFastAgentInferenceRetryDelayMs(
 
 function formatFastAgentInferenceRetryNotice(
   notice: FastAgentInferenceRetryNotice,
+  modelId?: string,
 ): string {
   const headline =
     notice.failure.reason === 'rate_limited'
@@ -504,12 +510,24 @@ function formatFastAgentInferenceRetryNotice(
           ? 'The inference provider did not respond in time.'
           : 'The inference provider returned a temporary error.';
 
-  if (notice.delayMs === undefined || notice.maxAttempts === undefined) {
-    return `${headline} Retrying automatically…`;
+  const providerId = modelId ? getTaskModelProviderId(modelId) : null;
+  const identity = getProviderRetryIdentityLabel({
+    ...(modelId ? { modelId } : {}),
+    ...(providerId ? { providerId } : {}),
+  });
+  const contextualHeadline = identity
+    ? `${headline.slice(0, -1)} for ${identity}.`
+    : headline;
+
+  if (notice.delayMs === undefined) {
+    return `${contextualHeadline} Retrying automatically…`;
   }
 
   const seconds = Math.max(1, Math.round(notice.delayMs / 1_000));
-  return `${headline} Retrying in ${seconds}s (attempt ${notice.attemptNumber}/${notice.maxAttempts}).`;
+  if (notice.maxAttempts === undefined) {
+    return `${contextualHeadline} Retrying in ${seconds}s.`;
+  }
+  return `${contextualHeadline} Retrying in ${seconds}s (attempt ${notice.attemptNumber}/${notice.maxAttempts}).`;
 }
 
 function formatFastAgentInferenceFailure(
@@ -613,12 +631,14 @@ async function runFastAgentInferenceWithRetries<T>(
         failure,
         attemptNumber,
       );
+      const retryAtMs = Date.now() + delayMs;
       try {
         await onRetry?.({
           failure,
           attemptNumber,
           maxAttempts: maxRetries,
           delayMs,
+          retryAtMs,
         });
       } catch (noticeError) {
         console.warn(
@@ -1019,6 +1039,7 @@ export async function answerFastAgentQuestion({
     | { eventId: string; turnSeq: number }
     | undefined;
   let inferenceRetryAttempted = false;
+  let effectiveInferenceModel = model?.trim() || undefined;
   // Anchors the silent-recovery window: set on the first retry signal of a
   // continuous no-progress stretch, cleared whenever the provider makes
   // visible progress again (completed message or successful attempt).
@@ -1245,6 +1266,7 @@ export async function answerFastAgentQuestion({
     platformMessageId,
     nativeMessage,
     inferenceRetryNotice = false,
+    providerRetryPayload,
     visibleInTranscript = true,
   }: {
     reply: FastAgentReply;
@@ -1252,6 +1274,7 @@ export async function answerFastAgentQuestion({
     platformMessageId?: string;
     nativeMessage?: NonTaskOpenCodeCompletedMessage | null;
     inferenceRetryNotice?: boolean;
+    providerRetryPayload?: ProviderRetryNotice;
     visibleInTranscript?: boolean;
   }) =>
     persistCanonicalMessage(
@@ -1274,11 +1297,21 @@ export async function answerFastAgentQuestion({
                 inferenceRetryActive: reply.purpose === 'progress',
               }
             : {}),
+          ...(providerRetryPayload
+            ? {
+                [PROVIDER_RETRY_NOTICE_PAYLOAD_KEY]: providerRetryPayload,
+              }
+            : {}),
           ...(platformMessageId ? { platformMessageId } : {}),
         },
         payload: {
           purpose: reply.purpose,
           ...(transcriptPayload ?? {}),
+          ...(providerRetryPayload
+            ? {
+                [PROVIDER_RETRY_NOTICE_PAYLOAD_KEY]: providerRetryPayload,
+              }
+            : {}),
           ...(reply.imageArtifactIds?.length
             ? { imageArtifactIds: reply.imageArtifactIds }
             : {}),
@@ -1782,7 +1815,37 @@ export async function answerFastAgentQuestion({
       notice: FastAgentInferenceRetryNotice,
     ) => {
       inferenceRetryAttempted = true;
-      const message = formatFastAgentInferenceRetryNotice(notice);
+      const providerId = effectiveInferenceModel
+        ? getTaskModelProviderId(effectiveInferenceModel)
+        : null;
+      const providerRetryPayload: ProviderRetryNotice | undefined =
+        notice.failure.reason === 'rate_limited'
+          ? {
+              kind: 'rate_limit',
+              attemptNumber: notice.attemptNumber,
+              maxAttempts:
+                notice.maxAttempts ?? Math.max(notice.attemptNumber, 1),
+              ...(notice.maxAttempts === undefined
+                ? { showAttempt: false }
+                : {}),
+              ...(notice.delayMs !== undefined
+                ? { delayMs: notice.delayMs }
+                : {}),
+              ...(notice.retryAtMs !== undefined
+                ? { retryAtMs: notice.retryAtMs }
+                : {}),
+              ...(providerId ? { providerId } : {}),
+              ...(effectiveInferenceModel
+                ? { modelId: effectiveInferenceModel }
+                : {}),
+            }
+          : undefined;
+      const message = formatFastAgentInferenceRetryNotice(
+        notice,
+        notice.failure.reason === 'rate_limited'
+          ? effectiveInferenceModel
+          : undefined,
+      );
       const reply = { purpose: 'progress' as const, message };
 
       // Silence is a presentation choice, not permission to keep recovery
@@ -1796,6 +1859,7 @@ export async function answerFastAgentQuestion({
         reply,
         event: inferenceRetryCanonicalEvent,
         inferenceRetryNotice: true,
+        ...(providerRetryPayload ? { providerRetryPayload } : {}),
         visibleInTranscript: false,
       });
 
@@ -1829,6 +1893,7 @@ export async function answerFastAgentQuestion({
           event: inferenceRetryCanonicalEvent,
           platformMessageId: inferenceRetryReply?.messageId,
           inferenceRetryNotice: true,
+          ...(providerRetryPayload ? { providerRetryPayload } : {}),
         });
       }
       diagnostics.recordVisibleReply({ assistantResponse: false });
@@ -1848,6 +1913,9 @@ export async function answerFastAgentQuestion({
         failure: classifyNonTaskInferenceError(new Error(event.message)),
         attemptNumber: event.attempt,
         ...(pendingDelayMs !== undefined ? { delayMs: pendingDelayMs } : {}),
+        ...(event.nextRetryAtMs !== undefined
+          ? { retryAtMs: event.nextRetryAtMs }
+          : {}),
       });
     };
     const reportRoomoteInferenceRetry = async (
@@ -2713,6 +2781,7 @@ export async function answerFastAgentQuestion({
                       tools: FAST_AGENT_SESSION_TOOL_FILTER,
                       onModelResolved: (model) => {
                         resolvedInferenceModel = model;
+                        effectiveInferenceModel = model;
                         diagnostics.recordModelResolved(model);
                       },
                       onMessageCompleted: (message) => {

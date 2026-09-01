@@ -3606,15 +3606,20 @@ describe('OpenCodeServerHarness', () => {
           (event) => event.eventName === TaskEventName.TaskAborted,
         ),
       ).toBe(false);
+      const rateLimitNotice = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          String(envelope.payload.text ?? '').includes('Retrying in') &&
+          asRecord(envelope.payload.providerRetryNotice)?.kind === 'rate_limit',
+      );
+      expect(rateLimitNotice).toBeDefined();
       expect(
-        persistedEnvelopes.some(
-          (envelope) =>
-            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
-            String(envelope.payload.text ?? '').includes('Retrying in') &&
-            asRecord(envelope.payload.providerRetryNotice)?.kind ===
-              'rate_limit',
-        ),
-      ).toBe(true);
+        asRecord(rateLimitNotice?.payload.providerRetryNotice),
+      ).toMatchObject({
+        providerId: 'test-provider',
+        modelId: TEST_OPENCODE_MODEL,
+        retryAtMs: expect.any(Number),
+      });
       // Invisible continue prompt stays out of the user-visible queue, while
       // preserving the existing follow-up for after the retry.
       expect(

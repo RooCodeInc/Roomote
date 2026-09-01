@@ -31,6 +31,7 @@ import { ModelSelect } from '@/components/tasks/ModelSelect';
 import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import type { TaskRunDetail } from '@/lib/server/task-runs';
+import { registerProviderRetryModelSwitcher } from '@/lib/provider-retry-model-switcher';
 import { useTRPC } from '@/trpc/client';
 
 type SwitcherRole = 'coding' | TaskModelOverrideRole;
@@ -77,6 +78,13 @@ export function TaskModelSwitcher({
   const { data: roleDefaults } = useQuery(
     trpc.taskModels.roleDefaults.queryOptions(undefined, { enabled: open }),
   );
+  useEffect(() => {
+    if (disabled) {
+      return;
+    }
+
+    return registerProviderRetryModelSwitcher(() => setOpen(true));
+  }, [disabled]);
   const { data: launchModels } = useLaunchTaskModels();
   const modelDisplayNames = useMemo(
     () =>

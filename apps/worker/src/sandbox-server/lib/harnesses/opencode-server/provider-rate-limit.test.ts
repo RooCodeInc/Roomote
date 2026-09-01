@@ -124,4 +124,18 @@ describe('formatOpenCodeRateLimitRetryNoticeText', () => {
       'Provider rate limit: Too many requests\n\nRetrying in 10s (attempt 2/3).',
     );
   });
+
+  it('includes effective provider and model context when available', () => {
+    expect(
+      formatOpenCodeRateLimitRetryNoticeText({
+        attemptNumber: 1,
+        maxAttempts: 3,
+        delayMs: 45_000,
+        providerId: 'openrouter',
+        modelId: 'openrouter/anthropic/claude-sonnet-4',
+      }),
+    ).toBe(
+      'Provider rate limit hit for anthropic/claude-sonnet-4 via OpenRouter\n\nRetrying in 45s (attempt 1/3).',
+    );
+  });
 });

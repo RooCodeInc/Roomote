@@ -722,8 +722,20 @@ describe('Fast conversation repository', () => {
           purpose: 'progress',
           inferenceRetryNotice: true,
           inferenceRetryActive: true,
+          providerRetryNotice: {
+            kind: 'rate_limit',
+            attemptNumber: 1,
+            maxAttempts: 3,
+          },
         },
-        payload: { purpose: 'progress' },
+        payload: {
+          purpose: 'progress',
+          providerRetryNotice: {
+            kind: 'rate_limit',
+            attemptNumber: 1,
+            maxAttempts: 3,
+          },
+        },
         source: 'web',
       },
     });
@@ -745,6 +757,8 @@ describe('Fast conversation repository', () => {
       inferenceRetryNotice: true,
       inferenceRetryActive: false,
     });
+    expect(notice?.metadata).not.toHaveProperty('providerRetryNotice');
+    expect(notice?.payload).not.toHaveProperty('providerRetryNotice');
   });
 
   it('reconciles only retry notices whose session lease is inactive', async () => {

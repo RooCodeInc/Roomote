@@ -4683,7 +4683,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         data: { responseHeaders: { 'retry-after': '45' } },
       };
       mocks.generateText
-        .mockRejectedValueOnce(rateLimitError)
+        .mockImplementationOnce(async (_params, _session, options) => {
+          options.onModelResolved?.('openrouter/anthropic/claude-sonnet-4');
+          throw rateLimitError;
+        })
         .mockImplementationOnce(async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
           await invokeTool(nativeToolNames.sendChatReply, {
@@ -4705,8 +4708,25 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
         purpose: 'progress',
         message:
-          'The inference provider is rate limiting requests. Retrying in 45s (attempt 1/3).',
+          'The inference provider is rate limiting requests for anthropic/claude-sonnet-4 via OpenRouter. Retrying in 45s (attempt 1/3).',
       });
+      expect(mocks.upsertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({
+            payload: expect.objectContaining({
+              providerRetryNotice: {
+                kind: 'rate_limit',
+                attemptNumber: 1,
+                maxAttempts: 3,
+                delayMs: 45_000,
+                retryAtMs: expect.any(Number),
+                providerId: 'openrouter',
+                modelId: 'openrouter/anthropic/claude-sonnet-4',
+              },
+            }),
+          }),
+        }),
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -4787,7 +4807,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
       purpose: 'progress',
       message:
-        'The inference provider is rate limiting requests. Retrying automatically…',
+        'The inference provider is rate limiting requests. Retrying in 45s.',
     });
   });
 

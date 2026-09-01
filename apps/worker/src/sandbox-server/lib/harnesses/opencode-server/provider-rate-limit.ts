@@ -3,6 +3,7 @@ import {
   INFERENCE_PROVIDER_RATE_LIMIT_BASE_DELAY_MS,
   INFERENCE_PROVIDER_RATE_LIMIT_MAX_DELAY_MS,
   asRecord,
+  getProviderRetryIdentityLabel,
   resolveInferenceProviderRetryDelayMs,
 } from '@roomote/types';
 
@@ -70,6 +71,8 @@ export function formatOpenCodeRateLimitRetryNoticeText(options: {
   maxAttempts: number;
   delayMs: number;
   errorSummary?: string;
+  providerId?: string;
+  modelId?: string;
 }): string {
   const seconds = Math.max(1, Math.round(options.delayMs / 1000));
   const errorSummary = options.errorSummary?.trim();
@@ -77,6 +80,7 @@ export function formatOpenCodeRateLimitRetryNoticeText(options: {
     ? `Provider rate limit: ${errorSummary}`
     : 'Provider rate limit hit';
   const attempt = `attempt ${options.attemptNumber}/${options.maxAttempts}`;
+  const identity = getProviderRetryIdentityLabel(options);
 
-  return `${headline}\n\nRetrying in ${seconds}s (${attempt}).`;
+  return `${headline}${identity ? ` for ${identity}` : ''}\n\nRetrying in ${seconds}s (${attempt}).`;
 }

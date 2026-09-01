@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
+  getProviderRetryIdentityLabel,
   getProviderRetryNoticeFromMessageData,
   type ProviderRetryNotice,
 } from '@roomote/types';
 
-import { RefreshCw } from '@/components/system';
+import { Button, RefreshCw } from '@/components/system';
+import { useProviderRetryModelSwitcher } from '@/lib/provider-retry-model-switcher';
 import { cn } from '@/lib/utils';
 
 function getRetryTitle(notice: ProviderRetryNotice): string {
@@ -86,12 +88,14 @@ export function ProviderRetryNoticeMessage({
   // for a retry notice (the parent already gates, but keep the component
   // safe if message data transitions).
   const remainingMs = useRetryCountdown(notice?.retryAtMs);
+  const openModelSwitcher = useProviderRetryModelSwitcher();
 
   if (!notice) {
     return null;
   }
 
   const errorText = notice.errorSummary?.trim() ?? '';
+  const identityText = getProviderRetryIdentityLabel(notice);
   const statusText = getRetryingStatusText({ notice, remainingMs });
   const isCountingDown = remainingMs !== null && remainingMs > 0;
   const hasDetails = Boolean(errorText) || Boolean(statusText);
@@ -125,7 +129,24 @@ export function ProviderRetryNoticeMessage({
               {errorText}
             </p>
           ) : null}
+          {identityText ? (
+            <p data-testid="provider-retry-notice-identity">
+              Using {identityText}
+            </p>
+          ) : null}
           <p data-testid="provider-retry-notice-status">{statusText}</p>
+          {notice.kind === 'rate_limit' && openModelSwitcher ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-1 h-7"
+              data-testid="provider-retry-switch-model"
+              onClick={openModelSwitcher}
+            >
+              Switch model
+            </Button>
+          ) : null}
         </div>
       ) : null}
     </div>

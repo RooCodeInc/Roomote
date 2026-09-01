@@ -199,6 +199,45 @@ describe('FastSessionTranscript', () => {
     createdAt: new Date(ts),
   });
 
+  it('renders structured provider/model context for Fast rate-limit retries', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...textMessage({
+              id: 'retry-1',
+              role: 'assistant',
+              text: 'The inference provider is rate limiting requests.',
+              ts: 1,
+            }),
+            payload: {
+              providerRetryNotice: {
+                kind: 'rate_limit',
+                attemptNumber: 1,
+                maxAttempts: 3,
+                delayMs: 45_000,
+                retryAtMs: Date.now() + 45_000,
+                providerId: 'openrouter',
+                modelId: 'openrouter/anthropic/claude-sonnet-4',
+              },
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('provider-retry-notice-title')).toHaveTextContent(
+      'Provider rate limit',
+    );
+    expect(
+      screen.getByTestId('provider-retry-notice-identity'),
+    ).toHaveTextContent('Using anthropic/claude-sonnet-4 via OpenRouter');
+    expect(
+      screen.getByTestId('provider-retry-notice-status'),
+    ).toHaveTextContent('Retrying in 45s (attempt 1/3)');
+  });
+
   describe('pendingResponseReducer', () => {
     const emptyState = {
       pendingAfter: null,

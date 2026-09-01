@@ -4345,6 +4345,12 @@ export class OpenCodeServerHarness
       delayMs,
       retryAtMs,
       errorSummary,
+      ...(this.model
+        ? {
+            providerId: this.model.providerID,
+            modelId: this.model.qualifiedModel,
+          }
+        : {}),
     };
 
     this.logger.warn(
@@ -4359,6 +4365,8 @@ export class OpenCodeServerHarness
         maxAttempts: this.providerRateLimitMaxRetries,
         delayMs,
         errorSummary,
+        ...(notice.providerId ? { providerId: notice.providerId } : {}),
+        ...(notice.modelId ? { modelId: notice.modelId } : {}),
       }),
     });
 

@@ -1,15 +1,27 @@
 'use client';
 
-import { act, cleanup, render, screen } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PROVIDER_RETRY_NOTICE_PAYLOAD_KEY } from '@roomote/types';
 
+import { registerProviderRetryModelSwitcher } from '@/lib/provider-retry-model-switcher';
+
 import { ProviderRetryNoticeMessage } from './ProviderRetryNoticeMessage';
 
 describe('ProviderRetryNoticeMessage', () => {
+  let unregisterModelSwitcher: (() => void) | undefined;
+
   afterEach(() => {
     cleanup();
+    unregisterModelSwitcher?.();
+    unregisterModelSwitcher = undefined;
     vi.useRealTimers();
   });
 
@@ -17,6 +29,9 @@ describe('ProviderRetryNoticeMessage', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-18T12:00:00.000Z'));
 
+    const openModelSwitcher = vi.fn();
+    unregisterModelSwitcher =
+      registerProviderRetryModelSwitcher(openModelSwitcher);
     render(
       <ProviderRetryNoticeMessage
         text="ignored body"
@@ -28,6 +43,8 @@ describe('ProviderRetryNoticeMessage', () => {
             delayMs: 10_000,
             retryAtMs: Date.now() + 10_000,
             errorSummary: 'Too many requests from OpenRouter',
+            providerId: 'openrouter',
+            modelId: 'openrouter/anthropic/claude-sonnet-4',
           },
         }}
       />,
@@ -42,6 +59,11 @@ describe('ProviderRetryNoticeMessage', () => {
     expect(
       screen.getByTestId('provider-retry-notice-status'),
     ).toHaveTextContent('Retrying in 10s (attempt 1/3)');
+    expect(
+      screen.getByTestId('provider-retry-notice-identity'),
+    ).toHaveTextContent('Using anthropic/claude-sonnet-4 via OpenRouter');
+    fireEvent.click(screen.getByTestId('provider-retry-switch-model'));
+    expect(openModelSwitcher).toHaveBeenCalledOnce();
 
     act(() => {
       vi.advanceTimersByTime(4_000);

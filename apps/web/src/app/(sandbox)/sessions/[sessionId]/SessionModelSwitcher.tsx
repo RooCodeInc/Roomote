@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { getReasoningEffortLabel, type ReasoningEffort } from '@roomote/types';
 
@@ -15,6 +15,7 @@ import {
 import { ModelSelect } from '@/components/tasks/ModelSelect';
 import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
+import { registerProviderRetryModelSwitcher } from '@/lib/provider-retry-model-switcher';
 
 /** Session composer model chip, mirroring the task composer's model switcher:
  * a ghost chip with the model and reasoning level that opens a popover with
@@ -47,6 +48,14 @@ export function SessionModelSwitcher({
     : defaultModelId
       ? displayModelName(defaultModelId)
       : 'Model';
+
+  useEffect(() => {
+    if (disabled) {
+      return;
+    }
+
+    return registerProviderRetryModelSwitcher(() => setOpen(true));
+  }, [disabled]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

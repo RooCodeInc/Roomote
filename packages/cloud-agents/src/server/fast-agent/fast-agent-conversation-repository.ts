@@ -20,6 +20,7 @@ import {
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
   fastAgentConversationSchema,
 } from '@roomote/types';
 
@@ -123,6 +124,11 @@ async function reconcileInferenceRetryNotices(
     );
 
   for (const notice of notices) {
+    const metadata = { ...(notice.metadata ?? {}) };
+    const payload = { ...notice.payload };
+    delete metadata[PROVIDER_RETRY_NOTICE_PAYLOAD_KEY];
+    delete payload[PROVIDER_RETRY_NOTICE_PAYLOAD_KEY];
+
     await database
       .update(fastAgentMessages)
       .set({
@@ -130,13 +136,13 @@ async function reconcileInferenceRetryNotices(
           { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
         ],
         metadata: {
-          ...(notice.metadata ?? {}),
+          ...metadata,
           visibleInTranscript: true,
           purpose: 'closeout',
           inferenceRetryNotice: true,
           inferenceRetryActive: false,
         },
-        payload: { ...notice.payload, purpose: 'closeout' },
+        payload: { ...payload, purpose: 'closeout' },
         updatedAt: new Date(),
       })
       .where(eq(fastAgentMessages.id, notice.id));
