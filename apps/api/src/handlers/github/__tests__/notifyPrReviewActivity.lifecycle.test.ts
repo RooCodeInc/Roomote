@@ -3,6 +3,7 @@
 const {
   mockCompleteGithubPrReviewCheckFromSummary,
   mockEnqueuePrReviewNotification,
+  mockMarkRoomotePullRequestReadyAfterCleanReview,
   mockStartPrReviewNotificationCycle,
 } = vi.hoisted(() => ({
   mockCompleteGithubPrReviewCheckFromSummary: vi
@@ -11,6 +12,9 @@ const {
   mockEnqueuePrReviewNotification: vi
     .fn()
     .mockResolvedValue({ notifiedTaskCount: 1 }),
+  mockMarkRoomotePullRequestReadyAfterCleanReview: vi
+    .fn()
+    .mockResolvedValue('marked_ready'),
   mockStartPrReviewNotificationCycle: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -30,6 +34,8 @@ vi.mock('@roomote/sdk/server', () => ({
   completeGithubPrReviewCheckFromSummary:
     mockCompleteGithubPrReviewCheckFromSummary,
   enqueuePrReviewNotification: mockEnqueuePrReviewNotification,
+  markRoomotePullRequestReadyAfterCleanReview:
+    mockMarkRoomotePullRequestReadyAfterCleanReview,
   startPrReviewNotificationCycle: mockStartPrReviewNotificationCycle,
 }));
 
@@ -110,6 +116,7 @@ describe('PR review-summary lifecycle replay', () => {
     });
     mockCompleteGithubPrReviewCheckFromSummary.mockClear();
     mockEnqueuePrReviewNotification.mockClear();
+    mockMarkRoomotePullRequestReadyAfterCleanReview.mockClear();
     mockStartPrReviewNotificationCycle.mockClear();
   });
 
@@ -137,6 +144,9 @@ describe('PR review-summary lifecycle replay', () => {
     );
 
     expect(mockEnqueuePrReviewNotification).toHaveBeenCalledOnce();
+    expect(
+      mockMarkRoomotePullRequestReadyAfterCleanReview,
+    ).not.toHaveBeenCalled();
     expect(mockEnqueuePrReviewNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         repository: 'RooCodeInc/Roomote',
@@ -149,5 +159,69 @@ describe('PR review-summary lifecycle replay', () => {
         }),
       }),
     );
+  });
+
+  it('promotes only after a durable clean terminal summary is recorded', async () => {
+    const cleanBody = TERMINAL_BODY.replace(
+      '1 issue outstanding.',
+      'No code issues found.',
+    ).replace(
+      '- [ ] Validate image values before they satisfy the empty-message guard.',
+      '',
+    );
+
+    await queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: cleanBody,
+        previousBody: IN_PROGRESS_BODY,
+        updatedAt: COMPLETED_AT,
+      }),
+    );
+
+    expect(mockEnqueuePrReviewNotification).toHaveBeenCalledOnce();
+    expect(
+      mockMarkRoomotePullRequestReadyAfterCleanReview,
+    ).toHaveBeenCalledWith({
+      installationId: 1,
+      repository: 'RooCodeInc/Roomote',
+      prNumber: 1688,
+      reviewHeadSha: REVIEW_HEAD_SHA,
+      reviewResult: expect.objectContaining({
+        outcome: 'clean',
+        findingCount: null,
+      }),
+    });
+    expect(
+      mockEnqueuePrReviewNotification.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mockMarkRoomotePullRequestReadyAfterCleanReview.mock
+        .invocationCallOrder[0]!,
+    );
+  });
+
+  it('does not promote a stale clean summary', async () => {
+    mockEnqueuePrReviewNotification.mockResolvedValueOnce({
+      notifiedTaskCount: 0,
+      reason: 'stale_review_cycle',
+    });
+    const cleanBody = TERMINAL_BODY.replace(
+      '1 issue outstanding.',
+      'No code issues found.',
+    ).replace(
+      '- [ ] Validate image values before they satisfy the empty-message guard.',
+      '',
+    );
+
+    await queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: cleanBody,
+        previousBody: IN_PROGRESS_BODY,
+        updatedAt: COMPLETED_AT,
+      }),
+    );
+
+    expect(
+      mockMarkRoomotePullRequestReadyAfterCleanReview,
+    ).not.toHaveBeenCalled();
   });
 });
