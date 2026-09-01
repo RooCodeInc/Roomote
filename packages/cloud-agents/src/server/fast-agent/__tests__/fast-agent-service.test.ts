@@ -2658,6 +2658,64 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('does not extend the lease when ownership is lost during the renewal lookup', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const lockLost = new FastAgentTurnLockLostError();
+    let releaseLookup: (() => void) | undefined;
+    let lookupCalls = 0;
+    mocks.getUnifiedSession.mockImplementation(async () => {
+      lookupCalls += 1;
+      if (lookupCalls === 2) {
+        // The renewal's session lookup stalls; ownership is lost meanwhile.
+        await new Promise<void>((resolve) => {
+          releaseLookup = resolve;
+        });
+      }
+      return { id: 'session-1' };
+    });
+    mocks.generateText.mockImplementation(
+      (_params: unknown, _session: unknown, options: { signal: AbortSignal }) =>
+        new Promise<string>((_resolve, reject) => {
+          options.signal.addEventListener(
+            'abort',
+            () => reject(options.signal.reason),
+            { once: true },
+          );
+        }),
+    );
+    const leaseExtensions = () =>
+      mocks.touchSessionActivity.mock.calls.filter(
+        ([, , , update]) => update?.respondingUntil instanceof Date,
+      );
+
+    try {
+      const answer = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        signal: controller.signal,
+      });
+      const rejection = expect(answer).rejects.toBe(lockLost);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(leaseExtensions()).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS);
+      expect(releaseLookup).toBeDefined();
+
+      controller.abort(lockLost);
+      releaseLookup?.();
+      await vi.advanceTimersByTimeAsync(1);
+      await rejection;
+
+      // The stalled renewal saw the lost ownership after its lookup and
+      // wrote nothing, and the fenced-off owner never cleared the lease.
+      expect(leaseExtensions()).toHaveLength(1);
+      expect(mocks.touchSessionActivity).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('waits out an in-flight lease renewal before settling the lease', async () => {
     vi.useFakeTimers();
     mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });

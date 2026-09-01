@@ -259,9 +259,13 @@ async function markFastAgentHumanFollowUpDelivered(id: string): Promise<void> {
 async function setFastSessionResponding(
   fastConversationId: string,
   responding: boolean,
+  /** Re-checked after the session lookup, immediately before the write, so
+   * an owner fenced off mid-lookup cannot extend a successor's lease. */
+  isOwnershipCurrent?: () => boolean,
 ): Promise<void> {
   const session = await getSessionForFastConversation(db, fastConversationId);
   if (!session) return;
+  if (isOwnershipCurrent && !isOwnershipCurrent()) return;
   await touchSessionActivity(db, session.id, Math.floor(Date.now() / 1000), {
     respondingUntil: responding
       ? new Date(Date.now() + FAST_RESPONDING_LEASE_MS)
@@ -1560,7 +1564,11 @@ export async function answerFastAgentQuestion({
         `[Fast Agent] Failed to reconcile interrupted inference retry notices: ${formatErrorForLog(error)}`,
       );
     });
-    await setFastSessionResponding(session.id, true).catch((error) => {
+    await setFastSessionResponding(
+      session.id,
+      true,
+      () => !signal?.aborted,
+    ).catch((error) => {
       console.warn(
         `[sessions] Failed to mark Fast Session active: ${formatErrorForLog(error)}`,
       );
@@ -1577,9 +1585,14 @@ export async function answerFastAgentQuestion({
       respondingLeaseRenewal = respondingLeaseRenewal.then(async () => {
         // Re-check ownership when the chained renewal actually runs: a tick
         // queued behind a slow write must not extend the lease after this
-        // owner was aborted or fenced off.
+        // owner was aborted or fenced off. The predicate re-checks again
+        // after the session lookup, immediately before the write.
         if (signal?.aborted) return;
-        await setFastSessionResponding(session.id, true).catch((error) => {
+        await setFastSessionResponding(
+          session.id,
+          true,
+          () => !signal?.aborted,
+        ).catch((error) => {
           console.warn(
             `[sessions] Failed to renew Fast Session responding lease: ${formatErrorForLog(error)}`,
           );
