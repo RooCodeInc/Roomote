@@ -1032,6 +1032,31 @@ describe('SessionWorkspace', () => {
     );
   });
 
+  it('counts a follow-up turn when the run status remains idle', async () => {
+    renderWorkspace({
+      isMobile: false,
+      children: <RunningTaskCount />,
+      queriedTasks: [
+        {
+          ...singleTask,
+          latestRun: {
+            id: 1,
+            status: RunStatus.Idle,
+            taskPhase: 'running',
+            error: null,
+            result: null,
+          },
+        },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('status', { name: 'Running task count' }),
+      ).toHaveTextContent('1'),
+    );
+  });
+
   it('opens delegated tasks in the existing session side-panel slot', () => {
     renderWorkspace({ isMobile: false, children: <OpenNestedTask /> });
 

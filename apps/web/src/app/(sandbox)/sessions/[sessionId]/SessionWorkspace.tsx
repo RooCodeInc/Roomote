@@ -13,7 +13,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
   getReasoningEffortLabel,
-  isActivelyRunningTask,
+  isTaskExecutingTurn,
   type ReasoningEffort,
   type RunStatus,
 } from '@roomote/types';
@@ -698,7 +698,7 @@ export function SessionWorkspace({
   const artifactTasks = isFastTaskSource ? fastTasks : sessionTasks;
   const sessionPullRequests = getSessionPullRequests(sessionTasks);
   const runningTasks = taskCards.filter((task) =>
-    isActivelyRunningTask(task.latestRun?.status, task.latestRun?.taskPhase),
+    isTaskExecutingTurn(task.latestRun?.status, task.latestRun?.taskPhase),
   );
   const runningTaskCount = runningTasks.length;
   const taskStateRevision = useMemo(
