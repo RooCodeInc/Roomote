@@ -799,7 +799,9 @@ async function getSessionTasks(sessionId: string) {
     .from(sessionTasks)
     .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
     .where(and(eq(sessionTasks.sessionId, sessionId), isNull(tasks.deletedAt)))
-    .orderBy(sessionTasks.attachedAt);
+    // attachedAt ties are common (tasks attached in one statement share a
+    // timestamp), so break them deterministically.
+    .orderBy(sessionTasks.attachedAt, sessionTasks.taskId);
 
   if (linked.length === 0) return [];
 

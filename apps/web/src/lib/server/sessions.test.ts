@@ -839,11 +839,17 @@ describe('unified Session queries', () => {
       title: 'Second task',
     });
     await db.insert(sessionTasks).values([
-      { sessionId: session.id, taskId: firstTask.id, origin: 'direct_launch' },
+      {
+        sessionId: session.id,
+        taskId: firstTask.id,
+        origin: 'direct_launch',
+        attachedAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
       {
         sessionId: session.id,
         taskId: secondTask.id,
         origin: 'fast_delegation',
+        attachedAt: new Date('2026-01-01T00:00:01.000Z'),
       },
     ]);
     await db.insert(taskArtifacts).values([
