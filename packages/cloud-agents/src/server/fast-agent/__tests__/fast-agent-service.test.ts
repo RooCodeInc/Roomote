@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   revokeMcpCapabilities: vi.fn(),
   reconcileRetryNotices: vi.fn(),
   markRetryNoticeInterruption: vi.fn(),
+  renewRespondingLease: vi.fn(),
   getUnifiedSession: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
@@ -93,6 +94,7 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   reconcileFastAgentInferenceRetryNotices: mocks.reconcileRetryNotices,
   markFastAgentInferenceRetryNoticeInterruption:
     mocks.markRetryNoticeInterruption,
+  renewFastSessionRespondingLease: mocks.renewRespondingLease,
 }));
 
 vi.mock('../../router', () => ({
@@ -380,6 +382,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.upsertMessage.mockResolvedValue({ initialHumanTurn: true });
     mocks.reconcileRetryNotices.mockResolvedValue(0);
     mocks.markRetryNoticeInterruption.mockResolvedValue(undefined);
+    mocks.renewRespondingLease.mockResolvedValue(true);
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
@@ -2619,10 +2622,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           finishInference = () => resolve('All done.');
         }),
     );
-    const leaseExtensions = () =>
-      mocks.touchSessionActivity.mock.calls.filter(
-        ([, , , update]) => update?.respondingUntil instanceof Date,
-      );
 
     try {
       const answer = answerFastAgentQuestion({
@@ -2630,17 +2629,19 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         adapter: callbacks(),
       });
       await vi.advanceTimersByTimeAsync(0);
-      expect(leaseExtensions()).toHaveLength(1);
+      expect(mocks.touchSessionActivity).toHaveBeenCalledOnce();
+      expect(mocks.renewRespondingLease).not.toHaveBeenCalled();
 
       // No assistant message persists during this stretch; only the
       // wall-clock renewal keeps the lease ahead of the reconciler.
       await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS);
-      expect(leaseExtensions()).toHaveLength(2);
+      expect(mocks.renewRespondingLease).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS);
-      expect(leaseExtensions()).toHaveLength(3);
+      expect(mocks.renewRespondingLease).toHaveBeenCalledTimes(2);
+      expect(mocks.renewRespondingLease).toHaveBeenCalledWith('conversation-1');
 
       finishInference?.();
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(1);
       await answer;
 
       // Settling the turn clears the lease and stops the renewal timer.
@@ -2650,29 +2651,25 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.any(Number),
         { respondingUntil: null },
       );
-      const settledCalls = mocks.touchSessionActivity.mock.calls.length;
       await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS * 2);
-      expect(mocks.touchSessionActivity.mock.calls).toHaveLength(settledCalls);
+      expect(mocks.renewRespondingLease).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('does not extend the lease when ownership is lost during the renewal lookup', async () => {
+  it('stops renewing once ownership is lost, even for a queued renewal', async () => {
     vi.useFakeTimers();
     const controller = new AbortController();
     const lockLost = new FastAgentTurnLockLostError();
-    let releaseLookup: (() => void) | undefined;
-    let lookupCalls = 0;
-    mocks.getUnifiedSession.mockImplementation(async () => {
-      lookupCalls += 1;
-      if (lookupCalls === 2) {
-        // The renewal's session lookup stalls; ownership is lost meanwhile.
-        await new Promise<void>((resolve) => {
-          releaseLookup = resolve;
-        });
-      }
-      return { id: 'session-1' };
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
+    let releaseRenewal: (() => void) | undefined;
+    mocks.renewRespondingLease.mockImplementation(async () => {
+      // The first renewal stalls mid-write; a second tick queues behind it.
+      await new Promise<void>((resolve) => {
+        releaseRenewal = resolve;
+      });
+      return true;
     });
     mocks.generateText.mockImplementation(
       (_params: unknown, _session: unknown, options: { signal: AbortSignal }) =>
@@ -2684,10 +2681,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           );
         }),
     );
-    const leaseExtensions = () =>
-      mocks.touchSessionActivity.mock.calls.filter(
-        ([, , , update]) => update?.respondingUntil instanceof Date,
-      );
 
     try {
       const answer = answerFastAgentQuestion({
@@ -2697,19 +2690,19 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
       const rejection = expect(answer).rejects.toBe(lockLost);
       await vi.advanceTimersByTimeAsync(0);
-      expect(leaseExtensions()).toHaveLength(1);
-
       await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS);
-      expect(releaseLookup).toBeDefined();
+      expect(mocks.renewRespondingLease).toHaveBeenCalledTimes(1);
+      expect(releaseRenewal).toBeDefined();
+      await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS);
 
       controller.abort(lockLost);
-      releaseLookup?.();
+      releaseRenewal?.();
       await vi.advanceTimersByTimeAsync(1);
       await rejection;
 
-      // The stalled renewal saw the lost ownership after its lookup and
-      // wrote nothing, and the fenced-off owner never cleared the lease.
-      expect(leaseExtensions()).toHaveLength(1);
+      // The queued second renewal saw the lost ownership and never ran, and
+      // the fenced-off owner did not clear the lease.
+      expect(mocks.renewRespondingLease).toHaveBeenCalledTimes(1);
       expect(mocks.touchSessionActivity).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
@@ -2720,25 +2713,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     vi.useFakeTimers();
     mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
     let releaseRenewal: (() => void) | undefined;
-    let leaseWrites = 0;
-    mocks.touchSessionActivity.mockImplementation(
-      async (
-        _db: unknown,
-        _sessionId: unknown,
-        _ts: unknown,
-        update: { respondingUntil?: unknown } | undefined,
-      ) => {
-        if (update?.respondingUntil instanceof Date) {
-          leaseWrites += 1;
-          if (leaseWrites === 2) {
-            // The wall-clock renewal stalls mid-write.
-            await new Promise<void>((resolve) => {
-              releaseRenewal = resolve;
-            });
-          }
-        }
-      },
-    );
+    mocks.renewRespondingLease.mockImplementation(async () => {
+      // The wall-clock renewal stalls mid-write.
+      await new Promise<void>((resolve) => {
+        releaseRenewal = resolve;
+      });
+      return true;
+    });
     let finishInference: (() => void) | undefined;
     mocks.generateText.mockImplementation(
       () =>
@@ -2765,19 +2746,21 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       // Settlement must wait for the stalled renewal so the terminal lease
       // write cannot be overwritten by the stale extension.
       expect(settled).toBe(false);
-      const callsBeforeRelease = mocks.touchSessionActivity.mock.calls.length;
+      const settleWrites = () =>
+        mocks.touchSessionActivity.mock.calls.filter(
+          ([, , , update]) => update?.respondingUntil === null,
+        );
+      expect(settleWrites()).toHaveLength(0);
 
       releaseRenewal?.();
       await vi.advanceTimersByTimeAsync(1);
       await answer;
+      expect(settleWrites()).toHaveLength(1);
       expect(mocks.touchSessionActivity).toHaveBeenLastCalledWith(
         expect.anything(),
         'session-1',
         expect.any(Number),
         { respondingUntil: null },
-      );
-      expect(mocks.touchSessionActivity.mock.calls).toHaveLength(
-        callsBeforeRelease + 1,
       );
     } finally {
       vi.useRealTimers();

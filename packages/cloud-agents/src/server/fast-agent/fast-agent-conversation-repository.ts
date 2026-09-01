@@ -10,6 +10,8 @@ import {
   advanceSessionNotifiedCursor,
   advanceSessionReadCursor,
   getSessionForFastConversation,
+  gt,
+  isNotNull,
   isNull,
   lt,
   or,
@@ -205,6 +207,33 @@ export async function markFastAgentInferenceRetryNoticeInterruption(
     )
     .returning({ id: fastAgentMessages.id });
   return stamped.length > 0;
+}
+
+/**
+ * Extend the responding lease with the fence in the statement itself: only a
+ * lease that is still live is extended, so a stale renewal from an owner that
+ * lost the conversation mid-write can never resurrect a lease a settlement
+ * or successor already cleared. No read precedes the write, which removes
+ * the check-then-write window entirely. Returns whether a lease was renewed.
+ */
+export async function renewFastSessionRespondingLease(
+  fastConversationId: string,
+): Promise<boolean> {
+  const renewed = await db
+    .update(sessions)
+    .set({
+      respondingUntil: new Date(Date.now() + FAST_RESPONDING_LEASE_MS),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(sessions.fastConversationId, fastConversationId),
+        isNotNull(sessions.respondingUntil),
+        gt(sessions.respondingUntil, new Date()),
+      ),
+    )
+    .returning({ id: sessions.id });
+  return renewed.length > 0;
 }
 
 export async function reconcileExpiredFastAgentInferenceRetryNotices(

@@ -96,6 +96,7 @@ import {
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   markFastAgentInferenceRetryNoticeInterruption,
   reconcileFastAgentInferenceRetryNotices,
+  renewFastSessionRespondingLease,
   RESTARTED_ACTIVE_TURN_MESSAGE,
   type FastAgentInterruptionReason,
 } from './fast-agent-conversation-repository';
@@ -1583,16 +1584,12 @@ export async function answerFastAgentQuestion({
     respondingLeaseRenewalTimer = setInterval(() => {
       if (signal?.aborted) return;
       respondingLeaseRenewal = respondingLeaseRenewal.then(async () => {
-        // Re-check ownership when the chained renewal actually runs: a tick
-        // queued behind a slow write must not extend the lease after this
-        // owner was aborted or fenced off. The predicate re-checks again
-        // after the session lookup, immediately before the write.
+        // The abort check is only a cheap short-circuit; correctness comes
+        // from the renewal statement itself, which extends the lease only
+        // where it is still live, so a stale write cannot resurrect a lease
+        // a settlement or successor already cleared.
         if (signal?.aborted) return;
-        await setFastSessionResponding(
-          session.id,
-          true,
-          () => !signal?.aborted,
-        ).catch((error) => {
+        await renewFastSessionRespondingLease(session.id).catch((error) => {
           console.warn(
             `[sessions] Failed to renew Fast Session responding lease: ${formatErrorForLog(error)}`,
           );
