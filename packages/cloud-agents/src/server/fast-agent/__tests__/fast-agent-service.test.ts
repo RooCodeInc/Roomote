@@ -120,6 +120,7 @@ vi.mock('@roomote/db/server', () => ({
   isNull: vi.fn((value) => value),
   sql: vi.fn(),
   fastAgentParentEvents: {
+    admission: 'admission',
     conversationId: 'conversationId',
     createdAt: 'createdAt',
     deliveredAt: 'deliveredAt',
@@ -3391,6 +3392,35 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         'durable-row-1',
         'Turn interrupted without replay (turn_aborted).',
       );
+    });
+
+    it('never steers a turn with its own inline-admitted row', async () => {
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          // Native steering is available, so the steer poll runs between
+          // tool calls and issues its pending-follow-up query.
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Done.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        durableAdmission,
+      });
+
+      // The steer poll must skip inline-admitted rows: they are whole turns
+      // (this one, or one awaiting queue resumption), never steers.
+      expect(mocks.getPendingHumanFollowUp).toHaveBeenCalled();
+      for (const [query] of mocks.getPendingHumanFollowUp.mock.calls) {
+        expect(query.where).toContain('admission');
+      }
     });
 
     it('marks a resumed turn so the model does not re-acknowledge', async () => {

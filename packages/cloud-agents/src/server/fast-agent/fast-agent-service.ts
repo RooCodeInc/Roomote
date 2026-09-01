@@ -241,6 +241,9 @@ async function getPendingFastAgentHumanFollowUps(
       eq(fastAgentParentEvents.conversationId, sessionId),
       isNull(fastAgentParentEvents.deliveredAt),
       isNull(fastAgentParentEvents.discardedAt),
+      // An inline-admitted row is a whole turn owned by a live process (or
+      // awaiting queue resumption), never a steer for the current turn.
+      isNull(fastAgentParentEvents.admission),
       sql`${fastAgentParentEvents.event} ->> 'type' = ${FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE}`,
       ...(excludedEventId
         ? [
