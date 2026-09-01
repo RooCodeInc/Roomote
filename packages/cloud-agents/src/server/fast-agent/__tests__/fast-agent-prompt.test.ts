@@ -581,6 +581,12 @@ describe('buildFastAgentSystemPrompt', () => {
       'Do not describe a closed pull request as merged or a merged pull request as merely closed',
     );
     expect(prompt).toContain(
+      'A newer authoritative merged or closed pull-request event always takes precedence over an older child-authored report',
+    );
+    expect(prompt).toContain(
+      'Keep useful child findings visible without repeating or endorsing stale claims that the pull request remains open, draft, or unpublished',
+    );
+    expect(prompt).toContain(
       'When `targetBranch` is absent from the pull request metadata, do not infer or name a destination branch',
     );
     expect(prompt).not.toContain(

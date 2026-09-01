@@ -181,6 +181,56 @@ describe('Fast parent event durable queue', () => {
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });
 
+  it.each(['merged', 'closed'] as const)(
+    'keeps a newer %s pull request event ahead of a stale child closeout idempotently',
+    async (status) => {
+      const terminalEvent: FastAgentParentEvent = {
+        type: 'pull_request_status_changed',
+        taskId: event.taskId,
+        runId: event.runId,
+        taskUrl: 'https://roomote.test/task/child-task',
+        pullRequest: {
+          provider: 'github',
+          host: null,
+          repository: 'RooCodeInc/Roomote',
+          number: 1887,
+          title: 'Release Roomote 1.0.0',
+          url: 'https://github.com/RooCodeInc/Roomote/pull/1887',
+          status,
+        },
+        status,
+        actorLogin: 'maintainer',
+      };
+      const staleCloseout: FastAgentParentEvent = {
+        ...event,
+        messageId: `stale-after-${status}`,
+        message: 'The pull request remains draft and unpublished.',
+      };
+      const terminalRow = pendingRow(`pr-${status}`, terminalEvent);
+      const staleRow = pendingRow(`stale-${status}`, staleCloseout);
+      mocks.findPending
+        .mockResolvedValueOnce(terminalRow)
+        .mockResolvedValueOnce(terminalRow)
+        .mockResolvedValueOnce(staleRow)
+        .mockResolvedValueOnce(undefined);
+
+      await drainFastAgentParentEvents({
+        conversationId: parent.sessionId,
+        eventKey: staleRow.eventKey,
+      });
+      await drainFastAgentParentEvents({
+        conversationId: parent.sessionId,
+        eventKey: staleRow.eventKey,
+      });
+
+      expect(mocks.deliver).toHaveBeenCalledTimes(2);
+      expect(mocks.deliver.mock.calls.map(([params]) => params.event)).toEqual([
+        terminalEvent,
+        staleCloseout,
+      ]);
+    },
+  );
+
   it('returns a retryable busy signal without occupying a worker slot', async () => {
     const first = pendingRow('event-1');
     mocks.findPending.mockResolvedValueOnce(first);

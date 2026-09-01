@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => {
     updateSet: vi.fn(),
     recordLifecycle: vi.fn(),
     deliverParentEvent: vi.fn(),
+    enqueueParentEvent: vi.fn(),
     getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
     FastAgentParentEventDeliveryError,
   };
@@ -66,6 +67,10 @@ vi.mock('../../fast-agent-parent-event', () => ({
   FastAgentParentEventDeliveryError: mocks.FastAgentParentEventDeliveryError,
 }));
 
+vi.mock('../../fast-agent-parent-event-queue', () => ({
+  enqueueFastAgentParentEvent: mocks.enqueueParentEvent,
+}));
+
 import { notifyFastAgentParentOnPullRequestStatusChanged } from '../notify-fast-agent-parent-on-pull-request-status-changed';
 import { notifyFastAgentParentOnPullRequestConflict } from '../notify-fast-agent-parent-on-pull-request-conflict';
 
@@ -106,6 +111,10 @@ describe('notifyFastAgentParentOnPullRequestStatusChanged', () => {
     mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
     mocks.findClaimRun.mockResolvedValue({ id: 200 });
     mocks.deliverParentEvent.mockResolvedValue('delivered');
+    mocks.enqueueParentEvent.mockResolvedValue({
+      eventKey: 'pr-status-event',
+      queued: true,
+    });
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
 
@@ -120,9 +129,8 @@ describe('notifyFastAgentParentOnPullRequestStatusChanged', () => {
         actorLogin: 'alice',
       });
 
-      expect(mocks.deliverParentEvent).toHaveBeenCalledWith({
+      expect(mocks.enqueueParentEvent).toHaveBeenCalledWith({
         parent: fastParent,
-        lockWaitMs: 30_000,
         event: {
           type: 'pull_request_status_changed',
           taskId: 'child-task',
