@@ -564,10 +564,9 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     repository,
   });
 
-  // Finish the open event before returning to the child so a very fast
-  // completion cannot overtake it in the parent conversation. Transient
-  // failures propagate after releasing their claim: the next source-control
-  // attempt finds this PR, updates it, and re-enters the deduplicated notifier.
+  // Durably admit the open event before returning so a very fast completion
+  // cannot overtake it in the parent conversation. Parent delivery then runs
+  // asynchronously without coupling this mutation to the parent turn lock.
   await notifyFastAgentParentOnPullRequestOpened({
     run: taskRun,
     ...(input.body.trim()
