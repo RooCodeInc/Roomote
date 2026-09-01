@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import type { SourceControlProvider } from '@roomote/types';
+import type { SetupSourceControlStatus } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
 import { buildSetupSessionSourceControlReturnTarget } from '@/lib/server/source-control-oauth-redirect';
@@ -24,19 +24,6 @@ import { StepSourceControlConfig } from './StepSourceControlConfig';
 import { StepSourceControlConnect } from './StepSourceControlConnect';
 import { StepSourceControlProvider } from './StepSourceControlProvider';
 
-type SourceControlSetup = {
-  connectedProvider: SourceControlProvider | null;
-  selectedProvider: SourceControlProvider | null;
-  runtimeConfiguredProvider: SourceControlProvider | null;
-  preselectedProvider: SourceControlProvider;
-  providers: Array<{
-    provider: SourceControlProvider;
-    label: string;
-    connected: boolean;
-    repositoryCount?: number;
-  }>;
-};
-
 type CardStage = 'provider' | 'config' | 'connect';
 
 /**
@@ -50,7 +37,7 @@ function SetupSessionSourceControlCardBody({
   sourceControlSetup,
   sessionId,
 }: {
-  sourceControlSetup: SourceControlSetup;
+  sourceControlSetup: SetupSourceControlStatus;
   sessionId: string;
 }) {
   const trpc = useTRPC();
@@ -150,7 +137,7 @@ function SetupSessionSourceControlCardBody({
                 </DialogDescription>
               </DialogHeader>
               <StepSourceControlConfig
-                sourceControlSetup={sourceControlSetup as never}
+                sourceControlSetup={sourceControlSetup}
                 selectedProviderId={sourceControlSetup.selectedProvider}
                 onContinue={() => {
                   setConfigOpen(false);
@@ -164,7 +151,7 @@ function SetupSessionSourceControlCardBody({
         </>
       ) : (
         <StepSourceControlConnect
-          sourceControlSetup={sourceControlSetup as never}
+          sourceControlSetup={sourceControlSetup}
           onContinue={() => setShowConnectStage(false)}
           returnPath={returnPath}
           embedded

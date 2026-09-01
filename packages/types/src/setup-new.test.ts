@@ -64,10 +64,22 @@ describe('setup-session metadata', () => {
     });
 
     expect(normalized).toEqual({
+      workflowVersion: 1,
       sessionId: 'abc',
       startedAt: '2026-08-29T00:00:00.000Z',
       starterTaskSelection: null,
     });
+  });
+
+  it('preserves a persisted workflow version for in-progress sessions', () => {
+    const normalized = normalizeSetupNewSetupSession({
+      workflowVersion: 2,
+      sessionId: 'abc',
+      startedAt: '2026-08-29T00:00:00.000Z',
+      starterTaskSelection: null,
+    });
+
+    expect(normalized?.workflowVersion).toBe(2);
   });
 
   it('returns null for malformed or partially written setup session values', () => {

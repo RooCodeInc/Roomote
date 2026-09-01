@@ -32,7 +32,7 @@ export function SetupSessionActionCard({
   return (
     <Card variant="snug" className="border-primary/30 bg-card">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+        <CardTitle className="flex items-center gap-2 text-base font-semibold">
           <span className="text-muted-foreground" aria-hidden="true">
             {icon}
           </span>

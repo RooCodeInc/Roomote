@@ -9,6 +9,7 @@ import {
   eq,
   fastAgentConversations,
   fastAgentMessages,
+  gte,
   sessions,
   sql,
   taskRuns,
@@ -20,10 +21,10 @@ import {
   isSetupStarterTaskId,
   normalizeSetupNewState,
   normalizeSetupNewSetupSession,
+  RunStatus,
   type AcpRequestUserInputAnswers,
   type AcpRequestUserInputPayload,
   type SetupStarterTaskId,
-  type SourceControlProvider,
 } from '@roomote/types';
 import { captureEvent } from '@roomote/telemetry/server';
 
@@ -53,6 +54,7 @@ type SetupSessionConversation = {
   sessionId: string;
   conversationId: string;
   workspaceId: string;
+  workflowVersion: number;
 };
 
 function hasSynchronizedSourceControl(
@@ -120,44 +122,48 @@ async function findSetupSessionConversation(
       ),
     )
     .limit(1);
-  return row ?? null;
+  return row ? { ...row, workflowVersion: setupSession.workflowVersion } : null;
 }
 
 function buildSetupEventTurnId(input: {
   sessionId: string;
+  workflowVersion: number;
   kind: SetupPlatformEventKind;
   fingerprint: string;
 }): string {
   const digest = createHash('sha256')
-    .update(`${input.sessionId}:${input.kind}:${input.fingerprint}`)
+    .update(
+      `${input.sessionId}:v${input.workflowVersion}:${input.kind}:${input.fingerprint}`,
+    )
     .digest('hex')
     .slice(0, 24);
   return `setup:${input.kind}:${digest}`;
 }
 
-async function buildSetupSnapshot(auth: UserAuthSuccess): Promise<string> {
-  const status = await getSetupNewStatusCommand(auth);
-  const state = normalizeSetupNewState(status.setupNewState);
+function buildSetupSnapshot(input: {
+  status: Awaited<ReturnType<typeof getSetupNewStatusCommand>>;
+  hasSuccessfulStarterLaunch: boolean;
+}): string {
+  const state = normalizeSetupNewState(input.status.setupNewState);
   const setupSession = normalizeSetupNewSetupSession(state.setupSession);
-  const repositoryCount = status.sourceControlSetup.providers.reduce(
+  const repositoryCount = input.status.sourceControlSetup.providers.reduce(
     (total, provider) => total + (provider.repositoryCount ?? 0),
     0,
   );
-  const hasSuccessfulStarterLaunch = setupSession?.starterTaskSelection
-    ? await hasSetupSessionTask(auth)
-    : false;
 
   return JSON.stringify({
-    rail: deriveSetupRailMilestones(status),
+    rail: deriveSetupRailMilestones(input.status),
     sourceControl: {
       selectedProvider: state.sourceControlProvider,
-      connectedProviders: status.sourceControlSetup.providers
+      connectedProviders: input.status.sourceControlSetup.providers
         .filter((provider) => provider.connected)
         .map((provider) => provider.provider),
       repositoryCount,
     },
     starterSelection: setupSession?.starterTaskSelection ?? null,
-    starterLaunch: { hasSuccessfulLaunch: hasSuccessfulStarterLaunch },
+    starterLaunch: {
+      hasSuccessfulLaunch: input.hasSuccessfulStarterLaunch,
+    },
     recommendations: state.automationRecommendations
       ? {
           fingerprint: state.automationRecommendations.inputFingerprint,
@@ -171,13 +177,38 @@ async function buildSetupSnapshot(auth: UserAuthSuccess): Promise<string> {
   });
 }
 
-async function hasSetupSessionTask(auth: UserAuthSuccess): Promise<boolean> {
+async function resolveSetupSnapshot(auth: UserAuthSuccess): Promise<string> {
+  const status = await getSetupNewStatusCommand(auth);
+  const setupSession = normalizeSetupNewSetupSession(
+    status.setupNewState.setupSession,
+  );
+  return buildSetupSnapshot({
+    status,
+    hasSuccessfulStarterLaunch: setupSession?.starterTaskSelection
+      ? await hasSuccessfulSetupSessionTaskLaunch(
+          auth,
+          setupSession.starterTaskSelection.selectedAt,
+        )
+      : false,
+  });
+}
+
+async function hasSuccessfulSetupSessionTaskLaunch(
+  auth: UserAuthSuccess,
+  selectedAt: string,
+): Promise<boolean> {
   const conversation = await findSetupSessionConversation(auth);
   if (!conversation) return false;
   const [run] = await db
     .select({ id: taskRuns.id })
     .from(taskRuns)
-    .where(eq(taskRuns.fastAgentSessionId, conversation.fastConversationId))
+    .where(
+      and(
+        eq(taskRuns.fastAgentSessionId, conversation.fastConversationId),
+        gte(taskRuns.createdAt, new Date(selectedAt)),
+        sql`${taskRuns.status} NOT IN (${RunStatus.Failed}, ${RunStatus.Canceled})`,
+      ),
+    )
     .limit(1);
   return Boolean(run);
 }
@@ -225,35 +256,21 @@ async function buildSetupSessionAdapterExtensions(
 ): Promise<Partial<FastAgentTurnAdapter>> {
   return {
     resolveUserInputPreset: async (preset) => {
-      if (preset === 'setup_starter_tasks') {
-        await assertSetupStarterWorkReady(auth);
-        return [
-          {
-            id: 'setup-starter-tasks',
-            header: 'First work',
-            question: 'What should Roomote work on first?',
-            isOther: false,
-            isSecret: false,
-            multiple: true,
-            options: SETUP_STARTER_TASKS.map((task) => ({
-              label: task.id,
-              description: `${task.title}: ${task.description}`,
-            })),
-          },
-        ];
+      if (preset !== 'setup_starter_tasks') {
+        throw new Error('Unsupported setup input preset.');
       }
-
-      const status = await getSetupNewStatusCommand(auth);
+      await assertSetupStarterWorkReady(auth);
       return [
         {
-          id: 'setup-source-control-provider',
-          header: 'Source control',
-          question: 'Which source-control provider should Roomote connect?',
+          id: 'setup-starter-tasks',
+          header: 'First work',
+          question: 'What should Roomote work on first?',
           isOther: false,
           isSecret: false,
-          options: status.sourceControlSetup.providers.map((provider) => ({
-            label: provider.provider,
-            description: provider.label,
+          multiple: true,
+          options: SETUP_STARTER_TASKS.map((task) => ({
+            label: task.id,
+            description: `${task.title}: ${task.description}`,
           })),
         },
       ];
@@ -274,16 +291,36 @@ export async function scheduleSetupPlatformEvent(
     payload: Record<string, unknown>;
   },
 ): Promise<{ scheduled: boolean }> {
+  const turn = await buildSetupPlatformEventTurn(auth, input);
+  if (!turn) return { scheduled: false };
+  scheduleWebFastAgentTurn(turn);
+  return { scheduled: true };
+}
+
+async function buildSetupPlatformEventTurn(
+  auth: UserAuthSuccess,
+  input: {
+    kind: SetupPlatformEventKind;
+    fingerprint: string;
+    payload: Record<string, unknown>;
+  },
+  prepared?: {
+    conversation: SetupSessionConversation;
+    setupSnapshot: string;
+  },
+): Promise<Parameters<typeof scheduleWebFastAgentTurn>[0] | null> {
   assertAdmin(auth);
-  const conversation = await findSetupSessionConversation(auth);
-  if (!conversation) return { scheduled: false };
+  const conversation =
+    prepared?.conversation ?? (await findSetupSessionConversation(auth));
+  if (!conversation) return null;
 
   const currentMessageId = buildSetupEventTurnId({
     sessionId: conversation.sessionId,
+    workflowVersion: conversation.workflowVersion,
     kind: input.kind,
     fingerprint: input.fingerprint,
   });
-  scheduleWebFastAgentTurn({
+  return {
     userId: auth.userId,
     delivery: {
       conversation: {
@@ -313,15 +350,15 @@ export async function scheduleSetupPlatformEvent(
     platformEventKind: 'setup',
     platformEventVisibility: 'required',
     currentMessageId,
-    skipIfEventExists: {
+    skipIfTurnCompleted: {
       conversationId: conversation.fastConversationId,
-      eventId: `${currentMessageId}:user`,
+      turnId: currentMessageId,
     },
     adapterExtensions: await buildSetupSessionAdapterExtensions(auth),
     setupSession: true,
-    setupSnapshot: await buildSetupSnapshot(auth),
-  });
-  return { scheduled: true };
+    setupSnapshot:
+      prepared?.setupSnapshot ?? (await resolveSetupSnapshot(auth)),
+  };
 }
 
 /**
@@ -336,9 +373,18 @@ export async function reconcileSetupPlatformEvents(
   const state = normalizeSetupNewState(status.setupNewState);
   const setupSession = normalizeSetupNewSetupSession(state.setupSession);
   if (!setupSession) return;
+  const conversation = await findSetupSessionConversation(auth);
+  if (!conversation) return;
   const hasSuccessfulStarterLaunch = setupSession.starterTaskSelection
-    ? await hasSetupSessionTask(auth)
+    ? await hasSuccessfulSetupSessionTaskLaunch(
+        auth,
+        setupSession.starterTaskSelection.selectedAt,
+      )
     : false;
+  const setupSnapshot = buildSetupSnapshot({
+    status,
+    hasSuccessfulStarterLaunch,
+  });
 
   const events: Array<Parameters<typeof scheduleSetupPlatformEvent>[1]> = [
     {
@@ -418,9 +464,13 @@ export async function reconcileSetupPlatformEvents(
     });
   }
 
-  await Promise.all(
-    events.map((event) => scheduleSetupPlatformEvent(auth, event)),
-  );
+  for (const event of events) {
+    const turn = await buildSetupPlatformEventTurn(auth, event, {
+      conversation,
+      setupSnapshot,
+    });
+    if (turn) scheduleWebFastAgentTurn(turn);
+  }
 }
 
 export async function notifySetupSourceControlSynchronized(
@@ -569,10 +619,10 @@ async function persistSetupPresetResponse(input: {
 }): Promise<{ completedSetup: boolean }> {
   assertAdmin(input.auth);
   const preset = input.request.payload.preset;
-  if (!preset) throw new Error('The setup input preset is missing.');
-  if (preset === 'setup_starter_tasks') {
-    await assertSetupStarterWorkReady(input.auth);
+  if (preset !== 'setup_starter_tasks') {
+    throw new Error('The setup starter-task preset is missing.');
   }
+  await assertSetupStarterWorkReady(input.auth);
 
   let completedSetup = false;
   await db.transaction(async (tx) => {
@@ -614,58 +664,33 @@ async function persistSetupPresetResponse(input: {
     if (existingResponse)
       throw new Error('This input request was already resolved.');
 
-    let nextState = state;
-    if (preset === 'setup_source_control_provider') {
-      const provider =
-        input.answers['setup-source-control-provider']?.answers[0];
-      const validProviders: SourceControlProvider[] = [
-        'github',
-        'gitlab',
-        'gitea',
-        'bitbucket',
-        'ado',
-      ];
-      if (
-        !provider ||
-        !validProviders.includes(provider as SourceControlProvider)
-      ) {
-        throw new Error('Select one supported source-control provider.');
-      }
-      nextState = {
-        ...state,
-        sourceControlProvider: provider as SourceControlProvider,
-      };
-    } else if (preset === 'setup_starter_tasks') {
-      const taskIds = [
-        ...new Set(
-          input.answers['setup-starter-tasks']?.answers.filter(
-            isSetupStarterTaskId,
-          ) ?? [],
-        ),
-      ] as SetupStarterTaskId[];
-      if (taskIds.length === 0) {
-        throw new Error('Select at least one starter task.');
-      }
-      const selectedAt = new Date();
-      nextState = {
-        ...state,
-        setupSession: {
-          ...setupSession,
-          starterTaskSelection: {
-            requestId: input.request.payload.requestId,
-            taskIds,
-            selectedAt: selectedAt.toISOString(),
-          },
-        },
-      };
-      await tx
-        .update(users)
-        .set({ onboardingCompletedAt: selectedAt })
-        .where(eq(users.id, input.auth.userId));
-      completedSetup = true;
-    } else {
-      throw new Error('Unsupported setup input preset.');
+    const taskIds = [
+      ...new Set(
+        input.answers['setup-starter-tasks']?.answers.filter(
+          isSetupStarterTaskId,
+        ) ?? [],
+      ),
+    ] as SetupStarterTaskId[];
+    if (taskIds.length === 0) {
+      throw new Error('Select at least one starter task.');
     }
+    const selectedAt = new Date();
+    const nextState = {
+      ...state,
+      setupSession: {
+        ...setupSession,
+        starterTaskSelection: {
+          requestId: input.request.payload.requestId,
+          taskIds,
+          selectedAt: selectedAt.toISOString(),
+        },
+      },
+    };
+    await tx
+      .update(users)
+      .set({ onboardingCompletedAt: selectedAt })
+      .where(eq(users.id, input.auth.userId));
+    completedSetup = true;
 
     const now = new Date();
     await tx
@@ -731,7 +756,7 @@ export async function submitSetupSessionUserInputCommand(
   }
   return submitFastSessionUserInputCommand(auth, input, {
     adapterExtensions: await buildSetupSessionAdapterExtensions(auth),
-    setupSnapshot: await buildSetupSnapshot(auth),
+    setupSnapshot: await resolveSetupSnapshot(auth),
     setupSession: true,
     persistSetupPresetResponse: async (details) => {
       const result = await persistSetupPresetResponse({ auth, ...details });

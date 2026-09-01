@@ -381,10 +381,7 @@ const requestUserInputQuestionSchema = z.object({
     .optional(),
   multiple: z.boolean().optional(),
 });
-const fastAgentInputPresetSchema = z.enum([
-  'setup_source_control_provider',
-  'setup_starter_tasks',
-]);
+const fastAgentInputPresetSchema = z.enum(['setup_starter_tasks']);
 const requestUserInputArgsSchema = z.union([
   z.object({
     questions: z.array(requestUserInputQuestionSchema).min(1).max(4),

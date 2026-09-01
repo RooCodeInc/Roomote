@@ -179,6 +179,43 @@ export type AcpRequestUserInputAnswers = Record<
   }
 >;
 
+export function getAcpRequestUserInputValidationError(
+  questions: AcpRequestUserInputQuestion[],
+  answers: AcpRequestUserInputAnswers,
+  resolution: 'submitted' | 'cancelled' = 'submitted',
+): string | null {
+  const questionIds = new Set(questions.map((question) => question.id));
+  if (Object.keys(answers).some((questionId) => !questionIds.has(questionId))) {
+    return 'One or more answers do not belong to this request.';
+  }
+  if (resolution === 'cancelled') return null;
+
+  for (const question of questions) {
+    const submitted = answers[question.id]?.answers ?? [];
+    if (new Set(submitted).size !== submitted.length) {
+      return 'Duplicate answers are not allowed.';
+    }
+    if (submitted.length === 0) {
+      return 'Answer every question before submitting.';
+    }
+    if (!question.multiple && submitted.length > 1) {
+      return 'This question accepts a single answer.';
+    }
+    if (question.options?.length) {
+      const optionLabels = new Set(
+        question.options.map((option) => option.label),
+      );
+      const customAnswerCount = submitted.filter(
+        (answer) => !optionLabels.has(answer),
+      ).length;
+      if (customAnswerCount > (question.isOther ? 1 : 0)) {
+        return 'One or more selections are not valid options.';
+      }
+    }
+  }
+  return null;
+}
+
 export interface AcpRequestUserInputRequestParams {
   sessionId: string;
   turnId: string;
@@ -189,7 +226,7 @@ export interface AcpRequestUserInputRequestParams {
 export interface AcpRequestUserInputPayload extends AcpRequestUserInputRequestParams {
   requestId: string;
   status: 'pending';
-  preset?: 'setup_source_control_provider' | 'setup_starter_tasks';
+  preset?: 'setup_starter_tasks';
 }
 
 export interface AcpRequestUserInputResponsePayload {
@@ -361,10 +398,7 @@ export function parseAcpRequestUserInputPayload(
   const requestId = asStringOrNull(payload?.requestId);
   const request = parseAcpRequestUserInputRequestParams(payload);
   const preset =
-    payload?.preset === 'setup_source_control_provider' ||
-    payload?.preset === 'setup_starter_tasks'
-      ? payload.preset
-      : undefined;
+    payload?.preset === 'setup_starter_tasks' ? payload.preset : undefined;
 
   if (!requestId || !request) {
     return null;
@@ -373,7 +407,6 @@ export function parseAcpRequestUserInputPayload(
   return {
     requestId,
     ...request,
-    ...(preset ? { preset } : {}),
     status: 'pending',
     ...(preset ? { preset } : {}),
   };

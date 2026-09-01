@@ -91,7 +91,7 @@ describe('SessionUserInputCard', () => {
     );
   });
 
-  it('keeps single-choice options as pressable choices without checkboxes', () => {
+  it('uses accessible radio semantics for single-choice options', () => {
     render(
       <SessionUserInputCard
         sessionId="s"
@@ -115,11 +115,45 @@ describe('SessionUserInputCard', () => {
     );
 
     expect(screen.queryByRole('checkbox')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /Deep/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /Deep/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
     expect(mockMutate).toHaveBeenCalledWith(
       expect.objectContaining({
         answers: { mode: { answers: ['Deep'] } },
+      }),
+    );
+  });
+
+  it('requires and submits a custom Other answer', () => {
+    render(
+      <SessionUserInputCard
+        sessionId="s"
+        request={{
+          requestId: 'rui:test-other',
+          questions: [
+            {
+              id: 'mode',
+              header: 'Mode',
+              question: 'Pick one mode.',
+              isOther: true,
+              isSecret: false,
+              options: [{ label: 'Fast', description: 'Fast mode' }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Other' }));
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Pick one mode. other answer'), {
+      target: { value: 'Balanced' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+    expect(mockMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answers: { mode: { answers: ['Balanced'] } },
       }),
     );
   });

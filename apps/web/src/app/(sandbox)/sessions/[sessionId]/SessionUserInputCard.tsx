@@ -7,8 +7,14 @@ import {
 } from '@roomote/types';
 
 import { cn } from '@/lib/utils';
-import { Button, GitBranch, ListChecks } from '@/components/system';
-import { Checkbox } from '@/components/system/primitives/checkbox';
+import {
+  Button,
+  Checkbox,
+  Input,
+  ListChecks,
+  RadioGroup,
+  RadioGroupItem,
+} from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -16,13 +22,14 @@ import { SetupSessionActionCard } from '../../../(onboarding)/setup/SetupSession
 
 /** Checkbox state per multi-select question; single questions keep a string. */
 type SelectionState = Record<string, string[]>;
+const OTHER_VALUE = '__other__';
 
 /**
  * Session structured-input card. Renders a pending `request_user_input`
  * request: options questions use radio-style choices in single mode or
  * checkboxes with an explicit Submit action in multiple mode; free-text
  * questions render an input. Keyboard and screen-reader behavior follows the
- * native checkbox/button primitives.
+ * native checkbox/radio primitives.
  */
 export function SessionUserInputCard({
   sessionId,
@@ -55,16 +62,26 @@ export function SessionUserInputCard({
 
   const validationError = useMemo(() => {
     for (const question of request.questions) {
+      const options = question.options ?? [];
+      const selected = selections[question.id] ?? [];
+      const otherSelected = selected.includes(OTHER_VALUE);
+      const otherText = (freeText[question.id] ?? '').trim();
       if (question.multiple) {
-        const min = 1;
-        const selected = selections[question.id] ?? [];
-        if (selected.length < min) {
-          return `Select at least ${min} option${min === 1 ? '' : 's'}.`;
+        const answerCount =
+          selected.filter((value) => value !== OTHER_VALUE).length +
+          (otherSelected && otherText ? 1 : 0);
+        if (answerCount === 0) {
+          return 'Select at least one option.';
         }
+      } else if (options.length > 0) {
+        if (selected.length === 0) return 'Select an option.';
+        if (otherSelected && !otherText) return 'Enter another answer.';
+      } else if (!otherText) {
+        return 'Enter an answer.';
       }
     }
     return null;
-  }, [request.questions, selections]);
+  }, [freeText, request.questions, selections]);
 
   const canSubmit = !submit.isPending && !validationError;
 
@@ -73,7 +90,11 @@ export function SessionUserInputCard({
     for (const question of request.questions) {
       const options = question.options ?? [];
       if (question.multiple) {
-        const selected = selections[question.id] ?? [];
+        const selected = (selections[question.id] ?? []).flatMap((value) =>
+          value === OTHER_VALUE
+            ? [(freeText[question.id] ?? '').trim()].filter(Boolean)
+            : [value],
+        );
         if (selected.length > 0) {
           answers[question.id] = { answers: selected };
         }
@@ -82,7 +103,13 @@ export function SessionUserInputCard({
       if (options.length > 0) {
         const selected = selections[question.id]?.[0];
         if (selected) {
-          answers[question.id] = { answers: [selected] };
+          answers[question.id] = {
+            answers: [
+              selected === OTHER_VALUE
+                ? (freeText[question.id] ?? '').trim()
+                : selected,
+            ].filter(Boolean),
+          };
         }
         continue;
       }
@@ -176,43 +203,96 @@ export function SessionUserInputCard({
                       </label>
                     );
                   })}
+                  {question.isOther ? (
+                    <label className="flex cursor-pointer items-start gap-2 rounded-md border border-transparent px-2 py-1.5 text-sm hover:bg-muted/60">
+                      <Checkbox
+                        checked={selected.includes(OTHER_VALUE)}
+                        disabled={submit.isPending}
+                        onCheckedChange={(value) => {
+                          setSelections((current) => {
+                            const previous = current[question.id] ?? [];
+                            return {
+                              ...current,
+                              [question.id]:
+                                value === true
+                                  ? [...previous, OTHER_VALUE]
+                                  : previous.filter(
+                                      (item) => item !== OTHER_VALUE,
+                                    ),
+                            };
+                          });
+                        }}
+                        aria-label="Other"
+                      />
+                      <span className="font-medium">Other</span>
+                    </label>
+                  ) : null}
+                  {selected.includes(OTHER_VALUE) ? (
+                    <Input
+                      type={question.isSecret ? 'password' : 'text'}
+                      value={freeText[question.id] ?? ''}
+                      disabled={submit.isPending}
+                      aria-label={`${question.question} other answer`}
+                      onChange={(event) =>
+                        setFreeText((current) => ({
+                          ...current,
+                          [question.id]: event.target.value,
+                        }))
+                      }
+                    />
+                  ) : null}
                 </div>
               ) : (
-                <div
+                <RadioGroup
                   className="space-y-1.5"
-                  role="radiogroup"
-                  aria-label={question.question}
+                  value={selected[0] ?? ''}
+                  onValueChange={(value) =>
+                    setSelections((current) => ({
+                      ...current,
+                      [question.id]: [value],
+                    }))
+                  }
                 >
                   {options.map((option) => {
-                    const isSelected = selected[0] === option.label;
                     return (
-                      <Button
+                      <label
                         key={option.label}
-                        type="button"
-                        variant={isSelected ? 'default' : 'outline'}
-                        className="w-full justify-start text-left"
-                        aria-pressed={isSelected}
-                        onClick={() =>
-                          setSelections((current) => ({
-                            ...current,
-                            [question.id]: [option.label],
-                          }))
-                        }
+                        className="flex cursor-pointer items-start gap-2 rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-muted/60"
                       >
+                        <RadioGroupItem value={option.label} />
                         <span>
                           <span className="font-medium">{option.label}</span>
                           <span className="block text-xs opacity-80">
                             {option.description}
                           </span>
                         </span>
-                      </Button>
+                      </label>
                     );
                   })}
-                </div>
+                  {question.isOther ? (
+                    <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-muted/60">
+                      <RadioGroupItem value={OTHER_VALUE} />
+                      <span className="font-medium">Other</span>
+                    </label>
+                  ) : null}
+                  {selected[0] === OTHER_VALUE ? (
+                    <Input
+                      type={question.isSecret ? 'password' : 'text'}
+                      value={freeText[question.id] ?? ''}
+                      disabled={submit.isPending}
+                      aria-label={`${question.question} other answer`}
+                      onChange={(event) =>
+                        setFreeText((current) => ({
+                          ...current,
+                          [question.id]: event.target.value,
+                        }))
+                      }
+                    />
+                  ) : null}
+                </RadioGroup>
               )
             ) : (
-              <input
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+              <Input
                 type={question.isSecret ? 'password' : 'text'}
                 value={freeText[question.id] ?? ''}
                 disabled={submit.isPending}
@@ -261,18 +341,6 @@ export function SessionUserInputCard({
       </div>
     </form>
   );
-
-  if (request.preset === 'setup_source_control_provider') {
-    return (
-      <SetupSessionActionCard
-        title="Connect source control"
-        icon={<GitBranch className="size-4" />}
-        intro="Choose where your repositories are hosted so I can work on your code."
-      >
-        {form}
-      </SetupSessionActionCard>
-    );
-  }
 
   if (request.preset === 'setup_starter_tasks') {
     return (

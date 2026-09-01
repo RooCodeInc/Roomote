@@ -138,6 +138,9 @@ export const SETUP_STARTER_TASK_IDS = [
 
 export type SetupStarterTaskId = (typeof SETUP_STARTER_TASK_IDS)[number];
 
+/** Persisted setup workflow contract for in-progress session compatibility. */
+export const SETUP_SESSION_WORKFLOW_VERSION = 1 as const;
+
 export function isSetupStarterTaskId(
   value: unknown,
 ): value is SetupStarterTaskId {
@@ -153,6 +156,7 @@ export function isSetupStarterTaskId(
  * existing deployments need no migration and checklist state stays derived.
  */
 export type SetupNewSetupSession = {
+  workflowVersion: number;
   /** Unified (canonical) session ID shown in routes and transcript. */
   sessionId: string;
   startedAt: string;
@@ -168,6 +172,7 @@ export function createSetupNewSetupSession(input: {
   startedAt?: string;
 }): SetupNewSetupSession {
   return {
+    workflowVersion: SETUP_SESSION_WORKFLOW_VERSION,
     sessionId: input.sessionId,
     startedAt: input.startedAt ?? new Date().toISOString(),
     starterTaskSelection: null,
@@ -211,6 +216,14 @@ export function normalizeSetupNewSetupSession(
   }
 
   return {
+    // Sessions created before workflow versioning shipped use the original
+    // contract. Future versions can migrate or deliberately preserve them.
+    workflowVersion:
+      typeof record.workflowVersion === 'number' &&
+      Number.isSafeInteger(record.workflowVersion) &&
+      record.workflowVersion > 0
+        ? record.workflowVersion
+        : SETUP_SESSION_WORKFLOW_VERSION,
     sessionId,
     startedAt,
     starterTaskSelection,

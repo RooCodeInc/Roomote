@@ -1,4 +1,5 @@
 import {
+  getAcpRequestUserInputValidationError,
   parseAcpRequestUserInputAnswers,
   parseAcpRequestUserInputPayload,
   parseAcpRequestUserInputQuestion,
@@ -23,6 +24,32 @@ describe('request_user_input multi-select payloads', () => {
     const question = parseAcpRequestUserInputQuestion(singleQuestion);
 
     expect(question?.multiple).toBeUndefined();
+  });
+
+  it('validates shared single, multiple, and Other answer semantics', () => {
+    expect(
+      getAcpRequestUserInputValidationError([singleQuestion], {
+        mode: { answers: ['Fast', 'Thorough'] },
+      }),
+    ).toBe('This question accepts a single answer.');
+    expect(
+      getAcpRequestUserInputValidationError(
+        [{ ...singleQuestion, multiple: true }],
+        { mode: { answers: ['Fast', 'Thorough'] } },
+      ),
+    ).toBeNull();
+    expect(
+      getAcpRequestUserInputValidationError(
+        [{ ...singleQuestion, isOther: true }],
+        { mode: { answers: ['Balanced'] } },
+      ),
+    ).toBeNull();
+    expect(
+      getAcpRequestUserInputValidationError(
+        [{ ...singleQuestion, isOther: true, multiple: true }],
+        { mode: { answers: ['Balanced', 'Careful'] } },
+      ),
+    ).toBe('One or more selections are not valid options.');
   });
 
   it('parses explicit multiple mode', () => {

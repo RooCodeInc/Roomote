@@ -454,13 +454,15 @@ export default {
       id: z.string().min(1).max(80),
       header: z.string().min(1).max(60),
       question: z.string().min(1).max(500),
+      isOther: z.boolean().optional().describe("Allow a free-text Other answer"),
+      isSecret: z.boolean().optional().describe("Mask the answer in user-visible history"),
       options: z.array(z.object({
         label: z.string().min(1).max(140),
         description: z.string().min(1).max(500),
       })).min(1).max(12).optional().describe("Present options as choices; omit for free-text"),
       multiple: z.boolean().optional().describe("Allow more than one option; defaults to false"),
     })).min(1).max(4).optional(),
-    preset: z.enum(["setup_source_control_provider", "setup_starter_tasks"]).optional().describe("Use exactly one trusted setup preset instead of questions"),
+    preset: z.enum(["setup_starter_tasks"]).optional().describe("Use the trusted starter-task preset instead of questions"),
   },
   execute: (args, context) => invoke("request_user_input", args, context),
 }

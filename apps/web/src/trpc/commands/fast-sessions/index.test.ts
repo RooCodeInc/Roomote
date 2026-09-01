@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   dbSelect: vi.fn(),
   dbInnerJoin: vi.fn(),
   dbSelectLimit: vi.fn(),
+  sql: vi.fn(),
 }));
 
 vi.mock('next/server', () => ({ after: mocks.after }));
@@ -520,7 +521,7 @@ describe('startSetupFastSessionCommand', () => {
     expect(mocks.dbSelect).not.toHaveBeenCalled();
   });
 
-  it('skips a scheduled kickoff whose transcript gained messages before the turn lock', async () => {
+  it('skips a scheduled kickoff completed before the turn lock', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: true,
@@ -537,8 +538,8 @@ describe('startSetupFastSessionCommand', () => {
     await startSetupFastSessionCommand(auth, input);
     expect(scheduled).toBeDefined();
 
-    // A concurrent submit's kickoff persisted its prompt row first: the
-    // re-check under the turn lock sees the kickoff event and skips.
+    // A concurrent submit completed its kickoff first. The re-check under the
+    // turn lock sees its terminal output and skips duplicate inference.
     mocks.dbSelectLimit.mockResolvedValue([{ id: 'message-1' }]);
     await scheduled?.();
 
@@ -546,7 +547,7 @@ describe('startSetupFastSessionCommand', () => {
     expect(release).toHaveBeenCalledOnce();
   });
 
-  it('runs a scheduled kickoff whose transcript is still empty at the turn lock', async () => {
+  it('runs a scheduled kickoff that has no terminal output at the turn lock', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: true,
@@ -575,7 +576,7 @@ describe('startSetupFastSessionCommand', () => {
     expect(release).toHaveBeenCalledOnce();
   });
 
-  it('recovers a lost kickoff when reusing a conversation with an empty transcript', async () => {
+  it('recovers a lost or failed kickoff when no terminal output exists', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: false,
@@ -590,7 +591,7 @@ describe('startSetupFastSessionCommand', () => {
     expect(mocks.after).toHaveBeenCalledOnce();
   });
 
-  it('does not schedule a second kickoff once the kickoff event row exists', async () => {
+  it('does not schedule a second kickoff once the kickoff has terminal output', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: false,
