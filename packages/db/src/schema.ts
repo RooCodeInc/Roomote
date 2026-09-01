@@ -4761,6 +4761,71 @@ export const fastAgentMemoryEvents = pgTable(
 );
 
 /**
+ * Durable, privacy-safe outbox for central Cloud inference accounting. Rows
+ * contain only the strict v1 outbound DTO fields and are deleted only after
+ * Cloud acknowledges their usage ids.
+ */
+export const cloudInferenceUsageOutbox = pgTable(
+  'cloud_inference_usage_outbox',
+  {
+    usageId: uuid('usage_id').primaryKey().defaultRandom(),
+    provider: text('provider').notNull(),
+    modelId: text('model_id'),
+    usageType: text('usage_type')
+      .notNull()
+      .$type<'inference' | 'embedding' | 'rerank' | 'other'>(),
+    inputTokens: bigint('input_tokens', { mode: 'number' })
+      .notNull()
+      .default(0),
+    outputTokens: bigint('output_tokens', { mode: 'number' })
+      .notNull()
+      .default(0),
+    reasoningTokens: bigint('reasoning_tokens', { mode: 'number' })
+      .notNull()
+      .default(0),
+    cacheReadTokens: bigint('cache_read_tokens', { mode: 'number' })
+      .notNull()
+      .default(0),
+    cacheWriteTokens: bigint('cache_write_tokens', { mode: 'number' })
+      .notNull()
+      .default(0),
+    latencyMs: bigint('latency_ms', { mode: 'number' }),
+    outcome: text('outcome')
+      .notNull()
+      .$type<'succeeded' | 'provider_error' | 'transport_error' | 'canceled'>(),
+    completedAt: timestamp('completed_at', { withTimezone: true }).notNull(),
+    credentialOwner: text('credential_owner')
+      .notNull()
+      .$type<'roomote' | 'tenant'>(),
+    estimatedCostMicroUsd: bigint('estimated_cost_micro_usd', {
+      mode: 'number',
+    }),
+    estimatePricingVersion: text('estimate_pricing_version'),
+    providerReportedCostMicroUsd: bigint('provider_reported_cost_micro_usd', {
+      mode: 'number',
+    }),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'processing'>(),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index('cloud_inference_usage_outbox_pending_idx').on(
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
+/**
  * brainSyncState
  *
  * Durable per-collector sync state for Brain memory sources. `watermark`

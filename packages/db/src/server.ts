@@ -100,6 +100,7 @@ export * from './lib/webhook-retention';
 export * from './lib/brain';
 export * from './lib/fast-agent-memory';
 export * from './lib/managed-access';
+export * from './lib/cloud-usage-outbox';
 
 export {
   users,
@@ -158,6 +159,7 @@ export {
   computeProviderUsage,
   computeProviderUsageSamples,
   computeProviderUsageRelations,
+  cloudInferenceUsageOutbox,
   githubPendingInstallations,
   githubPendingInstallationsRelations,
   githubInstallations,

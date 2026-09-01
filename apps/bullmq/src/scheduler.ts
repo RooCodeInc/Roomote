@@ -36,6 +36,7 @@ import {
   brainCollectorsJob,
   brainMaintenanceJob,
   sessionsReconcileJob,
+  cloudUsageOutboxDrainJob,
 } from './scheduled-jobs';
 
 const QUEUE_NAME = 'scheduled-jobs';
@@ -229,6 +230,9 @@ async function createJobs(queue: Queue): Promise<void> {
   await queue.upsertJobScheduler(ScheduledJobName.SessionsReconcile, {
     every: 60 * 1000,
   });
+  await queue.upsertJobScheduler(ScheduledJobName.CloudUsageOutboxDrain, {
+    every: 60 * 1000,
+  });
 
   const schedulers = await queue.getJobSchedulers();
   console.log('[createJobs] getJobSchedulers ->', schedulers);
@@ -273,6 +277,8 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return brainMaintenanceJob();
     case ScheduledJobName.SessionsReconcile:
       return sessionsReconcileJob();
+    case ScheduledJobName.CloudUsageOutboxDrain:
+      return cloudUsageOutboxDrainJob();
     case ScheduledJobName.CustomAutomations:
       await customAutomationsJob();
       return;
