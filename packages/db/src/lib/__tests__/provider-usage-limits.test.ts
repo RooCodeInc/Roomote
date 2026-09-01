@@ -1,10 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockGetChatGptSubscription, mockGetFreshChatGptAccessToken } =
-  vi.hoisted(() => ({
-    mockGetChatGptSubscription: vi.fn(),
-    mockGetFreshChatGptAccessToken: vi.fn(),
-  }));
+const {
+  mockGetChatGptSubscription,
+  mockGetFreshChatGptAccessToken,
+  mockGetGitHubCopilotAccessToken,
+  mockGetFreshXaiAccessToken,
+  mockGetXaiSubscription,
+} = vi.hoisted(() => ({
+  mockGetChatGptSubscription: vi.fn(),
+  mockGetFreshChatGptAccessToken: vi.fn(),
+  mockGetGitHubCopilotAccessToken: vi.fn(),
+  mockGetFreshXaiAccessToken: vi.fn(),
+  mockGetXaiSubscription: vi.fn(),
+}));
 
 vi.mock('../../encryption', () => ({
   encryptJSON: (value: unknown) => JSON.stringify(value),
@@ -18,6 +26,24 @@ vi.mock('../chatgpt-subscription', async (importOriginal) => {
     ...actual,
     getChatGptSubscription: mockGetChatGptSubscription,
     getFreshChatGptAccessToken: mockGetFreshChatGptAccessToken,
+  };
+});
+
+vi.mock('../github-copilot-subscription', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../github-copilot-subscription')>();
+  return {
+    ...actual,
+    getGitHubCopilotAccessToken: mockGetGitHubCopilotAccessToken,
+  };
+});
+
+vi.mock('../xai-subscription', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../xai-subscription')>();
+  return {
+    ...actual,
+    getFreshXaiAccessToken: mockGetFreshXaiAccessToken,
+    getXaiSubscription: mockGetXaiSubscription,
   };
 });
 
@@ -47,6 +73,9 @@ describe('getProviderUsageLimitSnapshots', () => {
   beforeEach(() => {
     mockGetChatGptSubscription.mockReset().mockResolvedValue(null);
     mockGetFreshChatGptAccessToken.mockReset().mockResolvedValue(null);
+    mockGetGitHubCopilotAccessToken.mockReset().mockResolvedValue(null);
+    mockGetFreshXaiAccessToken.mockReset().mockResolvedValue(null);
+    mockGetXaiSubscription.mockReset().mockResolvedValue(null);
   });
 
   it('uses weekly limit_remaining instead of all-time OpenRouter usage', async () => {
@@ -181,7 +210,7 @@ describe('getProviderUsageLimitSnapshots', () => {
     expect(snapshots).toEqual([
       expect.objectContaining({
         providerId: 'chatgpt',
-        providerName: 'ChatGPT Subscription',
+        providerName: 'ChatGPT (subscription)',
         credentialFingerprint: expect.stringMatching(/^[a-f0-9]{12}$/),
         windowLabel: 'Weekly limit',
         usedPercent: 86,
@@ -216,6 +245,11 @@ describe('getProviderUsageLimitSnapshots', () => {
       .mockResolvedValueOnce({
         ...subscription,
         refresh: 'rotated-refresh-token',
+      })
+      .mockResolvedValueOnce({
+        ...subscription,
+        refresh: 'different-account-token',
+        connectedAt: '2026-09-01T00:00:00.000Z',
       });
     mockGetFreshChatGptAccessToken.mockResolvedValue({
       access: 'chatgpt-access',
@@ -233,9 +267,73 @@ describe('getProviderUsageLimitSnapshots', () => {
 
     const first = await getProviderUsageLimitSnapshots({ fetchImpl });
     const second = await getProviderUsageLimitSnapshots({ fetchImpl });
+    const reconnected = await getProviderUsageLimitSnapshots({ fetchImpl });
 
     expect(first[0]?.credentialFingerprint).toBe(
       second[0]?.credentialFingerprint,
+    );
+    expect(reconnected[0]?.credentialFingerprint).not.toBe(
+      first[0]?.credentialFingerprint,
+    );
+  });
+
+  it('includes connected Copilot and xAI subscription quota windows', async () => {
+    mockGetGitHubCopilotAccessToken.mockResolvedValue('copilot-access');
+    mockGetFreshXaiAccessToken.mockResolvedValue({
+      access: 'xai-access',
+      expires: Date.now() + 60 * 60 * 1000,
+    });
+    mockGetXaiSubscription.mockResolvedValue({
+      refresh: 'xai-refresh',
+      access: 'xai-access',
+      expires: Date.now() + 60 * 60 * 1000,
+      status: 'connected',
+      connectedAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    });
+    const fetchImpl = vi.fn().mockImplementation(async (url: string) => {
+      if (url === 'https://api.github.com/copilot_internal/user') {
+        return jsonResponse({
+          quota_snapshots: {
+            premium_interactions: {
+              entitlement: 300,
+              remaining: 30,
+              percent_remaining: 10,
+              unlimited: false,
+            },
+          },
+          quota_reset_date: '2026-10-01',
+        });
+      }
+      if (url === 'https://cli-chat-proxy.grok.com/v1/user') {
+        return jsonResponse({ userId: 'xai-user' });
+      }
+      if (url === 'https://cli-chat-proxy.grok.com/v1/billing?format=credits') {
+        return jsonResponse({ config: { creditUsagePercent: 88 } });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const snapshots = await getProviderUsageLimitSnapshots({ fetchImpl });
+
+    expect(snapshots).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerId: 'github-copilot',
+          providerName: 'GitHub Copilot',
+          windowLabel: 'Premium requests',
+          usedPercent: 90,
+          used: 270,
+          remaining: 30,
+          limit: 300,
+        }),
+        expect.objectContaining({
+          providerId: 'xai-subscription',
+          providerName: 'xAI (Grok subscription)',
+          windowLabel: 'Included usage',
+          usedPercent: 88,
+        }),
+      ]),
     );
   });
 });
