@@ -10,13 +10,11 @@ import {
   db,
   desc,
   eq,
-  exists,
   fastAgentConversations,
   fastAgentMessages,
   llmUsageEvents,
   inArray,
   isNull,
-  or,
   sessions,
   sql,
   taskArtifacts,
@@ -147,29 +145,10 @@ const fastSessionSelection = {
   updatedAt: fastAgentConversations.updatedAt,
 };
 
-function fastSessionScope(auth: FastSessionAuth) {
-  if (auth.isAdmin) {
-    return undefined;
-  }
-
-  // Shared-surface conversations (e.g. Slack channels/threads) are stamped
-  // with the first participant's userId, but every participant's prompts are
-  // persisted with their own userId in the message metadata — so a session is
-  // visible to its owner and to anyone who spoke in it.
-  return or(
-    eq(fastAgentConversations.userId, auth.userId),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(fastAgentMessages)
-        .where(
-          and(
-            eq(fastAgentMessages.conversationId, fastAgentConversations.id),
-            sql`${fastAgentMessages.metadata} ->> 'userId' = ${auth.userId}`,
-          ),
-        ),
-    ),
-  );
+function fastSessionScope(_auth: FastSessionAuth) {
+  // Sessions follow the same visibility rules as tasks: every authenticated
+  // user of the deployment can read every conversation and its transcript.
+  return undefined;
 }
 
 /** Light session lookup with the same visibility scope as the list/detail. */

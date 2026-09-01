@@ -49,15 +49,20 @@ const DISCORD_CHANNEL_KINDS: Record<number, string> = {
 
 async function listSlackChannels(
   _actingUserId: string | null,
+  slackTeamId: string | null,
 ): Promise<CommunicationPlatformChannels> {
-  const installations = await db.query.slackInstallations.findMany({
-    columns: {
-      botAccessToken: true,
-      teamId: true,
-      teamName: true,
-    },
-    where: (installation, { eq }) => eq(installation.isActive, true),
-  });
+  const installations = (
+    await db.query.slackInstallations.findMany({
+      columns: {
+        botAccessToken: true,
+        teamId: true,
+        teamName: true,
+      },
+      where: (installation, { eq }) => eq(installation.isActive, true),
+    })
+  ).filter(
+    (installation) => !slackTeamId || installation.teamId === slackTeamId,
+  );
   const channels = (
     await Promise.all(
       installations.map(async (installation) => {
@@ -185,10 +190,12 @@ async function listTeamsChannels(
 
 export async function listCommunicationChannels(options: {
   actingUserId?: string | null;
+  slackTeamId?: string | null;
 }): Promise<CommunicationChannelsPayload> {
   const actingUserId = options.actingUserId?.trim() || null;
+  const slackTeamId = options.slackTeamId?.trim() || null;
   const discovered = await Promise.all([
-    listSlackChannels(actingUserId),
+    listSlackChannels(actingUserId, slackTeamId),
     listTeamsChannels(actingUserId),
     listDiscordChannels(actingUserId),
   ]);

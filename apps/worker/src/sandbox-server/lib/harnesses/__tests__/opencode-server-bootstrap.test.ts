@@ -16,7 +16,6 @@ describe('opencode-server bootstrap', () => {
   const slackPostingToolExclusions = {
     roomote_send_chat_reply: false,
     roomote_send_chat_reaction_emoji: false,
-    roomote_add_reaction_to_slack_message: false,
     roomote_post_to_channel: false,
     roomote_reply_to_slack_thread: false,
   };

@@ -28,6 +28,8 @@ const mocks = vi.hoisted(() => ({
   markShutdownCloseoutSettled: vi.fn(),
   revokeMcpCapabilities: vi.fn(),
   reconcileRetryNotices: vi.fn(),
+  getUnifiedSession: vi.fn(),
+  touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
@@ -93,9 +95,9 @@ vi.mock('@roomote/db/server', () => ({
   appendFastAgentMemory: mocks.appendMemory,
   isBrainEnabled: mocks.isBrainEnabled,
   db: {},
-  getSessionForFastConversation: vi.fn().mockResolvedValue(null),
+  getSessionForFastConversation: mocks.getUnifiedSession,
   getSessionForTask: mocks.getSessionForTask,
-  touchSessionActivity: vi.fn().mockResolvedValue(undefined),
+  touchSessionActivity: mocks.touchSessionActivity,
 }));
 
 vi.mock('../../non-task-provider-usage', () => ({
@@ -169,6 +171,12 @@ vi.mock('../fast-agent-title', () => ({
 }));
 
 vi.mock('../fast-agent-turn-lock', () => ({
+  FastAgentTurnLockLostError: class extends Error {
+    constructor() {
+      super('Fast conversation lock ownership was lost.');
+      this.name = 'FastAgentTurnLockLostError';
+    }
+  },
   FastAgentProcessShutdownError: class extends Error {
     constructor(public readonly signal: NodeJS.Signals) {
       super(`Fast turn interrupted by API shutdown (${signal}).`);
@@ -196,7 +204,10 @@ import {
   type FastAgentTurnAdapter,
   type LaunchFastAgentTask,
 } from '../fast-agent-conversation';
-import { FastAgentProcessShutdownError } from '../fast-agent-turn-lock';
+import {
+  FastAgentProcessShutdownError,
+  FastAgentTurnLockLostError,
+} from '../fast-agent-turn-lock';
 
 const baseParams = {
   question: 'What does this service do?',
@@ -269,6 +280,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.nativeExecutor = undefined;
     mocks.mcpExecutor = undefined;
     mocks.mcpCapabilityAvailable = false;
+    mocks.getUnifiedSession.mockResolvedValue(null);
+    mocks.touchSessionActivity.mockResolvedValue(undefined);
     mocks.getSessionForTask.mockResolvedValue(null);
     mocks.getNativeRuntime.mockImplementation(async () => {
       mocks.mcpCapabilityAvailable = true;
@@ -1702,9 +1715,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
-  it('stops a cancelled turn without posting a stale error closeout', async () => {
+  it('stops a lock-lost turn without posting a stale error closeout', async () => {
     const controller = new AbortController();
-    const lockLost = new Error('Fast conversation lock ownership was lost.');
+    const lockLost = new FastAgentTurnLockLostError();
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
         expect(options.signal).toBeInstanceOf(AbortSignal);
@@ -1735,12 +1748,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.generateText).toHaveBeenCalledOnce();
     expect(adapter.postReply).not.toHaveBeenCalled();
     expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+    expect(mocks.reconcileRetryNotices).toHaveBeenCalledOnce();
   });
 
-  it('closes a retry notice when conversation lock loss cancels backoff', async () => {
+  it('leaves a visible retry notice for the successor when lock loss cancels backoff', async () => {
     vi.useFakeTimers();
     const controller = new AbortController();
-    const lockLost = new Error('Fast conversation lock ownership was lost.');
+    const lockLost = new FastAgentTurnLockLostError();
     const postReply = vi.fn().mockImplementation(async () => {
       controller.abort(lockLost);
       return { messageId: 'retry-1' };
@@ -1771,15 +1785,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         purpose: 'progress',
         message: expect.stringContaining('attempt 1/3'),
       });
-      expect(replaceReply).toHaveBeenCalledWith(
-        { messageId: 'retry-1' },
-        {
-          purpose: 'closeout',
-          message:
-            'The inference retry was interrupted before it completed. Please send the request again.',
-        },
-      );
+      expect(replaceReply).not.toHaveBeenCalled();
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites.at(-1)?.metadata).toMatchObject({
+        visibleInTranscript: true,
+        purpose: 'progress',
+        inferenceRetryNotice: true,
+        inferenceRetryActive: true,
+      });
       expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+      expect(mocks.reconcileRetryNotices).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }
@@ -1787,7 +1804,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
   it('does not start another attempt when lock loss follows backoff expiry', async () => {
     const controller = new AbortController();
-    const lockLost = new Error('Fast conversation lock ownership was lost.');
+    const lockLost = new FastAgentTurnLockLostError();
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
     const postReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
     const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
     const originalSetTimeout = globalThis.setTimeout;
@@ -1819,6 +1837,23 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       // retry notice to close after the lock is lost.
       expect(postReply).not.toHaveBeenCalled();
       expect(replaceReply).not.toHaveBeenCalled();
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites.at(-1)?.metadata).toMatchObject({
+        visibleInTranscript: false,
+        purpose: 'progress',
+        inferenceRetryNotice: true,
+        inferenceRetryActive: true,
+      });
+      expect(mocks.reconcileRetryNotices).toHaveBeenCalledOnce();
+      expect(mocks.touchSessionActivity).toHaveBeenCalledOnce();
+      expect(mocks.touchSessionActivity).toHaveBeenCalledWith(
+        expect.anything(),
+        'session-1',
+        expect.any(Number),
+        { respondingUntil: expect.any(Date) },
+      );
     } finally {
       timeout.mockRestore();
     }
@@ -1827,6 +1862,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   it('posts a terminal closeout when API shutdown interrupts silent retry backoff', async () => {
     const controller = new AbortController();
     const shutdown = new FastAgentProcessShutdownError('SIGTERM');
+    const expectedCloseout =
+      'The inference retry was interrupted before it completed. Please send the request again.';
     const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
     const originalSetTimeout = globalThis.setTimeout;
     let shouldAbort = true;
@@ -1856,16 +1893,31 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(postReply).toHaveBeenCalledOnce();
       expect(postReply).toHaveBeenCalledWith({
         purpose: 'closeout',
-        message:
-          'The inference retry was interrupted before it completed. Please send the request again.',
+        message: expectedCloseout,
       });
-      expect(mocks.upsertMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: expect.objectContaining({
-            metadata: expect.objectContaining({ purpose: 'closeout' }),
-          }),
-        }),
-      );
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites.at(-1)).toMatchObject({
+        contentBlocks: [
+          {
+            type: 'text',
+            text: expectedCloseout,
+          },
+        ],
+        metadata: {
+          visibleInTranscript: true,
+          purpose: 'closeout',
+          platformMessageId: 'closeout-1',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: false,
+        },
+      });
+      expect(
+        mocks.upsertMessage.mock.calls
+          .map(([input]) => input.message.eventId)
+          .filter((eventId) => eventId.startsWith('100.2:assistant:')),
+      ).toHaveLength(0);
     } finally {
       timeout.mockRestore();
     }
@@ -2145,6 +2197,241 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         },
       },
     );
+  });
+
+  it('exposes and targets Slack channel tools through the Fast parent', async () => {
+    const postReaction = vi.fn().mockResolvedValue(undefined);
+    mocks.callIntegration.mockImplementation(
+      async (_context, _integrations, request) =>
+        request.toolName === 'send_chat_reaction_emoji'
+          ? { channelId: 'channel-1', messageTs: '100.2', name: 'eyes' }
+          : { ok: true },
+    );
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [
+          { name: 'get_chat_message_context' },
+          { name: 'get_chat_channel_messages' },
+          { name: 'list_chat_channels' },
+          { name: 'post_to_channel' },
+          { name: 'send_chat_reaction_emoji' },
+          { name: 'add_reaction_to_slack_message' },
+        ],
+      },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeMcpTool('roomote', 'send_chat_reaction_emoji', {
+            name: ':eyes:',
+          }),
+        ).resolves.toMatchObject({ success: true });
+        await invokeMcpTool('roomote', 'list_chat_channels', {});
+        await invokeMcpTool('roomote', 'post_to_channel', {
+          channel: '#shipping',
+          threadTs: '199.9',
+          text: 'Release is ready.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Posted the release update.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks({ postReaction }),
+    });
+
+    const roomoteTools = (
+      mocks.getNativeRuntime.mock.calls[0]?.[1] as Array<{
+        id: string;
+        tools: Array<{ name: string }>;
+      }>
+    )
+      .find(({ id }) => id === 'roomote')!
+      .tools.map(({ name }) => name);
+    expect(roomoteTools).toEqual(
+      expect.arrayContaining([
+        'get_chat_message_context',
+        'get_chat_channel_messages',
+        'list_chat_channels',
+        'post_to_channel',
+        'send_chat_reaction_emoji',
+      ]),
+    );
+    expect(roomoteTools).not.toContain('add_reaction_to_slack_message');
+    expect(postReaction).not.toHaveBeenCalled();
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      {
+        integrationId: 'roomote',
+        toolName: 'send_chat_reaction_emoji',
+        args: {
+          name: ':eyes:',
+          provider: 'slack',
+          slackTeamId: 'team-1',
+          channel: 'channel-1',
+          messageId: '100.2',
+        },
+      },
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      {
+        integrationId: 'roomote',
+        toolName: 'list_chat_channels',
+        args: { slackTeamId: 'team-1' },
+      },
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      {
+        integrationId: 'roomote',
+        toolName: 'post_to_channel',
+        args: {
+          channel: '#shipping',
+          threadTs: '199.9',
+          text: 'Release is ready.',
+          provider: 'slack',
+          slackTeamId: 'team-1',
+        },
+      },
+    );
+  });
+
+  it('does not record a failed Roomote MCP reaction as delivered', async () => {
+    let reactionResult: unknown;
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [{ name: 'send_chat_reaction_emoji' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({
+      error: 'Slack app is not a member of channel channel-1.',
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        reactionResult = await invokeMcpTool(
+          'roomote',
+          'send_chat_reaction_emoji',
+          { name: 'eyes' },
+        );
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The reaction was not posted.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(reactionResult).toEqual({
+      success: false,
+      error: 'Slack app is not a member of channel channel-1.',
+    });
+    expect(mocks.upsertMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({ payload: { reaction: 'eyes' } }),
+      }),
+    );
+  });
+
+  it('omits gated channel tools when the Fast surface has no valid chat context', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [
+          { name: 'get_chat_message_context' },
+          { name: 'list_chat_channels' },
+          { name: 'post_to_channel' },
+          { name: 'send_chat_reaction_emoji' },
+          { name: 'add_reaction_to_slack_message' },
+        ],
+      },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'No channel action is available.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'web-session-1',
+      },
+      adapter: callbacks({ postReaction: undefined }),
+    });
+
+    const roomoteTools = (
+      mocks.getNativeRuntime.mock.calls[0]?.[1] as Array<{
+        id: string;
+        tools: Array<{ name: string }>;
+      }>
+    )
+      .find(({ id }) => id === 'roomote')!
+      .tools.map(({ name }) => name);
+    expect(roomoteTools).toEqual(['get_chat_message_context']);
+  });
+
+  it('preserves the broker inventory when deployment config disabled channel tools', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [{ name: 'get_chat_message_context' }],
+      },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The deployment channel policy is applied.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks(),
+    });
+
+    const roomoteTools = (
+      mocks.getNativeRuntime.mock.calls[0]?.[1] as Array<{
+        id: string;
+        tools: Array<{ name: string }>;
+      }>
+    )
+      .find(({ id }) => id === 'roomote')!
+      .tools.map(({ name }) => name);
+    expect(roomoteTools).toEqual(['get_chat_message_context']);
   });
 
   it.each([
@@ -3525,6 +3812,31 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         'It coordinates incoming requests.',
       );
       expect(mocks.generateText).toHaveBeenCalledTimes(2);
+      expect(mocks.upsertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({
+            eventId: '100.2:retry-notice:0',
+            metadata: expect.objectContaining({
+              visibleInTranscript: false,
+              purpose: 'progress',
+              inferenceRetryNotice: true,
+              inferenceRetryActive: true,
+            }),
+          }),
+        }),
+      );
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites.at(-1)?.contentBlocks).toEqual([
+        { type: 'text', text: 'It coordinates incoming requests.' },
+      ]);
+      expect(retryWrites.at(-1)?.metadata).toMatchObject({
+        visibleInTranscript: false,
+        purpose: 'closeout',
+        inferenceRetryNotice: true,
+        inferenceRetryActive: false,
+      });
       expect(mocks.captureInferenceContext).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({

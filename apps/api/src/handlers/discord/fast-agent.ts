@@ -29,7 +29,7 @@ import {
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
 } from '@roomote/sdk/server';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, type TaskInitiator } from '@roomote/types';
 
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
 import {
@@ -99,6 +99,10 @@ export async function processDiscordFastAgentMessage(
     interaction?: DiscordInteractionReplyContext;
     activeTasks?: { taskId: string }[];
     directedAtRoomote?: boolean;
+    /** Attribution for tasks Fast delegates from this turn; automation-identity
+     * turns pass their automation initiator so delegated work keeps automation
+     * provenance instead of appearing installer-initiated. */
+    delegatedTaskInitiator?: TaskInitiator;
     onAccepted?: (abort: () => Promise<void>) => void;
     onRejected?: () => void;
   } & DiscordFastAgentSource,
@@ -301,6 +305,9 @@ export async function processDiscordFastAgentMessage(
             applicationId: input.applicationId,
             requesterDiscordUserId: input.sender.id,
             launchOwnerUserId: input.senderUserId,
+            ...(input.delegatedTaskInitiator
+              ? { initiator: input.delegatedTaskInitiator }
+              : {}),
             queuedMessage: {
               provider: 'discord',
               text: prompt,
