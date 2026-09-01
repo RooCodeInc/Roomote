@@ -959,6 +959,52 @@ export async function processSlackChannelAutoStartTask(params: {
         }
       }
 
+      // Bot-authored feed messages get the same first hop as a human post in
+      // this channel: a Fast turn under the automation launch identity, with
+      // the direct task launch below as the fallback. The launch gate above
+      // still decides whether the message warrants any response at all.
+      if (isBotAuthored) {
+        const fastStart = await startFastAgentResponse({
+          event: { ...event, user: launchIdentity.slackUserId },
+          slackInstallation,
+          slack,
+          userId: launchIdentity.launchUserId,
+          teamId,
+          continuation: true,
+          directedAtRoomote: mentionsSlackBot(
+            event,
+            slackInstallation.botUserId,
+          ),
+          processingReactionName: ackEmoji,
+          errorLogPrefix: `❌ Background fast-agent response failed for configured channel auto-start thread ${threadId}:`,
+        });
+
+        if (fastStart.accepted) {
+          if (channelAutoStartDebug) {
+            await postChannelAutoStartRoutingDebugBestEffort({
+              slack,
+              sourceChannelId: event.channel,
+              sourceChannelName,
+              threadId,
+              messageText: event.text,
+              launchMode: channelAutoStartLaunchMode,
+              llmDecision: channelAutoStartDebug.llmDecision,
+              llmReason: channelAutoStartDebug.reason,
+              taskOutcome: 'started',
+              taskOutcomeDetails: 'Routed to Fast.',
+            });
+          }
+          apiLogger.info(
+            `[SlackWebhook] Configured channel auto-start routed to Fast thread_id=${threadId} channel=${event.channel}`,
+          );
+          return;
+        }
+
+        apiLogger.warn(
+          `[SlackWebhook] Configured channel auto-start Fast entry not accepted (${fastStart.reason}); falling back to direct task launch for thread ${threadId}`,
+        );
+      }
+
       if (humanUserMapping && typeof event.user === 'string') {
         await recordInboundSlackConversationMessage({
           event: { ...event, user: event.user },

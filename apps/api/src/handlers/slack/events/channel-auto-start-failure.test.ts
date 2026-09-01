@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   recordInboundMessage: vi.fn(),
   postRoutingDebug: vi.fn(),
   automationLaunchIdentity: vi.fn(),
+  processFastAgentMessage: vi.fn(),
   logWarn: vi.fn(),
 }));
 
@@ -56,6 +57,11 @@ vi.mock('../../shared/channel-launch-gate.js', async (importOriginal) => ({
     typeof import('../../shared/channel-launch-gate.js')
   >()),
   evaluateChannelLaunchGate: mocks.evaluateGate,
+}));
+
+vi.mock('./fast-agent.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./fast-agent.js')>()),
+  processFastAgentMessage: mocks.processFastAgentMessage,
 }));
 
 vi.mock('../helpers/attachments.js', () => ({
@@ -140,6 +146,13 @@ describe('Slack channel auto-start failures', () => {
       launchUserId: 'installer-1',
       slackUserId: 'UBOT',
     });
+    // Bot-authored coverage below exercises the direct-task fallback unless a
+    // test opts into an accepted Fast turn explicitly.
+    mocks.processFastAgentMessage.mockImplementation(
+      async ({ onRejected }: { onRejected?: () => void }) => {
+        onRejected?.();
+      },
+    );
     postMessage.mockResolvedValue({ ts: 'reply-1' });
     vi.mocked(slack.addReaction).mockResolvedValue(undefined);
     vi.mocked(slack.getChannelName).mockResolvedValue('forge');
@@ -254,6 +267,29 @@ describe('Slack channel auto-start failures', () => {
 
     expect(postMessage).not.toHaveBeenCalled();
     expect(mocks.startTask).not.toHaveBeenCalled();
+  });
+
+  it('routes a bot-authored message to Fast under the automation identity when the turn is accepted', async () => {
+    mocks.processFastAgentMessage.mockImplementation(
+      async ({ onAccepted }: { onAccepted?: (abort: () => void) => void }) => {
+        onAccepted?.(() => {});
+      },
+    );
+
+    await expect(runHandler(undefined, { isBotAuthored: true })).resolves.toBe(
+      true,
+    );
+    await flushBackgroundWork();
+
+    expect(mocks.processFastAgentMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'installer-1',
+        continuation: true,
+        event: expect.objectContaining({ user: 'UBOT' }),
+      }),
+    );
+    expect(mocks.startTask).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalled();
   });
 
   it('stays silent when task startup throws for a bot-authored message', async () => {

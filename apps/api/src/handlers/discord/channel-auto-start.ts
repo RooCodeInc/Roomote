@@ -16,7 +16,10 @@ import {
   REDIS_KEYS,
   syncAutoStartChannelCacheBestEffort,
 } from '@roomote/redis';
-import { findDiscordMappedUserId } from '@roomote/sdk/server';
+import {
+  findDiscordInstallationByGuildId,
+  findDiscordMappedUserId,
+} from '@roomote/sdk/server';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   isDeploymentReadOnlyError,
@@ -40,6 +43,7 @@ import { processDiscordAttachments } from './attachments.js';
 import {
   getDiscordFastConversationId,
   processDiscordFastAgentMessage,
+  startDiscordFastAgentResponse,
 } from './fast-agent.js';
 import { rememberPendingDiscordAccountLinkTask } from './pending-account-link-task.js';
 import { startNewDiscordTask } from './task-orchestration.js';
@@ -391,6 +395,48 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
           }
           await releaseRoutingLock();
           return;
+        }
+      }
+
+      // Bot/webhook-authored feed messages get the same first hop as a human
+      // post in this channel: a Fast turn under the automation launch
+      // identity (the guild installer), with the direct task launch below as
+      // the fallback — mirroring the Slack auto-start path. The launch gate
+      // above still decides whether the message warrants any response.
+      if (isBotAuthored) {
+        const installation = channel.guildId
+          ? await findDiscordInstallationByGuildId(channel.guildId)
+          : null;
+        const automationLaunchUserId = installation?.installedByUserId ?? null;
+
+        if (automationLaunchUserId) {
+          const fastStart = await startDiscordFastAgentResponse({
+            event,
+            question: queuedMessage.text,
+            sender: message.author,
+            senderUserId: automationLaunchUserId,
+            provider,
+            applicationId: input.applicationId,
+            channel,
+            metadata,
+            conversationId: getDiscordFastConversationId(channel, message.id),
+            directedAtRoomote: true,
+          });
+
+          if (fastStart.accepted) {
+            apiLogger.info(
+              `[DiscordChannelAutoStart] Routed ${logContext} to Fast under the automation identity`,
+            );
+            return;
+          }
+
+          apiLogger.warn(
+            `[DiscordChannelAutoStart] Fast entry not accepted (${fastStart.reason}) for ${logContext}; falling back to direct task launch`,
+          );
+        } else {
+          apiLogger.warn(
+            `[DiscordChannelAutoStart] No installer launch identity for ${logContext}; falling back to direct task launch`,
+          );
         }
       }
 

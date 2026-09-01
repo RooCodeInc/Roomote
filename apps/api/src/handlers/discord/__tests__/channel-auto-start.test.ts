@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   postMessage: vi.fn(),
   addReaction: vi.fn(),
   processFast: vi.fn(),
+  startFastResponse: vi.fn(),
+  findInstallation: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -38,6 +40,7 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   findDiscordMappedUserId: mocks.findMappedUserId,
+  findDiscordInstallationByGuildId: mocks.findInstallation,
 }));
 
 vi.mock('../../shared/channel-launch-gate.js', async (importOriginal) => ({
@@ -58,6 +61,7 @@ vi.mock('../fast-agent.js', () => ({
   ) =>
     channel.isDirectMessage || channel.isThread ? channel.channelId : eventId,
   processDiscordFastAgentMessage: mocks.processFast,
+  startDiscordFastAgentResponse: mocks.startFastResponse,
 }));
 
 vi.mock('../task-orchestration.js', () => ({
@@ -204,6 +208,15 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
       ]),
     );
     mocks.findMappedUserId.mockResolvedValue('roomote-user-1');
+    mocks.findInstallation.mockResolvedValue({
+      installedByUserId: 'installer-1',
+    });
+    // Bot-authored coverage below exercises the direct-task fallback unless a
+    // test opts into an accepted Fast turn explicitly.
+    mocks.startFastResponse.mockResolvedValue({
+      accepted: false,
+      reason: 'Fast session is busy.',
+    });
     mocks.evaluateGate.mockResolvedValue({
       shouldLaunch: true,
       debug: { llmDecision: 'launch', reason: 'ok' },
@@ -469,6 +482,46 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
       });
     },
   );
+
+  it('routes a bot-authored message to Fast under the installer identity when the turn is accepted', async () => {
+    mocks.startFastResponse.mockResolvedValue({
+      accepted: true,
+      abort: vi.fn(),
+    });
+
+    await expect(
+      runHandler({
+        payload: messagePayload({
+          author: { id: 'alert-bot', username: 'alerts', bot: true },
+        }),
+      }),
+    ).resolves.toBe(true);
+    await flushBackgroundWork();
+
+    expect(mocks.startFastResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        senderUserId: 'installer-1',
+        directedAtRoomote: true,
+      }),
+    );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a direct task launch when no installer identity exists', async () => {
+    mocks.findInstallation.mockResolvedValue(null);
+
+    await expect(
+      runHandler({
+        payload: messagePayload({
+          author: { id: 'alert-bot', username: 'alerts', bot: true },
+        }),
+      }),
+    ).resolves.toBe(true);
+    await flushBackgroundWork();
+
+    expect(mocks.startFastResponse).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).toHaveBeenCalledTimes(1);
+  });
 
   it('consults the launch gate when criteria are configured and stays silent on skip', async () => {
     mocks.getBackgroundAgentSettings.mockResolvedValue(
