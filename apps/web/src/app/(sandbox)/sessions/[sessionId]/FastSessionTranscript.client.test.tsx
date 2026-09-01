@@ -1220,7 +1220,10 @@ describe('FastSessionTranscript', () => {
             eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
             role: 'assistant',
             contentBlocks: [
-              { type: 'text', text: 'I started the checkout fix.' },
+              {
+                type: 'text',
+                text: 'I started the checkout fix.\n\n[Open in Roomote](https://roomote.example/sessions/session-1?task=child-1)',
+              },
             ],
             metadata: { visibleInTranscript: true },
             payload: { purpose: 'progress', kickoff: true },
@@ -1237,6 +1240,9 @@ describe('FastSessionTranscript', () => {
       screen.getByRole('button', { name: /Started Coding Task Completed/ }),
     ).toBeInTheDocument();
     expect(screen.getByText('I started the checkout fix.')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Open in Roomote' }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows a reply composer for web sessions and sends replies optimistically', async () => {

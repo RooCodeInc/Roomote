@@ -63,6 +63,16 @@ type TranscriptMessage = Omit<FastSessionMessage, 'createdAt'> & {
 
 type TranscriptOrder = Pick<TranscriptMessage, 'id' | 'ts' | 'turnSeq'>;
 
+const ROOMOTE_KICKOFF_LINK = /\r?\n\r?\n\[Open in Roomote\]\([^\r\n]+\)\s*$/;
+
+function getTranscriptMessageText(message: TranscriptMessage) {
+  const text = getTextFromContentBlocks(message.contentBlocks) ?? undefined;
+  const payload = message.payload as { kickoff?: unknown } | null;
+  return payload?.kickoff === true
+    ? text?.replace(ROOMOTE_KICKOFF_LINK, '')
+    : text;
+}
+
 type PendingResponseState = {
   pendingAfter: TranscriptOrder | null;
   latestVisibleResponse: TranscriptOrder | null;
@@ -436,7 +446,7 @@ export function FastSessionTranscript({
           contentBlocks: message.contentBlocks,
           metadata: message.metadata,
           payload: message.payload,
-          text: getTextFromContentBlocks(message.contentBlocks) ?? undefined,
+          text: getTranscriptMessageText(message),
         }),
       ),
     [messages],
