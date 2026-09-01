@@ -104,6 +104,7 @@ import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
 import {
   FastAgentProcessShutdownError,
+  FastAgentTurnLockLostError,
   markFastAgentShutdownCloseoutPending,
   markFastAgentShutdownCloseoutSettled,
 } from './fast-agent-turn-lock';
@@ -2558,11 +2559,13 @@ export async function answerFastAgentQuestion({
     if (signal?.aborted) {
       const shutdownInterrupted =
         terminalError instanceof FastAgentProcessShutdownError;
+      const lockOwnershipLost =
+        terminalError instanceof FastAgentTurnLockLostError;
       try {
         if (canonicalConversationId) {
           fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
         }
-        if (inferenceRetryReply) {
+        if (!lockOwnershipLost && inferenceRetryReply) {
           await replaceInferenceRetryReply(
             {
               purpose: 'closeout',
@@ -2658,7 +2661,15 @@ export async function answerFastAgentQuestion({
     }
     return lastVisibleMessage || message;
   } finally {
-    if (canonicalConversationId) {
+    // Once Redis reports ownership loss, this invocation is fenced off from
+    // the canonical lease/retry state below. A successor may already own and
+    // have renewed the Session lease; clearing it or reconciling the prior
+    // retry here would let the stale owner write an interruption over the
+    // successor. The new owner reconciles on entry, or the lease-gated
+    // scheduled reconciler repairs the marker later when no successor appears.
+    const lockOwnershipLost =
+      signal?.aborted && signal.reason instanceof FastAgentTurnLockLostError;
+    if (canonicalConversationId && !lockOwnershipLost) {
       await setFastSessionResponding(canonicalConversationId, false).catch(
         (error) => {
           console.warn(

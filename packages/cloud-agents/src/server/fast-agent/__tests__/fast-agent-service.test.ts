@@ -169,6 +169,12 @@ vi.mock('../fast-agent-title', () => ({
 }));
 
 vi.mock('../fast-agent-turn-lock', () => ({
+  FastAgentTurnLockLostError: class extends Error {
+    constructor() {
+      super('Fast conversation lock ownership was lost.');
+      this.name = 'FastAgentTurnLockLostError';
+    }
+  },
   FastAgentProcessShutdownError: class extends Error {
     constructor(public readonly signal: NodeJS.Signals) {
       super(`Fast turn interrupted by API shutdown (${signal}).`);
@@ -196,7 +202,10 @@ import {
   type FastAgentTurnAdapter,
   type LaunchFastAgentTask,
 } from '../fast-agent-conversation';
-import { FastAgentProcessShutdownError } from '../fast-agent-turn-lock';
+import {
+  FastAgentProcessShutdownError,
+  FastAgentTurnLockLostError,
+} from '../fast-agent-turn-lock';
 
 const baseParams = {
   question: 'What does this service do?',
@@ -1702,9 +1711,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
-  it('stops a cancelled turn without posting a stale error closeout', async () => {
+  it('stops a lock-lost turn without posting a stale error closeout', async () => {
     const controller = new AbortController();
-    const lockLost = new Error('Fast conversation lock ownership was lost.');
+    const lockLost = new FastAgentTurnLockLostError();
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
         expect(options.signal).toBeInstanceOf(AbortSignal);
@@ -1735,12 +1744,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.generateText).toHaveBeenCalledOnce();
     expect(adapter.postReply).not.toHaveBeenCalled();
     expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+    expect(mocks.reconcileRetryNotices).toHaveBeenCalledOnce();
   });
 
-  it('closes a retry notice when conversation lock loss cancels backoff', async () => {
+  it('leaves a visible retry notice for the successor when lock loss cancels backoff', async () => {
     vi.useFakeTimers();
     const controller = new AbortController();
-    const lockLost = new Error('Fast conversation lock ownership was lost.');
+    const lockLost = new FastAgentTurnLockLostError();
     const postReply = vi.fn().mockImplementation(async () => {
       controller.abort(lockLost);
       return { messageId: 'retry-1' };
@@ -1771,15 +1781,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         purpose: 'progress',
         message: expect.stringContaining('attempt 1/3'),
       });
-      expect(replaceReply).toHaveBeenCalledWith(
-        { messageId: 'retry-1' },
-        {
-          purpose: 'closeout',
-          message:
-            'The inference retry was interrupted before it completed. Please send the request again.',
-        },
-      );
+      expect(replaceReply).not.toHaveBeenCalled();
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites.at(-1)?.metadata).toMatchObject({
+        visibleInTranscript: true,
+        purpose: 'progress',
+        inferenceRetryNotice: true,
+        inferenceRetryActive: true,
+      });
       expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+      expect(mocks.reconcileRetryNotices).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }
@@ -1787,7 +1800,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
   it('does not start another attempt when lock loss follows backoff expiry', async () => {
     const controller = new AbortController();
-    const lockLost = new Error('Fast conversation lock ownership was lost.');
+    const lockLost = new FastAgentTurnLockLostError();
     const postReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
     const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
     const originalSetTimeout = globalThis.setTimeout;
@@ -1819,6 +1832,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       // retry notice to close after the lock is lost.
       expect(postReply).not.toHaveBeenCalled();
       expect(replaceReply).not.toHaveBeenCalled();
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites.at(-1)?.metadata).toMatchObject({
+        visibleInTranscript: false,
+        purpose: 'progress',
+        inferenceRetryNotice: true,
+        inferenceRetryActive: true,
+      });
+      expect(mocks.reconcileRetryNotices).toHaveBeenCalledOnce();
     } finally {
       timeout.mockRestore();
     }
