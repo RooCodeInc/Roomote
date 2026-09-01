@@ -371,6 +371,42 @@ describe('startFastSessionCommand', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledOnce();
   });
 
+  it('recovers an artifact kickoff before a unified Session exists', async () => {
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'fast-session-1',
+      created: false,
+    });
+    mocks.getUnifiedSession.mockResolvedValue(null);
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([{ id: 'message-1' }])
+      .mockResolvedValueOnce([{ id: 'message-1' }]);
+
+    let scheduled: (() => Promise<void>) | undefined;
+    mocks.after.mockImplementation((callback) => {
+      scheduled = callback;
+    });
+    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: new AbortController().signal,
+    });
+    mocks.acquireTurnLock.mockResolvedValue(release);
+
+    await startFastSessionCommand(auth, {
+      text: 'Build the plan',
+      artifactBuild: {
+        launchId: '11111111-1111-4111-8111-111111111111',
+        environmentId: '33333333-3333-4333-8333-333333333333',
+        taskModel: 'model-1',
+        sourceTaskId: 'source-task-1',
+        sourceArtifactId: '22222222-2222-4222-8222-222222222222',
+        sourceArtifactPath: 'plans/widget.md',
+        sourceArtifactVersion: 3,
+      },
+    });
+    await scheduled?.();
+
+    expect(mocks.answerQuestion).toHaveBeenCalledOnce();
+  });
+
   it('does not retry an artifact kickoff after its task is attached', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'fast-session-1',

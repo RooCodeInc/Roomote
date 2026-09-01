@@ -123,7 +123,7 @@ type WebFastAgentTurnInput = {
   skipIfEventExists?: {
     conversationId: string;
     eventId: string;
-    requireTaskInSessionId?: string;
+    requireArtifactBuildTask?: boolean;
   };
 };
 
@@ -174,17 +174,18 @@ async function runWebFastAgentTurn({
         )
         .limit(1);
       if (existingEvent) {
-        if (skipIfEventExists.requireTaskInSessionId) {
-          const [existingTask] = await db
-            .select({ taskId: sessionTasks.taskId })
-            .from(sessionTasks)
-            .where(
-              eq(
-                sessionTasks.sessionId,
-                skipIfEventExists.requireTaskInSessionId,
-              ),
-            )
-            .limit(1);
+        if (skipIfEventExists.requireArtifactBuildTask) {
+          const unifiedSession = await getSessionForFastConversation(
+            db,
+            skipIfEventExists.conversationId,
+          );
+          const [existingTask] = unifiedSession
+            ? await db
+                .select({ taskId: sessionTasks.taskId })
+                .from(sessionTasks)
+                .where(eq(sessionTasks.sessionId, unifiedSession.id))
+                .limit(1)
+            : [];
           if (!existingTask) {
             console.log(
               `[Fast Web] Recovering incomplete turn for ${conversation.conversationId}: event ${skipIfEventExists.eventId} exists without an attached task.`,
@@ -308,12 +309,14 @@ export async function startFastSessionCommand(
       .limit(1);
     if (!existingKickoff) {
       scheduleKickoff = true;
-    } else if (input.artifactBuild && unifiedSession) {
-      const [existingTask] = await db
-        .select({ taskId: sessionTasks.taskId })
-        .from(sessionTasks)
-        .where(eq(sessionTasks.sessionId, unifiedSession.id))
-        .limit(1);
+    } else if (input.artifactBuild) {
+      const [existingTask] = unifiedSession
+        ? await db
+            .select({ taskId: sessionTasks.taskId })
+            .from(sessionTasks)
+            .where(eq(sessionTasks.sessionId, unifiedSession.id))
+            .limit(1)
+        : [];
       scheduleKickoff = !existingTask;
     }
   }
@@ -372,9 +375,7 @@ export async function startFastSessionCommand(
             skipIfEventExists: {
               conversationId: session.id,
               eventId: kickoffPromptEventId,
-              ...(artifactBuild && unifiedSession
-                ? { requireTaskInSessionId: unifiedSession.id }
-                : {}),
+              ...(artifactBuild ? { requireArtifactBuildTask: true } : {}),
             },
           }
         : {}),
