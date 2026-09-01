@@ -159,7 +159,10 @@ export default async function SessionDetailPage({
                   defaultModelId={defaultModelId}
                   defaultReasoningEffort={defaultReasoningEffort}
                   headerExtras={
-                    <SessionHeaderExtras status={unifiedSession.status} />
+                    <SessionHeaderExtras
+                      key="session-header-extras"
+                      status={unifiedSession.status}
+                    />
                   }
                   {...(isSetupSession
                     ? { timelineExtras: setupTimelineExtras }
