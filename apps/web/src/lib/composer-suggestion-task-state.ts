@@ -1,6 +1,7 @@
 /** The task fields that matter to a composer suggestion's context block. */
 type SuggestionTaskState = {
   taskId: string;
+  title?: string | null;
   latestRun?: {
     status?: string | null;
     taskPhase?: string | null;
@@ -9,10 +10,11 @@ type SuggestionTaskState = {
 };
 
 /**
- * A short, order-independent fingerprint of the delegated tasks' state used
- * by both the client query key and the server generation cache, so a task
- * finishing or failing while the session is idle refreshes the suggestion
- * without waiting for another assistant message. Empty when there are no
+ * A short, order-independent fingerprint of every delegated-task field the
+ * suggestion context includes (title, run state, artifact count), used by
+ * both the client query key and the server generation cache, so a task
+ * finishing, failing, or being renamed while the session is idle refreshes
+ * the suggestion without waiting for another assistant message. Empty when there are no
  * tasks so a session without delegations keeps a stable key.
  */
 export function computeTaskStateRevision(
@@ -25,7 +27,7 @@ export function computeTaskStateRevision(
   const input = tasks
     .map(
       (task) =>
-        `${task.taskId}:${task.latestRun?.status ?? ''}:${task.latestRun?.taskPhase ?? ''}:${task.artifacts?.length ?? 0}`,
+        `${task.taskId}:${task.title ?? ''}:${task.latestRun?.status ?? ''}:${task.latestRun?.taskPhase ?? ''}:${task.artifacts?.length ?? 0}`,
     )
     .sort()
     .join('|');

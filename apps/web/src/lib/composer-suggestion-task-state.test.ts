@@ -3,11 +3,13 @@ import { computeTaskStateRevision } from './composer-suggestion-task-state';
 describe('computeTaskStateRevision', () => {
   const running = {
     taskId: 'task-1',
+    title: 'Fix login redirect',
     latestRun: { status: 'running', taskPhase: 'running' },
     artifacts: [],
   };
   const done = {
     taskId: 'task-2',
+    title: 'Add tests',
     latestRun: { status: 'completed', taskPhase: 'waiting_for_prompt' },
     artifacts: [{ id: 'a' }],
   };
@@ -22,8 +24,11 @@ describe('computeTaskStateRevision', () => {
     );
   });
 
-  it('changes when a task status, phase, or artifact count changes', () => {
+  it('changes when a task title, status, phase, or artifact count changes', () => {
     const base = computeTaskStateRevision([running, done]);
+    expect(
+      computeTaskStateRevision([{ ...running, title: 'Fix redirect' }, done]),
+    ).not.toBe(base);
     expect(
       computeTaskStateRevision([
         {
