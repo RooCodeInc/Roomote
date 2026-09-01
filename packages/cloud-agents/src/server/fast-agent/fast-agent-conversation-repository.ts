@@ -125,53 +125,43 @@ async function reconcileInferenceRetryNotices(
     }
   }
 
-  const notices = await database
-    .select({
-      id: fastAgentMessages.id,
-      metadata: fastAgentMessages.metadata,
-      payload: fastAgentMessages.payload,
+  // One set-based statement with no prior read: the terminal metadata is
+  // derived from each row's current value under its row lock, so a cause an
+  // interrupted owner commits concurrently (e.g. lock_lost) cannot be
+  // overwritten by a stale snapshot; the reconciler's own reason only fills
+  // in when nobody recorded one.
+  const reconciled = await database
+    .update(fastAgentMessages)
+    .set({
+      contentBlocks: [
+        { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
+      ],
+      metadata: sql`coalesce(${fastAgentMessages.metadata}, '{}'::jsonb)
+        || ${JSON.stringify({
+          visibleInTranscript: true,
+          purpose: 'closeout',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: false,
+        })}::jsonb
+        || jsonb_build_object('interruptionReason', coalesce(${fastAgentMessages.metadata}->>'interruptionReason', ${reason}::text))`,
+      payload: sql`coalesce(${fastAgentMessages.payload}, '{}'::jsonb) || '{"purpose":"closeout"}'::jsonb`,
+      updatedAt: new Date(),
     })
-    .from(fastAgentMessages)
     .where(
       and(
         eq(fastAgentMessages.conversationId, conversationId),
         activeInferenceRetryNoticeWhere(),
       ),
-    );
+    )
+    .returning({ id: fastAgentMessages.id });
 
-  for (const notice of notices) {
-    await database
-      .update(fastAgentMessages)
-      .set({
-        contentBlocks: [
-          { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
-        ],
-        metadata: {
-          ...(notice.metadata ?? {}),
-          visibleInTranscript: true,
-          purpose: 'closeout',
-          inferenceRetryNotice: true,
-          inferenceRetryActive: false,
-          // An interrupted owner may have already recorded the specific cause
-          // (e.g. lock_lost); the reconciler only fills in when nobody did.
-          interruptionReason:
-            typeof notice.metadata?.interruptionReason === 'string'
-              ? notice.metadata.interruptionReason
-              : reason,
-        },
-        payload: { ...notice.payload, purpose: 'closeout' },
-        updatedAt: new Date(),
-      })
-      .where(eq(fastAgentMessages.id, notice.id));
-  }
-
-  if (notices.length > 0) {
+  if (reconciled.length > 0) {
     console.warn(
-      `[Fast Agent] Reconciled ${notices.length} interrupted inference retry notice(s) (conversation=${conversationId}, reason=${reason}).`,
+      `[Fast Agent] Reconciled ${reconciled.length} interrupted inference retry notice(s) (conversation=${conversationId}, reason=${reason}).`,
     );
   }
 
-  return notices.length;
+  return reconciled.length;
 }
 
 export async function reconcileFastAgentInferenceRetryNotices(
@@ -198,8 +188,8 @@ export async function markFastAgentInferenceRetryNoticeInterruption(
   conversationId: string,
   eventId: string,
   reason: FastAgentInterruptionReason,
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const stamped = await db
     .update(fastAgentMessages)
     .set({
       metadata: sql`coalesce(${fastAgentMessages.metadata}, '{}'::jsonb) || ${JSON.stringify({ interruptionReason: reason })}::jsonb`,
@@ -212,7 +202,9 @@ export async function markFastAgentInferenceRetryNoticeInterruption(
         activeInferenceRetryNoticeWhere(),
         sql`${fastAgentMessages.metadata}->>'interruptionReason' IS NULL`,
       ),
-    );
+    )
+    .returning({ id: fastAgentMessages.id });
+  return stamped.length > 0;
 }
 
 export async function reconcileExpiredFastAgentInferenceRetryNotices(
