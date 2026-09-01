@@ -29,6 +29,7 @@ vi.mock('@roomote/sdk/server', () => ({
 
 import {
   findAccessibleSession,
+  getArtifactBuildParentSession,
   getLatestExternalSessionEvent,
   getSessionById,
   getSessionForTask,
@@ -43,6 +44,83 @@ describe('unified Session queries', () => {
   beforeEach(() => {
     syncFastSlackTitle.mockReset();
     syncFastSlackTitle.mockResolvedValue(undefined);
+  });
+
+  it('resolves an artifact through its owning task to the canonical Session', async () => {
+    const owner = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      fastConversationId: conversation!.id,
+    });
+    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'fast_delegation',
+    });
+    const [artifact] = await db
+      .insert(taskArtifacts)
+      .values({
+        taskId: task.id,
+        path: 'plans/build.md',
+        version: 3,
+        contentType: 'text/markdown',
+        size: 100,
+        uploaded: true,
+      })
+      .returning();
+
+    await expect(
+      getArtifactBuildParentSession(
+        { userId: owner.id, isAdmin: false },
+        artifact!.id,
+      ),
+    ).resolves.toEqual({
+      sourceTaskId: task.id,
+      sourceArtifactPath: 'plans/build.md',
+      sourceArtifactVersion: 3,
+      sessionId: session.id,
+      fastConversationId: conversation!.id,
+    });
+  });
+
+  it('keeps artifact ownership when its task has no Session parent', async () => {
+    const owner = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    const [artifact] = await db
+      .insert(taskArtifacts)
+      .values({
+        taskId: task.id,
+        path: 'plans/orphan.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 100,
+        uploaded: true,
+      })
+      .returning();
+
+    await expect(
+      getArtifactBuildParentSession(
+        { userId: owner.id, isAdmin: false },
+        artifact!.id,
+      ),
+    ).resolves.toEqual({
+      sourceTaskId: task.id,
+      sourceArtifactPath: 'plans/orphan.md',
+      sourceArtifactVersion: 1,
+      sessionId: null,
+      fastConversationId: null,
+    });
   });
   it('opens detail reads to everyone but scopes the list like tasks', async () => {
     const owner = await userFactory.create();

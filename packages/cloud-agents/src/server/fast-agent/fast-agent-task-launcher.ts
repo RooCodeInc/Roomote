@@ -3,6 +3,7 @@ import {
   buildFastAgentChildTaskMetadata,
   buildSlackThreadPermalink,
   TaskPayloadKind,
+  type FastAgentConversation,
   type StandardTask,
   type TaskInitiator,
   type TaskSurface,
@@ -206,11 +207,7 @@ export function createFastAgentSlackTaskLauncher(
 
 export function createFastAgentWebTaskLauncher(params: {
   userId: string;
-  conversation: {
-    surface: 'web' | 'automation';
-    workspaceId: string;
-    conversationId: string;
-  };
+  conversation: FastAgentConversation;
 }): LaunchFastAgentTask {
   return createFastAgentTaskLauncher({
     userId: params.userId,

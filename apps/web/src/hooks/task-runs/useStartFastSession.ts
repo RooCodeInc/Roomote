@@ -28,7 +28,6 @@ type StartFastSessionVariables = {
     environmentId: string;
     branch?: string;
     taskModel: string;
-    sourceTaskId: string;
     sourceArtifactId: string;
     sourceArtifactPath: string;
     sourceArtifactVersion: number;

@@ -41,6 +41,7 @@ import {
   getFastSessionTasks,
   updateFastSessionPrReviewOfferStatus,
 } from '@/lib/server/fast-sessions';
+import { getArtifactBuildParentSession } from '@/lib/server/sessions';
 import { handleWebPrReviewAction } from '@/lib/server/pr-review-actions';
 import {
   currentEpochSeconds,
@@ -127,6 +128,7 @@ type WebFastAgentTurnInput = {
     conversationId: string;
     eventId: string;
     artifactBuildLaunchId?: string;
+    artifactBuildSessionId?: string;
   };
 };
 
@@ -193,13 +195,9 @@ async function runWebFastAgentTurn({
         .limit(1);
       if (existingEvent) {
         if (skipIfEventExists.artifactBuildLaunchId) {
-          const unifiedSession = await getSessionForFastConversation(
-            db,
-            skipIfEventExists.conversationId,
-          );
-          const [existingTask] = unifiedSession
+          const [existingTask] = skipIfEventExists.artifactBuildSessionId
             ? await findArtifactBuildTask(
-                unifiedSession.id,
+                skipIfEventExists.artifactBuildSessionId,
                 skipIfEventExists.artifactBuildLaunchId,
               )
             : [];
@@ -266,6 +264,120 @@ export function scheduleWebFastAgentTurn(input: WebFastAgentTurnInput): void {
   after(() => runWebFastAgentTurn(input));
 }
 
+type ArtifactBuildInput = {
+  launchId: string;
+  environmentId: string;
+  branch?: string;
+  taskModel: string;
+  sourceArtifactId: string;
+  sourceArtifactPath: string;
+  sourceArtifactVersion: number;
+};
+
+async function startArtifactBuildInParentSession(
+  auth: UserAuthSuccess,
+  input: { text: string; artifactBuild: ArtifactBuildInput },
+): Promise<{ sessionId: string; fastConversationId: string }> {
+  const source = await getArtifactBuildParentSession(
+    auth,
+    input.artifactBuild.sourceArtifactId,
+  );
+  if (!source) {
+    throw new Error('The artifact could not be found.');
+  }
+  if (!source.sessionId) {
+    throw new Error(
+      'The task that created this artifact is not attached to a Session.',
+    );
+  }
+  if (!source.fastConversationId) {
+    throw new Error("This artifact's Session cannot start a delegated task.");
+  }
+  const parentFastConversationId = source.fastConversationId;
+
+  const [existingTask] = await findArtifactBuildTask(
+    source.sessionId,
+    input.artifactBuild.launchId,
+  );
+  if (existingTask) {
+    return {
+      sessionId: source.sessionId,
+      fastConversationId: parentFastConversationId,
+    };
+  }
+
+  const senderDisplayName =
+    getUserDisplayName({ name: auth.name, email: auth.primaryEmail }) ?? null;
+  const delivery = await buildFastAgentSurfaceReplyDelivery({
+    sessionId: parentFastConversationId,
+    userId: auth.userId,
+    senderDisplayName,
+    question: input.text,
+  });
+  if (!delivery) {
+    throw new Error(
+      "This artifact's Session is not connected, so the build cannot be started.",
+    );
+  }
+
+  const launchTask = createFastAgentWebTaskLauncher({
+    userId: auth.userId,
+    conversation: delivery.conversation,
+  });
+  const attributedLaunchTask = async (
+    params: Parameters<typeof launchTask>[0],
+  ) => {
+    const result = await launchTask({
+      ...params,
+      environmentId: input.artifactBuild.environmentId,
+      branch: input.artifactBuild.branch,
+      launchIdempotencyKey: `artifact-build:${input.artifactBuild.launchId}`,
+      model: input.artifactBuild.taskModel,
+      parentSessionId: parentFastConversationId,
+    });
+    if (result.success) {
+      try {
+        await notifySourceTaskArtifactBuild({
+          auth,
+          sourceTaskId: source.sourceTaskId,
+          sourceArtifactId: input.artifactBuild.sourceArtifactId,
+          sourceArtifactPath: source.sourceArtifactPath,
+          sourceArtifactVersion: source.sourceArtifactVersion,
+          newTaskId: result.taskId,
+        });
+      } catch (error) {
+        console.error(
+          `[startFastSession] Failed to notify Slack threads for source task ${source.sourceTaskId}: ${formatErrorForLog(error)}`,
+        );
+      }
+    }
+    return result;
+  };
+
+  const currentMessageId = `artifact-build:${input.artifactBuild.launchId}`;
+  scheduleWebFastAgentTurn({
+    userId: auth.userId,
+    delivery: {
+      ...delivery,
+      adapter: { ...delivery.adapter, launchTask: attributedLaunchTask },
+    },
+    question: input.text,
+    ...(senderDisplayName ? { senderDisplayName } : {}),
+    currentMessageId,
+    skipIfEventExists: {
+      conversationId: parentFastConversationId,
+      eventId: `${currentMessageId}:user`,
+      artifactBuildLaunchId: input.artifactBuild.launchId,
+      artifactBuildSessionId: source.sessionId,
+    },
+  });
+
+  return {
+    sessionId: source.sessionId,
+    fastConversationId: parentFastConversationId,
+  };
+}
+
 export async function startFastSessionCommand(
   auth: UserAuthSuccess,
   input: {
@@ -280,19 +392,23 @@ export async function startFastSessionCommand(
       environmentId: string;
       branch?: string;
       taskModel: string;
-      sourceTaskId: string;
       sourceArtifactId: string;
       sourceArtifactPath: string;
       sourceArtifactVersion: number;
     };
   },
 ): Promise<{ sessionId: string; fastConversationId?: string }> {
+  if (input.artifactBuild) {
+    return startArtifactBuildInParentSession(auth, {
+      text: input.text,
+      artifactBuild: input.artifactBuild,
+    });
+  }
+
   const conversation: WebFastAgentConversation = {
     surface: 'web',
     workspaceId: auth.userId,
-    conversationId: input.artifactBuild
-      ? `artifact-build:${input.artifactBuild.launchId}`
-      : (input.conversationId ?? randomUUID()),
+    conversationId: input.conversationId ?? randomUUID(),
   };
 
   const session = await getOrCreateFastAgentSession({
@@ -305,10 +421,9 @@ export async function startFastSessionCommand(
   });
   const unifiedSession = await getSessionForFastConversation(db, session.id);
 
-  const kickoffTurnId =
-    input.conversationId || input.artifactBuild
-      ? `web-kickoff:${session.id}`
-      : undefined;
+  const kickoffTurnId = input.conversationId
+    ? `web-kickoff:${session.id}`
+    : undefined;
   const kickoffPromptEventId = kickoffTurnId
     ? `${kickoffTurnId}:user`
     : undefined;
@@ -326,14 +441,6 @@ export async function startFastSessionCommand(
       .limit(1);
     if (!existingKickoff) {
       scheduleKickoff = true;
-    } else if (input.artifactBuild) {
-      const [existingTask] = unifiedSession
-        ? await findArtifactBuildTask(
-            unifiedSession.id,
-            input.artifactBuild.launchId,
-          )
-        : [];
-      scheduleKickoff = !existingTask;
     }
   }
 
@@ -342,42 +449,13 @@ export async function startFastSessionCommand(
       userId: auth.userId,
       conversation,
     });
-    const artifactBuild = input.artifactBuild;
-    const attributedLaunchTask = artifactBuild
-      ? async (params: Parameters<typeof launchTask>[0]) => {
-          const result = await launchTask({
-            ...params,
-            environmentId: artifactBuild.environmentId,
-            branch: artifactBuild.branch,
-            launchIdempotencyKey: `artifact-build:${artifactBuild.launchId}`,
-            model: artifactBuild.taskModel,
-          });
-          if (result.success) {
-            try {
-              await notifySourceTaskArtifactBuild({
-                auth,
-                sourceTaskId: artifactBuild.sourceTaskId,
-                sourceArtifactId: artifactBuild.sourceArtifactId,
-                sourceArtifactPath: artifactBuild.sourceArtifactPath,
-                sourceArtifactVersion: artifactBuild.sourceArtifactVersion,
-                newTaskId: result.taskId,
-              });
-            } catch (error) {
-              console.error(
-                `[startFastSession] Failed to notify Slack threads for source task ${artifactBuild.sourceTaskId}: ${formatErrorForLog(error)}`,
-              );
-            }
-          }
-          return result;
-        }
-      : launchTask;
 
     scheduleWebFastAgentTurn({
       userId: auth.userId,
       delivery: {
         conversation,
         adapter: {
-          launchTask: attributedLaunchTask,
+          launchTask,
           postReply: async () => {},
         },
       },
@@ -392,9 +470,6 @@ export async function startFastSessionCommand(
             skipIfEventExists: {
               conversationId: session.id,
               eventId: kickoffPromptEventId,
-              ...(artifactBuild
-                ? { artifactBuildLaunchId: artifactBuild.launchId }
-                : {}),
             },
           }
         : {}),
