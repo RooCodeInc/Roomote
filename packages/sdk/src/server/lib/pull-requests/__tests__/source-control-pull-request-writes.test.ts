@@ -15,6 +15,9 @@ const {
   mockResolveAdoToken,
   mockResolveAdoBaseUrl,
   mockBuildAdoOrganizationApiBaseUrl,
+  mockGetTerminalReviewSummaryResult,
+  mockMarkPullRequestReady,
+  mockEnqueuePrReviewNotification,
 } = vi.hoisted(() => ({
   mockCreateGitHubToken: vi.fn(),
   mockGetOctokit: vi.fn(),
@@ -27,6 +30,9 @@ const {
   mockResolveAdoToken: vi.fn(),
   mockResolveAdoBaseUrl: vi.fn(),
   mockBuildAdoOrganizationApiBaseUrl: vi.fn(),
+  mockGetTerminalReviewSummaryResult: vi.fn(),
+  mockMarkPullRequestReady: vi.fn(),
+  mockEnqueuePrReviewNotification: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -102,17 +108,35 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((left: unknown, right: unknown) => ({ type: 'eq', left, right })),
 }));
 
+vi.mock('../mark-roomote-pull-request-ready', () => ({
+  markRoomotePullRequestReadyAfterCleanReview: (...args: unknown[]) =>
+    mockMarkPullRequestReady(...args),
+}));
+
+vi.mock('../../task-runs/github-pr-review-check', () => ({
+  getTerminalReviewSummaryResult: (...args: unknown[]) =>
+    mockGetTerminalReviewSummaryResult(...args),
+}));
+
+vi.mock('../../task-runs/pr-review-notification', () => ({
+  enqueuePrReviewNotification: (...args: unknown[]) =>
+    mockEnqueuePrReviewNotification(...args),
+}));
+
 import {
   sourceControlPullRequestWriteInputSchema,
   writeSourceControlPullRequestForTaskRun,
 } from '../source-control-pull-request-writes';
 
-function makeTaskRun(payload: TaskRun['payload']): TaskRun {
+function makeTaskRun(
+  payload: TaskRun['payload'],
+  payloadKind: TaskPayloadKind = TaskPayloadKind.StandardTask,
+): TaskRun {
   return {
     id: 123,
     status: RunStatus.Dequeued,
     kind: 'fresh',
-    payloadKind: TaskPayloadKind.StandardTask,
+    payloadKind,
     taskId: 'task-123',
     actingUserId: 'user-123',
     payload,
@@ -141,6 +165,9 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
     mockBuildAdoOrganizationApiBaseUrl.mockReturnValue(
       'https://dev.azure.com/acme',
     );
+    mockGetTerminalReviewSummaryResult.mockReturnValue(null);
+    mockMarkPullRequestReady.mockResolvedValue('marked_ready');
+    mockEnqueuePrReviewNotification.mockResolvedValue({ notifiedTaskCount: 1 });
   });
 
   it('replies to a GitLab discussion in a GitHub-primary mixed task', async () => {
@@ -675,6 +702,104 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
       applied: true,
       warnings: [],
     });
+  });
+
+  it('runs provider-neutral promotion after a clean review summary write', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: '101',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitlab.com/acme/backend',
+    });
+    mockGetTerminalReviewSummaryResult.mockReturnValue({
+      conclusion: 'success',
+    });
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse({ id: 501 }));
+
+    await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun(
+        {
+          repo: 'acme/backend',
+          sourceControlProvider: 'gitlab',
+          headSha: 'reviewed-head',
+        },
+        TaskPayloadKind.GithubPrReview,
+      ),
+      input: {
+        action: 'update_pull_request_comment',
+        repositoryFullName: 'acme/backend',
+        prNumber: 42,
+        commentId: '501',
+        body: '<!-- roomote-review-summary --> clean',
+        sourceControlProvider: 'gitlab',
+      },
+      fetchImpl,
+    });
+
+    expect(mockMarkPullRequestReady).toHaveBeenCalledWith({
+      sourceControlProvider: 'gitlab',
+      repository: 'acme/backend',
+      prNumber: 42,
+      reviewHeadSha: 'reviewed-head',
+      reviewResult: {
+        outcome: 'clean',
+        findingCount: 0,
+        headSha: 'reviewed-head',
+      },
+      fetchImpl,
+    });
+    expect(mockEnqueuePrReviewNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repository: 'acme/backend',
+        prNumber: 42,
+        sourceControlProvider: 'gitlab',
+        event: expect.objectContaining({
+          kind: 'review_summary',
+          reviewHeadSha: 'reviewed-head',
+          roomoteAuthored: true,
+        }),
+      }),
+    );
+  });
+
+  it('does not promote a stale persisted review summary', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: '101',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitlab.com/acme/backend',
+    });
+    mockGetTerminalReviewSummaryResult.mockReturnValue({
+      conclusion: 'success',
+      summary: 'Roomote found no unresolved issues in this review.',
+    });
+    mockEnqueuePrReviewNotification.mockResolvedValueOnce({
+      notifiedTaskCount: 0,
+      reason: 'stale_review_cycle',
+    });
+
+    await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun(
+        {
+          repo: 'acme/backend',
+          sourceControlProvider: 'gitlab',
+          headSha: 'reviewed-head',
+          prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+        },
+        TaskPayloadKind.GithubPrReview,
+      ),
+      input: {
+        action: 'update_pull_request_comment',
+        repositoryFullName: 'acme/backend',
+        prNumber: 42,
+        commentId: '501',
+        body: '<!-- roomote-review-summary --> clean',
+        sourceControlProvider: 'gitlab',
+      },
+      fetchImpl: vi.fn().mockResolvedValueOnce(jsonResponse({ id: 501 })),
+    });
+
+    expect(mockMarkPullRequestReady).not.toHaveBeenCalled();
   });
 
   it('rejects Azure DevOps comment updates without a threadId', async () => {

@@ -565,7 +565,6 @@ export async function queuePrReviewSummaryNotification(
     }
     if (
       notificationResult.reason !== 'stale_review_cycle' &&
-      eventPayload.installation?.id &&
       event.reviewHeadSha &&
       event.reviewResult?.outcome === 'clean' &&
       (event.reviewResult.findingCount === null ||
@@ -573,7 +572,7 @@ export async function queuePrReviewSummaryNotification(
     ) {
       operations.push(
         markRoomotePullRequestReadyAfterCleanReview({
-          installationId: eventPayload.installation.id,
+          sourceControlProvider: 'github',
           repository: lifecycle.notification.input.repository,
           prNumber: lifecycle.notification.input.prNumber,
           reviewHeadSha: event.reviewHeadSha,
