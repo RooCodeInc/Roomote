@@ -25,15 +25,15 @@ const MAX_SUGGESTION_CHARS = 100;
 const MAX_SUGGESTION_WORDS = 12;
 
 const composerSuggestionSchema = z.object({
-  suggestion: z.string().trim().min(1).max(300).nullable(),
+  suggestion: z.string().trim().min(1).max(300),
 });
 
 const SUGGESTION_PROMPT = `You suggest the next message a user might send to Roomote, an AI coding agent, in an ongoing task conversation.
 
-Propose ONE short follow-up message the user is likely to want to send next, but only when the conversation points to a clear, high-value next step.
+Propose ONE short follow-up message the user is most likely to want to send next.
 
 Rules:
-- If you are not fairly confident about what the user would want next, set suggestion to null. Never pad with generic filler like "keep going" or "looks good".
+- Always suggest something. If the next step is uncertain, pick the most plausible concrete one rather than generic filler like "keep going" or "looks good".
 - Keep it to 5-10 words, on a single line, with no surrounding quotes, markdown, or emoji.
 - Write it in the user's voice, as an instruction or question addressed to the agent.
 - Make it specific to this conversation (reference the actual work).
@@ -97,11 +97,7 @@ function buildConversationText(messages: SuggestableMessage[]): string {
 }
 
 /** Collapse to one line, strip wrapping quotes, and enforce brevity. */
-function normalizeSuggestion(raw: string | null): string | null {
-  if (raw === null) {
-    return null;
-  }
-
+function normalizeSuggestion(raw: string): string | null {
   let text = raw.replace(/\s+/g, ' ').trim();
 
   if (
@@ -131,7 +127,7 @@ async function generateSuggestion(
   userId: string | null,
   taskId: string | null,
   fastConversationId: string | null,
-): Promise<string | null> {
+): Promise<string> {
   const { object } = await generateTrackedNonTaskObject({
     userId,
     taskId,

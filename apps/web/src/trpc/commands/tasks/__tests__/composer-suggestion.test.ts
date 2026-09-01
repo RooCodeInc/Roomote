@@ -154,20 +154,6 @@ describe('getComposerSuggestionCommand', () => {
     });
   });
 
-  it('passes through a null suggestion when the model is not confident', async () => {
-    mockGetTaskSuggestableMessages.mockResolvedValue([
-      userRow('m1', 'Fix it'),
-      assistantRow('m2', 'Fixed'),
-    ]);
-    mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: { suggestion: null },
-    });
-
-    await expect(
-      getComposerSuggestionCommand(auth, { taskId: 'task-1' }),
-    ).resolves.toEqual({ suggestion: null, messageCount: 2 });
-  });
-
   it('discards suggestions that overshoot the word budget', async () => {
     mockGetTaskSuggestableMessages.mockResolvedValue([
       userRow('m1', 'Fix it'),
