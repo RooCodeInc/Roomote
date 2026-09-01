@@ -33,8 +33,6 @@ import {
 import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
 import { processSlackAttachments } from '../helpers/attachments.js';
-import { listCommunicationChannels } from '../../mcp/communication-channel-discovery.js';
-import { sendCommunicationChannelPost } from '../../mcp/communication-channel-posts.js';
 
 export function stripLeadingFastCommandMention(text: string): string {
   return text.replace(LEADING_FAST_COMMAND_MENTION_PATTERN, '').trimStart();
@@ -289,37 +287,6 @@ export async function processFastAgentMessage(params: {
             apiBaseUrl,
             includeRoomoteMemberTools: true,
           }),
-        listChatChannels: () =>
-          listCommunicationChannels({
-            actingUserId: userId,
-            slackTeamId: teamId,
-          }),
-        postToChannel: async ({ channel, threadTs, text }) => {
-          const response = await sendCommunicationChannelPost({
-            taskRun: {
-              id: 0,
-              taskId: session.id,
-              actingUserId: userId,
-              payload: {
-                communicationProvider: 'slack',
-                communicationTeamId: teamId,
-                communicationChannelId: event.channel,
-                communicationThreadId: threadId,
-              },
-            },
-            parsedBody: {
-              channel,
-              ...(threadTs ? { threadTs } : {}),
-              text,
-              images: [],
-            },
-          });
-          const payload = (await response.json()) as { error?: string };
-          if (!response.ok) {
-            throw new Error(payload.error ?? 'Slack channel post failed.');
-          }
-          return payload;
-        },
         launchTask,
         postReply: async ({ message, kickoff }) => {
           const posted = await postSlackThreadMarkdownMessage({
