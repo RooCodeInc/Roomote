@@ -233,11 +233,9 @@ export function NewTaskForm({
   }) => {
     if (result.success && 'taskId' in result) {
       onTaskStarted?.();
-      router.push(
-        result.sessionId
-          ? `/sessions/${result.sessionId}`
-          : `/task/${result.taskId}`,
-      );
+      // A direct launch into an environment or repository is a task, not a
+      // conversation — land on the task view even though a Session wraps it.
+      router.push(`/task/${result.taskId}`);
     } else if ('error' in result) {
       toast.error(result.error);
     }

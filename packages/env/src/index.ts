@@ -155,6 +155,8 @@ const serverSchema = {
   // RELEASE_VERSION, so channel builds (develop-<sha>/main-<sha>) still know
   // which product release they contain. Read by the in-app release notices.
   RELEASE_PRODUCT_VERSION: z.string().min(1).optional(),
+  // Kill switch for the low-noise recurring-automation offer in Fast mode.
+  R_FAST_AUTOMATION_OFFERS_DISABLED: optInBoolean(),
   TRPC_URL: z.string().min(1),
   R_MODEL: z.string().min(1).optional(),
   R_ORCHESTRATION_MODEL: z.string().min(1).optional(),

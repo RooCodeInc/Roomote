@@ -49,6 +49,13 @@ Recommendations are a starting point rather than a fixed policy. After applying
 them, use **Settings > Automations** to adjust schedules, destinations, workspace
 targets, prompts, or models, and to create other automations from scratch.
 
+Admins can also ask Fast to create recurring work during a conversation. Roomote
+confirms the schedule, checks for an existing matching automation, and asks for
+approval before it saves anything. After creation, Fast offers to run the
+automation immediately so you can verify the prompt and destination. When a
+non-admin asks, Fast prepares a copyable automation draft for an administrator
+instead of offering controls that person cannot use.
+
 ## Pull request automations
 
 These automations react to pull requests, issues, and repository state.
@@ -243,10 +250,12 @@ replies and suggested-task cards.
 
 The channel section starts with **Auto-respond to channels**.
 
-Use it to let Roomote start a task from new top-level messages in selected
-Slack or Discord channels, even when nobody mentions Roomote directly. You can
-add multiple channels across both providers, and each one can include its own
-optional instructions and launch criteria.
+Use it to let Roomote start a Fast Session from new top-level messages in
+selected Slack or Discord channels, even when nobody mentions Roomote directly.
+Fast can answer or delegate the work to a task; if Fast cannot accept an
+automated entry, Roomote falls back to a direct task launch so the request is
+not dropped. You can add multiple channels across both providers, and each one
+can include its own optional instructions and launch criteria.
 
 Good first examples:
 
@@ -265,8 +274,9 @@ A few provider-specific behaviors to know:
   to Roomote do not start tasks; Roomote sends them a direct message
   explaining how to link instead.
 - Messages posted by other bots or webhooks (for example a deploy or alert
-  feed) can start tasks too. Use launch criteria to keep noisy feeds in
-  check — for example, only launching on new or worsening alerts.
+  feed) can start Fast Sessions too. Roomote uses the deployment's automation
+  identity for these entries. Use launch criteria to keep noisy feeds in check
+  — for example, only launching on new or worsening alerts.
 
 If Roomote cannot determine whether to start a task or encounters an unexpected
 startup error, it notifies human users but stays silent for bot and webhook

@@ -23,16 +23,20 @@ import { Hono } from 'hono';
 import {
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   type AuthTokenContext,
+  type RunTokenContext,
+  TaskPayloadKind,
 } from '@roomote/types';
 import {
   db,
   eq,
+  ensureAutomationRows,
   fastAgentConversations,
   fastAgentMessages,
   sessionFactory,
   sessions,
   sessionTasks,
   taskFactory,
+  taskRuns,
   tasks,
   userFactory,
   users,
@@ -47,10 +51,13 @@ const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
 const createdConversationIds: string[] = [];
 
-function createApp(userId: string) {
+function createApp(userIdOrAuth: string | AuthTokenContext | RunTokenContext) {
   const app = new Hono<{ Variables: Variables }>();
   app.use('*', async (c, next) => {
-    const auth: AuthTokenContext = { userId, tokenType: 'auth', version: 1 };
+    const auth: AuthTokenContext | RunTokenContext =
+      typeof userIdOrAuth === 'string'
+        ? { userId: userIdOrAuth, tokenType: 'auth', version: 1 }
+        : userIdOrAuth;
     c.set('authContext', auth);
     await next();
   });
@@ -111,6 +118,122 @@ describe('MCP session routes', () => {
     );
   });
 
+  it('starts as the durable owner of a bot-triggered task with no acting user', async () => {
+    await ensureAutomationRows(db);
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+    const parentSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+    });
+    createdSessionIds.push(parentSession.id);
+    const parentTask = await taskFactory.create({
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation: 'slack_channel_auto_start',
+    });
+    createdTaskIds.push(parentTask.id);
+    await db.insert(sessionTasks).values({
+      sessionId: parentSession.id,
+      taskId: parentTask.id,
+      origin: 'fast_delegation',
+    });
+    const [parentRun] = await db
+      .insert(taskRuns)
+      .values({
+        taskId: parentTask.id,
+        actingUserId: null,
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: '', description: 'Automated request' },
+      })
+      .returning({ id: taskRuns.id });
+    const sessionId = crypto.randomUUID();
+    const fastConversationId = crypto.randomUUID();
+    mocks.getOrCreateFastAgentSession.mockResolvedValue({
+      id: fastConversationId,
+      created: true,
+    });
+    mocks.getSessionForFastConversation.mockResolvedValue({ id: sessionId });
+    mocks.queueFastAgentSurfaceReply.mockResolvedValue(true);
+
+    const response = await createApp({
+      runId: parentRun!.id,
+      userId: null,
+      principal: 'deployment',
+      tokenType: 'run',
+      version: 1,
+    } as RunTokenContext).request('/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Continue in a Session' }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(mocks.getOrCreateFastAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: owner.id }),
+    );
+    expect(mocks.queueFastAgentSurfaceReply).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: owner.id }),
+    );
+  });
+
+  it('starts as the current acting user instead of the run token mint-time user', async () => {
+    const originalUser = await userFactory.create();
+    const currentUser = await userFactory.create();
+    createdUserIds.push(originalUser.id, currentUser.id);
+    const parentSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: originalUser.id,
+    });
+    createdSessionIds.push(parentSession.id);
+    const parentTask = await taskFactory.create({
+      initiatorUserId: originalUser.id,
+    });
+    createdTaskIds.push(parentTask.id);
+    await db.insert(sessionTasks).values({
+      sessionId: parentSession.id,
+      taskId: parentTask.id,
+      origin: 'direct_launch',
+    });
+    const [parentRun] = await db
+      .insert(taskRuns)
+      .values({
+        taskId: parentTask.id,
+        actingUserId: currentUser.id,
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: '', description: 'Current user request' },
+      })
+      .returning({ id: taskRuns.id });
+    const sessionId = crypto.randomUUID();
+    const fastConversationId = crypto.randomUUID();
+    mocks.getOrCreateFastAgentSession.mockResolvedValue({
+      id: fastConversationId,
+      created: true,
+    });
+    mocks.getSessionForFastConversation.mockResolvedValue({ id: sessionId });
+    mocks.queueFastAgentSurfaceReply.mockResolvedValue(true);
+
+    const response = await createApp({
+      runId: parentRun!.id,
+      userId: originalUser.id,
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    } as RunTokenContext).request('/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Continue as the current user' }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(mocks.getOrCreateFastAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: currentUser.id }),
+    );
+    expect(mocks.queueFastAgentSurfaceReply).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: currentUser.id }),
+    );
+  });
+
   it('returns accessible sessions with nested child-task state', async () => {
     const owner = await userFactory.create();
     createdUserIds.push(owner.id);
@@ -165,7 +288,7 @@ describe('MCP session routes', () => {
     });
   });
 
-  it('hides sessions from users who are not participants', async () => {
+  it('shares sessions with every deployment user like tasks', async () => {
     const owner = await userFactory.create();
     const bystander = await userFactory.create();
     createdUserIds.push(owner.id, bystander.id);
@@ -178,11 +301,15 @@ describe('MCP session routes', () => {
     const response = await createApp(bystander.id).request(
       `/sessions/${session.id}/summary`,
     );
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ id: session.id });
     const messagesResponse = await createApp(bystander.id).request(
       `/sessions/${session.id}/messages`,
     );
-    expect(messagesResponse.status).toBe(404);
+    expect(messagesResponse.status).toBe(200);
+    await expect(messagesResponse.json()).resolves.toMatchObject({
+      sessionId: session.id,
+    });
   });
 
   it('returns visible, sanitized session messages newest first', async () => {

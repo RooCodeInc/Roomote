@@ -25,6 +25,7 @@ const {
   mockResolveTelegramRuntimeCredentials,
   mockGetPrBodyAttributionLine,
   mockGetSessionForTask,
+  mockGetTaskHumanOwnerUserIds,
   mockTaskParticipantRows,
   mockTasksFindFirst,
   mockResolveLaunchTaskCommitAuthor,
@@ -49,6 +50,7 @@ const {
   mockResolveTelegramRuntimeCredentials: vi.fn(),
   mockGetPrBodyAttributionLine: vi.fn(),
   mockGetSessionForTask: vi.fn(),
+  mockGetTaskHumanOwnerUserIds: vi.fn(),
   mockTaskParticipantRows: vi.fn(),
   mockTasksFindFirst: vi.fn(),
   mockResolveLaunchTaskCommitAuthor: vi.fn(),
@@ -132,6 +134,8 @@ vi.mock('@roomote/db/server', () => ({
   getDeploymentPrAction: (...args: unknown[]) =>
     mockGetDeploymentPrAction(...args),
   getSessionForTask: (...args: unknown[]) => mockGetSessionForTask(...args),
+  getTaskHumanOwnerUserIds: (...args: unknown[]) =>
+    mockGetTaskHumanOwnerUserIds(...args),
   resolveTelegramRuntimeCredentials: (...args: unknown[]) =>
     mockResolveTelegramRuntimeCredentials(...args),
   db: {
@@ -293,6 +297,7 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
     mockGetDeploymentPrAction.mockResolvedValue('draft');
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockGetSessionForTask.mockResolvedValue(null);
+    mockGetTaskHumanOwnerUserIds.mockResolvedValue([]);
     mockTaskParticipantRows.mockResolvedValue([]);
     mockResolveGitLabToken.mockResolvedValue('gitlab-token');
     mockResolveGiteaToken.mockResolvedValue('gitea-token');
@@ -1226,6 +1231,76 @@ describe('optional targetBranch', () => {
     );
   });
 
+  it('falls back to the single durable owner when a bot-triggered task has no acting user', async () => {
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockGetTaskHumanOwnerUserIds.mockResolvedValue(['user-matt']);
+    mockResolveRunCommitAuthor
+      .mockResolvedValueOnce({
+        kind: 'roomote',
+        displayName: 'Roomote',
+        publicDisplayName: null,
+        prAssigneeLogin: null,
+      })
+      .mockResolvedValueOnce({
+        kind: 'user',
+        displayName: 'Matt Rubens',
+        publicDisplayName: '@mrubens',
+        prAssigneeLogin: 'mrubens',
+      });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: { ...makeTaskRun({ repo: 'acme/web' }), actingUserId: null },
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+      },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining('Opened on behalf of Matt Rubens.'),
+      }),
+    );
+  });
+
+  it('keeps Roomote provenance when an automation task has no durable owner', async () => {
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: { ...makeTaskRun({ repo: 'acme/web' }), actingUserId: null },
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+      },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining('Created by Roomote.'),
+      }),
+    );
+  });
+
   it('uses an explicitly selected participant when Matt initiates and Dan later comments', async () => {
     const octokit = makeOctokit({
       list: [],
@@ -1277,6 +1352,50 @@ describe('optional targetBranch', () => {
     );
     expect(octokit.rest.issues.addAssignees).toHaveBeenCalledWith(
       expect.objectContaining({ assignees: ['daniel-lxs'] }),
+    );
+  });
+
+  it('allows explicit attribution to the durable Session owner for a bot-triggered task', async () => {
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockGetTaskHumanOwnerUserIds.mockResolvedValue(['user-matt']);
+    mockResolveRunCommitAuthor
+      .mockResolvedValueOnce({
+        kind: 'roomote',
+        displayName: 'Roomote',
+        publicDisplayName: null,
+        prAssigneeLogin: null,
+      })
+      .mockResolvedValueOnce({
+        kind: 'user',
+        displayName: 'Matt Rubens',
+        publicDisplayName: '@mrubens',
+        prAssigneeLogin: 'mrubens',
+      });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: { ...makeTaskRun({ repo: 'acme/web' }), actingUserId: null },
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: attributionBody('Opened on behalf of @mrubens.'),
+        prAttribution: 'Matt Rubens',
+      },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: attributionBody('Opened on behalf of Matt Rubens.'),
+      }),
     );
   });
 

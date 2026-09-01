@@ -32,9 +32,13 @@ const mocks = vi.hoisted(() => ({
   getUnifiedSession: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
+  getPendingHumanFollowUp: vi.fn(),
+  updateParentEventWhere: vi.fn(),
+  nativeSteer: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
         agent?: string;
+        messageId?: string;
         name: string;
         args: Record<string, unknown>;
       }) => Promise<unknown>)
@@ -93,10 +97,30 @@ vi.mock('../../router', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  and: vi.fn((...values) => values),
+  asc: vi.fn((value) => value),
+  eq: vi.fn((...values) => values),
+  isNull: vi.fn((value) => value),
+  sql: vi.fn(),
+  fastAgentParentEvents: {
+    conversationId: 'conversationId',
+    createdAt: 'createdAt',
+    deliveredAt: 'deliveredAt',
+    discardedAt: 'discardedAt',
+    event: 'event',
+    id: 'id',
+  },
   getDeploymentTaskModelOptions: mocks.getTaskModelOptions,
   appendFastAgentMemory: mocks.appendMemory,
   isBrainEnabled: mocks.isBrainEnabled,
-  db: {},
+  db: {
+    query: {
+      fastAgentParentEvents: { findFirst: mocks.getPendingHumanFollowUp },
+    },
+    update: vi.fn(() => ({
+      set: vi.fn(() => ({ where: mocks.updateParentEventWhere })),
+    })),
+  },
   getSessionForFastConversation: mocks.getUnifiedSession,
   getSessionForTask: mocks.getSessionForTask,
   touchSessionActivity: mocks.touchSessionActivity,
@@ -261,9 +285,15 @@ async function invokeTool(
   name: string,
   args: Record<string, unknown>,
   agent?: string,
+  messageId?: string,
 ) {
   if (!mocks.nativeExecutor) throw new Error('Native executor is not bound.');
-  return mocks.nativeExecutor({ name, args, ...(agent ? { agent } : {}) });
+  return mocks.nativeExecutor({
+    name,
+    args,
+    ...(agent ? { agent } : {}),
+    ...(messageId ? { messageId } : {}),
+  });
 }
 
 async function invokeMcpTool(
@@ -285,6 +315,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.getUnifiedSession.mockResolvedValue(null);
     mocks.touchSessionActivity.mockResolvedValue(undefined);
     mocks.getSessionForTask.mockResolvedValue(null);
+    mocks.getPendingHumanFollowUp.mockResolvedValue(undefined);
+    mocks.updateParentEventWhere.mockResolvedValue(undefined);
+    mocks.nativeSteer.mockResolvedValue(undefined);
     mocks.getNativeRuntime.mockImplementation(async () => {
       mocks.mcpCapabilityAvailable = true;
       return {
@@ -364,6 +397,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.getUserIdentity.mockResolvedValue({
       displayName: 'Matt Rubens',
       githubLogin: 'mrubens',
+      isAdmin: true,
     });
     mocks.classifyInferenceError.mockImplementation((error: unknown) => {
       const detail = error instanceof Error ? error.message.toLowerCase() : '';
@@ -553,6 +587,687 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       sessionId: 'conversation-1',
       openCodeSessionId: 'opencode-session-1',
     });
+  });
+
+  it('injects durable human follow-ups with native steering between tool calls', async () => {
+    vi.useFakeTimers();
+    try {
+      const createdAt = new Date('2026-08-31T12:00:00.000Z');
+      const queuedFollowUp = {
+        id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+        createdAt,
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.3',
+          currentMessageId: '100.3',
+          userId: 'user-1',
+          question: 'Use the corrected requirement.',
+          senderDisplayName: 'Matt',
+          senderExternalId: 'U123',
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce(queuedFollowUp)
+        // A stale read after promptAsync succeeds must not inject the same
+        // durable event twice before deliveredAt becomes visible.
+        .mockResolvedValueOnce(queuedFollowUp)
+        .mockResolvedValue(undefined);
+      let finishNativeSteer: (() => void) | undefined;
+      mocks.nativeSteer.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishNativeSteer = resolve;
+          }),
+      );
+      let finishTool:
+        | ((value: { success: true; taskId: string }) => void)
+        | undefined;
+      const adapter = callbacks({
+        launchTask: vi.fn(
+          async () =>
+            await new Promise<{ success: true; taskId: string }>((resolve) => {
+              finishTool = resolve;
+            }),
+        ),
+      });
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          options.onModelResolved?.('openrouter/openai/gpt-5.4');
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Inspect the current state.',
+            environmentId: 'env-1',
+            model: null,
+            includeAttachments: false,
+            kickoffMessage: 'I’m checking the current state.',
+          });
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+      });
+      await vi.waitFor(() => expect(finishTool).toBeTypeOf('function'));
+      await vi.advanceTimersByTimeAsync(250);
+      expect(mocks.nativeSteer).not.toHaveBeenCalled();
+      finishTool?.({ success: true, taskId: 'task-1' });
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      expect(mocks.updateParentEventWhere).not.toHaveBeenCalled();
+
+      expect(mocks.nativeSteer).toHaveBeenCalledWith({
+        messageId: expect.stringMatching(/^msg_[a-f0-9]{26}$/u),
+        text: expect.stringContaining('Use the corrected requirement.'),
+        files: [],
+      });
+      expect(mocks.upsertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'conversation-1',
+          message: expect.objectContaining({
+            eventId: '100.3:user',
+            eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+            metadata: expect.objectContaining({
+              turnSource: 'human',
+              userId: 'user-1',
+            }),
+          }),
+        }),
+      );
+      finishNativeSteer?.();
+      await vi.waitFor(() => {
+        expect(mocks.getPendingHumanFollowUp).toHaveBeenCalledTimes(3);
+        expect(mocks.updateParentEventWhere).toHaveBeenCalledTimes(2);
+      });
+      expect(mocks.nativeSteer).toHaveBeenCalledOnce();
+
+      finishGeneration?.('Steered answer');
+      await expect(resultPromise).resolves.toBe('Steered answer');
+      expect(mocks.invalidateSession).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets a native steer close independently from the response already in progress', async () => {
+    vi.useFakeTimers();
+    try {
+      const queuedFollowUp = {
+        id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.3',
+          currentMessageId: '100.3',
+          userId: 'user-1',
+          question: 'Use the corrected closeout.',
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce(queuedFollowUp)
+        .mockResolvedValue(undefined);
+
+      let continueGeneration: (() => void) | undefined;
+      const generationPaused = new Promise<void>((resolve) => {
+        continueGeneration = resolve;
+      });
+      const originalResult = vi.fn();
+      const repeatedOriginalResult = vi.fn();
+      const adapter = callbacks();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-before-steer',
+            sessionId: 'opencode-session-1',
+            parentId: 'initial-user-message',
+            createdAtMs: 100,
+          });
+          await generationPaused;
+          originalResult(
+            await invokeTool(
+              nativeToolNames.sendChatReply,
+              {
+                purpose: 'closeout',
+                message: 'Original closeout',
+              },
+              undefined,
+              'assistant-before-steer',
+            ),
+          );
+          repeatedOriginalResult(
+            await invokeTool(
+              nativeToolNames.sendChatReply,
+              {
+                purpose: 'closeout',
+                message: 'Repeated original closeout',
+              },
+              undefined,
+              'assistant-before-steer',
+            ),
+          );
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-after-steer',
+            sessionId: 'opencode-session-1',
+            parentId: 'steered-user-message',
+            createdAtMs: 200,
+          });
+          await invokeTool(
+            nativeToolNames.sendChatReply,
+            {
+              purpose: 'closeout',
+              message: 'Corrected closeout',
+            },
+            undefined,
+            'assistant-after-steer',
+          );
+          return '';
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      continueGeneration?.();
+      await resultPromise;
+
+      expect(originalResult).toHaveBeenCalledWith({
+        success: true,
+        delivered: true,
+        closed: true,
+      });
+      expect(repeatedOriginalResult).toHaveBeenCalledWith({
+        success: false,
+        error: 'This Fast turn is closed.',
+      });
+      expect(adapter.postReply).toHaveBeenCalledTimes(2);
+      expect(adapter.postReply).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ message: 'Original closeout' }),
+      );
+      expect(adapter.postReply).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ message: 'Corrected closeout' }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores plain terminal text from an assistant superseded by a native steer', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce({
+          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+          createdAt: new Date('2026-08-31T12:00:00.000Z'),
+          parent: { sessionId: 'conversation-1' },
+          event: {
+            type: 'human_follow_up',
+            eventId: '100.3',
+            currentMessageId: '100.3',
+            userId: 'user-1',
+            question: 'Use the corrected requirement.',
+          },
+        })
+        .mockResolvedValue(undefined);
+      let finishPreSteerPrompt: (() => void) | undefined;
+      const preSteerPromptBlocked = new Promise<void>((resolve) => {
+        finishPreSteerPrompt = resolve;
+      });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-before-steer',
+            sessionId: 'opencode-session-1',
+            parentId: 'initial-user-message',
+            createdAtMs: 100,
+          });
+          await preSteerPromptBlocked;
+          await options.onMessageCompleted?.({
+            id: 'assistant-before-steer',
+            sessionId: 'opencode-session-1',
+            createdAtMs: 100,
+            completedAtMs: 200,
+          });
+          return 'Stale pre-steer answer';
+        },
+      );
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      finishPreSteerPrompt?.();
+
+      await expect(resultPromise).resolves.toBe('');
+      expect(adapter.postReply).not.toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'Stale pre-steer answer' }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('assigns the new instruction before promptAsync finishes accepting the steer', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce({
+          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+          createdAt: new Date('2026-08-31T12:00:00.000Z'),
+          parent: { sessionId: 'conversation-1' },
+          event: {
+            type: 'human_follow_up',
+            eventId: '100.3',
+            currentMessageId: '100.3',
+            userId: 'user-1',
+            question: 'Use the corrected requirement.',
+          },
+        })
+        .mockResolvedValue(undefined);
+      let startSteeredAssistant: (() => void) | undefined;
+      let finishNativeSteer: (() => void) | undefined;
+      mocks.nativeSteer.mockImplementationOnce(
+        async () =>
+          await new Promise<void>((resolve) => {
+            finishNativeSteer = resolve;
+            startSteeredAssistant?.();
+          }),
+      );
+      let finishGeneration: (() => Promise<void>) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-before-steer',
+            sessionId: 'opencode-session-1',
+            parentId: 'initial-user-message',
+            createdAtMs: 100,
+          });
+          startSteeredAssistant = () => {
+            options.onAssistantMessageStarted?.({
+              id: 'assistant-after-steer',
+              sessionId: 'opencode-session-1',
+              parentId: 'steered-user-message',
+              createdAtMs: 200,
+            });
+          };
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = async () => {
+              await options.onMessageCompleted?.({
+                id: 'assistant-after-steer',
+                sessionId: 'opencode-session-1',
+                createdAtMs: 200,
+                completedAtMs: 300,
+              });
+              resolve('Steered plain-text answer');
+            };
+          });
+        },
+      );
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(finishNativeSteer).toBeTypeOf('function'));
+      finishNativeSteer?.();
+      await vi.waitFor(() => expect(finishGeneration).toBeTypeOf('function'));
+      await finishGeneration?.();
+
+      await expect(resultPromise).resolves.toBe('Steered plain-text answer');
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: 'Steered plain-text answer',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits when a tool starts while the follow-up user event is persisting', async () => {
+    vi.useFakeTimers();
+    try {
+      const queuedFollowUp = {
+        id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.3',
+          currentMessageId: '100.3',
+          userId: 'user-1',
+          question: 'Wait for the active tool.',
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce(queuedFollowUp)
+        .mockResolvedValueOnce(queuedFollowUp)
+        .mockResolvedValue(undefined);
+
+      let notePersistenceStarted: (() => void) | undefined;
+      const persistenceStarted = new Promise<void>((resolve) => {
+        notePersistenceStarted = resolve;
+      });
+      let finishPersistence: (() => void) | undefined;
+      const persistenceBlocked = new Promise<void>((resolve) => {
+        finishPersistence = resolve;
+      });
+      mocks.upsertMessage.mockImplementation(async ({ message }) => {
+        if (message.eventId === '100.3:user') {
+          notePersistenceStarted?.();
+          await persistenceBlocked;
+        }
+        return { initialHumanTurn: false };
+      });
+
+      let startTool: (() => void) | undefined;
+      const toolStartRequested = new Promise<void>((resolve) => {
+        startTool = resolve;
+      });
+      let finishTool:
+        | ((value: { success: true; taskId: string }) => void)
+        | undefined;
+      const adapter = callbacks({
+        launchTask: vi.fn(
+          async () =>
+            await new Promise<{ success: true; taskId: string }>((resolve) => {
+              finishTool = resolve;
+            }),
+        ),
+      });
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          await toolStartRequested;
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Run the active tool.',
+            environmentId: 'env-1',
+            model: null,
+            includeAttachments: false,
+            kickoffMessage: 'Running the active tool.',
+          });
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await persistenceStarted;
+
+      startTool?.();
+      await vi.waitFor(() => expect(finishTool).toBeTypeOf('function'));
+      finishPersistence?.();
+      await vi.waitFor(() => {
+        expect(mocks.getPendingHumanFollowUp).toHaveBeenCalledOnce();
+      });
+      expect(mocks.nativeSteer).not.toHaveBeenCalled();
+
+      finishTool?.({ success: true, taskId: 'task-1' });
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      expect(mocks.nativeSteer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining('Wait for the active tool.'),
+        }),
+      );
+
+      finishGeneration?.('Steered after tool completion');
+      await expect(resultPromise).resolves.toBe(
+        'Steered after tool completion',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaves another participant follow-up queued for its own authorized turn', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getPendingHumanFollowUp.mockResolvedValueOnce({
+        id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.3',
+          currentMessageId: '100.3',
+          userId: 'different-user',
+          question: 'Use my integrations, not theirs.',
+        },
+      });
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+
+      expect(mocks.getPendingHumanFollowUp).toHaveBeenCalled();
+      expect(mocks.nativeSteer).not.toHaveBeenCalled();
+      expect(mocks.updateParentEventWhere).not.toHaveBeenCalled();
+
+      finishGeneration?.('Original participant answer');
+      await expect(resultPromise).resolves.toBe('Original participant answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('preserves explicit skill invocation markers in native follow-ups', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce({
+          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+          createdAt: new Date('2026-08-31T12:00:00.000Z'),
+          parent: { sessionId: 'conversation-1' },
+          event: {
+            type: 'human_follow_up',
+            eventId: '100.3',
+            currentMessageId: '100.3',
+            userId: 'user-1',
+            question: '$create-pr',
+            senderDisplayName: 'Matt',
+            senderExternalId: 'U123',
+          },
+        })
+        .mockResolvedValue(undefined);
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+
+      expect(mocks.nativeSteer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining('<explicit_skill_invocation'),
+        }),
+      );
+      expect(mocks.nativeSteer.mock.calls[0]?.[0]?.text).toContain(
+        '$create-pr',
+      );
+
+      finishGeneration?.('Created the pull request');
+      await expect(resultPromise).resolves.toBe('Created the pull request');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps injected follow-ups in a clean-session retry bootstrap', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce({
+          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+          createdAt: new Date('2026-08-31T12:00:00.000Z'),
+          parent: { sessionId: 'conversation-1' },
+          event: {
+            type: 'human_follow_up',
+            eventId: '100.3',
+            currentMessageId: '100.3',
+            userId: 'user-1',
+            question: 'Use the corrected requirement.',
+          },
+        })
+        .mockResolvedValue(undefined);
+      let failFirstAttempt: ((error: Error) => void) | undefined;
+      let attempt = 0;
+      mocks.generateText.mockImplementation(
+        async (params, _session, options) => {
+          attempt += 1;
+          options.onModelResolved?.('openrouter/openai/gpt-5.4');
+          await options.onSessionReady(`opencode-session-${attempt}`);
+          options.onPromptStarted?.();
+          if (attempt === 1) {
+            options.onNativeSteerReady?.(mocks.nativeSteer);
+            return await new Promise<string>((_resolve, reject) => {
+              failFirstAttempt = reject;
+            });
+          }
+          expect(params.prompt).toContain('Use the corrected requirement.');
+          return 'Recovered answer';
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      failFirstAttempt?.(new TypeError('fetch failed'));
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await expect(resultPromise).resolves.toBe('Recovered answer');
+      expect(mocks.generateText).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps injected follow-ups in a session-manager fallback rebuild', async () => {
+    vi.useFakeTimers();
+    try {
+      const { FastAgentOpenCodeSessionManager } = await vi.importActual<
+        typeof import('../fast-agent-opencode-session')
+      >('../fast-agent-opencode-session');
+      const manager = new FastAgentOpenCodeSessionManager();
+      mocks.runSession.mockImplementation((input) => manager.run(input));
+      mocks.getSession.mockResolvedValue({
+        id: 'conversation-1',
+        compatibilityMessages: [],
+        openCodeSessionId: 'missing-session',
+      });
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce({
+          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+          createdAt: new Date('2026-08-31T12:00:00.000Z'),
+          parent: { sessionId: 'conversation-1' },
+          event: {
+            type: 'human_follow_up',
+            eventId: '100.3',
+            currentMessageId: '100.3',
+            userId: 'user-1',
+            question: 'Preserve this fallback correction.',
+            images: ['data:image/png;base64,aGVsbG8='],
+          },
+        })
+        .mockResolvedValue(undefined);
+      let failHeldSession: ((error: Error) => void) | undefined;
+      let attempt = 0;
+      mocks.generateText.mockImplementation(
+        async (params, _session, options) => {
+          attempt += 1;
+          await options.onSessionReady(`opencode-session-${attempt}`);
+          options.onPromptStarted?.();
+          if (attempt === 1) {
+            options.onNativeSteerReady?.(mocks.nativeSteer);
+            return await new Promise<string>((_resolve, reject) => {
+              failHeldSession = reject;
+            });
+          }
+          expect(params.prompt).toContain('Preserve this fallback correction.');
+          expect(params.files).toEqual([
+            {
+              mime: 'image/png',
+              url: 'data:image/png;base64,aGVsbG8=',
+            },
+          ]);
+          return 'Fallback recovered';
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      const missingSession = new Error('Session not found');
+      missingSession.name = 'NonTaskOpenCodeSessionNotFoundError';
+      failHeldSession?.(missingSession);
+
+      await expect(resultPromise).resolves.toBe('Fallback recovered');
+      expect(mocks.generateText).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('starts and settles surface activity around a successful turn', async () => {
@@ -757,7 +1472,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ({ prompt, bootstrapPrompt, execute }) =>
           execute(
             hasNativeSession ? { id: 'opencode-session-1' } : {},
-            hasNativeSession ? prompt : bootstrapPrompt,
+            hasNativeSession
+              ? prompt
+              : typeof bootstrapPrompt === 'function'
+                ? bootstrapPrompt()
+                : bootstrapPrompt,
             { path, validateSession: path === 'cold_resume' },
           ),
       );
@@ -911,10 +1630,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       openCodeSessionId: null,
     });
     mocks.runSession.mockImplementationOnce(({ bootstrapPrompt, execute }) =>
-      execute({}, bootstrapPrompt, {
-        path: 'cold_rebuild',
-        validateSession: false,
-      }),
+      execute(
+        {},
+        typeof bootstrapPrompt === 'function'
+          ? bootstrapPrompt()
+          : bootstrapPrompt,
+        {
+          path: 'cold_rebuild',
+          validateSession: false,
+        },
+      ),
     );
 
     await answerFastAgentQuestion({
@@ -969,10 +1694,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       openCodeSessionId: null,
     });
     mocks.runSession.mockImplementationOnce(({ bootstrapPrompt, execute }) =>
-      execute({}, bootstrapPrompt, {
-        path: 'cold_rebuild',
-        validateSession: false,
-      }),
+      execute(
+        {},
+        typeof bootstrapPrompt === 'function'
+          ? bootstrapPrompt()
+          : bootstrapPrompt,
+        {
+          path: 'cold_rebuild',
+          validateSession: false,
+        },
+      ),
     );
 
     await answerFastAgentQuestion({

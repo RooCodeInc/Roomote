@@ -26,10 +26,11 @@ import {
   withThreadReplyFooterLock,
 } from '@roomote/communication';
 import {
+  admitFastAgentHumanFollowUp,
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
 } from '@roomote/sdk/server';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, type TaskInitiator } from '@roomote/types';
 
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
 import {
@@ -99,6 +100,10 @@ export async function processDiscordFastAgentMessage(
     interaction?: DiscordInteractionReplyContext;
     activeTasks?: { taskId: string }[];
     directedAtRoomote?: boolean;
+    /** Attribution for tasks Fast delegates from this turn; automation-identity
+     * turns pass their automation initiator so delegated work keeps automation
+     * provenance instead of appearing installer-initiated. */
+    delegatedTaskInitiator?: TaskInitiator;
     onAccepted?: (abort: () => Promise<void>) => void;
     onRejected?: () => void;
   } & DiscordFastAgentSource,
@@ -150,14 +155,10 @@ export async function processDiscordFastAgentMessage(
         : {}),
     },
   };
-  const releaseFastAgentLock = await acquireFastAgentTurnLock({ conversation });
-  if (!releaseFastAgentLock) {
-    input.onRejected?.();
-    console.error(
-      `[Discord] Fast turn lock did not become available for ${conversation.workspaceId}:${conversation.conversationId}`,
-    );
-    return false;
-  }
+  let releaseFastAgentLock = await acquireFastAgentTurnLock({
+    conversation,
+    maxWaitMs: 0,
+  });
 
   try {
     const history =
@@ -176,11 +177,38 @@ export async function processDiscordFastAgentMessage(
       userId: input.senderUserId,
       conversation,
     });
+    if (!releaseFastAgentLock) {
+      const admission = await admitFastAgentHumanFollowUp({
+        parent: { sessionId: session.id, conversation },
+        event: {
+          type: 'human_follow_up',
+          eventId,
+          currentMessageId: anchorMessageId ?? eventId,
+          userId: input.senderUserId,
+          question: input.question,
+          senderDisplayName:
+            input.interaction?.interaction.member?.nick ??
+            input.sender.global_name ??
+            input.sender.username,
+          senderExternalId: input.sender.id,
+        },
+      });
+      if (admission.kind !== 'turn') {
+        input.onAccepted?.(admission.abort);
+        return true;
+      }
+      releaseFastAgentLock = admission.turnLock;
+    }
+    if (!releaseFastAgentLock) {
+      input.onRejected?.();
+      return false;
+    }
+    const activeTurnLock = releaseFastAgentLock;
     const footerContext = await resolveFastSessionReplyFooterContext({
       sessionId: session.id,
     });
     input.onAccepted?.(() =>
-      releaseFastAgentLock.abort(
+      activeTurnLock.abort(
         new Error('Fast suggestion launch settlement failed.'),
       ),
     );
@@ -250,7 +278,7 @@ export async function processDiscordFastAgentMessage(
       apiBaseUrl,
       conversation,
       currentMessageId: anchorMessageId ?? input.interaction?.interaction.id,
-      signal: releaseFastAgentLock.signal,
+      signal: activeTurnLock.signal,
       senderDisplayName:
         input.interaction?.interaction.member?.nick ??
         input.sender.global_name ??
@@ -301,6 +329,9 @@ export async function processDiscordFastAgentMessage(
             applicationId: input.applicationId,
             requesterDiscordUserId: input.sender.id,
             launchOwnerUserId: input.senderUserId,
+            ...(input.delegatedTaskInitiator
+              ? { initiator: input.delegatedTaskInitiator }
+              : {}),
             queuedMessage: {
               provider: 'discord',
               text: prompt,
@@ -437,7 +468,7 @@ export async function processDiscordFastAgentMessage(
       await postFastReplyWithFooter(response);
     }
   } finally {
-    await releaseFastAgentLock().catch(() => {});
+    await releaseFastAgentLock?.().catch(() => {});
   }
   return true;
 }

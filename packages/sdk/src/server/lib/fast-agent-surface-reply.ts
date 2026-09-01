@@ -9,14 +9,7 @@ import {
   type FastAgentReactionExternalInput,
   type FastAgentTurnAdapter,
 } from '@roomote/cloud-agents/server';
-import {
-  and,
-  db,
-  eq,
-  fastAgentMessages,
-  slackInstallations,
-  sql,
-} from '@roomote/db/server';
+import { and, db, eq, slackInstallations } from '@roomote/db/server';
 import {
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
@@ -43,6 +36,7 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import { findTeamsConversationRoute } from '../automations/destination';
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
+import { admitFastAgentHumanFollowUp } from './fast-agent-human-follow-up';
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
@@ -127,27 +121,17 @@ type FastAgentSurfaceReplyParams = {
   externalInput?: FastAgentReactionExternalInput;
 };
 
+// Sessions follow the same rules as tasks: every authenticated user of the
+// deployment can read and reply to every conversation, so access reduces to
+// the conversation existing. Replies stay attributed to the sending user.
 export async function canUserAccessFastAgentSession(params: {
   sessionId: string;
   userId: string;
 }): Promise<boolean> {
-  const [session] = await db
-    .select({ id: fastAgentMessages.conversationId })
-    .from(fastAgentMessages)
-    .where(
-      and(
-        eq(fastAgentMessages.conversationId, params.sessionId),
-        sql`${fastAgentMessages.metadata} ->> 'userId' = ${params.userId}`,
-      ),
-    )
-    .limit(1);
-
-  if (session) return true;
-
   const conversation = await fastAgentConversationRepository.findById({
     id: params.sessionId,
   });
-  return conversation?.userId === params.userId;
+  return conversation !== null;
 }
 
 /**
@@ -533,22 +517,57 @@ export async function continueFastAgentSurfaceReply(
     return false;
   }
 
-  return runFastAgentSurfaceReply({ ...params, delivery });
+  const admission = await admitFastAgentSurfaceHumanFollowUp(params, delivery);
+  if (admission && admission.kind !== 'turn') return true;
+
+  return runFastAgentSurfaceReply({ ...params, delivery, admission });
+}
+
+type FastAgentSurfaceHumanFollowUpAdmission = Awaited<
+  ReturnType<typeof admitFastAgentHumanFollowUp>
+> | null;
+
+async function admitFastAgentSurfaceHumanFollowUp(
+  params: FastAgentSurfaceReplyParams,
+  delivery: FastAgentSurfaceReplyDelivery,
+  forceQueue = false,
+): Promise<FastAgentSurfaceHumanFollowUpAdmission> {
+  if (params.externalInput) return null;
+
+  return admitFastAgentHumanFollowUp({
+    parent: {
+      sessionId: params.sessionId,
+      conversation: delivery.conversation,
+    },
+    event: {
+      type: 'human_follow_up',
+      eventId: params.currentMessageId,
+      currentMessageId: params.currentMessageId,
+      userId: params.userId,
+      question: params.question,
+      ...(params.images?.length ? { images: params.images } : {}),
+      ...(params.senderDisplayName
+        ? { senderDisplayName: params.senderDisplayName }
+        : {}),
+    },
+    forceQueue,
+  });
 }
 
 async function runFastAgentSurfaceReply(
   params: FastAgentSurfaceReplyParams & {
     delivery: FastAgentSurfaceReplyDelivery;
+    admission: FastAgentSurfaceHumanFollowUpAdmission;
   },
 ): Promise<boolean> {
-  const { delivery } = params;
+  const { admission, delivery } = params;
 
-  const release = await acquireFastAgentTurnLock({
-    conversation: delivery.conversation,
-  });
-  if (!release) {
-    return false;
-  }
+  const release =
+    (admission?.kind === 'turn' ? admission.turnLock : null) ??
+    (await acquireFastAgentTurnLock({
+      conversation: delivery.conversation,
+    }));
+  if (!release) return false;
 
   const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
   try {
@@ -596,8 +615,17 @@ export async function queueFastAgentSurfaceReply(
   const delivery = await buildFastAgentSurfaceReplyDelivery(params);
   if (!delivery) return false;
 
-  void runFastAgentSurfaceReply({ ...params, delivery }).catch((error) => {
-    console.error('[Fast Agent] Queued surface reply failed:', error);
-  });
+  const admission = await admitFastAgentSurfaceHumanFollowUp(
+    params,
+    delivery,
+    true,
+  );
+  if (admission?.kind === 'queued') return true;
+
+  void runFastAgentSurfaceReply({ ...params, delivery, admission }).catch(
+    (error) => {
+      console.error('[Fast Agent] Queued surface reply failed:', error);
+    },
+  );
   return true;
 }

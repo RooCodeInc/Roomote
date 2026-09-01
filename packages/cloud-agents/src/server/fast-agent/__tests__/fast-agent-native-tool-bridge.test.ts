@@ -164,6 +164,7 @@ describe('Fast native OpenCode tool bridge', () => {
       ]),
     );
     expect(bridgeSource).toContain('context.sessionID');
+    expect(bridgeSource).toContain('messageID: context.messageID');
     expect(bridgeSource).toContain('agent: context.agent');
     expect(bridgeSource).toContain('metadata: payload.metadata ?? {}');
     expect(spillReadSource).toContain('never pass filesystem paths');
@@ -999,8 +1000,9 @@ describe('Fast native OpenCode tool bridge', () => {
 
   it('routes raw JSON arguments and results by OpenCode session id', async () => {
     const runtime = await getFastAgentNativeToolRuntime('native-route', []);
-    const executor = vi.fn(async ({ agent, name, args }) => ({
+    const executor = vi.fn(async ({ agent, messageId, name, args }) => ({
       agent,
+      messageId,
       name,
       echoed: args,
       nestedResult: { values: [1, 2, 3] },
@@ -1021,6 +1023,7 @@ describe('Fast native OpenCode tool bridge', () => {
         },
         body: JSON.stringify({
           sessionID: 'opencode-session-1',
+          messageID: 'assistant-message-1',
           agent: 'judge',
           tool: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
           args: { reason: 'test' },
@@ -1034,18 +1037,23 @@ describe('Fast native OpenCode tool bridge', () => {
         metadata: {
           roomoteResult: {
             agent: 'judge',
+            messageId: 'assistant-message-1',
             name: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
           },
         },
       });
       expect(JSON.parse(payload.output)).toEqual({
         agent: 'judge',
+        messageId: 'assistant-message-1',
         name: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
         echoed: { reason: 'test' },
         nestedResult: { values: [1, 2, 3] },
       });
       expect(executor).toHaveBeenCalledWith(
-        expect.objectContaining({ agent: 'judge' }),
+        expect.objectContaining({
+          agent: 'judge',
+          messageId: 'assistant-message-1',
+        }),
       );
     } finally {
       unbind();

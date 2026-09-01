@@ -39,6 +39,8 @@ export function createFastAgentTaskLauncher(
     buildTask: (input: {
       prompt: string;
       environmentId: string | null;
+      branch?: string;
+      launchIdempotencyKey?: string;
       model?: string | null;
       parentSessionId: string;
     }) => StandardTask | Promise<StandardTask>;
@@ -48,6 +50,8 @@ export function createFastAgentTaskLauncher(
     prompt,
     images,
     environmentId,
+    branch,
+    launchIdempotencyKey,
     model,
     parentSessionId,
     postKickoff,
@@ -55,6 +59,8 @@ export function createFastAgentTaskLauncher(
     const builtTask = await params.buildTask({
       prompt,
       environmentId,
+      branch,
+      launchIdempotencyKey,
       model,
       parentSessionId,
     });
@@ -131,6 +137,10 @@ export type FastAgentSlackTaskLauncherParams = {
   channelId: string;
   threadTs: string;
   messageId?: string;
+  /** Attribution override for delegated tasks; automation-identity Fast
+   * turns pass their automation initiator so delegated work is not
+   * persisted as user-initiated by the launch owner. */
+  initiator?: TaskInitiator;
   /** Opt the child into the native Slack task card in the parent thread. */
   liveTaskStream?: boolean;
 } & FastAgentTaskLaunchHooks;
@@ -149,6 +159,7 @@ export function createFastAgentSlackTaskLauncher(
   return createFastAgentTaskLauncher({
     userId: params.userId,
     surface: 'slack',
+    ...(params.initiator ? { initiator: params.initiator } : {}),
     taskUrlCampaign: 'fast-delegation',
     afterKickoff: params.afterKickoff,
     onQueueFailure: params.onQueueFailure,
@@ -206,7 +217,14 @@ export function createFastAgentWebTaskLauncher(params: {
     surface: 'web',
     taskUrlCampaign: 'fast-delegation',
     rendersTaskLink: true,
-    buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
+    buildTask: ({
+      prompt,
+      environmentId,
+      branch,
+      launchIdempotencyKey,
+      model,
+      parentSessionId,
+    }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
         repo: ALL_REPOSITORIES,
@@ -218,6 +236,8 @@ export function createFastAgentWebTaskLauncher(params: {
         ...(environmentId && environmentId !== ALL_REPOSITORIES
           ? { environmentId }
           : {}),
+        ...(branch ? { branch } : {}),
+        ...(launchIdempotencyKey ? { launchIdempotencyKey } : {}),
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),

@@ -6,18 +6,18 @@ import {
 } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 
-const { createTaskRunState, queryOptionsMock } = vi.hoisted(() => ({
-  createTaskRunState: {
+const { startFastSessionState, queryOptionsMock } = vi.hoisted(() => ({
+  startFastSessionState: {
     mutate: vi.fn(),
     options: undefined as
       | {
           onSuccess: (
             result: {
-              success: boolean;
-              taskId?: string;
-              error?: string;
+              sessionId: string;
             },
-            variables: { sourceArtifactPath?: string },
+            variables: {
+              artifactBuild?: { sourceArtifactPath?: string };
+            },
           ) => void;
         }
       | undefined,
@@ -95,6 +95,10 @@ vi.mock('@/lib/utils', () => ({
     classes.filter(Boolean).join(' '),
 }));
 
+vi.mock('@/lib/client-uuid', () => ({
+  generateClientUuid: () => '11111111-1111-4111-8111-111111111111',
+}));
+
 vi.mock('@/hooks/tasks', () => ({
   useTask: () => ({ data: null }),
 }));
@@ -113,11 +117,11 @@ vi.mock('@/hooks/useUser', () => ({
 }));
 
 vi.mock('@/hooks/task-runs', () => ({
-  useCreateStandardTaskRun: (options: typeof createTaskRunState.options) => {
-    createTaskRunState.options = options;
+  useStartFastSession: (options: typeof startFastSessionState.options) => {
+    startFastSessionState.options = options;
     return {
       isPending: false,
-      mutate: createTaskRunState.mutate,
+      mutate: startFastSessionState.mutate,
     };
   },
 }));
@@ -198,6 +202,7 @@ vi.mock('./BuildArtifactConfirmDialog', () => ({
     open: boolean;
     onConfirm: (values: {
       repo: string;
+      branch?: string;
       environmentId: string;
       modelId: string;
     }) => void;
@@ -207,6 +212,7 @@ vi.mock('./BuildArtifactConfirmDialog', () => ({
         onClick={() =>
           onConfirm({
             repo: 'org/repo',
+            branch: 'feature/source-branch',
             environmentId: 'environment-1',
             modelId: 'model-1',
           })
@@ -444,7 +450,7 @@ describe('ArtifactViewerContent', () => {
     expect(screen.queryByText('Build this')).not.toBeInTheDocument();
   });
 
-  it('shows build progress and links to the new task', () => {
+  it('starts an attributed Session and links to it', () => {
     render(
       <ArtifactViewerContent
         taskId="task-1"
@@ -467,16 +473,33 @@ describe('ArtifactViewerContent', () => {
     fireEvent.click(screen.getByText('Confirm build'));
 
     expect(toast.info).toHaveBeenCalledWith(
-      'Starting new task to build plans/widget-plan.md',
+      'Starting new Session to build plans/widget-plan.md',
     );
 
-    createTaskRunState.options?.onSuccess(
+    expect(startFastSessionState.mutate).toHaveBeenCalledWith({
+      text: expect.stringMatching(
+        /environment environment-1 using model model-1/,
+      ),
+      artifactBuild: {
+        launchId: '11111111-1111-4111-8111-111111111111',
+        environmentId: 'environment-1',
+        branch: 'feature/source-branch',
+        taskModel: 'model-1',
+        sourceTaskId: 'task-1',
+        sourceArtifactId: 'artifact-2',
+        sourceArtifactPath: 'plans/widget-plan.md',
+        sourceArtifactVersion: 1,
+      },
+    });
+
+    startFastSessionState.options?.onSuccess(
       {
-        success: true,
-        taskId: 'new-task-id',
+        sessionId: 'new-session-id',
       },
       {
-        sourceArtifactPath: 'plans/widget-plan.md',
+        artifactBuild: {
+          sourceArtifactPath: 'plans/widget-plan.md',
+        },
       },
     );
 
@@ -488,10 +511,10 @@ describe('ArtifactViewerContent', () => {
     const successToastOptions = vi.mocked(toast.success).mock.calls[0]?.[1];
     render(successToastOptions?.action as ReactElement);
 
-    const viewTaskLink = screen.getByRole('link', { name: 'View task' });
-    expect(viewTaskLink).toHaveAttribute('href', '/task/new-task-id');
-    expect(viewTaskLink).toHaveAttribute('data-size', 'sm');
-    expect(viewTaskLink).toHaveAttribute('data-variant', 'default');
+    const viewSessionLink = screen.getByRole('link', { name: 'View Session' });
+    expect(viewSessionLink).toHaveAttribute('href', '/sessions/new-session-id');
+    expect(viewSessionLink).toHaveAttribute('data-size', 'sm');
+    expect(viewSessionLink).toHaveAttribute('data-variant', 'default');
   });
 
   describe('buildArtifactPlanDescription', () => {
@@ -500,6 +523,8 @@ describe('ArtifactViewerContent', () => {
         artifactPath: 'plans/widget.md',
         artifactVersion: 2,
         artifactContent: '# Widget plan\n\nDo the thing.',
+        environmentId: 'environment-1',
+        modelId: 'model-1',
       });
 
       expect(description).toContain('Build the plan from plans/widget.md (v2)');
@@ -511,6 +536,8 @@ describe('ArtifactViewerContent', () => {
         artifactPath: 'plans/widget.md',
         artifactVersion: 2,
         artifactContent: '# Widget plan',
+        environmentId: 'environment-1',
+        modelId: 'model-1',
       });
 
       // The plan content is embedded directly so the build is deterministic;

@@ -9,14 +9,18 @@ const mocks = vi.hoisted(() => ({
   updateOfferStatus: vi.fn(),
   buildReplyDelivery: vi.fn(),
   createWebTaskLauncher: vi.fn(),
+  launchTask: vi.fn(),
+  notifyArtifactBuild: vi.fn(),
   getOrCreateSession: vi.fn(),
   getUnifiedSession: vi.fn(),
+  isNull: vi.fn(),
   getFastSessionTasks: vi.fn(),
   currentEpochSeconds: vi.fn(),
   dbUpdate: vi.fn(),
   dbSet: vi.fn(),
   dbWhere: vi.fn(),
   dbSelect: vi.fn(),
+  dbInnerJoin: vi.fn(),
   dbSelectLimit: vi.fn(),
 }));
 
@@ -40,9 +44,13 @@ vi.mock('@roomote/db/server', () => ({
   retireCanonicalPrReviewActionsForDestinationKey: mocks.retireReviewActions,
   and: vi.fn(),
   eq: vi.fn(),
+  isNull: mocks.isNull,
+  sql: vi.fn(),
   fastAgentConversations: {},
   fastAgentMessages: {},
   sessions: {},
+  sessionTasks: {},
+  taskRuns: {},
   getSessionForFastConversation: mocks.getUnifiedSession,
 }));
 
@@ -62,6 +70,10 @@ vi.mock('@/lib/server/artifact-signature', () => ({
 
 vi.mock('@/lib/server/pr-review-actions', () => ({
   handleWebPrReviewAction: mocks.handleReviewAction,
+}));
+
+vi.mock('../task-runs', () => ({
+  notifySourceTaskArtifactBuild: mocks.notifyArtifactBuild,
 }));
 
 import {
@@ -205,12 +217,23 @@ describe('scheduleWebFastAgentTurn', () => {
 describe('startFastSessionCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.createWebTaskLauncher.mockReturnValue(vi.fn());
+    mocks.createWebTaskLauncher.mockReturnValue(mocks.launchTask);
+    mocks.launchTask.mockResolvedValue({ success: true, taskId: 'task-1' });
     mocks.getUnifiedSession.mockResolvedValue({ id: 'unified-session-1' });
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'fast-session-1',
       created: true,
     });
+    mocks.dbSelect.mockReturnValue({
+      from: () => ({
+        where: () => ({ limit: mocks.dbSelectLimit }),
+        innerJoin: mocks.dbInnerJoin,
+      }),
+    });
+    mocks.dbInnerJoin.mockReturnValue({
+      where: () => ({ limit: mocks.dbSelectLimit }),
+    });
+    mocks.dbSelectLimit.mockResolvedValue([]);
   });
 
   it('recovers an idempotent Session without scheduling its first turn twice', async () => {
@@ -227,6 +250,7 @@ describe('startFastSessionCommand', () => {
       id: 'fast-session-1',
       created: false,
     });
+    mocks.dbSelectLimit.mockResolvedValueOnce([{ id: 'message-1' }]);
     await expect(startFastSessionCommand(auth, input)).resolves.toEqual({
       sessionId: 'unified-session-1',
       fastConversationId: 'fast-session-1',
@@ -242,6 +266,184 @@ describe('startFastSessionCommand', () => {
       },
     });
     expect(mocks.after).toHaveBeenCalledOnce();
+  });
+
+  it('recovers a deterministic Session kickoff lost after creation', async () => {
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'fast-session-1',
+      created: false,
+    });
+    mocks.dbSelectLimit.mockResolvedValue([]);
+
+    await startFastSessionCommand(auth, {
+      text: 'Build the plan',
+      conversationId: '11111111-1111-4111-8111-111111111111',
+    });
+
+    expect(mocks.after).toHaveBeenCalledOnce();
+  });
+
+  it('attributes the delegated artifact build task to its source artifact', async () => {
+    let scheduled: (() => Promise<void>) | undefined;
+    mocks.after.mockImplementation((callback) => {
+      scheduled = callback;
+    });
+    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: new AbortController().signal,
+    });
+    mocks.acquireTurnLock.mockResolvedValue(release);
+
+    await startFastSessionCommand(auth, {
+      text: 'Build the plan',
+      artifactBuild: {
+        launchId: '11111111-1111-4111-8111-111111111111',
+        environmentId: '33333333-3333-4333-8333-333333333333',
+        branch: 'feature/source-branch',
+        taskModel: 'model-1',
+        sourceTaskId: 'source-task-1',
+        sourceArtifactId: '22222222-2222-4222-8222-222222222222',
+        sourceArtifactPath: 'plans/widget.md',
+        sourceArtifactVersion: 3,
+      },
+    });
+    expect(mocks.getOrCreateSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'artifact-build:11111111-1111-4111-8111-111111111111',
+      },
+    });
+    await scheduled?.();
+
+    const turnInput = mocks.answerQuestion.mock.calls[0]?.[0];
+    await turnInput.adapter.launchTask({
+      prompt: 'Build the plan',
+      environmentId: 'different-environment',
+      model: 'different-model',
+      parentSessionId: 'unified-session-1',
+      postKickoff: vi.fn(),
+    });
+
+    expect(mocks.launchTask).toHaveBeenCalledWith({
+      prompt: 'Build the plan',
+      environmentId: '33333333-3333-4333-8333-333333333333',
+      branch: 'feature/source-branch',
+      launchIdempotencyKey:
+        'artifact-build:11111111-1111-4111-8111-111111111111',
+      model: 'model-1',
+      parentSessionId: 'unified-session-1',
+      postKickoff: expect.any(Function),
+    });
+
+    expect(mocks.notifyArtifactBuild).toHaveBeenCalledWith({
+      auth,
+      sourceTaskId: 'source-task-1',
+      sourceArtifactId: '22222222-2222-4222-8222-222222222222',
+      sourceArtifactPath: 'plans/widget.md',
+      sourceArtifactVersion: 3,
+      newTaskId: 'task-1',
+    });
+  });
+
+  it('recovers an artifact kickoff without a non-canceled matching task', async () => {
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'fast-session-1',
+      created: false,
+    });
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([{ id: 'message-1' }])
+      .mockResolvedValueOnce([]);
+
+    let scheduled: (() => Promise<void>) | undefined;
+    mocks.after.mockImplementation((callback) => {
+      scheduled = callback;
+    });
+    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: new AbortController().signal,
+    });
+    mocks.acquireTurnLock.mockResolvedValue(release);
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([{ id: 'message-1' }])
+      .mockResolvedValueOnce([]);
+
+    await startFastSessionCommand(auth, {
+      text: 'Build the plan',
+      artifactBuild: {
+        launchId: '11111111-1111-4111-8111-111111111111',
+        environmentId: '33333333-3333-4333-8333-333333333333',
+        taskModel: 'model-1',
+        sourceTaskId: 'source-task-1',
+        sourceArtifactId: '22222222-2222-4222-8222-222222222222',
+        sourceArtifactPath: 'plans/widget.md',
+        sourceArtifactVersion: 3,
+      },
+    });
+    await scheduled?.();
+
+    expect(mocks.answerQuestion).toHaveBeenCalledOnce();
+    expect(mocks.isNull).toHaveBeenCalled();
+  });
+
+  it('recovers an artifact kickoff before a unified Session exists', async () => {
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'fast-session-1',
+      created: false,
+    });
+    mocks.getUnifiedSession.mockResolvedValue(null);
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([{ id: 'message-1' }])
+      .mockResolvedValueOnce([{ id: 'message-1' }]);
+
+    let scheduled: (() => Promise<void>) | undefined;
+    mocks.after.mockImplementation((callback) => {
+      scheduled = callback;
+    });
+    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: new AbortController().signal,
+    });
+    mocks.acquireTurnLock.mockResolvedValue(release);
+
+    await startFastSessionCommand(auth, {
+      text: 'Build the plan',
+      artifactBuild: {
+        launchId: '11111111-1111-4111-8111-111111111111',
+        environmentId: '33333333-3333-4333-8333-333333333333',
+        taskModel: 'model-1',
+        sourceTaskId: 'source-task-1',
+        sourceArtifactId: '22222222-2222-4222-8222-222222222222',
+        sourceArtifactPath: 'plans/widget.md',
+        sourceArtifactVersion: 3,
+      },
+    });
+    await scheduled?.();
+
+    expect(mocks.answerQuestion).toHaveBeenCalledOnce();
+  });
+
+  it('does not retry an artifact kickoff after its task is attached', async () => {
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'fast-session-1',
+      created: false,
+    });
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([{ id: 'message-1' }])
+      .mockResolvedValueOnce([{ taskId: 'task-1' }]);
+
+    await startFastSessionCommand(auth, {
+      text: 'Build the plan',
+      artifactBuild: {
+        launchId: '11111111-1111-4111-8111-111111111111',
+        environmentId: '33333333-3333-4333-8333-333333333333',
+        taskModel: 'model-1',
+        sourceTaskId: 'source-task-1',
+        sourceArtifactId: '22222222-2222-4222-8222-222222222222',
+        sourceArtifactPath: 'plans/widget.md',
+        sourceArtifactVersion: 3,
+      },
+    });
+
+    expect(mocks.after).not.toHaveBeenCalled();
   });
 });
 

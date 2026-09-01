@@ -37,6 +37,7 @@ import {
   Button,
   CopyIconButton,
   Calendar,
+  LocalDateTime,
   DollarSign,
   Globe,
   Slack,
@@ -93,17 +94,6 @@ const SANDBOX_PROVIDER_ICONS = {
   azure: CloudIcon,
   roomote: CloudIcon,
 } satisfies Record<ComputeProvider, typeof CloudIcon>;
-
-function formatStartedAt(startedAt: Date | null): string {
-  if (!startedAt) {
-    return 'Not started yet';
-  }
-
-  return startedAt.toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  });
-}
 
 type StartedFromBrandIcon =
   | 'slack'
@@ -477,9 +467,11 @@ export function TaskInfoPanel({
         <SandboxInfoRow label="Started At">
           <span className="inline-flex items-center gap-1.5">
             <Calendar className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate">
-              {formatStartedAt(taskRun.startedAt)}
-            </span>
+            {taskRun.startedAt ? (
+              <LocalDateTime date={taskRun.startedAt} className="truncate" />
+            ) : (
+              <span className="truncate">Not started yet</span>
+            )}
           </span>
         </SandboxInfoRow>
 

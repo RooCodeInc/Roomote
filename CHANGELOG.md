@@ -2,6 +2,46 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.0.2 (2026-09-01)
+
+Roomote 1.0.2 makes Fast follow-ups reliable and steerable during active work, moves artifact builds into Sessions, and strengthens conversational and unattended automations.
+
+### Highlights
+
+- Send follow-ups during active Fast responses without losing messages, with same-person corrections steering current work between completed tool calls.
+- Create recurring automations from Fast conversations, and let unattended runs launch follow-on Sessions and coding tasks with trusted owner context.
+- Build Markdown plans inside Sessions while preserving the selected environment, branch, model, and plan context.
+
+### Patch changes
+
+- Let unattended automation runs use their trusted owner context to start follow-on Sessions and coding tasks and attribute resulting pull requests, while ownerless runs remain restricted.
+- Let deployment admins turn repeatable Fast work into recurring automations through conversation, with schedule confirmation, duplicate checks, and an optional test run after creation.
+- Keep human follow-ups sent during an active Fast response durable across web and supported chat providers, so accepted messages run in order under the correct participant instead of disappearing.
+- Let same-person follow-ups steer active Fast work between completed tool calls instead of waiting for the current response to finish, while preserving safe queued turns for other participants.
+- Reduce noise in Sessions list and board views by removing active spinners while keeping needs-input and blocked badges visible.
+- Start Markdown artifact builds inside a Session while preserving the selected environment, branch, model, and plan context, so retries recover the same delegated task instead of creating a standalone Task.
+
+## 1.0.1 (2026-09-01)
+
+Roomote 1.0.1 improves Session access and task navigation, brings automated Slack and Discord entries into Fast, and hardens Fast recovery, model defaults, and pull-request review follow-through.
+
+### Highlights
+
+- Share Session links across the deployment, see attached work in task-only Sessions, and keep task timelines consistently ordered.
+- Route eligible Slack and Discord automation feeds through Fast, and let authorized Slack Fast sessions discover channels and post standalone updates.
+- Open direct environment launches in their task workspace while keeping Fast retries, model defaults, and pull-request auto-resolve behavior reliable.
+
+### Patch changes
+
+- Route eligible Slack and Discord messages from bots, webhooks, and automated feeds through Fast first, while retaining direct task launch as a fallback so automated work is not dropped.
+- Open the task workspace immediately after a user selects an environment and launches work from the web, instead of routing them through the owning Session first.
+- Show and honor the deployment's Fast orchestration model in the new-Session picker instead of silently persisting the coding model default as a Session override.
+- Recover Fast Sessions whose owner disappears during a quiet provider retry, preserving the silent short-retry experience while ensuring abandoned turns settle to a visible interruption instead of remaining stuck.
+- Give Slack-originated Fast sessions authorized channel discovery and standalone posting while keeping reactions safely scoped to the current inbound message and honoring deployment-disabled tools.
+- Keep pull-request auto-resolve enabled through temporary task snapshot gaps so later review and CI cycles retry automatic dispatch instead of showing duplicate review prompts.
+- Make Sessions reliable and shareable across deployments: any signed-in user with the link can view and contribute like they can with tasks, task-only Sessions show their attached work, and concurrently attached tasks stay consistently ordered.
+- Render Session and task start times in each viewer's local format without triggering hydration errors when the browser and server use different locales or time zones.
+
 ## 1.0.0 (2026-08-30)
 
 Roomote 1.0 makes Fast the default entry point for conversations, enables Memory by default on new hosted deployments, and completes the Session-centered automation, analytics, and artifact experience.

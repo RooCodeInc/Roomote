@@ -52,6 +52,7 @@ import {
   Info,
   LayoutGrid,
   Loader2Icon,
+  LocalDateTime,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -613,12 +614,7 @@ function SessionInfoPanel({
           <SandboxInfoRow label="Started At">
             <span className="inline-flex items-center gap-1.5">
               <Calendar className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate">
-                {session.createdAt.toLocaleString(undefined, {
-                  dateStyle: 'medium',
-                  timeStyle: 'short',
-                })}
-              </span>
+              <LocalDateTime date={session.createdAt} className="truncate" />
             </span>
           </SandboxInfoRow>
           <SandboxInfoRow label="Started From">

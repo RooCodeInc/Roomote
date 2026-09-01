@@ -94,6 +94,7 @@ import { attachTelegramMediaToQueuedMessage } from './attachments.js';
 import {
   claimTelegramLinkNudge,
   claimTelegramUpdate,
+  releaseTelegramUpdateClaim,
   rememberTelegramImplicitTopic,
   verifyTelegramWebhookSecret,
 } from './webhook-gate.js';
@@ -587,10 +588,6 @@ telegram.post('/', async (c) => {
     if (!question) {
       return c.json({ ok: true, queued: false, reason: 'fast_message_empty' });
     }
-    await ackTelegramMessageBestEffort({
-      chatId: metadata.communicationChannelId,
-      messageId: metadata.communicationMessageId,
-    });
     const senderDisplayName =
       [message.from?.first_name, message.from?.last_name]
         .filter(Boolean)
@@ -598,28 +595,34 @@ telegram.post('/', async (c) => {
         .trim() ||
       message.from?.username?.trim() ||
       null;
-    void continueFastAgentSurfaceReply({
-      sessionId: fastSession.id,
-      userId: senderUserId,
-      senderDisplayName,
-      question,
-      currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
-      ...(fastMessage.images ? { images: fastMessage.images } : {}),
-    })
-      .then((continued) => {
-        if (!continued) {
-          apiLogger.warn(
-            `[telegram] Fast session ${fastSession.id} could not resolve an active delivery route`,
-          );
-        }
-      })
-      .catch((error) => {
-        apiLogger.error(
-          `[telegram] Fast session ${fastSession.id} continuation failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
+    let continued: boolean;
+    try {
+      continued = await queueFastAgentSurfaceReply({
+        sessionId: fastSession.id,
+        userId: senderUserId,
+        senderDisplayName,
+        question,
+        currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
+        ...(fastMessage.images ? { images: fastMessage.images } : {}),
       });
+    } catch (error) {
+      await releaseTelegramUpdateClaim(update.update_id).catch(() => {});
+      throw error;
+    }
+    if (!continued) {
+      apiLogger.warn(
+        `[telegram] Fast session ${fastSession.id} could not resolve an active delivery route`,
+      );
+      return c.json({
+        ok: true,
+        queued: false,
+        reason: 'fast_session_delivery_unavailable',
+      });
+    }
+    await ackTelegramMessageBestEffort({
+      chatId: metadata.communicationChannelId,
+      messageId: metadata.communicationMessageId,
+    });
     return c.json({ ok: true, fastAnswered: true, fastContinued: true });
   }
   const activeRun = repliedToAutomationReport

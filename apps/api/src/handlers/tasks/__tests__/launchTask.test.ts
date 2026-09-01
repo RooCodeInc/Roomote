@@ -14,6 +14,7 @@ const {
   mockSelectRows,
   mockResolveWorkspaceRepositoryProviders,
   mockGetMembershipRole,
+  mockGetTaskHumanOwnerUserIds,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockEnvironmentsFindFirst: vi.fn(),
@@ -22,6 +23,7 @@ const {
   mockSelectRows: vi.fn(),
   mockResolveWorkspaceRepositoryProviders: vi.fn(),
   mockGetMembershipRole: vi.fn(),
+  mockGetTaskHumanOwnerUserIds: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -40,6 +42,8 @@ vi.mock('@roomote/db/server', () => ({
   environmentRepositoryMappings: {},
   repositories: {},
   taskRuns: {},
+  getTaskHumanOwnerUserIds: (...args: unknown[]) =>
+    mockGetTaskHumanOwnerUserIds(...args),
   resolveWorkspaceRepositoryProviders: (...args: unknown[]) =>
     mockResolveWorkspaceRepositoryProviders(...args),
   db: {
@@ -97,13 +101,19 @@ describe('launchTask', () => {
     mockEnvironmentsFindFirst.mockResolvedValue({ id: 'env-1' });
     mockRepositoriesFindMany.mockReset();
     mockTaskRunsFindFirst.mockReset();
-    mockTaskRunsFindFirst.mockResolvedValue(undefined);
+    mockTaskRunsFindFirst.mockResolvedValue({
+      actingUserId: 'user-1',
+      taskId: 'task-parent',
+      vendor: null,
+    });
     mockSelectRows.mockReset();
     mockSelectRows.mockReturnValue([]);
     mockResolveWorkspaceRepositoryProviders.mockReset();
     mockResolveWorkspaceRepositoryProviders.mockResolvedValue({});
     mockGetMembershipRole.mockReset();
     mockGetMembershipRole.mockResolvedValue('org:admin');
+    mockGetTaskHumanOwnerUserIds.mockReset();
+    mockGetTaskHumanOwnerUserIds.mockResolvedValue([]);
   });
 
   it('returns the LaunchTaskResponse success envelope shape, not the raw Run row', async () => {
@@ -307,11 +317,107 @@ describe('launchTask', () => {
     expect(enqueuedTask.task.payload.notifySourceRunOnSettle).toBe(true);
   });
 
+  it('prefers the current acting user over the run token mint-time user', async () => {
+    mockEnqueueTask.mockResolvedValue({ id: 102, taskId: 'task-child' });
+    mockTaskRunsFindFirst.mockResolvedValue({
+      actingUserId: 'user-current',
+      taskId: 'task-parent',
+      vendor: null,
+    });
+    const runAuth = {
+      runId: 555,
+      userId: 'user-original',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    } as RunTokenContext;
+
+    const response = await createApp(runAuth).request(
+      new Request('http://localhost/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'Continue the implementation' }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initiator: { kind: 'user', userId: 'user-current' },
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('launches as the durable Session owner when an automation run has no acting user', async () => {
+    mockEnqueueTask.mockResolvedValue({ id: 102, taskId: 'task-child' });
+    mockTaskRunsFindFirst
+      .mockResolvedValueOnce({
+        actingUserId: null,
+        taskId: 'task-bot-parent',
+      })
+      .mockResolvedValueOnce({ vendor: 'modal' });
+    mockGetTaskHumanOwnerUserIds.mockResolvedValue(['user-owner']);
+    const runAuth = {
+      runId: 555,
+      userId: null,
+      principal: 'deployment',
+      tokenType: 'run',
+      version: 1,
+    } as RunTokenContext;
+
+    const response = await createApp(runAuth).request(
+      new Request('http://localhost/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'Implement the discovered fix' }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initiator: { kind: 'user', userId: 'user-owner' },
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('rejects an ownerless automation run instead of inventing user context', async () => {
+    mockTaskRunsFindFirst.mockResolvedValue({
+      actingUserId: null,
+      taskId: 'task-ownerless-automation',
+    });
+    mockGetTaskHumanOwnerUserIds.mockResolvedValue([]);
+    const runAuth = {
+      runId: 555,
+      userId: null,
+      principal: 'deployment',
+      tokenType: 'run',
+      version: 1,
+    } as RunTokenContext;
+
+    const response = await createApp(runAuth).request(
+      new Request('http://localhost/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'Implement the discovered fix' }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
   it.each(['docker', 'modal'] as const)(
     'inherits the %s source run compute provider for run-token child launches',
     async (provider) => {
       mockEnqueueTask.mockResolvedValue({ id: 103, taskId: 'task-child' });
-      mockTaskRunsFindFirst.mockResolvedValue({ vendor: provider });
+      mockTaskRunsFindFirst.mockResolvedValue({
+        actingUserId: 'user-1',
+        taskId: 'task-parent',
+        vendor: provider,
+      });
 
       const runAuth = {
         runId: 555,
@@ -366,7 +472,7 @@ describe('launchTask', () => {
       task: { computeProvider?: string };
     };
     expect(enqueuedTask.task.computeProvider).toBe('modal');
-    expect(mockTaskRunsFindFirst).not.toHaveBeenCalled();
+    expect(mockTaskRunsFindFirst).toHaveBeenCalledTimes(1);
   });
 
   it('ignores notifyOnSettle for user-token launches', async () => {

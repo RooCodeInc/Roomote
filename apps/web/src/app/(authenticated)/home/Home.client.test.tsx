@@ -645,7 +645,7 @@ describe('Home', () => {
     });
   });
 
-  it('opens a new task session on the transcript', async () => {
+  it('opens the task view for a direct environment launch', async () => {
     mockUseCreateStandardTaskRun.mockImplementation(
       (options: { onSuccess: (result: unknown) => void }) => ({
         isPending: false,
@@ -669,7 +669,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith('/sessions/session-1');
+      expect(mockPush).toHaveBeenCalledWith('/task/task-4');
     });
   });
 
