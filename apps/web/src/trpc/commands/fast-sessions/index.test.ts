@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   notifyArtifactBuild: vi.fn(),
   getOrCreateSession: vi.fn(),
   getUnifiedSession: vi.fn(),
+  isNull: vi.fn(),
   getFastSessionTasks: vi.fn(),
   currentEpochSeconds: vi.fn(),
   dbUpdate: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock('@roomote/db/server', () => ({
   retireCanonicalPrReviewActionsForDestinationKey: mocks.retireReviewActions,
   and: vi.fn(),
   eq: vi.fn(),
+  isNull: mocks.isNull,
   sql: vi.fn(),
   fastAgentConversations: {},
   fastAgentMessages: {},
@@ -344,7 +346,7 @@ describe('startFastSessionCommand', () => {
     });
   });
 
-  it('recovers an artifact kickoff whose prompt exists without an attached task', async () => {
+  it('recovers an artifact kickoff without a non-canceled matching task', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'fast-session-1',
       created: false,
@@ -380,6 +382,7 @@ describe('startFastSessionCommand', () => {
     await scheduled?.();
 
     expect(mocks.answerQuestion).toHaveBeenCalledOnce();
+    expect(mocks.isNull).toHaveBeenCalled();
   });
 
   it('recovers an artifact kickoff before a unified Session exists', async () => {

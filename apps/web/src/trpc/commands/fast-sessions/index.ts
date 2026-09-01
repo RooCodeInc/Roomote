@@ -20,6 +20,7 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   getSessionForFastConversation,
+  isNull,
   retireCanonicalPrReviewActionsForDestinationKey,
   sessions,
   sessionTasks,
@@ -138,6 +139,7 @@ function findArtifactBuildTask(sessionId: string, launchId: string) {
       and(
         eq(sessionTasks.sessionId, sessionId),
         sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${`artifact-build:${launchId}`}`,
+        isNull(taskRuns.canceledAt),
       ),
     )
     .limit(1);
