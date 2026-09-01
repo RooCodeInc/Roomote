@@ -523,6 +523,8 @@ export async function answerSandboxUserInputRequestCommand(
   let didSwitchActingUser = false;
 
   try {
+    await touchTaskActivity(db, parsed.taskId);
+
     // Same trusted pre-delivery actor switch as sendSandboxPromptCommand: the
     // worker blocks answers whose sender is not the run's acting user. Note
     // this resolves the actor before delivery rather than through the atomic
