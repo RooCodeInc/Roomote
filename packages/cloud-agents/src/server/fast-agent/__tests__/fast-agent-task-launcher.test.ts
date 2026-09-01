@@ -64,6 +64,8 @@ describe('createFastAgentSlackTaskLauncher', () => {
       launchTask({
         prompt: 'Add a regression test',
         environmentId: 'env-1',
+        branch: 'feature/source-branch',
+        launchIdempotencyKey: 'artifact-build:launch-1',
         model: 'anthropic/claude-sonnet-5',
         parentSessionId: '11111111-1111-4111-8111-111111111111',
         postKickoff,
@@ -104,6 +106,8 @@ describe('createFastAgentSlackTaskLauncher', () => {
               },
             },
             environmentId: 'env-1',
+            branch: 'feature/source-branch',
+            launchIdempotencyKey: 'artifact-build:launch-1',
             harnessModelOverrides: {
               'opencode-server': 'anthropic/claude-sonnet-5',
             },

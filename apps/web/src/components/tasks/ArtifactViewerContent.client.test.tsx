@@ -473,7 +473,7 @@ describe('ArtifactViewerContent', () => {
     fireEvent.click(screen.getByText('Confirm build'));
 
     expect(toast.info).toHaveBeenCalledWith(
-      'Starting new Session to build plans/widget-plan.md',
+      'Starting task in this Session to build plans/widget-plan.md',
     );
 
     expect(startFastSessionState.mutate).toHaveBeenCalledWith({
@@ -485,7 +485,6 @@ describe('ArtifactViewerContent', () => {
         environmentId: 'environment-1',
         branch: 'feature/source-branch',
         taskModel: 'model-1',
-        sourceTaskId: 'task-1',
         sourceArtifactId: 'artifact-2',
         sourceArtifactPath: 'plans/widget-plan.md',
         sourceArtifactVersion: 1,
