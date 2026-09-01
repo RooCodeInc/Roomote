@@ -3362,6 +3362,45 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
     });
 
+    it('withdraws a plain-text turn from replay before its terminal closeout', async () => {
+      const order: string[] = [];
+      mocks.revokeDurableReplay.mockImplementation(async () => {
+        order.push('revoke');
+        return true;
+      });
+      const postReply = vi.fn(async () => {
+        order.push('post');
+        return { messageId: 'reply-1' };
+      });
+      mocks.generateText.mockResolvedValueOnce('All done.');
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+      });
+
+      expect(order).toEqual(['revoke', 'post']);
+      expect(postReply).toHaveBeenCalledWith(
+        expect.objectContaining({ purpose: 'closeout', message: 'All done.' }),
+      );
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('skips the terminal closeout when the turn cannot be withdrawn from replay', async () => {
+      mocks.revokeDurableReplay.mockResolvedValue(false);
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+      mocks.generateText.mockResolvedValueOnce('All done.');
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+      });
+
+      expect(postReply).not.toHaveBeenCalled();
+    });
+
     it('hands a replay-safe turn to the queue on shutdown without a closeout', async () => {
       const controller = new AbortController();
       const shutdown = new FastAgentProcessShutdownError('SIGTERM');

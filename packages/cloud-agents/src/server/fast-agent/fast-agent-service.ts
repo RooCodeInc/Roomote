@@ -3322,7 +3322,15 @@ export async function answerFastAgentQuestion({
       !isInstructionClosed(terminalInstructionVersion)
     ) {
       const message = promptText.trim();
-      if (message) {
+      // A terminal closeout is itself a side effect a replay would repeat:
+      // withdraw the turn from recovery before posting it.
+      const terminalReplayRevoked =
+        await revokeDurableTurnReplay('Terminal closeout.');
+      if (!terminalReplayRevoked) {
+        console.warn(
+          '[Fast Agent] Skipping the terminal closeout because the turn could not be withdrawn from replay.',
+        );
+      } else if (message) {
         await postReply(
           { purpose: 'closeout', message },
           false,
@@ -3497,7 +3505,11 @@ export async function answerFastAgentQuestion({
             inferenceRetryAttempted,
           )
         : 'I hit an error while handling that request. Please try again in a moment.';
-    if (!isInstructionClosed()) {
+    // The error closeout is terminal too; a replay must not post it twice.
+    if (
+      !isInstructionClosed() &&
+      (await revokeDurableTurnReplay('Error closeout.'))
+    ) {
       try {
         const reply = { purpose: 'closeout' as const, message };
         if (
