@@ -2658,6 +2658,74 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('waits out an in-flight lease renewal before settling the lease', async () => {
+    vi.useFakeTimers();
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
+    let releaseRenewal: (() => void) | undefined;
+    let leaseWrites = 0;
+    mocks.touchSessionActivity.mockImplementation(
+      async (
+        _db: unknown,
+        _sessionId: unknown,
+        _ts: unknown,
+        update: { respondingUntil?: unknown } | undefined,
+      ) => {
+        if (update?.respondingUntil instanceof Date) {
+          leaseWrites += 1;
+          if (leaseWrites === 2) {
+            // The wall-clock renewal stalls mid-write.
+            await new Promise<void>((resolve) => {
+              releaseRenewal = resolve;
+            });
+          }
+        }
+      },
+    );
+    let finishInference: (() => void) | undefined;
+    mocks.generateText.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          finishInference = () => resolve('All done.');
+        }),
+    );
+
+    try {
+      const answer = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      let settled = false;
+      void answer.finally(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS);
+      expect(releaseRenewal).toBeDefined();
+
+      finishInference?.();
+      await vi.advanceTimersByTimeAsync(1);
+      // Settlement must wait for the stalled renewal so the terminal lease
+      // write cannot be overwritten by the stale extension.
+      expect(settled).toBe(false);
+      const callsBeforeRelease = mocks.touchSessionActivity.mock.calls.length;
+
+      releaseRenewal?.();
+      await vi.advanceTimersByTimeAsync(1);
+      await answer;
+      expect(mocks.touchSessionActivity).toHaveBeenLastCalledWith(
+        expect.anything(),
+        'session-1',
+        expect.any(Number),
+        { respondingUntil: null },
+      );
+      expect(mocks.touchSessionActivity.mock.calls).toHaveLength(
+        callsBeforeRelease + 1,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('posts a terminal closeout when API shutdown interrupts silent retry backoff', async () => {
     const controller = new AbortController();
     const shutdown = new FastAgentProcessShutdownError('SIGTERM');

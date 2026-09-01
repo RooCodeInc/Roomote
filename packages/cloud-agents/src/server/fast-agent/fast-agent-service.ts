@@ -1056,6 +1056,11 @@ export async function answerFastAgentQuestion({
   let activeToolExecutions = 0;
   let humanSteerPollTimer: ReturnType<typeof setInterval> | undefined;
   let respondingLeaseRenewalTimer: ReturnType<typeof setInterval> | undefined;
+  // Renewals chain onto this promise so settlement can await the in-flight
+  // write before recording the terminal lease state; a fire-and-forget tick
+  // could otherwise commit after the settle write and leave an idle Session
+  // marked responding for another lease.
+  let respondingLeaseRenewal: Promise<void> = Promise.resolve();
   let activeHumanSteerPoll = Promise.resolve();
   const injectedHumanFollowUpIds = new Set<string>();
   const humanFollowUpTurnSeqs = new Map<string, number>();
@@ -1569,10 +1574,16 @@ export async function answerFastAgentQuestion({
     // successor's lease.
     respondingLeaseRenewalTimer = setInterval(() => {
       if (signal?.aborted) return;
-      void setFastSessionResponding(session.id, true).catch((error) => {
-        console.warn(
-          `[sessions] Failed to renew Fast Session responding lease: ${formatErrorForLog(error)}`,
-        );
+      respondingLeaseRenewal = respondingLeaseRenewal.then(async () => {
+        // Re-check ownership when the chained renewal actually runs: a tick
+        // queued behind a slow write must not extend the lease after this
+        // owner was aborted or fenced off.
+        if (signal?.aborted) return;
+        await setFastSessionResponding(session.id, true).catch((error) => {
+          console.warn(
+            `[sessions] Failed to renew Fast Session responding lease: ${formatErrorForLog(error)}`,
+          );
+        });
       });
     }, FAST_RESPONDING_LEASE_RENEW_MS);
     respondingLeaseRenewalTimer.unref();
@@ -3156,6 +3167,9 @@ export async function answerFastAgentQuestion({
   } finally {
     if (respondingLeaseRenewalTimer) clearInterval(respondingLeaseRenewalTimer);
     respondingLeaseRenewalTimer = undefined;
+    // Wait out any renewal already in flight so the terminal lease write
+    // below cannot be overwritten by a stale extension.
+    await respondingLeaseRenewal;
     signal?.removeEventListener('abort', stopHumanSteerPolling);
     stopHumanSteerPolling();
     await activeHumanSteerPoll;
