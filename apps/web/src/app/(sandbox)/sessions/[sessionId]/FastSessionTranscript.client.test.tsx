@@ -43,6 +43,24 @@ vi.mock('@/trpc/client', () => ({
       updateModelSelection: { mutate: updateModelSelectionMutate },
     },
   }),
+  useTRPC: () => ({
+    fastSessions: {
+      composerSuggestion: {
+        queryOptions: (input: unknown, options?: Record<string, unknown>) => ({
+          ...options,
+          queryKey: ['fastSessions.composerSuggestion', input],
+          queryFn: async () => ({ suggestion: null, messageCount: 0 }),
+        }),
+      },
+    },
+  }),
+}));
+
+// The session composer's suggestion query needs no QueryClientProvider here;
+// these tests exercise the transcript, not suggestions.
+vi.mock('@tanstack/react-query', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@tanstack/react-query')>()),
+  useQuery: () => ({ data: undefined }),
 }));
 
 vi.mock('./SessionModelSwitcher', () => ({

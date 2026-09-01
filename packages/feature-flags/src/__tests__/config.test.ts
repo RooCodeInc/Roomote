@@ -7,9 +7,10 @@ import {
 import { FeatureFlag } from '../types';
 
 describe('feature flags', () => {
-  it('defines no active flags now that the Sessions rollout is unconditional', () => {
-    expect(FeatureFlag).toEqual({});
-    expect(FEATURE_FLAG_CONFIG).toEqual({});
+  it('defines the composer suggestions opt-in as the only active flag', () => {
+    expect(Object.values(FeatureFlag)).toEqual(['composerSuggestions']);
+    expect(Object.keys(FEATURE_FLAG_CONFIG)).toEqual(['composerSuggestions']);
+    expect(FEATURE_FLAG_CONFIG.composerSuggestions.defaultValue).toBe(false);
   });
 
   it('retains the deployment-control metadata descriptors', () => {

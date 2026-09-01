@@ -109,6 +109,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   brainSynthesis: 'brain_synthesis',
   chatAudioTranscription: 'chat_audio_transcription',
   chatVideoDescription: 'chat_video_description',
+  composerSuggestionGeneration: 'composer_suggestion_generation',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
   fastAgentQuestionAnswering: 'fast_agent',
   inferenceValidation: 'inference_validation',
