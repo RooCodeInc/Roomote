@@ -1,18 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
+  mockAcquireLifecycleLock,
   mockCreateGitHubToken,
   mockFindAssociation,
+  mockGetSetting,
   mockGetOctokit,
   mockGraphql,
   mockPullRequestGet,
+  mockReleaseLifecycleLock,
   mockUpdateTaskPrStatus,
 } = vi.hoisted(() => ({
+  mockAcquireLifecycleLock: vi.fn(),
   mockCreateGitHubToken: vi.fn(),
   mockFindAssociation: vi.fn(),
+  mockGetSetting: vi.fn(),
   mockGetOctokit: vi.fn(),
   mockGraphql: vi.fn(),
   mockPullRequestGet: vi.fn(),
+  mockReleaseLifecycleLock: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
 }));
 
@@ -32,6 +38,8 @@ vi.mock('@roomote/db/server', () => ({
       taskPullRequests: { findFirst: mockFindAssociation },
     },
   },
+  getDeploymentMarkRoomotePrReadyAfterCleanReview: (...args: unknown[]) =>
+    mockGetSetting(...args),
   taskPullRequests: {
     sourceControlProvider: 'sourceControlProvider',
     repository: 'repository',
@@ -42,6 +50,11 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('../update-task-pr-status', () => ({
   updateTaskPrStatus: (...args: unknown[]) => mockUpdateTaskPrStatus(...args),
+}));
+
+vi.mock('../../task-runs/github-pr-review-check', () => ({
+  acquireGithubPrReviewLifecycleLock: (...args: unknown[]) =>
+    mockAcquireLifecycleLock(...args),
 }));
 
 import { markRoomotePullRequestReadyAfterCleanReview } from '../mark-roomote-pull-request-ready';
@@ -83,15 +96,32 @@ async function markReady(
 
 describe('markRoomotePullRequestReadyAfterCleanReview', () => {
   beforeEach(() => {
+    mockAcquireLifecycleLock
+      .mockReset()
+      .mockResolvedValue(mockReleaseLifecycleLock);
     mockCreateGitHubToken.mockReset().mockResolvedValue('token');
     mockFindAssociation.mockReset().mockResolvedValue({ id: 'association' });
-    mockGraphql.mockReset().mockResolvedValue({});
+    mockGetSetting.mockReset().mockResolvedValue(true);
+    mockGraphql.mockReset().mockResolvedValue({
+      markPullRequestReadyForReview: {
+        pullRequest: { headRefOid: REVIEW_HEAD_SHA, isDraft: false },
+      },
+    });
     mockPullRequestGet.mockReset().mockResolvedValue(pullRequest());
     mockUpdateTaskPrStatus.mockReset().mockResolvedValue(undefined);
+    mockReleaseLifecycleLock.mockReset().mockResolvedValue(undefined);
     mockGetOctokit.mockReset().mockReturnValue({
       graphql: mockGraphql,
       rest: { pulls: { get: mockPullRequestGet } },
     });
+  });
+
+  it('does nothing when automatic ready promotion is disabled', async () => {
+    mockGetSetting.mockResolvedValue(false);
+
+    await expect(markReady()).resolves.toBe('disabled');
+    expect(mockFindAssociation).not.toHaveBeenCalled();
+    expect(mockPullRequestGet).not.toHaveBeenCalled();
   });
 
   it('marks a Roomote-created draft ready after a clean review', async () => {
@@ -107,6 +137,48 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
       42,
       'open',
     );
+    expect(mockReleaseLifecycleLock).toHaveBeenCalledOnce();
+  });
+
+  it('converts the pull request back to draft when the mutation sees a newer head', async () => {
+    mockGraphql
+      .mockResolvedValueOnce({
+        markPullRequestReadyForReview: {
+          pullRequest: {
+            headRefOid: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
+            isDraft: false,
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        convertPullRequestToDraft: { pullRequest: { isDraft: true } },
+      });
+
+    await expect(markReady()).resolves.toBe('head_changed');
+    expect(mockGraphql).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('convertPullRequestToDraft'),
+      { pullRequestId: 'PR_node_id' },
+    );
+    expect(mockUpdateTaskPrStatus).not.toHaveBeenCalled();
+    expect(mockReleaseLifecycleLock).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces a failed stale-head compensation for webhook retry', async () => {
+    mockGraphql
+      .mockResolvedValueOnce({
+        markPullRequestReadyForReview: {
+          pullRequest: {
+            headRefOid: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
+            isDraft: false,
+          },
+        },
+      })
+      .mockRejectedValueOnce(new Error('draft conversion failed'));
+
+    await expect(markReady()).rejects.toThrow('draft conversion failed');
+    expect(mockUpdateTaskPrStatus).not.toHaveBeenCalled();
+    expect(mockReleaseLifecycleLock).toHaveBeenCalledOnce();
   });
 
   it('does not touch a human-created pull request', async () => {

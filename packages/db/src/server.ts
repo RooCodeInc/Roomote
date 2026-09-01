@@ -84,6 +84,7 @@ export * from './lib/router-debug-settings';
 export * from './lib/slack-fast-integration-calls';
 export * from './lib/pr-action-settings';
 export * from './lib/github-mention-settings';
+export * from './lib/pr-ready-after-clean-review-settings';
 export * from './lib/account-link-help-settings';
 export * from './lib/setup-qualification';
 export * from './lib/repositories';

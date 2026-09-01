@@ -121,12 +121,14 @@ import {
 } from '../commands/github';
 import {
   getPrActionCommand,
+  getMarkRoomotePrReadyAfterCleanReviewCommand,
   getGitHubRoomoteMentionCommand,
   getRepositoriesCommand,
   getSourceControlConfigStatusCommand,
   clearSourceControlConfigCommand,
   saveSourceControlConfigCommand,
   setPrActionCommand,
+  setMarkRoomotePrReadyAfterCleanReviewCommand,
   setGitHubRoomoteMentionCommand,
   syncRepositoriesCommand,
 } from '../commands/source-control';
@@ -1255,6 +1257,16 @@ export const appRouter = createRouter({
     setPrAction: protectedProcedure
       .input(z.object({ prAction: z.enum(prActions) }))
       .mutation(({ ctx: { auth }, input }) => setPrActionCommand(auth, input)),
+
+    markRoomotePrReadyAfterCleanReview: protectedProcedure.query(
+      ({ ctx: { auth } }) => getMarkRoomotePrReadyAfterCleanReviewCommand(auth),
+    ),
+
+    setMarkRoomotePrReadyAfterCleanReview: protectedProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setMarkRoomotePrReadyAfterCleanReviewCommand(auth, input),
+      ),
 
     githubRoomoteMention: protectedProcedure.query(({ ctx: { auth } }) =>
       getGitHubRoomoteMentionCommand(auth),

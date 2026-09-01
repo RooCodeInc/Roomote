@@ -63,6 +63,7 @@ const mutations = vi.hoisted(() => ({
   syncAdo: vi.fn(),
   syncBitbucket: vi.fn(),
   setPrAction: vi.fn(),
+  setMarkRoomotePrReadyAfterCleanReview: vi.fn(),
   setGitHubRoomoteMention: vi.fn(),
 }));
 
@@ -161,6 +162,14 @@ vi.mock('@/hooks/source-control', () => ({
   useSetPrAction: () => ({
     isPending: false,
     mutate: mutations.setPrAction,
+  }),
+  useMarkRoomotePrReadyAfterCleanReview: () => ({
+    data: { enabled: false },
+    isLoading: false,
+  }),
+  useSetMarkRoomotePrReadyAfterCleanReview: () => ({
+    isPending: false,
+    mutate: mutations.setMarkRoomotePrReadyAfterCleanReview,
   }),
   useGitHubRoomoteMention: () => ({
     data: { enabled: true },
@@ -632,6 +641,24 @@ describe('SourceControl settings', () => {
       false,
       expect.anything(),
     );
+  });
+
+  it('lets admins opt in to marking clean Roomote drafts ready', () => {
+    render(<SourceControl />);
+
+    const toggle = screen.getByRole('switch', {
+      name: 'Mark Roomote PR ready after clean review',
+    });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(
+      screen.getByText(/does not approve or merge the pull request/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    expect(
+      mutations.setMarkRoomotePrReadyAfterCleanReview,
+    ).toHaveBeenCalledWith(true, expect.anything());
   });
 
   it('shows setup links instead of sync for disconnected token providers', () => {

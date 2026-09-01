@@ -1,9 +1,16 @@
 import { createGitHubToken } from '@roomote/auth';
-import { and, db, eq, taskPullRequests } from '@roomote/db/server';
+import {
+  and,
+  db,
+  eq,
+  getDeploymentMarkRoomotePrReadyAfterCleanReview,
+  taskPullRequests,
+} from '@roomote/db/server';
 import { getOctokit } from '@roomote/github';
 
 import { splitRepositoryFullName } from './source-control-pull-request-shared';
 import { updateTaskPrStatus } from './update-task-pr-status';
+import { acquireGithubPrReviewLifecycleLock } from '../task-runs/github-pr-review-check';
 
 type ReviewResult = {
   outcome: string | null;
@@ -14,6 +21,7 @@ type ReviewResult = {
 export type MarkRoomotePullRequestReadyResult =
   | 'marked_ready'
   | 'already_ready'
+  | 'disabled'
   | 'not_roomote_created'
   | 'review_not_clean'
   | 'pull_request_not_open'
@@ -31,6 +39,10 @@ export async function markRoomotePullRequestReadyAfterCleanReview(input: {
   reviewHeadSha: string;
   reviewResult: ReviewResult;
 }): Promise<MarkRoomotePullRequestReadyResult> {
+  if (!(await getDeploymentMarkRoomotePrReadyAfterCleanReview())) {
+    return 'disabled';
+  }
+
   if (
     input.reviewResult.outcome !== 'clean' ||
     (input.reviewResult.findingCount !== null &&
@@ -59,55 +71,107 @@ export async function markRoomotePullRequestReadyAfterCleanReview(input: {
     installationId: input.installationId,
   });
   const octokit = getOctokit(token, { retryRateLimits: true });
-  const { data: pullRequest } = await octokit.rest.pulls.get({
-    owner,
-    repo,
-    pull_number: input.prNumber,
-  });
+  const releaseLifecycleLock = await acquireGithubPrReviewLifecycleLock(
+    input.repository,
+    input.prNumber,
+  );
+  if (!releaseLifecycleLock) {
+    throw new Error(
+      `Timed out serializing ready transition for ${input.repository}#${input.prNumber}`,
+    );
+  }
 
-  if (pullRequest.state !== 'open') {
-    return 'pull_request_not_open';
-  }
-  if (pullRequest.head.sha !== input.reviewHeadSha) {
-    return 'head_changed';
-  }
-  if (!pullRequest.draft) {
+  try {
+    const { data: pullRequest } = await octokit.rest.pulls.get({
+      owner,
+      repo,
+      pull_number: input.prNumber,
+    });
+
+    if (pullRequest.state !== 'open') {
+      return 'pull_request_not_open';
+    }
+    if (pullRequest.head.sha !== input.reviewHeadSha) {
+      return 'head_changed';
+    }
+    if (!pullRequest.draft) {
+      await updateTaskPrStatus(
+        'github',
+        input.repository,
+        input.prNumber,
+        'open',
+      );
+      return 'already_ready';
+    }
+
+    let result: MarkRoomotePullRequestReadyResult = 'marked_ready';
+    let mutationResult:
+      | {
+          markPullRequestReadyForReview?: {
+            pullRequest?: { headRefOid: string; isDraft: boolean } | null;
+          } | null;
+        }
+      | undefined;
+    try {
+      mutationResult = await octokit.graphql(
+        `mutation MarkPullRequestReadyForReview($pullRequestId: ID!) {
+          markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
+            pullRequest { headRefOid isDraft }
+          }
+        }`,
+        { pullRequestId: pullRequest.node_id },
+      );
+    } catch (error) {
+      // The mutation can succeed remotely while its response times out, or
+      // race with another delivery processing the same terminal summary.
+      const { data: currentPullRequest } = await octokit.rest.pulls.get({
+        owner,
+        repo,
+        pull_number: input.prNumber,
+      });
+      if (
+        currentPullRequest.state !== 'open' ||
+        currentPullRequest.draft ||
+        currentPullRequest.head.sha !== input.reviewHeadSha
+      ) {
+        throw error;
+      }
+      result = 'already_ready';
+    }
+
+    const markedPullRequest =
+      mutationResult?.markPullRequestReadyForReview?.pullRequest;
+    if (
+      result === 'marked_ready' &&
+      (!markedPullRequest || markedPullRequest.isDraft)
+    ) {
+      throw new Error(
+        `GitHub did not confirm ready transition for ${input.repository}#${input.prNumber}`,
+      );
+    }
+    if (
+      result === 'marked_ready' &&
+      markedPullRequest?.headRefOid !== input.reviewHeadSha
+    ) {
+      await octokit.graphql(
+        `mutation ConvertPullRequestToDraft($pullRequestId: ID!) {
+          convertPullRequestToDraft(input: { pullRequestId: $pullRequestId }) {
+            pullRequest { isDraft }
+          }
+        }`,
+        { pullRequestId: pullRequest.node_id },
+      );
+      return 'head_changed';
+    }
+
     await updateTaskPrStatus(
       'github',
       input.repository,
       input.prNumber,
       'open',
     );
-    return 'already_ready';
+    return result;
+  } finally {
+    await releaseLifecycleLock();
   }
-
-  let result: MarkRoomotePullRequestReadyResult = 'marked_ready';
-  try {
-    await octokit.graphql(
-      `mutation MarkPullRequestReadyForReview($pullRequestId: ID!) {
-        markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
-          pullRequest { isDraft }
-        }
-      }`,
-      { pullRequestId: pullRequest.node_id },
-    );
-  } catch (error) {
-    // The mutation can succeed remotely while its response times out, or race
-    // with another delivery processing the same terminal summary.
-    const { data: currentPullRequest } = await octokit.rest.pulls.get({
-      owner,
-      repo,
-      pull_number: input.prNumber,
-    });
-    if (
-      currentPullRequest.state !== 'open' ||
-      currentPullRequest.draft ||
-      currentPullRequest.head.sha !== input.reviewHeadSha
-    ) {
-      throw error;
-    }
-    result = 'already_ready';
-  }
-  await updateTaskPrStatus('github', input.repository, input.prNumber, 'open');
-  return result;
 }

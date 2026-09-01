@@ -16,9 +16,11 @@ import {
 
 import {
   usePrAction,
+  useMarkRoomotePrReadyAfterCleanReview,
   useGitHubRoomoteMention,
   useRepositories,
   useSetPrAction,
+  useSetMarkRoomotePrReadyAfterCleanReview,
   useSetGitHubRoomoteMention,
   useSourceControlConfigStatus,
   useSyncRepositories,
@@ -463,6 +465,7 @@ export function SourceControl() {
           {isAdmin ? (
             <>
               <PrActionSetting />
+              <MarkRoomotePrReadyAfterCleanReviewSetting />
               <GitHubRoomoteMentionSetting />
             </>
           ) : null}
@@ -474,6 +477,41 @@ export function SourceControl() {
           {...providerBlock}
         />
       ))}
+    </div>
+  );
+}
+
+function MarkRoomotePrReadyAfterCleanReviewSetting() {
+  const settingQuery = useMarkRoomotePrReadyAfterCleanReview();
+  const setSetting = useSetMarkRoomotePrReadyAfterCleanReview();
+  const enabled = settingQuery.data?.enabled ?? false;
+
+  return (
+    <div className="flex gap-3">
+      <Switch
+        aria-label="Mark Roomote PR ready after clean review"
+        checked={enabled}
+        disabled={settingQuery.isLoading || setSetting.isPending}
+        onCheckedChange={(checked) => {
+          setSetting.mutate(checked === true, {
+            onSuccess: () => toast.success('Source control settings saved.'),
+            onError: (error) =>
+              toast.error(
+                `Failed to update clean review setting: ${error.message}`,
+              ),
+          });
+        }}
+      />
+      <div>
+        <div className="text-sm font-medium">
+          Mark Roomote PR ready after clean review
+        </div>
+        <p className="text-sm text-muted-foreground">
+          When Roomote creates a GitHub draft pull request, mark it ready for
+          human review after the automated reviewer finds no issues. This does
+          not approve or merge the pull request.
+        </p>
+      </div>
     </div>
   );
 }
