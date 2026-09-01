@@ -14,7 +14,11 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
-import type { FastAgentParent } from '@roomote/types';
+import {
+  RunStatus,
+  exitedRunStatuses,
+  type FastAgentParent,
+} from '@roomote/types';
 
 import {
   buildEventClientMessageSeed,
@@ -30,6 +34,10 @@ export type FastAgentParentEventQueueRequest = {
   conversationId: string;
   eventKey: string;
 };
+type FastAgentPullRequestOpenedEvent = Extract<
+  FastAgentParentEvent,
+  { type: 'pull_request_opened' }
+>;
 
 export class FastAgentParentBusyError extends Error {
   constructor() {
@@ -40,6 +48,7 @@ export class FastAgentParentBusyError extends Error {
 
 let fastAgentParentEventQueue: Queue<FastAgentParentEventQueueRequest> | null =
   null;
+const EXITED_RUN_STATUSES = new Set<RunStatus>(exitedRunStatuses);
 
 function getFastAgentParentEventQueue() {
   fastAgentParentEventQueue ??= new Queue<FastAgentParentEventQueueRequest>(
@@ -76,6 +85,16 @@ async function addWakeupJob(request: FastAgentParentEventQueueRequest) {
   });
 }
 
+function wakeFastAgentParentEvent(request: FastAgentParentEventQueueRequest) {
+  void addWakeupJob(request).catch((error) => {
+    // Admission is already durable. BullMQ startup and its periodic recovery
+    // sweep recreate the wakeup without making the child task wait or retry.
+    console.error(
+      `[FastAgentParentEventQueue] Persisted ${request.eventKey}, but its immediate wakeup failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+}
+
 /** Persist before acknowledging so child work never waits on the parent. */
 export async function enqueueFastAgentParentEvent(params: {
   parent: FastAgentParent;
@@ -94,18 +113,51 @@ export async function enqueueFastAgentParentEvent(params: {
     })
     .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
 
-  void addWakeupJob({
+  wakeFastAgentParentEvent({
     conversationId: params.parent.sessionId,
     eventKey,
-  }).catch((error) => {
-    // Admission is already durable. BullMQ startup and its periodic recovery
-    // sweep recreate the wakeup without making the child task wait or retry.
-    console.error(
-      `[FastAgentParentEventQueue] Persisted ${eventKey}, but its immediate wakeup failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
   });
 
   return { eventKey, queued: true };
+}
+
+/** Serialize PR-open admission with terminal run updates on the same row. */
+export async function enqueueFastAgentParentEventForRun(params: {
+  parent: FastAgentParent;
+  event: FastAgentPullRequestOpenedEvent;
+  runId: number;
+}): Promise<{ eventKey: string; queued: boolean }> {
+  const eventKey = buildFastAgentParentEventKey(params);
+  const queued = await db.transaction(async (tx) => {
+    const [run] = await tx
+      .select({ status: taskRuns.status })
+      .from(taskRuns)
+      .where(eq(taskRuns.id, params.runId))
+      .limit(1)
+      .for('update');
+    if (!run || EXITED_RUN_STATUSES.has(run.status)) {
+      return false;
+    }
+
+    await tx
+      .insert(fastAgentParentEvents)
+      .values({
+        conversationId: params.parent.sessionId,
+        eventKey,
+        parent: params.parent,
+        event: params.event,
+      })
+      .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
+    return true;
+  });
+
+  if (queued) {
+    wakeFastAgentParentEvent({
+      conversationId: params.parent.sessionId,
+      eventKey,
+    });
+  }
+  return { eventKey, queued };
 }
 
 function pendingPredicate(conversationId?: string) {

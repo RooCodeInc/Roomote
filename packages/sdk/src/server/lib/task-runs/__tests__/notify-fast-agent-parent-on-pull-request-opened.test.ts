@@ -18,7 +18,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('../../fast-agent-parent-event-queue', () => ({
-  enqueueFastAgentParentEvent: mocks.enqueueParentEvent,
+  enqueueFastAgentParentEventForRun: mocks.enqueueParentEvent,
 }));
 
 import { notifyFastAgentParentOnPullRequestOpened } from '../notify-fast-agent-parent-on-pull-request-opened';
@@ -66,7 +66,10 @@ const pullRequest = {
 describe('notifyFastAgentParentOnPullRequestOpened', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.enqueueParentEvent.mockResolvedValue({ queued: true });
+    mocks.enqueueParentEvent.mockResolvedValue({
+      eventKey: 'event-key',
+      queued: true,
+    });
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
 
@@ -80,6 +83,7 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
 
     expect(mocks.enqueueParentEvent).toHaveBeenCalledWith({
       parent: discordFastParent,
+      runId: 200,
       event: {
         type: 'pull_request_opened',
         taskId: 'child-task',
@@ -131,6 +135,20 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
     });
 
     expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not record lifecycle history when terminal settlement wins admission', async () => {
+    mocks.enqueueParentEvent.mockResolvedValueOnce({
+      eventKey: 'event-key',
+      queued: false,
+    });
+
+    await notifyFastAgentParentOnPullRequestOpened({
+      run: makeRun({ fastAgentParent: fastParent }),
+      pullRequest,
+    });
+
+    expect(mocks.recordLifecycle).not.toHaveBeenCalled();
   });
 
   it('fails only when durable queue admission fails', async () => {

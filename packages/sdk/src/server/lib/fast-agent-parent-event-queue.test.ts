@@ -1,3 +1,5 @@
+import { RunStatus } from '@roomote/types';
+
 const mocks = vi.hoisted(() => {
   class DeliveryError extends Error {
     readonly replyPosted: boolean;
@@ -17,6 +19,8 @@ const mocks = vi.hoisted(() => {
     queueAdd: vi.fn(),
     insertValues: vi.fn(),
     insertOnConflict: vi.fn(),
+    transaction: vi.fn(),
+    selectForUpdate: vi.fn(),
     updateSet: vi.fn(),
     updateWhere: vi.fn(),
     findPending: vi.fn(),
@@ -46,6 +50,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 vi.mock('@roomote/db/server', () => ({
   db: {
     insert: vi.fn(() => ({ values: mocks.insertValues })),
+    transaction: mocks.transaction,
     update: vi.fn(() => ({ set: mocks.updateSet })),
     query: {
       fastAgentParentEvents: { findFirst: mocks.findPending },
@@ -69,7 +74,7 @@ vi.mock('@roomote/db/server', () => ({
     deliveredAt: 'delivered_at',
     discardedAt: 'discarded_at',
   },
-  taskRuns: { id: 'task_runs.id' },
+  taskRuns: { id: 'task_runs.id', status: 'task_runs.status' },
 }));
 
 vi.mock('./fast-agent-parent-event', () => ({
@@ -89,6 +94,7 @@ import {
   buildFastAgentParentEventKey,
   drainFastAgentParentEvents,
   enqueueFastAgentParentEvent,
+  enqueueFastAgentParentEventForRun,
   FastAgentParentBusyError,
 } from './fast-agent-parent-event-queue';
 import type { FastAgentParentEvent } from './fast-agent-parent-event';
@@ -112,6 +118,22 @@ const event = {
   message: 'Done.',
 };
 
+const pullRequestOpenedEvent = {
+  type: 'pull_request_opened' as const,
+  taskId: 'child-task',
+  runId: 42,
+  taskUrl: 'https://roomote.example/task/child-task',
+  pullRequest: {
+    provider: 'github' as const,
+    host: 'github.com',
+    repository: 'acme/web',
+    number: 42,
+    title: '[Fix] Keep delivery ordered',
+    url: 'https://github.com/acme/web/pull/42',
+    status: 'draft' as const,
+  },
+};
+
 function pendingRow(id: string, queuedEvent: FastAgentParentEvent = event) {
   return {
     id,
@@ -130,6 +152,20 @@ describe('Fast parent event durable queue', () => {
       onConflictDoNothing: mocks.insertOnConflict,
     });
     mocks.insertOnConflict.mockResolvedValue(undefined);
+    mocks.selectForUpdate.mockResolvedValue([{ status: RunStatus.Running }]);
+    mocks.transaction.mockImplementation(
+      async (callback: (tx: unknown) => unknown) =>
+        callback({
+          insert: vi.fn(() => ({ values: mocks.insertValues })),
+          select: vi.fn(() => ({
+            from: vi.fn(() => ({
+              where: vi.fn(() => ({
+                limit: vi.fn(() => ({ for: mocks.selectForUpdate })),
+              })),
+            })),
+          })),
+        }),
+    );
     mocks.updateSet.mockReturnValue({ where: mocks.updateWhere });
     mocks.updateWhere.mockResolvedValue(undefined);
     mocks.queueAdd.mockResolvedValue(undefined);
@@ -183,6 +219,50 @@ describe('Fast parent event durable queue', () => {
     expect(mocks.insertOnConflict).toHaveBeenCalledWith({
       target: 'event_key',
     });
+  });
+
+  it('locks the run row before admitting a PR-open event', async () => {
+    const result = await enqueueFastAgentParentEventForRun({
+      parent,
+      event: pullRequestOpenedEvent,
+      runId: pullRequestOpenedEvent.runId,
+    });
+
+    expect(result).toEqual(expect.objectContaining({ queued: true }));
+    expect(mocks.selectForUpdate).toHaveBeenCalledWith('update');
+    expect(mocks.insertOnConflict).toHaveBeenCalledWith({
+      target: 'event_key',
+    });
+    expect(mocks.queueAdd).toHaveBeenCalledOnce();
+  });
+
+  it.each([RunStatus.Completed, RunStatus.Failed, RunStatus.Canceled])(
+    'skips PR-open admission after %s settlement',
+    async (status) => {
+      mocks.selectForUpdate.mockResolvedValueOnce([{ status }]);
+
+      const result = await enqueueFastAgentParentEventForRun({
+        parent,
+        event: pullRequestOpenedEvent,
+        runId: pullRequestOpenedEvent.runId,
+      });
+
+      expect(result).toEqual(expect.objectContaining({ queued: false }));
+      expect(mocks.insertValues).not.toHaveBeenCalled();
+      expect(mocks.queueAdd).not.toHaveBeenCalled();
+    },
+  );
+
+  it('still admits PR-open while the run is idle', async () => {
+    mocks.selectForUpdate.mockResolvedValueOnce([{ status: RunStatus.Idle }]);
+
+    await expect(
+      enqueueFastAgentParentEventForRun({
+        parent,
+        event: pullRequestOpenedEvent,
+        runId: pullRequestOpenedEvent.runId,
+      }),
+    ).resolves.toEqual(expect.objectContaining({ queued: true }));
   });
 
   it('drains one parent in durable creation order under one turn lock', async () => {

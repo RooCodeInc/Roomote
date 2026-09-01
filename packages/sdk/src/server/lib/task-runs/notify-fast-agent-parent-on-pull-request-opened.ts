@@ -11,7 +11,7 @@ import {
 } from '@roomote/types';
 
 import type { FastAgentPullRequestContext } from '../fast-agent-parent-event';
-import { enqueueFastAgentParentEvent } from '../fast-agent-parent-event-queue';
+import { enqueueFastAgentParentEventForRun } from '../fast-agent-parent-event-queue';
 
 /** Pass a newly opened task PR to its Fast parent through the shared event path. */
 export async function notifyFastAgentParentOnPullRequestOpened(params: {
@@ -42,8 +42,9 @@ export async function notifyFastAgentParentOnPullRequestOpened(params: {
     status: params.pullRequest.status,
   };
 
-  await enqueueFastAgentParentEvent({
+  const admission = await enqueueFastAgentParentEventForRun({
     parent,
+    runId: params.run.id,
     event: {
       type: 'pull_request_opened',
       taskId: params.run.taskId,
@@ -64,6 +65,9 @@ export async function notifyFastAgentParentOnPullRequestOpened(params: {
       pullRequest,
     },
   });
+  if (!admission.queued) {
+    return;
+  }
 
   try {
     await recordTaskRunLifecycleEvent(db, {
