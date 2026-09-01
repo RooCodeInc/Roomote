@@ -12,6 +12,8 @@ import {
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
+import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
+
 import {
   preparePromptAttachments,
   ROOMOTE_FILE_ATTACHMENT_ACCEPT,
@@ -44,11 +46,11 @@ import {
   useSandboxConnected,
   useSandboxConnectionStatus,
   useSandboxCurrentUserInfo,
-  useSandboxMessageCount,
   useSandboxQueuedMessages,
   useSandboxReadOnly,
   useSandboxTaskPhase,
 } from '../hooks/SandboxProvider';
+import { useTaskMessageEnvelopes } from '../hooks/use-task-message-envelopes';
 import type { TaskRunDetail } from '@/lib/server/task-runs';
 import { TaskToolsButton } from '../sidebar-actions/TaskToolsButton';
 import { shouldShowTaskToolsActions } from '../sidebar-actions/utils';
@@ -67,12 +69,17 @@ const DRAFT_SAVE_DEBOUNCE_MS = 1_000;
 const KEEPALIVE_TOUCH_THROTTLE_MS = 10_000;
 const SANDBOX_CANCEL_TIMEOUT_MS = 10_000;
 
-// Refresh the ghost suggestion only after this many new transcript events, so
-// mid-turn tool chatter does not thrash the query key.
-const SUGGESTION_HISTORY_BUCKET = 8;
+// Match the server generation cache so each completed conversational turn can
+// advance the client query without reacting to tool or reasoning events.
+const SUGGESTION_HISTORY_BUCKET = 4;
 
 // Don't ask for a suggestion until the conversation has some substance.
-const SUGGESTION_MIN_TRANSCRIPT_EVENTS = 2;
+const SUGGESTION_MIN_HISTORY_MESSAGES = 2;
+
+const SUGGESTION_HISTORY_EVENT_TYPES = new Set<string>([
+  ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+  ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+]);
 
 export interface PromptInputHandle {
   focus: () => void;
@@ -137,13 +144,24 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const runId = taskRun?.id;
     const taskId = taskRun?.taskId;
     const { capture } = useTelemetry();
-    const messageCount = useSandboxMessageCount();
-    // Bump only on meaningful history growth; each revision is a distinct
-    // query cache entry, so late responses for an older revision can never
-    // overwrite the suggestion shown for the current one.
-    const historyRevision = Math.floor(
-      messageCount / SUGGESTION_HISTORY_BUCKET,
-    );
+    const taskHistory = useTaskMessageEnvelopes(taskId, {
+      enabled: Boolean(taskId) && connected && !readOnly,
+    }).data;
+    const historyMessageCount =
+      taskHistory?.reduce(
+        (count, message) =>
+          SUGGESTION_HISTORY_EVENT_TYPES.has(message.eventType) &&
+          message.text?.trim()
+            ? count + 1
+            : count,
+        0,
+      ) ?? 0;
+    // The revision follows the same persisted user/assistant history and
+    // threshold as the server cache. UI-only and optimistic events cannot
+    // advance it, while a completed turn moves it to the next query key.
+    const historyRevision =
+      Math.floor(historyMessageCount / SUGGESTION_HISTORY_BUCKET) *
+      SUGGESTION_HISTORY_BUCKET;
     const suggestionHintId = useId();
 
     const composerSuggestionQuery = useQuery(
@@ -154,7 +172,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             Boolean(taskId) &&
             connected &&
             !readOnly &&
-            messageCount >= SUGGESTION_MIN_TRANSCRIPT_EVENTS,
+            historyMessageCount >= SUGGESTION_MIN_HISTORY_MESSAGES,
           staleTime: Number.POSITIVE_INFINITY,
           refetchOnWindowFocus: false,
         },

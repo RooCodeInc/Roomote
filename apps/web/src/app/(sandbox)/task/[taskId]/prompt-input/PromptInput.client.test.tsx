@@ -33,7 +33,6 @@ const {
   useMutationMock,
   useOptionalPendingUserInputRequestStateMock,
   useQueryMock,
-  useSandboxMessageCountMock,
   useSandboxClientMock,
   useSandboxConnectedMock,
   useSandboxConnectionStatusMock,
@@ -43,6 +42,7 @@ const {
   useSandboxTaskPhaseMock,
   useTRPCClientMock,
   useTRPCMock,
+  useTaskMessageEnvelopesMock,
   useVoiceDictationMock,
 } = vi.hoisted(() => ({
   autoCompleteDraftSaveRef: { current: true },
@@ -72,7 +72,6 @@ const {
   useMutationMock: vi.fn(),
   useOptionalPendingUserInputRequestStateMock: vi.fn(),
   useQueryMock: vi.fn(),
-  useSandboxMessageCountMock: vi.fn(),
   useSandboxClientMock: vi.fn(),
   useSandboxConnectedMock: vi.fn(),
   useSandboxConnectionStatusMock: vi.fn(),
@@ -82,6 +81,7 @@ const {
   useSandboxTaskPhaseMock: vi.fn(),
   useTRPCClientMock: vi.fn(),
   useTRPCMock: vi.fn(),
+  useTaskMessageEnvelopesMock: vi.fn(),
   useVoiceDictationMock: vi.fn(),
 }));
 
@@ -228,13 +228,16 @@ vi.mock('../hooks/SandboxProvider', () => ({
   useSandboxConnected: useSandboxConnectedMock,
   useSandboxConnectionStatus: useSandboxConnectionStatusMock,
   useSandboxCurrentUserInfo: useSandboxCurrentUserInfoMock,
-  useSandboxMessageCount: useSandboxMessageCountMock,
   useSandboxQueuedMessages: useSandboxQueuedMessagesMock,
   useSandboxReadOnly: useSandboxReadOnlyMock,
   useSandboxRemoveOptimisticMessage: () => removeOptimisticMessageMock,
   useSandboxRemoveOptimisticQueuedMessage: () =>
     removeOptimisticQueuedMessageMock,
   useSandboxTaskPhase: useSandboxTaskPhaseMock,
+}));
+
+vi.mock('../hooks/use-task-message-envelopes', () => ({
+  useTaskMessageEnvelopes: useTaskMessageEnvelopesMock,
 }));
 
 vi.mock('../PendingUserInputRequestPanel', () => ({
@@ -373,7 +376,7 @@ describe('PromptInput', () => {
     });
 
     useQueryMock.mockReturnValue({ data: undefined });
-    useSandboxMessageCountMock.mockReturnValue(0);
+    useTaskMessageEnvelopesMock.mockReturnValue({ data: undefined });
     useSandboxClientMock.mockReturnValue(null);
     useSandboxCurrentUserInfoMock.mockReturnValue(null);
     useSandboxQueuedMessagesMock.mockReturnValue([]);
@@ -1253,7 +1256,18 @@ describe('PromptInput ghost suggestion', () => {
         touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
       },
     });
-    useSandboxMessageCountMock.mockReturnValue(12);
+    useTaskMessageEnvelopesMock.mockReturnValue({
+      data: [
+        {
+          eventType: 'roomote_runtime.user_prompt',
+          text: 'Fix the login redirect',
+        },
+        {
+          eventType: 'roomote_runtime.assistant_message',
+          text: 'The redirect is fixed',
+        },
+      ],
+    });
     useQueryMock.mockReturnValue({
       data: { suggestion: 'Add a regression test for that', messageCount: 6 },
     });
@@ -1326,8 +1340,60 @@ describe('PromptInput ghost suggestion', () => {
     );
   });
 
-  it('does not request a suggestion until the transcript has enough events', () => {
-    useSandboxMessageCountMock.mockReturnValue(0);
+  it('advances the suggestion revision from persisted conversational history', () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    let history = [
+      {
+        eventType: 'roomote_runtime.user_prompt',
+        text: 'Fix the login redirect',
+      },
+      {
+        eventType: 'roomote_runtime.assistant_message',
+        text: 'The redirect is fixed',
+      },
+      {
+        eventType: 'roomote_runtime.tool_call',
+        text: 'This UI-only event must not advance the cache',
+      },
+    ];
+    useTaskMessageEnvelopesMock.mockImplementation(() => ({ data: history }));
+    const props = {
+      onFileSearchOpen: () => {},
+      onCommandSearchOpen: () => {},
+      taskRun: createTaskRun(1),
+    };
+
+    const { rerender } = render(<PromptInput {...props} />);
+
+    expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
+      input: { historyRevision: 0 },
+    });
+
+    history = [
+      ...history,
+      {
+        eventType: 'roomote_runtime.user_prompt',
+        text: 'Please add a regression test',
+      },
+      {
+        eventType: 'roomote_runtime.assistant_message',
+        text: 'The regression test now passes',
+      },
+    ];
+    rerender(<PromptInput {...props} />);
+
+    expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
+      input: { historyRevision: 4 },
+    });
+  });
+
+  it('does not request a suggestion until persisted history has enough messages', () => {
+    useTaskMessageEnvelopesMock.mockReturnValue({ data: [] });
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: true,

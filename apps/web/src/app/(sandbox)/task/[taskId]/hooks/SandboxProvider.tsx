@@ -255,12 +255,6 @@ export function useSandboxHistoryReady(): boolean {
   return useContext(SandboxHistoryReadyContext);
 }
 
-/** Cheap length-only selector so consumers don't re-render per message body. */
-export function useSandboxMessageCount(): number {
-  const store = useSandboxStore();
-  return useStore(store, (s) => s.messages.length);
-}
-
 export function useSandboxClient(): SandboxClient | null {
   const store = useSandboxStore();
   return useStore(store, (s) => s.client);
