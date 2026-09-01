@@ -22,7 +22,7 @@ type FastAgentStorageDiagnostic = {
 };
 
 export function isFastAgentStorageFullError(error: unknown): boolean {
-  const detail = formatErrorForLog(error).toLowerCase();
+  const detail = (formatErrorForLog(error) || '').toLowerCase();
   return (
     detail.includes('enospc') || detail.includes('no space left on device')
   );
