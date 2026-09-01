@@ -206,7 +206,10 @@ type AgentMailWebhookStatus = {
 };
 
 export type AgentMailCommsStatus = {
+  /** The routed inbox_id (the persisted configuration value). */
   inboxAddress: string | null;
+  /** The deliverable address for display, resolved live from AgentMail. */
+  inboxEmail: string | null;
   webhook: AgentMailWebhookStatus;
 };
 
@@ -790,6 +793,29 @@ function readAgentMailInboxAddress(
   return normalizeAgentMailInboxAddress(inboxId ?? email);
 }
 
+/**
+ * The deliverable address of an inbox object, for operator-facing display
+ * only — never persisted and never used to route (see
+ * readAgentMailInboxAddress). Deriving it live from the API each time means
+ * a stored value can never drift from AgentMail's record.
+ */
+function readAgentMailInboxEmail(
+  inbox: Record<string, unknown>,
+): string | null {
+  const email = typeof inbox.email === 'string' ? inbox.email : null;
+  return (
+    normalizeAgentMailInboxAddress(email) ?? readAgentMailInboxAddress(inbox)
+  );
+}
+
+/** `email (inbox_id)` when the fields differ, else just the address. */
+function formatAgentMailInboxLabel(
+  inboxId: string,
+  email: string | null,
+): string {
+  return email && email !== inboxId ? `${email} (${inboxId})` : inboxId;
+}
+
 async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
   const credentials = await resolveAgentMailRuntimeCredentials();
   if (!credentials.apiKey) return null;
@@ -798,6 +824,19 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
   const client = createAgentMailApiClient(credentials.apiKey);
 
   try {
+    // Display only: the deliverable address may differ from the routed
+    // inbox_id, and resolving it live means it can never drift. Best-effort;
+    // the webhook status below is the load-bearing part.
+    let inboxEmail: string | null = null;
+    if (credentials.inboxId) {
+      try {
+        const inbox = await client.getInbox(credentials.inboxId);
+        inboxEmail = inbox ? readAgentMailInboxEmail(inbox) : null;
+      } catch {
+        inboxEmail = null;
+      }
+    }
+
     const { webhooks } = await client.listWebhooks();
     const webhook = findRoomoteAgentMailWebhook(webhooks);
     const registeredUrl = webhook?.url ?? null;
@@ -813,6 +852,7 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
 
     return {
       inboxAddress: credentials.inboxId,
+      inboxEmail,
       webhook: {
         status: !webhook
           ? 'unregistered'
@@ -827,6 +867,7 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
   } catch (error) {
     return {
       inboxAddress: credentials.inboxId,
+      inboxEmail: null,
       webhook: {
         status: 'error',
         registeredUrl: null,
@@ -846,7 +887,10 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
 export async function listAgentMailInboxesCommand(
   auth: UserAuthSuccess,
   input: { apiKey?: string } = {},
-): Promise<{ inboxes: string[]; proposedNewAddress: string }> {
+): Promise<{
+  inboxes: Array<{ inboxId: string; email: string }>;
+  proposedNewAddress: string;
+}> {
   assertAdmin(auth);
 
   invalidateAgentMailRuntimeCredentialsCache();
@@ -862,8 +906,15 @@ export async function listAgentMailInboxesCommand(
   try {
     const listed = await client.listInboxes();
     const inboxes = (listed.inboxes ?? [])
-      .map((inbox) => readAgentMailInboxAddress(inbox))
-      .filter((address): address is string => Boolean(address));
+      .map((inbox) => {
+        const inboxId = readAgentMailInboxAddress(inbox);
+        return inboxId
+          ? { inboxId, email: readAgentMailInboxEmail(inbox) ?? inboxId }
+          : null;
+      })
+      .filter((entry): entry is { inboxId: string; email: string } =>
+        Boolean(entry),
+      );
 
     return {
       inboxes,
@@ -879,7 +930,10 @@ export async function listAgentMailInboxesCommand(
 }
 
 type AgentMailReconcileResult = {
+  /** The routed inbox_id — persisted and used in API paths/webhook scoping. */
   inboxAddress: string;
+  /** The deliverable address, display only. */
+  inboxEmail: string;
   webhookUrl: string;
   webhookSecret: string | null;
 };
@@ -944,6 +998,7 @@ async function reconcileAgentMailSetup(input: {
   // confusing inbox or webhook error.
   const orgInboxes: string[] = [];
   const inboxDisplayNames = new Map<string, string | null>();
+  const inboxEmails = new Map<string, string>();
   try {
     const listed = await client.listInboxes();
     for (const inbox of listed.inboxes ?? []) {
@@ -954,6 +1009,10 @@ async function reconcileAgentMailSetup(input: {
         address,
         typeof inbox.display_name === 'string' ? inbox.display_name : null,
       );
+      const email = readAgentMailInboxEmail(inbox);
+      if (email) {
+        inboxEmails.set(address, email);
+      }
     }
   } catch (error) {
     throw new Error(
@@ -980,6 +1039,10 @@ async function reconcileAgentMailSetup(input: {
     try {
       const inbox = await client.getInbox(requestedInboxId);
       inboxAddress = readAgentMailInboxAddress(inbox) ?? requestedInboxId;
+      const email = readAgentMailInboxEmail(inbox);
+      if (email) {
+        inboxEmails.set(inboxAddress, email);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/\(404\)|not found/iu.test(message)) {
@@ -1007,7 +1070,11 @@ async function reconcileAgentMailSetup(input: {
     inboxAddress = orgInboxes[0]!;
   } else if (orgInboxes.length > 1) {
     throw new Error(
-      `This AgentMail account has ${orgInboxes.length} inboxes. Enter the one Roomote should use in the Inbox Email Address field: ${orgInboxes.join(', ')}`,
+      `This AgentMail account has ${orgInboxes.length} inboxes. Enter the one Roomote should use in the Inbox Email Address field: ${orgInboxes
+        .map((address) =>
+          formatAgentMailInboxLabel(address, inboxEmails.get(address) ?? null),
+        )
+        .join(', ')}`,
     );
   } else {
     inboxAddress = await createProposedAgentMailInbox(
@@ -1123,7 +1190,12 @@ async function reconcileAgentMailSetup(input: {
     );
   }
 
-  return { inboxAddress, webhookUrl, webhookSecret };
+  return {
+    inboxAddress,
+    inboxEmail: inboxEmails.get(inboxAddress) ?? inboxAddress,
+    webhookUrl,
+    webhookSecret,
+  };
 }
 
 /** Deleting the webhook must never block a disconnect. */
@@ -1756,6 +1828,7 @@ export async function saveCommsAuthConfigCommand(
       ? {
           agentmail: {
             inboxAddress: agentmailSetup.inboxAddress,
+            inboxEmail: agentmailSetup.inboxEmail,
             webhookUrl: agentmailSetup.webhookUrl,
           },
         }

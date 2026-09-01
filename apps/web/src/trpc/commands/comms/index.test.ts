@@ -854,7 +854,10 @@ describe('comms commands', () => {
           values: { R_AGENTMAIL_API_KEY: 'am-key' },
         }),
       ).resolves.toMatchObject({
-        agentmail: { inboxAddress: 'existing@agentmail.to' },
+        agentmail: {
+          inboxAddress: 'existing@agentmail.to',
+          inboxEmail: 'display-alias@agentmail.to',
+        },
       });
     });
 
@@ -1330,7 +1333,10 @@ describe('comms commands', () => {
           apiKey: '  typed-key  ',
         }),
       ).resolves.toEqual({
-        inboxes: ['one@agentmail.to', 'two@agentmail.to'],
+        inboxes: [
+          { inboxId: 'one@agentmail.to', email: 'one@agentmail.to' },
+          { inboxId: 'two@agentmail.to', email: 'two@agentmail.to' },
+        ],
         proposedNewAddress,
       });
 
@@ -1352,7 +1358,12 @@ describe('comms commands', () => {
       await expect(
         listAgentMailInboxesCommand(buildMockAuth(), {}),
       ).resolves.toEqual({
-        inboxes: ['existing@agentmail.to'],
+        inboxes: [
+          {
+            inboxId: 'existing@agentmail.to',
+            email: 'existing@agentmail.to',
+          },
+        ],
         proposedNewAddress,
       });
 

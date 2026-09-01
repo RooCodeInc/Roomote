@@ -307,7 +307,15 @@ function AgentMailSetupStatus({
           <Mail className="size-4 mt-0.5 shrink-0" />
           <p className="text-sm">
             Inbox:{' '}
-            <span className="break-all font-mono">{status.inboxAddress}</span>
+            <span className="break-all font-mono">
+              {status.inboxEmail ?? status.inboxAddress}
+            </span>
+            {status.inboxEmail && status.inboxEmail !== status.inboxAddress ? (
+              <span className="text-muted-foreground">
+                {' '}
+                (id: {status.inboxAddress})
+              </span>
+            ) : null}
           </p>
         </div>
       ) : null}
@@ -399,15 +407,18 @@ function AgentMailInboxChooser({
     loadInboxes.isPending ||
     (loadEnabled && !loadInboxes.isSuccess && !loadInboxes.isError);
 
+  // Entries pair the routed inbox_id (the submitted value) with the
+  // deliverable email (the label); they are equal today but may diverge.
   const inboxes = loadInboxes.data?.inboxes ?? [];
+  const inboxIds = inboxes.map((inbox) => inbox.inboxId);
   const proposedNewAddress = loadInboxes.data?.proposedNewAddress ?? null;
   const proposalAlreadyExists = Boolean(
-    proposedNewAddress && inboxes.includes(proposedNewAddress),
+    proposedNewAddress && inboxIds.includes(proposedNewAddress),
   );
   const normalizedValue = value.trim().toLowerCase();
   const selectValue = !normalizedValue
     ? undefined
-    : inboxes.includes(normalizedValue)
+    : inboxIds.includes(normalizedValue)
       ? normalizedValue
       : normalizedValue === proposedNewAddress && !proposalAlreadyExists
         ? AGENTMAIL_CREATE_NEW_INBOX_OPTION
@@ -530,9 +541,11 @@ function AgentMailInboxChooser({
               <SelectValue placeholder="Choose an inbox" />
             </SelectTrigger>
             <SelectContent>
-              {inboxes.map((address) => (
-                <SelectItem key={address} value={address}>
-                  {address}
+              {inboxes.map((inbox) => (
+                <SelectItem key={inbox.inboxId} value={inbox.inboxId}>
+                  {inbox.email !== inbox.inboxId
+                    ? `${inbox.email} (${inbox.inboxId})`
+                    : inbox.inboxId}
                 </SelectItem>
               ))}
               {proposedNewAddress && !proposalAlreadyExists ? (

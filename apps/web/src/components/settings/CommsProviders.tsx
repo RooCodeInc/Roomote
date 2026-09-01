@@ -43,7 +43,7 @@ export function CommsProviders() {
 
         if (result?.agentmail) {
           toast.success(
-            `Email connected. Roomote receives mail at ${result.agentmail.inboxAddress}.`,
+            `Email connected. Roomote receives mail at ${result.agentmail.inboxEmail ?? result.agentmail.inboxAddress}.`,
           );
           return;
         }
