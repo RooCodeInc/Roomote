@@ -40,16 +40,22 @@ import {
  */
 function SetupSessionSourceControlCardBody({
   sourceControlSetup,
+  explicitlySelectedProvider,
   sessionId,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
+  explicitlySelectedProvider: SourceControlProvider | null;
   sessionId: string;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const [stage, setStage] = useState<SourceControlCardStage>(() =>
-    getInitialSourceControlCardStage(sourceControlSetup, searchParams),
+    getInitialSourceControlCardStage(
+      sourceControlSetup,
+      explicitlySelectedProvider,
+      searchParams,
+    ),
   );
   const [configOpen, setConfigOpen] = useState(false);
   const [activeProvider, setActiveProvider] =
@@ -70,7 +76,7 @@ function SetupSessionSourceControlCardBody({
 
   const provider =
     activeProvider ??
-    sourceControlSetup.selectedProvider ??
+    explicitlySelectedProvider ??
     sourceControlSetup.runtimeConfiguredProvider ??
     sourceControlSetup.preselectedProvider;
   const providerLabel =
@@ -171,6 +177,8 @@ export function SetupSessionSourceControlCard({
     trpc.setupNew.status.queryOptions(undefined, { staleTime: 10_000 }),
   );
   const sourceControlSetup = statusQuery.data?.sourceControlSetup ?? null;
+  const explicitlySelectedProvider =
+    statusQuery.data?.setupNewState.sourceControlProvider ?? null;
   const hasSynchronizedRepository = sourceControlSetup?.providers.some(
     (provider) => provider.connected && (provider.repositoryCount ?? 0) > 0,
   );
@@ -182,6 +190,7 @@ export function SetupSessionSourceControlCard({
   return (
     <SetupSessionSourceControlCardBody
       sourceControlSetup={sourceControlSetup}
+      explicitlySelectedProvider={explicitlySelectedProvider}
       sessionId={sessionId}
     />
   );

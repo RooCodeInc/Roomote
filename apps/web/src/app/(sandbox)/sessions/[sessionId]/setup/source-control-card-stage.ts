@@ -9,9 +9,9 @@ type SearchParamsReader = {
 export function getInitialSourceControlCardStage(
   sourceControlSetup: {
     connectedProvider: SourceControlProvider | null;
-    selectedProvider: SourceControlProvider | null;
     providers: Array<{ connected: boolean }>;
   },
+  explicitlySelectedProvider: SourceControlProvider | null,
   searchParams: SearchParamsReader,
 ): SourceControlCardStage {
   const anyAuthorized =
@@ -22,6 +22,6 @@ export function getInitialSourceControlCardStage(
     searchParams.get('setup') === 'source-control';
 
   if (anyAuthorized || returningFromConnection) return 'connect';
-  if (sourceControlSetup.selectedProvider) return 'config';
+  if (explicitlySelectedProvider) return 'config';
   return 'provider';
 }
