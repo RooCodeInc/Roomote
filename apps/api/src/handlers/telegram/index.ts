@@ -613,11 +613,15 @@ telegram.post('/', async (c) => {
       apiLogger.warn(
         `[telegram] Fast session ${fastSession.id} could not resolve an active delivery route`,
       );
-      return c.json({
-        ok: true,
-        queued: false,
-        reason: 'fast_session_delivery_unavailable',
-      });
+      await releaseTelegramUpdateClaim(update.update_id).catch(() => {});
+      return c.json(
+        {
+          ok: true,
+          queued: false,
+          reason: 'fast_session_delivery_unavailable',
+        },
+        503,
+      );
     }
     await ackTelegramMessageBestEffort({
       chatId: metadata.communicationChannelId,
