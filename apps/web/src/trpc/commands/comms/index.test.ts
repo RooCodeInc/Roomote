@@ -895,6 +895,31 @@ describe('comms commands', () => {
       expect(mockAgentMailCreateWebhook).not.toHaveBeenCalled();
     });
 
+    it('uses the created inbox email in the result when it differs from the id', async () => {
+      mockAgentMailListInboxes.mockResolvedValue({ inboxes: [] });
+      mockAgentMailCreateInbox.mockResolvedValue({
+        inbox_id: `${expectedUsername}@agentmail.to`,
+        email: `${expectedUsername}-alias@agentmail.to`,
+      });
+      mockAgentMailCreateWebhook.mockResolvedValue({
+        webhook_id: 'wh-1',
+        url: expectedWebhookUrl,
+        secret: 'whsec_created',
+      });
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+          values: { R_AGENTMAIL_API_KEY: 'am-key' },
+        }),
+      ).resolves.toMatchObject({
+        agentmail: {
+          inboxAddress: `${expectedUsername}@agentmail.to`,
+          inboxEmail: `${expectedUsername}-alias@agentmail.to`,
+        },
+      });
+    });
+
     it('asks the operator to choose when the org has several inboxes', async () => {
       mockAgentMailListInboxes.mockResolvedValue({
         inboxes: [

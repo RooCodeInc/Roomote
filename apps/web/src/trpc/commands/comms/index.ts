@@ -940,13 +940,14 @@ type AgentMailReconcileResult = {
 
 /**
  * Create the deployment's proposed inbox (idempotent via the proposal client
- * id) and return its normalized address. Shared by the blank-inbox provision
- * path and the chooser's explicit "create new" path.
+ * id) and return its normalized routing address plus the deliverable email.
+ * Shared by the blank-inbox provision path and the chooser's explicit
+ * "create new" path.
  */
 async function createProposedAgentMailInbox(
   client: AgentMailApiClient,
   proposal: { username: string; clientId: string },
-): Promise<string> {
+): Promise<{ inboxAddress: string; inboxEmail: string }> {
   try {
     const inbox = await client.createInbox({
       username: proposal.username,
@@ -957,7 +958,10 @@ async function createProposedAgentMailInbox(
     if (!createdAddress) {
       throw new Error('AgentMail created an inbox but returned no inbox id.');
     }
-    return createdAddress;
+    return {
+      inboxAddress: createdAddress,
+      inboxEmail: readAgentMailInboxEmail(inbox) ?? createdAddress,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (/\(409\)|already exists|already taken/iu.test(message)) {
@@ -1051,7 +1055,9 @@ async function reconcileAgentMailSetup(input: {
           // The inbox chooser's "create new" option submits the deployment's
           // proposal address explicitly, so a 404 here means it does not
           // exist yet: create it instead of erroring.
-          inboxAddress = await createProposedAgentMailInbox(client, proposal);
+          const created = await createProposedAgentMailInbox(client, proposal);
+          inboxAddress = created.inboxAddress;
+          inboxEmails.set(created.inboxAddress, created.inboxEmail);
         } else {
           throw new Error(
             `AgentMail could not find the inbox ${requestedInboxId} with this API key. Check the inbox email address, or clear it to let Roomote create one.`,
@@ -1077,10 +1083,12 @@ async function reconcileAgentMailSetup(input: {
         .join(', ')}`,
     );
   } else {
-    inboxAddress = await createProposedAgentMailInbox(
+    const created = await createProposedAgentMailInbox(
       client,
       buildAgentMailInboxProposal(Env.R_APP_URL),
     );
+    inboxAddress = created.inboxAddress;
+    inboxEmails.set(created.inboxAddress, created.inboxEmail);
   }
 
   // Prove message_read without side effects: fetching a sentinel message id
