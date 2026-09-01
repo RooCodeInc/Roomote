@@ -10,10 +10,15 @@ import { Skeleton, Switch } from '@/components/system';
 import { Section } from '@/components/settings';
 import type { ExperimentalFlag } from '@/trpc/commands/feature-flags';
 
-function prettifyFlagId(id: string): string {
-  return id
+function flagDisplayName(flag: ExperimentalFlag): string {
+  if (flag.label) {
+    return flag.label;
+  }
+
+  const spaced = flag.id
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 export function ExperimentalSettings() {
@@ -42,7 +47,7 @@ export function ExperimentalSettings() {
       queryClient.setQueryData<ExperimentalFlag[]>(queryKey, updated);
       router.refresh();
       toast.success(
-        `${prettifyFlagId(flag.id)} ${nextValue ? 'enabled' : 'disabled'}`,
+        `${flagDisplayName(flag)} ${nextValue ? 'enabled' : 'disabled'}`,
       );
     } catch (error) {
       queryClient.setQueryData<ExperimentalFlag[]>(queryKey, previous);
@@ -77,10 +82,10 @@ export function ExperimentalSettings() {
       {flagsQuery.data.map((flag) => (
         <Section
           key={flag.id}
-          title={prettifyFlagId(flag.id)}
+          title={flagDisplayName(flag)}
           action={
             <Switch
-              aria-label={`Toggle ${prettifyFlagId(flag.id)}`}
+              aria-label={`Toggle ${flagDisplayName(flag)}`}
               checked={flag.value}
               disabled={updateMutation.isPending}
               onCheckedChange={(checked) =>

@@ -26,6 +26,7 @@ function getConfiguredFlag(flag: FeatureFlag): FeatureFlagConfig {
 export type ExperimentalFlag = {
   id: FeatureFlag;
   metadataKey: string;
+  label: string | null;
   description: string;
   value: boolean;
   explicitlySet: boolean;
@@ -65,6 +66,7 @@ function buildExperimentalFlags(
     return {
       id: flag,
       metadataKey,
+      label: config.label ?? null,
       description: config.description ?? '',
       value: evaluateFeatureFlagFromMetadata(flag, metadataRecord),
       explicitlySet: metadataKey in metadata,

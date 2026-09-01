@@ -19,6 +19,8 @@ export interface FeatureFlagConfig<T extends FeatureFlagValue = boolean> {
   override?: T | (() => T);
   metadataKey?: string;
   legacyMetadataKeys?: string[];
+  /** Human-readable name shown in settings; falls back to the flag id. */
+  label?: string;
   description?: string;
   group?: string;
 }
