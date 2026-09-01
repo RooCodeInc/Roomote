@@ -28,6 +28,53 @@ function candidateTitle(candidateId: string) {
   );
 }
 
+export function AutomationRecommendationChoices({
+  batch,
+  onEnabledChange,
+  disabled = false,
+}: {
+  batch: AutomationRecommendationBatch;
+  onEnabledChange: (id: string, enabled: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="divide-y rounded-lg border bg-background/40">
+        {batch.recommendations.map((recommendation) => (
+          <div
+            key={recommendation.id}
+            className="flex flex-col gap-4 py-3 px-4 sm:flex-row sm:items-center"
+          >
+            <Switch
+              id={`automation-recommendation-${recommendation.id}`}
+              checked={recommendation.enabled}
+              disabled={disabled}
+              onCheckedChange={(enabled) =>
+                onEnabledChange(recommendation.id, enabled)
+              }
+            />
+            <Label
+              htmlFor={`automation-recommendation-${recommendation.id}`}
+              className="min-w-0 flex-1 flex-col items-start gap-1"
+            >
+              <span className="text-sm font-semibold">
+                {candidateTitle(recommendation.candidateId)}
+              </span>
+              <span className="text-sm font-normal text-muted-foreground">
+                {recommendation.explanation}
+              </span>
+            </Label>
+          </div>
+        ))}
+      </div>
+      <p>
+        You can manage these (and dozens of others) and create your own in the{' '}
+        <Zap className="inline size-4 ml-0.5 -mt-0.5" /> Automations page.
+      </p>
+    </div>
+  );
+}
+
 export function AutomationRecommendations({
   onContinue,
 }: {
@@ -166,40 +213,11 @@ export function AutomationRecommendations({
           </AlertDescription>
         </Alert>
       ) : (
-        <div className="space-y-4">
-          <div className="divide-y rounded-lg border bg-background/40">
-            {batch.recommendations.map((recommendation) => (
-              <div
-                key={recommendation.id}
-                className="flex flex-col gap-4 py-3 px-4 sm:flex-row sm:items-center"
-              >
-                <Switch
-                  id={`automation-recommendation-${recommendation.id}`}
-                  checked={recommendation.enabled}
-                  onCheckedChange={(enabled) =>
-                    setEnabled.mutate({ id: recommendation.id, enabled })
-                  }
-                />
-                <Label
-                  htmlFor={`automation-recommendation-${recommendation.id}`}
-                  className="min-w-0 flex-1 flex-col items-start gap-1"
-                >
-                  <span className="text-sm font-semibold">
-                    {candidateTitle(recommendation.candidateId)}
-                  </span>
-                  <span className="text-sm font-normal text-muted-foreground">
-                    {recommendation.explanation}
-                  </span>
-                </Label>
-              </div>
-            ))}
-          </div>
-          <p>
-            You can manage these (and dozens of others) and create your own in
-            the <Zap className="inline size-4 ml-0.5 -mt-0.5" /> Automations
-            page.
-          </p>
-        </div>
+        <AutomationRecommendationChoices
+          batch={batch}
+          onEnabledChange={(id, enabled) => setEnabled.mutate({ id, enabled })}
+          disabled={setEnabled.isPending}
+        />
       )}
       {startRecommendations.error ? (
         <Alert variant="destructive">
