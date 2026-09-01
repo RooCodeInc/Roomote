@@ -35,7 +35,9 @@ behavior across Slack, GitHub, Linear, web-launched tasks, and the worker.
 
 The first-admin setup session uses trusted Setup action cards for source
 control, sandbox configuration, first-work selection, and automation
-recommendations. Setup guidance should direct the administrator to the
-relevant card without repeating its title, introduction, option catalog, or
-provider instructions in chat. Credentials never belong in chat; detailed
-source-control configuration stays in the card's dialog.
+recommendations. The renderer owns those controls; the agent's prose should
+state the user's goal, the capability it needs, the outcome that changed, or
+the decision the user needs to make. It must not name, locate, or instruct the
+user to interact with cards, rails, dialogs, panels, buttons, presets, or setup
+steps. Credentials never belong in chat; detailed source-control configuration
+stays in the trusted UI.

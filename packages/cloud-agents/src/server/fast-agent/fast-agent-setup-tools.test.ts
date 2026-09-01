@@ -52,6 +52,10 @@ describe('setup prompt guidance and snapshot injection', () => {
     expect(prompt).toContain(
       "This is often the user's first interaction with Roomote",
     );
+    expect(prompt).toContain("Hi, I'm Roomote");
+    expect(prompt).toContain(
+      'To get started, I need access to your source code.',
+    );
     expect(prompt).toContain(
       'always refer to Roomote in the first person: use "I", "me", and "my"',
     );
@@ -66,14 +70,32 @@ describe('setup prompt guidance and snapshot injection', () => {
     expect(prompt).toContain('request_user_input');
     expect(prompt).toContain('setup_starter_tasks');
     expect(prompt).toContain('launch_task');
-    expect(prompt).toContain('visible Setup action cards are the trusted UI');
+    expect(prompt).toContain(
+      'The renderer automatically presents the trusted controls appropriate to the setup snapshot',
+    );
+    expect(prompt).toContain(
+      'Keep those controls separate from my side of the conversation',
+    );
+    expect(prompt).toContain(
+      'Never name, locate, or instruct the user to interact with UI elements',
+    );
+    expect(prompt).toContain(
+      "state only the user's goal, the capability I need, the outcome that changed, or the decision the user needs to make",
+    );
     expect(prompt).toContain(
       'Launch is deferred until the setup snapshot says',
     );
-    expect(prompt).toContain('sandbox action card');
     expect(prompt).toContain(
-      "Do not repeat a card's title, introduction, option catalog, or provider instructions",
+      'I need a workspace where I can run the work you selected',
     );
+    expect(prompt).not.toContain(
+      'Direct the administrator to the relevant card',
+    );
+    expect(prompt).not.toContain('complete the source-control action card');
+    expect(prompt).not.toContain(
+      'direct the administrator to the sandbox action card',
+    );
+    expect(prompt).not.toContain('helps the user recognize the visible card');
     expect(prompt).not.toContain('launch_setup_starter_tasks');
     expect(prompt).not.toContain('update_plan');
   });
