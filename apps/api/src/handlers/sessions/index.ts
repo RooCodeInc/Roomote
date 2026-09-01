@@ -58,10 +58,10 @@ async function findAccessibleSession(sessionId: string) {
     .limit(1);
   if (session) return session;
 
-  // Session pages retain Fast conversation UUIDs as durable legacy URLs.
-  // Resolve those links here too, including conversations whose backfill has
-  // not created the canonical Session row yet.
-  const [legacy] = await db
+  // Session pages retain persisted Fast conversation UUIDs as alternate
+  // identifiers. Resolve those links here too, including conversations whose
+  // backfill has not created the canonical Session row yet.
+  const [alternate] = await db
     .select({
       conversationId: fastAgentConversations.id,
       session: sessions,
@@ -73,12 +73,14 @@ async function findAccessibleSession(sessionId: string) {
     )
     .where(eq(fastAgentConversations.id, sessionId))
     .limit(1);
-  if (!legacy) return null;
-  if (legacy.session) {
-    return legacy.session.visibility === 'visible' ? legacy.session : null;
+  if (!alternate) return null;
+  if (alternate.session) {
+    return alternate.session.visibility === 'visible'
+      ? alternate.session
+      : null;
   }
 
-  return ensureSessionForFastConversation(db, legacy.conversationId);
+  return ensureSessionForFastConversation(db, alternate.conversationId);
 }
 
 async function sendSessionMessage(c: SessionContext): Promise<Response> {

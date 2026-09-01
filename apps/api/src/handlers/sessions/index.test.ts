@@ -408,19 +408,21 @@ describe('MCP session routes', () => {
       }),
     );
 
-    const legacyIdResponse = await createApp(owner.id).request(
+    const fastConversationIdResponse = await createApp(owner.id).request(
       `/sessions/${conversation!.id}/send_message`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: 'Continue from legacy link' }),
+        body: JSON.stringify({
+          message: 'Continue from Fast conversation link',
+        }),
       },
     );
-    expect(legacyIdResponse.status).toBe(200);
+    expect(fastConversationIdResponse.status).toBe(200);
     expect(mocks.queueFastAgentSurfaceReply).toHaveBeenLastCalledWith(
       expect.objectContaining({
         sessionId: conversation!.id,
-        question: 'Continue from legacy link',
+        question: 'Continue from Fast conversation link',
       }),
     );
   });
@@ -435,14 +437,14 @@ describe('MCP session routes', () => {
         surface: 'web',
         workspaceId: owner.id,
         conversationId: crypto.randomUUID(),
-        title: 'Legacy Session link',
+        title: 'Fast conversation Session link',
       })
       .returning();
     createdConversationIds.push(conversation!.id);
     await db.insert(fastAgentMessages).values({
       conversationId: conversation!.id,
-      eventId: 'legacy-message',
-      turnId: 'legacy-turn',
+      eventId: 'fast-conversation-message',
+      turnId: 'fast-conversation-turn',
       turnSeq: 0,
       ts: 1,
       eventType: 'roomote_runtime.user_prompt',
