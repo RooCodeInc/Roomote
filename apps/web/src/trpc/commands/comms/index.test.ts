@@ -868,6 +868,23 @@ describe('comms commands', () => {
       expect(mockAgentMailCreateWebhook).not.toHaveBeenCalled();
     });
 
+    it('fails the save when the message_read probe cannot complete (network error)', async () => {
+      mockAgentMailListInboxes.mockResolvedValue({
+        inboxes: [{ inbox_id: 'existing@agentmail.to' }],
+      });
+      mockAgentMailGetMessage.mockRejectedValue(
+        new Error('fetch failed: socket hang up'),
+      );
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+          values: { R_AGENTMAIL_API_KEY: 'am-key' },
+        }),
+      ).rejects.toThrow(/Could not reach the AgentMail API/);
+      expect(mockAgentMailCreateWebhook).not.toHaveBeenCalled();
+    });
+
     it('asks the operator to choose when the org has several inboxes', async () => {
       mockAgentMailListInboxes.mockResolvedValue({
         inboxes: [

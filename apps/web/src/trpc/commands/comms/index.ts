@@ -1025,7 +1025,10 @@ async function reconcileAgentMailSetup(input: {
   try {
     await client.getMessage(inboxAddress, 'roomote-permission-probe');
   } catch (error) {
-    if (error instanceof AgentMailApiError && error.status !== 404) {
+    // Only the expected 404 proves the permission; anything else — 403, but
+    // also timeouts and network failures — means validation never completed
+    // and must fail the save rather than persist an unvalidated key.
+    if (!(error instanceof AgentMailApiError) || error.status !== 404) {
       throw new Error(
         classifyAgentMailSetupError(error, 'reading inbox messages'),
       );
