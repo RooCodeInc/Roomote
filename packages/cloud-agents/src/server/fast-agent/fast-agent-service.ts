@@ -18,6 +18,7 @@ import {
   buildInferenceProviderRecoveryPrompt,
   fastAgentHumanFollowUpEventSchema,
   formatErrorForLog,
+  getAllowedIntegrationMcpToolNames,
   resolveInferenceProviderRetryDelayMs,
   isMemoryMcpServer,
   truncateAcpOutputText,
@@ -58,6 +59,10 @@ import {
 } from '../../utils';
 import { resolveRoomoteReleaseVersion } from '../../release-version';
 import { getAvailableEnvironments, type RoutableEnvironment } from '../router';
+import {
+  isRouterMcpServerEnabled,
+  isRouterMcpToolAllowed,
+} from '../router/mcp-policy';
 import {
   FAST_AGENT_MODEL_ROLE,
   FAST_RESPONDING_LEASE_MS,
@@ -399,6 +404,69 @@ function buildIntegrationCallSignature({
     toolName,
     canonicalizeIntegrationCallValue(args),
   ]);
+}
+
+const REPLAY_SAFE_ROOMOTE_TASK_ACTIONS = new Set([
+  'search',
+  'get_summary',
+  'get_messages',
+  'search_tasks',
+  'get_compute_logs',
+  'list_environments',
+]);
+
+const REPLAY_SAFE_ROOMOTE_AUTOMATION_ACTIONS = new Set([
+  'list',
+  'list_models',
+  'resolve_schedule',
+]);
+
+function isReplaySafeFastAgentMcpCall(call: FastAgentMcpToolCall): boolean {
+  if (call.integrationId === ROOMOTE_MCP_ID) {
+    if (
+      call.toolName === 'get_about_me' ||
+      call.toolName === CHAT_CHANNELS_TOOL.name ||
+      call.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name ||
+      call.toolName === CHAT_MESSAGE_CONTEXT_TOOL.name
+    ) {
+      return true;
+    }
+    if (call.toolName === 'manage_tasks') {
+      return (
+        typeof call.args.action === 'string' &&
+        REPLAY_SAFE_ROOMOTE_TASK_ACTIONS.has(call.args.action)
+      );
+    }
+    if (call.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name) {
+      return (
+        typeof call.args.action === 'string' &&
+        REPLAY_SAFE_ROOMOTE_AUTOMATION_ACTIONS.has(call.args.action)
+      );
+    }
+    return false;
+  }
+
+  if (isRouterMcpServerEnabled(call.integrationId)) {
+    return isRouterMcpToolAllowed(call.integrationId, call.toolName);
+  }
+
+  return Boolean(
+    getAllowedIntegrationMcpToolNames(call.integrationId)?.includes(
+      call.toolName,
+    ),
+  );
+}
+
+function isReplaySafeFastAgentNativeTool(
+  name: FastAgentNativeToolCall['name'],
+): boolean {
+  return (
+    name === FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply ||
+    name === FAST_AGENT_NATIVE_TOOL_NAMES.listSkills ||
+    name === FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill ||
+    name === FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep ||
+    name === FAST_AGENT_NATIVE_TOOL_NAMES.spillRead
+  );
 }
 
 export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
@@ -1020,6 +1088,11 @@ export async function answerFastAgentQuestion({
     | { eventId: string; turnSeq: number }
     | undefined;
   let inferenceRetryAttempted = false;
+  let automaticRetryRecoverySafe =
+    substantiveHumanInput &&
+    (conversation.surface === 'web' ||
+      conversation.surface === 'slack' ||
+      conversation.surface === 'discord');
   let inferenceRetryRecoveryEligible = false;
   let inferenceRetryRecoveryContext:
     | {
@@ -1818,12 +1891,7 @@ export async function answerFastAgentQuestion({
       inferenceRetryAttempted = true;
       const message = formatFastAgentInferenceRetryNotice(notice);
       const reply = { purpose: 'progress' as const, message };
-      inferenceRetryRecoveryEligible =
-        substantiveHumanInput &&
-        !nativeToolInvoked &&
-        (conversation.surface === 'web' ||
-          conversation.surface === 'slack' ||
-          conversation.surface === 'discord');
+      inferenceRetryRecoveryEligible = automaticRetryRecoverySafe;
       inferenceRetryRecoveryContext = inferenceRetryRecoveryEligible
         ? {
             ...(currentMessageAgentContext
@@ -1951,8 +2019,10 @@ export async function answerFastAgentQuestion({
               'Post an acknowledgement with send_chat_reply before this action.',
           }
         : null;
-    const disableInferenceRetryRecoveryBeforeTool = async () => {
+    const recordToolInvocation = async (replaySafe: boolean) => {
       nativeToolInvoked = true;
+      if (replaySafe) return;
+      automaticRetryRecoverySafe = false;
       inferenceRetryRecoveryEligible = false;
       inferenceRetryRecoveryContext = undefined;
       if (canonicalConversationId && inferenceRetryCanonicalEvent) {
@@ -1975,7 +2045,7 @@ export async function answerFastAgentQuestion({
         if (closedError) return closedError;
         const ownershipError = requireLockOwnership();
         if (ownershipError) return ownershipError;
-        await disableInferenceRetryRecoveryBeforeTool();
+        await recordToolInvocation(isReplaySafeFastAgentMcpCall(call));
         turnProgressMarker += 1;
 
         if (platformEventHandling === 'present_only') {
@@ -2148,7 +2218,7 @@ export async function answerFastAgentQuestion({
         if (closedError) return closedError;
         const ownershipError = requireLockOwnership();
         if (ownershipError) return ownershipError;
-        await disableInferenceRetryRecoveryBeforeTool();
+        await recordToolInvocation(isReplaySafeFastAgentNativeTool(call.name));
         turnProgressMarker += 1;
 
         if (

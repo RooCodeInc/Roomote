@@ -2592,10 +2592,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
-  it('leaves a safe silent retry queued for recovery when API shutdown interrupts backoff', async () => {
+  it('recovers after an acknowledgement and read-only Session inspection when shutdown interrupts backoff', async () => {
     const controller = new AbortController();
     const shutdown = new FastAgentProcessShutdownError('SIGTERM');
-    const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
+    const postReply = vi.fn().mockResolvedValue({ messageId: 'ack-1' });
     const originalSetTimeout = globalThis.setTimeout;
     let shouldAbort = true;
     const timeout = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
@@ -2609,7 +2609,29 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }
       }, 0);
     }) as typeof setTimeout);
-    mocks.generateText.mockRejectedValue(new Error('TypeError: fetch failed'));
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Deployment management',
+        tools: [{ name: 'manage_tasks' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({ messages: [] });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll inspect that.',
+        });
+        await invokeMcpTool('roomote', 'manage_tasks', {
+          action: 'get_messages',
+          sessionId: 'session-1',
+        });
+        throw new Error('TypeError: fetch failed');
+      },
+    );
 
     try {
       await expect(
@@ -2622,7 +2644,21 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ).rejects.toBe(shutdown);
 
       expect(mocks.generateText).toHaveBeenCalledOnce();
-      expect(postReply).not.toHaveBeenCalled();
+      expect(postReply).toHaveBeenCalledOnce();
+      expect(postReply).toHaveBeenCalledWith({
+        purpose: 'ack',
+        message: 'I’ll inspect that.',
+      });
+      expect(mocks.callIntegration).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        {
+          integrationId: 'roomote',
+          toolName: 'manage_tasks',
+          args: { action: 'get_messages', sessionId: 'session-1' },
+        },
+      );
+      expect(mocks.disableRetryRecovery).not.toHaveBeenCalled();
       const retryWrites = mocks.upsertMessage.mock.calls
         .map(([input]) => input.message)
         .filter((message) => message.eventId === '100.2:retry-notice:0');
@@ -2639,11 +2675,93 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         },
       });
       expect(mocks.reconcileRetryNotices).toHaveBeenCalledOnce();
-      expect(
-        mocks.upsertMessage.mock.calls
-          .map(([input]) => input.message.eventId)
-          .filter((eventId) => eventId.startsWith('100.2:assistant:')),
-      ).toHaveLength(0);
+      const assistantWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId.startsWith('100.2:assistant:'));
+      expect(assistantWrites).toHaveLength(1);
+      expect(assistantWrites[0]?.contentBlocks).toEqual([
+        { type: 'text', text: 'I’ll inspect that.' },
+      ]);
+      expect(JSON.stringify(mocks.upsertMessage.mock.calls)).not.toContain(
+        'The inference retry was interrupted before it completed.',
+      );
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('requires a resend after a mutating Session action when shutdown interrupts backoff', async () => {
+    const controller = new AbortController();
+    const shutdown = new FastAgentProcessShutdownError('SIGTERM');
+    const postReply = vi
+      .fn()
+      .mockResolvedValueOnce({ messageId: 'ack-1' })
+      .mockResolvedValueOnce({ messageId: 'closeout-1' });
+    const originalSetTimeout = globalThis.setTimeout;
+    let shouldAbort = true;
+    const timeout = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      callback: () => void,
+    ) => {
+      return originalSetTimeout(() => {
+        callback();
+        if (shouldAbort) {
+          shouldAbort = false;
+          controller.abort(shutdown);
+        }
+      }, 0);
+    }) as typeof setTimeout);
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Deployment management',
+        tools: [{ name: 'manage_tasks' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({ success: true });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll update that.',
+        });
+        await invokeMcpTool('roomote', 'manage_tasks', {
+          action: 'send_message',
+          sessionId: 'session-1',
+          message: 'Continue with the correction.',
+        });
+        throw new Error('TypeError: fetch failed');
+      },
+    );
+
+    try {
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ postReply }),
+          signal: controller.signal,
+        }),
+      ).rejects.toBe(shutdown);
+
+      expect(postReply).toHaveBeenCalledTimes(2);
+      expect(postReply).toHaveBeenLastCalledWith({
+        purpose: 'closeout',
+        message:
+          'The inference retry was interrupted before it completed. Please send the request again.',
+      });
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites[0]?.metadata).toMatchObject({
+        inferenceRetryActive: true,
+        inferenceRetryRecoveryEligible: false,
+      });
+      expect(retryWrites.at(-1)?.metadata).toMatchObject({
+        visibleInTranscript: true,
+        purpose: 'closeout',
+        inferenceRetryActive: false,
+      });
     } finally {
       timeout.mockRestore();
     }
@@ -5168,10 +5286,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         inferenceRetryActive: true,
         inferenceRetryRecoveryEligible: true,
       });
-      expect(mocks.disableRetryRecovery).toHaveBeenCalledWith({
-        conversationId: 'conversation-1',
-        retryEventId: '100.2:retry-notice:0',
-      });
+      expect(mocks.disableRetryRecovery).not.toHaveBeenCalled();
       expect(retryWrites.at(-1)?.metadata).toMatchObject({
         purpose: 'closeout',
         inferenceRetryNotice: true,
