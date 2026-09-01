@@ -9,6 +9,7 @@ const {
   removeOptimisticQueuedMessageMock,
   restoreMutateAsyncMock,
   toastErrorMock,
+  useAuthorizedUserMock,
   useSandboxCurrentUserInfoMock,
 } = vi.hoisted(() => ({
   appendOptimisticAcpEventMock: vi.fn(),
@@ -18,6 +19,7 @@ const {
   removeOptimisticQueuedMessageMock: vi.fn(),
   restoreMutateAsyncMock: vi.fn(),
   toastErrorMock: vi.fn(),
+  useAuthorizedUserMock: vi.fn(),
   useSandboxCurrentUserInfoMock: vi.fn(),
 }));
 
@@ -26,6 +28,7 @@ let capturedSuggestion: unknown;
 let capturedSubmitWithMetaKey: boolean | undefined;
 let capturedSubmitIcon: unknown;
 let capturedSurface: string | undefined;
+let capturedModelSwitcherDisabled: boolean | undefined;
 const submittedFilesRef: {
   current: Array<{
     url?: string;
@@ -54,16 +57,7 @@ vi.mock('@/hooks/snapshots', () => ({
 }));
 
 vi.mock('@/hooks/useUser', () => ({
-  useAuthorizedUser: () => ({
-    managedAccess: {
-      state: 'active',
-      reason: null,
-      revision: 1,
-      effectiveAt: '2026-01-01T00:00:00.000Z',
-      restrictionStartsAt: null,
-      remediationUrl: null,
-    },
-  }),
+  useAuthorizedUser: useAuthorizedUserMock,
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -99,6 +93,7 @@ vi.mock('@/components/tasks', () => ({
     suggestion,
     submitWithMetaKey,
     submitIcon,
+    tools,
     surface,
     submitDisabledReason,
   }: {
@@ -117,6 +112,7 @@ vi.mock('@/components/tasks', () => ({
     suggestion?: unknown;
     submitWithMetaKey?: boolean;
     submitIcon?: unknown;
+    tools?: React.ReactNode;
     surface?: string;
     submitDisabledReason?: string;
   }) => {
@@ -145,9 +141,49 @@ vi.mock('@/components/tasks', () => ({
         >
           Send
         </button>
+        {tools}
       </div>
     );
   },
+}));
+
+vi.mock('./prompt-input/TaskModelSwitcher', () => ({
+  TaskModelSwitcher: ({
+    disabled,
+    onPendingChange,
+  }: {
+    disabled?: boolean;
+    onPendingChange?: (pending: boolean) => void;
+  }) => {
+    capturedModelSwitcherDisabled = disabled;
+
+    return (
+      <button type="button" onClick={() => onPendingChange?.(true)}>
+        Model selector
+      </button>
+    );
+  },
+}));
+
+vi.mock('./sidebar-actions/TaskToolsButton', () => ({
+  TaskToolsMenu: ({
+    disabled,
+    onSelect,
+  }: {
+    disabled?: boolean;
+    onSelect: (actionId: 'simplify') => void;
+  }) => (
+    <div>
+      <button type="button" disabled={disabled} aria-label="Task Tools" />
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onSelect('simplify')}
+      >
+        Simplify changed code
+      </button>
+    </div>
+  ),
 }));
 
 import { WakeTaskInput } from './WakeTaskInput';
@@ -166,6 +202,7 @@ describe('WakeTaskInput', () => {
     capturedSubmitWithMetaKey = undefined;
     capturedSubmitIcon = undefined;
     capturedSurface = undefined;
+    capturedModelSwitcherDisabled = undefined;
     submittedFilesRef.current = [];
     preparePromptAttachmentsMock.mockResolvedValue({
       text: 'Wake up and keep going',
@@ -174,6 +211,16 @@ describe('WakeTaskInput', () => {
       success: true,
       runId: 84,
       taskId: 'task-42',
+    });
+    useAuthorizedUserMock.mockReturnValue({
+      managedAccess: {
+        state: 'active',
+        reason: null,
+        revision: 1,
+        effectiveAt: '2026-01-01T00:00:00.000Z',
+        restrictionStartsAt: null,
+        remediationUrl: null,
+      },
     });
     useSandboxCurrentUserInfoMock.mockReturnValue(null);
   });
@@ -217,6 +264,121 @@ describe('WakeTaskInput', () => {
     );
 
     expect(capturedSurface).toBe('embedded');
+  });
+
+  it('allows model selection before waking an OpenCode task', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+
+    renderWithQueryClient(
+      <WakeTaskInput
+        taskRun={{
+          id: 42,
+          snapshotId: 'snap-42',
+          taskId: 'task-42',
+          harness: 'opencode-server',
+        }}
+      />,
+      queryClient,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Model selector' }),
+    ).toBeVisible();
+    expect(capturedModelSwitcherDisabled).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Model selector' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+      expect(capturedModelSwitcherDisabled).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(restoreMutateAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it('runs a task tool as the wake-up prompt', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    preparePromptAttachmentsMock.mockImplementation(
+      ({ text }: { text: string }) => Promise.resolve({ text }),
+    );
+
+    renderWithQueryClient(
+      <WakeTaskInput
+        taskRun={{
+          id: 42,
+          snapshotId: 'snap-42',
+          taskId: 'task-42',
+          harness: 'opencode-server',
+          payloadKind: 'standard',
+        }}
+      />,
+      queryClient,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Simplify changed code' }),
+    );
+
+    await waitFor(() => {
+      expect(restoreMutateAsyncMock).toHaveBeenCalledWith({
+        sourceSnapshotId: 'snap-42',
+        sourceRunId: 42,
+        clientMessageId: expect.any(String),
+        resumePrompt: '$simplify',
+      });
+    });
+
+    expect(appendOptimisticAcpEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: '$simplify',
+      }),
+    );
+  });
+
+  it('disables task tools when managed access blocks waking the task', () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    useAuthorizedUserMock.mockReturnValue({
+      managedAccess: {
+        state: 'read_only',
+        reason: 'billing_required',
+        revision: 2,
+        effectiveAt: '2026-01-02T00:00:00.000Z',
+        restrictionStartsAt: null,
+        remediationUrl: null,
+      },
+    });
+
+    renderWithQueryClient(
+      <WakeTaskInput
+        taskRun={{
+          id: 42,
+          snapshotId: 'snap-42',
+          taskId: 'task-42',
+          harness: 'opencode-server',
+          payloadKind: 'standard',
+        }}
+      />,
+      queryClient,
+    );
+
+    expect(screen.getByRole('button', { name: 'Task Tools' })).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Simplify changed code' }),
+    );
+    expect(restoreMutateAsyncMock).not.toHaveBeenCalled();
   });
 
   it('prefills the sleeping draft, appends an optimistic transcript row, and resumes the task with a deferred prompt', async () => {

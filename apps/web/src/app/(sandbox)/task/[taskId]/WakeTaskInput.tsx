@@ -3,7 +3,11 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
-import { DEFAULT_MANAGED_DEPLOYMENT_ACCESS } from '@roomote/types';
+import {
+  DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
+  getTaskToolInvocation,
+  type TaskToolActionId,
+} from '@roomote/types';
 
 import type { PromptInputMessage } from '@/components/ai-elements';
 import { TaskPromptInput } from '@/components/tasks';
@@ -16,9 +20,13 @@ import type { TaskRunDetail } from '@/lib/server';
 import { cn } from '@/lib/utils';
 
 import { useOptimisticPromptSubmission } from './prompt-input/useOptimisticPromptSubmission';
+import { TaskModelSwitcher } from './prompt-input/TaskModelSwitcher';
+import { TaskToolsMenu } from './sidebar-actions/TaskToolsButton';
+import { shouldShowTaskToolsActions } from './sidebar-actions/utils';
 
 interface WakeTaskInputProps {
-  taskRun: Pick<TaskRunDetail, 'id' | 'snapshotId' | 'taskId'>;
+  taskRun: Pick<TaskRunDetail, 'id' | 'snapshotId' | 'taskId'> &
+    Partial<Pick<TaskRunDetail, 'harness' | 'payload' | 'payloadKind'>>;
   initialPrompt?: string;
   embedded?: boolean;
 }
@@ -34,6 +42,7 @@ export function WakeTaskInput({
   } = useOptimisticPromptSubmission();
   const [promptText, setPromptText] = useState(initialPrompt);
   const [sending, setSending] = useState(false);
+  const [modelSettingsPending, setModelSettingsPending] = useState(false);
   const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
     useAuthorizedUser();
   const taskLaunchDisabledReason = getTaskLaunchDisabledReason(managedAccess);
@@ -41,7 +50,7 @@ export function WakeTaskInput({
   const restore = useRestoreTaskRunSnapshot({
     onSuccess: () => setPromptText(''),
   });
-  const isBusy = sending || restore.isPending;
+  const isBusy = sending || restore.isPending || modelSettingsPending;
 
   useEffect(() => {
     setPromptText(initialPrompt);
@@ -126,6 +135,13 @@ export function WakeTaskInput({
     }
   };
 
+  const handleTaskToolSelect = (actionId: TaskToolActionId) => {
+    void handleSubmit({
+      text: getTaskToolInvocation(actionId, taskRun.harness),
+      files: [],
+    });
+  };
+
   const input = (
     <div
       className={cn(
@@ -142,6 +158,23 @@ export function WakeTaskInput({
         animateContainer={false}
         submitWithMetaKey={false}
         submitIcon={promptText.trim().length === 0 ? <Sun /> : undefined}
+        tools={
+          <>
+            {shouldShowTaskToolsActions(taskRun.payloadKind) && (
+              <TaskToolsMenu
+                onSelect={handleTaskToolSelect}
+                disabled={isBusy || Boolean(taskLaunchDisabledReason)}
+              />
+            )}
+            {taskRun.harness === 'opencode-server' && (
+              <TaskModelSwitcher
+                taskRun={taskRun}
+                disabled={isBusy}
+                onPendingChange={setModelSettingsPending}
+              />
+            )}
+          </>
+        }
         surface={embedded ? 'embedded' : 'default'}
         submitDisabledReason={taskLaunchDisabledReason}
       />

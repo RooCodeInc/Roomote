@@ -3,6 +3,8 @@
 import { Fragment, memo } from 'react';
 import { toast } from 'sonner';
 
+import type { TaskToolActionId } from '@roomote/types';
+
 import { useUser } from '@/hooks/useUser';
 import { generateClientUuid } from '@/lib/client-uuid';
 import { useTRPCClient } from '@/trpc/client';
@@ -31,6 +33,44 @@ import { TASK_TOOL_CATALOG } from '../task-tools';
 import { type SidebarActionBaseProps } from './types';
 import { isTaskRunAsleep } from './utils';
 
+export function TaskToolsMenu({
+  onSelect,
+  disabled = false,
+}: {
+  onSelect: (actionId: TaskToolActionId) => void | Promise<void>;
+  disabled?: boolean;
+}) {
+  return (
+    <PromptInputActionMenu>
+      <BasicTooltip content="Task Tools">
+        <PromptInputActionMenuTrigger
+          aria-label="Task Tools"
+          className="hover:bg-secondary"
+          disabled={disabled}
+        >
+          <Wrench className="size-4" />
+        </PromptInputActionMenuTrigger>
+      </BasicTooltip>
+      <PromptInputActionMenuContent>
+        <DropdownMenuLabel>Task Tools</DropdownMenuLabel>
+        {TASK_TOOL_CATALOG.map(({ actionId, label, separator, icon: Icon }) => (
+          <Fragment key={actionId}>
+            {separator && <DropdownMenuSeparator />}
+            <DropdownMenuItem
+              disabled={disabled}
+              onClick={() => void onSelect(actionId)}
+              className="flex items-center gap-2 cursor-pointer min-w-64"
+            >
+              <Icon className="size-4" />
+              <span>{label}</span>
+            </DropdownMenuItem>
+          </Fragment>
+        ))}
+      </PromptInputActionMenuContent>
+    </PromptInputActionMenu>
+  );
+}
+
 function TaskToolsButtonBase({
   taskRun,
 }: Pick<SidebarActionBaseProps, 'taskRun'>) {
@@ -52,54 +92,28 @@ function TaskToolsButtonBase({
     return null;
   }
 
-  const content = (
-    <>
-      <DropdownMenuLabel>Task Tools</DropdownMenuLabel>
-      {TASK_TOOL_CATALOG.map(({ actionId, label, separator, icon: Icon }) => (
-        <Fragment key={actionId}>
-          {separator && <DropdownMenuSeparator />}
-          <DropdownMenuItem
-            onClick={async () => {
-              const clientMessageId = generateClientUuid();
-
-              try {
-                await trpcClient.sandboxSession.sendPrompt.mutate({
-                  taskId: taskRun.taskId,
-                  taskTool: { actionId },
-                  source: 'web',
-                  clientMessageId,
-                  userImageUrl,
-                });
-              } catch (error) {
-                toast.error(
-                  error instanceof Error
-                    ? error.message
-                    : 'Failed to send task tool.',
-                );
-              }
-            }}
-            className="flex items-center gap-2 cursor-pointer min-w-64"
-          >
-            <Icon className="size-4" />
-            <span>{label}</span>
-          </DropdownMenuItem>
-        </Fragment>
-      ))}
-    </>
-  );
-
   return (
-    <PromptInputActionMenu>
-      <BasicTooltip content="Task Tools">
-        <PromptInputActionMenuTrigger
-          aria-label="Task Tools"
-          className="hover:bg-secondary"
-        >
-          <Wrench className="size-4" />
-        </PromptInputActionMenuTrigger>
-      </BasicTooltip>
-      <PromptInputActionMenuContent>{content}</PromptInputActionMenuContent>
-    </PromptInputActionMenu>
+    <TaskToolsMenu
+      onSelect={async (actionId) => {
+        const clientMessageId = generateClientUuid();
+
+        try {
+          await trpcClient.sandboxSession.sendPrompt.mutate({
+            taskId: taskRun.taskId,
+            taskTool: { actionId },
+            source: 'web',
+            clientMessageId,
+            userImageUrl,
+          });
+        } catch (error) {
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : 'Failed to send task tool.',
+          );
+        }
+      }}
+    />
   );
 }
 
