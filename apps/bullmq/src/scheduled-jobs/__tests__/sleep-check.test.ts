@@ -35,6 +35,7 @@ const {
   fromFn,
   selectFn,
   inArrayFn,
+  existsFn,
 } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- suppressed for oxlint; ESLint's own rule is offloaded and reports this directive as unused, which is a false positive
   type AnyMock = Mock<(...args: any[]) => any>;
@@ -63,6 +64,7 @@ const {
     direction: 'desc',
   }));
   const inArrayFn: AnyMock = vi.fn();
+  const existsFn: AnyMock = vi.fn(() => ({ exists: true }));
   const eqFn: AnyMock = vi.fn();
   const gtFn: AnyMock = vi.fn();
   const orFn: AnyMock = vi.fn();
@@ -100,6 +102,7 @@ const {
     fromFn,
     selectFn,
     inArrayFn,
+    existsFn,
   };
 });
 
@@ -168,12 +171,18 @@ vi.mock('@roomote/db/server', () => ({
     id: 'id',
     taskId: 'taskId',
   },
+  tasks: {
+    id: 'taskId',
+    state: 'taskState',
+    activityAt: 'activityAt',
+  },
   eq: eqFn,
   and: vi.fn(),
   or: orFn,
   isNull: vi.fn(),
   isNotNull: vi.fn(),
   inArray: inArrayFn,
+  exists: existsFn,
   gt: gtFn,
   lte: vi.fn(),
   asc: ascFn,
@@ -337,7 +346,7 @@ describe('sleepTaskRunNow', () => {
     });
     mockCreateSnapshot.mockResolvedValue(true);
 
-    await sleepTaskRunNow(123, 'merged_pr');
+    await sleepTaskRunNow(123, 'merged_pr', 700);
 
     expect(mockCreateSnapshot).toHaveBeenCalledWith({
       runId: 123,
@@ -345,6 +354,7 @@ describe('sleepTaskRunNow', () => {
       snapshotIntentId: expect.stringMatching(/^merged_pr-123-/),
       triggerPath: 'merged_pr',
     });
+    expect(eqFn).toHaveBeenCalledWith('activityAt', 700);
   });
 
   it('does not sleep a merged-PR task that resumed before dequeue', async () => {

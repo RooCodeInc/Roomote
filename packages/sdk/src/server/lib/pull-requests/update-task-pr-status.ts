@@ -67,7 +67,11 @@ async function sleepMergedPrOriginatingTask(taskId: string): Promise<void> {
   const runId = selectMergedPrTaskRunToSleep({ ...task, activeRuns });
 
   if (runId !== null) {
-    await enqueueTaskSleep({ runId, triggerPath: 'merged_pr' });
+    await enqueueTaskSleep({
+      runId,
+      triggerPath: 'merged_pr',
+      expectedTaskActivityAt: task.activityAt,
+    });
   }
 }
 
@@ -136,7 +140,12 @@ export async function updateTaskPrStatus(
   });
 
   if (status === 'merged' && originatingTaskId) {
-    await sleepMergedPrOriginatingTask(originatingTaskId);
+    void sleepMergedPrOriginatingTask(originatingTaskId).catch((error) => {
+      console.error(
+        `[updateTaskPrStatus] Failed to enqueue merged-PR sleep for task ${originatingTaskId}:`,
+        error,
+      );
+    });
   }
 
   if (status !== 'merged' || updated.length === 0) {

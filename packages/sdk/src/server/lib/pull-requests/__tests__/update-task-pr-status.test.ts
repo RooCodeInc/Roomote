@@ -74,12 +74,11 @@ describe('updateTaskPrStatus', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it('sleeps the originating idle task when it has been inactive for five minutes', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-09-01T12:00:00Z'));
-    const activityAt = Math.floor(Date.now() / 1_000) - 5 * 60;
+    const activityAt = 0;
     mockLinkedTasks.mockResolvedValue([
       { taskId: 'task-1', createdByRoomote: true },
     ]);
@@ -99,10 +98,72 @@ describe('updateTaskPrStatus', () => {
 
     await updateTaskPrStatus('github', 'owner/repo', 42, 'merged');
 
-    expect(mockEnqueueTaskSleep).toHaveBeenCalledWith({
-      runId: 123,
-      triggerPath: 'merged_pr',
+    await vi.waitFor(() => {
+      expect(mockEnqueueTaskSleep).toHaveBeenCalledWith({
+        runId: 123,
+        triggerPath: 'merged_pr',
+        expectedTaskActivityAt: activityAt,
+      });
     });
+  });
+
+  it('does not wait for merged-PR sleep completion before returning', async () => {
+    mockLinkedTasks.mockResolvedValue([
+      { taskId: 'task-1', createdByRoomote: true },
+    ]);
+    mockDbSelect
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: () => Promise.resolve([{ state: 'active', activityAt: 0 }]),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => Promise.resolve([{ id: 123, status: RunStatus.Idle }]),
+        }),
+      });
+    mockEnqueueTaskSleep.mockReturnValue(new Promise(() => {}));
+
+    await expect(
+      updateTaskPrStatus('github', 'owner/repo', 42, 'merged'),
+    ).resolves.toBeUndefined();
+    await vi.waitFor(() => {
+      expect(mockEnqueueTaskSleep).toHaveBeenCalled();
+    });
+  });
+
+  it('handles a background sleep enqueue failure without failing the webhook', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockLinkedTasks.mockResolvedValue([
+      { taskId: 'task-1', createdByRoomote: true },
+    ]);
+    mockDbSelect
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: () => Promise.resolve([{ state: 'active', activityAt: 0 }]),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => Promise.resolve([{ id: 123, status: RunStatus.Idle }]),
+        }),
+      });
+    mockEnqueueTaskSleep.mockRejectedValue(new Error('queue unavailable'));
+
+    await expect(
+      updateTaskPrStatus('gitlab', 'owner/repo', 42, 'merged'),
+    ).resolves.toBeUndefined();
+    await vi.waitFor(() => {
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to enqueue merged-PR sleep'),
+        expect.any(Error),
+      );
+    });
+    errorSpy.mockRestore();
   });
 
   it('reconciles each linked task state once when a pull request is merged', async () => {

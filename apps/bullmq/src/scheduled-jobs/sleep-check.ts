@@ -14,6 +14,7 @@ import {
   type TaskRun,
   db,
   taskRuns,
+  tasks,
   createComputeProviderMutationEventRecorder,
   recordTaskRunEvent,
   eq,
@@ -22,6 +23,7 @@ import {
   isNull,
   isNotNull,
   inArray,
+  exists,
   asc,
   desc,
   gt,
@@ -592,6 +594,26 @@ function warnIfSleepCheckBatchLimitReached(
   );
 }
 
+function taskActivityClaimGuard(
+  job: SleepCheckJob,
+  expectedTaskActivityAt?: number,
+) {
+  return expectedTaskActivityAt === undefined
+    ? undefined
+    : exists(
+        db
+          .select({ id: tasks.id })
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.id, job.taskId),
+              eq(tasks.state, 'active'),
+              eq(tasks.activityAt, expectedTaskActivityAt),
+            ),
+          ),
+      );
+}
+
 /**
  * Optimistically claim the snapshot slot for a job and enqueue a snapshot.
  * Returns `'enqueued'` when a snapshot job was added, `'duplicate'` when a
@@ -602,6 +624,7 @@ function warnIfSleepCheckBatchLimitReached(
 async function claimAndSnapshot(
   job: SleepCheckJob,
   path: SleepCheckPath,
+  expectedTaskActivityAt?: number,
 ): Promise<'enqueued' | 'duplicate' | 'skipped' | 'error'> {
   const now = new Date();
   const snapshotIntentId = `${path}-${job.id}-${now.getTime()}`;
@@ -619,6 +642,7 @@ async function claimAndSnapshot(
         isNull(taskRuns.sleepRequestedAt),
         isNull(taskRuns.snapshotRequestedAt),
         isNull(taskRuns.snapshotId),
+        taskActivityClaimGuard(job, expectedTaskActivityAt),
       ),
     )
     .returning({ id: taskRuns.id });
@@ -701,6 +725,7 @@ async function claimAndEnterStandby(
   job: SleepCheckJob,
   client: ComputeProviderClient,
   path: SleepCheckPath,
+  expectedTaskActivityAt?: number,
 ): Promise<'completed' | 'skipped' | 'error'> {
   const requestedAt = new Date();
   const [claimed] = await db
@@ -713,6 +738,7 @@ async function claimAndEnterStandby(
         isNull(taskRuns.sleepRequestedAt),
         isNull(taskRuns.snapshotRequestedAt),
         isNull(taskRuns.snapshotId),
+        taskActivityClaimGuard(job, expectedTaskActivityAt),
       ),
     )
     .returning({ id: taskRuns.id });
@@ -840,6 +866,7 @@ async function claimResumableSleep(
 export async function sleepTaskRunNow(
   runId: number,
   path: Extract<SleepCheckPath, 'manual_sleep' | 'merged_pr'> = 'manual_sleep',
+  expectedTaskActivityAt?: number,
 ): Promise<void> {
   const job = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, runId),
@@ -900,7 +927,12 @@ export async function sleepTaskRunNow(
   }
 
   if (isStandbyResumeCapableComputeProvider(job.vendor)) {
-    const result = await claimAndEnterStandby(job, client, path);
+    const result = await claimAndEnterStandby(
+      job,
+      client,
+      path,
+      expectedTaskActivityAt,
+    );
 
     if (result === 'error') {
       throw new Error(`Failed to put task run #${runId} on standby`);
@@ -909,7 +941,7 @@ export async function sleepTaskRunNow(
     return;
   }
 
-  const result = await claimAndSnapshot(job, path);
+  const result = await claimAndSnapshot(job, path, expectedTaskActivityAt);
 
   if (result === 'error') {
     throw new Error(`Failed to snapshot task run #${runId}`);

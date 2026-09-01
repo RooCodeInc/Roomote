@@ -16,7 +16,12 @@ export function startTaskSleepQueue() {
   );
   const worker = new Worker<TaskSleepRequest, void, string>(
     TASK_SLEEP_QUEUE_NAME,
-    ({ data }) => sleepTaskRunNow(data.runId, data.triggerPath),
+    ({ data }) =>
+      sleepTaskRunNow(
+        data.runId,
+        data.triggerPath,
+        data.expectedTaskActivityAt,
+      ),
     { connection, concurrency: 5, autorun: true },
   );
   const queueEvents = new QueueEvents(TASK_SLEEP_QUEUE_NAME, { connection });
