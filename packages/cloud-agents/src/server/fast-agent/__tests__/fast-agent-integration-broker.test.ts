@@ -294,6 +294,33 @@ describe('fast-agent integration broker', () => {
     });
   });
 
+  it('keeps deployment-disabled Roomote channel tools out of Fast inventory', async () => {
+    mocks.configuredServers = {
+      roomote: {
+        url: 'https://app.example.test/mcp',
+        headers: {},
+        disabledTools: ['post_to_channel'],
+      },
+    };
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'manage_tasks' },
+      { name: 'list_chat_channels' },
+      { name: 'post_to_channel' },
+      { name: 'send_chat_reaction_emoji' },
+    ]);
+
+    const integrations = await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://app.example.test/_roomote-api',
+    });
+
+    expect(integrations[0]?.tools.map(({ name }) => name)).toEqual([
+      'manage_tasks',
+      'list_chat_channels',
+      'send_chat_reaction_emoji',
+    ]);
+  });
+
   it('injects the current user token into deployment proxies behind a reverse-proxy base path', async () => {
     mocks.configuredServers = {
       roomote: {

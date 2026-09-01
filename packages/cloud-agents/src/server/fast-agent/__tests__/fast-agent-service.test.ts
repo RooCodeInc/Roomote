@@ -2199,6 +2199,241 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('exposes and targets Slack channel tools through the Fast parent', async () => {
+    const postReaction = vi.fn().mockResolvedValue(undefined);
+    mocks.callIntegration.mockImplementation(
+      async (_context, _integrations, request) =>
+        request.toolName === 'send_chat_reaction_emoji'
+          ? { channelId: 'channel-1', messageTs: '100.2', name: 'eyes' }
+          : { ok: true },
+    );
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [
+          { name: 'get_chat_message_context' },
+          { name: 'get_chat_channel_messages' },
+          { name: 'list_chat_channels' },
+          { name: 'post_to_channel' },
+          { name: 'send_chat_reaction_emoji' },
+          { name: 'add_reaction_to_slack_message' },
+        ],
+      },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeMcpTool('roomote', 'send_chat_reaction_emoji', {
+            name: ':eyes:',
+          }),
+        ).resolves.toMatchObject({ success: true });
+        await invokeMcpTool('roomote', 'list_chat_channels', {});
+        await invokeMcpTool('roomote', 'post_to_channel', {
+          channel: '#shipping',
+          threadTs: '199.9',
+          text: 'Release is ready.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Posted the release update.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks({ postReaction }),
+    });
+
+    const roomoteTools = (
+      mocks.getNativeRuntime.mock.calls[0]?.[1] as Array<{
+        id: string;
+        tools: Array<{ name: string }>;
+      }>
+    )
+      .find(({ id }) => id === 'roomote')!
+      .tools.map(({ name }) => name);
+    expect(roomoteTools).toEqual(
+      expect.arrayContaining([
+        'get_chat_message_context',
+        'get_chat_channel_messages',
+        'list_chat_channels',
+        'post_to_channel',
+        'send_chat_reaction_emoji',
+      ]),
+    );
+    expect(roomoteTools).not.toContain('add_reaction_to_slack_message');
+    expect(postReaction).not.toHaveBeenCalled();
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      {
+        integrationId: 'roomote',
+        toolName: 'send_chat_reaction_emoji',
+        args: {
+          name: ':eyes:',
+          provider: 'slack',
+          slackTeamId: 'team-1',
+          channel: 'channel-1',
+          messageId: '100.2',
+        },
+      },
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      {
+        integrationId: 'roomote',
+        toolName: 'list_chat_channels',
+        args: { slackTeamId: 'team-1' },
+      },
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      {
+        integrationId: 'roomote',
+        toolName: 'post_to_channel',
+        args: {
+          channel: '#shipping',
+          threadTs: '199.9',
+          text: 'Release is ready.',
+          provider: 'slack',
+          slackTeamId: 'team-1',
+        },
+      },
+    );
+  });
+
+  it('does not record a failed Roomote MCP reaction as delivered', async () => {
+    let reactionResult: unknown;
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [{ name: 'send_chat_reaction_emoji' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({
+      error: 'Slack app is not a member of channel channel-1.',
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        reactionResult = await invokeMcpTool(
+          'roomote',
+          'send_chat_reaction_emoji',
+          { name: 'eyes' },
+        );
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The reaction was not posted.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(reactionResult).toEqual({
+      success: false,
+      error: 'Slack app is not a member of channel channel-1.',
+    });
+    expect(mocks.upsertMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({ payload: { reaction: 'eyes' } }),
+      }),
+    );
+  });
+
+  it('omits gated channel tools when the Fast surface has no valid chat context', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [
+          { name: 'get_chat_message_context' },
+          { name: 'list_chat_channels' },
+          { name: 'post_to_channel' },
+          { name: 'send_chat_reaction_emoji' },
+          { name: 'add_reaction_to_slack_message' },
+        ],
+      },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'No channel action is available.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'web-session-1',
+      },
+      adapter: callbacks({ postReaction: undefined }),
+    });
+
+    const roomoteTools = (
+      mocks.getNativeRuntime.mock.calls[0]?.[1] as Array<{
+        id: string;
+        tools: Array<{ name: string }>;
+      }>
+    )
+      .find(({ id }) => id === 'roomote')!
+      .tools.map(({ name }) => name);
+    expect(roomoteTools).toEqual(['get_chat_message_context']);
+  });
+
+  it('preserves the broker inventory when deployment config disabled channel tools', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [{ name: 'get_chat_message_context' }],
+      },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The deployment channel policy is applied.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks(),
+    });
+
+    const roomoteTools = (
+      mocks.getNativeRuntime.mock.calls[0]?.[1] as Array<{
+        id: string;
+        tools: Array<{ name: string }>;
+      }>
+    )
+      .find(({ id }) => id === 'roomote')!
+      .tools.map(({ name }) => name);
+    expect(roomoteTools).toEqual(['get_chat_message_context']);
+  });
+
   it.each([
     [undefined, '2026-08-23T12:00:00.000Z'],
     ['1710000000.000000', '2024-03-08T16:00:00.000Z'],

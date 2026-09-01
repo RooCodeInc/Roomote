@@ -4,8 +4,11 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
+  CHAT_CHANNEL_POST_TOOL_NAME,
   CHAT_CHANNEL_MESSAGES_TOOL,
+  CHAT_CHANNELS_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
+  CHAT_REACTION_EMOJI_TOOL_NAME,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
@@ -95,6 +98,7 @@ import { getFastAgentNativeAcpKind } from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
   listFastAgentIntegrations,
+  type FastAgentIntegration,
 } from './fast-agent-integration-broker';
 import {
   cancelFastAgentTask,
@@ -129,6 +133,36 @@ import {
   type FastAgentTurnSource,
 } from './fast-agent-conversation';
 import { prepareShowWidget } from '../show-widget';
+
+const LEGACY_SLACK_REACTION_TOOL = 'add_reaction_to_slack_message';
+
+function selectFastRoomoteChannelTools(options: {
+  integrations: FastAgentIntegration[];
+  conversation: FastAgentConversation;
+  currentMessageReactable: boolean;
+}): FastAgentIntegration[] {
+  const slackConversation = options.conversation.surface === 'slack';
+  return options.integrations.map((integration) =>
+    integration.id === ROOMOTE_MCP_ID
+      ? {
+          ...integration,
+          tools: integration.tools.filter(({ name }) => {
+            if (name === LEGACY_SLACK_REACTION_TOOL) return false;
+            if (
+              name === CHAT_CHANNELS_TOOL.name ||
+              name === CHAT_CHANNEL_POST_TOOL_NAME
+            ) {
+              return slackConversation;
+            }
+            if (name === CHAT_REACTION_EMOJI_TOOL_NAME) {
+              return slackConversation && options.currentMessageReactable;
+            }
+            return true;
+          }),
+        }
+      : integration,
+  );
+}
 
 export type FastAgentThreadMessage = SlackThreadPromptMessage;
 
@@ -815,6 +849,18 @@ function toolFailure(error: unknown): { success: false; error: string } {
   return { success: false, error: formatErrorForLog(error) };
 }
 
+function isSuccessfulChatReactionResult(
+  result: unknown,
+): result is { channelId: string; messageTs: string; name: string } {
+  if (!result || typeof result !== 'object') return false;
+  const value = result as Record<string, unknown>;
+  return (
+    typeof value.channelId === 'string' &&
+    typeof value.messageTs === 'string' &&
+    typeof value.name === 'string'
+  );
+}
+
 export async function answerFastAgentQuestion({
   question,
   images = [],
@@ -1209,7 +1255,7 @@ export async function answerFastAgentQuestion({
       availableEnvironments,
       taskModelOptions,
       session,
-      availableIntegrations,
+      discoveredIntegrations,
       currentUser,
     ] = await Promise.all([
       getAvailableEnvironments(),
@@ -1241,6 +1287,11 @@ export async function answerFastAgentQuestion({
             return { displayName: null, githubLogin: null };
           }),
     ]);
+    const availableIntegrations = selectFastRoomoteChannelTools({
+      integrations: discoveredIntegrations,
+      conversation,
+      currentMessageReactable,
+    });
     canonicalConversationId = session.id;
     await reconcileFastAgentInferenceRetryNotices(session.id).catch((error) => {
       console.warn(
@@ -1411,6 +1462,73 @@ export async function answerFastAgentQuestion({
         await mirrorPendingMessages(true);
       }
     };
+    const recordChatReaction = async (
+      name: string,
+      purpose: 'ack' | 'closeout',
+      messageId: string,
+    ) => {
+      const signature = JSON.stringify([name, purpose, messageId]);
+      if (completedChatReactionSignatures.has(signature)) {
+        return {
+          success: true as const,
+          delivered: true,
+          duplicate: true,
+          closed,
+        };
+      }
+      completedChatReactionSignatures.add(signature);
+      turnVisibleMessages.push(
+        buildAssistantTextMessage(`[Reacted with :${name}:]`),
+      );
+      await persistCanonicalMessage(
+        {
+          ...allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
+          turnId,
+          ts: Date.now(),
+          eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+          role: 'assistant',
+          contentBlocks: [{ type: 'text', text: `[Reacted with :${name}:]` }],
+          metadata: { visibleInTranscript: true },
+          payload: { reaction: name, purpose },
+          source: conversation.surface,
+          nativeSessionId: activeOpenCodeSessionId,
+        },
+        true,
+      );
+      visibleUpdatePosted = true;
+      if (purpose === 'closeout') closed = true;
+      return { success: true as const, delivered: true, closed };
+    };
+    const postChatReaction = async (
+      rawName: string,
+      purpose: 'ack' | 'closeout',
+    ) => {
+      if (!currentMessageReactable) {
+        return {
+          success: false as const,
+          error:
+            'Emoji reactions are unavailable for this input. Use send_chat_reply or ignore_event instead.',
+        };
+      }
+      if (!adapter.postReaction) {
+        return {
+          success: false as const,
+          error: 'Emoji reactions are unavailable on this surface.',
+        };
+      }
+      const name = rawName.replace(/^:+|:+$/g, '');
+      if (!name || /\s/.test(name)) {
+        return { success: false as const, error: 'Invalid reaction name.' };
+      }
+      const messageId = currentMessageId ?? conversation.conversationId;
+      const signature = JSON.stringify([name, purpose, messageId]);
+      if (completedChatReactionSignatures.has(signature)) {
+        return recordChatReaction(name, purpose, messageId);
+      }
+      throwIfTurnCancelled();
+      await adapter.postReaction({ name, purpose, messageId });
+      return recordChatReaction(name, purpose, messageId);
+    };
 
     const reportInferenceRetry = async (
       notice: FastAgentInferenceRetryNotice,
@@ -1580,13 +1698,41 @@ export async function answerFastAgentQuestion({
             integrationArguments.messageLink.trim().length === 0)
             ? { ...integrationArguments, channel: currentChatChannel }
             : integrationArguments;
-        const actorScopedIntegrationArguments = chatLookupProvider
+        const chatScopedIntegrationArguments = chatLookupProvider
           ? { ...chatLookupArguments, provider: chatLookupProvider }
           : chatLookupArguments;
+        const actorScopedIntegrationArguments =
+          call.integrationId === ROOMOTE_MCP_ID &&
+          conversation.surface === 'slack'
+            ? call.toolName === CHAT_CHANNELS_TOOL.name
+              ? {
+                  ...chatScopedIntegrationArguments,
+                  slackTeamId: conversation.workspaceId,
+                }
+              : call.toolName === CHAT_CHANNEL_POST_TOOL_NAME
+                ? {
+                    ...chatScopedIntegrationArguments,
+                    provider: 'slack',
+                    slackTeamId: conversation.workspaceId,
+                  }
+                : call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME
+                  ? {
+                      name: call.args.name,
+                      provider: 'slack',
+                      slackTeamId: conversation.workspaceId,
+                      channel: conversation.replyTarget.channelId,
+                      messageId:
+                        currentMessageId ?? conversation.conversationId,
+                    }
+                  : chatScopedIntegrationArguments
+            : chatScopedIntegrationArguments;
         const managesCustomAutomations =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
-        if (!managesCustomAutomations) {
+        const sendsChatReaction =
+          call.integrationId === ROOMOTE_MCP_ID &&
+          call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME;
+        if (!managesCustomAutomations && !sendsChatReaction) {
           const ackError = requireAcknowledgement();
           if (ackError) return ackError;
         }
@@ -1624,6 +1770,30 @@ export async function answerFastAgentQuestion({
             args: actorScopedIntegrationArguments,
           },
         );
+        if (sendsChatReaction) {
+          if (!isSuccessfulChatReactionResult(result)) {
+            const failure = {
+              success: false as const,
+              error:
+                result &&
+                typeof result === 'object' &&
+                typeof (result as { error?: unknown }).error === 'string'
+                  ? (result as { error: string }).error
+                  : 'Slack did not confirm the emoji reaction.',
+            };
+            await finishCanonicalToolEvent(canonicalToolEvent, failure);
+            return failure;
+          }
+          const name =
+            typeof call.args.name === 'string'
+              ? call.args.name.trim().replace(/^:+|:+$/g, '')
+              : '';
+          await recordChatReaction(
+            name,
+            'ack',
+            currentMessageId ?? conversation.conversationId,
+          );
+        }
         const response = { success: true, result };
         await finishCanonicalToolEvent(canonicalToolEvent, response);
         return response;
@@ -1734,65 +1904,7 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction: {
             const args = chatReactionArgsSchema.parse(call.args);
-            if (!currentMessageReactable) {
-              return {
-                success: false,
-                error:
-                  'Emoji reactions are unavailable for this input. Use send_chat_reply or ignore_event instead.',
-              };
-            }
-            if (!adapter.postReaction) {
-              return {
-                success: false,
-                error: 'Emoji reactions are unavailable on this surface.',
-              };
-            }
-            const name = args.name.replace(/^:+|:+$/g, '');
-            if (!name || /\s/.test(name)) {
-              return { success: false, error: 'Invalid reaction name.' };
-            }
-            const messageId = currentMessageId ?? conversation.conversationId;
-            const signature = JSON.stringify([name, args.purpose, messageId]);
-            if (completedChatReactionSignatures.has(signature)) {
-              return {
-                success: true,
-                delivered: true,
-                duplicate: true,
-                closed,
-              };
-            }
-            throwIfTurnCancelled();
-            await adapter.postReaction({
-              name,
-              purpose: args.purpose,
-              messageId,
-            });
-            completedChatReactionSignatures.add(signature);
-            turnVisibleMessages.push(
-              buildAssistantTextMessage(`[Reacted with :${name}:]`),
-            );
-            await persistCanonicalMessage(
-              {
-                ...allocateCanonicalEvent(
-                  `assistant:${nextAssistantOrdinal++}`,
-                ),
-                turnId,
-                ts: Date.now(),
-                eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-                role: 'assistant',
-                contentBlocks: [
-                  { type: 'text', text: `[Reacted with :${name}:]` },
-                ],
-                metadata: { visibleInTranscript: true },
-                payload: { reaction: name, purpose: args.purpose },
-                source: conversation.surface,
-                nativeSessionId: activeOpenCodeSessionId,
-              },
-              true,
-            );
-            visibleUpdatePosted = true;
-            if (args.purpose === 'closeout') closed = true;
-            return { success: true, delivered: true, closed };
+            return postChatReaction(args.name, args.purpose);
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.showWidget: {

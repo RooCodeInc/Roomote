@@ -53,6 +53,7 @@ import type { McpAuth } from './middleware';
 import { resolveAboutMeVersion } from './about-me-version';
 import { registerRoomoteMemberTools } from './roomote-member-tools';
 import { registerRoomoteCustomAutomationsTool } from './roomote-custom-automations-tool';
+import { registerRoomoteCommunicationTools } from './roomote-communication-tools';
 
 const ROOMOTE_MCP_SERVER_INFO = {
   name: 'roomote-router-mcp',
@@ -403,6 +404,9 @@ function createRoomoteMcpServer(
 
   if (registerMemberTools) {
     registerRoomoteMemberTools(server, toolAuth);
+    if (actingUserId) {
+      registerRoomoteCommunicationTools(server, actingUserId);
+    }
   }
   registerRoomoteCustomAutomationsTool(server, toolAuth);
 
