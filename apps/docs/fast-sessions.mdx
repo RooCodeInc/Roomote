@@ -94,6 +94,13 @@ the Session view and can resume the same Session directly from chat. Roomote
 verifies the provider installation, conversation, and linked user before it
 accepts the follow-up.
 
+Follow-ups sent while Fast is responding are retained before Roomote reports
+that they were accepted. A correction from the same person can steer the active
+response between completed tool calls; messages from another participant wait
+for a separate turn under that participant's identity. This keeps shared
+conversations ordered without losing instructions that arrive during active
+work.
+
 In shared Slack and Discord conversations, Fast can stay silent when linked
 participants are talking to each other. A direct reply to Roomote, a mention,
 an explicit Fast command, or a direct message still requires a response.
