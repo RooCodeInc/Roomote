@@ -63,6 +63,45 @@ export async function abortActiveFastAgentTurns(
   return activeLocks.length;
 }
 
+const turnSettleWaiters = new Set<() => void>();
+
+function notifyTurnSettleWaitersIfIdle() {
+  if (activeFastAgentTurnLocks.size > 0) return;
+  for (const waiter of [...turnSettleWaiters]) waiter();
+}
+
+/**
+ * Refuse new Fast turn admissions without aborting the active ones, so a
+ * shutdown can let in-flight turns finish before interrupting the remainder.
+ */
+export function beginFastAgentTurnDrain(
+  reason: FastAgentProcessShutdownError,
+): void {
+  processShutdownReason ??= reason;
+}
+
+/**
+ * Resolve once every active Fast turn has settled or the deadline passes.
+ * Returns the number of turns still active at that point.
+ */
+export async function waitForActiveFastAgentTurnsToSettle(
+  timeoutMs: number,
+): Promise<number> {
+  if (timeoutMs > 0 && activeFastAgentTurnLocks.size > 0) {
+    await new Promise<void>((resolve) => {
+      const settle = () => {
+        clearTimeout(deadline);
+        turnSettleWaiters.delete(settle);
+        resolve();
+      };
+      turnSettleWaiters.add(settle);
+      const deadline = setTimeout(settle, timeoutMs);
+      deadline.unref();
+    });
+  }
+  return activeFastAgentTurnLocks.size;
+}
+
 /** Serialize every human and platform-generated Fast turn for one chat. */
 export function buildFastAgentTurnLockKey(
   conversation: FastAgentConversation,
@@ -140,6 +179,7 @@ export async function acquireFastAgentTurnLock(params: {
         if (turnSettled) return;
         turnSettled = true;
         activeFastAgentTurnLocks.delete(releaseTurnLock);
+        notifyTurnSettleWaitersIfIdle();
         try {
           if (
             ownership.signal.reason instanceof FastAgentProcessShutdownError
