@@ -11,7 +11,9 @@ const {
   mockEnvironmentMappingRows,
   mockResolveDeploymentEnvVar,
   mockGetDeploymentGitHubRoomoteMentionEnabled,
+  mockGetDeploymentMarkRoomotePrReadyAfterCleanReview,
   mockSetDeploymentGitHubRoomoteMentionEnabled,
+  mockSetDeploymentMarkRoomotePrReadyAfterCleanReview,
   mockSyncAdoRepositories,
   mockSyncGitLabRepositories,
   mockSyncGiteaRepositories,
@@ -53,7 +55,9 @@ const {
   mockEnvironmentMappingRows: { rows: [] as { repositoryId: string }[] },
   mockResolveDeploymentEnvVar: vi.fn(),
   mockGetDeploymentGitHubRoomoteMentionEnabled: vi.fn(),
+  mockGetDeploymentMarkRoomotePrReadyAfterCleanReview: vi.fn(),
   mockSetDeploymentGitHubRoomoteMentionEnabled: vi.fn(),
+  mockSetDeploymentMarkRoomotePrReadyAfterCleanReview: vi.fn(),
   mockSyncAdoRepositories: vi.fn(),
   mockSyncGitLabRepositories: vi.fn(),
   mockSyncGiteaRepositories: vi.fn(),
@@ -171,10 +175,14 @@ vi.mock('@roomote/db/server', () => ({
   getDeploymentPrAction: vi.fn(),
   getDeploymentGitHubRoomoteMentionEnabled:
     mockGetDeploymentGitHubRoomoteMentionEnabled,
+  getDeploymentMarkRoomotePrReadyAfterCleanReview:
+    mockGetDeploymentMarkRoomotePrReadyAfterCleanReview,
   resolveDeploymentEnvVar: mockResolveDeploymentEnvVar,
   setDeploymentPrAction: vi.fn(),
   setDeploymentGitHubRoomoteMentionEnabled:
     mockSetDeploymentGitHubRoomoteMentionEnabled,
+  setDeploymentMarkRoomotePrReadyAfterCleanReview:
+    mockSetDeploymentMarkRoomotePrReadyAfterCleanReview,
 }));
 
 vi.mock('@/lib/server', () => ({
@@ -211,6 +219,8 @@ import {
   assertValidSourceControlConfigInput,
   clearSourceControlConfigCommand,
   getGitHubRoomoteMentionCommand,
+  getMarkRoomotePrReadyAfterCleanReviewCommand,
+  setMarkRoomotePrReadyAfterCleanReviewCommand,
   setGitHubRoomoteMentionCommand,
   syncRepositoriesCommand,
 } from './index';
@@ -255,6 +265,42 @@ describe('GitHub Roomote mention setting commands', () => {
       setGitHubRoomoteMentionCommand(buildMockAuth({ isAdmin: false }), {
         enabled: false,
       }),
+    ).rejects.toThrow('Unauthorized');
+  });
+});
+
+describe('clean review ready setting commands', () => {
+  it('returns the deployment setting to admins', async () => {
+    mockGetDeploymentMarkRoomotePrReadyAfterCleanReview.mockResolvedValueOnce(
+      true,
+    );
+
+    await expect(
+      getMarkRoomotePrReadyAfterCleanReviewCommand(buildMockAuth()),
+    ).resolves.toEqual({ enabled: true });
+  });
+
+  it('persists an admin opt-in', async () => {
+    mockSetDeploymentMarkRoomotePrReadyAfterCleanReview.mockResolvedValueOnce(
+      true,
+    );
+
+    await expect(
+      setMarkRoomotePrReadyAfterCleanReviewCommand(buildMockAuth(), {
+        enabled: true,
+      }),
+    ).resolves.toEqual({ enabled: true });
+    expect(
+      mockSetDeploymentMarkRoomotePrReadyAfterCleanReview,
+    ).toHaveBeenCalledWith(true);
+  });
+
+  it('rejects non-admin updates', async () => {
+    await expect(
+      setMarkRoomotePrReadyAfterCleanReviewCommand(
+        buildMockAuth({ isAdmin: false }),
+        { enabled: true },
+      ),
     ).rejects.toThrow('Unauthorized');
   });
 });
