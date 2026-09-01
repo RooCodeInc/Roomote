@@ -492,7 +492,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('permits silence only for eligible ambient human turns', () => {
+  it('prioritizes directedness for eligible multi-human turns', () => {
     const ambientPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       allowSilentAmbientReply: true,
@@ -502,7 +502,22 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(ambientPrompt).toContain(
-      'If it is ambient conversation between people rather than a request, reply, or answer directed at Roomote, call `ignore_event` and stop',
+      'Before applying Turn Startup or Evidence-Driven Workflow, decide whether the current sender is specifically addressing Roomote',
+    );
+    expect(ambientPrompt).toContain(
+      'asking a peer to act is ambient even when it contains an actionable request',
+    );
+    expect(ambientPrompt).toContain(
+      'For a short acknowledgement whose addressee is genuinely ambiguous, prefer a lightweight `send_chat_reaction`',
+    );
+    expect(ambientPrompt).toContain(
+      'A first-time participant is not ambient merely because they are new; respond when they address Roomote',
+    );
+    expect(ambientPrompt).toContain(
+      "a direct answer to Roomote's latest question, a request to act on Roomote's work, or a clearly directed follow-up requires a response",
+    );
+    expect(ambientPrompt).toContain(
+      'Never call `ignore_event` for one of these',
     );
     expect(ambientPrompt).toContain(
       'An eligible ambient message or optional human reaction may use `ignore_event` under its narrow rule below',

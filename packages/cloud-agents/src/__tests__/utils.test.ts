@@ -8,6 +8,7 @@ import {
   getSlackThreadDisplayName,
   generateTaskRunTitle,
   hasDeterministicTaskRunTitle,
+  hasLeadingSlackProductAddress,
   stripLeadingRawSlackMention,
   stripLeadingSlackProductMention,
   wrapSlackMessage,
@@ -53,12 +54,36 @@ describe('stripLeadingSlackProductMention', () => {
     );
   });
 
+  it('removes a conversational greeting that directly addresses the product', () => {
+    expect(
+      stripLeadingSlackProductMention('Hey Roomote, can you check this too?'),
+    ).toBe('can you check this too?');
+  });
+
   it('does not remove later mentions in the message body', () => {
     expect(
       stripLeadingSlackProductMention(
         'Please ask @Roomote to summarize this after the deploy',
       ),
     ).toBe('Please ask @Roomote to summarize this after the deploy');
+  });
+});
+
+describe('hasLeadingSlackProductAddress', () => {
+  it.each([
+    '@Roomote can you check this?',
+    'Roomote, can you check this?',
+    'Hey Roomote, can you check this?',
+  ])('recognizes a direct product address in %s', (text) => {
+    expect(hasLeadingSlackProductAddress(text)).toBe(true);
+  });
+
+  it('does not treat a later product reference as a direct address', () => {
+    expect(
+      hasLeadingSlackProductAddress(
+        'Dan, can you check why Roomote posted that message?',
+      ),
+    ).toBe(false);
   });
 });
 

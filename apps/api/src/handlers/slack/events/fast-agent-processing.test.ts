@@ -59,6 +59,8 @@ vi.mock('@roomote/cloud-agents', () => ({
   }) => [text, ...attachmentTexts].filter(Boolean).join('\n\n'),
   isRoomoteTextExtractableAttachment: ({ mimeType }: { mimeType?: string }) =>
     mimeType?.startsWith('text/') ?? false,
+  hasLeadingSlackProductAddress: (text: string) =>
+    /^\s*(?:(?:hey|hi|hello)\s+)?@?roomote(?=$|\s|[,:;.!?-])/i.test(text),
   stripLeadingSlackProductMention: (text: string) => text,
 }));
 
@@ -1092,7 +1094,10 @@ describe('processFastAgentMessage', () => {
     );
   });
 
-  it('allows silence for an unmentioned turn with another human participant', async () => {
+  it.each([
+    ['ambient peer message', 'Dan, can you send me the logs?'],
+    ['ambiguous acknowledgement', 'Sounds good'],
+  ])('allows reaction or silence for an %s', async (_scenario, text) => {
     const slack = {
       addReaction: vi.fn().mockResolvedValue(true),
       removeReaction: vi.fn().mockResolvedValue(true),
@@ -1106,7 +1111,7 @@ describe('processFastAgentMessage', () => {
           text: 'Hi Dan.',
           ts: '100.001',
         },
-        { user: 'U222', username: 'Matt', text: 'Makes sense', ts: '100.002' },
+        { user: 'U222', username: 'Matt', text, ts: '100.002' },
       ]),
     };
 
@@ -1115,7 +1120,7 @@ describe('processFastAgentMessage', () => {
         type: 'message',
         channel: 'C123',
         user: 'U222',
-        text: 'Makes sense',
+        text,
         ts: '100.002',
         thread_ts: '100.000',
       } as never,
@@ -1127,7 +1132,56 @@ describe('processFastAgentMessage', () => {
     });
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
-      expect.objectContaining({ allowSilentAmbientReply: true }),
+      expect.objectContaining({
+        allowSilentAmbientReply: true,
+        adapter: expect.objectContaining({
+          postReaction: expect.any(Function),
+        }),
+      }),
+    );
+  });
+
+  it('requires a response when a first-time participant addresses Roomote by name', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        { user: 'U111', username: 'Dan', text: '!fast hi', ts: '100.000' },
+        {
+          user: 'UBOT',
+          username: 'Roomote',
+          bot_id: 'B999',
+          text: 'Hi Dan.',
+          ts: '100.001',
+        },
+        {
+          user: 'U222',
+          username: 'Matt',
+          text: 'Hey Roomote, can you check this too?',
+          ts: '100.002',
+        },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U222',
+        text: 'Hey Roomote, can you check this too?',
+        ts: '100.002',
+        thread_ts: '100.000',
+      } as never,
+      slack: slack as never,
+      userId: 'user-2',
+      teamId: 'T123',
+      continuation: true,
+      isExistingConversation: true,
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ allowSilentAmbientReply: false }),
     );
   });
 

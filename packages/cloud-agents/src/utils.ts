@@ -14,6 +14,10 @@ const LEADING_RAW_SLACK_MENTION_PATTERN = new RegExp(
   String.raw`^\s*(?:<@[^>]+>${LEADING_SLACK_MENTION_TRAILER_PATTERN})+`,
   'u',
 );
+const LEADING_SLACK_PRODUCT_ADDRESS_PATTERN = new RegExp(
+  `^\\s*(?:(?:hey|hi|hello)\\s+)?(?:@${escapeRegExp(PRODUCT_NAME)}|${escapeRegExp(PRODUCT_NAME)})(?=$|\\s|[,:;.!?-])[\\s,:;.!?-]*`,
+  'i',
+);
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -88,13 +92,11 @@ export function stripLeadingRawSlackMention(text: string): string {
 }
 
 export function stripLeadingSlackProductMention(text: string): string {
-  const escapedProductName = escapeRegExp(PRODUCT_NAME);
-  const leadingMentionPattern = new RegExp(
-    `^\\s*(?:(?:@${escapedProductName}|${escapedProductName})(?=$|\\s|[,:;.!?-])[\\s,:;.!?-]*)+`,
-    'i',
-  );
+  return text.replace(LEADING_SLACK_PRODUCT_ADDRESS_PATTERN, '').trimStart();
+}
 
-  return text.replace(leadingMentionPattern, '').trimStart();
+export function hasLeadingSlackProductAddress(text: string): boolean {
+  return LEADING_SLACK_PRODUCT_ADDRESS_PATTERN.test(text);
 }
 
 function buildSlackWrapperOpenTag(

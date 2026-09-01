@@ -332,7 +332,14 @@ ${
 - The reacted-to message is context, not the current message surface. Do not call \`send_chat_reaction\` or \`retry_task_start\`.
 `
       : allowSilentAmbientReply
-        ? '- This is an unmentioned message in a Fast conversation with multiple human participants. If it is ambient conversation between people rather than a request, reply, or answer directed at Roomote, call `ignore_event` and stop. Do not ignore a request merely because it is unclear, difficult, or needs clarification.\n- `retry_task_start` is invalid for a human-authored turn.\n'
+        ? `## Multi-Human Conversation Directedness (Highest Priority)
+- This is an unmentioned message in a Fast conversation with multiple human participants. Before applying Turn Startup or Evidence-Driven Workflow, decide whether the current sender is specifically addressing Roomote from the current message and recent thread context.
+- A Roomote mention or command, a direct answer to Roomote's latest question, a request to act on Roomote's work, or a clearly directed follow-up requires a response. Never call \`ignore_event\` for one of these. A first-time participant is not ambient merely because they are new; respond when they address Roomote.
+- A message aimed at another person, continuing a peer exchange, or asking a peer to act is ambient even when it contains an actionable request. Call \`ignore_event\` without acknowledging, using integrations, or starting work.
+- For a short acknowledgement whose addressee is genuinely ambiguous, prefer a lightweight \`send_chat_reaction\` when an emoji adds useful acknowledgement without interrupting; otherwise call \`ignore_event\`. Do not post a text reply merely to join the conversation.
+- When directedness is uncertain, err toward reaction or silence only when the message plausibly belongs to the humans' exchange. Never use ambiguity to suppress a legitimate request to Roomote merely because it is unclear, difficult, or needs clarification.
+- \`retry_task_start\` is invalid for a human-authored turn.
+`
         : '- `ignore_event` and `retry_task_start` are invalid for this human-authored turn.\n'
 }
 
