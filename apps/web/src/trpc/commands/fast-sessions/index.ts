@@ -22,6 +22,7 @@ import {
   getSessionForFastConversation,
   retireCanonicalPrReviewActionsForDestinationKey,
   sessions,
+  sessionTasks,
 } from '@roomote/db/server';
 import {
   formatErrorForLog,
@@ -119,7 +120,11 @@ type WebFastAgentTurnInput = {
    * kickoff persists its prompt row under the turn lock, so the re-check
    * under the same lock is race-free — and unlike a transcript-emptiness
    * probe it is not fooled by an early human reply in the new session. */
-  skipIfEventExists?: { conversationId: string; eventId: string };
+  skipIfEventExists?: {
+    conversationId: string;
+    eventId: string;
+    requireTaskInSessionId?: string;
+  };
 };
 
 /**
@@ -169,10 +174,33 @@ async function runWebFastAgentTurn({
         )
         .limit(1);
       if (existingEvent) {
-        console.log(
-          `[Fast Web] Skipping duplicate turn for ${conversation.conversationId}: event ${skipIfEventExists.eventId} already ran.`,
-        );
-        return;
+        if (skipIfEventExists.requireTaskInSessionId) {
+          const [existingTask] = await db
+            .select({ taskId: sessionTasks.taskId })
+            .from(sessionTasks)
+            .where(
+              eq(
+                sessionTasks.sessionId,
+                skipIfEventExists.requireTaskInSessionId,
+              ),
+            )
+            .limit(1);
+          if (!existingTask) {
+            console.log(
+              `[Fast Web] Recovering incomplete turn for ${conversation.conversationId}: event ${skipIfEventExists.eventId} exists without an attached task.`,
+            );
+          } else {
+            console.log(
+              `[Fast Web] Skipping duplicate turn for ${conversation.conversationId}: event ${skipIfEventExists.eventId} already launched task ${existingTask.taskId}.`,
+            );
+            return;
+          }
+        } else {
+          console.log(
+            `[Fast Web] Skipping duplicate turn for ${conversation.conversationId}: event ${skipIfEventExists.eventId} already ran.`,
+          );
+          return;
+        }
       }
     }
 
@@ -257,6 +285,7 @@ export async function startFastSessionCommand(
     model: null,
     reasoningEffort: null,
   });
+  const unifiedSession = await getSessionForFastConversation(db, session.id);
 
   const kickoffTurnId =
     input.conversationId || input.artifactBuild
@@ -277,7 +306,16 @@ export async function startFastSessionCommand(
         ),
       )
       .limit(1);
-    scheduleKickoff = !existingKickoff;
+    if (!existingKickoff) {
+      scheduleKickoff = true;
+    } else if (input.artifactBuild && unifiedSession) {
+      const [existingTask] = await db
+        .select({ taskId: sessionTasks.taskId })
+        .from(sessionTasks)
+        .where(eq(sessionTasks.sessionId, unifiedSession.id))
+        .limit(1);
+      scheduleKickoff = !existingTask;
+    }
   }
 
   if (scheduleKickoff) {
@@ -334,13 +372,15 @@ export async function startFastSessionCommand(
             skipIfEventExists: {
               conversationId: session.id,
               eventId: kickoffPromptEventId,
+              ...(artifactBuild && unifiedSession
+                ? { requireTaskInSessionId: unifiedSession.id }
+                : {}),
             },
           }
         : {}),
     });
   }
 
-  const unifiedSession = await getSessionForFastConversation(db, session.id);
   return {
     sessionId: unifiedSession?.id ?? session.id,
     fastConversationId: session.id,
