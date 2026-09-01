@@ -22,7 +22,13 @@ const VOICE_OPENAI_ENV_VAR_NAMES = [
 
 const OPENAI_API_BASE_URL = 'https://api.openai.com';
 
-/** Realtime transcription model used for live microphone speech-to-text. */
+/**
+ * Realtime transcription model used for live microphone speech-to-text.
+ * `gpt-live-transcribe` streams word-by-word deltas while the user is still
+ * talking, but the API rejects `turn_detection` for it, so utterance
+ * boundaries come from the browser: client-side VAD watches the microphone
+ * and commits the audio buffer at each pause (see `useLiveVoice`).
+ */
 const VOICE_TRANSCRIPTION_MODEL = 'gpt-live-transcribe';
 
 const VOICE_TTS_MODEL = 'gpt-4o-mini-tts';
@@ -51,9 +57,9 @@ export type VoiceRealtimeClientSecret = {
 /**
  * Mint an ephemeral realtime client secret scoped to a transcription-only
  * session: the browser streams microphone audio to OpenAI over WebRTC and
- * receives transcript events, but no model responses. Server-side VAD turns
- * each pause into a completed transcript, which the client forwards to the
- * fast agent as an ordinary session reply.
+ * receives transcript events, but no model responses. The browser's own VAD
+ * commits the buffer at each pause, which finalizes the utterance that gets
+ * forwarded to the fast agent as an ordinary session reply.
  */
 export async function createVoiceRealtimeClientSecret(
   apiKey: string,
@@ -77,14 +83,10 @@ export async function createVoiceRealtimeClientSecret(
             input: {
               noise_reduction: { type: 'near_field' },
               transcription: { model: VOICE_TRANSCRIPTION_MODEL },
-              // Server VAD keeps the conversation hands-free: OpenAI detects
-              // the end of an utterance and emits the completed transcript
-              // without the user pressing anything. The silence window leans
-              // long so mid-sentence pauses don't split a request in two.
-              turn_detection: {
-                type: 'server_vad',
-                silence_duration_ms: 800,
-              },
+              // gpt-live-transcribe does not support server-side turn
+              // detection; the client commits turns manually from its own
+              // VAD, keeping the word-by-word delta stream.
+              turn_detection: null,
             },
           },
         },

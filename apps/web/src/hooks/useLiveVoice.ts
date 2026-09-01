@@ -9,15 +9,25 @@ import { chunkSpeakableText, toSpeakableText } from '@/lib/voice-speech';
  * Live voice conversation controller. Streams the microphone to OpenAI's
  * realtime transcription API over WebRTC (using a short-lived token minted
  * server-side), surfaces completed utterances to the caller, and plays
- * synthesized replies from the deployment's TTS endpoint. Server-side VAD
- * ends each utterance hands-free, and detected speech interrupts playback so
- * the user can talk over a long reply.
+ * synthesized replies from the deployment's TTS endpoint. The transcription
+ * model (`gpt-live-transcribe`) streams word-by-word deltas continuously and
+ * has no server-side turn detection, so a local energy-based VAD watches the
+ * microphone: a pause commits the audio buffer (finalizing the utterance)
+ * and detected speech interrupts playback so the user can talk over a reply.
  */
 
 const OPENAI_REALTIME_CALLS_URL = 'https://api.openai.com/v1/realtime/calls';
 const TTS_SAMPLE_RATE = 24_000;
 /** Feed the player in ~250ms batches so playback starts almost immediately. */
 const MIN_PLAYBACK_SAMPLES = TTS_SAMPLE_RATE / 4;
+
+const VAD_INTERVAL_MS = 50;
+/** RMS above this counts as the user speaking. */
+const VAD_SPEECH_RMS = 0.02;
+/** A pause this long ends the utterance and commits it. */
+const VAD_SILENCE_MS = 800;
+/** Shorter bursts (a cough, a keyboard clack) are not worth committing. */
+const VAD_MIN_SPEECH_MS = 250;
 
 export type LiveVoiceStatus =
   | 'idle'
@@ -108,8 +118,119 @@ export function useLiveVoice({
     }
   }, [setSpeaking]);
 
+  // Local VAD state: an analyser taps the mic stream and a timer classifies
+  // each 50ms window as speech or silence.
+  const vadTimerRef = useRef<number | null>(null);
+  const vadAnalyserRef = useRef<AnalyserNode | null>(null);
+  const vadSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const vadSamplesRef = useRef<Float32Array<ArrayBuffer> | null>(null);
+  const vadStateRef = useRef({
+    speaking: false,
+    speechStartAt: 0,
+    lastVoiceAt: 0,
+    hadSpeech: false,
+  });
+
+  const ensureAudioContext = useCallback(() => {
+    const context =
+      audioContextRef.current ??
+      new AudioContext({ sampleRate: TTS_SAMPLE_RATE });
+    audioContextRef.current = context;
+    void context.resume().catch(() => undefined);
+    return context;
+  }, []);
+
+  /** Finalize the buffered utterance; the completed transcript follows as a
+   * server event. */
+  const commitUtterance = useCallback(() => {
+    const channel = dataChannelRef.current;
+
+    if (channel?.readyState === 'open') {
+      channel.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+    }
+  }, []);
+
+  const stopVad = useCallback(() => {
+    if (vadTimerRef.current !== null) {
+      window.clearInterval(vadTimerRef.current);
+      vadTimerRef.current = null;
+    }
+    vadSourceRef.current?.disconnect();
+    vadSourceRef.current = null;
+    vadAnalyserRef.current = null;
+    vadSamplesRef.current = null;
+  }, []);
+
+  const startVad = useCallback(
+    (micStream: MediaStream) => {
+      const context = ensureAudioContext();
+      const source = context.createMediaStreamSource(micStream);
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      vadSourceRef.current = source;
+      vadAnalyserRef.current = analyser;
+      vadSamplesRef.current = new Float32Array(analyser.fftSize);
+      vadStateRef.current = {
+        speaking: false,
+        speechStartAt: 0,
+        lastVoiceAt: 0,
+        hadSpeech: false,
+      };
+
+      vadTimerRef.current = window.setInterval(() => {
+        const currentAnalyser = vadAnalyserRef.current;
+        const samples = vadSamplesRef.current;
+
+        if (!currentAnalyser || !samples) {
+          return;
+        }
+
+        currentAnalyser.getFloatTimeDomainData(samples);
+        let sum = 0;
+        for (let i = 0; i < samples.length; i++) {
+          const value = samples[i] ?? 0;
+          sum += value * value;
+        }
+        const rms = Math.sqrt(sum / samples.length);
+        // Residual echo of the agent's own reply must not read as the user
+        // interrupting, so the bar is higher while a reply is playing.
+        const threshold = speakingRef.current
+          ? VAD_SPEECH_RMS * 2
+          : VAD_SPEECH_RMS;
+        const now = Date.now();
+        const state = vadStateRef.current;
+
+        if (rms >= threshold) {
+          if (!state.speaking) {
+            state.speaking = true;
+            state.speechStartAt = now;
+            // Barge-in: the user talking over a reply silences it.
+            stopSpeaking();
+          }
+          state.lastVoiceAt = now;
+          state.hadSpeech = true;
+          return;
+        }
+
+        if (state.speaking && now - state.lastVoiceAt >= VAD_SILENCE_MS) {
+          state.speaking = false;
+          const spokeLongEnough =
+            state.lastVoiceAt - state.speechStartAt >= VAD_MIN_SPEECH_MS;
+
+          if (state.hadSpeech && spokeLongEnough) {
+            commitUtterance();
+          }
+          state.hadSpeech = false;
+        }
+      }, VAD_INTERVAL_MS);
+    },
+    [commitUtterance, ensureAudioContext, stopSpeaking],
+  );
+
   const stop = useCallback(() => {
     activeRef.current = false;
+    stopVad();
     stopSpeaking();
     dataChannelRef.current?.close();
     dataChannelRef.current = null;
@@ -122,7 +243,7 @@ export function useLiveVoice({
     setActive(false);
     setStatus('idle');
     setInterimTranscript('');
-  }, [stopSpeaking]);
+  }, [stopSpeaking, stopVad]);
 
   const handleServerEvent = useCallback(
     (raw: string) => {
@@ -219,6 +340,7 @@ export function useLiveVoice({
       dataChannelRef.current = dataChannel;
       micStreamRef.current = micStream;
       activeRef.current = true;
+      startVad(micStream);
       setActive(true);
       setStatus('listening');
     } catch (caught) {
@@ -230,7 +352,7 @@ export function useLiveVoice({
           : 'Could not start the voice conversation',
       );
     }
-  }, [disabled, handleServerEvent, stop, trpcClient]);
+  }, [disabled, handleServerEvent, startVad, stop, trpcClient]);
 
   const schedulePcm = useCallback(
     (context: AudioContext, samples: Float32Array<ArrayBuffer>) => {
@@ -279,11 +401,7 @@ export function useLiveVoice({
       const abortController = new AbortController();
       playbackAbortRef.current = abortController;
 
-      const context =
-        audioContextRef.current ??
-        new AudioContext({ sampleRate: TTS_SAMPLE_RATE });
-      audioContextRef.current = context;
-      void context.resume().catch(() => undefined);
+      const context = ensureAudioContext();
       nextPlaybackTimeRef.current = context.currentTime;
       setSpeaking(true);
 
@@ -374,7 +492,7 @@ export function useLiveVoice({
         }
       })();
     },
-    [schedulePcm, setSpeaking, stopSpeaking],
+    [ensureAudioContext, schedulePcm, setSpeaking, stopSpeaking],
   );
 
   // `stop` is stable (its dependency chain bottoms out in setState), so this
