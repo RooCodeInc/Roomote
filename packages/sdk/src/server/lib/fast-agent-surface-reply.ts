@@ -9,14 +9,7 @@ import {
   type FastAgentReactionExternalInput,
   type FastAgentTurnAdapter,
 } from '@roomote/cloud-agents/server';
-import {
-  and,
-  db,
-  eq,
-  fastAgentMessages,
-  slackInstallations,
-  sql,
-} from '@roomote/db/server';
+import { and, db, eq, slackInstallations } from '@roomote/db/server';
 import {
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
@@ -127,27 +120,17 @@ type FastAgentSurfaceReplyParams = {
   externalInput?: FastAgentReactionExternalInput;
 };
 
+// Sessions follow the same rules as tasks: every authenticated user of the
+// deployment can read and reply to every conversation, so access reduces to
+// the conversation existing. Replies stay attributed to the sending user.
 export async function canUserAccessFastAgentSession(params: {
   sessionId: string;
   userId: string;
 }): Promise<boolean> {
-  const [session] = await db
-    .select({ id: fastAgentMessages.conversationId })
-    .from(fastAgentMessages)
-    .where(
-      and(
-        eq(fastAgentMessages.conversationId, params.sessionId),
-        sql`${fastAgentMessages.metadata} ->> 'userId' = ${params.userId}`,
-      ),
-    )
-    .limit(1);
-
-  if (session) return true;
-
   const conversation = await fastAgentConversationRepository.findById({
     id: params.sessionId,
   });
-  return conversation?.userId === params.userId;
+  return conversation !== null;
 }
 
 /**

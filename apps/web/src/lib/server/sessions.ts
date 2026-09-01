@@ -69,7 +69,15 @@ const MIN_TRANSCRIPT_SEARCH_LENGTH = 3;
 const SEARCH_SNIPPET_CONTEXT_CHARS = 60;
 const SEARCH_SNIPPET_LENGTH = 180;
 
-function sessionScope(auth: SessionAuth) {
+function sessionScope(_auth: SessionAuth) {
+  // Sessions follow the same visibility rules as tasks: every authenticated
+  // user of the deployment can open and interact with any Session by id.
+  return undefined;
+}
+
+// The /sessions listing mirrors the /tasks listing instead: admins see every
+// Session, other users see the Sessions they own, participate in, or spoke in.
+function sessionListScope(auth: SessionAuth) {
   if (auth.isAdmin) return undefined;
   return or(
     eq(sessions.ownerUserId, auth.userId),
@@ -281,7 +289,7 @@ async function getSessionSearchSnippets(
   if (sessionIds.length === 0 || !search?.searchTranscripts) {
     return new Map<string, string>();
   }
-  const accessCondition = sessionScope(auth) ?? sql`true`;
+  const accessCondition = sessionListScope(auth) ?? sql`true`;
 
   // Keep context retrieval page-bounded so it reuses relationship indexes
   // instead of repeating the global transcript scan used to find matches.
@@ -380,7 +388,7 @@ function listConditions(
   const pullRequestNumber = Number(input.pullRequest);
 
   return and(
-    sessionScope(auth),
+    sessionListScope(auth),
     eq(sessions.visibility, 'visible'),
     isNull(sessions.archivedAt),
     input.ids ? inArray(sessions.id, input.ids) : undefined,
@@ -740,7 +748,7 @@ export async function getSessionSources(auth: SessionAuth) {
     .from(sessions)
     .where(
       and(
-        sessionScope(auth),
+        sessionListScope(auth),
         eq(sessions.visibility, 'visible'),
         isNull(sessions.archivedAt),
       ),

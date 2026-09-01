@@ -165,7 +165,7 @@ describe('MCP session routes', () => {
     });
   });
 
-  it('hides sessions from users who are not participants', async () => {
+  it('shares sessions with every deployment user like tasks', async () => {
     const owner = await userFactory.create();
     const bystander = await userFactory.create();
     createdUserIds.push(owner.id, bystander.id);
@@ -178,11 +178,15 @@ describe('MCP session routes', () => {
     const response = await createApp(bystander.id).request(
       `/sessions/${session.id}/summary`,
     );
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ id: session.id });
     const messagesResponse = await createApp(bystander.id).request(
       `/sessions/${session.id}/messages`,
     );
-    expect(messagesResponse.status).toBe(404);
+    expect(messagesResponse.status).toBe(200);
+    await expect(messagesResponse.json()).resolves.toMatchObject({
+      sessionId: session.id,
+    });
   });
 
   it('returns visible, sanitized session messages newest first', async () => {

@@ -143,7 +143,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     expect(delivery?.conversation.surface).toBe('automation');
   });
 
-  it('allows recorded participants but rejects unrelated users', async () => {
+  it('allows every deployment user to reply, like tasks', async () => {
     const owner = await userFactory.create();
     const participant = await userFactory.create();
     const bystander = await userFactory.create();
@@ -180,7 +180,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         senderDisplayName: null,
         question: 'Bystander follow-up',
       }),
-    ).resolves.toBeNull();
+    ).resolves.not.toBeNull();
   });
 
   it('returns null for a Slack session without an installation', async () => {

@@ -44,7 +44,7 @@ describe('unified Session queries', () => {
     syncFastSlackTitle.mockReset();
     syncFastSlackTitle.mockResolvedValue(undefined);
   });
-  it('scopes list and detail reads to owners, participants, and admins', async () => {
+  it('opens detail reads to everyone but scopes the list like tasks', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
     const session = await sessionFactory.create({
@@ -53,6 +53,7 @@ describe('unified Session queries', () => {
       title: 'Visible Session',
     });
 
+    // Anyone with the link can open the Session.
     await expect(
       findAccessibleSession({ userId: owner.id, isAdmin: false }, session.id),
     ).resolves.toMatchObject({ id: session.id });
@@ -61,19 +62,30 @@ describe('unified Session queries', () => {
         { userId: stranger.id, isAdmin: false },
         session.id,
       ),
-    ).resolves.toBeNull();
-    await expect(
-      findAccessibleSession({ userId: stranger.id, isAdmin: true }, session.id),
     ).resolves.toMatchObject({ id: session.id });
 
-    const list = await getSessions(
+    // The list defaults mirror /tasks: admins see everything, other users
+    // see only Sessions they own or participate in.
+    const ownerList = await getSessions(
       { userId: owner.id, isAdmin: false },
       { scope: 'all' },
     );
-    expect(list.sessions.map((row) => row.id)).toContain(session.id);
+    expect(ownerList.sessions.map((row) => row.id)).toContain(session.id);
+    const strangerList = await getSessions(
+      { userId: stranger.id, isAdmin: false },
+      { scope: 'all' },
+    );
+    expect(strangerList.sessions.map((row) => row.id)).not.toContain(
+      session.id,
+    );
+    const adminList = await getSessions(
+      { userId: stranger.id, isAdmin: true },
+      { scope: 'all' },
+    );
+    expect(adminList.sessions.map((row) => row.id)).toContain(session.id);
   });
 
-  it('filters recent-session lookups by id without bypassing access scope', async () => {
+  it('filters recent-session lookups by id without bypassing list scope', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
     const included = await sessionFactory.create({
@@ -88,16 +100,16 @@ describe('unified Session queries', () => {
       title: 'Newer but not included',
       activityAt: 300,
     });
-    const inaccessible = await sessionFactory.create({
+    const otherOwned = await sessionFactory.create({
       ownerKind: 'user',
       ownerUserId: stranger.id,
-      title: 'Inaccessible Session',
+      title: 'Outside the list scope',
       activityAt: 200,
     });
 
     const result = await getSessions(
       { userId: owner.id, isAdmin: false },
-      { ids: [included.id, inaccessible.id] },
+      { ids: [included.id, otherOwned.id] },
     );
 
     expect(result.sessions.map((session) => session.id)).toEqual([included.id]);
@@ -178,7 +190,7 @@ describe('unified Session queries', () => {
     ]);
   });
 
-  it('lists only distinct visible sources available to the current user', async () => {
+  it('lists only distinct visible sources within the list scope', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
     await sessionFactory.create({
@@ -838,6 +850,8 @@ describe('unified Session queries', () => {
       initiatorUserId: owner.id,
       title: 'Second task',
     });
+    // Explicit attachedAt values: rows inserted in one statement share a
+    // timestamp, which makes the attachedAt ordering below nondeterministic.
     await db.insert(sessionTasks).values([
       {
         sessionId: session.id,
