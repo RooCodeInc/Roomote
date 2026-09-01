@@ -102,6 +102,9 @@ describe('getLaunchTaskModelsCommand', () => {
 
     mockFindDeploymentSettings.mockImplementation(async () => ({
       taskModelSettings: persistedTaskModelSettings,
+      runtimeModelConfig: {
+        roomoteOrchestrationModel: 'xai/grok-4.7',
+      },
     }));
     mockSyncConnectedXaiTaskModels.mockImplementation(async () => {
       persistedTaskModelSettings = {
@@ -125,6 +128,8 @@ describe('getLaunchTaskModelsCommand', () => {
     const result = await getLaunchTaskModelsCommand(buildMockAuth());
 
     expect(mockSyncConnectedXaiTaskModels).toHaveBeenCalledOnce();
+    expect(result.defaultModelId).toBe('xai/grok-4.6');
+    expect(result.defaultFastModelId).toBe('xai/grok-4.7');
     expect(result.models).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'xai/grok-4.6' }),

@@ -1107,12 +1107,14 @@ export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
 
   const [
     settings,
+    persistedRuntimeModelConfig,
     chatgptConnected,
     githubCopilotConnected,
     xaiSubscriptionConnected,
     persistedEnvVarNames,
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
+    getDeploymentRuntimeModelConfig(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
     isXaiSubscriptionConnected(),
@@ -1135,9 +1137,15 @@ export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
     );
   const enabledModels = getEnabledTaskModels(settings);
   const defaultModel = getDefaultTaskModel(settings);
+  const runtimeModels = resolveRuntimeModelStatus({
+    settingsDefaultModelId: settings.defaultModelId,
+    persisted: persistedRuntimeModelConfig,
+  });
 
   return {
     defaultModelId: defaultModel.id,
+    defaultFastModelId:
+      runtimeModels.orchestrationModel.effectiveModelId ?? defaultModel.id,
     chatgptConnected,
     openaiConnected: isApiKeyProviderConnected('openai'),
     // Display-grouping inputs: `xai/` models group under the Grok
