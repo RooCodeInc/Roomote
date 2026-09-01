@@ -413,9 +413,61 @@ describe('MCP session routes', () => {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: 'Wrong identifier kind' }),
+        body: JSON.stringify({ message: 'Continue from legacy link' }),
       },
     );
-    expect(legacyIdResponse.status).toBe(404);
+    expect(legacyIdResponse.status).toBe(200);
+    expect(mocks.queueFastAgentSurfaceReply).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        sessionId: conversation!.id,
+        question: 'Continue from legacy link',
+      }),
+    );
+  });
+
+  it('resolves a Fast conversation URL and repairs its missing Session row', async () => {
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+        title: 'Legacy Session link',
+      })
+      .returning();
+    createdConversationIds.push(conversation!.id);
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: 'legacy-message',
+      turnId: 'legacy-turn',
+      turnSeq: 0,
+      ts: 1,
+      eventType: 'roomote_runtime.user_prompt',
+      role: 'user',
+      contentBlocks: [{ type: 'text', text: 'Inspect this Session' }],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+      source: 'web',
+    });
+
+    const summaryResponse = await createApp(owner.id).request(
+      `/sessions/${conversation!.id}/summary`,
+    );
+    expect(summaryResponse.status).toBe(200);
+    const summary = (await summaryResponse.json()) as { id: string };
+    createdSessionIds.push(summary.id);
+    expect(summary.id).not.toBe(conversation!.id);
+
+    const messagesResponse = await createApp(owner.id).request(
+      `/sessions/${conversation!.id}/messages`,
+    );
+    expect(messagesResponse.status).toBe(200);
+    await expect(messagesResponse.json()).resolves.toMatchObject({
+      sessionId: summary.id,
+      messages: [{ text: 'Inspect this Session' }],
+    });
   });
 });
