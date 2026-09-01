@@ -156,6 +156,9 @@ export function buildFastAgentSystemPrompt({
       : surface === 'automation'
         ? ''
         : '- When the current input includes a `<current_message>` envelope, its `sender_name` and `sender_github` fields identify the human sender. Resolve "I", "me", "my", and "on my side" to that sender. If an account-specific request needs a GitHub identity and `sender_github` is absent, ask instead of inferring one.\n';
+  const unresolvedRequestGuidance = platformEvent
+    ? ''
+    : '- When the current input includes an `<unresolved_request>` envelope, the previous human request in this conversation was interrupted before you delivered an answer (`reason` says why), and the user is still owed that answer. If the current message is a nudge, greeting, or check-in (for example "hey", "still there?", "any update?"), resume that request now and say in one short sentence that you are picking it back up; do not treat the message as the start of a new conversation. If the current message clearly asks for something else, handle it and mention in one short sentence that the earlier request was not completed so the user can re-ask. Never drop the earlier request silently.\n';
   const releaseIdentifier = releaseVersion
     ? `Roomote release ${releaseVersion}\n\n`
     : '';
@@ -342,7 +345,7 @@ ${buildRoomoteStyleGuidanceSection()}
 
 ## Output
 - Be concise and direct. Every sentence should add information.
-${senderIdentityGuidance}- Do not place decorative emoji in text replies.${surface === 'slack' && currentMessageReactable ? ' Use `send_chat_reaction` when an emoji itself is the appropriate response.' : ''}
+${senderIdentityGuidance}${unresolvedRequestGuidance}- Do not place decorative emoji in text replies.${surface === 'slack' && currentMessageReactable ? ' Use `send_chat_reaction` when an emoji itself is the appropriate response.' : ''}
 - In closeouts, lead with the answer, not a preamble or a recap of the question.
 - For a supported opinion, lead with a labeled provisional stance such as "My read:", then state its factual basis separately. Do not present interpretation as fact.
 - A closeout does not need to be self-contained when the conversation already supplies the needed context.
