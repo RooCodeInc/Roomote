@@ -21,10 +21,7 @@ import {
   type SlackEvent,
   type SlackNotifier,
 } from '@roomote/slack';
-import {
-  appendAttachmentTextsToPromptText,
-  stripLeadingSlackProductMention,
-} from '@roomote/cloud-agents';
+import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   admitFastAgentHumanFollowUp,
   recordFastAgentConversationMessageBestEffort,
@@ -115,12 +112,11 @@ export async function processFastAgentMessage(params: {
     maxWaitMs: 0,
   });
 
-  const normalizedText = stripLeadingSlackProductMention(
-    await slack.normalizeIncomingText(
-      stripLeadingFastCommandMention(event.authoredText ?? event.text),
-    ),
-  );
-  const baseQuestion = extractFastQuestion(normalizedText, continuation) ?? '';
+  const authoredText = event.authoredText ?? event.text;
+  const questionText = continuation
+    ? authoredText
+    : stripLeadingFastCommandMention(authoredText);
+  const baseQuestion = extractFastQuestion(questionText, continuation) ?? '';
 
   let didAddProcessingReaction = false;
   let releaseCanonicalFastAgentLock: Awaited<
