@@ -1109,6 +1109,7 @@ export async function answerFastAgentQuestion({
   let respondingLeaseRenewal: Promise<void> = Promise.resolve();
   let activeHumanSteerPoll = Promise.resolve();
   const injectedHumanFollowUpIds = new Set<string>();
+  const deferredOversizedHumanFollowUpIds = new Set<string>();
   const humanFollowUpTurnSeqs = new Map<string, number>();
   const injectedHumanFollowUpMessages: ModelMessage[] = [];
   const injectedHumanFollowUpFiles: NonTaskPromptFile[] = [];
@@ -1183,6 +1184,7 @@ export async function answerFastAgentQuestion({
       ) {
         return;
       }
+      if (deferredOversizedHumanFollowUpIds.has(rows[0]!.id)) return;
 
       const alreadyInjectedIds: string[] = [];
       const batch: Array<{
@@ -1270,7 +1272,17 @@ export async function answerFastAgentQuestion({
             FAST_AGENT_HUMAN_STEER_MAX_TEXT_BYTES ||
           batchFileCount + files.length > FAST_AGENT_HUMAN_STEER_MAX_FILES ||
           batchFileBytes + filesBytes > FAST_AGENT_HUMAN_STEER_MAX_FILE_BYTES;
-        if (batch.length > 0 && exceedsBatchLimit) break;
+        if (exceedsBatchLimit) {
+          if (batch.length > 0) break;
+          // A single oversized follow-up cannot be split without changing its
+          // meaning or attachments. Leave it durable for the normal queued
+          // whole-turn fallback instead of hot-retrying promptAsync forever.
+          deferredOversizedHumanFollowUpIds.add(row.id);
+          console.info(
+            `[Fast Agent] Native steer deferred. conversationId="${canonicalConversationId}" reason="oversized_singleton"`,
+          );
+          return;
+        }
 
         batchTextBytes += separatorBytes + serializedPromptBytes;
         batchFileCount += files.length;

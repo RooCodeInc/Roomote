@@ -961,6 +961,54 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('defers an oversized singleton to the durable fallback without native retries', async () => {
+    vi.useFakeTimers();
+    try {
+      const oversizedFollowUp = {
+        id: '77777777-7777-4777-8777-777777777777',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.9',
+          currentMessageId: '100.9',
+          userId: 'user-1',
+          question: 'x'.repeat(64 * 1024),
+        },
+      };
+      mocks.getPendingHumanFollowUp.mockResolvedValue([oversizedFollowUp]);
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(mocks.nativeSteer).not.toHaveBeenCalled();
+      expect(mocks.updateParentEventWhere).not.toHaveBeenCalled();
+      expect(mocks.getPendingHumanFollowUp.mock.calls.length).toBeGreaterThan(
+        1,
+      );
+
+      finishGeneration?.('Original answer');
+      await expect(resultPromise).resolves.toBe('Original answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('lets a native steer close independently from the response already in progress', async () => {
     vi.useFakeTimers();
     try {
