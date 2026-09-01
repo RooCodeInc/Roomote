@@ -399,6 +399,29 @@ export function FastSessionTranscript({
     );
   }, [serverMessages, optimisticMessages]);
 
+  // Persisted user/assistant history only, matching the server's suggestion
+  // cache: optimistic sends must not advance the suggestion query key, and
+  // only a completed agent turn (a new assistant message) regenerates.
+  const suggestionHistory = useMemo(() => {
+    let messageCount = 0;
+    let assistantCount = 0;
+    for (const message of serverMessages.values()) {
+      const isAssistant =
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage;
+      if (
+        (isAssistant ||
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt) &&
+        getTextFromContentBlocks(message.contentBlocks)?.trim()
+      ) {
+        messageCount += 1;
+        if (isAssistant) {
+          assistantCount += 1;
+        }
+      }
+    }
+    return { messageCount, assistantCount };
+  }, [serverMessages]);
+
   const uiMessages = useMemo(
     () =>
       messages.map((message) =>
@@ -596,6 +619,13 @@ export function FastSessionTranscript({
             sessionId={sessionId}
             isBusy={isSending}
             onSend={sendReply}
+            historyMessageCount={suggestionHistory.messageCount}
+            assistantMessageCount={suggestionHistory.assistantCount}
+            agentWorking={
+              isSending ||
+              conversationResponding === true ||
+              pendingResponseState.pendingAfter !== null
+            }
             initialModel={sessionModel}
             initialReasoningEffort={sessionReasoningEffort}
             defaultModelId={defaultModelId}

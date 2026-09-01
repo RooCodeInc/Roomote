@@ -32,6 +32,7 @@ import {
 } from '@roomote/types';
 
 import {
+  getFastSessionComposerSuggestionCommand,
   getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
   replyToFastSessionCommand,
@@ -2860,6 +2861,22 @@ export const appRouter = createRouter({
       .input(z.object({ sessionId: z.string().uuid() }))
       .query(({ ctx: { auth }, input }) =>
         getFastSessionTasksCommand(auth, input.sessionId),
+      ),
+    composerSuggestion: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          // Client-side cache key: bumps when the live transcript meaningfully
+          // changes so stale suggestions are never shown for newer history.
+          // The server derives its own regeneration bucket from persisted
+          // messages, so this field only shapes client caching.
+          historyRevision: z.number().int().nonnegative().optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getFastSessionComposerSuggestionCommand(auth, {
+          sessionId: input.sessionId,
+        }),
       ),
   }),
 

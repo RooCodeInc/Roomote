@@ -1,5 +1,7 @@
 import {
+  ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
+  extractAcpMessageText,
   parsePrReviewActionOffer,
   type PrReviewActionOfferStatus,
   sanitizeEnvelopeFields,
@@ -367,6 +369,51 @@ export async function getFastSessionMessagesSince(
   });
 
   return { messages, cursor };
+}
+
+/**
+ * The persisted user/assistant conversation reduced to the minimal shape the
+ * composer-suggestion prompt is built from. Tool events never leave the DB.
+ */
+export async function getFastSessionSuggestableMessages(
+  sessionId: string,
+): Promise<
+  Array<{ eventType: string; role: string | null; text: string | null }>
+> {
+  const rows = await db
+    .select({
+      eventType: fastAgentMessages.eventType,
+      role: fastAgentMessages.role,
+      contentBlocks: fastAgentMessages.contentBlocks,
+      payload: fastAgentMessages.payload,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, sessionId),
+        inArray(fastAgentMessages.eventType, [
+          ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        ]),
+        sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+      ),
+    )
+    .orderBy(
+      asc(fastAgentMessages.ts),
+      asc(fastAgentMessages.turnSeq),
+      asc(fastAgentMessages.createdAt),
+      asc(fastAgentMessages.id),
+    );
+
+  return rows.map((row) => ({
+    eventType: row.eventType,
+    role: row.role,
+    text:
+      extractAcpMessageText(
+        row.contentBlocks,
+        (row.payload as Record<string, unknown> | null) ?? null,
+      ) ?? null,
+  }));
 }
 
 export async function getFastSessionById(

@@ -4,7 +4,6 @@ import {
   forwardRef,
   useCallback,
   useEffect,
-  useId,
   useImperativeHandle,
   useRef,
   useState,
@@ -20,7 +19,10 @@ import {
 } from '@/lib/prompt-attachments';
 
 import { useUser } from '@/hooks/useUser';
-import { useTelemetry } from '@/hooks/useTelemetry';
+import {
+  SUGGESTION_MIN_HISTORY_MESSAGES,
+  useGhostSuggestion,
+} from '@/hooks/useGhostSuggestion';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
@@ -68,13 +70,6 @@ import { TaskStatus } from './TaskStatus';
 const DRAFT_SAVE_DEBOUNCE_MS = 1_000;
 const KEEPALIVE_TOUCH_THROTTLE_MS = 10_000;
 const SANDBOX_CANCEL_TIMEOUT_MS = 10_000;
-
-// Match the server generation cache so each completed conversational turn can
-// advance the client query without reacting to tool or reasoning events.
-const SUGGESTION_HISTORY_BUCKET = 4;
-
-// Don't ask for a suggestion until the conversation has some substance.
-const SUGGESTION_MIN_HISTORY_MESSAGES = 2;
 
 const SUGGESTION_HISTORY_EVENT_TYPES = new Set<string>([
   ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
@@ -135,15 +130,11 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const pendingUserInputState = useOptionalPendingUserInputRequestState();
     const [prompt, setPrompt] = useState(initialPrompt);
     const [sending, setSending] = useState(false);
-    const [dismissedSuggestion, setDismissedSuggestion] = useState<
-      string | null
-    >(null);
     const cancellingRef = useRef(false);
     const steeringQueuedMessageRef = useRef(false);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const runId = taskRun?.id;
     const taskId = taskRun?.taskId;
-    const { capture } = useTelemetry();
     const taskHistory = useTaskMessageEnvelopes(taskId, {
       enabled: Boolean(taskId) && connected && !readOnly,
     }).data;
@@ -156,13 +147,25 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             : count,
         0,
       ) ?? 0;
-    // The revision follows the same persisted user/assistant history and
-    // threshold as the server cache. UI-only and optimistic events cannot
-    // advance it, while a completed turn moves it to the next query key.
+    // The revision is the persisted assistant-message count, matching the
+    // server generation cache: each completed agent turn mints a new query
+    // key (and so a fresh suggestion), while the user's own messages and
+    // UI-only or optimistic events cannot advance it.
     const historyRevision =
-      Math.floor(historyMessageCount / SUGGESTION_HISTORY_BUCKET) *
-      SUGGESTION_HISTORY_BUCKET;
-    const suggestionHintId = useId();
+      taskHistory?.reduce(
+        (count, message) =>
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          message.text?.trim()
+            ? count + 1
+            : count,
+        0,
+      ) ?? 0;
+
+    // Suggestions exist only while the agent is waiting for the human: an
+    // assistant message landing mid-turn advances the revision, and without
+    // this gate each one would generate and surface a premature suggestion
+    // while the agent is still working.
+    const isAwaitingHuman = taskPhase === 'waiting_for_prompt';
 
     const composerSuggestionQuery = useQuery(
       trpc.tasks.composerSuggestion.queryOptions(
@@ -172,6 +175,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             Boolean(taskId) &&
             connected &&
             !readOnly &&
+            isAwaitingHuman &&
             historyMessageCount >= SUGGESTION_MIN_HISTORY_MESSAGES,
           staleTime: Number.POSITIVE_INFINITY,
           refetchOnWindowFocus: false,
@@ -179,11 +183,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       ),
     );
     const suggestion = composerSuggestionQuery.data?.suggestion?.trim() || null;
-    // Ghost text renders only in a truly empty, idle composer.
-    const ghostSuggestion =
-      suggestion && suggestion !== dismissedSuggestion && !prompt && !sending
-        ? suggestion
-        : null;
 
     const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
       null,
@@ -327,6 +326,25 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         flushDraft({ force: true });
       }
     }, [runId, flushDraft]);
+
+    const {
+      ghostSuggestion,
+      suggestionHintId,
+      acceptGhostSuggestion,
+      consumeSuggestion,
+      handleSuggestionKeyDown,
+    } = useGhostSuggestion({
+      suggestion,
+      active: !prompt && !sending && isAwaitingHuman,
+      surface: 'task',
+      onAccept: (text) => {
+        applyPromptChange(text);
+        requestAnimationFrame(() => {
+          const textarea = textareaRef.current;
+          focusTextarea(textarea ? textarea.value.length : undefined);
+        });
+      },
+    });
 
     const updatePrompt = useCallback(
       (
@@ -504,6 +522,8 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           return;
         }
 
+        consumeSuggestion();
+
         handlePromptChange('');
         setSending(true);
         scrollToBottom?.();
@@ -593,6 +613,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         client,
         pendingUserInputState,
         sending,
+        consumeSuggestion,
         handlePromptChange,
         scrollToBottom,
         handleMessageSent,
@@ -710,61 +731,10 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const showConnectingStatus =
       !connected && !connectionError && !hasTransportError;
 
-    const acceptGhostSuggestion = useCallback(() => {
-      if (!ghostSuggestion) {
-        return;
-      }
-
-      applyPromptChange(ghostSuggestion);
-      capture('composer_suggestion_accepted', { surface: 'task' });
-
-      requestAnimationFrame(() => {
-        const textarea = textareaRef.current;
-        focusTextarea(textarea ? textarea.value.length : undefined);
-      });
-    }, [ghostSuggestion, applyPromptChange, capture, focusTextarea]);
-
-    const dismissGhostSuggestion = useCallback(() => {
-      if (!ghostSuggestion) {
-        return;
-      }
-
-      setDismissedSuggestion(ghostSuggestion);
-      capture('composer_suggestion_dismissed', { surface: 'task' });
-    }, [ghostSuggestion, capture]);
-
-    // Count each distinct rendered suggestion once.
-    const lastShownSuggestionRef = useRef<string | null>(null);
-    useEffect(() => {
-      if (
-        ghostSuggestion &&
-        lastShownSuggestionRef.current !== ghostSuggestion
-      ) {
-        lastShownSuggestionRef.current = ghostSuggestion;
-        capture('composer_suggestion_shown', { surface: 'task' });
-      }
-    }, [ghostSuggestion, capture]);
-
     const handleTextareaKeyDown = useCallback(
       (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (ghostSuggestion && !event.nativeEvent.isComposing) {
-          if (
-            event.key === 'Tab' &&
-            !event.shiftKey &&
-            !event.metaKey &&
-            !event.ctrlKey &&
-            !event.altKey
-          ) {
-            event.preventDefault();
-            acceptGhostSuggestion();
-            return;
-          }
-
-          if (event.key === 'Escape') {
-            event.preventDefault();
-            dismissGhostSuggestion();
-            return;
-          }
+        if (handleSuggestionKeyDown(event)) {
+          return;
         }
 
         const submitButton = event.currentTarget.form?.querySelector(
@@ -816,11 +786,9 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           });
       },
       [
-        acceptGhostSuggestion,
         canSteerQueuedMessages,
         client,
-        dismissGhostSuggestion,
-        ghostSuggestion,
+        handleSuggestionKeyDown,
         prompt,
         readOnly,
         steerableQueuedMessages,

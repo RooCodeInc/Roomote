@@ -6,6 +6,7 @@ import {
 } from 'react';
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -1245,6 +1246,7 @@ describe('PromptInput', () => {
 
 describe('PromptInput ghost suggestion', () => {
   function renderConnectedComposer() {
+    useSandboxTaskPhaseMock.mockReturnValue('waiting_for_prompt');
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: true,
@@ -1340,6 +1342,55 @@ describe('PromptInput ghost suggestion', () => {
     );
   });
 
+  it('hides the ghost suggestion while the agent is still working', () => {
+    const textarea = renderConnectedComposer();
+    expect(textarea).toBeInTheDocument();
+
+    useSandboxTaskPhaseMock.mockReturnValue('running');
+    cleanup();
+
+    render(
+      <PromptInput
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+        taskRun={createTaskRun(1)}
+      />,
+    );
+
+    // Same cached suggestion, but a running agent must fall back to the
+    // default placeholder and disable the query.
+    expect(
+      screen.queryByPlaceholderText('Add a regression test for that'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Message agent/i)).toBeInTheDocument();
+    const runningQueryArg = useQueryMock.mock.calls.at(-1)?.[0] as {
+      enabled?: boolean;
+    };
+    expect(runningQueryArg?.enabled).toBe(false);
+  });
+
+  it('does not re-show a sent suggestion in the emptied composer', async () => {
+    const textarea = renderConnectedComposer();
+
+    fireEvent.keyDown(textarea, { key: 'Tab', code: 'Tab' });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(sandboxSendPromptMutateMock).toHaveBeenCalled();
+    });
+
+    // The composer is empty and idle again, but the consumed suggestion must
+    // not come back: the cached query still holds it until the next history
+    // bucket.
+    expect(
+      screen.queryByPlaceholderText('Add a regression test for that'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Insert suggested message' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Message agent/i)).toBeInTheDocument();
+  });
+
   it('advances the suggestion revision from persisted conversational history', () => {
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
@@ -1371,15 +1422,26 @@ describe('PromptInput ghost suggestion', () => {
     const { rerender } = render(<PromptInput {...props} />);
 
     expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
-      input: { historyRevision: 0 },
+      input: { historyRevision: 1 },
     });
 
+    // A user message alone must not advance the revision: only a completed
+    // agent turn regenerates the suggestion.
     history = [
       ...history,
       {
         eventType: 'roomote_runtime.user_prompt',
         text: 'Please add a regression test',
       },
+    ];
+    rerender(<PromptInput {...props} />);
+
+    expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
+      input: { historyRevision: 1 },
+    });
+
+    history = [
+      ...history,
       {
         eventType: 'roomote_runtime.assistant_message',
         text: 'The regression test now passes',
@@ -1388,7 +1450,7 @@ describe('PromptInput ghost suggestion', () => {
     rerender(<PromptInput {...props} />);
 
     expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
-      input: { historyRevision: 4 },
+      input: { historyRevision: 2 },
     });
   });
 

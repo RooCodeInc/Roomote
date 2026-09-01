@@ -177,6 +177,57 @@ describe('getComposerSuggestionCommand', () => {
     });
   });
 
+  it('passes through a null suggestion when the model is not confident', async () => {
+    mockGetTaskMessageEnvelopes.mockResolvedValue([
+      envelope({
+        id: 'm1',
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        text: 'Fix it',
+      }),
+      envelope({
+        id: 'm2',
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        text: 'Fixed',
+      }),
+    ]);
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: { suggestion: null },
+    });
+
+    await expect(
+      getComposerSuggestionCommand(auth, { taskId: 'task-1' }),
+    ).resolves.toEqual({ suggestion: null, messageCount: 2 });
+  });
+
+  it('discards suggestions that overshoot the word budget', async () => {
+    mockGetTaskMessageEnvelopes.mockResolvedValue([
+      envelope({
+        id: 'm1',
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        text: 'Fix it',
+      }),
+      envelope({
+        id: 'm2',
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        text: 'Fixed',
+      }),
+    ]);
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        suggestion:
+          'Now please go ahead and update all of the documentation pages to describe this behavior',
+      },
+    });
+
+    await expect(
+      getComposerSuggestionCommand(auth, { taskId: 'task-1' }),
+    ).resolves.toEqual({ suggestion: null, messageCount: 2 });
+  });
+
   it('fails soft when generation throws', async () => {
     const consoleErrorSpy = vi
       .spyOn(console, 'error')

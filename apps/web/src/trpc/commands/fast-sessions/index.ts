@@ -1,3 +1,5 @@
+export { getFastSessionComposerSuggestionCommand } from './composer-suggestion';
+
 import { randomUUID } from 'node:crypto';
 import { after } from 'next/server';
 
