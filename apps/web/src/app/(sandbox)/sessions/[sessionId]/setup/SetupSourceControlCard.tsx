@@ -26,8 +26,10 @@ import { SetupSessionActionCard } from './SetupSessionActionCard';
 import { SourceControlConfiguration } from './SourceControlConfiguration';
 import { SourceControlConnection } from './SourceControlConnection';
 import { SourceControlProviderPicker } from './SourceControlProviderPicker';
-
-type CardStage = 'provider' | 'config' | 'connect';
+import {
+  getInitialSourceControlCardStage,
+  type SourceControlCardStage,
+} from './source-control-card-stage';
 
 /**
  * Trusted source-control action for the conversational setup session.
@@ -46,20 +48,8 @@ function SetupSessionSourceControlCardBody({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
-  const anyAuthorized =
-    Boolean(sourceControlSetup.connectedProvider) ||
-    sourceControlSetup.providers.some((provider) => provider.connected);
-  const hasSelected =
-    Boolean(sourceControlSetup.selectedProvider) ||
-    Boolean(sourceControlSetup.runtimeConfiguredProvider);
-  const [stage, setStage] = useState<CardStage>(() =>
-    anyAuthorized ||
-    searchParams.get('step') === 'source-control-connect' ||
-    searchParams.get('setup') === 'source-control'
-      ? 'connect'
-      : hasSelected
-        ? 'config'
-        : 'provider',
+  const [stage, setStage] = useState<SourceControlCardStage>(() =>
+    getInitialSourceControlCardStage(sourceControlSetup, searchParams),
   );
   const [configOpen, setConfigOpen] = useState(false);
   const [activeProvider, setActiveProvider] =
