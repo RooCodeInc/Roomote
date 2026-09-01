@@ -371,6 +371,7 @@ function AgentMailInboxChooser({
   disabled: boolean;
   onChange: (address: string) => void;
 }) {
+  const trpc = useTRPC();
   // A key typed into the form only loads on request, so AgentMail is not
   // called on every keystroke. A saved-and-connected config never loads
   // automatically either — the status block already names the inbox, so
@@ -389,42 +390,10 @@ function AgentMailInboxChooser({
 
   // A mutation rather than a query: the typed API key travels in the POST
   // body instead of being serialized into a GET URL (browser history, proxy
-  // logs, tracing). The mutationFn calls the tRPC HTTP endpoint directly
-  // instead of going through the tRPC client: mutation promises from the
-  // client's link stack have been observed to never settle in the browser
-  // (the request completes server-side; the hang is client-internal), and
-  // this endpoint's shape is simple enough that a direct call is the
-  // sturdier choice until that is root-caused.
-  const loadInboxes = useMutation({
-    mutationFn: async (input: { apiKey?: string }) => {
-      const response = await fetch(
-        '/api/trpc/comms.listAgentMailInboxes?batch=1',
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ 0: { json: input } }),
-        },
-      );
-      const batch = (await response.json()) as Array<{
-        result?: {
-          data: {
-            json: {
-              inboxes: Array<{ inboxId: string; email: string }>;
-              proposedNewAddress: string;
-            };
-          };
-        };
-        error?: { json: { message: string } };
-      }>;
-      const item = batch[0];
-      if (!item || item.error || !item.result) {
-        throw new Error(
-          item?.error?.json.message ?? 'Failed to load AgentMail inboxes.',
-        );
-      }
-      return item.result.data.json;
-    },
-  });
+  // logs, tracing).
+  const loadInboxes = useMutation(
+    trpc.comms.listAgentMailInboxes.mutationOptions(),
+  );
   const requestedKeyRef = useRef<string | null>(null);
   const requestKey = hasEnteredKey ? enteredApiKey : '';
   // savedSatisfied joins the signature so a save that just created the
