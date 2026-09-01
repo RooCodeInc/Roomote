@@ -26,7 +26,7 @@ export function SetupSessionActionCard({
     <section className="w-full max-w-2xl rounded-xl bg-card p-5 text-sm sm:p-6">
       <div className="flex items-start gap-3">
         <span
-          className="mt-0.5 shrink-0 text-muted-foreground [&>svg]:size-6"
+          className="mt-0.5 shrink-0 text-muted-foreground [&>svg]:size-5"
           aria-hidden="true"
         >
           {icon}
@@ -55,7 +55,7 @@ export function SetupSessionActionCardActions({
   if (!onBack && !children) return null;
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+    <div className="flex flex-wrap items-center justify-start gap-2 pt-1">
       {onBack ? (
         <Button
           type="button"
@@ -67,10 +67,8 @@ export function SetupSessionActionCardActions({
           <ArrowLeft />
           Back
         </Button>
-      ) : (
-        <span />
-      )}
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      ) : null}
+      <div className="flex flex-wrap items-center justify-start gap-2">
         {children}
       </div>
     </div>

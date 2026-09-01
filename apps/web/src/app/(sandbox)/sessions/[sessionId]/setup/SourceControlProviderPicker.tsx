@@ -5,7 +5,7 @@ import {
   type SourceControlProvider,
 } from '@roomote/types';
 
-import { ArrowRight, BrandIcon, Button } from '@/components/system';
+import { BrandIcon, Button } from '@/components/system';
 
 export function SourceControlProviderPicker({
   sourceControlSetup,
@@ -27,7 +27,6 @@ export function SourceControlProviderPicker({
 }) {
   return (
     <div className="max-w-xl space-y-3">
-      <p className="font-medium">Where do you keep your repositories?</p>
       <div className="grid gap-2 sm:grid-cols-2">
         {SETUP_SOURCE_CONTROL_PROVIDER_CATALOG.map((provider) => {
           const status = sourceControlSetup.providers.find(
@@ -40,19 +39,19 @@ export function SourceControlProviderPicker({
               type="button"
               onClick={() => onContinue(provider.provider)}
               disabled={disabled}
-              variant="outline"
-              className="group h-auto w-full justify-start gap-3 p-3 text-left"
+              variant="default"
+              size="sm"
+              className="w-full justify-start gap-3 text-left"
             >
               <BrandIcon
                 icon={provider.provider}
                 name=""
-                className="shrink-0"
+                className="size-4 shrink-0"
               />
               <span className="min-w-0 grow font-medium">
                 {provider.label}
                 {status?.connected ? ' (connected)' : ''}
               </span>
-              <ArrowRight />
             </Button>
           );
         })}

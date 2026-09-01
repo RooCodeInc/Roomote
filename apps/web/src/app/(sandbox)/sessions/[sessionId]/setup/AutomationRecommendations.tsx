@@ -10,12 +10,10 @@ import {
   Alert,
   AlertDescription,
   AlertTriangle,
-  ArrowRight,
-  Switch,
   Button,
+  Checkbox,
   Label,
   Spinner,
-  Zap,
 } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { SetupSessionActionCardActions } from './SetupSessionActionCard';
@@ -38,39 +36,31 @@ export function AutomationRecommendationChoices({
   disabled?: boolean;
 }) {
   return (
-    <div className="space-y-4">
-      <div className="divide-y rounded-lg border bg-background/40">
-        {batch.recommendations.map((recommendation) => (
-          <div
-            key={recommendation.id}
-            className="flex flex-col gap-4 py-3 px-4 sm:flex-row sm:items-center"
+    <div className="space-y-3">
+      {batch.recommendations.map((recommendation) => (
+        <div key={recommendation.id} className="flex items-start gap-2">
+          <Checkbox
+            id={`automation-recommendation-${recommendation.id}`}
+            className="mt-0.5"
+            checked={recommendation.enabled}
+            disabled={disabled}
+            onCheckedChange={(enabled) =>
+              onEnabledChange(recommendation.id, enabled === true)
+            }
+          />
+          <Label
+            htmlFor={`automation-recommendation-${recommendation.id}`}
+            className="min-w-0 flex-1 flex-col items-start gap-1"
           >
-            <Switch
-              id={`automation-recommendation-${recommendation.id}`}
-              checked={recommendation.enabled}
-              disabled={disabled}
-              onCheckedChange={(enabled) =>
-                onEnabledChange(recommendation.id, enabled)
-              }
-            />
-            <Label
-              htmlFor={`automation-recommendation-${recommendation.id}`}
-              className="min-w-0 flex-1 flex-col items-start gap-1"
-            >
-              <span className="text-sm font-semibold">
-                {candidateTitle(recommendation.candidateId)}
-              </span>
-              <span className="text-sm font-normal text-muted-foreground">
-                {recommendation.explanation}
-              </span>
-            </Label>
-          </div>
-        ))}
-      </div>
-      <p>
-        You can manage these (and dozens of others) and create your own in the{' '}
-        <Zap className="inline size-4 ml-0.5 -mt-0.5" /> Automations page.
-      </p>
+            <span className="text-sm font-semibold">
+              {candidateTitle(recommendation.candidateId)}
+            </span>
+            <span className="text-sm font-normal text-muted-foreground">
+              {recommendation.explanation}
+            </span>
+          </Label>
+        </div>
+      ))}
     </div>
   );
 }
@@ -259,6 +249,7 @@ export function AutomationRecommendations({
         (startRecommendations.error || pendingTooLong || failed) ? (
           <Button
             type="button"
+            size="sm"
             variant="outline"
             onClick={() => {
               setPendingTooLong(false);
@@ -271,6 +262,7 @@ export function AutomationRecommendations({
         ) : null}
         <Button
           type="button"
+          size="sm"
           onClick={handleContinue}
           disabled={
             setEnabled.isPending ||
@@ -282,8 +274,7 @@ export function AutomationRecommendations({
             ? 'Applying...'
             : pending
               ? 'Skip'
-              : 'Continue'}
-          <ArrowRight />
+              : 'Save'}
         </Button>
       </SetupSessionActionCardActions>
     </div>

@@ -22,6 +22,21 @@ import { toast } from 'sonner';
 type SelectionState = Record<string, string[]>;
 const OTHER_VALUE = '__other__';
 
+function getInitialSelections(
+  request: Pick<AcpRequestUserInputPayload, 'questions' | 'preset'>,
+): SelectionState {
+  if (request.preset !== 'setup_starter_tasks') return {};
+
+  return Object.fromEntries(
+    request.questions
+      .filter((question) => question.multiple === true)
+      .map((question) => [
+        question.id,
+        (question.options ?? []).map((option) => option.label),
+      ]),
+  );
+}
+
 /**
  * Session structured-input card. Renders a pending `request_user_input`
  * request: options questions use radio-style choices in single mode or
@@ -46,7 +61,9 @@ export function SessionUserInputCard({
   cancellable?: boolean;
 }) {
   const trpc = useTRPC();
-  const [selections, setSelections] = useState<SelectionState>({});
+  const [selections, setSelections] = useState<SelectionState>(() =>
+    getInitialSelections(request),
+  );
   const [freeText, setFreeText] = useState<Record<string, string>>({});
 
   const submit = useMutation(
@@ -155,7 +172,12 @@ export function SessionUserInputCard({
         const selected = selections[question.id] ?? [];
         return (
           <fieldset key={question.id} className="space-y-2">
-            <legend className="text-sm font-medium">
+            <legend
+              className={cn(
+                'text-sm font-medium',
+                request.preset === 'setup_starter_tasks' ? 'sr-only' : '',
+              )}
+            >
               {question.header ? `${question.header}: ` : ''}
               {question.question}
             </legend>
@@ -174,6 +196,7 @@ export function SessionUserInputCard({
                         className="flex cursor-pointer items-start gap-2 rounded-md border border-transparent px-2 py-1.5 text-sm hover:bg-muted/60"
                       >
                         <Checkbox
+                          className="mt-0.5"
                           checked={checked}
                           disabled={submit.isPending}
                           onCheckedChange={(value) => {
@@ -208,6 +231,7 @@ export function SessionUserInputCard({
                   {question.isOther ? (
                     <label className="flex cursor-pointer items-start gap-2 rounded-md border border-transparent px-2 py-1.5 text-sm hover:bg-muted/60">
                       <Checkbox
+                        className="mt-0.5"
                         checked={selected.includes(OTHER_VALUE)}
                         disabled={submit.isPending}
                         onCheckedChange={(value) => {
@@ -310,10 +334,10 @@ export function SessionUserInputCard({
           </fieldset>
         );
       })}
-      {validationError ? (
+      {validationError && request.preset !== 'setup_starter_tasks' ? (
         <p className="text-xs text-destructive">{validationError}</p>
       ) : null}
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex items-center justify-start gap-2">
         {cancellable ? (
           <Button
             type="button"
@@ -338,7 +362,11 @@ export function SessionUserInputCard({
           disabled={!canSubmit}
           aria-disabled={!canSubmit}
         >
-          {submit.isPending ? 'Submitting…' : 'Submit'}
+          {submit.isPending
+            ? 'Submitting…'
+            : request.preset === 'setup_starter_tasks'
+              ? "Let's go"
+              : 'Submit'}
         </Button>
       </div>
     </form>

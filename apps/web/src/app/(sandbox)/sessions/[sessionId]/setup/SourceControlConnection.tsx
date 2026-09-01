@@ -382,7 +382,9 @@ export function SourceControlConnection({
             .
           </p>
           <SetupSessionActionCardActions onBack={onBack}>
-            <Button onClick={onContinue}>Continue</Button>
+            <Button size="sm" onClick={onContinue}>
+              Continue
+            </Button>
           </SetupSessionActionCardActions>
         </div>
       ) : needsAdoMicrosoftConnection ? (
@@ -401,6 +403,7 @@ export function SourceControlConnection({
               </p>
             ) : (
               <Button
+                size="sm"
                 onClick={() =>
                   authenticateAdoAccount.mutate(
                     returnPath ??
@@ -431,6 +434,7 @@ export function SourceControlConnection({
           <p>{githubCopy}</p>
           <SetupSessionActionCardActions onBack={onBack}>
             <Button
+              size="sm"
               onClick={() =>
                 createInstallation.mutate(
                   returnPath ??
@@ -455,6 +459,7 @@ export function SourceControlConnection({
           ) : null}
           <SetupSessionActionCardActions onBack={onBack}>
             <Button
+              size="sm"
               onClick={() => void handleSyncRepositories()}
               disabled={
                 syncRepositories.isPending || saveAdoLinkedAccount.isPending

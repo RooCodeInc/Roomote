@@ -564,6 +564,7 @@ export function SourceControlConfiguration({
       <SetupSessionActionCardActions>
         <Button
           type="button"
+          size="sm"
           onClick={() => void handleContinue()}
           disabled={isActionDisabled}
         >

@@ -6,7 +6,7 @@ import {
   type SetupComputeStatus,
 } from '@roomote/types';
 
-import { ArrowRight, BrandIcon, Button } from '@/components/system';
+import { BrandIcon, Button } from '@/components/system';
 
 const BRAND_ICON_BY_PROVIDER = {
   modal: 'modal',
@@ -53,13 +53,14 @@ export function SandboxProviderPicker({
               type="button"
               onClick={() => onContinue(provider.provider)}
               disabled={disabled}
-              variant="outline"
-              className="group h-auto w-full justify-start gap-3 p-3 text-left"
+              variant="default"
+              size="sm"
+              className="w-full justify-start gap-3 text-left"
             >
               <BrandIcon
                 icon={BRAND_ICON_BY_PROVIDER[provider.provider]}
                 name=""
-                className="shrink-0"
+                className="size-4 shrink-0"
               />
               <span className="min-w-0 grow">
                 <span className="block font-medium">{provider.label}</span>
@@ -67,7 +68,6 @@ export function SandboxProviderPicker({
               {provider.comment ? (
                 <span className="text-xs opacity-60">{provider.comment}</span>
               ) : null}
-              <ArrowRight />
             </Button>
           );
         })}

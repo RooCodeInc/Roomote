@@ -167,12 +167,23 @@ describe('SessionUserInputCard', () => {
       />,
     );
 
-    expect(screen.getByText('Choose your first task')).toBeInTheDocument();
+    expect(screen.getByText('First task ideas')).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Pick what you would like me to work on first. You can choose more than one.',
+        'I found a few things I could do right away. Click the button to get it going:',
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText('Starter tasks: Which starter tasks should run first?'),
+    ).toHaveClass('sr-only');
+    expect(screen.queryByText('Select at least one option.')).toBeNull();
+    expect(screen.getByRole('button', { name: "Let's go" })).toBeEnabled();
+    for (const option of multiRequest.questions[0]!.options) {
+      expect(screen.getByLabelText(option.label)).toHaveAttribute(
+        'aria-checked',
+        'true',
+      );
+    }
   });
 });
 

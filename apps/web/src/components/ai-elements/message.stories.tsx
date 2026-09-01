@@ -11,7 +11,6 @@ import {
   type KnownAcpToolKind,
 } from '@roomote/types';
 import {
-  ArrowRight,
   Button,
   Container,
   CopyIcon,
@@ -434,9 +433,8 @@ function SetupSessionConversationStory() {
             }
           />
           <SetupSessionActionCardActions>
-            <Button type="button">
-              Continue
-              <ArrowRight />
+            <Button type="button" size="sm">
+              Save
             </Button>
           </SetupSessionActionCardActions>
         </SetupSessionActionCard>

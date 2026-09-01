@@ -517,6 +517,7 @@ export function SandboxConfiguration({
       >
         <Button
           type="button"
+          size="sm"
           onClick={() => void handleContinue()}
           disabled={isActionDisabled}
         >
