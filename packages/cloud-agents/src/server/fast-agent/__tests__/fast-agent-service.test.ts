@@ -395,6 +395,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.getUserIdentity.mockResolvedValue({
       displayName: 'Matt Rubens',
       githubLogin: 'mrubens',
+      isAdmin: true,
     });
     mocks.classifyInferenceError.mockImplementation((error: unknown) => {
       const detail = error instanceof Error ? error.message.toLowerCase() : '';

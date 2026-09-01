@@ -1510,13 +1510,17 @@ export async function answerFastAgentQuestion({
         return [];
       }),
       platformEvent
-        ? Promise.resolve({ displayName: null, githubLogin: null })
+        ? Promise.resolve({
+            displayName: null,
+            githubLogin: null,
+            isAdmin: false,
+          })
         : getFastAgentUserIdentity(userId).catch((error) => {
             degradedContextComponents.add('user_identity');
             console.warn(
               `[Fast Agent] User identity unavailable: ${formatErrorForLog(error)}`,
             );
-            return { displayName: null, githubLogin: null };
+            return { displayName: null, githubLogin: null, isAdmin: false };
           }),
     ]);
     const availableIntegrations = selectFastRoomoteChannelTools({
@@ -1641,6 +1645,8 @@ export async function answerFastAgentQuestion({
       platformEventKind,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
+      isCurrentUserAdmin: currentUser.isAdmin,
+      implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
       releaseVersion,
     });
     let visibleUpdatePosted = false;
