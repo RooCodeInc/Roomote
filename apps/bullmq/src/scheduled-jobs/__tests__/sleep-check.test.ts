@@ -317,6 +317,43 @@ describe('sleepTaskRunNow', () => {
     });
     expect(mockEnterStandby).not.toHaveBeenCalled();
   });
+
+  it('preserves the merged-PR trigger through snapshot handoff', async () => {
+    mockDbQueryTaskRunsFindFirst.mockResolvedValue({
+      id: 123,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Idle,
+      taskPhase: null,
+      machineId: 'modal-machine-1',
+      vendor: 'modal',
+      taskId: 'task-1',
+      snapshotRequestedAt: null,
+      sandboxCmdId: 'command-1',
+      sleepAt: new Date(Date.now() + 30_000),
+      sleepRequestedAt: null,
+      startedAt: new Date(),
+      workerHeartbeatAt: new Date(),
+      snapshotId: null,
+    });
+    mockCreateSnapshot.mockResolvedValue(true);
+
+    await sleepTaskRunNow(123, 'merged_pr');
+
+    expect(mockCreateSnapshot).toHaveBeenCalledWith({
+      runId: 123,
+      sandboxId: 'modal-machine-1',
+      snapshotIntentId: expect.stringMatching(/^merged_pr-123-/),
+      triggerPath: 'merged_pr',
+    });
+  });
+
+  it('does not sleep a merged-PR task that resumed before dequeue', async () => {
+    await sleepTaskRunNow(123, 'merged_pr');
+
+    expect(mockGetInstanceStatus).not.toHaveBeenCalled();
+    expect(mockCreateSnapshot).not.toHaveBeenCalled();
+    expect(mockEnterStandby).not.toHaveBeenCalled();
+  });
 });
 
 describe('sleepCheckJob', () => {

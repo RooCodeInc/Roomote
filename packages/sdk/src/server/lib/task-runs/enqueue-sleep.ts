@@ -16,6 +16,7 @@ const BLOCKING_JOB_STATES = new Set([
 
 export const taskSleepRequestSchema = z.object({
   runId: z.number(),
+  triggerPath: z.enum(['manual_sleep', 'merged_pr']).optional(),
 });
 
 export type TaskSleepRequest = z.infer<typeof taskSleepRequestSchema>;

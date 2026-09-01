@@ -1,10 +1,14 @@
 const {
   mockLinkedTasks,
+  mockDbSelect,
+  mockEnqueueTaskSleep,
   mockReturning,
   mockSyncTaskStateFromRuns,
   mockTransaction,
 } = vi.hoisted(() => {
   const mockLinkedTasks = vi.fn();
+  const mockDbSelect = vi.fn();
+  const mockEnqueueTaskSleep = vi.fn();
   const mockReturning = vi.fn();
   const mockSyncTaskStateFromRuns = vi.fn();
   const mockTransaction = vi.fn(async (callback: (tx: unknown) => unknown) =>
@@ -22,6 +26,8 @@ const {
 
   return {
     mockLinkedTasks,
+    mockDbSelect,
+    mockEnqueueTaskSleep,
     mockReturning,
     mockSyncTaskStateFromRuns,
     mockTransaction,
@@ -36,17 +42,26 @@ vi.mock('@roomote/db/server', async () => {
 
   return {
     ...actual,
-    db: { transaction: mockTransaction },
+    db: { transaction: mockTransaction, select: mockDbSelect },
     syncTaskStateFromRuns: (...args: unknown[]) =>
       mockSyncTaskStateFromRuns(...args),
   };
 });
 
+vi.mock('../../task-runs/enqueue-sleep', () => ({
+  enqueueTaskSleep: (...args: unknown[]) => mockEnqueueTaskSleep(...args),
+}));
+
 vi.mock('@roomote/telemetry/server', () => ({
   captureActivationPrMerged: vi.fn(),
 }));
 
-import { updateTaskPrStatus } from '../update-task-pr-status';
+import { RunStatus } from '@roomote/types';
+
+import {
+  selectMergedPrTaskRunToSleep,
+  updateTaskPrStatus,
+} from '../update-task-pr-status';
 
 describe('updateTaskPrStatus', () => {
   beforeEach(() => {
@@ -54,6 +69,40 @@ describe('updateTaskPrStatus', () => {
     mockLinkedTasks.mockResolvedValue([]);
     mockReturning.mockResolvedValue([]);
     mockSyncTaskStateFromRuns.mockResolvedValue(undefined);
+    mockEnqueueTaskSleep.mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('sleeps the originating idle task when it has been inactive for five minutes', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-01T12:00:00Z'));
+    const activityAt = Math.floor(Date.now() / 1_000) - 5 * 60;
+    mockLinkedTasks.mockResolvedValue([
+      { taskId: 'task-1', createdByRoomote: true },
+    ]);
+    mockDbSelect
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: () => Promise.resolve([{ state: 'active', activityAt }]),
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => Promise.resolve([{ id: 123, status: RunStatus.Idle }]),
+        }),
+      });
+
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged');
+
+    expect(mockEnqueueTaskSleep).toHaveBeenCalledWith({
+      runId: 123,
+      triggerPath: 'merged_pr',
+    });
   });
 
   it('reconciles each linked task state once when a pull request is merged', async () => {
@@ -92,5 +141,77 @@ describe('updateTaskPrStatus', () => {
 
     expect(mockSyncTaskStateFromRuns).not.toHaveBeenCalled();
     expect(mockLinkedTasks).not.toHaveBeenCalled();
+  });
+});
+
+describe('selectMergedPrTaskRunToSleep', () => {
+  const nowSeconds = 1_000;
+
+  it('includes the exact five-minute inactivity threshold', () => {
+    expect(
+      selectMergedPrTaskRunToSleep(
+        {
+          state: 'active',
+          activityAt: 700,
+          activeRuns: [{ id: 1, status: RunStatus.Idle }],
+        },
+        nowSeconds,
+      ),
+    ).toBe(1);
+  });
+
+  it('preserves recently active tasks', () => {
+    expect(
+      selectMergedPrTaskRunToSleep(
+        {
+          state: 'active',
+          activityAt: 701,
+          activeRuns: [{ id: 1, status: RunStatus.Idle }],
+        },
+        nowSeconds,
+      ),
+    ).toBeNull();
+  });
+
+  it('preserves tasks that are no longer active', () => {
+    expect(
+      selectMergedPrTaskRunToSleep(
+        {
+          state: 'completed',
+          activityAt: 700,
+          activeRuns: [{ id: 1, status: RunStatus.Idle }],
+        },
+        nowSeconds,
+      ),
+    ).toBeNull();
+  });
+
+  it('preserves a task with running work', () => {
+    expect(
+      selectMergedPrTaskRunToSleep(
+        {
+          state: 'active',
+          activityAt: 700,
+          activeRuns: [{ id: 1, status: RunStatus.Running }],
+        },
+        nowSeconds,
+      ),
+    ).toBeNull();
+  });
+
+  it('preserves an idle task with another active sibling run', () => {
+    expect(
+      selectMergedPrTaskRunToSleep(
+        {
+          state: 'active',
+          activityAt: 700,
+          activeRuns: [
+            { id: 1, status: RunStatus.Idle },
+            { id: 2, status: RunStatus.Running },
+          ],
+        },
+        nowSeconds,
+      ),
+    ).toBeNull();
   });
 });
