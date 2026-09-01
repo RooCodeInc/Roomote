@@ -279,8 +279,15 @@ export function NewTaskForm({
     [onTaskStarted, startFastSessionMutation, router],
   );
   const launchTaskModels = useLaunchTaskModels();
+  const selectedWorkspace = form.watch('repository');
+  const isFastWorkspace =
+    selectedWorkspace === FAST_EXECUTION ||
+    selectedWorkspace === AUTO_WORKSPACE_VALUE;
   const selectedModelId =
-    selectedModelOverrideId ?? launchTaskModels.data?.defaultModelId;
+    selectedModelOverrideId ??
+    (isFastWorkspace
+      ? launchTaskModels.data?.defaultFastModelId
+      : launchTaskModels.data?.defaultModelId);
 
   const launchTask = useCallback(
     async (payload: {
@@ -350,7 +357,7 @@ export function NewTaskForm({
           text: submission.description ?? '',
           images: submission.images,
           attachmentTexts: submission.attachmentTexts,
-          model: selectedModelId,
+          model: selectedModelOverrideId,
         });
         return;
       }
@@ -363,7 +370,7 @@ export function NewTaskForm({
           text: submission.description ?? '',
           images: submission.images,
           attachmentTexts: submission.attachmentTexts,
-          model: selectedModelId,
+          model: selectedModelOverrideId,
         });
         return;
       }
@@ -394,7 +401,7 @@ export function NewTaskForm({
       canSelectBranch,
       wiggleWorkspace,
       startFastSession,
-      selectedModelId,
+      selectedModelOverrideId,
     ],
   );
 

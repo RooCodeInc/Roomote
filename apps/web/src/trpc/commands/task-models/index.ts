@@ -1107,18 +1107,27 @@ export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
 
   const [
     settings,
+    persistedRuntimeModelConfig,
     chatgptConnected,
     githubCopilotConnected,
     xaiSubscriptionConnected,
     persistedEnvVarNames,
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
+    getDeploymentRuntimeModelConfig(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
     isXaiSubscriptionConnected(),
     getPersistedEnvironmentVariableNames(),
   ]);
   const providerSetup = buildSetupModelStatus({
+    runtimeEnv: process.env,
+    persistedEnvVarNames,
+    chatgptConnected,
+    githubCopilotConnected,
+    xaiSubscriptionConnected,
+  });
+  const connectedProviderIds = collectConnectedTaskModelProviderIds({
     runtimeEnv: process.env,
     persistedEnvVarNames,
     chatgptConnected,
@@ -1135,16 +1144,28 @@ export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
     );
   const enabledModels = getEnabledTaskModels(settings);
   const defaultModel = getDefaultTaskModel(settings);
+  const runtimeModels = resolveRuntimeModelStatus({
+    settingsDefaultModelId: settings.defaultModelId,
+    persisted: persistedRuntimeModelConfig,
+  });
+  const defaultFastModelId =
+    runtimeModels.orchestrationModel.effectiveModelId ?? defaultModel.id;
+  const selectableModels = appendSelectedTaskModels({
+    models: enabledModels,
+    selectedModelIds: new Set([defaultFastModelId]),
+    connectedProviderIds,
+  });
 
   return {
     defaultModelId: defaultModel.id,
+    defaultFastModelId,
     chatgptConnected,
     openaiConnected: isApiKeyProviderConnected('openai'),
     // Display-grouping inputs: `xai/` models group under the Grok
     // subscription only when the API-key sibling is not also connected.
     xaiSubscriptionConnected,
     xaiConnected: isApiKeyProviderConnected('xai'),
-    models: enabledModels.map((option) => ({
+    models: selectableModels.map((option) => ({
       ...option,
       isDefault: option.id === defaultModel.id,
     })),
