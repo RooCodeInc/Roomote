@@ -83,6 +83,7 @@ import { protectedProcedure, publicProcedure, createRouter } from '../init';
 import {
   getTasksCommand,
   generateTaskSummaryCommand,
+  getComposerSuggestionCommand,
   getTaskMessageEnvelopesCommand,
   getTaskRunEventsCommand,
   getTaskByIdCommand,
@@ -981,6 +982,21 @@ export const appRouter = createRouter({
       .input(z.object({ taskId: z.string() }))
       .query(({ ctx: { auth }, input }) =>
         generateTaskSummaryCommand(auth, input),
+      ),
+
+    composerSuggestion: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+          // Client-side cache key: bumps when the live transcript meaningfully
+          // changes so stale suggestions are never shown for newer history.
+          // The server derives its own regeneration bucket from persisted
+          // messages, so this field only shapes client caching.
+          historyRevision: z.number().int().nonnegative().optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getComposerSuggestionCommand(auth, { taskId: input.taskId }),
       ),
 
     recentPullRequests: protectedProcedure.query(({ ctx: { auth } }) =>

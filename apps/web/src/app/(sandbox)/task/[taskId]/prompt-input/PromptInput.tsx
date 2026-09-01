@@ -4,11 +4,12 @@ import {
   forwardRef,
   useCallback,
   useEffect,
+  useId,
   useImperativeHandle,
   useRef,
   useState,
 } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import {
@@ -17,6 +18,7 @@ import {
 } from '@/lib/prompt-attachments';
 
 import { useUser } from '@/hooks/useUser';
+import { useTelemetry } from '@/hooks/useTelemetry';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
@@ -42,6 +44,7 @@ import {
   useSandboxConnected,
   useSandboxConnectionStatus,
   useSandboxCurrentUserInfo,
+  useSandboxMessageCount,
   useSandboxQueuedMessages,
   useSandboxReadOnly,
   useSandboxTaskPhase,
@@ -63,6 +66,13 @@ import { TaskStatus } from './TaskStatus';
 const DRAFT_SAVE_DEBOUNCE_MS = 1_000;
 const KEEPALIVE_TOUCH_THROTTLE_MS = 10_000;
 const SANDBOX_CANCEL_TIMEOUT_MS = 10_000;
+
+// Refresh the ghost suggestion only after this many new transcript events, so
+// mid-turn tool chatter does not thrash the query key.
+const SUGGESTION_HISTORY_BUCKET = 8;
+
+// Don't ask for a suggestion until the conversation has some substance.
+const SUGGESTION_MIN_TRANSCRIPT_EVENTS = 2;
 
 export interface PromptInputHandle {
   focus: () => void;
@@ -118,11 +128,44 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const pendingUserInputState = useOptionalPendingUserInputRequestState();
     const [prompt, setPrompt] = useState(initialPrompt);
     const [sending, setSending] = useState(false);
+    const [dismissedSuggestion, setDismissedSuggestion] = useState<
+      string | null
+    >(null);
     const cancellingRef = useRef(false);
     const steeringQueuedMessageRef = useRef(false);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const runId = taskRun?.id;
     const taskId = taskRun?.taskId;
+    const { capture } = useTelemetry();
+    const messageCount = useSandboxMessageCount();
+    // Bump only on meaningful history growth; each revision is a distinct
+    // query cache entry, so late responses for an older revision can never
+    // overwrite the suggestion shown for the current one.
+    const historyRevision = Math.floor(
+      messageCount / SUGGESTION_HISTORY_BUCKET,
+    );
+    const suggestionHintId = useId();
+
+    const composerSuggestionQuery = useQuery(
+      trpc.tasks.composerSuggestion.queryOptions(
+        { taskId: taskId ?? '', historyRevision },
+        {
+          enabled:
+            Boolean(taskId) &&
+            connected &&
+            !readOnly &&
+            messageCount >= SUGGESTION_MIN_TRANSCRIPT_EVENTS,
+          staleTime: Number.POSITIVE_INFINITY,
+          refetchOnWindowFocus: false,
+        },
+      ),
+    );
+    const suggestion = composerSuggestionQuery.data?.suggestion?.trim() || null;
+    // Ghost text renders only in a truly empty, idle composer.
+    const ghostSuggestion =
+      suggestion && suggestion !== dismissedSuggestion && !prompt && !sending
+        ? suggestion
+        : null;
 
     const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
       null,
@@ -649,8 +692,63 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const showConnectingStatus =
       !connected && !connectionError && !hasTransportError;
 
+    const acceptGhostSuggestion = useCallback(() => {
+      if (!ghostSuggestion) {
+        return;
+      }
+
+      applyPromptChange(ghostSuggestion);
+      capture('composer_suggestion_accepted', { surface: 'task' });
+
+      requestAnimationFrame(() => {
+        const textarea = textareaRef.current;
+        focusTextarea(textarea ? textarea.value.length : undefined);
+      });
+    }, [ghostSuggestion, applyPromptChange, capture, focusTextarea]);
+
+    const dismissGhostSuggestion = useCallback(() => {
+      if (!ghostSuggestion) {
+        return;
+      }
+
+      setDismissedSuggestion(ghostSuggestion);
+      capture('composer_suggestion_dismissed', { surface: 'task' });
+    }, [ghostSuggestion, capture]);
+
+    // Count each distinct rendered suggestion once.
+    const lastShownSuggestionRef = useRef<string | null>(null);
+    useEffect(() => {
+      if (
+        ghostSuggestion &&
+        lastShownSuggestionRef.current !== ghostSuggestion
+      ) {
+        lastShownSuggestionRef.current = ghostSuggestion;
+        capture('composer_suggestion_shown', { surface: 'task' });
+      }
+    }, [ghostSuggestion, capture]);
+
     const handleTextareaKeyDown = useCallback(
       (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (ghostSuggestion && !event.nativeEvent.isComposing) {
+          if (
+            event.key === 'Tab' &&
+            !event.shiftKey &&
+            !event.metaKey &&
+            !event.ctrlKey &&
+            !event.altKey
+          ) {
+            event.preventDefault();
+            acceptGhostSuggestion();
+            return;
+          }
+
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            dismissGhostSuggestion();
+            return;
+          }
+        }
+
         const submitButton = event.currentTarget.form?.querySelector(
           'button[type="submit"]',
         ) as HTMLButtonElement | null;
@@ -700,8 +798,11 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           });
       },
       [
+        acceptGhostSuggestion,
         canSteerQueuedMessages,
         client,
+        dismissGhostSuggestion,
+        ghostSuggestion,
         prompt,
         readOnly,
         steerableQueuedMessages,
@@ -717,15 +818,36 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         >
           <AttachmentsDisplay />
           <PromptInputBody>
-            <PromptInputTextarea
-              ref={textareaRef}
-              value={prompt}
-              onChange={handleChange}
-              onBlur={() => flushDraft()}
-              onKeyDown={handleTextareaKeyDown}
-              placeholder={placeholder}
-              disabled={!connected || sending}
-            />
+            <div className="relative">
+              <PromptInputTextarea
+                ref={textareaRef}
+                value={prompt}
+                onChange={handleChange}
+                onBlur={() => flushDraft()}
+                onKeyDown={handleTextareaKeyDown}
+                placeholder={ghostSuggestion ?? placeholder}
+                aria-describedby={
+                  ghostSuggestion ? suggestionHintId : undefined
+                }
+                disabled={!connected || sending}
+              />
+              {ghostSuggestion && (
+                <>
+                  <span id={suggestionHintId} className="sr-only">
+                    Suggested message: {ghostSuggestion}. Press Tab to accept or
+                    Escape to dismiss.
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Insert suggested message"
+                    onClick={acceptGhostSuggestion}
+                    className="absolute right-3 top-3 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
+                  >
+                    Tab
+                  </button>
+                </>
+              )}
+            </div>
           </PromptInputBody>
           <PromptInputFooter className="pt-0 pb-4 px-4">
             <PromptInputTools>
