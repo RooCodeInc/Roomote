@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fastMocks = vi.hoisted(() => ({
+  DeliveryError: class FastAgentParentEventDeliveryError extends Error {
+    readonly replyPosted: boolean;
+
+    constructor(message: string, replyPosted: boolean) {
+      super(message);
+      this.replyPosted = replyPosted;
+    }
+  },
   getSession: vi.fn(),
   deliverParentEvent: vi.fn(),
   slackPostMessage: vi.fn(),
@@ -24,6 +32,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 vi.mock('../../lib/fast-agent-parent-event', () => ({
   buildSlackClientMessageId: vi.fn(() => 'client-message-id'),
   deliverFastAgentParentEvent: fastMocks.deliverParentEvent,
+  FastAgentParentEventDeliveryError: fastMocks.DeliveryError,
 }));
 
 vi.mock('../../lib/fast-agent-provider-message', () => ({
@@ -344,6 +353,40 @@ describe('customAutomationsJob', () => {
         status: 'failed',
         error: 'parent turn failed',
       }),
+    );
+  });
+
+  it('records success when Fast finalization fails after the Slack report posts', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+    vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+      teamId: 'T123',
+    } as never);
+    fastMocks.deliverParentEvent.mockRejectedValueOnce(
+      new fastMocks.DeliveryError('transcript persistence failed', true),
+    );
+
+    const result = await customAutomationsJob();
+
+    expect(result.completed).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        id: automation.id,
+        status: 'succeeded',
+      }),
+    );
+    expect(recordCustomAutomationRunOutcome).not.toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({ status: 'failed' }),
     );
   });
 

@@ -702,6 +702,7 @@ async function createSlackFastAgentParentTurn(
                 'Slack did not create the Fast automation result.',
               );
             }
+            params.onReplyPosted();
             await fastAgentConversationRepository.getOrCreate({
               userId: actorUserId,
               conversation: {
@@ -739,7 +740,6 @@ async function createSlackFastAgentParentTurn(
               suggestions,
             });
           }
-          params.onReplyPosted();
           return { messageId: messageTs };
         }
 

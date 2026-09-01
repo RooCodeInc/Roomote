@@ -58,6 +58,7 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../lib/t
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../lib/telegram-communication';
 import {
   deliverFastAgentParentEvent,
+  FastAgentParentEventDeliveryError,
   type FastAgentParentEvent,
 } from '../lib/fast-agent-parent-event';
 import { recordFastAgentConversationMessage } from '../lib/fast-agent-provider-message';
@@ -454,6 +455,16 @@ async function runFastCustomAutomation(params: {
       event,
     });
   } catch (error) {
+    if (
+      error instanceof FastAgentParentEventDeliveryError &&
+      error.replyPosted
+    ) {
+      console.warn(
+        `${LOG_PREFIX} Fast automation ${params.automation.id} reported after delivery: ${error.message}`,
+      );
+      return;
+    }
+
     const message = `${params.automation.name} failed: ${error instanceof Error ? error.message : String(error)}`;
     try {
       if (conversation.surface === 'discord' && rootMessageId) {
