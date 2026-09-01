@@ -211,8 +211,6 @@ const showWidgetArgsSchema = z.object({
 });
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS = 50_000;
-const FAST_AGENT_HUMAN_STEER_POLL_INTERVAL_MS = 250;
-const FAST_AGENT_HUMAN_STEER_QUIET_WINDOW_MS = 3_000;
 const FAST_AGENT_HUMAN_STEER_MAX_MESSAGES = 16;
 const FAST_AGENT_HUMAN_STEER_QUERY_LIMIT =
   FAST_AGENT_HUMAN_STEER_MAX_MESSAGES + 1;
@@ -1100,7 +1098,6 @@ export async function answerFastAgentQuestion({
   const degradedContextComponents = new Set<string>();
   let nativeSteer: NonTaskOpenCodeNativeSteer | undefined;
   let activeToolExecutions = 0;
-  let humanSteerPollTimer: ReturnType<typeof setInterval> | undefined;
   let respondingLeaseRenewalTimer: ReturnType<typeof setInterval> | undefined;
   // Renewals chain onto this promise so settlement can await the in-flight
   // write before recording the terminal lease state; a fire-and-forget tick
@@ -1118,8 +1115,6 @@ export async function answerFastAgentQuestion({
   const completedChatReplySignatures = new Set<string>();
   const completedTaskActions = new Set<string>();
   const stopHumanSteerPolling = () => {
-    if (humanSteerPollTimer) clearInterval(humanSteerPollTimer);
-    humanSteerPollTimer = undefined;
     nativeSteer = undefined;
   };
   signal?.addEventListener('abort', stopHumanSteerPolling, { once: true });
@@ -1173,14 +1168,6 @@ export async function answerFastAgentQuestion({
         rows.length === 0 ||
         !nativeSteer ||
         activeToolExecutions > 0
-      ) {
-        return;
-      }
-      const newestPendingCreatedAt = rows.at(-1)?.createdAt.getTime();
-      if (
-        newestPendingCreatedAt !== undefined &&
-        Date.now() - newestPendingCreatedAt <
-          FAST_AGENT_HUMAN_STEER_QUIET_WINDOW_MS
       ) {
         return;
       }
@@ -1394,6 +1381,7 @@ export async function answerFastAgentQuestion({
           `[Fast Agent] Failed to inject a native human steer: ${formatErrorForLog(error)}`,
         );
       });
+    return activeHumanSteerPoll;
   };
   const persistAssistantReply = async ({
     reply,
@@ -1693,11 +1681,6 @@ export async function answerFastAgentQuestion({
       currentMessageReactable,
     });
     canonicalConversationId = session.id;
-    humanSteerPollTimer = setInterval(
-      schedulePendingHumanSteerDrain,
-      FAST_AGENT_HUMAN_STEER_POLL_INTERVAL_MS,
-    );
-    humanSteerPollTimer.unref();
     await reconcileFastAgentInferenceRetryNotices(
       session.id,
       'next_turn_reconcile',
@@ -2944,12 +2927,17 @@ export async function answerFastAgentQuestion({
                           currentInstructionVersion,
                         );
                       },
+                      onAssistantMessageCompleted: () =>
+                        schedulePendingHumanSteerDrain(),
                       onPromptStarted: () => {
                         promptStarted = true;
                         diagnostics.markInferenceStarted();
                       },
                       onNativeSteerReady: (steer) => {
                         nativeSteer = steer;
+                        // The prompt becoming active is the first native
+                        // pickup boundary. Messages admitted during setup are
+                        // already accumulated and can be submitted together.
                         schedulePendingHumanSteerDrain();
                       },
                       onNativeSteerClosed: () => {

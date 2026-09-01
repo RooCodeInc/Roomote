@@ -830,10 +830,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
-  it('waits for a quiet window and batches rapidly arriving messages', async () => {
+  it('batches rapidly arriving messages at the next assistant boundary', async () => {
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(new Date('2026-08-31T12:00:00.000Z'));
       const first = {
         id: '55555555-5555-4555-8555-555555555555',
         createdAt: new Date(),
@@ -846,18 +845,27 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           question: 'Rapid update one.',
         },
       };
-      let pendingRows = [first];
+      let pendingRows: (typeof first)[] = [];
       mocks.getPendingHumanFollowUp.mockImplementation(async () => pendingRows);
       mocks.nativeSteer.mockImplementationOnce(async () => {
         pendingRows = [];
       });
 
       let finishGeneration: ((value: string) => void) | undefined;
+      let completeAssistantBoundary: (() => Promise<void>) | undefined;
       mocks.generateText.mockImplementation(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
           options.onPromptStarted?.();
           options.onNativeSteerReady?.(mocks.nativeSteer);
+          completeAssistantBoundary = async () => {
+            await options.onAssistantMessageCompleted?.({
+              id: 'assistant-before-rapid-updates',
+              sessionId: 'opencode-session-1',
+              createdAtMs: 100,
+              completedAtMs: 200,
+            });
+          };
           return await new Promise<string>((resolve) => {
             finishGeneration = resolve;
           });
@@ -868,7 +876,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ...baseParams,
         adapter: callbacks(),
       });
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.waitFor(() =>
+        expect(completeAssistantBoundary).toBeTypeOf('function'),
+      );
+      pendingRows = [first];
       expect(mocks.nativeSteer).not.toHaveBeenCalled();
 
       const second = {
@@ -884,10 +895,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         },
       };
       pendingRows = [first, second];
-      await vi.advanceTimersByTimeAsync(2_750);
-      expect(mocks.nativeSteer).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(250);
+      await completeAssistantBoundary?.();
       await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
       const steerText = mocks.nativeSteer.mock.calls[0]?.[0]?.text;
       expect(steerText).toContain('Rapid update one.');
@@ -998,9 +1006,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       expect(mocks.nativeSteer).not.toHaveBeenCalled();
       expect(mocks.updateParentEventWhere).not.toHaveBeenCalled();
-      expect(mocks.getPendingHumanFollowUp.mock.calls.length).toBeGreaterThan(
-        1,
-      );
+      expect(mocks.getPendingHumanFollowUp).toHaveBeenCalledOnce();
 
       finishGeneration?.('Original answer');
       await expect(resultPromise).resolves.toBe('Original answer');

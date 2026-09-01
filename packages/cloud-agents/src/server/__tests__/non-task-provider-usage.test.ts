@@ -305,6 +305,18 @@ describe('resolveOpenCodeSmallModel', () => {
           },
         };
         yield {
+          type: 'message.updated' as const,
+          properties: {
+            info: {
+              id: 'assistant-message-1',
+              sessionID: 'session-1',
+              parentID: 'user-message-1',
+              role: 'assistant' as const,
+              time: { created: 150, completed: 175 },
+            },
+          },
+        };
+        yield {
           type: 'session.created',
           properties: {
             sessionID: 'subagent-session-1',
@@ -340,6 +352,7 @@ describe('resolveOpenCodeSmallModel', () => {
     const onPromptStarted = vi.fn();
     const onMessageCompleted = vi.fn();
     const onAssistantMessageStarted = vi.fn();
+    const onAssistantMessageCompleted = vi.fn();
     const onSubagentSessionReady = vi.fn(() => markSubagentReady());
     const session: { id?: string } = {};
 
@@ -363,6 +376,7 @@ describe('resolveOpenCodeSmallModel', () => {
           },
           onModelResolved,
           onAssistantMessageStarted,
+          onAssistantMessageCompleted,
           onMessageCompleted,
           onPromptStarted,
           onSessionReady,
@@ -386,6 +400,12 @@ describe('resolveOpenCodeSmallModel', () => {
       sessionId: 'session-1',
       parentId: 'user-message-1',
       createdAtMs: 150,
+    });
+    expect(onAssistantMessageCompleted).toHaveBeenCalledWith({
+      id: 'assistant-message-1',
+      sessionId: 'session-1',
+      createdAtMs: 150,
+      completedAtMs: 175,
     });
     expect(onPromptStarted).toHaveBeenCalledOnce();
     expect(onSessionReady).toHaveBeenCalledWith('session-1');
