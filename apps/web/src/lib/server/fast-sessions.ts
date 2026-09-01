@@ -15,6 +15,7 @@ import {
   llmUsageEvents,
   inArray,
   isNull,
+  or,
   sessions,
   sql,
   taskArtifacts,

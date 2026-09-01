@@ -208,6 +208,7 @@ async function runWebFastAgentTurn({
   reasoningEffort,
   senderDisplayName,
   currentMessageId,
+  skipIfEventExists,
   skipIfTurnCompleted,
   turnSource,
   platformEventKind,
