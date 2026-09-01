@@ -52,10 +52,10 @@ curl -fsSL https://get.roomote.dev | bash
 ```
 
 The installer brings up the full stack from published images and prints a setup
-link. For this self-hosted path, open it in a browser and the wizard walks you
-through the rest: sign-in provider, source-control provider, a ChatGPT
-subscription or inference provider API key, communications provider,
-repositories, and a first task.
+link. Open it in a browser to create the first administrator and configure
+inference. Roomote then opens a persistent setup conversation where trusted
+cards guide you through source control, your first task, a sandbox provider,
+and recommended automations.
 
 No DNS setup is needed to try it out; pass `--domain roomote.example.com` for a
 production install on your own domain.
@@ -71,7 +71,7 @@ sudo bash install.sh
 
 ## Setup checklist
 
-Have these ready before the wizard asks for them:
+Have these ready before setup asks for them:
 
 - a public HTTPS URL for the deployment, especially when source-control or chat
   callbacks need to reach it
@@ -180,20 +180,20 @@ Roomote surfaces release history and available updates in the web app:
 - Managed Roomote inference from an eligible host, or a ChatGPT subscription or
   inference provider API key (OpenRouter, Anthropic, OpenAI, and others).
 - An account with a supported source-control provider. For GitHub, the setup
-  wizard creates the GitHub App; other providers use their documented OAuth or
-  credential flow.
+  conversation creates the GitHub App; other providers use their documented
+  OAuth or credential flow.
 - For Slack, Microsoft Teams, Telegram, and Discord: a workspace or server where
   you can install an app or bot; the setup assistant prefills the Slack app
   manifest and creates Discord's installation link for you.
 
 ## Verify the deployment
 
-Setup ends in a conversational session with Roomote. Once sign-in, inference,
-and a usable sandbox provider are confirmed, the setup wizard is replaced by a
-persistent chat session: Roomote maintains an onboarding agenda in the
-session, and you connect source control through the trusted side panel (the
-same panel opens as a sheet on smaller screens). Credential entry and OAuth
-always happen in that panel, never in chat.
+After sign-in and inference are ready, setup continues entirely in a persistent
+conversation with Roomote. Trusted action cards appear beside the relevant
+messages for source control, first work, sandbox configuration, and automation
+recommendations. Detailed provider instructions and credential entry open in a
+dialog from the source-control card; Roomote never asks for credentials in
+chat.
 
 When repositories are connected, Roomote offers the preselected starter tasks
 in one structured multi-select question. Choosing at least one completes setup

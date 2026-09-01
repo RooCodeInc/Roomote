@@ -18,26 +18,6 @@ const SETUP_STEP_DEFINITIONS = [
     id: 'env-vars',
     title: 'Configure inference provider',
   },
-  {
-    id: 'source-control-provider',
-    title: 'Source control provider',
-  },
-  {
-    id: 'source-control-config',
-    title: 'Configure source control',
-  },
-  {
-    id: 'source-control-connect',
-    title: 'Connect source control',
-  },
-  {
-    id: 'compute-provider',
-    title: 'Sandbox provider',
-  },
-  {
-    id: 'compute-config',
-    title: 'Configure sandboxes',
-  },
 ] as const satisfies readonly SetupStepConfig[];
 
 type SetupStepDefinition = (typeof SETUP_STEP_DEFINITIONS)[number];

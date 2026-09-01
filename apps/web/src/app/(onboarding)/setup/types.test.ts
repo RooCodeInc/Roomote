@@ -4,16 +4,7 @@ describe('getSetupSteps', () => {
   it('returns the canonical step order regardless of the auth mode', () => {
     expect(getSetupSteps(false)).toBe(SETUP_STEPS);
     expect(getSetupSteps(true)).toBe(SETUP_STEPS);
-    expect(SETUP_STEPS).toEqual([
-      'welcome',
-      'inference',
-      'env-vars',
-      'source-control-provider',
-      'source-control-config',
-      'source-control-connect',
-      'compute-provider',
-      'compute-config',
-    ]);
+    expect(SETUP_STEPS).toEqual(['welcome', 'inference', 'env-vars']);
   });
 
   it('orders inference before provider configuration', () => {

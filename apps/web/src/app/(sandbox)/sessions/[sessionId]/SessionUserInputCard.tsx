@@ -11,14 +11,12 @@ import {
   Button,
   Checkbox,
   Input,
-  ListChecks,
   RadioGroup,
   RadioGroupItem,
 } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { SetupSessionActionCard } from '../../../(onboarding)/setup/SetupSessionActionCard';
 
 /** Checkbox state per multi-select question; single questions keep a string. */
 type SelectionState = Record<string, string[]>;
@@ -35,6 +33,8 @@ export function SessionUserInputCard({
   sessionId,
   request,
   isResolved,
+  submission = 'session',
+  cancellable = true,
 }: {
   sessionId: string;
   request: Pick<
@@ -42,13 +42,15 @@ export function SessionUserInputCard({
     'requestId' | 'questions' | 'preset'
   >;
   isResolved?: boolean;
+  submission?: 'session' | 'setup';
+  cancellable?: boolean;
 }) {
   const trpc = useTRPC();
   const [selections, setSelections] = useState<SelectionState>({});
   const [freeText, setFreeText] = useState<Record<string, string>>({});
 
   const submit = useMutation(
-    (request.preset
+    (submission === 'setup'
       ? trpc.setup.submitSessionUserInput
       : trpc.fastSessions.submitUserInput
     ).mutationOptions({
@@ -312,7 +314,7 @@ export function SessionUserInputCard({
         <p className="text-xs text-destructive">{validationError}</p>
       ) : null}
       <div className="flex items-center justify-end gap-2">
-        {!request.preset ? (
+        {cancellable ? (
           <Button
             type="button"
             size="sm"
@@ -341,18 +343,6 @@ export function SessionUserInputCard({
       </div>
     </form>
   );
-
-  if (request.preset === 'setup_starter_tasks') {
-    return (
-      <SetupSessionActionCard
-        title="Choose your first task"
-        icon={<ListChecks className="size-4" />}
-        intro="Pick what you would like me to work on first. You can choose more than one."
-      >
-        {form}
-      </SetupSessionActionCard>
-    );
-  }
 
   return form;
 }

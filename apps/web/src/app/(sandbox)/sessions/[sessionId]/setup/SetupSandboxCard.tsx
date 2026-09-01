@@ -8,8 +8,8 @@ import { toast } from 'sonner';
 import { useTRPC } from '@/trpc/client';
 import { Container } from '@/components/system';
 
-import { StepComputeConfig } from './StepComputeConfig';
-import { StepComputeProvider } from './StepComputeProvider';
+import { SandboxConfiguration } from './SandboxConfiguration';
+import { SandboxProviderPicker } from './SandboxProviderPicker';
 import { SetupSessionActionCard } from './SetupSessionActionCard';
 
 /**
@@ -18,7 +18,7 @@ import { SetupSessionActionCard } from './SetupSessionActionCard';
  * this card. Otherwise, starter work remains persisted as intent while this
  * trusted provider/configuration UI is completed.
  */
-export function SetupSandboxInlineCard() {
+export function SetupSandboxCard() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [selectedProvider, setSelectedProvider] =
@@ -65,11 +65,11 @@ export function SetupSandboxInlineCard() {
   return (
     <SetupSessionActionCard
       title="Set up a sandbox"
-      icon={<Container className="size-4" />}
+      icon={<Container />}
       intro="Choose where I should run the work you selected. This is a one-time setup for this deployment."
     >
       {effectiveProvider ? (
-        <StepComputeConfig
+        <SandboxConfiguration
           computeSetup={computeSetup}
           selectedProviderId={effectiveProvider}
           onContinue={() => {
@@ -78,14 +78,12 @@ export function SetupSandboxInlineCard() {
             });
           }}
           onBack={() => setSelectedProvider(null)}
-          embedded
         />
       ) : (
-        <StepComputeProvider
+        <SandboxProviderPicker
           computeSetup={computeSetup}
           onContinue={(provider) => saveProviderChoice.mutate({ provider })}
           disabled={saveProviderChoice.isPending}
-          embedded
         />
       )}
     </SetupSessionActionCard>

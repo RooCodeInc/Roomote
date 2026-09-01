@@ -12,17 +12,6 @@ import { getSetupDocsPath, getSetupDocsStep } from './setup-docs';
 describe('SetupDocs', () => {
   it('maps setup steps to the matching documentation pages', () => {
     expect(getSetupDocsPath('inference')).toBe('models');
-    expect(
-      getSetupDocsPath('source-control-connect', {
-        sourceControlProvider: 'github',
-      }),
-    ).toBe('providers/source-control/github');
-    expect(getSetupDocsPath('compute-config', { computeProvider: 'e2b' })).toBe(
-      'providers/compute/e2b',
-    );
-    expect(getSetupDocsPath('compute-config', { computeProvider: 'box' })).toBe(
-      'providers/compute/box',
-    );
     expect(getSetupDocsPath('env-vars', { modelProvider: 'vllm' })).toBe(
       'providers/inference/vllm',
     );

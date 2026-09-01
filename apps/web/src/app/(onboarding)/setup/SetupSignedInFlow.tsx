@@ -2,15 +2,10 @@
 
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import {
-  getSetupNewComputeProvisioningState,
-  isSetupProvisionableComputeProvider,
-  type SetupModelProviderId,
-  type SourceControlProvider,
-} from '@roomote/types';
+import type { SetupModelProviderId } from '@roomote/types';
 
 import { useUser } from '@/hooks/useUser';
 import {
@@ -23,49 +18,38 @@ import { Button } from '@/components/system';
 import { StepWelcome } from './StepWelcome';
 import { StepInferenceProvider } from './StepInferenceProvider';
 import { StepConfigureInference } from './StepConfigureInference';
-import { StepSourceControlProvider } from './StepSourceControlProvider';
-import { StepSourceControlConfig } from './StepSourceControlConfig';
-import { StepSourceControlConnect } from './StepSourceControlConnect';
 import { useSetupFlow } from './hooks';
-import { StepInvoke } from './StepInvoke';
 import { LoadingSetupFlow, stepTransitionVariants } from './SetupBootstrapFlow';
 
+/**
+ * Signed-in bootstrap for the conversational setup session.
+ *
+ * This page intentionally stops once inference is usable. Repository access,
+ * starter work, sandbox configuration, and recommended automations belong to
+ * the setup conversation itself.
+ */
 export function SetupSignedInFlow() {
   const router = useRouter();
   const trpc = useTRPC();
-  const queryClient = useQueryClient();
   const { authStatus, isSignedIn, user } = useUser();
   const isAdmin = user?.isAdmin === true;
-  const [pendingSourceControlProvider, setPendingSourceControlProvider] =
-    useState<SourceControlProvider | null>(null);
   const [pendingModelProvider, setPendingModelProvider] =
     useState<SetupModelProviderId | null>(null);
   const trackWelcomeSeen = useMutation(
     trpc.setupNew.trackWelcomeSeen.mutationOptions(),
   );
-  const {
-    data: setupSession,
-    isPending: isSetupSessionPending,
-    isError: isSetupSessionError,
-    mutate: createSetupSession,
-  } = useMutation(
+  const createSession = useMutation(
     trpc.setup.getOrCreateSession.mutationOptions({
+      onSuccess: ({ sessionId }) => router.replace(`/sessions/${sessionId}`),
       onError: (error) => toast.error(error.message),
     }),
   );
-  const {
-    data: setupStatus,
-    isLoading: isSetupStatusLoading,
-    isError: isSetupStatusError,
-  } = useQuery(
+  const setupStatus = useQuery(
     trpc.setup.status.queryOptions(undefined, {
       enabled: isSignedIn && isAdmin,
       staleTime: 30_000,
     }),
   );
-  const flow = useSetupFlow({
-    enabled: isSignedIn && isAdmin,
-  });
   const {
     step,
     transitionDirection,
@@ -79,69 +63,48 @@ export function SetupSignedInFlow() {
     status,
     isLoading,
     isError,
-  } = flow;
+  } = useSetupFlow({ enabled: isSignedIn && isAdmin });
 
-  const saveSourceControlProviderChoice = useMutation(
-    trpc.setupNew.saveSourceControlProviderChoice.mutationOptions({
-      onSuccess: async (_data, variables) => {
-        await queryClient.invalidateQueries({
-          queryKey: trpc.setupNew.status.queryKey(),
-        });
-        setPendingSourceControlProvider(variables.provider);
-        goToStep('source-control-config');
-      },
-      onError: (error) => toast.error(error.message),
-    }),
-  );
-  const selectedSourceControlProvider =
-    pendingSourceControlProvider ??
-    status?.setupNewState.sourceControlProvider ??
-    status?.sourceControlSetup.runtimeConfiguredProvider ??
-    status?.sourceControlSetup.selectedProvider;
   const selectedModelProvider =
     pendingModelProvider ?? status?.setupNewState.modelProvider;
 
   useEffect(() => {
     const params = readSetupSearchParams();
-    const providerParams = {
-      modelProvider: selectedModelProvider,
-      sourceControlProvider: selectedSourceControlProvider,
-    };
-    let changed = false;
-    for (const [key, value] of Object.entries(providerParams)) {
-      if (value && params.get(key) !== value) {
-        params.set(key, value);
-        changed = true;
-      } else if (!value && params.has(key)) {
-        params.delete(key);
-        changed = true;
-      }
+    if (selectedModelProvider) {
+      if (params.get('modelProvider') === selectedModelProvider) return;
+      params.set('modelProvider', selectedModelProvider);
+    } else {
+      if (!params.has('modelProvider')) return;
+      params.delete('modelProvider');
     }
-    if (changed) commitSetupUrl(params);
-  }, [
-    commitSetupUrl,
-    readSetupSearchParams,
-    selectedModelProvider,
-    selectedSourceControlProvider,
-  ]);
+    commitSetupUrl(params);
+  }, [commitSetupUrl, readSetupSearchParams, selectedModelProvider]);
+
   const shouldEvaluateSetupRedirect = isSignedIn && isAdmin;
   const setupRedirectPath =
-    shouldEvaluateSetupRedirect && !isSetupStatusError && setupStatus != null
-      ? getSetupRedirectPath(setupStatus)
+    shouldEvaluateSetupRedirect &&
+    !setupStatus.isError &&
+    setupStatus.data != null
+      ? getSetupRedirectPath(setupStatus.data)
       : null;
   const observedIncompleteSetupRef = useRef(false);
 
   useEffect(() => {
-    if (setupStatus != null && setupStatus.setupCompletedAt == null)
+    if (
+      setupStatus.data?.setupCompletedAt == null &&
+      setupStatus.data != null
+    ) {
       observedIncompleteSetupRef.current = true;
-  }, [setupStatus]);
+    }
+  }, [setupStatus.data]);
+
   useEffect(() => {
     if (authStatus === 'signed-in' && !isAdmin) {
       router.replace('/');
       return;
     }
     if (!shouldEvaluateSetupRedirect) return;
-    if (!isSetupStatusLoading && !isSetupStatusError && setupStatus != null) {
+    if (!setupStatus.isLoading && !setupStatus.isError && setupStatus.data) {
       if (
         setupRedirectPath &&
         setupRedirectPath !== DEFAULT_SETUP_REDIRECT_PATH
@@ -151,7 +114,6 @@ export function SetupSignedInFlow() {
       }
       if (setupRedirectPath === null && !observedIncompleteSetupRef.current) {
         router.replace('/');
-        return;
       }
     }
     if (isError) router.replace('/');
@@ -159,45 +121,35 @@ export function SetupSignedInFlow() {
     authStatus,
     isAdmin,
     isError,
-    isSetupStatusError,
-    isSetupStatusLoading,
-    shouldEvaluateSetupRedirect,
     router,
-    setupStatus,
     setupRedirectPath,
+    setupStatus.data,
+    setupStatus.isError,
+    setupStatus.isLoading,
+    shouldEvaluateSetupRedirect,
   ]);
+
   useEffect(() => {
     if (status?.setupNewState.modelProvider) setPendingModelProvider(null);
   }, [status?.setupNewState.modelProvider]);
 
   const conversationalSetupReady =
-    status != null &&
-    status.modelSetup.setupSatisfied &&
+    status?.modelSetup.setupSatisfied === true &&
     status.setupCompletedAt == null;
-  const setupSessionId = setupSession?.sessionId ?? null;
 
   useEffect(() => {
-    if (!conversationalSetupReady) return;
-
-    if (setupSessionId) {
-      router.replace(`/sessions/${setupSessionId}`);
-      return;
+    if (
+      conversationalSetupReady &&
+      !createSession.isPending &&
+      !createSession.isError &&
+      !createSession.data
+    ) {
+      createSession.mutate();
     }
-
-    if (!isSetupSessionPending && !isSetupSessionError) {
-      createSetupSession();
-    }
-  }, [
-    conversationalSetupReady,
-    createSetupSession,
-    isSetupSessionError,
-    isSetupSessionPending,
-    router,
-    setupSessionId,
-  ]);
+  }, [conversationalSetupReady, createSession]);
 
   if (!isSignedIn || !isAdmin) return null;
-  if (isError)
+  if (isError) {
     return (
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
@@ -208,52 +160,25 @@ export function SetupSignedInFlow() {
         </Button>
       </div>
     );
+  }
   if (isLoading || !status) return <LoadingSetupFlow />;
 
-  const legacySetupStarted =
-    status.setupNewState.onboardingTaskId !== null &&
-    status.setupNewState.onboardingTaskStartedAt !== null;
-  if (legacySetupStarted) {
-    const provider = status.setupNewState.computeProvider;
-    const computeProvisioning =
-      provider && isSetupProvisionableComputeProvider(provider)
-        ? getSetupNewComputeProvisioningState(status.setupNewState, provider)
-        : null;
-    return (
-      <StepInvoke
-        onboardingTaskId={status.setupNewState.onboardingTaskId}
-        communicationProviders={
-          status.authSetup.selectedProvider
-            ? [status.authSetup.selectedProvider]
-            : status.hasSlack
-              ? ['slack']
-              : []
-        }
-        sourceControlProviders={
-          status.sourceControlSetup.connectedProvider
-            ? [status.sourceControlSetup.connectedProvider]
-            : []
-        }
-        includeLinear={status.hasLinear}
-        linkSuggestedTasks={status.queuedOnboardingTasks.some(
-          (task) => task.suggestionId !== null,
-        )}
-        computeProvisioning={computeProvisioning}
-        onRetryComputeProvisioning={() => undefined}
-        onTryItOut={() => undefined}
-      />
-    );
-  }
-
   if (conversationalSetupReady) {
+    if (createSession.isError) {
+      return (
+        <div className="mx-auto max-w-md space-y-4 text-center">
+          <p className="font-semibold">I couldn’t start the setup session.</p>
+          <p className="text-sm text-muted-foreground">
+            {createSession.error.message}
+          </p>
+          <Button type="button" onClick={() => createSession.mutate()}>
+            Try again
+          </Button>
+        </div>
+      );
+    }
     return <LoadingSetupFlow />;
   }
-
-  const removeSourceControlSyncMarker = () => {
-    const params = readSetupSearchParams();
-    params.delete('sync');
-    commitSetupUrl(params);
-  };
 
   return (
     <div className="relative w-full">
@@ -266,15 +191,14 @@ export function SetupSignedInFlow() {
           animate="center"
           exit="exit"
         >
-          {step === 'welcome' && (
+          {step === 'welcome' ? (
             <StepWelcome
               onContinue={() => {
                 trackWelcomeSeen.mutate();
                 goToNextStep();
               }}
             />
-          )}
-          {step === 'inference' && (
+          ) : step === 'inference' ? (
             <StepConfigureInference
               onUseTrial={goToNextStep}
               onConfigureProvider={() =>
@@ -282,8 +206,7 @@ export function SetupSignedInFlow() {
               }
               onBack={canGoBack ? goToPreviousStep : undefined}
             />
-          )}
-          {step === 'env-vars' && (
+          ) : (
             <StepInferenceProvider
               modelSetup={status.modelSetup}
               openRouterOauthStatus={entryContext.openrouterOauthStatus}
@@ -296,42 +219,6 @@ export function SetupSignedInFlow() {
               }}
               onBack={canGoBack ? goToPreviousStep : undefined}
               onSelectedProviderChange={setPendingModelProvider}
-            />
-          )}
-          {step === 'source-control-provider' && (
-            <StepSourceControlProvider
-              sourceControlSetup={status.sourceControlSetup}
-              onContinue={(provider) =>
-                saveSourceControlProviderChoice.mutate({ provider })
-              }
-              onBack={canGoBack ? goToPreviousStep : undefined}
-              disabled={saveSourceControlProviderChoice.isPending}
-            />
-          )}
-          {step === 'source-control-config' && (
-            <StepSourceControlConfig
-              sourceControlSetup={status.sourceControlSetup}
-              selectedProviderId={pendingSourceControlProvider}
-              onContinue={() => {
-                setPendingSourceControlProvider(null);
-                goToStep('source-control-connect');
-              }}
-              onBack={() => {
-                setPendingSourceControlProvider(null);
-                if (canGoBack) {
-                  goToPreviousStep();
-                  return;
-                }
-                goToStep('source-control-provider');
-              }}
-            />
-          )}
-          {step === 'source-control-connect' && (
-            <StepSourceControlConnect
-              sourceControlSetup={status.sourceControlSetup}
-              onContinue={goToNextStep}
-              onRemoveSyncMarker={removeSourceControlSyncMarker}
-              onBack={canGoBack ? goToPreviousStep : undefined}
             />
           )}
         </motion.div>

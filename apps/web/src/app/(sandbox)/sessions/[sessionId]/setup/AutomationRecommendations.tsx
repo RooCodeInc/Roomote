@@ -18,8 +18,7 @@ import {
   Zap,
 } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
-import { SetupFooter } from './SetupFooter';
-import { StepTitle } from './StepTitle';
+import { SetupSessionActionCardActions } from './SetupSessionActionCard';
 
 function candidateTitle(candidateId: string) {
   return (
@@ -29,15 +28,10 @@ function candidateTitle(candidateId: string) {
   );
 }
 
-export function StepAutomationRecommendations({
+export function AutomationRecommendations({
   onContinue,
-  onBack,
-  embedded = false,
 }: {
   onContinue: (batch: AutomationRecommendationBatch | null) => void;
-  onBack?: () => void;
-  /** The setup-session action card supplies the heading and introduction. */
-  embedded?: boolean;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -94,7 +88,7 @@ export function StepAutomationRecommendations({
       },
       onError: (error) => {
         console.error(
-          '[StepAutomationRecommendations] Failed to start recommendation scoring:',
+          '[AutomationRecommendations] Failed to start recommendation scoring:',
           error,
         );
       },
@@ -142,7 +136,7 @@ export function StepAutomationRecommendations({
 
     const timeout = window.setTimeout(() => {
       console.warn(
-        '[StepAutomationRecommendations] Recommendation scoring is taking longer than expected',
+        '[AutomationRecommendations] Recommendation scoring is taking longer than expected',
       );
       setPendingTooLong(true);
     }, 30_000);
@@ -150,22 +144,7 @@ export function StepAutomationRecommendations({
   }, [pending]);
 
   return (
-    <div
-      className={
-        embedded
-          ? 'flex w-full flex-col gap-4'
-          : 'mx-auto flex w-full max-w-3xl flex-col gap-8'
-      }
-    >
-      {!embedded ? (
-        <StepTitle
-          text={
-            pending
-              ? 'Looking for stuff to automate...'
-              : 'Recommended automations'
-          }
-        />
-      ) : null}
+    <div className="flex w-full flex-col gap-4">
       {pending ? (
         <div
           className="flex items-start gap-3 text-muted-foreground"
@@ -188,13 +167,7 @@ export function StepAutomationRecommendations({
         </Alert>
       ) : (
         <div className="space-y-4">
-          {!embedded ? (
-            <p className="text-muted-foreground">
-              After analyzing your connected repos, Roomote found some
-              automations to make your life easier:
-            </p>
-          ) : null}
-          <div className="divide-y-2 divide-accent-bright-foreground bg-card rounded-xl">
+          <div className="divide-y rounded-lg border bg-background/40">
             {batch.recommendations.map((recommendation) => (
               <div
                 key={recommendation.id}
@@ -263,7 +236,7 @@ export function StepAutomationRecommendations({
           </AlertDescription>
         </Alert>
       ) : null}
-      <SetupFooter onBack={onBack}>
+      <SetupSessionActionCardActions>
         {(pending || failed) &&
         (startRecommendations.error || pendingTooLong || failed) ? (
           <Button
@@ -294,7 +267,7 @@ export function StepAutomationRecommendations({
               : 'Continue'}
           <ArrowRight />
         </Button>
-      </SetupFooter>
+      </SetupSessionActionCardActions>
     </div>
   );
 }

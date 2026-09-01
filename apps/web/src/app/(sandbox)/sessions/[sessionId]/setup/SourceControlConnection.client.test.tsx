@@ -179,11 +179,13 @@ vi.mock('@/components/system', () => ({
   ),
 }));
 
-vi.mock('./StepTitle', () => ({
-  StepTitle: ({ text }: { text: string }) => <h1>{text}</h1>,
+vi.mock('./SetupSessionActionCard', () => ({
+  SetupSessionActionCardActions: ({ children }: { children?: ReactNode }) => (
+    <div>{children}</div>
+  ),
 }));
 
-import { StepSourceControlConnect } from './StepSourceControlConnect';
+import { SourceControlConnection } from './SourceControlConnection';
 
 function buildSourceControlSetup(
   provider: SourceControlProvider,
@@ -226,7 +228,7 @@ function buildSourceControlSetup(
   };
 }
 
-describe('StepSourceControlConnect', () => {
+describe('SourceControlConnection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     syncRepositoriesOptionsRef.current = null;
@@ -255,7 +257,7 @@ describe('StepSourceControlConnect', () => {
 
   it('renders the runtime-configured GitHub install CTA', () => {
     render(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('github')}
         onContinue={vi.fn()}
       />,
@@ -275,7 +277,7 @@ describe('StepSourceControlConnect', () => {
     const onContinue = vi.fn();
 
     render(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('github')}
         onContinue={onContinue}
       />,
@@ -301,7 +303,7 @@ describe('StepSourceControlConnect', () => {
     const onContinue = vi.fn();
 
     const { rerender } = render(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('github')}
         onContinue={onContinue}
       />,
@@ -316,7 +318,7 @@ describe('StepSourceControlConnect', () => {
     // and snap back to the connect CTA.
     pendingInstallationsDataRef.current = { pending: false };
     rerender(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('github')}
         onContinue={onContinue}
       />,
@@ -332,7 +334,7 @@ describe('StepSourceControlConnect', () => {
     pendingInstallationsDataRef.current = { pending: false };
 
     render(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('github')}
         onContinue={vi.fn()}
       />,
@@ -348,7 +350,7 @@ describe('StepSourceControlConnect', () => {
 
   it('renders the runtime-configured token-backed sync CTA', () => {
     render(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('gitlab')}
         onContinue={vi.fn()}
       />,
@@ -366,7 +368,7 @@ describe('StepSourceControlConnect', () => {
     // Gitea. The connect copy must describe Gitea, not claim it is already
     // configured.
     render(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('gitea', {
           selectedProvider: 'gitea',
           preselectedProvider: 'gitea',
@@ -396,7 +398,7 @@ describe('StepSourceControlConnect', () => {
 
   it('describes Gitea webhook setup during token-backed onboarding', () => {
     render(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('gitea', {
           lockReason: null,
           runtimeConfiguredProvider: null,
@@ -426,7 +428,7 @@ describe('StepSourceControlConnect', () => {
 
   it('describes Azure DevOps service hook setup during token-backed onboarding', () => {
     render(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('ado', {
           lockReason: null,
           runtimeConfiguredProvider: null,
@@ -456,7 +458,7 @@ describe('StepSourceControlConnect', () => {
 
   it('connects a delegated Azure DevOps account before repository sync', () => {
     render(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('ado', {
           lockReason: null,
           runtimeConfiguredProvider: null,
@@ -508,7 +510,7 @@ describe('StepSourceControlConnect', () => {
     };
 
     render(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('ado', {
           lockReason: null,
           runtimeConfiguredProvider: null,
@@ -554,7 +556,7 @@ describe('StepSourceControlConnect', () => {
 
   it('does not auto-sync an OAuth-configured GitLab provider before OAuth completes', () => {
     render(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('gitlab', {
           lockReason: null,
           runtimeConfiguredProvider: null,
@@ -597,7 +599,7 @@ describe('StepSourceControlConnect', () => {
     });
 
     const { rerender } = render(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('gitlab', {
           lockReason: null,
           runtimeConfiguredProvider: null,
@@ -631,7 +633,7 @@ describe('StepSourceControlConnect', () => {
     );
 
     rerender(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('gitlab', {
           lockReason: null,
           runtimeConfiguredProvider: null,
@@ -676,7 +678,7 @@ describe('StepSourceControlConnect', () => {
     const onRemoveSyncMarker = vi.fn();
 
     render(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('bitbucket', {
           lockReason: null,
           runtimeConfiguredProvider: null,
@@ -703,7 +705,7 @@ describe('StepSourceControlConnect', () => {
     const onContinue = vi.fn();
 
     render(
-      <StepSourceControlConnect
+      <SourceControlConnection
         sourceControlSetup={buildSourceControlSetup('gitea')}
         onContinue={onContinue}
       />,

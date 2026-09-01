@@ -6,7 +6,7 @@ import { useUser } from '@/hooks/useUser';
 import { useTRPC } from '@/trpc/client';
 import { Zap } from '@/components/system';
 
-import { StepAutomationRecommendations } from './StepAutomationRecommendations';
+import { AutomationRecommendations } from './AutomationRecommendations';
 import { SetupSessionActionCard } from './SetupSessionActionCard';
 
 /**
@@ -15,7 +15,7 @@ import { SetupSessionActionCard } from './SetupSessionActionCard';
  * Apply or Skip notifies Roomote so it can acknowledge the choice and
  * continue naturally. Optional: never blocks activation or launched tasks.
  */
-export function SetupRecommendationsInlineCard({
+export function SetupAutomationRecommendationsCard({
   sessionId,
 }: {
   sessionId: string;
@@ -36,10 +36,10 @@ export function SetupRecommendationsInlineCard({
   return (
     <SetupSessionActionCard
       title="Recommended automations"
-      icon={<Zap className="size-4" />}
+      icon={<Zap />}
       intro="Review the recurring work I found in your repositories, then choose what to turn on."
     >
-      <StepAutomationRecommendations onContinue={() => undefined} embedded />
+      <AutomationRecommendations onContinue={() => undefined} />
     </SetupSessionActionCard>
   );
 }

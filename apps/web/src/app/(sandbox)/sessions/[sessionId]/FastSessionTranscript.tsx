@@ -51,6 +51,7 @@ import {
   findPendingSessionInputRequest,
   SessionUserInputCard,
 } from './SessionUserInputCard';
+import { SetupStarterTasksCard } from './setup/SetupStarterTasksCard';
 
 import {
   AcpTranscriptBlockList,
@@ -573,13 +574,13 @@ export function FastSessionTranscript({
               Older messages in this session are not shown.
             </p>
           ) : null}
-          {timelineExtras}
           <AcpTranscriptBlockList
             blocks={renderBlocks}
             showInternalMessages={false}
             onSuppress={suppressMessage}
             onOpenDelegatedTask={openTaskPanel ?? undefined}
           />
+          {timelineExtras}
           {pendingResponseState.pendingAfter !== null ? (
             <ThinkingMessage />
           ) : !isSending &&
@@ -604,10 +605,17 @@ export function FastSessionTranscript({
           ))}
           {pendingInputRequest ? (
             <div className="mt-3">
-              <SessionUserInputCard
-                sessionId={sessionId}
-                request={pendingInputRequest}
-              />
+              {pendingInputRequest.preset === 'setup_starter_tasks' ? (
+                <SetupStarterTasksCard
+                  sessionId={sessionId}
+                  request={pendingInputRequest}
+                />
+              ) : (
+                <SessionUserInputCard
+                  sessionId={sessionId}
+                  request={pendingInputRequest}
+                />
+              )}
             </div>
           ) : null}
         </ConversationContent>

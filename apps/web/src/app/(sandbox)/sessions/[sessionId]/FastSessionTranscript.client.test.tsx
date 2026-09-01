@@ -123,6 +123,10 @@ vi.mock('./SessionUserInputCard', async (importOriginal) => ({
   SessionUserInputCard: () => <div>Structured input request</div>,
 }));
 
+vi.mock('./setup/SetupStarterTasksCard', () => ({
+  SetupStarterTasksCard: () => <div>Setup starter tasks</div>,
+}));
+
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
   listeners = new Map<string, Set<(event: MessageEvent) => void>>();

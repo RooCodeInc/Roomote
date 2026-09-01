@@ -4,7 +4,10 @@ import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import type { SetupSourceControlStatus } from '@roomote/types';
+import type {
+  SetupSourceControlStatus,
+  SourceControlProvider,
+} from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
 import { buildSetupSessionSourceControlReturnTarget } from '@/lib/server/source-control-oauth-redirect';
@@ -20,9 +23,9 @@ import {
 } from '@/components/system';
 
 import { SetupSessionActionCard } from './SetupSessionActionCard';
-import { StepSourceControlConfig } from './StepSourceControlConfig';
-import { StepSourceControlConnect } from './StepSourceControlConnect';
-import { StepSourceControlProvider } from './StepSourceControlProvider';
+import { SourceControlConfiguration } from './SourceControlConfiguration';
+import { SourceControlConnection } from './SourceControlConnection';
+import { SourceControlProviderPicker } from './SourceControlProviderPicker';
 
 type CardStage = 'provider' | 'config' | 'connect';
 
@@ -43,35 +46,40 @@ function SetupSessionSourceControlCardBody({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
-  const [configOpen, setConfigOpen] = useState(false);
-  const [showConnectStage, setShowConnectStage] = useState(
-    () =>
-      searchParams.get('step') === 'source-control-connect' ||
-      searchParams.get('setup') === 'source-control',
-  );
-  const saveSourceControlProviderChoice = useMutation(
-    trpc.setupNew.saveSourceControlProviderChoice.mutationOptions({
-      onSuccess: async () => {
-        await queryClient.invalidateQueries({
-          queryKey: trpc.setupNew.status.queryKey(),
-        });
-      },
-      onError: (error) => toast.error(error.message),
-    }),
-  );
-
   const anyAuthorized =
     Boolean(sourceControlSetup.connectedProvider) ||
     sourceControlSetup.providers.some((provider) => provider.connected);
   const hasSelected =
     Boolean(sourceControlSetup.selectedProvider) ||
     Boolean(sourceControlSetup.runtimeConfiguredProvider);
-  const stage: CardStage = anyAuthorized
-    ? 'connect'
-    : hasSelected
-      ? 'config'
-      : 'provider';
+  const [stage, setStage] = useState<CardStage>(() =>
+    anyAuthorized ||
+    searchParams.get('step') === 'source-control-connect' ||
+    searchParams.get('setup') === 'source-control'
+      ? 'connect'
+      : hasSelected
+        ? 'config'
+        : 'provider',
+  );
+  const [configOpen, setConfigOpen] = useState(false);
+  const [activeProvider, setActiveProvider] =
+    useState<SourceControlProvider | null>(null);
+  const saveSourceControlProviderChoice = useMutation(
+    trpc.setupNew.saveSourceControlProviderChoice.mutationOptions({
+      onSuccess: async (_result, variables) => {
+        setActiveProvider(variables.provider);
+        await queryClient.invalidateQueries({
+          queryKey: trpc.setupNew.status.queryKey(),
+        });
+        setStage('config');
+        setConfigOpen(true);
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
+
   const provider =
+    activeProvider ??
     sourceControlSetup.selectedProvider ??
     sourceControlSetup.runtimeConfiguredProvider ??
     sourceControlSetup.preselectedProvider;
@@ -91,20 +99,20 @@ function SetupSessionSourceControlCardBody({
   const cardTitle =
     stage === 'provider'
       ? 'Connect source control'
-      : stage === 'config' && !showConnectStage
+      : stage === 'config'
         ? `Set up ${providerLabel}`
         : `Authorize ${providerLabel}`;
   const cardIntro =
     stage === 'provider'
       ? 'Connect the service that hosts your repositories so I can work on your code.'
-      : stage === 'config' && !showConnectStage
+      : stage === 'config'
         ? `Add the ${providerLabel} app credentials. The detailed setup opens in a separate dialog.`
         : `Give me access to ${providerLabel} and sync the repositories I can work with.`;
 
   return (
     <SetupSessionActionCard
       title={cardTitle}
-      icon={<GitBranch className="size-4" />}
+      icon={<GitBranch />}
       intro={cardIntro}
     >
       {oauthError ? (
@@ -113,15 +121,14 @@ function SetupSessionSourceControlCardBody({
         </p>
       ) : null}
       {stage === 'provider' ? (
-        <StepSourceControlProvider
+        <SourceControlProviderPicker
           sourceControlSetup={sourceControlSetup}
           onContinue={(nextProvider) =>
             saveSourceControlProviderChoice.mutate({ provider: nextProvider })
           }
           disabled={saveSourceControlProviderChoice.isPending}
-          embedded
         />
-      ) : stage === 'config' && !showConnectStage ? (
+      ) : stage === 'config' ? (
         <>
           <Button type="button" onClick={() => setConfigOpen(true)}>
             Configure {providerLabel}
@@ -136,25 +143,28 @@ function SetupSessionSourceControlCardBody({
                   to continue connecting your repositories.
                 </DialogDescription>
               </DialogHeader>
-              <StepSourceControlConfig
+              <SourceControlConfiguration
                 sourceControlSetup={sourceControlSetup}
-                selectedProviderId={sourceControlSetup.selectedProvider}
+                selectedProviderId={provider}
                 onContinue={() => {
                   setConfigOpen(false);
-                  setShowConnectStage(true);
+                  setStage('connect');
                 }}
                 returnPath={returnPath}
-                hideTitle
               />
             </DialogContent>
           </Dialog>
         </>
       ) : (
-        <StepSourceControlConnect
+        <SourceControlConnection
           sourceControlSetup={sourceControlSetup}
-          onContinue={() => setShowConnectStage(false)}
+          onContinue={() => {
+            void queryClient.invalidateQueries({
+              queryKey: trpc.setupNew.status.queryKey(),
+            });
+          }}
+          onBack={() => setStage('config')}
           returnPath={returnPath}
-          embedded
         />
       )}
     </SetupSessionActionCard>

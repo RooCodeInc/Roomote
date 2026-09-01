@@ -31,6 +31,7 @@ import {
   findPendingSessionInputRequest,
   SessionUserInputCard,
 } from './SessionUserInputCard';
+import { SetupStarterTasksCard } from './setup/SetupStarterTasksCard';
 
 const multiRequest = {
   requestId: 'rui:test-multi',
@@ -160,7 +161,7 @@ describe('SessionUserInputCard', () => {
 
   it('uses the shared setup action-card framing for first-task choices', () => {
     render(
-      <SessionUserInputCard
+      <SetupStarterTasksCard
         sessionId="s"
         request={{ ...multiRequest, preset: 'setup_starter_tasks' }}
       />,

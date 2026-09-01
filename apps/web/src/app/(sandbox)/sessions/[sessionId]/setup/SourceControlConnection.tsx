@@ -26,13 +26,7 @@ import {
 } from '@/hooks/linked-accounts';
 import { useSyncRepositories } from '@/hooks/source-control/useSyncRepositories';
 
-import { StepTitle } from './StepTitle';
-import { SetupFooter } from './SetupFooter';
-import { getSetupStepDefinition } from './types';
-
-const SOURCE_CONTROL_CONNECT_STEP = getSetupStepDefinition(
-  'source-control-connect',
-);
+import { SetupSessionActionCardActions } from './SetupSessionActionCard';
 
 function getTokenBackedWebhookResource(
   provider: SourceControlProvider,
@@ -67,21 +61,18 @@ function getTokenBackedConnectCopy({
   }
 }
 
-export function StepSourceControlConnect({
+export function SourceControlConnection({
   sourceControlSetup,
   onContinue,
   onRemoveSyncMarker,
   onBack,
   returnPath,
-  embedded = false,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
   onContinue: () => void;
   onRemoveSyncMarker?: () => void;
   onBack?: () => void;
   returnPath?: string;
-  /** Omit legacy setup-step chrome when rendered in a setup session card. */
-  embedded?: boolean;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -379,17 +370,7 @@ export function StepSourceControlConnect({
   ]);
 
   return (
-    <div
-      className={
-        embedded
-          ? 'space-y-4'
-          : 'relative w-full max-w-lg space-y-6 py-2 md:py-0'
-      }
-    >
-      {!embedded ? (
-        <StepTitle text={SOURCE_CONTROL_CONNECT_STEP.title} />
-      ) : null}
-
+    <div className="max-w-xl space-y-4">
       {alreadyConnected && !needsAdoMicrosoftConnection ? (
         <div className="space-y-4">
           <p>
@@ -400,9 +381,9 @@ export function StepSourceControlConnect({
               : 'repositories'}
             .
           </p>
-          <SetupFooter onBack={onBack}>
+          <SetupSessionActionCardActions onBack={onBack}>
             <Button onClick={onContinue}>Continue</Button>
-          </SetupFooter>
+          </SetupSessionActionCardActions>
         </div>
       ) : needsAdoMicrosoftConnection ? (
         <div className="space-y-4">
@@ -410,7 +391,7 @@ export function StepSourceControlConnect({
             Connect your Azure DevOps account with Microsoft before syncing
             repositories.
           </p>
-          <SetupFooter onBack={onBack}>
+          <SetupSessionActionCardActions onBack={onBack}>
             {adoLinkedAccount.isPending ? (
               <Spinner />
             ) : adoLinkedAccount.data?.configured === false ? (
@@ -436,19 +417,19 @@ export function StepSourceControlConnect({
                 Connect with your Microsoft account
               </Button>
             )}
-          </SetupFooter>
+          </SetupSessionActionCardActions>
         </div>
       ) : provider === 'github' && showGitHubInstallPending ? (
         <div className="space-y-4">
           <GitHubInstallRequestPending
             onApproved={handleGitHubInstallApproved}
           />
-          <SetupFooter onBack={onBack} />
+          <SetupSessionActionCardActions onBack={onBack} />
         </div>
       ) : provider === 'github' ? (
         <div className="space-y-4">
           <p>{githubCopy}</p>
-          <SetupFooter onBack={onBack}>
+          <SetupSessionActionCardActions onBack={onBack}>
             <Button
               onClick={() =>
                 createInstallation.mutate(
@@ -461,7 +442,7 @@ export function StepSourceControlConnect({
               {createInstallation.isPending ? <Spinner /> : <Github />}
               Connect to GitHub
             </Button>
-          </SetupFooter>
+          </SetupSessionActionCardActions>
         </div>
       ) : (
         <div className="space-y-4">
@@ -472,7 +453,7 @@ export function StepSourceControlConnect({
               URL, then try again.
             </p>
           ) : null}
-          <SetupFooter onBack={onBack}>
+          <SetupSessionActionCardActions onBack={onBack}>
             <Button
               onClick={() => void handleSyncRepositories()}
               disabled={
@@ -486,7 +467,7 @@ export function StepSourceControlConnect({
               )}
               Sync repositories
             </Button>
-          </SetupFooter>
+          </SetupSessionActionCardActions>
         </div>
       )}
     </div>

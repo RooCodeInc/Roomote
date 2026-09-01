@@ -21,9 +21,6 @@ import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { WorkspaceHeader } from '@/components/layout';
 
 import { findDeploymentSetupSessionId } from '@/trpc/commands/setup/setup-session';
-import { SetupRecommendationsInlineCard } from '../../../(onboarding)/setup/SetupRecommendationsInlineCard';
-import { SetupSandboxInlineCard } from '../../../(onboarding)/setup/SetupSandboxInlineCard';
-import { SetupSessionSourceControlCard } from '../../../(onboarding)/setup/SetupSourceControlPanel';
 import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionTaskTimeline } from './SessionTaskTimeline';
 import {
@@ -32,6 +29,9 @@ import {
   type SessionInfo,
 } from './SessionWorkspace';
 import { SessionReadTracker } from './SessionReadTracker';
+import { SetupAutomationRecommendationsCard } from './setup/SetupAutomationRecommendationsCard';
+import { SetupSandboxCard } from './setup/SetupSandboxCard';
+import { SetupSessionSourceControlCard } from './setup/SetupSourceControlCard';
 
 const getSessionPageData = cache(async (sessionId: string) => {
   const authorizedUser = await authorize();
@@ -136,8 +136,8 @@ export default async function SessionDetailPage({
     const setupTimelineExtras = isSetupSession ? (
       <div className="space-y-3">
         <SetupSessionSourceControlCard sessionId={unifiedSession.id} />
-        <SetupSandboxInlineCard />
-        <SetupRecommendationsInlineCard sessionId={unifiedSession.id} />
+        <SetupSandboxCard />
+        <SetupAutomationRecommendationsCard sessionId={unifiedSession.id} />
       </div>
     ) : null;
     return (
