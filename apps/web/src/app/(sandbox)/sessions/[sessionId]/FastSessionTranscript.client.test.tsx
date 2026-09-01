@@ -383,6 +383,61 @@ describe('FastSessionTranscript', () => {
     });
   });
 
+  it('removes a structured-input card when its response control event arrives', () => {
+    const requestId = 'rui:setup-starters';
+    const request = {
+      ...textMessage({
+        id: 'starter-request',
+        role: 'assistant',
+        text: 'Choose starter tasks',
+        ts: 1,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      payload: {
+        requestId,
+        status: 'pending',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        preset: 'setup_starter_tasks',
+        questions: [
+          {
+            id: 'starters',
+            question: 'What should I work on first?',
+            multiple: true,
+            isOther: false,
+            isSecret: false,
+            options: [{ label: 'Speed up CI', description: 'Improve CI.' }],
+          },
+        ],
+      },
+    };
+    const response = {
+      ...textMessage({
+        id: 'starter-response',
+        role: 'user',
+        text: 'Structured response',
+        ts: 2,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+      payload: {
+        requestId,
+        answers: { starters: { answers: ['Speed up CI'] } },
+        resolution: 'submitted',
+      },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[request, response]}
+      />,
+    );
+
+    expect(screen.queryByText('Structured input request')).toBeNull();
+    expect(screen.queryByText('Structured response')).toBeNull();
+  });
+
   it.each([
     [1, '1 task running'],
     [2, '2 tasks running'],

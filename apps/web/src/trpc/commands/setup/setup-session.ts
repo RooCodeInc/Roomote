@@ -858,7 +858,10 @@ async function persistSetupPresetResponse(input: {
           }),
         },
       ],
-      metadata: { visibleInTranscript: false },
+      // The transcript client needs this control event to resolve and remove
+      // the input card. FastSessionTranscript filters response event types
+      // from rendered chat, so it remains visually hidden.
+      metadata: { visibleInTranscript: true },
       payload: {
         requestId: input.request.payload.requestId,
         sessionId: input.fastConversationId,
