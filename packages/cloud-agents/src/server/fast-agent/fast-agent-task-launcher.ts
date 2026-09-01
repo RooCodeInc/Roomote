@@ -3,7 +3,6 @@ import {
   buildFastAgentChildTaskMetadata,
   buildSlackThreadPermalink,
   TaskPayloadKind,
-  type FastAgentConversation,
   type StandardTask,
   type TaskInitiator,
   type TaskSurface,
@@ -65,15 +64,26 @@ export function createFastAgentTaskLauncher(
       model,
       parentSessionId,
     });
+    const taskWithLaunchOverrides =
+      branch || launchIdempotencyKey
+        ? {
+            ...builtTask,
+            payload: {
+              ...builtTask.payload,
+              ...(branch ? { branch } : {}),
+              ...(launchIdempotencyKey ? { launchIdempotencyKey } : {}),
+            },
+          }
+        : builtTask;
     const task = images?.length
       ? {
-          ...builtTask,
+          ...taskWithLaunchOverrides,
           payload: {
-            ...builtTask.payload,
+            ...taskWithLaunchOverrides.payload,
             images,
           },
         }
-      : builtTask;
+      : taskWithLaunchOverrides;
     let taskUrl: string | undefined;
     let preparedTaskRun: { id: number; taskId: string } | undefined;
 
@@ -207,7 +217,11 @@ export function createFastAgentSlackTaskLauncher(
 
 export function createFastAgentWebTaskLauncher(params: {
   userId: string;
-  conversation: FastAgentConversation;
+  conversation: {
+    surface: 'web' | 'automation';
+    workspaceId: string;
+    conversationId: string;
+  };
 }): LaunchFastAgentTask {
   return createFastAgentTaskLauncher({
     userId: params.userId,

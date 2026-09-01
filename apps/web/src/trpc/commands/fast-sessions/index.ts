@@ -320,10 +320,7 @@ async function startArtifactBuildInParentSession(
     );
   }
 
-  const launchTask = createFastAgentWebTaskLauncher({
-    userId: auth.userId,
-    conversation: delivery.conversation,
-  });
+  const launchTask = delivery.adapter.launchTask;
   const attributedLaunchTask = async (
     params: Parameters<typeof launchTask>[0],
   ) => {

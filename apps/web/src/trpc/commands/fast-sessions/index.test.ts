@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   buildReplyDelivery: vi.fn(),
   createWebTaskLauncher: vi.fn(),
   launchTask: vi.fn(),
+  surfaceLaunchTask: vi.fn(),
   notifyArtifactBuild: vi.fn(),
   getOrCreateSession: vi.fn(),
   getUnifiedSession: vi.fn(),
@@ -224,6 +225,10 @@ describe('startFastSessionCommand', () => {
     vi.clearAllMocks();
     mocks.createWebTaskLauncher.mockReturnValue(mocks.launchTask);
     mocks.launchTask.mockResolvedValue({ success: true, taskId: 'task-1' });
+    mocks.surfaceLaunchTask.mockResolvedValue({
+      success: true,
+      taskId: 'task-1',
+    });
     mocks.getUnifiedSession.mockResolvedValue({ id: 'unified-session-1' });
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'fast-session-1',
@@ -242,7 +247,7 @@ describe('startFastSessionCommand', () => {
         workspaceId: 'user-1',
         conversationId: 'existing-conversation',
       },
-      adapter: { launchTask: mocks.launchTask, postReply: vi.fn() },
+      adapter: { launchTask: mocks.surfaceLaunchTask, postReply: vi.fn() },
     });
     mocks.dbSelect.mockReturnValue({
       from: () => ({
@@ -336,14 +341,7 @@ describe('startFastSessionCommand', () => {
       senderDisplayName: 'User One',
       question: 'Build the plan',
     });
-    expect(mocks.createWebTaskLauncher).toHaveBeenCalledWith({
-      userId: 'user-1',
-      conversation: {
-        surface: 'web',
-        workspaceId: 'user-1',
-        conversationId: 'existing-conversation',
-      },
-    });
+    expect(mocks.createWebTaskLauncher).not.toHaveBeenCalled();
     await scheduled?.();
 
     const turnInput = mocks.answerQuestion.mock.calls[0]?.[0];
@@ -355,7 +353,7 @@ describe('startFastSessionCommand', () => {
       postKickoff: vi.fn(),
     });
 
-    expect(mocks.launchTask).toHaveBeenCalledWith({
+    expect(mocks.surfaceLaunchTask).toHaveBeenCalledWith({
       prompt: 'Build the plan',
       environmentId: '33333333-3333-4333-8333-333333333333',
       branch: 'feature/source-branch',
