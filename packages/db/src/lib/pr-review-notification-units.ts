@@ -222,6 +222,19 @@ async function isExistingTaskOwner(
   );
 }
 
+async function isRecoverableTaskOwner(
+  executor: DatabaseOrTransaction,
+  taskId: string,
+): Promise<boolean> {
+  if (!(await isExistingTaskOwner(executor, taskId))) return false;
+  const run = await executor.query.taskRuns.findFirst({
+    where: eq(taskRuns.taskId, taskId),
+    orderBy: [desc(taskRuns.createdAt)],
+    columns: { canceledAt: true },
+  });
+  return Boolean(run && !run.canceledAt);
+}
+
 function fastDestination(
   parent: NonNullable<ReturnType<typeof getFastAgentParentFromPayload>>,
 ) {
@@ -1115,6 +1128,19 @@ export async function findPrReviewAutoPreference(input: {
         };
       }
     }
+  }
+  if (
+    preference?.sourceTaskId &&
+    (await isRecoverableTaskOwner(db, preference.sourceTaskId))
+  ) {
+    // Task resumability can briefly disappear while a replacement run settles
+    // or its snapshot is persisted. Keep the PR-level choice active so the
+    // delivery path defers automatic dispatch instead of posting a new prompt.
+    return {
+      taskId: preference.sourceTaskId,
+      userId: preference.enabledByUserId,
+      destinationKey: preference.sourceDestinationKey,
+    };
   }
   if (preference) return null;
 

@@ -942,7 +942,7 @@ describe('prReviewNotificationJob', () => {
     );
   });
 
-  it('auto-dispatches repeated feedback delivered through a different linked task', async () => {
+  it('keeps repeated review and CI cycles on auto-dispatch while a prior cycle retries', async () => {
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
       payload: {
@@ -966,14 +966,31 @@ describe('prReviewNotificationJob', () => {
       taskId: 'parent-task',
       userId: 'user-9',
     });
-    mockConsumePending.mockResolvedValue([
-      {
-        kind: 'review_summary',
-        reviewTaskId: 'review-task',
-        reviewHeadSha: 'new-green-head',
-        summary: 'The same review finding remains unresolved.',
-      },
-    ]);
+    mockConsumePending
+      .mockResolvedValueOnce([
+        {
+          kind: 'review_summary',
+          reviewTaskId: 'review-task',
+          reviewHeadSha: 'new-green-head',
+          summary: 'The same review finding remains unresolved.',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          kind: 'review_summary',
+          reviewTaskId: 'review-task',
+          reviewHeadSha: 'new-green-head',
+          summary: 'The same review finding remains unresolved.',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          kind: 'check_run',
+          providerEventId: 'check-run-1',
+          checkName: 'Roomote code review',
+          summary: 'One issue remains outstanding.',
+        },
+      ]);
     mockPrepareDelivery.mockResolvedValue({
       post: true,
       text: 'The same review finding remains unresolved.',
@@ -982,11 +999,12 @@ describe('prReviewNotificationJob', () => {
     });
     mockDispatchFollowUp
       .mockResolvedValueOnce({ outcome: 'unavailable' })
-      .mockResolvedValueOnce({ outcome: 'resumed', runId: 12 });
+      .mockResolvedValueOnce({ outcome: 'resumed', runId: 12 })
+      .mockResolvedValueOnce({ outcome: 'queued', runId: 13 });
     mockNotifyFastAgentParent
       .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false);
+      .mockResolvedValueOnce(true);
 
     await prReviewNotificationJob(
       makeJob({
@@ -1018,9 +1036,9 @@ describe('prReviewNotificationJob', () => {
         taskId: 'duplicate-linked-review-task',
         events: [
           {
-            kind: 'review_summary',
-            reviewTaskId: 'review-task',
-            reviewHeadSha: 'new-green-head',
+            kind: 'check_run',
+            providerEventId: 'check-run-1',
+            checkName: 'Roomote code review',
           },
         ],
       }) as never,
@@ -1043,7 +1061,7 @@ describe('prReviewNotificationJob', () => {
         actingUserId: 'user-9',
       }),
     );
-    expect(mockDispatchFollowUp).toHaveBeenCalledTimes(2);
+    expect(mockDispatchFollowUp).toHaveBeenCalledTimes(3);
     expect(mockSchedule).toHaveBeenCalledWith({
       request: expect.objectContaining({
         taskId: 'linked-review-task',
