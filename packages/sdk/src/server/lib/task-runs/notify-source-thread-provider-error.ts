@@ -25,6 +25,7 @@ import { getTaskUrl } from '@roomote/cloud-agents/server';
 import { getRedis } from '@roomote/redis';
 import { SlackNotifier } from '@roomote/slack';
 
+import { createAgentMailCommunicationProviderFromRuntimeCredentials } from '../agentmail-communication';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../telegram-communication';
@@ -165,12 +166,14 @@ async function notifyTeams(run: NotifiedRun, error: string): Promise<boolean> {
 async function notifyThreadedMarkdownProvider(
   run: NotifiedRun,
   error: string,
-  provider: 'discord' | 'telegram',
+  provider: 'discord' | 'telegram' | 'agentmail',
 ): Promise<boolean> {
   const adapter =
     provider === 'discord'
       ? await createDiscordCommunicationProviderFromRuntimeCredentials()
-      : await createTelegramCommunicationProviderFromRuntimeCredentials();
+      : provider === 'agentmail'
+        ? await createAgentMailCommunicationProviderFromRuntimeCredentials()
+        : await createTelegramCommunicationProviderFromRuntimeCredentials();
 
   if (!adapter) {
     console.warn(
@@ -328,6 +331,9 @@ async function notifySourceThreadOfTerminalProviderError(input: {
         break;
       case 'discord':
       case 'telegram':
+      case 'agentmail':
+        // Email threads get the same threaded markdown notice; the adapter
+        // resolves the reply route from the conversation id in threadId.
         delivered = await notifyThreadedMarkdownProvider(run, error, provider);
         break;
     }

@@ -140,7 +140,9 @@ export function buildMcpTaskEnv(input: {
     ) {
       // Telegram, Teams, and Discord tasks use the same turn-satisfaction
       // machinery as Slack (ack/closeout enforcement and current-turn emoji
-      // reactions).
+      // reactions). AgentMail (email) is deliberately excluded: email is a
+      // low-frequency surface with no reactions, and it must never get the
+      // silence-reminder heartbeats this state file drives.
       mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE ??= [
         input.runtimeEnv.HOME ?? '/tmp',
         '.config',

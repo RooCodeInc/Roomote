@@ -140,9 +140,15 @@ export function buildFastAgentSystemPrompt({
           ? 'Microsoft Teams'
           : surface === 'telegram'
             ? 'Telegram'
-            : surface === 'web'
-              ? 'the Roomote web app'
-              : 'a stored automation conversation';
+            : surface === 'agentmail'
+              ? 'an email thread'
+              : surface === 'web'
+                ? 'the Roomote web app'
+                : 'a stored automation conversation';
+  const emailCadenceGuidance =
+    surface === 'agentmail'
+      ? "- Every reply you send becomes a new email in the sender's inbox. Email is low-frequency: send one substantive, self-contained reply per turn — no play-by-play, no separate acknowledgement followed by the answer moments later. When you delegate a task, one brief confirmation reply is enough; the task result will arrive in the thread on its own.\n"
+      : '';
   const reactionGuidance =
     surface === 'slack' && currentMessageReactable
       ? '- Use `send_chat_reaction` only for a lightweight acknowledgement or an emoji-only answer. Put the Slack emoji name without colons in `name`. Reserve "eyes" for actively looking, use "thumbsup" for acknowledgement or agreement, and "white_check_mark" for completion.'
@@ -216,7 +222,7 @@ ${formatIntegrationsForPrompt(availableIntegrations)}
 - Set "includeAttachments" on "launch_task" to true only when supported attachments from the active conversation turn are relevant to the coding task. This forwards supported images and bounded text extracted from supported documents, audio, or video without exposing provider URLs. Omit it otherwise; attachments are not forwarded by default.
 - If the answer is immediate, call the closeout tool directly.
 ${reactionGuidance}
-- Prefer one direct closeout over an acknowledgement followed immediately by the same answer.
+${emailCadenceGuidance}- Prefer one direct closeout over an acknowledgement followed immediately by the same answer.
 - After a closeout, clarification, closeout reaction, or ignored event, do not call another tool and do not add user-facing prose.
 
 ## User-Facing Communication

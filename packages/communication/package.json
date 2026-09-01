@@ -5,6 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./agentmail-event": "./src/agentmail-event.ts",
+    "./agentmail-provider": "./src/agentmail-provider.ts",
     "./chat-messages": "./src/chat-messages.ts",
     "./discord-event": "./src/discord-event.ts",
     "./discord-provider": "./src/discord-provider.ts",
@@ -33,6 +35,7 @@
     "check-types:fast": "tsgo --noEmit",
     "mock:telegram": "dotenvx run -f ../../.env.local -- tsx scripts/run-mock-telegram.ts",
     "mock:discord": "dotenvx run -f ../../.env.local -- tsx scripts/run-mock-discord.ts",
+    "mock:agentmail": "dotenvx run -f ../../.env.local -- tsx scripts/run-mock-agentmail.ts",
     "test": "dotenvx run -f ../../.env.test -- vitest",
     "clean": "rimraf .turbo",
     "eval:telegram-scenario": "dotenvx run -f ../../.env.local -- tsx evals/run-telegram-scenario.ts",

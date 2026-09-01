@@ -1,6 +1,10 @@
 import type { SetupAuthProviderId } from '@roomote/types';
 
-type ProviderSetupCopyId = SetupAuthProviderId | 'telegram' | 'discord';
+type ProviderSetupCopyId =
+  | SetupAuthProviderId
+  | 'telegram'
+  | 'discord'
+  | 'agentmail';
 
 type ProviderSetupCopy = {
   creationHref: string;
@@ -24,6 +28,10 @@ const PROVIDER_SETUP_COPY: Record<ProviderSetupCopyId, ProviderSetupCopy> = {
   discord: {
     creationHref: 'https://discord.com/developers/applications',
     setupLabel: 'Discord bot',
+  },
+  agentmail: {
+    creationHref: 'https://console.agentmail.to/dashboard/api-keys',
+    setupLabel: 'AgentMail API key',
   },
 };
 

@@ -19,10 +19,14 @@ import {
   supportsIntegrationRequestUserInput,
 } from './request-user-input';
 
+// AgentMail (email) renders request_user_input as a question email whose
+// options are signed one-click answer links, with free-text reply as the
+// fallback; the other providers use interactive chat prompts.
 const COMMUNICATION_RUI_PROVIDERS = new Set<CommunicationProvider>([
   'discord',
   'telegram',
   'teams',
+  'agentmail',
 ]);
 
 function supportsCommunicationRequestUserInput(

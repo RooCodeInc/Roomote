@@ -99,6 +99,7 @@ vi.mock('./env', () => ({
     R_ALLOWED_EMAILS: undefined,
     R_APP_URL: 'http://localhost:3000',
   },
+  isEmailChannelEnabled: () => false,
   getEncryptionKey: () => 'test-encryption-key',
   getBetterAuthSecret: () => 'test-better-auth-secret',
 }));

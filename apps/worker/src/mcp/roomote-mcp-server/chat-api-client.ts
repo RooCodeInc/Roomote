@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { buildApiHeaders, fetchWithTimeout } from './api-client.js';
 import { ChatDeliveryError } from './chat-delivery-error.js';
 import type {
@@ -121,7 +123,9 @@ export async function replyToChatThread(
   return postToChatEndpoint<SlackThreadReplyResponse>(
     config,
     'thread_reply',
-    input,
+    // One send id per tool invocation: HTTP retries of this call carry the
+    // same value, so idempotent providers (email) dedupe the logical send.
+    { ...input, clientSendId: randomUUID() },
     'Failed to reply to chat thread',
   );
 }
@@ -137,7 +141,7 @@ export async function replyToSlackThread(
   return postToChatEndpoint<SlackThreadReplyResponse>(
     config,
     'thread_reply',
-    input,
+    { ...input, clientSendId: randomUUID() },
     'Failed to reply to Slack thread',
   );
 }

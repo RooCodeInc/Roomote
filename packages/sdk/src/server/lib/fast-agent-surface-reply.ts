@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
@@ -33,6 +35,8 @@ import {
   createFastAgentDiscordTaskLauncher,
 } from './fast-agent-parent-event';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
+import { createAgentMailCommunicationProviderFromRuntimeCredentials } from './agentmail-communication';
+import { isAgentMailConversationParticipant } from './agentmail/conversation-store';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import { findTeamsConversationRoute } from '../automations/destination';
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
@@ -157,12 +161,20 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   if (!session) {
     return null;
   }
-  if (
-    !(await canUserAccessFastAgentSession({
+  const canAccess =
+    (await canUserAccessFastAgentSession({
       sessionId: session.id,
       userId: params.userId,
-    }))
-  ) {
+    })) ||
+    // Email conversations are owned by their initiator but deliberately
+    // admit cc'd verified users as participants; the participant table is
+    // the authorization source for their turns.
+    (session.conversation.surface === 'agentmail' &&
+      (await isAgentMailConversationParticipant({
+        conversationId: session.conversation.conversationId,
+        userId: params.userId,
+      })));
+  if (!canAccess) {
     return null;
   }
   const conversation = session.conversation;
@@ -506,6 +518,51 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     };
   }
 
+  if (conversation.surface === 'agentmail') {
+    const provider =
+      await createAgentMailCommunicationProviderFromRuntimeCredentials();
+    if (!provider) {
+      return null;
+    }
+    // Deterministic per-post identity: a re-run of the same inbound turn
+    // (crash between the provider accepting the email and the turn being
+    // marked consumed) replays the same key sequence, so retries cannot
+    // duplicate outbound emails. The text digest keeps distinct replies
+    // from ever colliding — web-initiated turns have no unique inbound
+    // message id, and a reused key with a different body is a provider 409.
+    let agentMailPostIndex = 0;
+    return {
+      conversation,
+      adapter: {
+        launchTask: createFastAgentCommunicationTaskLauncher({
+          userId: params.userId,
+          conversation,
+        }),
+        // The adapter resolves the durable reply anchor and recipient from
+        // the conversation row; threadId carries the internal conversation
+        // id. A sent email is immutable, so replaceReply keeps the original
+        // message instead of editing (email is one final reply per turn,
+        // never a streamed draft).
+        postReply: async ({ message }) => {
+          const posted = await provider.postMessage({
+            channelId: conversation.replyTarget.channelId,
+            threadId: conversation.conversationId,
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'agentmail', sessionId: session.id, ...footerContext })}`,
+            textFormat: 'markdown',
+            idempotencyKey: `agentmail:${conversation.conversationId}:fast-reply:${params.currentMessageId ?? 'web'}:${agentMailPostIndex++}:${createHash('sha256').update(message).digest('hex').slice(0, 12)}`,
+          });
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: posted.lastTextMessageId ?? posted.messageId,
+          });
+          return { messageId: posted.messageId };
+        },
+        replaceReply: async (handle) => handle,
+      },
+    };
+  }
+
   return null;
 }
 
@@ -569,8 +626,44 @@ async function runFastAgentSurfaceReply(
     }));
   if (!release) return false;
 
-  const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
   try {
+    await runFastAgentSurfaceReplyWithSignal(params, release.signal);
+    return true;
+  } finally {
+    await release().catch(() => {});
+  }
+}
+
+/**
+ * Run one surface turn while the CALLER owns the Fast turn lock. Durable
+ * queue drainers (AgentMail inbound turns) hold the lock across a whole
+ * ordered drain, so the per-turn acquire in `runFastAgentSurfaceReply` would
+ * deadlock; this awaited variant mirrors `deliverFastAgentParentEventWithLock`.
+ */
+export async function continueFastAgentSurfaceReplyWithLock(
+  params: FastAgentSurfaceReplyParams,
+  turnSignal: AbortSignal,
+): Promise<boolean> {
+  const delivery = await buildFastAgentSurfaceReplyDelivery(params);
+  if (!delivery) {
+    return false;
+  }
+
+  await runFastAgentSurfaceReplyWithSignal({ ...params, delivery }, turnSignal);
+  return true;
+}
+
+async function runFastAgentSurfaceReplyWithSignal(
+  params: FastAgentSurfaceReplyParams & {
+    delivery: FastAgentSurfaceReplyDelivery;
+  },
+  turnSignal: AbortSignal,
+): Promise<void> {
+  const { delivery } = params;
+  const release = { signal: turnSignal };
+
+  const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
+  {
     const activeTasks = params.externalInput
       ? await getActiveFastAgentTasks(params.sessionId)
       : undefined;
@@ -603,9 +696,6 @@ async function runFastAgentSurfaceReply(
         ...delivery.adapter,
       },
     });
-    return true;
-  } finally {
-    await release().catch(() => {});
   }
 }
 

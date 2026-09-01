@@ -1,6 +1,6 @@
 'use client';
 
-import type { CommunicationProvider } from '@roomote/types';
+import type { AutomationCapableCommunicationProvider } from '@roomote/types';
 
 import {
   Input,
@@ -14,7 +14,9 @@ import {
 
 import { SlackChannelSelect } from './SlackChannelSelect';
 
-export type AutomationDestinationProvider = 'none' | CommunicationProvider;
+export type AutomationDestinationProvider =
+  | 'none'
+  | AutomationCapableCommunicationProvider;
 type AutomationDestinationMode = 'channel' | 'direct_message';
 type AutomationDestinationValue = {
   provider: AutomationDestinationProvider;
@@ -33,7 +35,7 @@ const PROVIDER_LABELS = {
   discord: 'Discord',
   teams: 'Teams',
   telegram: 'Telegram',
-} as const satisfies Record<CommunicationProvider, string>;
+} as const satisfies Record<AutomationCapableCommunicationProvider, string>;
 
 export function AutomationDestinationPicker({
   id,
@@ -52,7 +54,7 @@ export function AutomationDestinationPicker({
   id: string;
   label?: string;
   value: AutomationDestinationValue;
-  availableProviders: readonly CommunicationProvider[];
+  availableProviders: readonly AutomationCapableCommunicationProvider[];
   slackOptions: DestinationOption[];
   discordOptions: DestinationOption[];
   defaultSlackChannelId?: string;
@@ -63,7 +65,7 @@ export function AutomationDestinationPicker({
   onChange: (value: AutomationDestinationValue) => void;
 }) {
   const visibleProviders = availableProviders.includes(
-    value.provider as CommunicationProvider,
+    value.provider as AutomationCapableCommunicationProvider,
   )
     ? availableProviders
     : value.provider === 'none'

@@ -79,6 +79,7 @@ export * from './lib/record-task-kickoff-message';
 export * from './lib/slack-runtime-credentials';
 export * from './lib/teams-runtime-credentials';
 export * from './lib/telegram-runtime-credentials';
+export * from './lib/agentmail-runtime-credentials';
 export * from './lib/discord-runtime-credentials';
 export * from './lib/router-debug-settings';
 export * from './lib/slack-fast-integration-calls';
@@ -182,6 +183,14 @@ export {
   notionDirectoryUsers,
   telegramUserMappings,
   telegramUserMappingsRelations,
+  agentmailUserMappings,
+  agentmailUserMappingsRelations,
+  agentmailConversations,
+  agentmailConversationParticipants,
+  agentmailConversationParticipantsRelations,
+  agentmailWebhookEvents,
+  agentmailInboundTurns,
+  agentmailSuppressions,
   discordInstallations,
   discordInstallationsRelations,
   discordInstallationChannels,

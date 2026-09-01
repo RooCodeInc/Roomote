@@ -26,6 +26,12 @@ export type CommunicationReplyTaskRun = {
 export type ParsedThreadReplyBody = {
   text?: string;
   images: Array<{ artifactId: string }>;
+  /**
+   * Caller-minted per-invocation send id: every HTTP retry of one tool call
+   * carries the same value, so providers with idempotent sends (email) can
+   * dedupe the logical send without depending on mutable route state.
+   */
+  clientSendId?: string;
 };
 
 type CommunicationThreadReplyProvider = 'discord' | 'telegram' | 'teams';

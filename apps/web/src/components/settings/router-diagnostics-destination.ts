@@ -1,16 +1,19 @@
 import type { CommunicationProvider } from '@roomote/types';
 
+/** Router diagnostics post to a chat channel; email has none. */
+type RouterDebugProvider = Exclude<CommunicationProvider, 'agentmail'>;
+
 export const ROUTER_DEBUG_NONE = '__none__';
 export const ROUTER_DEBUG_ENV_FALLBACK = '__env_fallback__';
 
 export type RouterDebugDestinationSelection =
-  | CommunicationProvider
+  | RouterDebugProvider
   | typeof ROUTER_DEBUG_NONE
   | typeof ROUTER_DEBUG_ENV_FALLBACK;
 
 export function getRouterDebugDestinationSelection(settings: {
   destination: {
-    provider: CommunicationProvider;
+    provider: RouterDebugProvider;
     channelId: string;
   } | null;
   disabled: boolean;
@@ -31,7 +34,7 @@ export function buildRouterDebugSettingsInput(
   selection: RouterDebugDestinationSelection,
   channelId: string,
 ): {
-  provider: CommunicationProvider | null;
+  provider: RouterDebugProvider | null;
   channelId: string | null;
   disabled: boolean;
 } {

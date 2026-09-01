@@ -51,6 +51,7 @@ import { startPullRequestMergeabilityCheckQueue } from './pull-request-mergeabil
 import { startTaskSleepQueue } from './task-sleep-queue';
 import { startAutomationRecommendationsQueue } from './automation-recommendations-queue';
 import { startFastAgentParentEventQueue } from './fast-agent-parent-event-queue';
+import { startAgentMailWebhookEventsQueue } from './agentmail-webhook-events-queue';
 
 // Resolve auto-generated auth keypairs before any queue worker starts so
 // scheduled jobs that sign tokens observe the resolved keys.
@@ -194,6 +195,12 @@ const {
   queueEvents: fastAgentParentEventQueueEvents,
 } = await startFastAgentParentEventQueue();
 
+const {
+  queue: agentMailWebhookEventsQueue,
+  worker: agentMailWebhookEventsWorker,
+  queueEvents: agentMailWebhookEventsQueueEvents,
+} = await startAgentMailWebhookEventsQueue();
+
 const serverAdapter = new HonoAdapter(serveStatic);
 
 createBullBoard({
@@ -233,6 +240,7 @@ createBullBoard({
       readOnlyMode: false,
     }),
     new BullMQAdapter(fastAgentParentEventQueue, { readOnlyMode: false }),
+    new BullMQAdapter(agentMailWebhookEventsQueue, { readOnlyMode: false }),
   ],
   serverAdapter,
 });
@@ -409,6 +417,9 @@ async function gracefulShutdown() {
     await fastAgentParentEventWorker.close();
     await fastAgentParentEventQueueEvents.close();
     await fastAgentParentEventQueue.close();
+    await agentMailWebhookEventsWorker.close();
+    await agentMailWebhookEventsQueueEvents.close();
+    await agentMailWebhookEventsQueue.close();
     await discordGatewaySupervisor.stop();
     await closeRedis();
   } catch (error) {

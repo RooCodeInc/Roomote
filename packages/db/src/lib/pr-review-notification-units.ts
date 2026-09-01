@@ -245,9 +245,15 @@ function fastDestination(
     conversation.conversationId,
   ]);
 
-  if (conversation.surface === 'automation' || conversation.surface === 'web') {
+  if (
+    conversation.surface === 'automation' ||
+    conversation.surface === 'web' ||
+    conversation.surface === 'agentmail'
+  ) {
     // Identity-only surfaces have no reply channel; delivery resolves the
-    // Fast conversation itself.
+    // Fast conversation itself. PR-review notifications never post to email
+    // directly either (only the consent-checked outbound entry point may
+    // initiate email).
     return {
       destinationKey,
       routeProvider: null,

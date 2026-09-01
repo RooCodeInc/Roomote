@@ -195,10 +195,15 @@ async function getActiveSlackBotToken(): Promise<string | null> {
 }
 
 async function postNonSlackRouterDebugMessage(params: {
-  provider: 'discord' | 'teams' | 'telegram';
+  provider: 'discord' | 'teams' | 'telegram' | 'agentmail';
   channelId: string;
   text: string;
 }): Promise<void> {
+  if (params.provider === 'agentmail') {
+    // Email has no debug channel; router debug output stays chat-only.
+    return;
+  }
+
   if (params.provider === 'discord') {
     const credentials = await resolveDiscordRuntimeCredentials();
     if (!credentials.botToken) return;

@@ -12,7 +12,7 @@ import {
 } from '@roomote/db/server';
 import {
   isBackgroundAutomationUserTargetKind,
-  type CommunicationProvider,
+  type AutomationCapableCommunicationProvider,
 } from '@roomote/types';
 
 import { findDiscordDefaultDestination } from '../lib/discord-persistence';
@@ -22,7 +22,7 @@ import { findUserDirectMessageDestination } from '../lib/user-direct-message';
 
 /** Fully resolved destination an automation run reports to. */
 export type ResolvedAutomationDestination = {
-  provider: CommunicationProvider;
+  provider: AutomationCapableCommunicationProvider;
   channelId: string;
   /** Provider workspace/tenant that owns the destination when routing is installation-specific. */
   teamId?: string;
@@ -37,8 +37,12 @@ export type ResolvedAutomationDestination = {
  * an installation is active; Teams when bot credentials resolve; Telegram
  * and Discord when a bot token resolves.
  */
+/**
+ * Chat providers that can receive automation output. Email (agentmail) is
+ * inbound-initiated and deliberately never listed here.
+ */
 export async function listConnectedCommunicationProviders(): Promise<
-  CommunicationProvider[]
+  AutomationCapableCommunicationProvider[]
 > {
   const [
     slackInstallation,
@@ -177,12 +181,13 @@ export async function resolveAutomationRuntimeDestination(params: {
   );
   if (userTarget) {
     const directMessage = await findUserDirectMessageDestination(
-      userTarget.provider as CommunicationProvider,
+      userTarget.provider as AutomationCapableCommunicationProvider,
       userTarget.externalRef,
     );
     return directMessage
       ? {
-          provider: userTarget.provider as CommunicationProvider,
+          provider:
+            userTarget.provider as AutomationCapableCommunicationProvider,
           ...directMessage,
           source: 'automation_target',
         }

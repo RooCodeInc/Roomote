@@ -476,11 +476,19 @@ function hasDiscordChatContext(): boolean {
   );
 }
 
+function hasAgentMailChatContext(): boolean {
+  return (
+    process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim() === 'agentmail' &&
+    Boolean(process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID?.trim())
+  );
+}
+
 function getChatReplySurfaceLabel():
   | 'Slack'
   | 'Teams'
   | 'Telegram'
   | 'Discord'
+  | 'email thread'
   | 'chat' {
   const provider = process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim();
 
@@ -494,6 +502,10 @@ function getChatReplySurfaceLabel():
 
   if (provider === 'discord') {
     return 'Discord';
+  }
+
+  if (provider === 'agentmail') {
+    return 'email thread';
   }
 
   return process.env.ROOMOTE_SLACK_CHANNEL?.trim() ? 'Slack' : 'chat';
@@ -1423,12 +1435,17 @@ if (shouldRegisterSlackThreadReplyTool() || isFastAgentChild()) {
     chatReplySurfaceLabel === 'Slack'
       ? 'Use the modern Slack Markdown contract from the Slack instructions; tables, headings, blockquotes, and fenced code blocks are allowed when they make the reply clearer.'
       : 'Use Markdown when it makes the reply clearer.';
+  // Email is a low-frequency surface: no play-by-play progress posting.
+  const chatReplyEmailCadenceGuidance =
+    chatReplySurfaceLabel === 'email thread'
+      ? 'Email is a low-frequency surface: batch updates instead of posting play-by-play progress, and aim for roughly two emails per task — an initial ack and the final result. '
+      : '';
   const chatReplySuggestionGuidance = supportsChatReplySuggestions
     ? 'Use the optional suggestions parameter when the automation prompt explicitly asks for task suggestions, launchable follow-ups, or help taking concrete actions. Do not infer suggested-task intent from a request that only asks for a summary or action-item list. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. '
     : '';
   const chatReplyDescription = relaysThroughFastParent
     ? 'Fast-internal: sends a lifecycle update privately to the Fast parent, which owns any user-visible reply. The raw message is never posted directly to the user. The kickoff already acknowledged the request, so do not send another generic ack. Use progress to pass concrete findings, blockers, meaningful work milestones, required input, or a brief note after roughly 10 minutes of silence. Describe the work itself without labeling the message as a progress update or using policy vocabulary such as phase transition, checkpoint, lifecycle, or user-facing. Use closeout for the final result or blocker and clarification when user input is needed. Ack and progress keep the coding task active.'
-    : `${chatReplySurfaceLabel}-visible: posts a lifecycle reply in the originating ${chatReplySurfaceLabel} thread. Choose the current ${chatReplySurfaceLabel} turn purpose before writing: ack, progress, closeout, or clarification. Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the ${chatReplySurfaceLabel} turn open. Use it again on later ${chatReplySurfaceLabel} turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. ${chatReplyMarkdownGuidance}${chatReplySourceLinkingGuidance}${chatReplySuggestionGuidance}Write the message so its content clearly matches the selected purpose.`;
+    : `${chatReplySurfaceLabel}-visible: posts a lifecycle reply in the originating ${chatReplySurfaceLabel} thread. Choose the current ${chatReplySurfaceLabel} turn purpose before writing: ack, progress, closeout, or clarification. Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the ${chatReplySurfaceLabel} turn open. Use it again on later ${chatReplySurfaceLabel} turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. ${chatReplyMarkdownGuidance}${chatReplySourceLinkingGuidance}${chatReplyEmailCadenceGuidance}${chatReplySuggestionGuidance}Write the message so its content clearly matches the selected purpose.`;
   roomoteMcpServer.registerTool(
     'send_chat_reply',
     {
@@ -1759,7 +1776,10 @@ if (shouldRegisterChannelPostTool()) {
     (hasSlackChatContext() ||
       hasTelegramChatContext() ||
       hasTeamsChatContext() ||
-      hasDiscordChatContext())
+      hasDiscordChatContext() ||
+      // Registered for email tasks too so a call gets the structured
+      // "email has no reactions" result instead of an unknown-tool error.
+      hasAgentMailChatContext())
   ) {
     const reactionSurface = getChatReplySurfaceLabel();
 
@@ -1779,6 +1799,11 @@ if (shouldRegisterChannelPostTool()) {
           ...(reactionSurface === 'Teams'
             ? [
                 'Teams reactions post a plain Teams message containing only the emoji and support a limited set; prefer common names like eyes, thumbsup, heart, laugh, or tada.',
+              ]
+            : []),
+          ...(reactionSurface === 'email thread'
+            ? [
+                'Email has no reactions, so this tool always reports unsupported for email tasks; reply with send_chat_reply when a response is needed.',
               ]
             : []),
         ].join(' '),

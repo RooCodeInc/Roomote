@@ -1,8 +1,16 @@
 import { eq } from 'drizzle-orm';
+import { z } from 'zod';
 import {
   communicationProviderSchema,
   type CommunicationProvider,
 } from '@roomote/types';
+
+/** Router diagnostics post to a chat channel; email (agentmail) has none. */
+export type RouterDebugProvider = Exclude<CommunicationProvider, 'agentmail'>;
+
+const routerDebugProviderSchema = communicationProviderSchema.refine(
+  (provider): provider is RouterDebugProvider => provider !== 'agentmail',
+) as unknown as z.ZodType<RouterDebugProvider>;
 
 import { type DatabaseOrTransaction, db } from '../db';
 import { deploymentSettings } from '../schema';
@@ -17,7 +25,7 @@ export type RouterDebugChannelSource =
   | 'none';
 
 export type RouterDebugDestination = {
-  provider: CommunicationProvider;
+  provider: RouterDebugProvider;
   channelId: string;
 };
 
@@ -36,7 +44,7 @@ export function normalizeRouterDebugSlackChannelId(
 export function normalizeRouterDebugDestination(
   value: Partial<RouterDebugDestination> | null | undefined,
 ): RouterDebugDestination | null {
-  const provider = communicationProviderSchema.safeParse(value?.provider);
+  const provider = routerDebugProviderSchema.safeParse(value?.provider);
   const channelId = value?.channelId?.trim();
 
   if (!provider.success || !channelId) {
@@ -90,7 +98,7 @@ export async function getRouterDebugSettings(
   );
   const deploymentDestination = normalizeRouterDebugDestination({
     provider: deployment?.routerDebugProvider as
-      | CommunicationProvider
+      | RouterDebugProvider
       | undefined,
     channelId: deployment?.routerDebugChannelId ?? undefined,
   });

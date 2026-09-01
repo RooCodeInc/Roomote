@@ -4,6 +4,7 @@ import {
   buildGitHubInvocationIdentity,
   buildSlackInvocationIdentity,
   buildTeamsInvocationIdentity,
+  buildAgentMailInvocationIdentity,
   buildTelegramInvocationIdentity,
   type InvocationIdentity,
 } from '@roomote/types';
@@ -14,6 +15,7 @@ import { slackInstallations, teamsInstallations } from '../schema';
 import { resolveDiscordRuntimeCredentials } from './discord-runtime-credentials';
 import { getDeploymentGitHubRoomoteMentionEnabled } from './github-mention-settings';
 import { resolveEffectiveDeploymentEnvVars } from './model-runtime-config';
+import { resolveAgentMailRuntimeCredentials } from './agentmail-runtime-credentials';
 import { resolveTelegramRuntimeCredentials } from './telegram-runtime-credentials';
 
 const TEAMS_PACKAGE_DEFAULT_BOT_NAME = 'Roomote';
@@ -33,6 +35,7 @@ export async function resolveInvocationIdentities(): Promise<
     slackInstallation,
     teamsInstallation,
     telegramCredentials,
+    agentMailCredentials,
     discordCredentials,
     githubRoomoteMentionEnabled,
   ] = await Promise.all([
@@ -53,6 +56,7 @@ export async function resolveInvocationIdentities(): Promise<
       },
     }),
     resolveTelegramRuntimeCredentials(),
+    resolveAgentMailRuntimeCredentials(),
     resolveDiscordRuntimeCredentials(),
     getDeploymentGitHubRoomoteMentionEnabled(),
   ]);
@@ -81,6 +85,7 @@ export async function resolveInvocationIdentities(): Promise<
       configured: Boolean(configuredTeamsBotName || teamsInstallation?.botName),
     }),
     buildTelegramInvocationIdentity(telegramCredentials.botUsername),
+    buildAgentMailInvocationIdentity(agentMailCredentials.inboxId),
     buildDiscordInvocationIdentity({
       botUserId: discordCredentials.botUserId,
       username: discordCredentials.botUsername,

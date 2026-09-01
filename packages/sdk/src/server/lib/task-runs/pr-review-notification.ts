@@ -1027,6 +1027,8 @@ function getPrReviewLinkFormatter(
       return (label, url) => `${label} (${url})`;
     case 'discord':
       return (label, url) => `[${label}](${url})`;
+    case 'agentmail':
+      return (label, url) => `[${label}](${url})`;
   }
 }
 

@@ -21,7 +21,8 @@ export type FastSessionFooterProvider =
   | 'slack'
   | 'discord'
   | 'teams'
-  | 'telegram';
+  | 'telegram'
+  | 'agentmail';
 
 export type FastSessionPullRequestReference = {
   number: number | null;

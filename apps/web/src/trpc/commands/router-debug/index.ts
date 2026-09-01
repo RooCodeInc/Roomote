@@ -8,7 +8,7 @@ import {
   teamsInstallations,
   updateRouterDebugSettings,
 } from '@roomote/db/server';
-import type { CommunicationProvider } from '@roomote/types';
+import type { AutomationCapableCommunicationProvider } from '@roomote/types';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { getCommunicationProviderAdapter } from '@roomote/sdk/server';
 import { SlackNotifier } from '@roomote/slack';
@@ -27,7 +27,9 @@ export async function getRouterDebugSettingsCommand(auth: UserAuthSuccess) {
 export async function updateRouterDebugSettingsCommand(
   auth: UserAuthSuccess,
   input: {
-    provider: CommunicationProvider | null;
+    // Router diagnostics post outbound messages, which email (agentmail)
+    // never receives, so the destination is limited to chat providers.
+    provider: AutomationCapableCommunicationProvider | null;
     channelId: string | null;
     disabled: boolean;
   },

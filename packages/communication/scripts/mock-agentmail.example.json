@@ -1,0 +1,30 @@
+{
+  "port": 3015,
+  "state": {
+    "inboxes": [
+      {
+        "inbox_id": "roomote@agentmail.to",
+        "display_name": "Roomote",
+        "client_id": "roomote-mock-inbox"
+      }
+    ],
+    "webhooks": [
+      {
+        "webhook_id": "wh_seeded_1",
+        "url": "http://localhost:4000/api/webhooks/agentmail",
+        "secret": "whsec_bW9jay1hZ2VudG1haWwtc2VlZGVkLXNlY3JldC0x",
+        "client_id": "roomote-mock-webhook",
+        "event_types": ["message.received"]
+      }
+    ]
+  },
+  "replay": [
+    {
+      "kind": "message",
+      "inboxId": "roomote@agentmail.to",
+      "from": "grace@example.com",
+      "subject": "Flaky login test",
+      "text": "Hi Roomote — can you look into the flaky login test?"
+    }
+  ]
+}

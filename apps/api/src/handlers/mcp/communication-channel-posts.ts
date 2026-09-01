@@ -66,6 +66,10 @@ const PROVIDER_UNAVAILABLE_ERRORS: Record<
     message: 'Discord bot token is not configured for outbound posts',
     status: 503,
   },
+  agentmail: {
+    message: 'AgentMail credentials are not configured for outbound posts',
+    status: 503,
+  },
 };
 
 function isOriginChannel(
@@ -329,6 +333,14 @@ async function resolveChannelPostTarget(params: {
       return resolveTelegramTarget(params);
     case 'discord':
       return resolveDiscordTarget({ ...params, provider: params.provider });
+    case 'agentmail':
+      // Email is inbound-initiated in v1: replies stay inside the durable
+      // conversation (via the thread-reply path), and there is no channel
+      // surface to post into.
+      throw new McpProxyError(
+        400,
+        'Email is inbound-initiated; posting to arbitrary addresses is not supported.',
+      );
   }
 }
 

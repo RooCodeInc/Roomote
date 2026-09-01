@@ -1,7 +1,7 @@
 ---
 title: Communications Overview
 icon: messages-square
-description: Connect Slack, Microsoft Teams, Telegram, or Discord so Roomote can start, continue, and summarize work from chat.
+description: Connect Slack, Microsoft Teams, Telegram, Discord, or email so Roomote can start, continue, and summarize work from chat.
 ---
 
 import { IntegrationName } from '/snippets/integration-name.jsx';
@@ -23,6 +23,7 @@ attention.
 | <IntegrationName href="/providers/communications/microsoft-teams" icon="microsoftteams" name="Microsoft Teams" /> | Teams that use Microsoft 365, Teams channels, and Microsoft Entra accounts | Microsoft can also be used for sign-in and account linking. |
 | <IntegrationName href="/providers/communications/telegram" icon="telegram" name="Telegram" /> | Lightweight personal, group, or forum-topic chat access | Telegram is a messaging provider, not a sign-in provider. |
 | <IntegrationName href="/providers/communications/discord" icon="discord" name="Discord" /> | Communities and teams that organize work in channels, threads, and forums | Discord is a messaging provider, not a sign-in provider. |
+| <IntegrationName href="/providers/communications/agentmail" icon="/logo/integrations/agentmail.svg" name="Email (AgentMail)" /> | Low-frequency task requests and results over email | Email conversations are replyable in both directions; not a sign-in provider. |
 
 Configure communications providers from **Settings > Communications**.
 
@@ -77,6 +78,7 @@ silent; it does not react to the reaction event itself.
 | Discord | Supported | Discord Gateway sends standard and server custom reaction-add events, but the event does not include the reacted-to message text. |
 | Microsoft Teams | Supported | Bot Framework sends native `messageReaction` activities only for messages posted by Roomote. Reaction removals are ignored. |
 | Telegram | Supported | Roomote uses user-attributed `message_reaction` updates. Anonymous aggregate `message_reaction_count` updates are not supported because they do not identify the reacting user. |
+| Email (AgentMail) | Not supported | Email has no reaction mechanism; reply in the thread instead. |
 
 These reaction paths apply only to Roomote replies that were recorded for the
 current Fast conversation. Reactions on older or unrelated messages do not gain
@@ -107,6 +109,10 @@ the request again.
 Telegram and Discord use one-time link codes instead of acting as sign-in
 providers. Generate a code under **Settings > Personal > Linked Accounts** and
 send the corresponding link command to the bot.
+
+Email needs no separate linking step: Roomote recognizes senders by the
+verified email addresses on their Roomote accounts. See
+[Email (AgentMail)](/providers/communications/agentmail).
 
 ## Related setup
 

@@ -28,6 +28,8 @@ import { Env } from '@/lib/server/env';
 import { resolveAuthProviderConfig } from '@/lib/server/auth-provider-config';
 import { captureIntegrationLifecycleEvent } from '@/lib/server/integration-telemetry';
 
+export * from './email-link';
+
 const MICROSOFT_ENTRA_PROVIDER_ID = 'microsoft-entra-id';
 
 function formatGitLabLinkedAccountDisplayName(accountId: string) {
