@@ -38,8 +38,6 @@ Rules:
 - Write it as an instruction or question addressed to the agent, mimicking the voice and tone of the user's previous messages: match their casing, punctuation, formality, and phrasing habits so it reads like something they would actually type.
 - Make it specific to this conversation (reference the actual work).
 - Prefer a concrete next step: verifying the result, extending the change, covering a gap the agent mentioned, or shipping.
-
-Here is the conversation:
 `;
 
 const SUGGESTABLE_EVENT_TYPES = new Set<string>([
@@ -160,12 +158,16 @@ export async function suggestNextComposerMessage({
   userId,
   taskId = null,
   fastConversationId = null,
+  context = null,
 }: {
   messages: SuggestableMessage[];
   cacheScope: string;
   userId: string | null;
   taskId?: string | null;
   fastConversationId?: string | null;
+  /** Optional preformatted state the transcript alone cannot convey (for
+   * example the session's delegated tasks), inserted before the conversation. */
+  context?: string | null;
 }): Promise<ComposerSuggestionResult> {
   let messageCount = 0;
 
@@ -202,7 +204,10 @@ export async function suggestNextComposerMessage({
       },
     );
 
-    const suggestion = await generator(SUGGESTION_PROMPT + conversationText);
+    const contextBlock = context?.trim() ? `${context.trim()}\n\n` : '';
+    const suggestion = await generator(
+      `${SUGGESTION_PROMPT}\n${contextBlock}Here is the conversation:\n${conversationText}`,
+    );
 
     return { suggestion: normalizeSuggestion(suggestion), messageCount };
   } catch (error) {

@@ -3,11 +3,56 @@ import type { UserAuthSuccess } from '@/types';
 import {
   findAccessibleFastSession,
   getFastSessionSuggestableMessages,
+  getFastSessionTasks,
 } from '@/lib/server/fast-sessions';
 import {
   type ComposerSuggestionResult,
   suggestNextComposerMessage,
 } from '@/lib/server/composer-suggestion';
+
+// Bound the task context so a session with many delegations stays cheap.
+const MAX_CONTEXT_TASKS = 20;
+
+/**
+ * The session's delegated tasks as a compact context block. Their live state
+ * (running, waiting, failed) is exactly what the transcript text cannot
+ * convey, so the suggestion can reference it. Fails soft to no context.
+ */
+async function buildSessionTaskContext(
+  auth: UserAuthSuccess,
+  sessionId: string,
+): Promise<string | null> {
+  try {
+    const tasks = await getFastSessionTasks(auth, sessionId);
+
+    if (!tasks || tasks.length === 0) {
+      return null;
+    }
+
+    const lines = tasks.slice(0, MAX_CONTEXT_TASKS).map((task) => {
+      const title = task.title?.trim() || 'Untitled task';
+      const state = [task.latestRun.status, task.latestRun.taskPhase]
+        .filter(Boolean)
+        .join(', ');
+      const artifacts =
+        task.artifacts.length > 0
+          ? `, ${task.artifacts.length} artifact${task.artifacts.length === 1 ? '' : 's'}`
+          : '';
+      return `- ${title} (${state}${artifacts})`;
+    });
+
+    return [
+      'Tasks the agent has delegated in this session, with their current status:',
+      ...lines,
+    ].join('\n');
+  } catch (error) {
+    console.error(
+      'Error loading session tasks for composer suggestion:',
+      error,
+    );
+    return null;
+  }
+}
 
 /**
  * Suggest the user's likely next composer message for a fast session,
@@ -30,13 +75,17 @@ export async function getFastSessionComposerSuggestionCommand(
       return { suggestion: null, messageCount: 0 };
     }
 
-    const messages = await getFastSessionSuggestableMessages(session.id);
+    const [messages, context] = await Promise.all([
+      getFastSessionSuggestableMessages(session.id),
+      buildSessionTaskContext(auth, session.id),
+    ]);
 
     return await suggestNextComposerMessage({
       messages,
       cacheScope: `session:${session.id}`,
       userId: auth.userId ?? null,
       fastConversationId: session.id,
+      context,
     });
   } catch (error) {
     console.error(

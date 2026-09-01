@@ -3,16 +3,19 @@ import type { UserAuthSuccess } from '@/types';
 const {
   mockFindAccessibleFastSession,
   mockGetFastSessionSuggestableMessages,
+  mockGetFastSessionTasks,
   mockGenerateTrackedNonTaskObject,
 } = vi.hoisted(() => ({
   mockFindAccessibleFastSession: vi.fn(),
   mockGetFastSessionSuggestableMessages: vi.fn(),
+  mockGetFastSessionTasks: vi.fn(),
   mockGenerateTrackedNonTaskObject: vi.fn(),
 }));
 
 vi.mock('@/lib/server/fast-sessions', () => ({
   findAccessibleFastSession: mockFindAccessibleFastSession,
   getFastSessionSuggestableMessages: mockGetFastSessionSuggestableMessages,
+  getFastSessionTasks: mockGetFastSessionTasks,
 }));
 
 vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
@@ -39,6 +42,7 @@ describe('getFastSessionComposerSuggestionCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFindAccessibleFastSession.mockResolvedValue({ id: 'session-1' });
+    mockGetFastSessionTasks.mockResolvedValue([]);
   });
 
   it('returns null without loading the session when the flag is off', async () => {
@@ -102,6 +106,97 @@ describe('getFastSessionComposerSuggestionCommand', () => {
     expect(call.prompt).toContain(
       'Roomote: Done. The redirect now preserves the return URL.',
     );
+  });
+
+  it('includes delegated task titles and status as context', async () => {
+    mockGetFastSessionSuggestableMessages.mockResolvedValue([
+      {
+        eventType: 'roomote_runtime.user_prompt',
+        role: 'user',
+        text: 'Fix the login redirect',
+      },
+      {
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        text: 'Delegated that to a task.',
+      },
+    ]);
+    mockGetFastSessionTasks.mockResolvedValue([
+      {
+        taskId: 'task-1',
+        title: 'Fix login redirect',
+        inferenceCostMicroUsd: 0,
+        artifacts: [{ id: 'a1' }],
+        latestRun: { status: 'running', taskPhase: 'running' },
+      },
+      {
+        taskId: 'task-2',
+        title: '',
+        inferenceCostMicroUsd: 0,
+        artifacts: [],
+        latestRun: { status: 'completed', taskPhase: 'waiting_for_prompt' },
+      },
+    ]);
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: { suggestion: 'Check on the redirect task' },
+    });
+
+    await getFastSessionComposerSuggestionCommand(auth, {
+      sessionId: 'session-1',
+    });
+
+    const prompt = (
+      mockGenerateTrackedNonTaskObject.mock.calls[0]?.[0] as {
+        prompt: string;
+      }
+    ).prompt;
+    expect(prompt).toContain(
+      'Tasks the agent has delegated in this session, with their current status:',
+    );
+    expect(prompt).toContain(
+      '- Fix login redirect (running, running, 1 artifact)',
+    );
+    expect(prompt).toContain('- Untitled task (completed, waiting_for_prompt)');
+    // Context precedes the transcript so the model reads state first.
+    expect(prompt.indexOf('Tasks the agent has delegated')).toBeLessThan(
+      prompt.indexOf('Here is the conversation:'),
+    );
+  });
+
+  it('still generates when loading session tasks fails', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => {});
+    mockGetFastSessionSuggestableMessages.mockResolvedValue([
+      {
+        eventType: 'roomote_runtime.user_prompt',
+        role: 'user',
+        text: 'Fix it',
+      },
+      {
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        text: 'Fixed',
+      },
+    ]);
+    mockGetFastSessionTasks.mockRejectedValue(new Error('tasks unavailable'));
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: { suggestion: 'Ship it' },
+    });
+
+    await expect(
+      getFastSessionComposerSuggestionCommand(auth, {
+        sessionId: 'session-1',
+      }),
+    ).resolves.toEqual({ suggestion: 'Ship it', messageCount: 2 });
+    expect(
+      (
+        mockGenerateTrackedNonTaskObject.mock.calls[0]?.[0] as {
+          prompt: string;
+        }
+      ).prompt,
+    ).not.toContain('Tasks the agent has delegated');
+    consoleErrorSpy.mockRestore();
   });
 
   it('returns null without generating when the conversation is too short', async () => {
