@@ -3,11 +3,23 @@ import { createMiddleware } from 'hono/factory';
 import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../types';
-import { resolveActingUserIdOrNull } from './proxy-utils';
+import { resolveTaskOrSessionUserIdOrNull } from './proxy-utils';
 
 export interface McpAuth {
   userId: string | undefined;
   authContext: AuthTokenContext | RunTokenContext;
+}
+
+export async function resolveMcpTaskOrSessionUserId(
+  auth: McpAuth,
+): Promise<string | undefined> {
+  if (auth.authContext.tokenType !== 'run') {
+    return auth.userId;
+  }
+
+  return (
+    (await resolveTaskOrSessionUserIdOrNull(auth.authContext)) ?? undefined
+  );
 }
 
 type McpVariables = Variables & { mcpAuth: McpAuth };
@@ -30,9 +42,7 @@ export const mcpAuthMiddleware = createMiddleware<{
   }
 
   const userId =
-    authContext.tokenType === 'run'
-      ? ((await resolveActingUserIdOrNull(authContext)) ?? undefined)
-      : authContext.userId;
+    'userId' in authContext ? (authContext.userId ?? undefined) : undefined;
 
   c.set('mcpAuth', { userId, authContext });
 

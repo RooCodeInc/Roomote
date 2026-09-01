@@ -167,6 +167,37 @@ export async function resolveActingUserIdOrNull(
     throw new McpProxyError(404, 'Task run not found for this MCP token');
   }
 
+  return taskRun.actingUserId ?? null;
+}
+
+/**
+ * Resolve the live actor or durable task owner for operations that explicitly
+ * create follow-on task or Session work. Admin mutation routes must keep using
+ * resolveActingUserIdOrNull so automation ownership does not grant authority.
+ */
+export async function resolveTaskOrSessionUserIdOrNull(
+  auth: McpAuthContext,
+): Promise<string | null> {
+  if (auth.tokenType !== 'run') {
+    return auth.userId;
+  }
+
+  if (!auth.runId) {
+    throw new McpProxyError(
+      403,
+      'MCP proxy requires a task run token with a task run id',
+    );
+  }
+
+  const taskRun = await db.query.taskRuns.findFirst({
+    columns: { actingUserId: true, taskId: true },
+    where: eq(taskRuns.id, auth.runId),
+  });
+
+  if (!taskRun) {
+    throw new McpProxyError(404, 'Task run not found for this MCP token');
+  }
+
   if (taskRun.actingUserId) {
     return taskRun.actingUserId;
   }
