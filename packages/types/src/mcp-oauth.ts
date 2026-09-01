@@ -383,6 +383,8 @@ export type McpIntegration = {
   authorizationParameters?: McpIntegrationAuthorizationParameter[];
   oauthClientEnv?: McpIntegrationOAuthClientEnv;
   oauthEndpoints?: McpIntegrationOAuthEndpoints;
+  /** RFC 8707 resource indicator sent throughout this integration's OAuth flow. */
+  oauthResource?: string;
   oauthScopes?: string[];
   oauthScopeSeparator?: ' ' | ',';
   oauthScopeMode?: McpIntegrationOauthScopeMode;
@@ -489,6 +491,7 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     url: 'https://mcp.monday.com/mcp',
     description: `Inspect monday.com boards, items, updates, docs, and workspace context from ${PRODUCT_NAME} tasks`,
     icon: 'monday',
+    oauthResource: 'https://mcp.monday.com/mcp',
     oauthScopes: [...MONDAY_MCP_READ_ONLY_OAUTH_SCOPES],
     oauthScopeMode: 'read-only',
     serverMode: 'upstream_proxy',
@@ -893,6 +896,21 @@ export function getMcpIntegrationOauthEndpoints(
       : integrationOrId;
 
   return integration?.oauthEndpoints;
+}
+
+export function getMcpIntegrationOauthResource(
+  integrationOrId: McpIntegration | string | undefined,
+): string | undefined {
+  if (!integrationOrId) {
+    return undefined;
+  }
+
+  const integration =
+    typeof integrationOrId === 'string'
+      ? getMcpIntegration(integrationOrId)
+      : integrationOrId;
+
+  return integration?.oauthResource;
 }
 
 export function getMcpIntegrationOauthScopeSeparator(

@@ -21,6 +21,7 @@ import type {
 } from '@roomote/types';
 import {
   getMcpIntegrationOauthEndpoints,
+  getMcpIntegrationOauthResource,
   MCP_INTEGRATIONS,
 } from '@roomote/types';
 
@@ -453,6 +454,8 @@ export async function getValidAccessToken(
             tokenEndpoint =
               getMcpIntegrationOauthEndpoints(integration)?.tokenEndpoint ??
               (await discoverOAuthEndpoints(mcpUrl)).token_endpoint;
+            const resource = getMcpIntegrationOauthResource(integration);
+            oauthOptions = resource ? { resource } : undefined;
           }
 
           const newTokens = await refreshOAuthToken(
