@@ -3,6 +3,7 @@ import {
   eq,
   fastAgentConversations,
   fastAgentMessages,
+  fastAgentParentEvents,
   inArray,
   sessionBackfillState,
   sessionFactory,
@@ -274,6 +275,83 @@ describe('sessionsReconcileJob', () => {
     expect(notice?.metadata).toMatchObject({
       purpose: 'closeout',
       inferenceRetryActive: false,
+    });
+  });
+
+  it('queues a safe expired retry for a new lock owner', async () => {
+    await sessionsReconcileJob();
+    await sessionsReconcileJob();
+
+    const user = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    await sessionsReconcileJob();
+    await db.insert(fastAgentMessages).values([
+      {
+        conversationId: conversation!.id,
+        eventId: 'recoverable-turn:user',
+        turnId: 'recoverable-turn',
+        turnSeq: 0,
+        ts: Date.now(),
+        eventType: 'roomote_runtime.user_prompt',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'Recover this request.' }],
+        metadata: { visibleInTranscript: true, turnSource: 'human' },
+        payload: {},
+        source: 'web',
+      },
+      {
+        conversationId: conversation!.id,
+        eventId: 'recoverable-turn:retry-notice:0',
+        turnId: 'recoverable-turn',
+        turnSeq: 1,
+        ts: Date.now(),
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying automatically…' }],
+        metadata: {
+          visibleInTranscript: false,
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
+          inferenceRetryRecoveryEligible: true,
+        },
+        payload: { purpose: 'progress' },
+        source: 'web',
+      },
+    ]);
+    await db
+      .update(sessions)
+      .set({ respondingUntil: new Date(Date.now() - 60_000) })
+      .where(eq(sessions.fastConversationId, conversation!.id));
+
+    await sessionsReconcileJob();
+    await sessionsReconcileJob();
+
+    const queued = await db
+      .select({ event: fastAgentParentEvents.event })
+      .from(fastAgentParentEvents)
+      .where(eq(fastAgentParentEvents.conversationId, conversation!.id));
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.event).toMatchObject({
+      type: 'inference_retry_resume',
+      retryEventId: 'recoverable-turn:retry-notice:0',
+    });
+
+    const [notice] = await db
+      .select({ metadata: fastAgentMessages.metadata })
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.eventId, 'recoverable-turn:retry-notice:0'));
+    expect(notice?.metadata).toMatchObject({
+      inferenceRetryActive: true,
+      inferenceRetryRecoveryEligible: true,
     });
   });
 });

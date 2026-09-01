@@ -10,6 +10,7 @@ import {
   advanceSessionNotifiedCursor,
   advanceSessionReadCursor,
   getSessionForFastConversation,
+  inArray,
   isNull,
   lt,
   or,
@@ -28,6 +29,7 @@ import {
   FAST_AGENT_REACTION_INPUT_TYPE,
   type FastAgentConversation,
 } from './fast-agent-conversation';
+import type { SlackThreadPromptMessage } from '../../utils';
 
 export type FastAgentConversationRecord = {
   id: string;
@@ -60,6 +62,21 @@ export type FastAgentMessageUpsertResult = {
 export const INTERRUPTED_INFERENCE_RETRY_MESSAGE =
   'The inference retry was interrupted before it completed. Please send the request again.';
 
+const AUTOMATIC_RETRY_RECOVERY_SURFACES = ['web', 'slack', 'discord'] as const;
+
+export type FastAgentInferenceRetryRecoveryCandidate = {
+  parent: {
+    sessionId: string;
+    conversation: FastAgentConversation;
+  };
+  retryEventId: string;
+};
+
+export type FastAgentInferenceRetryRecoveryContext = {
+  currentMessageAgentContext?: string;
+  threadContext?: SlackThreadPromptMessage[];
+};
+
 function isLegacyPlatformEventMessage(message: ModelMessage): boolean {
   if (message.role !== 'user') return false;
 
@@ -86,6 +103,13 @@ function activeInferenceRetryNoticeWhere() {
       sql`${fastAgentMessages.metadata}->>'inferenceRetryActive' = 'true'`,
       sql`${fastAgentMessages.metadata}->>'inferenceRetryActive' IS NULL`,
     ),
+  );
+}
+
+function automaticRecoveryEligibleWhere() {
+  return and(
+    activeInferenceRetryNoticeWhere(),
+    sql`${fastAgentMessages.metadata}->>'inferenceRetryRecoveryEligible' = 'true'`,
   );
 }
 
@@ -123,6 +147,8 @@ async function reconcileInferenceRetryNotices(
     );
 
   for (const notice of notices) {
+    const metadata = { ...(notice.metadata ?? {}) };
+    delete metadata.inferenceRetryRecoveryContext;
     await database
       .update(fastAgentMessages)
       .set({
@@ -130,7 +156,7 @@ async function reconcileInferenceRetryNotices(
           { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
         ],
         metadata: {
-          ...(notice.metadata ?? {}),
+          ...metadata,
           visibleInTranscript: true,
           purpose: 'closeout',
           inferenceRetryNotice: true,
@@ -160,12 +186,28 @@ export async function reconcileExpiredFastAgentInferenceRetryNotices(
     .selectDistinct({ conversationId: fastAgentMessages.conversationId })
     .from(fastAgentMessages)
     .innerJoin(
+      fastAgentConversations,
+      eq(fastAgentConversations.id, fastAgentMessages.conversationId),
+    )
+    .innerJoin(
       sessions,
       eq(sessions.fastConversationId, fastAgentMessages.conversationId),
     )
     .where(
       and(
         activeInferenceRetryNoticeWhere(),
+        // Recoverable notices are claimed through the durable parent-event
+        // inbox. Ambiguous and legacy notices retain the terminal fallback.
+        or(
+          sql`coalesce(${fastAgentMessages.metadata}->>'inferenceRetryRecoveryEligible', 'false') <> 'true'`,
+          sql`NOT (
+            ${fastAgentConversations.surface} = 'web'
+            OR (
+              ${fastAgentConversations.surface} IN ('slack', 'discord')
+              AND ${fastAgentConversations.currentReplyChannelId} IS NOT NULL
+            )
+          )`,
+        ),
         or(
           isNull(sessions.respondingUntil),
           lt(sessions.respondingUntil, new Date()),
@@ -183,6 +225,257 @@ export async function reconcileExpiredFastAgentInferenceRetryNotices(
     );
   }
   return reconciled;
+}
+
+export async function listExpiredFastAgentInferenceRetryRecoveries(
+  limit = 100,
+): Promise<FastAgentInferenceRetryRecoveryCandidate[]> {
+  const rows = await db
+    .select({
+      conversationId: fastAgentMessages.conversationId,
+      retryEventId: fastAgentMessages.eventId,
+      surface: fastAgentConversations.surface,
+      workspaceId: fastAgentConversations.workspaceId,
+      providerConversationId: fastAgentConversations.conversationId,
+      channelId: fastAgentConversations.currentReplyChannelId,
+      threadId: fastAgentConversations.currentReplyThreadId,
+      serviceUrl: fastAgentConversations.currentReplyServiceUrl,
+    })
+    .from(fastAgentMessages)
+    .innerJoin(
+      fastAgentConversations,
+      eq(fastAgentConversations.id, fastAgentMessages.conversationId),
+    )
+    .innerJoin(
+      sessions,
+      eq(sessions.fastConversationId, fastAgentMessages.conversationId),
+    )
+    .where(
+      and(
+        automaticRecoveryEligibleWhere(),
+        inArray(
+          fastAgentConversations.surface,
+          AUTOMATIC_RETRY_RECOVERY_SURFACES,
+        ),
+        or(
+          isNull(sessions.respondingUntil),
+          lt(sessions.respondingUntil, new Date()),
+        ),
+      ),
+    )
+    .limit(limit);
+
+  return rows.flatMap((row) => {
+    const base = {
+      surface: row.surface,
+      workspaceId: row.workspaceId,
+      conversationId: row.providerConversationId,
+    };
+    const conversation = fastAgentConversationSchema.safeParse(
+      row.surface === 'web'
+        ? base
+        : row.channelId
+          ? {
+              ...base,
+              replyTarget: {
+                channelId: row.channelId,
+                ...(row.threadId ? { threadId: row.threadId } : {}),
+                ...(row.serviceUrl ? { serviceUrl: row.serviceUrl } : {}),
+              },
+            }
+          : null,
+    );
+    if (!conversation.success) return [];
+    return [
+      {
+        parent: {
+          sessionId: row.conversationId,
+          conversation: conversation.data,
+        },
+        retryEventId: row.retryEventId,
+      },
+    ];
+  });
+}
+
+export async function disableFastAgentInferenceRetryRecovery(input: {
+  conversationId: string;
+  retryEventId: string;
+}): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${input.conversationId}`}, 0))`,
+    );
+    const [notice] = await tx
+      .select({
+        id: fastAgentMessages.id,
+        metadata: fastAgentMessages.metadata,
+      })
+      .from(fastAgentMessages)
+      .where(
+        and(
+          eq(fastAgentMessages.conversationId, input.conversationId),
+          eq(fastAgentMessages.eventId, input.retryEventId),
+          activeInferenceRetryNoticeWhere(),
+        ),
+      )
+      .limit(1);
+    if (!notice) return;
+    await tx
+      .update(fastAgentMessages)
+      .set({
+        metadata: {
+          ...(notice.metadata ?? {}),
+          inferenceRetryRecoveryEligible: false,
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(fastAgentMessages.id, notice.id));
+  });
+}
+
+export async function claimFastAgentInferenceRetryRecovery(input: {
+  conversationId: string;
+  retryEventId: string;
+  recoveryEventId: string;
+}): Promise<{
+  question: string;
+  images: string[];
+  originalTurnId: string;
+  context: FastAgentInferenceRetryRecoveryContext;
+} | null> {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${input.conversationId}`}, 0))`,
+    );
+    const [notice] = await tx
+      .select({
+        id: fastAgentMessages.id,
+        turnId: fastAgentMessages.turnId,
+        metadata: fastAgentMessages.metadata,
+      })
+      .from(fastAgentMessages)
+      .where(
+        and(
+          eq(fastAgentMessages.conversationId, input.conversationId),
+          eq(fastAgentMessages.eventId, input.retryEventId),
+        ),
+      )
+      .limit(1);
+    if (!notice) return null;
+
+    const alreadyClaimed =
+      notice.metadata?.inferenceRetryRecoveryEventId === input.recoveryEventId;
+    const claimable =
+      notice.metadata?.inferenceRetryActive === true &&
+      notice.metadata?.inferenceRetryRecoveryEligible === true;
+    if (!claimable && !alreadyClaimed) return null;
+    const rawRecoveryContext = notice.metadata?.inferenceRetryRecoveryContext;
+    const metadata = { ...(notice.metadata ?? {}) };
+    delete metadata.inferenceRetryRecoveryContext;
+
+    if (alreadyClaimed) {
+      const [completedRecovery] = await tx
+        .select({ id: fastAgentMessages.id })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(fastAgentMessages.conversationId, input.conversationId),
+            eq(fastAgentMessages.turnId, input.recoveryEventId),
+            sql`${fastAgentMessages.metadata}->>'purpose' IN ('closeout', 'clarification')`,
+          ),
+        )
+        .limit(1);
+      if (!completedRecovery) {
+        // The recovery owner disappeared after claiming. Replaying it could
+        // repeat tools, so preserve the same conservative resend boundary.
+        await tx
+          .update(fastAgentMessages)
+          .set({
+            contentBlocks: [
+              { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
+            ],
+            metadata: {
+              ...metadata,
+              visibleInTranscript: true,
+              purpose: 'closeout',
+              inferenceRetryActive: false,
+              inferenceRetryRecoveryEligible: false,
+            },
+            payload: { purpose: 'closeout' },
+            updatedAt: new Date(),
+          })
+          .where(eq(fastAgentMessages.id, notice.id));
+      }
+      return null;
+    }
+
+    const [prompt] = await tx
+      .select({ contentBlocks: fastAgentMessages.contentBlocks })
+      .from(fastAgentMessages)
+      .where(
+        and(
+          eq(fastAgentMessages.conversationId, input.conversationId),
+          eq(fastAgentMessages.turnId, notice.turnId),
+          eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        ),
+      )
+      .limit(1);
+    const question = prompt?.contentBlocks
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('\n')
+      .trim();
+    if (!question) {
+      await tx
+        .update(fastAgentMessages)
+        .set({
+          contentBlocks: [
+            { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
+          ],
+          metadata: {
+            ...metadata,
+            visibleInTranscript: true,
+            purpose: 'closeout',
+            inferenceRetryActive: false,
+            inferenceRetryRecoveryEligible: false,
+          },
+          payload: { purpose: 'closeout' },
+          updatedAt: new Date(),
+        })
+        .where(eq(fastAgentMessages.id, notice.id));
+      return null;
+    }
+
+    await tx
+      .update(fastAgentMessages)
+      .set({
+        metadata: {
+          ...metadata,
+          visibleInTranscript: false,
+          purpose: 'closeout',
+          inferenceRetryActive: false,
+          inferenceRetryRecoveryEventId: input.recoveryEventId,
+        },
+        payload: { purpose: 'closeout' },
+        updatedAt: new Date(),
+      })
+      .where(eq(fastAgentMessages.id, notice.id));
+
+    return {
+      question,
+      images:
+        prompt?.contentBlocks.flatMap((block) =>
+          block.type === 'image'
+            ? [`data:${block.mimeType};base64,${block.data}`]
+            : [],
+        ) ?? [],
+      originalTurnId: notice.turnId,
+      context:
+        rawRecoveryContext && typeof rawRecoveryContext === 'object'
+          ? (rawRecoveryContext as FastAgentInferenceRetryRecoveryContext)
+          : {},
+    };
+  });
 }
 
 export interface FastAgentConversationRepository {

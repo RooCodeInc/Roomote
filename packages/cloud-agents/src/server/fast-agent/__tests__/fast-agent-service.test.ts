@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   markShutdownCloseoutSettled: vi.fn(),
   revokeMcpCapabilities: vi.fn(),
   reconcileRetryNotices: vi.fn(),
+  disableRetryRecovery: vi.fn(),
   getUnifiedSession: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
@@ -84,6 +85,7 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   INTERRUPTED_INFERENCE_RETRY_MESSAGE:
     'The inference retry was interrupted before it completed. Please send the request again.',
   reconcileFastAgentInferenceRetryNotices: mocks.reconcileRetryNotices,
+  disableFastAgentInferenceRetryRecovery: mocks.disableRetryRecovery,
 }));
 
 vi.mock('../../router', () => ({
@@ -1859,11 +1861,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
-  it('posts a terminal closeout when API shutdown interrupts silent retry backoff', async () => {
+  it('leaves a safe silent retry queued for recovery when API shutdown interrupts backoff', async () => {
     const controller = new AbortController();
     const shutdown = new FastAgentProcessShutdownError('SIGTERM');
-    const expectedCloseout =
-      'The inference retry was interrupted before it completed. Please send the request again.';
     const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
     const originalSetTimeout = globalThis.setTimeout;
     let shouldAbort = true;
@@ -1890,29 +1890,20 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ).rejects.toBe(shutdown);
 
       expect(mocks.generateText).toHaveBeenCalledOnce();
-      expect(postReply).toHaveBeenCalledOnce();
-      expect(postReply).toHaveBeenCalledWith({
-        purpose: 'closeout',
-        message: expectedCloseout,
-      });
+      expect(postReply).not.toHaveBeenCalled();
       const retryWrites = mocks.upsertMessage.mock.calls
         .map(([input]) => input.message)
         .filter((message) => message.eventId === '100.2:retry-notice:0');
       expect(retryWrites.at(-1)).toMatchObject({
-        contentBlocks: [
-          {
-            type: 'text',
-            text: expectedCloseout,
-          },
-        ],
         metadata: {
-          visibleInTranscript: true,
-          purpose: 'closeout',
-          platformMessageId: 'closeout-1',
+          visibleInTranscript: false,
+          purpose: 'progress',
           inferenceRetryNotice: true,
-          inferenceRetryActive: false,
+          inferenceRetryActive: true,
+          inferenceRetryRecoveryEligible: true,
         },
       });
+      expect(mocks.reconcileRetryNotices).toHaveBeenCalledOnce();
       expect(
         mocks.upsertMessage.mock.calls
           .map(([input]) => input.message.eventId)
@@ -3617,6 +3608,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         duplicate: true,
       });
       expect(replaceReply).not.toHaveBeenCalled();
+      expect(
+        mocks.upsertMessage.mock.calls
+          .map(([input]) => input.message)
+          .find((message) => message.eventId === '100.2:retry-notice:0')
+          ?.metadata,
+      ).toMatchObject({
+        inferenceRetryActive: true,
+        inferenceRetryRecoveryEligible: false,
+      });
       expect(adapter.postReply).toHaveBeenLastCalledWith({
         purpose: 'closeout',
         message: 'The provider recovered.',
@@ -4431,6 +4431,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(retryWrites[0]?.metadata).toMatchObject({
         inferenceRetryNotice: true,
         inferenceRetryActive: true,
+        inferenceRetryRecoveryEligible: true,
+      });
+      expect(mocks.disableRetryRecovery).toHaveBeenCalledWith({
+        conversationId: 'conversation-1',
+        retryEventId: '100.2:retry-notice:0',
       });
       expect(retryWrites.at(-1)?.metadata).toMatchObject({
         purpose: 'closeout',

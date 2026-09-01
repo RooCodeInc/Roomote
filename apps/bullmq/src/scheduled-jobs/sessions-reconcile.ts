@@ -1,4 +1,7 @@
-import { reconcileExpiredFastAgentInferenceRetryNotices } from '@roomote/cloud-agents/server';
+import {
+  listExpiredFastAgentInferenceRetryRecoveries,
+  reconcileExpiredFastAgentInferenceRetryNotices,
+} from '@roomote/cloud-agents/server';
 import {
   and,
   db,
@@ -20,6 +23,7 @@ import {
   tasks,
   touchSessionActivity,
 } from '@roomote/db/server';
+import { enqueueFastAgentParentEvent } from '@roomote/sdk/server';
 const LOG_PREFIX = '[sessions]';
 const BACKFILL_KEY = 'unified-sessions-v1';
 /**
@@ -206,6 +210,27 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
     : null;
   const scanStartedAt = new Date();
   let orphanFailures = 0;
+  const retryRecoveries =
+    await listExpiredFastAgentInferenceRetryRecoveries(BATCH_SIZE);
+  let queuedRetryRecoveries = 0;
+  for (const recovery of retryRecoveries) {
+    try {
+      await enqueueFastAgentParentEvent({
+        parent: recovery.parent,
+        event: {
+          type: 'inference_retry_resume',
+          eventId: recovery.retryEventId,
+          retryEventId: recovery.retryEventId,
+        },
+      });
+      queuedRetryRecoveries += 1;
+    } catch (error) {
+      console.error(
+        `${LOG_PREFIX} failed to queue inference retry recovery ${recovery.retryEventId}`,
+        error,
+      );
+    }
+  }
   const reconciledRetryNotices =
     await reconcileExpiredFastAgentInferenceRetryNotices(BATCH_SIZE);
 
@@ -355,6 +380,7 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
     orphanVisibleTasks: orphanTasks.length,
     refreshedSessions: recent.length,
     healedExpiredLeases: expiredLeases.length,
+    queuedRetryRecoveries,
     reconciledRetryNotices,
   });
 }

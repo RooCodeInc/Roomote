@@ -24,6 +24,7 @@ export type FastAgentPlatformEventHandling = 'default' | 'present_only';
 
 export type FastAgentPlatformEventKind =
   | 'delegated_task'
+  | 'inference_retry'
   | 'automation'
   | 'setup';
 

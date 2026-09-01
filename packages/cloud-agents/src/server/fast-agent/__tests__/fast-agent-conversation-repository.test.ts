@@ -11,8 +11,10 @@ import {
 } from '@roomote/db/server';
 
 import {
+  claimFastAgentInferenceRetryRecovery,
   fastAgentConversationRepository,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+  listExpiredFastAgentInferenceRetryRecoveries,
   reconcileExpiredFastAgentInferenceRetryNotices,
   reconcileFastAgentInferenceRetryNotices,
 } from '../fast-agent-conversation-repository';
@@ -676,7 +678,13 @@ describe('Fast conversation repository', () => {
         eventType: 'roomote_runtime.assistant_message',
         role: 'assistant',
         contentBlocks: [{ type: 'text', text: 'Retrying in 1s' }],
-        metadata: { visibleInTranscript: true, purpose: 'progress' },
+        metadata: {
+          visibleInTranscript: true,
+          purpose: 'progress',
+          inferenceRetryRecoveryContext: {
+            currentMessageAgentContext: 'Transient attachment text',
+          },
+        },
         payload: { purpose: 'progress' },
         source: 'web',
       },
@@ -699,6 +707,9 @@ describe('Fast conversation repository', () => {
       inferenceRetryNotice: true,
       inferenceRetryActive: false,
     });
+    expect(notice?.metadata).not.toHaveProperty(
+      'inferenceRetryRecoveryContext',
+    );
   });
 
   it('reveals a quiet durable retry marker after its turn is orphaned', async () => {
@@ -722,6 +733,9 @@ describe('Fast conversation repository', () => {
           purpose: 'progress',
           inferenceRetryNotice: true,
           inferenceRetryActive: true,
+          inferenceRetryRecoveryContext: {
+            currentMessageAgentContext: 'Transient attachment text',
+          },
         },
         payload: { purpose: 'progress' },
         source: 'web',
@@ -818,5 +832,105 @@ describe('Fast conversation repository', () => {
     expect(
       rows.find((row) => row.conversationId === active.id)?.metadata,
     ).toMatchObject({ inferenceRetryActive: true });
+  });
+
+  it('lists safe expired retries instead of terminalizing them', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-safe:user',
+        turnId: 'turn-safe',
+        turnSeq: 0,
+        ts: 100,
+        eventType: 'roomote_runtime.user_prompt',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'Please continue safely.' }],
+        metadata: { visibleInTranscript: true, turnSource: 'human' },
+        payload: {},
+        source: 'slack',
+      },
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-safe:retry-notice:0',
+        turnId: 'turn-safe',
+        turnSeq: 1,
+        ts: 101,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying automatically…' }],
+        metadata: {
+          visibleInTranscript: false,
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
+          inferenceRetryRecoveryEligible: true,
+        },
+        payload: { purpose: 'progress' },
+        source: 'slack',
+      },
+    });
+    await db
+      .update(sessions)
+      .set({ respondingUntil: new Date(Date.now() - 1_000) })
+      .where(eq(sessions.fastConversationId, session.id));
+
+    const recoveries = await listExpiredFastAgentInferenceRetryRecoveries();
+    expect(
+      recoveries.find(
+        (recovery) => recovery.retryEventId === 'turn-safe:retry-notice:0',
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        retryEventId: 'turn-safe:retry-notice:0',
+        parent: expect.objectContaining({ sessionId: session.id }),
+      }),
+    );
+    await expect(
+      reconcileExpiredFastAgentInferenceRetryNotices(),
+    ).resolves.toBe(0);
+
+    await expect(
+      claimFastAgentInferenceRetryRecovery({
+        conversationId: session.id,
+        retryEventId: 'turn-safe:retry-notice:0',
+        recoveryEventId: 'recovery-event-1',
+      }),
+    ).resolves.toEqual({
+      question: 'Please continue safely.',
+      images: [],
+      originalTurnId: 'turn-safe',
+      context: {},
+    });
+    await expect(
+      claimFastAgentInferenceRetryRecovery({
+        conversationId: session.id,
+        retryEventId: 'turn-safe:retry-notice:0',
+        recoveryEventId: 'recovery-event-1',
+      }),
+    ).resolves.toBeNull();
+    const [interrupted] = await db
+      .select({
+        contentBlocks: fastAgentMessages.contentBlocks,
+        metadata: fastAgentMessages.metadata,
+      })
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.eventId, 'turn-safe:retry-notice:0'));
+    expect(interrupted?.contentBlocks).toEqual([
+      { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
+    ]);
+    expect(interrupted?.metadata).toMatchObject({
+      visibleInTranscript: true,
+      inferenceRetryRecoveryEligible: false,
+    });
+    expect(interrupted?.metadata).not.toHaveProperty(
+      'inferenceRetryRecoveryContext',
+    );
   });
 });

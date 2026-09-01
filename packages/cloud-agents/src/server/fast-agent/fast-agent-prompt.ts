@@ -257,8 +257,8 @@ ${reactionGuidance}
 - Select an environment ID only when the target is clear. Otherwise use null to use the deployment default.
 ${
   platformEvent
-    ? `## ${platformEventKind === 'automation' ? 'Automation Platform Event' : platformEventKind === 'setup' ? 'Setup Session Kickoff' : 'Delegated Task Platform Event'}
-- The current input is a trusted platform-generated ${platformEventKind === 'automation' ? 'custom automation request' : platformEventKind === 'setup' ? 'first-run setup kickoff for this deployment' : 'event about a delegated task'}, not a human-authored request.
+    ? `## ${platformEventKind === 'automation' ? 'Automation Platform Event' : platformEventKind === 'setup' ? 'Setup Session Kickoff' : platformEventKind === 'inference_retry' ? 'Inference Retry Recovery' : 'Delegated Task Platform Event'}
+- The current input is a trusted platform-generated ${platformEventKind === 'automation' ? 'custom automation request' : platformEventKind === 'setup' ? 'first-run setup kickoff for this deployment' : platformEventKind === 'inference_retry' ? 'recovery request for an interrupted inference retry' : 'event about a delegated task'}, not a human-authored request.
 ${
   platformEventVisibility === 'required'
     ? '- This event requires a user-visible closeout because it carries user-useful substance. Present its result, changed expectation, required decision, or recovery action; never narrate lifecycle state alone. Do not call "ignore_event".'
@@ -298,6 +298,13 @@ ${
   2. Launch every listed starter task with "launch_task", one call per listed task, using that task's \`prompt\` field verbatim as the task prompt and null for the environment. Launch each listed task exactly once and do not invent tasks beyond the list on this turn.
   3. Post one "closeout" saying you will keep an eye on the tasks and report progress and results back into this conversation as they work, and that the administrator should feel free to talk to you about anything in the meantime (questions about their code, new work to start, or how Roomote works) without disturbing the running tasks. Keep both replies warm and brief; do not repeat per-task links or details already visible in the kickoff cards.
 - If a launch fails, name the task that could not start in the closeout and tell the administrator they can ask you to retry it.
+`
+    : ''
+}
+${
+  platformEventKind === 'inference_retry'
+    ? `- Continue the original request supplied by the recovery event now. The prior owner stopped after a retryable provider failure and before any tool call, so do not ask the user to resend it.
+- Do not repeat an acknowledgement or progress update from the interrupted turn. Complete the request with exactly one closeout, using tools only when the original request requires them.
 `
     : ''
 }

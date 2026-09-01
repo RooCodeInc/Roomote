@@ -4,6 +4,7 @@ import { basename } from 'node:path';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  claimFastAgentInferenceRetryRecovery,
   createFastAgentTaskLauncher,
   createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
@@ -124,6 +125,11 @@ export type FastAgentPullRequestContext = {
 };
 
 export type FastAgentParentEvent =
+  | {
+      type: 'inference_retry_resume';
+      eventId: string;
+      retryEventId: string;
+    }
   | {
       type: 'automation_triggered';
       eventId: string;
@@ -320,6 +326,8 @@ export function buildEventClientMessageSeed(
   event: FastAgentParentEvent,
 ): string {
   switch (event.type) {
+    case 'inference_retry_resume':
+      return `fast-parent-inference-retry:${event.eventId}`;
     case 'automation_triggered':
       return `fast-parent-automation:${event.eventId}`;
     case 'child_message':
@@ -1511,6 +1519,18 @@ export async function deliverFastAgentParentEventWithLock(
   const turnSignal = turnLock.signal;
 
   try {
+    const recovery =
+      params.event.type === 'inference_retry_resume'
+        ? await claimFastAgentInferenceRetryRecovery({
+            conversationId: params.parent.sessionId,
+            retryEventId: params.event.retryEventId,
+            recoveryEventId: buildEventClientMessageSeed(params.event),
+          })
+        : null;
+    if (params.event.type === 'inference_retry_resume' && !recovery) {
+      return 'skipped';
+    }
+
     if (params.event.type === 'pull_request_opened') {
       const currentRun = await db.query.taskRuns.findFirst({
         where: eq(taskRuns.id, params.event.runId),
@@ -1544,8 +1564,26 @@ export async function deliverFastAgentParentEventWithLock(
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops
     // every deployment MCP server from parent-event turns.
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
+    const recoveryQuestion =
+      params.event.type === 'inference_retry_resume' && recovery
+        ? `<platform_event>${JSON.stringify({
+            type: params.event.type,
+            originalTurnId: recovery.originalTurnId,
+            originalRequest: recovery.question,
+          })}</platform_event>`
+        : `<platform_event>${JSON.stringify(params.event)}</platform_event>`;
     await answerFastAgentQuestion({
-      question: `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
+      question: recoveryQuestion,
+      ...(recovery?.images.length ? { images: recovery.images } : {}),
+      ...(recovery?.context.currentMessageAgentContext
+        ? {
+            currentMessageAgentContext:
+              recovery.context.currentMessageAgentContext,
+          }
+        : {}),
+      ...(recovery?.context.threadContext
+        ? { threadContext: recovery.context.threadContext }
+        : {}),
       userId: parentTurn.userId,
       conversation: parentTurn.conversation,
       currentMessageId: buildEventClientMessageSeed(params.event),
@@ -1558,15 +1596,18 @@ export async function deliverFastAgentParentEventWithLock(
           ? 'present_only'
           : 'default',
       platformEventVisibility:
+        params.event.type === 'inference_retry_resume' ||
         params.event.type === 'pull_request_feedback' ||
         params.event.type === 'pull_request_conflict_detected' ||
         params.event.type === 'automation_triggered'
           ? 'required'
           : 'optional',
       platformEventKind:
-        params.event.type === 'automation_triggered'
-          ? 'automation'
-          : 'delegated_task',
+        params.event.type === 'inference_retry_resume'
+          ? 'inference_retry'
+          : params.event.type === 'automation_triggered'
+            ? 'automation'
+            : 'delegated_task',
       ...(params.event.type === 'pull_request_feedback' &&
       params.event.reviewActionDeliveryId &&
       params.event.suggestedActionQuestion

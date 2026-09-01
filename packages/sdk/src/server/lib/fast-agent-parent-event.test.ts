@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   acquireRootBindingLock: vi.fn(),
   releaseRootBindingLock: vi.fn(),
   answerQuestion: vi.fn(),
+  claimRetryRecovery: vi.fn(),
   createLauncher: vi.fn(),
   launchTask: vi.fn(),
   findSession: vi.fn(),
@@ -73,6 +74,7 @@ vi.mock('@roomote/communication', async (importOriginal) => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  claimFastAgentInferenceRetryRecovery: mocks.claimRetryRecovery,
   resolveApiBaseUrl: () => 'https://roomote.example.com',
   fastAgentConversationRepository: {
     findById: mocks.findSession,
@@ -284,6 +286,7 @@ describe('deliverFastAgentParentEvent', () => {
       completionEmoji: 'white_check_mark',
     });
     mocks.resolveUserMcpServerConfigs.mockResolvedValue({});
+    mocks.claimRetryRecovery.mockResolvedValue(null);
     mocks.postSlackSuggestions.mockResolvedValue(undefined);
     mocks.postDiscordSuggestions.mockResolvedValue(undefined);
     mocks.postTeamsSuggestions.mockResolvedValue(undefined);
@@ -371,6 +374,46 @@ describe('deliverFastAgentParentEvent', () => {
           message: 'The proof is ready.',
           imageArtifactIds: ['artifact-1', 'artifact-1'],
         }),
+    );
+  });
+
+  it('resumes an eligible inference retry from its canonical request', async () => {
+    mocks.claimRetryRecovery.mockResolvedValue({
+      question: 'Investigate the transient failure.',
+      images: ['data:image/png;base64,cHJvb2Y='],
+      originalTurnId: 'original-turn',
+      context: {
+        currentMessageAgentContext: 'Attachment text',
+        threadContext: [{ ts: '99.1', user: 'U1', text: 'Earlier context' }],
+      },
+    });
+    const retryEvent = {
+      type: 'inference_retry_resume' as const,
+      eventId: 'original-turn:retry-notice:0',
+      retryEventId: 'original-turn:retry-notice:0',
+    };
+
+    await expect(
+      deliverFastAgentParentEvent({ parent, event: retryEvent }),
+    ).resolves.toBe('delivered');
+
+    expect(mocks.claimRetryRecovery).toHaveBeenCalledWith({
+      conversationId: parent.sessionId,
+      retryEventId: retryEvent.retryEventId,
+      recoveryEventId:
+        'fast-parent-inference-retry:original-turn:retry-notice:0',
+    });
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        images: ['data:image/png;base64,cHJvb2Y='],
+        currentMessageAgentContext: 'Attachment text',
+        threadContext: [{ ts: '99.1', user: 'U1', text: 'Earlier context' }],
+        platformEventKind: 'inference_retry',
+        platformEventVisibility: 'required',
+        question: expect.stringContaining(
+          '"originalRequest":"Investigate the transient failure."',
+        ),
+      }),
     );
   });
 

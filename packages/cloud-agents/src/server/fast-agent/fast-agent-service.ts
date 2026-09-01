@@ -82,6 +82,7 @@ import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import { RemoteFastAgentSettingsSkillSource } from './fast-agent-settings-skill-source';
 import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill-invocation';
 import {
+  disableFastAgentInferenceRetryRecovery,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   reconcileFastAgentInferenceRetryNotices,
 } from './fast-agent-conversation-repository';
@@ -949,6 +950,7 @@ export async function answerFastAgentQuestion({
     | { eventId: string; turnSeq: number }
     | undefined;
   let inferenceRetryAttempted = false;
+  let inferenceRetryRecoveryEligible = false;
   // Anchors the silent-recovery window: set on the first retry signal of a
   // continuous no-progress stretch, cleared whenever the provider makes
   // visible progress again (completed message or successful attempt).
@@ -1013,6 +1015,8 @@ export async function answerFastAgentQuestion({
     platformMessageId,
     nativeMessage,
     inferenceRetryNotice = false,
+    inferenceRetryRecoveryEligible: retryRecoveryEligible,
+    inferenceRetryRecoveryContext: retryRecoveryContext,
     visibleInTranscript = true,
   }: {
     reply: FastAgentReply;
@@ -1020,6 +1024,11 @@ export async function answerFastAgentQuestion({
     platformMessageId?: string;
     nativeMessage?: NonTaskOpenCodeCompletedMessage | null;
     inferenceRetryNotice?: boolean;
+    inferenceRetryRecoveryEligible?: boolean;
+    inferenceRetryRecoveryContext?: {
+      currentMessageAgentContext?: string;
+      threadContext?: FastAgentThreadMessage[];
+    };
     visibleInTranscript?: boolean;
   }) =>
     persistCanonicalMessage(
@@ -1040,6 +1049,14 @@ export async function answerFastAgentQuestion({
             ? {
                 inferenceRetryNotice: true,
                 inferenceRetryActive: reply.purpose === 'progress',
+                ...(retryRecoveryEligible !== undefined
+                  ? {
+                      inferenceRetryRecoveryEligible: retryRecoveryEligible,
+                    }
+                  : {}),
+                ...(retryRecoveryContext
+                  ? { inferenceRetryRecoveryContext: retryRecoveryContext }
+                  : {}),
               }
             : {}),
           ...(platformMessageId ? { platformMessageId } : {}),
@@ -1536,20 +1553,51 @@ export async function answerFastAgentQuestion({
       inferenceRetryAttempted = true;
       const message = formatFastAgentInferenceRetryNotice(notice);
       const reply = { purpose: 'progress' as const, message };
+      inferenceRetryRecoveryEligible =
+        substantiveHumanInput &&
+        !nativeToolInvoked &&
+        (conversation.surface === 'web' ||
+          conversation.surface === 'slack' ||
+          conversation.surface === 'discord');
 
       // Silence is a presentation choice, not permission to keep recovery
       // entirely in memory. Persist the first retry immediately so an owner
       // crash during quiet backoff leaves a durable marker for the expired-
-      // lease reconciler to turn into a terminal interruption.
+      // lease reconciler to recover when replay is still side-effect-free.
       inferenceRetryCanonicalEvent ??= allocateCanonicalEvent(
         `retry-notice:${nextRetryNoticeOrdinal++}`,
       );
-      await persistAssistantReply({
+      const persistedRetry = await persistAssistantReply({
         reply,
         event: inferenceRetryCanonicalEvent,
         inferenceRetryNotice: true,
+        inferenceRetryRecoveryEligible,
+        ...(inferenceRetryRecoveryEligible
+          ? {
+              inferenceRetryRecoveryContext: {
+                ...(currentMessageAgentContext
+                  ? { currentMessageAgentContext }
+                  : {}),
+                ...(threadContext.some(
+                  (message) => message.ts !== currentMessageId,
+                )
+                  ? {
+                      threadContext: threadContext.filter(
+                        (message) => message.ts !== currentMessageId,
+                      ),
+                    }
+                  : {}),
+              },
+            }
+          : {}),
         visibleInTranscript: false,
       });
+      // Automatic recovery requires a durable marker. If persistence failed,
+      // shutdown must keep the existing terminal fallback instead of assuming
+      // a successor can discover this turn.
+      if (!persistedRetry) {
+        inferenceRetryRecoveryEligible = false;
+      }
 
       if (platformEvent) return;
 
@@ -1581,6 +1629,7 @@ export async function answerFastAgentQuestion({
           event: inferenceRetryCanonicalEvent,
           platformMessageId: inferenceRetryReply?.messageId,
           inferenceRetryNotice: true,
+          inferenceRetryRecoveryEligible,
         });
       }
       diagnostics.recordVisibleReply({ assistantResponse: false });
@@ -1635,6 +1684,16 @@ export async function answerFastAgentQuestion({
               'Post an acknowledgement with send_chat_reply before this action.',
           }
         : null;
+    const disableInferenceRetryRecoveryBeforeTool = async () => {
+      nativeToolInvoked = true;
+      inferenceRetryRecoveryEligible = false;
+      if (canonicalConversationId && inferenceRetryCanonicalEvent) {
+        await disableFastAgentInferenceRetryRecovery({
+          conversationId: canonicalConversationId,
+          retryEventId: inferenceRetryCanonicalEvent.eventId,
+        });
+      }
+    };
 
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
@@ -1647,7 +1706,7 @@ export async function answerFastAgentQuestion({
         if (closedError) return closedError;
         const ownershipError = requireLockOwnership();
         if (ownershipError) return ownershipError;
-        nativeToolInvoked = true;
+        await disableInferenceRetryRecoveryBeforeTool();
         turnProgressMarker += 1;
 
         if (platformEventHandling === 'present_only') {
@@ -1816,7 +1875,7 @@ export async function answerFastAgentQuestion({
         if (closedError) return closedError;
         const ownershipError = requireLockOwnership();
         if (ownershipError) return ownershipError;
-        nativeToolInvoked = true;
+        await disableInferenceRetryRecoveryBeforeTool();
         turnProgressMarker += 1;
 
         if (
@@ -2677,7 +2736,14 @@ export async function answerFastAgentQuestion({
         if (canonicalConversationId) {
           fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
         }
-        if (!lockOwnershipLost && inferenceRetryReply) {
+        if (
+          shutdownInterrupted &&
+          inferenceRetryRecoveryEligible &&
+          inferenceRetryCanonicalEvent
+        ) {
+          // Leave the durable marker active. Once this process releases its
+          // Session lease, reconciliation will enqueue a new lock owner.
+        } else if (!lockOwnershipLost && inferenceRetryReply) {
           await replaceInferenceRetryReply(
             {
               purpose: 'closeout',
@@ -2789,7 +2855,12 @@ export async function answerFastAgentQuestion({
           );
         },
       );
-      if (inferenceRetryAttempted) {
+      const recoveryWillBeReenqueued =
+        signal?.aborted &&
+        signal.reason instanceof FastAgentProcessShutdownError &&
+        inferenceRetryRecoveryEligible &&
+        inferenceRetryCanonicalEvent;
+      if (inferenceRetryAttempted && !recoveryWillBeReenqueued) {
         await reconcileFastAgentInferenceRetryNotices(
           canonicalConversationId,
         ).catch((error) => {
