@@ -8,7 +8,6 @@ import {
   deriveSessionStatus,
   eq,
   exists,
-  fastAgentMessages,
   getSessionForFastConversation,
   ilike,
   inArray,
@@ -16,10 +15,10 @@ import {
   isNull,
   lt,
   or,
-  sessionParticipants,
   sessions,
   sessionTasks,
   sql,
+  type SQL,
   tasks,
 } from '@roomote/db/server';
 import { getOrCreateFastAgentSession } from '@roomote/cloud-agents/server';
@@ -47,44 +46,14 @@ type SessionContext = Context<{
   Variables: Variables & { mcpAuth: McpAuth };
 }>;
 
-function sessionAccessCondition(userId: string) {
-  return or(
-    eq(sessions.ownerUserId, userId),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(sessionParticipants)
-        .where(
-          and(
-            eq(sessionParticipants.sessionId, sessions.id),
-            eq(sessionParticipants.userId, userId),
-          ),
-        ),
-    ),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(fastAgentMessages)
-        .where(
-          and(
-            eq(fastAgentMessages.conversationId, sessions.fastConversationId),
-            sql`${fastAgentMessages.metadata} ->> 'userId' = ${userId}`,
-          ),
-        ),
-    ),
-  );
-}
-
-async function findAccessibleSession(userId: string, sessionId: string) {
+// Sessions follow the same visibility rules as tasks: every authenticated
+// user of the deployment can read and interact with every visible Session.
+async function findAccessibleSession(sessionId: string) {
   const [session] = await db
     .select()
     .from(sessions)
     .where(
-      and(
-        eq(sessions.id, sessionId),
-        eq(sessions.visibility, 'visible'),
-        sessionAccessCondition(userId),
-      ),
+      and(eq(sessions.id, sessionId), eq(sessions.visibility, 'visible')),
     )
     .limit(1);
   return session ?? null;
@@ -106,7 +75,7 @@ async function sendSessionMessage(c: SessionContext): Promise<Response> {
   if (!message) return c.json({ error: 'message is required' }, 400);
 
   try {
-    const session = await findAccessibleSession(userId, sessionId);
+    const session = await findAccessibleSession(sessionId);
     if (!session) return c.json({ error: 'Session not found' }, 404);
     if (!session.fastConversationId) {
       return c.json({ error: 'Session has no conversation to continue' }, 409);
@@ -281,10 +250,9 @@ async function searchSessions(c: SessionContext): Promise<Response> {
   }
 
   try {
-    const conditions = [
+    const conditions: Array<SQL | undefined> = [
       eq(sessions.visibility, 'visible'),
       isNull(sessions.archivedAt),
-      sessionAccessCondition(userId),
     ];
     if (sessionStatus) {
       conditions.push(eq(sessions.cachedStatus, sessionStatus));
@@ -357,7 +325,7 @@ async function getSessionSummary(c: SessionContext): Promise<Response> {
   if (!sessionId) return c.json({ error: 'sessionId is required' }, 400);
 
   try {
-    const session = await findAccessibleSession(userId, sessionId);
+    const session = await findAccessibleSession(sessionId);
     if (!session) return c.json({ error: 'Session not found' }, 404);
     const childTasks = await getChildTasks([session.id]);
     const response = serializeSession(
@@ -378,7 +346,7 @@ async function getSessionMessages(c: SessionContext): Promise<Response> {
   if (!sessionId) return c.json({ error: 'sessionId is required' }, 400);
 
   try {
-    const session = await findAccessibleSession(userId, sessionId);
+    const session = await findAccessibleSession(sessionId);
     if (!session) return c.json({ error: 'Session not found' }, 404);
     const parsedLimit = Number(c.req.query('limit') ?? 100);
     if (!Number.isFinite(parsedLimit)) {
