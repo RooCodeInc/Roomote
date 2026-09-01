@@ -202,6 +202,10 @@ async function claimTeamsActivity(activityId: string): Promise<boolean> {
   return Boolean(claimed);
 }
 
+async function releaseTeamsActivityClaim(activityId: string): Promise<void> {
+  await getRedis().del(`${TEAMS_ACTIVITY_DEDUP_PREFIX}${activityId}`);
+}
+
 function getTeamsAuthTokenKey(token: string): string {
   return `${TEAMS_AUTH_TOKEN_PREFIX}${token}`;
 }
@@ -2117,28 +2121,30 @@ teams.post('/', async (c) => {
     if (!question) {
       return c.json({ ok: true, queued: false, reason: 'fast_message_empty' });
     }
-    void continueFastAgentSurfaceReply({
-      sessionId: fastSession.id,
-      userId: mappedUserId,
-      senderDisplayName: activity.from?.name?.trim() || null,
-      question,
-      currentMessageId: queuedMessage.ts,
-      ...(fastMessage.images ? { images: fastMessage.images } : {}),
-    })
-      .then((continued) => {
-        if (!continued) {
-          apiLogger.warn(
-            `[teams] Fast session ${fastSession.id} could not resolve an active delivery route`,
-          );
-        }
-      })
-      .catch((error) => {
-        apiLogger.error(
-          `[teams] Fast session ${fastSession.id} continuation failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
+    let continued: boolean;
+    try {
+      continued = await queueFastAgentSurfaceReply({
+        sessionId: fastSession.id,
+        userId: mappedUserId,
+        senderDisplayName: activity.from?.name?.trim() || null,
+        question,
+        currentMessageId: queuedMessage.ts,
+        ...(fastMessage.images ? { images: fastMessage.images } : {}),
       });
+    } catch (error) {
+      await releaseTeamsActivityClaim(queuedMessage.ts).catch(() => {});
+      throw error;
+    }
+    if (!continued) {
+      apiLogger.warn(
+        `[teams] Fast session ${fastSession.id} could not resolve an active delivery route`,
+      );
+      return c.json({
+        ok: true,
+        queued: false,
+        reason: 'fast_session_delivery_unavailable',
+      });
+    }
     return c.json({ ok: true, fastAnswered: true, fastContinued: true });
   }
   const activeRun = await findActiveTeamsTaskRun({

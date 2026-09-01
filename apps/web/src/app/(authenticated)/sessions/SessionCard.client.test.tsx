@@ -118,7 +118,7 @@ describe('SessionCard', () => {
     expect(screen.getByLabelText('Unread activity')).toBeInTheDocument();
   });
 
-  it('renders the list and board status indicators', () => {
+  it('only renders list and board indicators for attention states', () => {
     const session = {
       id: 'session-4',
       title: 'Review status indicators',
@@ -141,12 +141,8 @@ describe('SessionCard', () => {
     const { container, rerender } = render(
       <SessionCard session={session} viewerUserId="user-1" />,
     );
-    const spinner = container.querySelector('.animate-spin');
-    expect(spinner).toBeInTheDocument();
-    expect(spinner?.parentElement).toHaveTextContent('Web');
-    expect(spinner?.parentElement).not.toHaveTextContent('started a session');
-    expect(screen.queryByText('active')).not.toBeInTheDocument();
-    expect(screen.getByText('Active')).toHaveClass('sr-only');
+    expect(container.querySelector('.animate-spin')).not.toBeInTheDocument();
+    expect(screen.queryByText('Active')).not.toBeInTheDocument();
 
     rerender(
       <SessionCard

@@ -20,8 +20,12 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   getSessionForFastConversation,
+  isNull,
   retireCanonicalPrReviewActionsForDestinationKey,
   sessions,
+  sessionTasks,
+  sql,
+  taskRuns,
 } from '@roomote/db/server';
 import {
   formatErrorForLog,
@@ -42,6 +46,7 @@ import {
   currentEpochSeconds,
   signArtifactId,
 } from '@/lib/server/artifact-signature';
+import { notifySourceTaskArtifactBuild } from '../task-runs';
 
 const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
 
@@ -118,8 +123,27 @@ type WebFastAgentTurnInput = {
    * kickoff persists its prompt row under the turn lock, so the re-check
    * under the same lock is race-free — and unlike a transcript-emptiness
    * probe it is not fooled by an early human reply in the new session. */
-  skipIfEventExists?: { conversationId: string; eventId: string };
+  skipIfEventExists?: {
+    conversationId: string;
+    eventId: string;
+    artifactBuildLaunchId?: string;
+  };
 };
+
+function findArtifactBuildTask(sessionId: string, launchId: string) {
+  return db
+    .select({ taskId: sessionTasks.taskId })
+    .from(sessionTasks)
+    .innerJoin(taskRuns, eq(taskRuns.taskId, sessionTasks.taskId))
+    .where(
+      and(
+        eq(sessionTasks.sessionId, sessionId),
+        sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${`artifact-build:${launchId}`}`,
+        isNull(taskRuns.canceledAt),
+      ),
+    )
+    .limit(1);
+}
 
 /**
  * Run one web-initiated Fast turn after the caller's response is ready. The
@@ -168,10 +192,33 @@ async function runWebFastAgentTurn({
         )
         .limit(1);
       if (existingEvent) {
-        console.log(
-          `[Fast Web] Skipping duplicate turn for ${conversation.conversationId}: event ${skipIfEventExists.eventId} already ran.`,
-        );
-        return;
+        if (skipIfEventExists.artifactBuildLaunchId) {
+          const unifiedSession = await getSessionForFastConversation(
+            db,
+            skipIfEventExists.conversationId,
+          );
+          const [existingTask] = unifiedSession
+            ? await findArtifactBuildTask(
+                unifiedSession.id,
+                skipIfEventExists.artifactBuildLaunchId,
+              )
+            : [];
+          if (!existingTask) {
+            console.log(
+              `[Fast Web] Recovering incomplete turn for ${conversation.conversationId}: event ${skipIfEventExists.eventId} exists without an attached task.`,
+            );
+          } else {
+            console.log(
+              `[Fast Web] Skipping duplicate turn for ${conversation.conversationId}: event ${skipIfEventExists.eventId} already launched task ${existingTask.taskId}.`,
+            );
+            return;
+          }
+        } else {
+          console.log(
+            `[Fast Web] Skipping duplicate turn for ${conversation.conversationId}: event ${skipIfEventExists.eventId} already ran.`,
+          );
+          return;
+        }
       }
     }
 
@@ -228,12 +275,24 @@ export async function startFastSessionCommand(
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
     conversationId?: string;
+    artifactBuild?: {
+      launchId: string;
+      environmentId: string;
+      branch?: string;
+      taskModel: string;
+      sourceTaskId: string;
+      sourceArtifactId: string;
+      sourceArtifactPath: string;
+      sourceArtifactVersion: number;
+    };
   },
 ): Promise<{ sessionId: string; fastConversationId?: string }> {
   const conversation: WebFastAgentConversation = {
     surface: 'web',
     workspaceId: auth.userId,
-    conversationId: input.conversationId ?? randomUUID(),
+    conversationId: input.artifactBuild
+      ? `artifact-build:${input.artifactBuild.launchId}`
+      : (input.conversationId ?? randomUUID()),
   };
 
   const session = await getOrCreateFastAgentSession({
@@ -244,17 +303,81 @@ export async function startFastSessionCommand(
     model: null,
     reasoningEffort: null,
   });
+  const unifiedSession = await getSessionForFastConversation(db, session.id);
 
-  if (session.created) {
+  const kickoffTurnId =
+    input.conversationId || input.artifactBuild
+      ? `web-kickoff:${session.id}`
+      : undefined;
+  const kickoffPromptEventId = kickoffTurnId
+    ? `${kickoffTurnId}:user`
+    : undefined;
+  let scheduleKickoff = session.created;
+  if (!scheduleKickoff && kickoffPromptEventId) {
+    const [existingKickoff] = await db
+      .select({ id: fastAgentMessages.id })
+      .from(fastAgentMessages)
+      .where(
+        and(
+          eq(fastAgentMessages.conversationId, session.id),
+          eq(fastAgentMessages.eventId, kickoffPromptEventId),
+        ),
+      )
+      .limit(1);
+    if (!existingKickoff) {
+      scheduleKickoff = true;
+    } else if (input.artifactBuild) {
+      const [existingTask] = unifiedSession
+        ? await findArtifactBuildTask(
+            unifiedSession.id,
+            input.artifactBuild.launchId,
+          )
+        : [];
+      scheduleKickoff = !existingTask;
+    }
+  }
+
+  if (scheduleKickoff) {
+    const launchTask = createFastAgentWebTaskLauncher({
+      userId: auth.userId,
+      conversation,
+    });
+    const artifactBuild = input.artifactBuild;
+    const attributedLaunchTask = artifactBuild
+      ? async (params: Parameters<typeof launchTask>[0]) => {
+          const result = await launchTask({
+            ...params,
+            environmentId: artifactBuild.environmentId,
+            branch: artifactBuild.branch,
+            launchIdempotencyKey: `artifact-build:${artifactBuild.launchId}`,
+            model: artifactBuild.taskModel,
+          });
+          if (result.success) {
+            try {
+              await notifySourceTaskArtifactBuild({
+                auth,
+                sourceTaskId: artifactBuild.sourceTaskId,
+                sourceArtifactId: artifactBuild.sourceArtifactId,
+                sourceArtifactPath: artifactBuild.sourceArtifactPath,
+                sourceArtifactVersion: artifactBuild.sourceArtifactVersion,
+                newTaskId: result.taskId,
+              });
+            } catch (error) {
+              console.error(
+                `[startFastSession] Failed to notify Slack threads for source task ${artifactBuild.sourceTaskId}: ${formatErrorForLog(error)}`,
+              );
+            }
+          }
+          return result;
+        }
+      : launchTask;
+
     scheduleWebFastAgentTurn({
       userId: auth.userId,
       delivery: {
         conversation,
         adapter: {
-          launchTask: createFastAgentWebTaskLauncher({
-            userId: auth.userId,
-            conversation,
-          }),
+          launchTask: attributedLaunchTask,
           postReply: async () => {},
         },
       },
@@ -263,10 +386,21 @@ export async function startFastSessionCommand(
       attachmentTexts: input.attachmentTexts,
       model: settings.model,
       reasoningEffort: settings.reasoningEffort,
+      ...(kickoffTurnId && kickoffPromptEventId
+        ? {
+            currentMessageId: kickoffTurnId,
+            skipIfEventExists: {
+              conversationId: session.id,
+              eventId: kickoffPromptEventId,
+              ...(artifactBuild
+                ? { artifactBuildLaunchId: artifactBuild.launchId }
+                : {}),
+            },
+          }
+        : {}),
     });
   }
 
-  const unifiedSession = await getSessionForFastConversation(db, session.id);
   return {
     sessionId: unifiedSession?.id ?? session.id,
     fastConversationId: session.id,

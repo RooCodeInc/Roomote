@@ -1,4 +1,4 @@
-import { db, eq, taskRuns } from '@roomote/db/server';
+import { db, eq, getTaskHumanOwnerUserIds, taskRuns } from '@roomote/db/server';
 
 interface ActorScopedAuthContext {
   /**
@@ -20,7 +20,8 @@ export interface ActorScopedUserContext {
  * token's userId is only mint-time attribution. Live-task steers and
  * follow-ups switch `task_runs.actingUserId` to the latest human who is
  * speaking to the task, so actor-scoped integration lookups follow that
- * live value when present and fall back to the token's mint-time user.
+ * live value when present, then the token's mint-time user, then the trusted
+ * human owner persisted on the task's canonical Session.
  *
  * Because this PREFERS the live `actingUserId`, that column is a credential-
  * resolution input and must only ever be written by trusted server-side
@@ -47,6 +48,7 @@ export async function resolveActorScopedUserContext(
   const taskRun = await db.query.taskRuns.findFirst({
     columns: {
       actingUserId: true,
+      taskId: true,
     },
     where: eq(taskRuns.id, auth.runId),
   });
@@ -55,7 +57,11 @@ export async function resolveActorScopedUserContext(
     return fallback;
   }
 
-  return {
-    userId: taskRun.actingUserId ?? auth.userId ?? undefined,
-  };
+  const liveUserId = taskRun.actingUserId ?? auth.userId ?? undefined;
+  if (liveUserId) {
+    return { userId: liveUserId };
+  }
+
+  const [ownerUserId] = await getTaskHumanOwnerUserIds(db, taskRun.taskId);
+  return { userId: ownerUserId };
 }

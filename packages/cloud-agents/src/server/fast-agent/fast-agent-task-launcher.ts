@@ -39,6 +39,8 @@ export function createFastAgentTaskLauncher(
     buildTask: (input: {
       prompt: string;
       environmentId: string | null;
+      branch?: string;
+      launchIdempotencyKey?: string;
       model?: string | null;
       parentSessionId: string;
     }) => StandardTask | Promise<StandardTask>;
@@ -48,6 +50,8 @@ export function createFastAgentTaskLauncher(
     prompt,
     images,
     environmentId,
+    branch,
+    launchIdempotencyKey,
     model,
     parentSessionId,
     postKickoff,
@@ -55,6 +59,8 @@ export function createFastAgentTaskLauncher(
     const builtTask = await params.buildTask({
       prompt,
       environmentId,
+      branch,
+      launchIdempotencyKey,
       model,
       parentSessionId,
     });
@@ -211,7 +217,14 @@ export function createFastAgentWebTaskLauncher(params: {
     surface: 'web',
     taskUrlCampaign: 'fast-delegation',
     rendersTaskLink: true,
-    buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
+    buildTask: ({
+      prompt,
+      environmentId,
+      branch,
+      launchIdempotencyKey,
+      model,
+      parentSessionId,
+    }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
         repo: ALL_REPOSITORIES,
@@ -223,6 +236,8 @@ export function createFastAgentWebTaskLauncher(params: {
         ...(environmentId && environmentId !== ALL_REPOSITORIES
           ? { environmentId }
           : {}),
+        ...(branch ? { branch } : {}),
+        ...(launchIdempotencyKey ? { launchIdempotencyKey } : {}),
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
