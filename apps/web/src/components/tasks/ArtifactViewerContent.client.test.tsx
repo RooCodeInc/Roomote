@@ -202,6 +202,7 @@ vi.mock('./BuildArtifactConfirmDialog', () => ({
     open: boolean;
     onConfirm: (values: {
       repo: string;
+      branch?: string;
       environmentId: string;
       modelId: string;
     }) => void;
@@ -211,6 +212,7 @@ vi.mock('./BuildArtifactConfirmDialog', () => ({
         onClick={() =>
           onConfirm({
             repo: 'org/repo',
+            branch: 'feature/source-branch',
             environmentId: 'environment-1',
             modelId: 'model-1',
           })
@@ -481,6 +483,7 @@ describe('ArtifactViewerContent', () => {
       artifactBuild: {
         launchId: '11111111-1111-4111-8111-111111111111',
         environmentId: 'environment-1',
+        branch: 'feature/source-branch',
         taskModel: 'model-1',
         sourceTaskId: 'task-1',
         sourceArtifactId: 'artifact-2',

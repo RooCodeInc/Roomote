@@ -40,6 +40,7 @@ describe('Fast session input schemas', () => {
         artifactBuild: {
           launchId: '11111111-1111-4111-8111-111111111111',
           environmentId: '33333333-3333-4333-8333-333333333333',
+          branch: 'feature/source-branch',
           taskModel: 'model-1',
           sourceTaskId: 'task-1',
           sourceArtifactId: '22222222-2222-4222-8222-222222222222',
@@ -52,6 +53,7 @@ describe('Fast session input schemas', () => {
       artifactBuild: {
         launchId: '11111111-1111-4111-8111-111111111111',
         environmentId: '33333333-3333-4333-8333-333333333333',
+        branch: 'feature/source-branch',
         taskModel: 'model-1',
         sourceTaskId: 'task-1',
         sourceArtifactId: '22222222-2222-4222-8222-222222222222',

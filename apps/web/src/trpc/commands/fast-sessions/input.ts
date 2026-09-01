@@ -58,6 +58,7 @@ export const startFastSessionInputSchema = z
       .object({
         launchId: z.string().uuid(),
         environmentId: z.string().uuid(),
+        branch: z.string().trim().min(1).optional(),
         taskModel: z.string().trim().min(1),
         sourceTaskId: z.string().min(1),
         sourceArtifactId: z.string().uuid(),

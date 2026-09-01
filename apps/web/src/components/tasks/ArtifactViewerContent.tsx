@@ -306,6 +306,7 @@ export function ArtifactViewerContent({
       artifact.id,
       artifact.version,
       values.environmentId,
+      values.branch,
       values.modelId,
     ]);
     if (buildSessionLaunchRef.current?.key !== launchKey) {
@@ -321,6 +322,7 @@ export function ArtifactViewerContent({
       artifactBuild: {
         launchId: buildSessionLaunchRef.current.launchId,
         environmentId: values.environmentId ?? '',
+        branch: values.branch,
         taskModel: values.modelId,
         sourceTaskId: taskId,
         sourceArtifactId: artifact.id,

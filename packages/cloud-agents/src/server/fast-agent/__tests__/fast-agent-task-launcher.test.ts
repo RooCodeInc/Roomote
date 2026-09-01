@@ -410,6 +410,7 @@ describe('createFastAgentWebTaskLauncher', () => {
     })({
       prompt: 'Fix checkout',
       environmentId: null,
+      branch: 'feature/source-branch',
       parentSessionId: '11111111-1111-4111-8111-111111111111',
       postKickoff,
     });
@@ -419,5 +420,15 @@ describe('createFastAgentWebTaskLauncher', () => {
       taskUrl: 'https://roomote.example/task/task-1',
       taskLinkRendered: true,
     });
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            branch: 'feature/source-branch',
+          }),
+        }),
+      }),
+      expect.any(Object),
+    );
   });
 });

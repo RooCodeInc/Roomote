@@ -232,6 +232,7 @@ export async function startFastSessionCommand(
     artifactBuild?: {
       launchId: string;
       environmentId: string;
+      branch?: string;
       taskModel: string;
       sourceTaskId: string;
       sourceArtifactId: string;
@@ -290,6 +291,7 @@ export async function startFastSessionCommand(
           const result = await launchTask({
             ...params,
             environmentId: artifactBuild.environmentId,
+            branch: artifactBuild.branch,
             model: artifactBuild.taskModel,
           });
           if (result.success) {
