@@ -59,7 +59,6 @@ vi.mock('@roomote/cloud-agents', () => ({
   }) => [text, ...attachmentTexts].filter(Boolean).join('\n\n'),
   isRoomoteTextExtractableAttachment: ({ mimeType }: { mimeType?: string }) =>
     mimeType?.startsWith('text/') ?? false,
-  stripLeadingSlackProductMention: (text: string) => text,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -136,6 +135,43 @@ describe('processFastAgentMessage', () => {
         return 'Doing well.';
       },
     );
+  });
+
+  it.each([
+    ['Roomote can you hear me?', 'Roomote can you hear me?'],
+    ['Roomote, can you hear me?', 'Roomote, can you hear me?'],
+    ['Roomote: can you hear me?', 'Roomote: can you hear me?'],
+    ['Hey Roomote, can you hear me?', 'Hey Roomote, can you hear me?'],
+    ['<@U_BOT> can you hear me?', '<@U_BOT> can you hear me?'],
+    ['<@U_BOT>, can you hear me?', '<@U_BOT>, can you hear me?'],
+  ])('passes Slack text %j to Fast as %j', async (text, expectedQuestion) => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (value: string) => value),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text,
+        ts: '100.001',
+        thread_ts: '100.000',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+      isExistingConversation: true,
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ question: expectedQuestion }),
+    );
+    expect(slack.normalizeIncomingText).not.toHaveBeenCalled();
   });
 
   it('durably steers an active Fast generation instead of waiting for its lock', async () => {
@@ -260,9 +296,9 @@ describe('processFastAgentMessage', () => {
         type: 'message',
         channel: 'D123',
         user: 'U123',
-        authoredText: '!fast investigate this',
+        authoredText: '<@U_BOT> !fast investigate this',
         agentContext: 'Slack block text:\nState: New',
-        text: '!fast investigate this\n\nSlack block text:\nState: New',
+        text: '<@U_BOT> !fast investigate this\n\nSlack block text:\nState: New',
         ts: '100.001',
       } as never,
       slack: slack as never,
@@ -287,6 +323,7 @@ describe('processFastAgentMessage', () => {
         ],
       }),
     );
+    expect(slack.normalizeIncomingText).not.toHaveBeenCalled();
   });
 
   it('resumes the canonical Fast session bound to a delayed Slack root', async () => {
