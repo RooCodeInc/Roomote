@@ -1,5 +1,6 @@
 import {
   db,
+  customAutomations,
   eq,
   ensureAutomationRows,
   fastAgentConversations,
@@ -28,6 +29,7 @@ import {
 const createdTaskIds: string[] = [];
 const createdSessionIds: string[] = [];
 const createdConversationIds: string[] = [];
+const createdCustomAutomationIds: string[] = [];
 const createdUserIds: string[] = [];
 
 afterEach(async () => {
@@ -41,6 +43,11 @@ afterEach(async () => {
     await db
       .delete(fastAgentConversations)
       .where(eq(fastAgentConversations.id, createdConversationIds.pop()!));
+  }
+  while (createdCustomAutomationIds.length > 0) {
+    await db
+      .delete(customAutomations)
+      .where(eq(customAutomations.id, createdCustomAutomationIds.pop()!));
   }
   while (createdUserIds.length > 0) {
     await db.delete(users).where(eq(users.id, createdUserIds.pop()!));
@@ -416,6 +423,50 @@ describe('session helpers', () => {
     await expect(getTaskHumanOwnerUserIds(db, task.id)).resolves.toEqual([
       owner.id,
     ]);
+  });
+
+  it('resolves the creator of a sandbox custom automation task', async () => {
+    await ensureAutomationRows(db);
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+    const [automation] = await db
+      .insert(customAutomations)
+      .values({
+        name: `Night shift ${crypto.randomUUID()}`,
+        prompt: 'Find and launch actionable work.',
+        createdByUserId: owner.id,
+      })
+      .returning();
+    createdCustomAutomationIds.push(automation!.id);
+    const task = await taskFactory.create({
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation: 'custom_automation',
+      actorExternalId: automation!.id,
+    });
+    createdTaskIds.push(task.id);
+    const session = await db.transaction((tx) =>
+      ensureSessionForTask(tx, { taskId: task.id }),
+    );
+    if (session) createdSessionIds.push(session.id);
+
+    expect(session?.ownerKind).toBe('automation');
+    await expect(getTaskHumanOwnerUserIds(db, task.id)).resolves.toEqual([
+      owner.id,
+    ]);
+  });
+
+  it('keeps an unlinked custom automation task ownerless', async () => {
+    await ensureAutomationRows(db);
+    const task = await taskFactory.create({
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation: 'custom_automation',
+      actorExternalId: crypto.randomUUID(),
+    });
+    createdTaskIds.push(task.id);
+
+    await expect(getTaskHumanOwnerUserIds(db, task.id)).resolves.toEqual([]);
   });
 
   it('ignores an unknown Fast conversation id instead of aborting', async () => {

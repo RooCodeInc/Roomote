@@ -4,6 +4,7 @@ import type { TaskGoalStatus, TaskState } from '@roomote/types';
 
 import type { DatabaseOrTransaction } from '../db';
 import {
+  customAutomations,
   sessionParticipants,
   sessions,
   sessionTasks,
@@ -405,24 +406,38 @@ export async function getSessionForTask(
  *
  * The immutable task initiator is authoritative for direct human launches.
  * Automation-delegated tasks instead retain their run-as human through the
- * canonical Session owner, without misclassifying the automation as a user.
+ * canonical Session owner or custom automation creator, without
+ * misclassifying the automation as a user.
  */
 export async function getTaskHumanOwnerUserIds(
   tx: DatabaseOrTransaction,
   taskId: string,
 ): Promise<string[]> {
   const [task] = await tx
-    .select({ initiatorUserId: tasks.initiatorUserId })
+    .select({
+      actorExternalId: tasks.actorExternalId,
+      initiatorAutomation: tasks.initiatorAutomation,
+      initiatorUserId: tasks.initiatorUserId,
+    })
     .from(tasks)
     .where(eq(tasks.id, taskId))
     .limit(1);
   const session = await getSessionForTask(tx, taskId);
+  const [customAutomation] =
+    task?.initiatorAutomation === 'custom_automation' && task.actorExternalId
+      ? await tx
+          .select({ createdByUserId: customAutomations.createdByUserId })
+          .from(customAutomations)
+          .where(eq(customAutomations.id, task.actorExternalId))
+          .limit(1)
+      : [];
 
   return [
     ...new Set(
       [
         task?.initiatorUserId,
         session?.ownerKind === 'user' ? session.ownerUserId : null,
+        customAutomation?.createdByUserId,
       ].filter((userId): userId is string => Boolean(userId)),
     ),
   ];

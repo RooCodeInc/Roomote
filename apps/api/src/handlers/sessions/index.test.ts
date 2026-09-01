@@ -27,6 +27,7 @@ import {
   TaskPayloadKind,
 } from '@roomote/types';
 import {
+  customAutomations,
   db,
   eq,
   ensureAutomationRows,
@@ -50,6 +51,7 @@ const createdSessionIds: string[] = [];
 const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
 const createdConversationIds: string[] = [];
+const createdCustomAutomationIds: string[] = [];
 
 function createApp(userIdOrAuth: string | AuthTokenContext | RunTokenContext) {
   const app = new Hono<{ Variables: Variables }>();
@@ -77,6 +79,11 @@ afterEach(async () => {
     await db
       .delete(fastAgentConversations)
       .where(eq(fastAgentConversations.id, createdConversationIds.pop()!));
+  }
+  while (createdCustomAutomationIds.length > 0) {
+    await db
+      .delete(customAutomations)
+      .where(eq(customAutomations.id, createdCustomAutomationIds.pop()!));
   }
   while (createdUserIds.length > 0) {
     await db.delete(users).where(eq(users.id, createdUserIds.pop()!));
@@ -172,6 +179,62 @@ describe('MCP session routes', () => {
     expect(mocks.getOrCreateFastAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({ userId: owner.id }),
     );
+    expect(mocks.queueFastAgentSurfaceReply).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: owner.id }),
+    );
+  });
+
+  it('starts as the creator of a sandbox custom automation task', async () => {
+    await ensureAutomationRows(db);
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+    const [automation] = await db
+      .insert(customAutomations)
+      .values({
+        name: `Sandbox probe ${crypto.randomUUID()}`,
+        prompt: 'Start follow-on work.',
+        createdByUserId: owner.id,
+      })
+      .returning();
+    createdCustomAutomationIds.push(automation!.id);
+    const parentTask = await taskFactory.create({
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation: 'custom_automation',
+      actorExternalId: automation!.id,
+    });
+    createdTaskIds.push(parentTask.id);
+    const [parentRun] = await db
+      .insert(taskRuns)
+      .values({
+        taskId: parentTask.id,
+        actingUserId: null,
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: '', description: 'Sandbox automation request' },
+      })
+      .returning({ id: taskRuns.id });
+    const sessionId = crypto.randomUUID();
+    const fastConversationId = crypto.randomUUID();
+    mocks.getOrCreateFastAgentSession.mockResolvedValue({
+      id: fastConversationId,
+      created: true,
+    });
+    mocks.getSessionForFastConversation.mockResolvedValue({ id: sessionId });
+    mocks.queueFastAgentSurfaceReply.mockResolvedValue(true);
+
+    const response = await createApp({
+      runId: parentRun!.id,
+      userId: null,
+      principal: 'deployment',
+      tokenType: 'run',
+      version: 1,
+    } as RunTokenContext).request('/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Continue in a Session' }),
+    });
+
+    expect(response.status).toBe(201);
     expect(mocks.queueFastAgentSurfaceReply).toHaveBeenCalledWith(
       expect.objectContaining({ userId: owner.id }),
     );
