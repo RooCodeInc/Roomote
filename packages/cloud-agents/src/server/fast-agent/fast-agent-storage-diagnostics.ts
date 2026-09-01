@@ -4,14 +4,14 @@ import { dirname } from 'node:path';
 
 import { formatErrorForLog } from '@roomote/types';
 
-export type FastAgentStorageExhaustionKind =
+type FastAgentStorageExhaustionKind =
   | 'bytes_and_inodes_exhausted'
   | 'bytes_exhausted'
   | 'inodes_exhausted'
   | 'quota_or_limit'
   | 'unknown';
 
-export type FastAgentStorageDiagnostic = {
+type FastAgentStorageDiagnostic = {
   affectedPath: string;
   filesystemPath: string;
   syscall?: string;
