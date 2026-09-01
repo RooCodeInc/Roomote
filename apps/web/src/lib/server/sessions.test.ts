@@ -44,7 +44,7 @@ describe('unified Session queries', () => {
     syncFastSlackTitle.mockReset();
     syncFastSlackTitle.mockResolvedValue(undefined);
   });
-  it('shares list and detail reads deployment-wide like tasks', async () => {
+  it('opens detail reads to everyone but scopes the list like tasks', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
     const session = await sessionFactory.create({
@@ -53,6 +53,7 @@ describe('unified Session queries', () => {
       title: 'Visible Session',
     });
 
+    // Anyone with the link can open the Session.
     await expect(
       findAccessibleSession({ userId: owner.id, isAdmin: false }, session.id),
     ).resolves.toMatchObject({ id: session.id });
@@ -62,18 +63,29 @@ describe('unified Session queries', () => {
         session.id,
       ),
     ).resolves.toMatchObject({ id: session.id });
-    await expect(
-      findAccessibleSession({ userId: stranger.id, isAdmin: true }, session.id),
-    ).resolves.toMatchObject({ id: session.id });
 
-    const list = await getSessions(
+    // The list defaults mirror /tasks: admins see everything, other users
+    // see only Sessions they own or participate in.
+    const ownerList = await getSessions(
       { userId: owner.id, isAdmin: false },
       { scope: 'all' },
     );
-    expect(list.sessions.map((row) => row.id)).toContain(session.id);
+    expect(ownerList.sessions.map((row) => row.id)).toContain(session.id);
+    const strangerList = await getSessions(
+      { userId: stranger.id, isAdmin: false },
+      { scope: 'all' },
+    );
+    expect(strangerList.sessions.map((row) => row.id)).not.toContain(
+      session.id,
+    );
+    const adminList = await getSessions(
+      { userId: stranger.id, isAdmin: true },
+      { scope: 'all' },
+    );
+    expect(adminList.sessions.map((row) => row.id)).toContain(session.id);
   });
 
-  it('filters recent-session lookups by id', async () => {
+  it('filters recent-session lookups by id without bypassing list scope', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
     const included = await sessionFactory.create({
@@ -91,7 +103,7 @@ describe('unified Session queries', () => {
     const otherOwned = await sessionFactory.create({
       ownerKind: 'user',
       ownerUserId: stranger.id,
-      title: 'Another Included Session',
+      title: 'Outside the list scope',
       activityAt: 200,
     });
 
@@ -100,9 +112,7 @@ describe('unified Session queries', () => {
       { ids: [included.id, otherOwned.id] },
     );
 
-    expect(result.sessions.map((session) => session.id).sort()).toEqual(
-      [included.id, otherOwned.id].sort(),
-    );
+    expect(result.sessions.map((session) => session.id)).toEqual([included.id]);
   });
 
   it('filters Session owners by automation creator values', async () => {
@@ -180,7 +190,7 @@ describe('unified Session queries', () => {
     ]);
   });
 
-  it('lists distinct unarchived sources across the deployment', async () => {
+  it('lists only distinct visible sources within the list scope', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
     await sessionFactory.create({
@@ -188,12 +198,15 @@ describe('unified Session queries', () => {
       ownerUserId: owner.id,
       sourceSurface: 'web',
     });
-    // Archived sessions do not contribute their source; 'telegram' is not used
-    // by any other test in this file.
     await sessionFactory.create({
       ownerKind: 'user',
       ownerUserId: owner.id,
-      sourceSurface: 'telegram',
+      sourceSurface: 'web',
+    });
+    await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      sourceSurface: 'slack',
       archivedAt: new Date(),
     });
     await sessionFactory.create({
@@ -202,13 +215,9 @@ describe('unified Session queries', () => {
       sourceSurface: 'discord',
     });
 
-    const sources = await getSessionSources({
-      userId: owner.id,
-      isAdmin: false,
-    });
-    expect(sources).toContain('web');
-    expect(sources).toContain('discord');
-    expect(sources).not.toContain('telegram');
+    await expect(
+      getSessionSources({ userId: owner.id, isAdmin: false }),
+    ).resolves.toEqual(['web']);
   });
 
   it('aggregates direct and attached-task inference costs exactly once', async () => {
