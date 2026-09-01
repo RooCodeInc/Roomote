@@ -109,6 +109,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   brainSynthesis: 'brain_synthesis',
   chatAudioTranscription: 'chat_audio_transcription',
   chatVideoDescription: 'chat_video_description',
+  composerSuggestionGeneration: 'composer_suggestion_generation',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
   fastAgentQuestionAnswering: 'fast_agent',
   inferenceValidation: 'inference_validation',
@@ -223,6 +224,19 @@ export type NonTaskOpenCodeCompletedMessage = {
   completedAtMs: number | null;
 };
 
+export type NonTaskOpenCodeAssistantMessage = {
+  id: string;
+  sessionId: string;
+  parentId: string | null;
+  createdAtMs: number | null;
+};
+
+export type NonTaskOpenCodeNativeSteer = (input: {
+  messageId: string;
+  text: string;
+  files?: NonTaskPromptFile[];
+}) => Promise<void>;
+
 export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
   env?: Partial<Record<string, string>>;
@@ -230,7 +244,12 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   onMessageCompleted?: (
     message: NonTaskOpenCodeCompletedMessage,
   ) => Promise<void> | void;
+  onAssistantMessageStarted?: (
+    message: NonTaskOpenCodeAssistantMessage,
+  ) => Promise<void> | void;
   onPromptStarted?: () => void;
+  onNativeSteerReady?: (steer: NonTaskOpenCodeNativeSteer) => void;
+  onNativeSteerClosed?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
   permission?: PermissionRuleset;
@@ -794,8 +813,13 @@ async function runNonTaskSdkPrompt(
     ephemeral?: boolean;
     env?: Partial<Record<string, string>>;
     onPromptStarted?: () => void;
+    onNativeSteerReady?: (steer: NonTaskOpenCodeNativeSteer) => void;
+    onNativeSteerClosed?: () => void;
     onMessageCompleted?: (
       message: NonTaskOpenCodeCompletedMessage,
+    ) => Promise<void> | void;
+    onAssistantMessageStarted?: (
+      message: NonTaskOpenCodeAssistantMessage,
     ) => Promise<void> | void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
@@ -966,8 +990,10 @@ async function runNonTaskSdkPrompt(
       rejectSessionError = reject;
     });
     let eventMonitor: Promise<void> | undefined;
+    const observedAssistantMessageIds = new Set<string>();
     const needsEventMonitor = Boolean(
       params.onProviderRetry ||
+      options.onAssistantMessageStarted ||
       options.onSubagentSessionReady ||
       options.trackSessionTreeUsage,
     );
@@ -999,14 +1025,37 @@ async function runNonTaskSdkPrompt(
                   return;
                 }
               } else if (
-                options.trackSessionTreeUsage &&
                 event.type === 'message.updated' &&
                 event.properties.info.role === 'assistant' &&
-                event.properties.info.time.completed !== undefined &&
                 trackedSessionIds.has(event.properties.info.sessionID)
               ) {
-                void recordUsageOnce(event.properties.info);
-                markUsageEventObserved(event.properties.info);
+                const info = event.properties.info;
+                const messageId = asString(info.id);
+                if (
+                  info.sessionID === sessionId &&
+                  messageId &&
+                  !observedAssistantMessageIds.has(messageId)
+                ) {
+                  observedAssistantMessageIds.add(messageId);
+                  try {
+                    await options.onAssistantMessageStarted?.({
+                      id: messageId,
+                      sessionId,
+                      parentId: asString(info.parentID) ?? null,
+                      createdAtMs: asFiniteNumber(info.time.created) ?? null,
+                    });
+                  } catch (error) {
+                    rejectSessionError(error);
+                    return;
+                  }
+                }
+                if (
+                  options.trackSessionTreeUsage &&
+                  info.time.completed !== undefined
+                ) {
+                  void recordUsageOnce(info);
+                  markUsageEventObserved(info);
+                }
               } else if (
                 event.type === 'session.status' &&
                 event.properties.sessionID === sessionId &&
@@ -1100,9 +1149,39 @@ async function runNonTaskSdkPrompt(
         },
         { signal: abortController.signal },
       );
-      const promptResult = needsEventMonitor
-        ? await Promise.race([promptRequest, sessionError])
-        : await promptRequest;
+      options.onNativeSteerReady?.(async (input) => {
+        const result = await client.session.promptAsync(
+          {
+            sessionID: sessionId,
+            directory: sessionDirectory,
+            messageID: input.messageId,
+            parts: [
+              { type: 'text', text: input.text },
+              ...(input.files ?? []).map((file) => ({
+                type: 'file' as const,
+                mime: file.mime,
+                ...(file.filename ? { filename: file.filename } : {}),
+                url: file.url,
+              })),
+            ],
+          },
+          { signal: abortController.signal },
+        );
+        if (result.error) {
+          throw new NonTaskOpenCodePromptError(
+            result.error,
+            'OpenCode native Fast steer failed',
+          );
+        }
+      });
+      let promptResult: Awaited<typeof promptRequest>;
+      try {
+        promptResult = needsEventMonitor
+          ? await Promise.race([promptRequest, sessionError])
+          : await promptRequest;
+      } finally {
+        options.onNativeSteerClosed?.();
+      }
 
       if (promptResult.error || !promptResult.data) {
         if (isOpenCodeSessionMissing(promptResult.error)) {
@@ -1395,6 +1474,9 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       directory: options.directory,
       env: options.env,
       onPromptStarted: options.onPromptStarted,
+      onNativeSteerReady: options.onNativeSteerReady,
+      onNativeSteerClosed: options.onNativeSteerClosed,
+      onAssistantMessageStarted: options.onAssistantMessageStarted,
       onMessageCompleted: options.onMessageCompleted,
       onSessionReady: options.onSessionReady,
       onSubagentSessionReady: options.onSubagentSessionReady,

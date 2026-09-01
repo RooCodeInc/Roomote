@@ -19,6 +19,47 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('guides admins through explicit recurring work and offers automation only when enabled', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      isCurrentUserAdmin: true,
+    });
+
+    expect(prompt).toContain('## Recurring Work and Automations');
+    expect(prompt).toContain('Use `resolve_schedule` before creation');
+    expect(prompt).toContain(
+      'use `list` to check for an equivalent automation',
+    );
+    expect(prompt).toContain('ask one explicit confirmation question');
+    expect(prompt).toContain('By the way — if you want this weekly');
+    expect(prompt).toContain('when in doubt, do not offer');
+  });
+
+  it('suppresses implicit offers for non-admins, automation events, and the deployment kill switch', () => {
+    const nonAdminPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+    const eventPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      isCurrentUserAdmin: true,
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+    });
+    const disabledPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      isCurrentUserAdmin: true,
+      implicitAutomationOffersEnabled: false,
+    });
+
+    for (const prompt of [nonAdminPrompt, eventPrompt, disabledPrompt]) {
+      expect(prompt).not.toContain('By the way — if you want this weekly');
+      expect(prompt).toContain(
+        'Do not proactively offer to save work as an automation on this turn',
+      );
+    }
+    expect(nonAdminPrompt).toContain('provide a copy-pasteable draft');
+  });
+
   it('omits the release identifier when no version is resolved', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
@@ -538,6 +579,12 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       'Do not describe a closed pull request as merged or a merged pull request as merely closed',
+    );
+    expect(prompt).toContain(
+      'A newer authoritative merged or closed pull-request event always takes precedence over an older child-authored report',
+    );
+    expect(prompt).toContain(
+      'Keep useful child findings visible without repeating or endorsing stale claims that the pull request remains open, draft, or unpublished',
     );
     expect(prompt).toContain(
       'When `targetBranch` is absent from the pull request metadata, do not infer or name a destination branch',

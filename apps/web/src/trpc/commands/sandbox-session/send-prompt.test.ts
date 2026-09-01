@@ -106,6 +106,7 @@ import {
   runFactory,
   taskFactory,
   taskRuns,
+  tasks,
   userFactory,
 } from '@roomote/db/server';
 import { RunStatus } from '@roomote/types';
@@ -191,6 +192,7 @@ describe('sendSandboxPromptCommand', () => {
     const user = await userFactory.create({ name: 'DB User' });
     const task = await taskFactory.create({
       initiatorUserId: user.id,
+      activityAt: 1,
     });
 
     await runFactory.create({
@@ -199,6 +201,15 @@ describe('sendSandboxPromptCommand', () => {
       status: RunStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.test',
       result: {},
+    });
+
+    mockSendPromptMutate.mockImplementationOnce(async () => {
+      const [updated] = await db
+        .select({ activityAt: tasks.activityAt })
+        .from(tasks)
+        .where(eq(tasks.id, task.id));
+      expect(updated?.activityAt).toBeGreaterThan(1);
+      return { success: true };
     });
 
     await sendSandboxPromptCommand(

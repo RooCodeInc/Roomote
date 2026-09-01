@@ -52,11 +52,36 @@ function buildAuth(isAdmin: boolean): UserAuthSuccess {
 describe('feature-flags commands', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('returns no experimental flags without a metadata lookup when the config is empty', async () => {
+  it('returns the composer suggestions flag, defaulting to disabled', async () => {
+    mockFindFirst.mockResolvedValue({ metadata: {} });
+
     await expect(getExperimentalFlagsCommand(buildAuth(true))).resolves.toEqual(
-      [],
+      [
+        expect.objectContaining({
+          id: 'composerSuggestions',
+          metadataKey: 'composerSuggestions',
+          value: false,
+          explicitlySet: false,
+          defaultValue: false,
+        }),
+      ],
     );
-    expect(mockFindFirst).not.toHaveBeenCalled();
+  });
+
+  it('reflects an explicitly enabled composer suggestions flag', async () => {
+    mockFindFirst.mockResolvedValue({
+      metadata: { composerSuggestions: true },
+    });
+
+    await expect(getExperimentalFlagsCommand(buildAuth(true))).resolves.toEqual(
+      [
+        expect.objectContaining({
+          id: 'composerSuggestions',
+          value: true,
+          explicitlySet: true,
+        }),
+      ],
+    );
   });
 
   it('still rejects non-admin reads', async () => {

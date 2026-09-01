@@ -21,11 +21,9 @@ import {
   type SlackEvent,
   type SlackNotifier,
 } from '@roomote/slack';
+import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
-  appendAttachmentTextsToPromptText,
-  stripLeadingSlackProductMention,
-} from '@roomote/cloud-agents';
-import {
+  admitFastAgentHumanFollowUp,
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
 } from '@roomote/sdk/server';
@@ -111,22 +109,14 @@ export async function processFastAgentMessage(params: {
   };
   const releaseFastAgentLock = await acquireFastAgentTurnLock({
     conversation: incomingConversation,
+    maxWaitMs: 0,
   });
 
-  if (!releaseFastAgentLock) {
-    params.onRejected?.();
-    console.error(
-      `[SlackWebhook] Fast turn lock did not become available for ${teamId}:${event.channel}:${threadId}`,
-    );
-    return;
-  }
-
-  const normalizedText = stripLeadingSlackProductMention(
-    await slack.normalizeIncomingText(
-      stripLeadingFastCommandMention(event.authoredText ?? event.text),
-    ),
-  );
-  const baseQuestion = extractFastQuestion(normalizedText, continuation) ?? '';
+  const authoredText = event.authoredText ?? event.text;
+  const questionText = continuation
+    ? authoredText
+    : stripLeadingFastCommandMention(authoredText);
+  const baseQuestion = extractFastQuestion(questionText, continuation) ?? '';
 
   let didAddProcessingReaction = false;
   let releaseCanonicalFastAgentLock: Awaited<
@@ -157,22 +147,6 @@ export async function processFastAgentMessage(params: {
       }
     })();
     const conversation = session.conversation;
-    if (
-      conversation.surface !== incomingConversation.surface ||
-      conversation.workspaceId !== incomingConversation.workspaceId ||
-      conversation.conversationId !== incomingConversation.conversationId
-    ) {
-      releaseCanonicalFastAgentLock = await acquireFastAgentTurnLock({
-        conversation,
-      });
-      if (!releaseCanonicalFastAgentLock) {
-        console.error(
-          `[SlackWebhook] Canonical Fast turn lock did not become available for session ${session.id}`,
-        );
-        return;
-      }
-    }
-
     if (!hasExistingConversation) {
       didAddProcessingReaction = await slack.addReaction({
         channel: event.channel,
@@ -180,12 +154,6 @@ export async function processFastAgentMessage(params: {
         name: processingReactionName,
       });
     }
-
-    params.onAccepted?.(() =>
-      (releaseCanonicalFastAgentLock ?? releaseFastAgentLock).abort(
-        new Error('Fast suggestion launch settlement failed.'),
-      ),
-    );
 
     let threadContext: Awaited<ReturnType<typeof slack.fetchThreadMessages>> =
       [];
@@ -247,6 +215,44 @@ export async function processFastAgentMessage(params: {
     const footerContext = await resolveFastSessionReplyFooterContext({
       sessionId: session.id,
     });
+    const needsCanonicalAdmission =
+      !releaseFastAgentLock ||
+      conversation.surface !== incomingConversation.surface ||
+      conversation.workspaceId !== incomingConversation.workspaceId ||
+      conversation.conversationId !== incomingConversation.conversationId;
+    if (needsCanonicalAdmission) {
+      const admission = await admitFastAgentHumanFollowUp({
+        parent: { sessionId: session.id, conversation },
+        event: {
+          type: 'human_follow_up',
+          eventId: event.ts,
+          currentMessageId: event.ts,
+          userId,
+          question,
+          ...(attachments.images.length ? { images: attachments.images } : {}),
+          ...(currentMessage?.username
+            ? { senderDisplayName: currentMessage.username }
+            : {}),
+          ...(event.user ? { senderExternalId: event.user } : {}),
+        },
+      });
+      if (admission.kind !== 'turn') {
+        params.onAccepted?.(admission.abort);
+        return;
+      }
+      releaseCanonicalFastAgentLock = admission.turnLock;
+    }
+    const activeTurnLock =
+      releaseCanonicalFastAgentLock ?? releaseFastAgentLock;
+    if (!activeTurnLock) {
+      params.onRejected?.();
+      return;
+    }
+    params.onAccepted?.(() =>
+      activeTurnLock.abort(
+        new Error('Fast suggestion launch settlement failed.'),
+      ),
+    );
     const responseText = await answerFastAgentQuestion({
       question,
       images: attachments.images,
@@ -257,7 +263,7 @@ export async function processFastAgentMessage(params: {
       apiBaseUrl,
       conversation,
       currentMessageId: event.ts,
-      signal: (releaseCanonicalFastAgentLock ?? releaseFastAgentLock).signal,
+      signal: activeTurnLock.signal,
       senderExternalId: event.user,
       senderDisplayName:
         currentMessage?.user === event.user
@@ -432,6 +438,6 @@ export async function processFastAgentMessage(params: {
         .catch(() => {});
     }
     await releaseCanonicalFastAgentLock?.().catch(() => {});
-    await releaseFastAgentLock().catch(() => {});
+    await releaseFastAgentLock?.().catch(() => {});
   }
 }

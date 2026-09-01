@@ -13,6 +13,7 @@ import {
 import {
   fastAgentConversationRepository,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+  markFastAgentInferenceRetryNoticeInterruption,
   reconcileExpiredFastAgentInferenceRetryNotices,
   reconcileFastAgentInferenceRetryNotices,
 } from '../fast-agent-conversation-repository';
@@ -683,7 +684,10 @@ describe('Fast conversation repository', () => {
     });
 
     await expect(
-      reconcileFastAgentInferenceRetryNotices(session.id),
+      reconcileFastAgentInferenceRetryNotices(
+        session.id,
+        'next_turn_reconcile',
+      ),
     ).resolves.toBe(1);
 
     const [notice] = await db
@@ -698,6 +702,7 @@ describe('Fast conversation repository', () => {
       purpose: 'closeout',
       inferenceRetryNotice: true,
       inferenceRetryActive: false,
+      interruptionReason: 'next_turn_reconcile',
     });
   });
 
@@ -729,7 +734,10 @@ describe('Fast conversation repository', () => {
     });
 
     await expect(
-      reconcileFastAgentInferenceRetryNotices(session.id),
+      reconcileFastAgentInferenceRetryNotices(
+        session.id,
+        'turn_settled_reconcile',
+      ),
     ).resolves.toBe(1);
 
     const [notice] = await db
@@ -744,6 +752,7 @@ describe('Fast conversation repository', () => {
       purpose: 'closeout',
       inferenceRetryNotice: true,
       inferenceRetryActive: false,
+      interruptionReason: 'turn_settled_reconcile',
     });
   });
 
@@ -814,9 +823,161 @@ describe('Fast conversation repository', () => {
       );
     expect(
       rows.find((row) => row.conversationId === expired.id)?.metadata,
-    ).toMatchObject({ inferenceRetryActive: false });
+    ).toMatchObject({
+      inferenceRetryActive: false,
+      interruptionReason: 'expired_lease_reconcile',
+    });
     expect(
       rows.find((row) => row.conversationId === active.id)?.metadata,
     ).toMatchObject({ inferenceRetryActive: true });
+  });
+
+  it('preserves a pre-recorded interruption cause when reconciling', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-lost:retry-notice:0',
+        turnId: 'turn-lost',
+        turnSeq: 1,
+        ts: 100,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying in 1s' }],
+        metadata: {
+          visibleInTranscript: true,
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
+        },
+        payload: { purpose: 'progress' },
+        source: 'web',
+      },
+    });
+
+    await markFastAgentInferenceRetryNoticeInterruption(
+      session.id,
+      'turn-lost:retry-notice:0',
+      'lock_lost',
+    );
+
+    const [stamped] = await db
+      .select({ metadata: fastAgentMessages.metadata })
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.conversationId, session.id));
+    // The stamp records the cause without ending the notice; the reconciler
+    // still owns the terminal flip.
+    expect(stamped?.metadata).toMatchObject({
+      inferenceRetryActive: true,
+      interruptionReason: 'lock_lost',
+    });
+
+    // A second stamp is fill-only and cannot overwrite the recorded cause.
+    await markFastAgentInferenceRetryNoticeInterruption(
+      session.id,
+      'turn-lost:retry-notice:0',
+      'turn_aborted',
+    );
+
+    await expect(
+      reconcileFastAgentInferenceRetryNotices(
+        session.id,
+        'next_turn_reconcile',
+      ),
+    ).resolves.toBe(1);
+
+    const [notice] = await db
+      .select()
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.conversationId, session.id));
+    expect(notice?.contentBlocks).toEqual([
+      { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
+    ]);
+    expect(notice?.metadata).toMatchObject({
+      inferenceRetryActive: false,
+      interruptionReason: 'lock_lost',
+    });
+
+    // Once terminal, the notice no longer matches the fill-only stamp.
+    await expect(
+      markFastAgentInferenceRetryNoticeInterruption(
+        session.id,
+        'turn-lost:retry-notice:0',
+        'turn_aborted',
+      ),
+    ).resolves.toBe(false);
+    const [settled] = await db
+      .select({ metadata: fastAgentMessages.metadata })
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.conversationId, session.id));
+    expect(settled?.metadata).toMatchObject({
+      interruptionReason: 'lock_lost',
+    });
+  });
+
+  it('never loses a concurrently stamped cause to the reconciler', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+
+    for (let round = 0; round < 10; round += 1) {
+      const eventId = `turn-race-${round}:retry-notice:0`;
+      await fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message: {
+          eventId,
+          turnId: `turn-race-${round}`,
+          turnSeq: 1,
+          ts: 100 + round,
+          eventType: 'roomote_runtime.assistant_message',
+          role: 'assistant',
+          contentBlocks: [{ type: 'text', text: 'Retrying in 1s' }],
+          metadata: {
+            visibleInTranscript: true,
+            purpose: 'progress',
+            inferenceRetryNotice: true,
+            inferenceRetryActive: true,
+          },
+          payload: { purpose: 'progress' },
+          source: 'web',
+        },
+      });
+
+      // Race the fill-only lock-lost stamp against the reconciler on separate
+      // connections. Whenever the stamp reports success (the notice was still
+      // active and unreasoned when it ran), the surviving cause must be
+      // lock_lost regardless of how the two interleaved.
+      const [stamped] = await Promise.all([
+        markFastAgentInferenceRetryNoticeInterruption(
+          session.id,
+          eventId,
+          'lock_lost',
+        ),
+        reconcileFastAgentInferenceRetryNotices(
+          session.id,
+          'next_turn_reconcile',
+        ),
+      ]);
+
+      const [notice] = await db
+        .select({ metadata: fastAgentMessages.metadata })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(fastAgentMessages.conversationId, session.id),
+            eq(fastAgentMessages.eventId, eventId),
+          ),
+        );
+      expect(notice?.metadata).toMatchObject({
+        inferenceRetryActive: false,
+        interruptionReason: stamped ? 'lock_lost' : 'next_turn_reconcile',
+      });
+    }
   });
 });

@@ -400,6 +400,34 @@ export async function getSessionForTask(
   return session?.session ?? null;
 }
 
+/**
+ * Returns the trusted human principals durably attached to a task.
+ *
+ * The immutable task initiator is authoritative for direct human launches.
+ * Automation-delegated tasks instead retain their run-as human through the
+ * canonical Session owner, without misclassifying the automation as a user.
+ */
+export async function getTaskHumanOwnerUserIds(
+  tx: DatabaseOrTransaction,
+  taskId: string,
+): Promise<string[]> {
+  const [task] = await tx
+    .select({ initiatorUserId: tasks.initiatorUserId })
+    .from(tasks)
+    .where(eq(tasks.id, taskId))
+    .limit(1);
+  const session = await getSessionForTask(tx, taskId);
+
+  return [
+    ...new Set(
+      [
+        task?.initiatorUserId,
+        session?.ownerKind === 'user' ? session.ownerUserId : null,
+      ].filter((userId): userId is string => Boolean(userId)),
+    ),
+  ];
+}
+
 export async function getSessionForFastConversation(
   tx: DatabaseOrTransaction,
   fastConversationId: string,

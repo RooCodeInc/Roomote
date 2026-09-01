@@ -32,6 +32,7 @@ import {
 } from '@roomote/types';
 
 import {
+  getFastSessionComposerSuggestionCommand,
   getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
   replyToFastSessionCommand,
@@ -83,6 +84,7 @@ import { protectedProcedure, publicProcedure, createRouter } from '../init';
 import {
   getTasksCommand,
   generateTaskSummaryCommand,
+  getComposerSuggestionCommand,
   getTaskMessageEnvelopesCommand,
   getTaskRunEventsCommand,
   getTaskByIdCommand,
@@ -984,6 +986,21 @@ export const appRouter = createRouter({
       .input(z.object({ taskId: z.string() }))
       .query(({ ctx: { auth }, input }) =>
         generateTaskSummaryCommand(auth, input),
+      ),
+
+    composerSuggestion: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+          // Client-side cache key: bumps when the live transcript meaningfully
+          // changes so stale suggestions are never shown for newer history.
+          // The server derives its own regeneration bucket from persisted
+          // messages, so this field only shapes client caching.
+          historyRevision: z.number().int().nonnegative().optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getComposerSuggestionCommand(auth, { taskId: input.taskId }),
       ),
 
     recentPullRequests: protectedProcedure.query(({ ctx: { auth } }) =>
@@ -2868,6 +2885,23 @@ export const appRouter = createRouter({
       .input(z.object({ sessionId: z.string().uuid() }))
       .query(({ ctx: { auth }, input }) =>
         getFastSessionTasksCommand(auth, input.sessionId),
+      ),
+    composerSuggestion: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          // Client-side cache keys: bump when the live transcript or the
+          // delegated tasks' state meaningfully change so stale suggestions
+          // are never shown. The server derives its own cache keys from
+          // persisted data, so these fields only shape client caching.
+          historyRevision: z.number().int().nonnegative().optional(),
+          taskStateRevision: z.string().max(64).optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getFastSessionComposerSuggestionCommand(auth, {
+          sessionId: input.sessionId,
+        }),
       ),
   }),
 

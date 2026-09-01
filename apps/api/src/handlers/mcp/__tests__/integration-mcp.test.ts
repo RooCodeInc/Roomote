@@ -10,12 +10,14 @@ const {
   mockFindEnablement,
   mockGetValidAccessToken,
   mockDecrypt,
+  mockGetTaskHumanOwnerUserIds,
 } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
   mockFindConnection: vi.fn(),
   mockFindEnablement: vi.fn(),
   mockGetValidAccessToken: vi.fn(),
   mockDecrypt: vi.fn(),
+  mockGetTaskHumanOwnerUserIds: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -27,6 +29,7 @@ vi.mock('@roomote/db/server', () => ({
     },
   },
   taskRuns: { id: 'id' },
+  getTaskHumanOwnerUserIds: mockGetTaskHumanOwnerUserIds,
   mcpConnections: {
     mcpId: 'mcpId',
     enabled: 'enabled',
@@ -152,6 +155,7 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
       disabledTools: null,
     });
     mockGetValidAccessToken.mockResolvedValue('valid-access-token');
+    mockGetTaskHumanOwnerUserIds.mockResolvedValue([]);
   });
 
   it('serves a deployment-scoped integration on a run with no human actor', async () => {

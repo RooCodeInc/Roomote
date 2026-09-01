@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   postThreadMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
+  admitHumanFollowUp: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -58,10 +59,10 @@ vi.mock('@roomote/cloud-agents', () => ({
   }) => [text, ...attachmentTexts].filter(Boolean).join('\n\n'),
   isRoomoteTextExtractableAttachment: ({ mimeType }: { mimeType?: string }) =>
     mimeType?.startsWith('text/') ?? false,
-  stripLeadingSlackProductMention: (text: string) => text,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
@@ -117,6 +118,10 @@ describe('processFastAgentMessage', () => {
       messageId: '101.001',
     });
     mocks.recordProviderMessage.mockResolvedValue(undefined);
+    mocks.admitHumanFollowUp.mockResolvedValue({
+      kind: 'turn',
+      turnLock: mocks.releaseLock,
+    });
     mocks.answerQuestion.mockImplementation(
       async ({
         adapter,
@@ -130,6 +135,86 @@ describe('processFastAgentMessage', () => {
         return 'Doing well.';
       },
     );
+  });
+
+  it.each([
+    ['Roomote can you hear me?', 'Roomote can you hear me?'],
+    ['Roomote, can you hear me?', 'Roomote, can you hear me?'],
+    ['Roomote: can you hear me?', 'Roomote: can you hear me?'],
+    ['Hey Roomote, can you hear me?', 'Hey Roomote, can you hear me?'],
+    ['<@U_BOT> can you hear me?', '<@U_BOT> can you hear me?'],
+    ['<@U_BOT>, can you hear me?', '<@U_BOT>, can you hear me?'],
+  ])('passes Slack text %j to Fast as %j', async (text, expectedQuestion) => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (value: string) => value),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text,
+        ts: '100.001',
+        thread_ts: '100.000',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+      isExistingConversation: true,
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ question: expectedQuestion }),
+    );
+    expect(slack.normalizeIncomingText).not.toHaveBeenCalled();
+  });
+
+  it('durably steers an active Fast generation instead of waiting for its lock', async () => {
+    const abort = vi.fn().mockResolvedValue(undefined);
+    const onAccepted = vi.fn();
+    mocks.acquireLock.mockResolvedValue(null);
+    mocks.hasSession.mockResolvedValue(true);
+    mocks.admitHumanFollowUp.mockResolvedValue({ kind: 'steered', abort });
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: 'Use the corrected requirement',
+        ts: '100.003',
+        thread_ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+      isExistingConversation: true,
+      onAccepted,
+    });
+
+    expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          type: 'human_follow_up',
+          eventId: '100.003',
+          question: 'Use the corrected requirement',
+        }),
+      }),
+    );
+    expect(onAccepted).toHaveBeenCalledWith(abort);
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
   });
 
   it('replaces a Fast retry notice in place', async () => {
@@ -211,9 +296,9 @@ describe('processFastAgentMessage', () => {
         type: 'message',
         channel: 'D123',
         user: 'U123',
-        authoredText: '!fast investigate this',
+        authoredText: '<@U_BOT> !fast investigate this',
         agentContext: 'Slack block text:\nState: New',
-        text: '!fast investigate this\n\nSlack block text:\nState: New',
+        text: '<@U_BOT> !fast investigate this\n\nSlack block text:\nState: New',
         ts: '100.001',
       } as never,
       slack: slack as never,
@@ -238,6 +323,7 @@ describe('processFastAgentMessage', () => {
         ],
       }),
     );
+    expect(slack.normalizeIncomingText).not.toHaveBeenCalled();
   });
 
   it('resumes the canonical Fast session bound to a delayed Slack root', async () => {
@@ -274,9 +360,13 @@ describe('processFastAgentMessage', () => {
       continuation: true,
     });
 
-    expect(mocks.acquireLock).toHaveBeenCalledWith({
-      conversation: canonicalConversation,
-    });
+    expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent: expect.objectContaining({
+          conversation: canonicalConversation,
+        }),
+      }),
+    );
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({ conversation: canonicalConversation }),
     );
@@ -926,6 +1016,7 @@ describe('processFastAgentMessage', () => {
         conversationId: '100.001',
         replyTarget: { channelId: 'D123', threadId: '100.001' },
       },
+      maxWaitMs: 0,
     });
     expect(mocks.acquireLock.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.hasSession.mock.invocationCallOrder[0]!,

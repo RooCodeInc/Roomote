@@ -14,7 +14,6 @@ import {
   CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS,
   listEnabledCustomAutomations,
   recordCustomAutomationRunOutcome,
-  releaseCustomAutomationLaunchClaim,
   tryClaimCustomAutomationLaunch,
   type CustomAutomation,
   slackInstallationChannels,
@@ -58,11 +57,19 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../lib/t
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../lib/telegram-communication';
 import {
   deliverFastAgentParentEvent,
+  FastAgentParentEventDeliveryError,
   type FastAgentParentEvent,
 } from '../lib/fast-agent-parent-event';
 import { recordFastAgentConversationMessage } from '../lib/fast-agent-provider-message';
 
 const LOG_PREFIX = '[custom-automations]';
+
+class CustomAutomationClaimSettlementError extends Error {
+  constructor(message: string, cause: unknown) {
+    super(message, { cause });
+    this.name = 'CustomAutomationClaimSettlementError';
+  }
+}
 
 // Email (agentmail) is inbound-initiated only and never an automation
 // destination, so it is deliberately absent here.
@@ -413,13 +420,13 @@ async function buildFastAutomationConversation(params: {
 async function runFastCustomAutomation(params: {
   automation: CustomAutomation;
   destination: ResolvedAutomationDestination | null;
-  launchClaimedAt: Date;
+  eventClaimedAt: Date;
   trigger: 'schedule' | 'manual';
 }): Promise<void> {
   if (!params.automation.createdByUserId) {
     throw new Error('Fast automation run-as user is not configured.');
   }
-  const eventId = `${params.automation.id}:${params.launchClaimedAt.toISOString()}`;
+  const eventId = `${params.automation.id}:${params.eventClaimedAt.toISOString()}`;
   const { conversation, rootMessageId } = await buildFastAutomationConversation(
     {
       automation: params.automation,
@@ -459,6 +466,16 @@ async function runFastCustomAutomation(params: {
       event,
     });
   } catch (error) {
+    if (
+      error instanceof FastAgentParentEventDeliveryError &&
+      error.replyPosted
+    ) {
+      console.warn(
+        `${LOG_PREFIX} Fast automation ${params.automation.id} reported after delivery: ${error.message}`,
+      );
+      return;
+    }
+
     const message = `${params.automation.name} failed: ${error instanceof Error ? error.message : String(error)}`;
     try {
       if (conversation.surface === 'discord' && rootMessageId) {
@@ -585,6 +602,7 @@ async function launchCustomAutomationRow(
       status: 'failed',
       error: message,
       lastLaunchedTaskId: null,
+      lastRunAt: automation.launchClaimedAt,
       launchClaimedAt: automation.launchClaimedAt,
     });
     return result;
@@ -716,6 +734,13 @@ async function launchCustomAutomationRow(
     );
   }
   const modelOverride = modelSelection?.ok ? modelSelection : null;
+  const eventClaimedAt =
+    fastExecution &&
+    opts.manualTrigger &&
+    automation.lastError &&
+    automation.lastRunAt
+      ? automation.lastRunAt
+      : launchClaimedAt;
 
   try {
     if (fastExecution) {
@@ -731,14 +756,17 @@ async function launchCustomAutomationRow(
       await runFastCustomAutomation({
         automation,
         destination,
-        launchClaimedAt,
+        eventClaimedAt,
         trigger: opts.manualTrigger ? 'manual' : 'schedule',
       });
-      await recordCustomAutomationRunOutcome(db, {
+      const settled = await recordCustomAutomationRunOutcome(db, {
         id: automation.id,
         status: 'succeeded',
         launchClaimedAt,
       });
+      if (!settled) {
+        throw new Error('The launch claim is no longer current.');
+      }
       result.completed = true;
       return result;
     }
@@ -814,8 +842,28 @@ async function launchCustomAutomationRow(
     result.completed = true;
     return result;
   } catch (error) {
-    await releaseCustomAutomationLaunchClaim(automation.id, launchClaimedAt);
-    throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    try {
+      const settled = await recordCustomAutomationRunOutcome(db, {
+        id: automation.id,
+        status: 'failed',
+        error: message,
+        lastRunAt: eventClaimedAt,
+        launchClaimedAt,
+      });
+      if (!settled) {
+        throw new Error('The launch claim is no longer current.');
+      }
+    } catch (settlementError) {
+      throw new CustomAutomationClaimSettlementError(
+        `Failed to settle custom automation ${automation.id} after: ${message}`,
+        settlementError,
+      );
+    }
+
+    result.errors.push(message);
+    result.skippedReason = message;
+    return result;
   }
 }
 
@@ -861,11 +909,13 @@ export async function customAutomationsJob(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       result.errors.push(`${automation.name}: ${message}`);
-      await recordCustomAutomationRunOutcome(db, {
-        id: automation.id,
-        status: 'failed',
-        error: message,
-      });
+      if (!(error instanceof CustomAutomationClaimSettlementError)) {
+        await recordCustomAutomationRunOutcome(db, {
+          id: automation.id,
+          status: 'failed',
+          error: message,
+        });
+      }
       console.error(`${LOG_PREFIX} Failed ${automation.id}: ${message}`);
     }
   }

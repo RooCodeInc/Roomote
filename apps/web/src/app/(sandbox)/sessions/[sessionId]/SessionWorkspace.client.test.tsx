@@ -245,7 +245,6 @@ function renderWorkspace({
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-
   const result = render(
     <QueryClientProvider client={queryClient}>
       <SandboxLayoutProvider>
@@ -443,7 +442,6 @@ describe('SessionWorkspace', () => {
         queryClient.getQueryState(['sessions', 'byId', session.id])?.status,
       ).toBe('success'),
     );
-
     act(() => {
       queryClient.setQueryData(['sessions', 'byId', session.id], {
         ...session,
@@ -1017,7 +1015,6 @@ describe('SessionWorkspace', () => {
         screen.getByRole('status', { name: 'Running task count' }),
       ).toHaveTextContent('2'),
     );
-
     act(() => {
       queryClient.setQueryData(
         ['fastSessions', 'tasks', session.id],
