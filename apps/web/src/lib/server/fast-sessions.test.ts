@@ -115,7 +115,7 @@ describe('Fast session queries', () => {
     ).resolves.toBe('Manual unified title');
   });
 
-  it('applies the caller scope to detail lookups', async () => {
+  it('shares detail lookups deployment-wide like tasks', async () => {
     const owner = await userFactory.create();
     const otherUser = await userFactory.create();
     const session = await createFastSession({
@@ -126,7 +126,7 @@ describe('Fast session queries', () => {
 
     await expect(
       getFastSessionById({ userId: otherUser.id, isAdmin: false }, session.id),
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({ id: session.id, userId: owner.id });
     await expect(
       getFastSessionById({ userId: otherUser.id, isAdmin: true }, session.id),
     ).resolves.toMatchObject({ id: session.id, userId: owner.id });
@@ -372,7 +372,7 @@ describe('Fast session queries', () => {
     });
   });
 
-  it('grants participants access to shared conversations they spoke in', async () => {
+  it('grants every deployment user access to shared conversations', async () => {
     const owner = await userFactory.create();
     const participant = await userFactory.create();
     const bystander = await userFactory.create();
@@ -397,7 +397,7 @@ describe('Fast session queries', () => {
 
     await expect(
       getFastSessionById({ userId: bystander.id, isAdmin: false }, session.id),
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({ id: session.id });
   });
 
   it('excludes transcript-hidden messages such as platform-event prompts', async () => {
@@ -586,7 +586,7 @@ describe('Fast session queries', () => {
     ).resolves.toBe('dismissed');
   });
 
-  it('finds sessions for owners and participants but not bystanders', async () => {
+  it('finds sessions for every deployment user', async () => {
     const owner = await userFactory.create();
     const participant = await userFactory.create();
     const bystander = await userFactory.create();
@@ -621,7 +621,7 @@ describe('Fast session queries', () => {
         { userId: bystander.id, isAdmin: false },
         session.id,
       ),
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({ id: session.id });
   });
 
   it('keeps a partial newest turn when a single turn overflows the window', async () => {

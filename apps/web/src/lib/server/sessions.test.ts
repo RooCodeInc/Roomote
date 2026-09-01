@@ -44,7 +44,7 @@ describe('unified Session queries', () => {
     syncFastSlackTitle.mockReset();
     syncFastSlackTitle.mockResolvedValue(undefined);
   });
-  it('scopes list and detail reads to owners, participants, and admins', async () => {
+  it('shares list and detail reads deployment-wide like tasks', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
     const session = await sessionFactory.create({
@@ -61,7 +61,7 @@ describe('unified Session queries', () => {
         { userId: stranger.id, isAdmin: false },
         session.id,
       ),
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({ id: session.id });
     await expect(
       findAccessibleSession({ userId: stranger.id, isAdmin: true }, session.id),
     ).resolves.toMatchObject({ id: session.id });
@@ -73,7 +73,7 @@ describe('unified Session queries', () => {
     expect(list.sessions.map((row) => row.id)).toContain(session.id);
   });
 
-  it('filters recent-session lookups by id without bypassing access scope', async () => {
+  it('filters recent-session lookups by id', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
     const included = await sessionFactory.create({
@@ -88,19 +88,21 @@ describe('unified Session queries', () => {
       title: 'Newer but not included',
       activityAt: 300,
     });
-    const inaccessible = await sessionFactory.create({
+    const otherOwned = await sessionFactory.create({
       ownerKind: 'user',
       ownerUserId: stranger.id,
-      title: 'Inaccessible Session',
+      title: 'Another Included Session',
       activityAt: 200,
     });
 
     const result = await getSessions(
       { userId: owner.id, isAdmin: false },
-      { ids: [included.id, inaccessible.id] },
+      { ids: [included.id, otherOwned.id] },
     );
 
-    expect(result.sessions.map((session) => session.id)).toEqual([included.id]);
+    expect(result.sessions.map((session) => session.id).sort()).toEqual(
+      [included.id, otherOwned.id].sort(),
+    );
   });
 
   it('filters Session owners by automation creator values', async () => {
@@ -178,7 +180,7 @@ describe('unified Session queries', () => {
     ]);
   });
 
-  it('lists only distinct visible sources available to the current user', async () => {
+  it('lists distinct unarchived sources across the deployment', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
     await sessionFactory.create({
@@ -186,15 +188,12 @@ describe('unified Session queries', () => {
       ownerUserId: owner.id,
       sourceSurface: 'web',
     });
+    // Archived sessions do not contribute their source; 'telegram' is not used
+    // by any other test in this file.
     await sessionFactory.create({
       ownerKind: 'user',
       ownerUserId: owner.id,
-      sourceSurface: 'web',
-    });
-    await sessionFactory.create({
-      ownerKind: 'user',
-      ownerUserId: owner.id,
-      sourceSurface: 'slack',
+      sourceSurface: 'telegram',
       archivedAt: new Date(),
     });
     await sessionFactory.create({
@@ -203,9 +202,13 @@ describe('unified Session queries', () => {
       sourceSurface: 'discord',
     });
 
-    await expect(
-      getSessionSources({ userId: owner.id, isAdmin: false }),
-    ).resolves.toEqual(['web']);
+    const sources = await getSessionSources({
+      userId: owner.id,
+      isAdmin: false,
+    });
+    expect(sources).toContain('web');
+    expect(sources).toContain('discord');
+    expect(sources).not.toContain('telegram');
   });
 
   it('aggregates direct and attached-task inference costs exactly once', async () => {
@@ -838,12 +841,20 @@ describe('unified Session queries', () => {
       initiatorUserId: owner.id,
       title: 'Second task',
     });
+    // Explicit attachedAt values: rows inserted in one statement share a
+    // timestamp, which makes the attachedAt ordering below nondeterministic.
     await db.insert(sessionTasks).values([
-      { sessionId: session.id, taskId: firstTask.id, origin: 'direct_launch' },
+      {
+        sessionId: session.id,
+        taskId: firstTask.id,
+        origin: 'direct_launch',
+        attachedAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
       {
         sessionId: session.id,
         taskId: secondTask.id,
         origin: 'fast_delegation',
+        attachedAt: new Date('2026-01-01T00:00:01.000Z'),
       },
     ]);
     await db.insert(taskArtifacts).values([
