@@ -5,11 +5,13 @@ const {
   mockGetFastSessionSuggestableMessages,
   mockGetFastSessionTasks,
   mockGenerateTrackedNonTaskObject,
+  cacheKeys,
 } = vi.hoisted(() => ({
   mockFindAccessibleFastSession: vi.fn(),
   mockGetFastSessionSuggestableMessages: vi.fn(),
   mockGetFastSessionTasks: vi.fn(),
   mockGenerateTrackedNonTaskObject: vi.fn(),
+  cacheKeys: [] as unknown[][],
 }));
 
 vi.mock('@/lib/server/fast-sessions', () => ({
@@ -26,7 +28,13 @@ vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
 }));
 
 vi.mock('next/cache', () => ({
-  unstable_cache: (fn: (...args: unknown[]) => unknown) => fn,
+  unstable_cache: (
+    fn: (...args: unknown[]) => unknown,
+    keyParts: unknown[],
+  ) => {
+    cacheKeys.push(keyParts);
+    return fn;
+  },
 }));
 
 import { getFastSessionComposerSuggestionCommand } from '../composer-suggestion';
@@ -41,6 +49,7 @@ const flagOffAuth = { userId: 'user-1', featureFlags: {} } as UserAuthSuccess;
 describe('getFastSessionComposerSuggestionCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    cacheKeys.length = 0;
     mockFindAccessibleFastSession.mockResolvedValue({ id: 'session-1' });
     mockGetFastSessionTasks.mockResolvedValue([]);
   });
@@ -161,6 +170,23 @@ describe('getFastSessionComposerSuggestionCommand', () => {
     expect(prompt.indexOf('Tasks the agent has delegated')).toBeLessThan(
       prompt.indexOf('Here is the conversation:'),
     );
+
+    const runningCacheKey = cacheKeys.at(-1);
+    mockGetFastSessionTasks.mockResolvedValue([
+      {
+        taskId: 'task-1',
+        title: 'Fix login redirect',
+        inferenceCostMicroUsd: 0,
+        artifacts: [{ id: 'a1', version: 1 }],
+        latestRun: { status: 'completed', taskPhase: 'waiting_for_prompt' },
+      },
+    ]);
+
+    await getFastSessionComposerSuggestionCommand(auth, {
+      sessionId: 'session-1',
+    });
+
+    expect(cacheKeys.at(-1)).not.toEqual(runningCacheKey);
   });
 
   it('still generates when loading session tasks fails', async () => {

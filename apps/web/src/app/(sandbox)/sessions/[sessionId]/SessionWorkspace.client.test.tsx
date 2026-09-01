@@ -29,6 +29,7 @@ const {
   routerReplaceMock,
   artifactQueryState,
   artifactQueryInputs,
+  composerSuggestionQueryKeyMock,
 } = vi.hoisted(() => ({
   useMediaQueryMock: vi.fn(),
   sessionQueryState: { data: null as unknown },
@@ -41,6 +42,10 @@ const {
     path: string;
     version?: number;
   }>,
+  composerSuggestionQueryKeyMock: vi.fn(() => [
+    'fastSessions',
+    'composerSuggestion',
+  ]),
 }));
 
 vi.mock('usehooks-ts', () => ({
@@ -73,6 +78,9 @@ vi.mock('@/trpc/client', () => ({
       },
     },
     fastSessions: {
+      composerSuggestion: {
+        queryKey: composerSuggestionQueryKeyMock,
+      },
       tasks: {
         queryOptions: (
           input: { sessionId: string },
@@ -245,6 +253,7 @@ function renderWorkspace({
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  const invalidateQueriesSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
   const result = render(
     <QueryClientProvider client={queryClient}>
@@ -257,6 +266,7 @@ function renderWorkspace({
   return {
     ...result,
     queryClient,
+    invalidateQueriesSpy,
     resizeToMobile() {
       mediaQuery.matches = true;
       act(() =>
@@ -443,7 +453,6 @@ describe('SessionWorkspace', () => {
         queryClient.getQueryState(['sessions', 'byId', session.id])?.status,
       ).toBe('success'),
     );
-
     act(() => {
       queryClient.setQueryData(['sessions', 'byId', session.id], {
         ...session,
@@ -1000,7 +1009,7 @@ describe('SessionWorkspace', () => {
       },
       artifacts: [],
     });
-    const { queryClient } = renderWorkspace({
+    const { invalidateQueriesSpy, queryClient } = renderWorkspace({
       isMobile: false,
       children: <RunningTaskCount />,
       sessionOverride: { taskSource: 'fast', taskCards: [] },
@@ -1017,6 +1026,7 @@ describe('SessionWorkspace', () => {
         screen.getByRole('status', { name: 'Running task count' }),
       ).toHaveTextContent('2'),
     );
+    invalidateQueriesSpy.mockClear();
 
     act(() => {
       queryClient.setQueryData(
@@ -1033,6 +1043,9 @@ describe('SessionWorkspace', () => {
         screen.getByRole('status', { name: 'Running task count' }),
       ).toHaveTextContent('0'),
     );
+    expect(invalidateQueriesSpy).toHaveBeenCalledWith({
+      queryKey: ['fastSessions', 'composerSuggestion'],
+    });
   });
 
   it('opens delegated tasks in the existing session side-panel slot', () => {
