@@ -256,6 +256,9 @@ async function findFastAgentTurnPrompt(
 export async function findFastAgentUnresolvedRequest(
   conversationId: string,
 ): Promise<FastAgentUnresolvedRequest | null> {
+  // Anchor on the latest substantive human prompt: platform events and
+  // reactions are persisted as prompts too, but their turns neither answer
+  // nor supersede a human request, so they must not mask an owed one.
   const [latestPrompt] = await db
     .select({ turnId: fastAgentMessages.turnId })
     .from(fastAgentMessages)
@@ -264,6 +267,11 @@ export async function findFastAgentUnresolvedRequest(
         eq(fastAgentMessages.conversationId, conversationId),
         eq(fastAgentMessages.role, 'user'),
         eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
+        or(
+          sql`${fastAgentMessages.metadata}->>'inputKind' IS NULL`,
+          sql`${fastAgentMessages.metadata}->>'inputKind' <> ${FAST_AGENT_REACTION_INPUT_TYPE}`,
+        ),
       ),
     )
     .orderBy(desc(fastAgentMessages.ts), desc(fastAgentMessages.turnSeq))

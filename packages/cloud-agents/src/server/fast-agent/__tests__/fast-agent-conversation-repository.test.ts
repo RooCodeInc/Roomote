@@ -1055,6 +1055,23 @@ describe('Fast conversation repository', () => {
       reason: 'api_shutdown',
     });
 
+    // Platform events and reactions that arrive afterward neither answer nor
+    // supersede the request, so they must not mask it.
+    await prompt('turn-1b', 150, '<platform_event>{}</platform_event>', {
+      visibleInTranscript: false,
+      turnSource: 'platform_event',
+    });
+    await closeout('turn-1b', 160);
+    await prompt('turn-1c', 170, 'reacted', {
+      inputKind: FAST_AGENT_REACTION_INPUT_TYPE,
+    });
+    await closeout('turn-1c', 180);
+    await expect(findFastAgentUnresolvedRequest(session.id)).resolves.toEqual({
+      turnId: 'turn-1',
+      text: 'Break down the duplicate validation',
+      reason: 'api_shutdown',
+    });
+
     // A nudge that resumed it and was interrupted again still surfaces the
     // original request, not the nudge.
     await prompt('turn-2', 200, 'hey', { resumesTurnId: 'turn-1' });
