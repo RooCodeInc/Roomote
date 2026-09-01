@@ -9,7 +9,7 @@ import {
   isUserToken,
   parseMcpJsonRpcPayload,
 } from '@roomote/types';
-import { db, eq, taskRuns } from '@roomote/db/server';
+import { db, eq, getTaskHumanOwnerUserIds, taskRuns } from '@roomote/db/server';
 import { Agent } from 'undici';
 import {
   assertEgressUrlAllowed,
@@ -81,8 +81,10 @@ export function toMcpToolResult<T extends Record<string, unknown>>(payload: T) {
  * MCPs execute as the most recent human who launched or replied to the task.
  * That live actor is stored on `task_runs.actingUserId` rather than inferred
  * from `task_messages`, because transcript persistence is async and may lag
- * behind the turn that is about to make MCP calls. The token's own userId is
- * mint-time attribution and deliberately plays no role here.
+ * behind the turn that is about to make MCP calls. Automation runs without a
+ * live actor fall back to the trusted human owner on their canonical Session.
+ * The token's own userId is mint-time attribution and deliberately plays no
+ * role here.
  *
  * Since this column selects whose credentials MCP calls run as, it is written
  * only by trusted server-side actors (web steer, follow-up delivery). Job
@@ -111,7 +113,7 @@ export async function resolveActingUserId(
   }
 
   const taskRun = await db.query.taskRuns.findFirst({
-    columns: { actingUserId: true },
+    columns: { actingUserId: true, taskId: true },
     where: eq(taskRuns.id, auth.runId),
   });
 
@@ -119,7 +121,10 @@ export async function resolveActingUserId(
     throw new McpProxyError(404, 'Task run not found for this MCP token');
   }
 
-  const actingUserId = taskRun.actingUserId;
+  const [ownerUserId] = taskRun.actingUserId
+    ? []
+    : await getTaskHumanOwnerUserIds(db, taskRun.taskId);
+  const actingUserId = taskRun.actingUserId ?? ownerUserId;
 
   if (!hasRealTaskRunUser(actingUserId)) {
     // Deployment-service-principal jobs have no human actor. Callers that
@@ -154,7 +159,7 @@ export async function resolveActingUserIdOrNull(
   }
 
   const taskRun = await db.query.taskRuns.findFirst({
-    columns: { actingUserId: true },
+    columns: { actingUserId: true, taskId: true },
     where: eq(taskRuns.id, auth.runId),
   });
 
@@ -162,7 +167,12 @@ export async function resolveActingUserIdOrNull(
     throw new McpProxyError(404, 'Task run not found for this MCP token');
   }
 
-  return taskRun.actingUserId ?? null;
+  if (taskRun.actingUserId) {
+    return taskRun.actingUserId;
+  }
+
+  const [ownerUserId] = await getTaskHumanOwnerUserIds(db, taskRun.taskId);
+  return ownerUserId ?? null;
 }
 
 /**
