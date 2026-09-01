@@ -411,6 +411,7 @@ describe('createFastAgentWebTaskLauncher', () => {
       prompt: 'Fix checkout',
       environmentId: null,
       branch: 'feature/source-branch',
+      launchIdempotencyKey: 'artifact-build:launch-1',
       parentSessionId: '11111111-1111-4111-8111-111111111111',
       postKickoff,
     });
@@ -425,6 +426,7 @@ describe('createFastAgentWebTaskLauncher', () => {
         task: expect.objectContaining({
           payload: expect.objectContaining({
             branch: 'feature/source-branch',
+            launchIdempotencyKey: 'artifact-build:launch-1',
           }),
         }),
       }),

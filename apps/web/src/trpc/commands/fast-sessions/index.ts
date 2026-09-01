@@ -23,6 +23,8 @@ import {
   retireCanonicalPrReviewActionsForDestinationKey,
   sessions,
   sessionTasks,
+  sql,
+  taskRuns,
 } from '@roomote/db/server';
 import {
   formatErrorForLog,
@@ -123,9 +125,23 @@ type WebFastAgentTurnInput = {
   skipIfEventExists?: {
     conversationId: string;
     eventId: string;
-    requireArtifactBuildTask?: boolean;
+    artifactBuildLaunchId?: string;
   };
 };
+
+function findArtifactBuildTask(sessionId: string, launchId: string) {
+  return db
+    .select({ taskId: sessionTasks.taskId })
+    .from(sessionTasks)
+    .innerJoin(taskRuns, eq(taskRuns.taskId, sessionTasks.taskId))
+    .where(
+      and(
+        eq(sessionTasks.sessionId, sessionId),
+        sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${`artifact-build:${launchId}`}`,
+      ),
+    )
+    .limit(1);
+}
 
 /**
  * Run one web-initiated Fast turn after the caller's response is ready. The
@@ -174,17 +190,16 @@ async function runWebFastAgentTurn({
         )
         .limit(1);
       if (existingEvent) {
-        if (skipIfEventExists.requireArtifactBuildTask) {
+        if (skipIfEventExists.artifactBuildLaunchId) {
           const unifiedSession = await getSessionForFastConversation(
             db,
             skipIfEventExists.conversationId,
           );
           const [existingTask] = unifiedSession
-            ? await db
-                .select({ taskId: sessionTasks.taskId })
-                .from(sessionTasks)
-                .where(eq(sessionTasks.sessionId, unifiedSession.id))
-                .limit(1)
+            ? await findArtifactBuildTask(
+                unifiedSession.id,
+                skipIfEventExists.artifactBuildLaunchId,
+              )
             : [];
           if (!existingTask) {
             console.log(
@@ -311,11 +326,10 @@ export async function startFastSessionCommand(
       scheduleKickoff = true;
     } else if (input.artifactBuild) {
       const [existingTask] = unifiedSession
-        ? await db
-            .select({ taskId: sessionTasks.taskId })
-            .from(sessionTasks)
-            .where(eq(sessionTasks.sessionId, unifiedSession.id))
-            .limit(1)
+        ? await findArtifactBuildTask(
+            unifiedSession.id,
+            input.artifactBuild.launchId,
+          )
         : [];
       scheduleKickoff = !existingTask;
     }
@@ -333,6 +347,7 @@ export async function startFastSessionCommand(
             ...params,
             environmentId: artifactBuild.environmentId,
             branch: artifactBuild.branch,
+            launchIdempotencyKey: `artifact-build:${artifactBuild.launchId}`,
             model: artifactBuild.taskModel,
           });
           if (result.success) {
@@ -375,7 +390,9 @@ export async function startFastSessionCommand(
             skipIfEventExists: {
               conversationId: session.id,
               eventId: kickoffPromptEventId,
-              ...(artifactBuild ? { requireArtifactBuildTask: true } : {}),
+              ...(artifactBuild
+                ? { artifactBuildLaunchId: artifactBuild.launchId }
+                : {}),
             },
           }
         : {}),

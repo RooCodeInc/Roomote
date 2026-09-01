@@ -89,6 +89,7 @@ export type LaunchFastAgentTask = (params: {
   images?: string[];
   environmentId: string | null;
   branch?: string;
+  launchIdempotencyKey?: string;
   model?: string | null;
   parentSessionId: string;
   postKickoff: (task: {

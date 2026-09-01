@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   dbSet: vi.fn(),
   dbWhere: vi.fn(),
   dbSelect: vi.fn(),
+  dbInnerJoin: vi.fn(),
   dbSelectLimit: vi.fn(),
 }));
 
@@ -42,10 +43,12 @@ vi.mock('@roomote/db/server', () => ({
   retireCanonicalPrReviewActionsForDestinationKey: mocks.retireReviewActions,
   and: vi.fn(),
   eq: vi.fn(),
+  sql: vi.fn(),
   fastAgentConversations: {},
   fastAgentMessages: {},
   sessions: {},
   sessionTasks: {},
+  taskRuns: {},
   getSessionForFastConversation: mocks.getUnifiedSession,
 }));
 
@@ -220,7 +223,13 @@ describe('startFastSessionCommand', () => {
       created: true,
     });
     mocks.dbSelect.mockReturnValue({
-      from: () => ({ where: () => ({ limit: mocks.dbSelectLimit }) }),
+      from: () => ({
+        where: () => ({ limit: mocks.dbSelectLimit }),
+        innerJoin: mocks.dbInnerJoin,
+      }),
+    });
+    mocks.dbInnerJoin.mockReturnValue({
+      where: () => ({ limit: mocks.dbSelectLimit }),
     });
     mocks.dbSelectLimit.mockResolvedValue([]);
   });
@@ -318,6 +327,8 @@ describe('startFastSessionCommand', () => {
       prompt: 'Build the plan',
       environmentId: '33333333-3333-4333-8333-333333333333',
       branch: 'feature/source-branch',
+      launchIdempotencyKey:
+        'artifact-build:11111111-1111-4111-8111-111111111111',
       model: 'model-1',
       parentSessionId: 'unified-session-1',
       postKickoff: expect.any(Function),
