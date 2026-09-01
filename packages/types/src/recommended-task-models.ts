@@ -28,6 +28,11 @@ type RecommendedTaskModel = {
  * per-provider slug maps is how the recommended set changes.
  */
 export const RECOMMENDED_TASK_MODELS = [
+  {
+    id: 'claude-fable-5-1',
+    displayName: 'Claude Fable 5.1',
+    family: 'Fable',
+  },
   { id: 'claude-fable-5', displayName: 'Claude Fable 5', family: 'Fable' },
   { id: 'claude-haiku-4-5', displayName: 'Claude Haiku 4.5', family: 'Haiku' },
   { id: 'claude-opus-5', displayName: 'Claude Opus 5', family: 'Opus' },
@@ -95,6 +100,7 @@ export function mapRecommendedTaskModels(
  * lab in the recommended list).
  */
 export const OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS = {
+  'claude-fable-5-1': 'openrouter/anthropic/claude-fable-5.1',
   'claude-fable-5': 'openrouter/anthropic/claude-fable-5',
   'claude-haiku-4-5': 'openrouter/anthropic/claude-haiku-4.5',
   'claude-opus-5': 'openrouter/anthropic/claude-opus-5',
