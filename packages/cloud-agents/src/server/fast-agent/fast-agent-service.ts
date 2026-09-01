@@ -61,6 +61,7 @@ import { getAvailableEnvironments, type RoutableEnvironment } from '../router';
 import {
   FAST_AGENT_MODEL_ROLE,
   FAST_RESPONDING_LEASE_MS,
+  FAST_RESPONDING_LEASE_RENEW_MS,
 } from './fast-agent-constants';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import {
@@ -95,6 +96,7 @@ import {
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   markFastAgentInferenceRetryNoticeInterruption,
   reconcileFastAgentInferenceRetryNotices,
+  renewFastSessionRespondingLease,
   RESTARTED_ACTIVE_TURN_MESSAGE,
   type FastAgentInterruptionReason,
 } from './fast-agent-conversation-repository';
@@ -258,9 +260,13 @@ async function markFastAgentHumanFollowUpDelivered(id: string): Promise<void> {
 async function setFastSessionResponding(
   fastConversationId: string,
   responding: boolean,
+  /** Re-checked after the session lookup, immediately before the write, so
+   * an owner fenced off mid-lookup cannot extend a successor's lease. */
+  isOwnershipCurrent?: () => boolean,
 ): Promise<void> {
   const session = await getSessionForFastConversation(db, fastConversationId);
   if (!session) return;
+  if (isOwnershipCurrent && !isOwnershipCurrent()) return;
   await touchSessionActivity(db, session.id, Math.floor(Date.now() / 1000), {
     respondingUntil: responding
       ? new Date(Date.now() + FAST_RESPONDING_LEASE_MS)
@@ -1054,6 +1060,12 @@ export async function answerFastAgentQuestion({
   let nativeSteer: NonTaskOpenCodeNativeSteer | undefined;
   let activeToolExecutions = 0;
   let humanSteerPollTimer: ReturnType<typeof setInterval> | undefined;
+  let respondingLeaseRenewalTimer: ReturnType<typeof setInterval> | undefined;
+  // Renewals chain onto this promise so settlement can await the in-flight
+  // write before recording the terminal lease state; a fire-and-forget tick
+  // could otherwise commit after the settle write and leave an idle Session
+  // marked responding for another lease.
+  let respondingLeaseRenewal: Promise<void> = Promise.resolve();
   let activeHumanSteerPoll = Promise.resolve();
   const injectedHumanFollowUpIds = new Set<string>();
   const humanFollowUpTurnSeqs = new Map<string, number>();
@@ -1553,11 +1565,38 @@ export async function answerFastAgentQuestion({
         `[Fast Agent] Failed to reconcile interrupted inference retry notices: ${formatErrorForLog(error)}`,
       );
     });
-    await setFastSessionResponding(session.id, true).catch((error) => {
+    await setFastSessionResponding(
+      session.id,
+      true,
+      () => !signal?.aborted,
+    ).catch((error) => {
       console.warn(
         `[sessions] Failed to mark Fast Session active: ${formatErrorForLog(error)}`,
       );
     });
+    // Assistant-message persists extend the lease as a side effect, but a
+    // turn can spend longer than the lease inside tool calls or a streaming
+    // stretch without persisting one, and the expired-lease reconciler would
+    // then stamp its live retry notice as interrupted. Renew on wall clock
+    // for as long as this owner is executing; the tick stops renewing the
+    // moment ownership is aborted so a fenced-off owner cannot extend a
+    // successor's lease.
+    respondingLeaseRenewalTimer = setInterval(() => {
+      if (signal?.aborted) return;
+      respondingLeaseRenewal = respondingLeaseRenewal.then(async () => {
+        // The abort check is only a cheap short-circuit; correctness comes
+        // from the renewal statement itself, which extends the lease only
+        // where it is still live, so a stale write cannot resurrect a lease
+        // a settlement or successor already cleared.
+        if (signal?.aborted) return;
+        await renewFastSessionRespondingLease(session.id).catch((error) => {
+          console.warn(
+            `[sessions] Failed to renew Fast Session responding lease: ${formatErrorForLog(error)}`,
+          );
+        });
+      });
+    }, FAST_RESPONDING_LEASE_RENEW_MS);
+    respondingLeaseRenewalTimer.unref();
     durableOpenCodeSessionId = session.openCodeSessionId;
     activeOpenCodeSessionId = session.openCodeSessionId;
     diagnostics.setCanonicalConversationId(session.id);
@@ -3136,6 +3175,11 @@ export async function answerFastAgentQuestion({
     }
     return lastVisibleMessage || message;
   } finally {
+    if (respondingLeaseRenewalTimer) clearInterval(respondingLeaseRenewalTimer);
+    respondingLeaseRenewalTimer = undefined;
+    // Wait out any renewal already in flight so the terminal lease write
+    // below cannot be overwritten by a stale extension.
+    await respondingLeaseRenewal;
     signal?.removeEventListener('abort', stopHumanSteerPolling);
     stopHumanSteerPolling();
     await activeHumanSteerPoll;

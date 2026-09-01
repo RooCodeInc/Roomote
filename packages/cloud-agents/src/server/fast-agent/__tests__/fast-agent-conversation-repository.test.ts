@@ -16,6 +16,7 @@ import {
   markFastAgentInferenceRetryNoticeInterruption,
   reconcileExpiredFastAgentInferenceRetryNotices,
   reconcileFastAgentInferenceRetryNotices,
+  renewFastSessionRespondingLease,
 } from '../fast-agent-conversation-repository';
 import { FAST_AGENT_REACTION_INPUT_TYPE } from '../fast-agent-conversation';
 import { hasFastAgentSession } from '../fast-agent-session';
@@ -979,5 +980,57 @@ describe('Fast conversation repository', () => {
         interruptionReason: stamped ? 'lock_lost' : 'next_turn_reconcile',
       });
     }
+  });
+
+  it('renews only a live responding lease', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: {
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: crypto.randomUUID(),
+      },
+    });
+    const readLease = async () => {
+      const [row] = await db
+        .select({ respondingUntil: sessions.respondingUntil })
+        .from(sessions)
+        .where(eq(sessions.fastConversationId, session.id));
+      return row?.respondingUntil ?? null;
+    };
+
+    // A cleared lease is fenced out: a stale renewal cannot resurrect it.
+    await db
+      .update(sessions)
+      .set({ respondingUntil: null })
+      .where(eq(sessions.fastConversationId, session.id));
+    await expect(renewFastSessionRespondingLease(session.id)).resolves.toBe(
+      false,
+    );
+    await expect(readLease()).resolves.toBeNull();
+
+    // An expired lease is fenced out and left untouched.
+    const expired = new Date(Date.now() - 1_000);
+    await db
+      .update(sessions)
+      .set({ respondingUntil: expired })
+      .where(eq(sessions.fastConversationId, session.id));
+    await expect(renewFastSessionRespondingLease(session.id)).resolves.toBe(
+      false,
+    );
+    await expect(readLease()).resolves.toEqual(expired);
+
+    // A live lease is extended.
+    const live = new Date(Date.now() + 60_000);
+    await db
+      .update(sessions)
+      .set({ respondingUntil: live })
+      .where(eq(sessions.fastConversationId, session.id));
+    await expect(renewFastSessionRespondingLease(session.id)).resolves.toBe(
+      true,
+    );
+    const renewed = await readLease();
+    expect(renewed?.getTime()).toBeGreaterThan(live.getTime());
   });
 });

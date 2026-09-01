@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   revokeMcpCapabilities: vi.fn(),
   reconcileRetryNotices: vi.fn(),
   markRetryNoticeInterruption: vi.fn(),
+  renewRespondingLease: vi.fn(),
   getUnifiedSession: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
@@ -93,6 +94,7 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   reconcileFastAgentInferenceRetryNotices: mocks.reconcileRetryNotices,
   markFastAgentInferenceRetryNoticeInterruption:
     mocks.markRetryNoticeInterruption,
+  renewFastSessionRespondingLease: mocks.renewRespondingLease,
 }));
 
 vi.mock('../../router', () => ({
@@ -237,6 +239,7 @@ import {
   FastAgentProcessShutdownError,
   FastAgentTurnLockLostError,
 } from '../fast-agent-turn-lock';
+import { FAST_RESPONDING_LEASE_RENEW_MS } from '../fast-agent-constants';
 
 const baseParams = {
   question: 'What does this service do?',
@@ -379,6 +382,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.upsertMessage.mockResolvedValue({ initialHumanTurn: true });
     mocks.reconcileRetryNotices.mockResolvedValue(0);
     mocks.markRetryNoticeInterruption.mockResolvedValue(undefined);
+    mocks.renewRespondingLease.mockResolvedValue(true);
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
@@ -2605,6 +2609,161 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
     } finally {
       timeout.mockRestore();
+    }
+  });
+
+  it('renews the responding lease on wall clock while a long turn executes', async () => {
+    vi.useFakeTimers();
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
+    let finishInference: (() => void) | undefined;
+    mocks.generateText.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          finishInference = () => resolve('All done.');
+        }),
+    );
+
+    try {
+      const answer = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.touchSessionActivity).toHaveBeenCalledOnce();
+      expect(mocks.renewRespondingLease).not.toHaveBeenCalled();
+
+      // No assistant message persists during this stretch; only the
+      // wall-clock renewal keeps the lease ahead of the reconciler.
+      await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS);
+      expect(mocks.renewRespondingLease).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS);
+      expect(mocks.renewRespondingLease).toHaveBeenCalledTimes(2);
+      expect(mocks.renewRespondingLease).toHaveBeenCalledWith('conversation-1');
+
+      finishInference?.();
+      await vi.advanceTimersByTimeAsync(1);
+      await answer;
+
+      // Settling the turn clears the lease and stops the renewal timer.
+      expect(mocks.touchSessionActivity).toHaveBeenLastCalledWith(
+        expect.anything(),
+        'session-1',
+        expect.any(Number),
+        { respondingUntil: null },
+      );
+      await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS * 2);
+      expect(mocks.renewRespondingLease).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops renewing once ownership is lost, even for a queued renewal', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const lockLost = new FastAgentTurnLockLostError();
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
+    let releaseRenewal: (() => void) | undefined;
+    mocks.renewRespondingLease.mockImplementation(async () => {
+      // The first renewal stalls mid-write; a second tick queues behind it.
+      await new Promise<void>((resolve) => {
+        releaseRenewal = resolve;
+      });
+      return true;
+    });
+    mocks.generateText.mockImplementation(
+      (_params: unknown, _session: unknown, options: { signal: AbortSignal }) =>
+        new Promise<string>((_resolve, reject) => {
+          options.signal.addEventListener(
+            'abort',
+            () => reject(options.signal.reason),
+            { once: true },
+          );
+        }),
+    );
+
+    try {
+      const answer = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        signal: controller.signal,
+      });
+      const rejection = expect(answer).rejects.toBe(lockLost);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS);
+      expect(mocks.renewRespondingLease).toHaveBeenCalledTimes(1);
+      expect(releaseRenewal).toBeDefined();
+      await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS);
+
+      controller.abort(lockLost);
+      releaseRenewal?.();
+      await vi.advanceTimersByTimeAsync(1);
+      await rejection;
+
+      // The queued second renewal saw the lost ownership and never ran, and
+      // the fenced-off owner did not clear the lease.
+      expect(mocks.renewRespondingLease).toHaveBeenCalledTimes(1);
+      expect(mocks.touchSessionActivity).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits out an in-flight lease renewal before settling the lease', async () => {
+    vi.useFakeTimers();
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
+    let releaseRenewal: (() => void) | undefined;
+    mocks.renewRespondingLease.mockImplementation(async () => {
+      // The wall-clock renewal stalls mid-write.
+      await new Promise<void>((resolve) => {
+        releaseRenewal = resolve;
+      });
+      return true;
+    });
+    let finishInference: (() => void) | undefined;
+    mocks.generateText.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          finishInference = () => resolve('All done.');
+        }),
+    );
+
+    try {
+      const answer = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      let settled = false;
+      void answer.finally(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS);
+      expect(releaseRenewal).toBeDefined();
+
+      finishInference?.();
+      await vi.advanceTimersByTimeAsync(1);
+      // Settlement must wait for the stalled renewal so the terminal lease
+      // write cannot be overwritten by the stale extension.
+      expect(settled).toBe(false);
+      const settleWrites = () =>
+        mocks.touchSessionActivity.mock.calls.filter(
+          ([, , , update]) => update?.respondingUntil === null,
+        );
+      expect(settleWrites()).toHaveLength(0);
+
+      releaseRenewal?.();
+      await vi.advanceTimersByTimeAsync(1);
+      await answer;
+      expect(settleWrites()).toHaveLength(1);
+      expect(mocks.touchSessionActivity).toHaveBeenLastCalledWith(
+        expect.anything(),
+        'session-1',
+        expect.any(Number),
+        { respondingUntil: null },
+      );
+    } finally {
+      vi.useRealTimers();
     }
   });
 
