@@ -634,6 +634,31 @@ export function PreviewSidePanel({
     }
   }, []);
 
+  const handleRetryPreview = useCallback(() => {
+    if (isNavigating) {
+      return;
+    }
+
+    retryStartRef.current = null;
+    retryCountRef.current = 0;
+    hasInitiallyLoadedRef.current = false;
+    setIsLoadWarningDismissed(false);
+    beginNavigationRequest();
+
+    const iframe = iframeRef.current;
+    if (!iframe?.src) {
+      return;
+    }
+
+    try {
+      iframe.contentWindow?.location.reload();
+    } catch {
+      const src = iframe.src;
+      iframe.src = '';
+      iframe.src = src;
+    }
+  }, [beginNavigationRequest, isNavigating]);
+
   const activeUrl = currentUrl ?? effectivePreviewUrl;
   const displayUrl = getDisplayPath(activeUrl);
 
@@ -912,7 +937,11 @@ export function PreviewSidePanel({
             {!hasLoadedOnce &&
             environmentSetupRunning &&
             !isSetupNoticeDismissed ? (
-              <div className="absolute inset-x-3 bottom-3 z-10 flex items-center justify-between gap-3 rounded-md border bg-background/95 p-3 shadow-md">
+              <div
+                role="status"
+                aria-live="polite"
+                className="absolute inset-x-3 bottom-3 z-10 flex items-center justify-between gap-3 rounded-md border bg-background/95 p-3 shadow-md"
+              >
                 <span className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="size-3.5 shrink-0 animate-spin" />
                   Environment services are still starting. The preview will load
@@ -929,13 +958,27 @@ export function PreviewSidePanel({
                 </Button>
               </div>
             ) : loadTimedOut && !isLoadWarningDismissed ? (
-              <div className="absolute inset-x-3 bottom-3 z-10 flex items-center justify-between gap-3 rounded-md border bg-background/95 p-3 shadow-md">
+              <div
+                role="status"
+                aria-live="polite"
+                className="absolute inset-x-3 bottom-3 z-10 flex items-center justify-between gap-3 rounded-md border bg-background/95 p-3 shadow-md"
+              >
                 <span className="text-sm text-muted-foreground">
                   {environmentSetupTroubled
                     ? 'Environment setup reported problems, which may be why the preview is not loading.'
                     : "The preview hasn't reported loading. It may still be starting, or something may be blocking it."}
                 </span>
                 <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleRetryPreview}
+                    disabled={isNavigating}
+                    aria-busy={isNavigating}
+                  >
+                    {isNavigating ? <Loader2 className="animate-spin" /> : null}
+                    {isNavigating ? 'Retrying...' : 'Try again'}
+                  </Button>
                   <Button
                     size="sm"
                     variant="outline"

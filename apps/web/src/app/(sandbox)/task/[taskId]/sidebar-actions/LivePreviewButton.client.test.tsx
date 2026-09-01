@@ -10,6 +10,7 @@ const {
   openPreviewPaneMock,
   resolvePreviewTargetMock,
   restoreSnapshotMutateAsyncMock,
+  restoreSnapshotState,
 } = vi.hoisted(() => ({
   usePreviewUrlsMock: vi.fn(),
   useTaskSidePanelMock: vi.fn(),
@@ -18,6 +19,10 @@ const {
   openPreviewSetupViewMock: vi.fn(),
   openPreviewPaneMock: vi.fn(),
   restoreSnapshotMutateAsyncMock: vi.fn(),
+  restoreSnapshotState: {
+    isPending: false,
+    onError: undefined as ((error: unknown) => void) | undefined,
+  },
   resolvePreviewTargetMock: vi.fn(
     ({
       initialPaths,
@@ -59,13 +64,20 @@ vi.mock('@/components/system', () => ({
     onClick,
     disabled,
     type,
+    'aria-busy': ariaBusy,
   }: {
     children: ReactNode;
     onClick?: () => void;
     disabled?: boolean;
     type?: 'button' | 'submit' | 'reset';
+    'aria-busy'?: boolean;
   }) => (
-    <button type={type} onClick={onClick} disabled={disabled}>
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      aria-busy={ariaBusy}
+    >
       {children}
     </button>
   ),
@@ -84,6 +96,7 @@ vi.mock('@/components/system', () => ({
     <div>{children}</div>
   ),
   DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
+  Spinner: () => <span aria-hidden="true">loading</span>,
 }));
 
 vi.mock('../hooks/use-preview-urls', () => ({
@@ -100,10 +113,16 @@ vi.mock('../hooks/use-preview-pane', () => ({
 }));
 
 vi.mock('@/hooks/snapshots', () => ({
-  useRestoreTaskRunSnapshot: () => ({
-    mutateAsync: restoreSnapshotMutateAsyncMock,
-    isPending: false,
-  }),
+  useRestoreTaskRunSnapshot: (options?: {
+    onError?: (error: unknown) => void;
+  }) => {
+    restoreSnapshotState.onError = options?.onError;
+
+    return {
+      mutateAsync: restoreSnapshotMutateAsyncMock,
+      isPending: restoreSnapshotState.isPending,
+    };
+  },
 }));
 
 vi.mock('@/hooks/useUser', () => ({
@@ -126,6 +145,7 @@ vi.mock('@/components/layout/side-nav/SideNavItem', () => ({
     label,
     linkProps,
     disabled,
+    description,
     onClick,
   }: {
     href?: string;
@@ -137,12 +157,14 @@ vi.mock('@/components/layout/side-nav/SideNavItem', () => ({
       target?: string;
     };
     disabled?: boolean;
+    description?: string;
     onClick?: () => void;
   }) => {
     if (href) {
       return (
         <a
           aria-label={label}
+          title={description}
           href={href}
           rel={linkProps?.rel}
           target={linkProps?.target}
@@ -157,6 +179,7 @@ vi.mock('@/components/layout/side-nav/SideNavItem', () => ({
       <button
         type="button"
         aria-label={label}
+        title={description}
         disabled={disabled}
         onClick={onClick}
       >
@@ -171,6 +194,8 @@ import { LivePreviewButton } from './LivePreviewButton';
 describe('LivePreviewButton', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    restoreSnapshotState.isPending = false;
+    restoreSnapshotState.onError = undefined;
     restoreSnapshotMutateAsyncMock.mockResolvedValue({
       success: true,
       runId: 456,
@@ -354,6 +379,7 @@ describe('LivePreviewButton', () => {
           {
             id: 123,
             snapshotId: 'snapshot-1',
+            snapshotCreatedAt: new Date(),
             payload: { environmentId: 'env-1' },
           } as never
         }
@@ -375,5 +401,134 @@ describe('LivePreviewButton', () => {
         resumePrompt: '',
       }),
     );
+  });
+
+  it('disables repeated wake attempts and exposes accessible progress', () => {
+    const props = {
+      taskId: 'task-1',
+      taskRun: {
+        id: 123,
+        snapshotId: 'snapshot-1',
+        snapshotCreatedAt: new Date(),
+        payload: { environmentId: 'env-1' },
+      } as never,
+    };
+    const { rerender } = render(
+      <LivePreviewButton {...props} disabled={false} />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Live Preview' }));
+    restoreSnapshotState.isPending = true;
+    rerender(<LivePreviewButton {...props} disabled={true} />);
+
+    const wakeButton = screen.getByRole('button', { name: /waking up/i });
+    expect(wakeButton).toBeDisabled();
+    expect(wakeButton).toHaveAttribute('aria-busy', 'true');
+
+    fireEvent.click(wakeButton);
+    expect(restoreSnapshotMutateAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the wake dialog open and shows restore failures inline', async () => {
+    restoreSnapshotMutateAsyncMock.mockImplementationOnce(async () => {
+      restoreSnapshotState.onError?.(
+        new Error('You do not have permission to restore this preview.'),
+      );
+    });
+
+    render(
+      <LivePreviewButton
+        taskId="task-1"
+        taskRun={
+          {
+            id: 123,
+            snapshotId: 'snapshot-1',
+            snapshotCreatedAt: new Date(),
+            payload: { environmentId: 'env-1' },
+          } as never
+        }
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Live Preview' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Wake up' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'You do not have permission to restore this preview.',
+    );
+    expect(
+      screen.getByRole('heading', { name: 'Wake up Roomote?' }),
+    ).toBeVisible();
+  });
+
+  it('submits only one restore for rapid repeated wake clicks', () => {
+    restoreSnapshotMutateAsyncMock.mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+
+    render(
+      <LivePreviewButton
+        taskId="task-1"
+        taskRun={
+          {
+            id: 123,
+            snapshotId: 'snapshot-1',
+            snapshotCreatedAt: new Date(),
+            payload: { environmentId: 'env-1' },
+          } as never
+        }
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Live Preview' }));
+    const wakeButton = screen.getByRole('button', { name: 'Wake up' });
+    fireEvent.click(wakeButton);
+    fireEvent.click(wakeButton);
+
+    expect(restoreSnapshotMutateAsyncMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables wake when the retained preview snapshot has expired', () => {
+    render(
+      <LivePreviewButton
+        taskId="task-1"
+        taskRun={
+          {
+            id: 123,
+            snapshotId: 'snapshot-1',
+            snapshotCreatedAt: new Date('2020-01-01T00:00:00.000Z'),
+            payload: { environmentId: 'env-1' },
+          } as never
+        }
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Live Preview' });
+    expect(trigger).toBeDisabled();
+    expect(trigger).toHaveAttribute(
+      'title',
+      'This task snapshot has expired and can no longer be resumed.',
+    );
+  });
+
+  it('disables preview while the task is going to sleep', () => {
+    render(
+      <LivePreviewButton
+        taskId="task-1"
+        taskRun={
+          {
+            id: 123,
+            sleepRequestedAt: new Date(),
+            snapshotCreatedAt: null,
+            snapshotFailedAt: null,
+            payload: { environmentId: 'env-1' },
+          } as never
+        }
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Live Preview' });
+    expect(trigger).toBeDisabled();
+    expect(trigger).toHaveAttribute('title', 'This task is going to sleep');
   });
 });

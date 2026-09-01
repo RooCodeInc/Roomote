@@ -1,8 +1,12 @@
 'use client';
 
-import { memo, useState, type MouseEventHandler } from 'react';
+import { memo, useRef, useState, type MouseEventHandler } from 'react';
 
-import { DEFAULT_MANAGED_DEPLOYMENT_ACCESS } from '@roomote/types';
+import {
+  DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
+  EXPIRED_SNAPSHOT_RESUME_ERROR,
+  isSnapshotResumable,
+} from '@roomote/types';
 
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 import { useRestoreTaskRunSnapshot } from '@/hooks/snapshots';
@@ -17,6 +21,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  Spinner,
 } from '@/components/system';
 
 import { useTaskSidePanel } from '../hooks/use-task-side-panel';
@@ -36,6 +41,8 @@ function LivePreviewButtonBase({
   disabled: disabledUntilReady = false,
 }: SidebarActionBaseProps & { disabled?: boolean }) {
   const [showWakeDialog, setShowWakeDialog] = useState(false);
+  const [wakeError, setWakeError] = useState<string | null>(null);
+  const wakeInFlightRef = useRef(false);
   const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
     useAuthorizedUser();
   const { initialPaths, previewUrl, previewUrls, primaryPortName } =
@@ -49,7 +56,17 @@ function LivePreviewButtonBase({
   } = useTaskSidePanel();
   const { openPreviewPane } = usePreviewPane();
   const restoreSnapshot = useRestoreTaskRunSnapshot({
-    onSuccess: () => setShowWakeDialog(false),
+    onSuccess: () => {
+      setWakeError(null);
+      setShowWakeDialog(false);
+    },
+    onError: (error) => {
+      setWakeError(
+        error instanceof Error
+          ? error.message
+          : 'Live Preview could not be restored. Try again.',
+      );
+    },
   });
   const {
     previewServiceName: resolvedPreviewServiceName,
@@ -70,8 +87,12 @@ function LivePreviewButtonBase({
   }
 
   const asleep = isTaskRunAsleep(taskRun);
+  const snapshotExpired =
+    Boolean(taskRun.snapshotId) &&
+    !isSnapshotResumable(taskRun.snapshotCreatedAt);
+  const goingToSleep = asleep && !taskRun.snapshotId;
   const canWakeForPreview =
-    asleep && !!taskRun?.snapshotId && !!resolvedPreviewUrl;
+    asleep && !snapshotExpired && !!taskRun.snapshotId && !!resolvedPreviewUrl;
   const taskLaunchDisabledReason = getTaskLaunchDisabledReason(managedAccess);
   const wakeDisabled = canWakeForPreview && Boolean(taskLaunchDisabledReason);
   const openUrl =
@@ -79,25 +100,38 @@ function LivePreviewButtonBase({
       ? buildPreviewIframeUrl(resolvedPreviewUrl, taskRun.id)
       : null;
   const hasPreviewUrl = Boolean(resolvedPreviewUrl);
-  const disabled = disabledUntilReady || !taskRun || wakeDisabled;
+  const disabled =
+    disabledUntilReady ||
+    !taskRun ||
+    wakeDisabled ||
+    snapshotExpired ||
+    goingToSleep;
   const tooltip = disabledUntilReady
     ? undefined
-    : wakeDisabled
-      ? taskLaunchDisabledReason
-      : canWakeForPreview
-        ? 'Wake up Roomote to use Live Preview'
-        : !hasPreviewUrl
-          ? 'Set up Live Preview'
-          : 'Live Preview';
+    : snapshotExpired
+      ? EXPIRED_SNAPSHOT_RESUME_ERROR
+      : goingToSleep
+        ? 'Live Preview will be available after the task finishes going to sleep'
+        : wakeDisabled
+          ? taskLaunchDisabledReason
+          : canWakeForPreview
+            ? 'Wake up Roomote to use Live Preview'
+            : !hasPreviewUrl
+              ? 'Set up Live Preview'
+              : 'Live Preview';
 
   const handleWakeConfirm = async () => {
     if (
       !taskRun?.snapshotId ||
       restoreSnapshot.isPending ||
+      wakeInFlightRef.current ||
       taskLaunchDisabledReason
     ) {
       return;
     }
+
+    setWakeError(null);
+    wakeInFlightRef.current = true;
 
     try {
       await restoreSnapshot.mutateAsync({
@@ -107,6 +141,8 @@ function LivePreviewButtonBase({
       });
     } catch {
       // The mutation hook already surfaces the error to the user.
+    } finally {
+      wakeInFlightRef.current = false;
     }
   };
 
@@ -139,15 +175,19 @@ function LivePreviewButtonBase({
         label="Live Preview"
         tooltip={tooltip}
         description={
-          wakeDisabled
-            ? taskLaunchDisabledReason
-            : canWakeForPreview
-              ? 'Wake this task so live preview becomes available'
-              : disabled
-                ? undefined
-                : hasPreviewUrl
-                  ? "Preview this task's app"
-                  : 'Set up live previews for this task'
+          snapshotExpired
+            ? EXPIRED_SNAPSHOT_RESUME_ERROR
+            : goingToSleep
+              ? 'This task is going to sleep'
+              : wakeDisabled
+                ? taskLaunchDisabledReason
+                : canWakeForPreview
+                  ? 'Wake this task so live preview becomes available'
+                  : disabled
+                    ? undefined
+                    : hasPreviewUrl
+                      ? "Preview this task's app"
+                      : 'Set up live previews for this task'
         }
         active={!disabled && !canWakeForPreview && isViewActive('preview')}
         disabled={disabled}
@@ -177,7 +217,15 @@ function LivePreviewButtonBase({
               }
         }
       />
-      <Dialog open={showWakeDialog} onOpenChange={setShowWakeDialog}>
+      <Dialog
+        open={showWakeDialog}
+        onOpenChange={(open) => {
+          setShowWakeDialog(open);
+          if (!open) {
+            setWakeError(null);
+          }
+        }}
+      >
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>Wake up Roomote?</DialogTitle>
@@ -186,6 +234,11 @@ function LivePreviewButtonBase({
               the task and make preview available again.
             </DialogDescription>
           </DialogHeader>
+          {wakeError ? (
+            <p role="alert" className="text-sm text-destructive">
+              {wakeError}
+            </p>
+          ) : null}
           <DialogFooter>
             <Button
               type="button"
@@ -201,7 +254,9 @@ function LivePreviewButtonBase({
               disabled={
                 restoreSnapshot.isPending || Boolean(taskLaunchDisabledReason)
               }
+              aria-busy={restoreSnapshot.isPending}
             >
+              {restoreSnapshot.isPending ? <Spinner /> : null}
               {restoreSnapshot.isPending ? 'Waking up...' : 'Wake up'}
             </Button>
           </DialogFooter>
