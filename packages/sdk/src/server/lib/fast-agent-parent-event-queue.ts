@@ -10,6 +10,7 @@ import {
   eq,
   fastAgentParentEvents,
   isNull,
+  recordCustomAutomationRunOutcome,
   sql,
   taskRuns,
 } from '@roomote/db/server';
@@ -168,6 +169,35 @@ async function markDiscarded(id: string, error: unknown) {
     .where(eq(fastAgentParentEvents.id, id));
 }
 
+function getAutomationLaunchClaim(event: FastAgentParentEvent) {
+  if (event.type !== 'automation_triggered') return null;
+
+  const prefix = `${event.automationId}:`;
+  if (!event.eventId.startsWith(prefix)) return null;
+
+  const launchClaimedAt = new Date(event.eventId.slice(prefix.length));
+  if (Number.isNaN(launchClaimedAt.getTime())) return null;
+
+  return { id: event.automationId, launchClaimedAt };
+}
+
+async function finalizeAutomationLaunch(
+  event: FastAgentParentEvent,
+  status: 'succeeded' | 'failed',
+  error?: unknown,
+) {
+  const claim = getAutomationLaunchClaim(event);
+  if (!claim) return;
+
+  await recordCustomAutomationRunOutcome(db, {
+    ...claim,
+    status,
+    ...(status === 'failed'
+      ? { error: error instanceof Error ? error.message : String(error) }
+      : {}),
+  });
+}
+
 /** Drain one parent's durable inbox in creation order under one turn lock. */
 export async function drainFastAgentParentEvents(
   request: FastAgentParentEventQueueRequest,
@@ -226,15 +256,18 @@ export async function drainFastAgentParentEvents(
           },
           turnLock,
         );
+        await finalizeAutomationLaunch(row.event, 'succeeded');
         await markDelivered(row.id);
       } catch (error) {
         const deliveryError =
           error instanceof FastAgentParentEventDeliveryError ? error : null;
         if (deliveryError?.replyPosted) {
+          await finalizeAutomationLaunch(row.event, 'succeeded');
           await markDelivered(row.id);
           continue;
         }
         if (deliveryError?.permanent) {
+          await finalizeAutomationLaunch(row.event, 'failed', deliveryError);
           await markDiscarded(row.id, deliveryError);
           continue;
         }

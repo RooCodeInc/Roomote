@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fastMocks = vi.hoisted(() => ({
   getSession: vi.fn(),
-  deliverParentEvent: vi.fn(),
+  enqueueParentEvent: vi.fn(),
   slackPostMessage: vi.fn(),
   slackUpdateMessage: vi.fn(),
   createDiscordProvider: vi.fn(),
@@ -23,7 +23,10 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('../../lib/fast-agent-parent-event', () => ({
   buildSlackClientMessageId: vi.fn(() => 'client-message-id'),
-  deliverFastAgentParentEvent: fastMocks.deliverParentEvent,
+}));
+
+vi.mock('../../lib/fast-agent-parent-event-queue', () => ({
+  enqueueFastAgentParentEvent: fastMocks.enqueueParentEvent,
 }));
 
 vi.mock('../../lib/fast-agent-provider-message', () => ({
@@ -204,7 +207,10 @@ describe('customAutomationsJob', () => {
       id: '33333333-3333-4333-8333-333333333333',
       compatibilityMessages: [],
     });
-    fastMocks.deliverParentEvent.mockResolvedValue('delivered');
+    fastMocks.enqueueParentEvent.mockResolvedValue({
+      eventKey: 'event-key',
+      queued: true,
+    });
     fastMocks.slackPostMessage.mockResolvedValue('100.001');
     fastMocks.slackUpdateMessage.mockResolvedValue(true);
     fastMocks.discordPostMessage.mockResolvedValue({
@@ -262,7 +268,7 @@ describe('customAutomationsJob', () => {
         workspaceId: automation.id,
       }),
     });
-    expect(fastMocks.deliverParentEvent).toHaveBeenCalledWith(
+    expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
           type: 'automation_triggered',
@@ -271,7 +277,7 @@ describe('customAutomationsJob', () => {
         }),
       }),
     );
-    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
+    expect(recordCustomAutomationRunOutcome).not.toHaveBeenCalledWith(
       db,
       expect.objectContaining({
         id: automation.id,
@@ -307,7 +313,7 @@ describe('customAutomationsJob', () => {
         replyTarget: { channelId: 'C123' },
       },
     });
-    expect(fastMocks.deliverParentEvent).toHaveBeenCalledWith(
+    expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.not.objectContaining({
           rootMessageId: expect.anything(),
@@ -329,20 +335,22 @@ describe('customAutomationsJob', () => {
       botAccessToken: 'xoxb-test',
       teamId: 'T123',
     } as never);
-    fastMocks.deliverParentEvent.mockRejectedValueOnce(
-      new Error('parent turn failed'),
+    fastMocks.enqueueParentEvent.mockRejectedValueOnce(
+      new Error('parent event admission failed'),
     );
 
     const result = await customAutomationsJob();
 
-    expect(result.errors).toEqual(['Flaky tests: parent turn failed']);
+    expect(result.errors).toEqual([
+      'Flaky tests: parent event admission failed',
+    ]);
     expect(fastMocks.slackPostMessage).not.toHaveBeenCalled();
     expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
       db,
       expect.objectContaining({
         id: automation.id,
         status: 'failed',
-        error: 'parent turn failed',
+        error: 'parent event admission failed',
       }),
     );
   });
@@ -452,7 +460,7 @@ describe('customAutomationsJob', () => {
         replyTarget: { channelId: 'D123' },
       },
     });
-    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
+    expect(recordCustomAutomationRunOutcome).not.toHaveBeenCalledWith(
       db,
       expect.objectContaining({
         id: automation.id,
@@ -590,7 +598,7 @@ describe('customAutomationsJob', () => {
           },
         }),
       });
-      expect(fastMocks.deliverParentEvent).toHaveBeenCalledWith(
+      expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
         expect.objectContaining({
           event: expect.objectContaining({
             ...('rootMessageId' in expected
@@ -639,7 +647,7 @@ describe('customAutomationsJob', () => {
     );
   });
 
-  it('uses the persisted Teams DM service URL to report a parent-turn failure', async () => {
+  it('uses the persisted Teams DM service URL to report an event admission failure', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {
         ...automation,
@@ -659,8 +667,8 @@ describe('customAutomationsJob', () => {
       teamId: 'tenant-1',
       serviceUrl: 'https://persisted.example.com/amer/',
     });
-    fastMocks.deliverParentEvent.mockRejectedValueOnce(
-      new Error('parent turn failed'),
+    fastMocks.enqueueParentEvent.mockRejectedValueOnce(
+      new Error('parent event admission failed'),
     );
     vi.mocked(findTeamsConversationRoute).mockResolvedValue(null);
 
@@ -674,7 +682,7 @@ describe('customAutomationsJob', () => {
       channelId: 'teams-dm-1',
       messageId: 'teams-message-1',
       serviceUrl: 'https://persisted.example.com/amer/',
-      text: 'Flaky tests failed: parent turn failed',
+      text: 'Flaky tests failed: parent event admission failed',
       textFormat: 'markdown',
     });
   });
@@ -1256,6 +1264,37 @@ describe('runCustomAutomationNow', () => {
             ),
           }),
         }),
+      }),
+    );
+  });
+
+  it('acknowledges a manual Fast run after durably queueing its event', async () => {
+    vi.mocked(getCustomAutomationById).mockResolvedValue({
+      ...automation,
+      executionMode: 'fast',
+      environmentId: null,
+      target: {},
+      createdByUserId: 'user-1',
+    } as never);
+
+    const result = await runCustomAutomationNow(automation.id);
+
+    expect(result).toEqual({ outcome: 'completed' });
+    expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          type: 'automation_triggered',
+          automationId: automation.id,
+          trigger: 'manual',
+        }),
+      }),
+    );
+    expect(enqueueTask).not.toHaveBeenCalled();
+    expect(recordCustomAutomationRunOutcome).not.toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        id: automation.id,
+        status: 'succeeded',
       }),
     );
   });

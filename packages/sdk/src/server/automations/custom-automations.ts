@@ -56,10 +56,8 @@ import { findUserDirectMessageDestination } from '../lib/user-direct-message';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../lib/discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../lib/teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../lib/telegram-communication';
-import {
-  deliverFastAgentParentEvent,
-  type FastAgentParentEvent,
-} from '../lib/fast-agent-parent-event';
+import type { FastAgentParentEvent } from '../lib/fast-agent-parent-event';
+import { enqueueFastAgentParentEvent } from '../lib/fast-agent-parent-event-queue';
 import { recordFastAgentConversationMessage } from '../lib/fast-agent-provider-message';
 
 const LOG_PREFIX = '[custom-automations]';
@@ -449,7 +447,7 @@ async function runFastCustomAutomation(params: {
         : {}),
       ...(rootMessageId ? { rootMessageId } : {}),
     };
-    await deliverFastAgentParentEvent({
+    await enqueueFastAgentParentEvent({
       parent: { sessionId: session.id, conversation },
       event,
     });
@@ -728,11 +726,6 @@ async function launchCustomAutomationRow(
         destination,
         launchClaimedAt,
         trigger: opts.manualTrigger ? 'manual' : 'schedule',
-      });
-      await recordCustomAutomationRunOutcome(db, {
-        id: automation.id,
-        status: 'succeeded',
-        launchClaimedAt,
       });
       result.completed = true;
       return result;
