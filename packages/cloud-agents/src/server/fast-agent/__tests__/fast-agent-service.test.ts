@@ -830,6 +830,81 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('waits for a quiet window and batches rapidly arriving messages', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-08-31T12:00:00.000Z'));
+      const first = {
+        id: '55555555-5555-4555-8555-555555555555',
+        createdAt: new Date(),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.7',
+          currentMessageId: '100.7',
+          userId: 'user-1',
+          question: 'Rapid update one.',
+        },
+      };
+      let pendingRows = [first];
+      mocks.getPendingHumanFollowUp.mockImplementation(async () => pendingRows);
+      mocks.nativeSteer.mockImplementationOnce(async () => {
+        pendingRows = [];
+      });
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(mocks.nativeSteer).not.toHaveBeenCalled();
+
+      const second = {
+        id: '66666666-6666-4666-8666-666666666666',
+        createdAt: new Date(),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.8',
+          currentMessageId: '100.8',
+          userId: 'user-1',
+          question: 'Rapid update two.',
+        },
+      };
+      pendingRows = [first, second];
+      await vi.advanceTimersByTimeAsync(2_750);
+      expect(mocks.nativeSteer).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      const steerText = mocks.nativeSteer.mock.calls[0]?.[0]?.text;
+      expect(steerText).toContain('Rapid update one.');
+      expect(steerText).toContain('Rapid update two.');
+      expect(steerText?.indexOf('Rapid update one.')).toBeLessThan(
+        steerText?.indexOf('Rapid update two.') ?? -1,
+      );
+
+      finishGeneration?.('Rapid updates handled together');
+      await expect(resultPromise).resolves.toBe(
+        'Rapid updates handled together',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('chunks an oversized pending prefix into bounded native steers', async () => {
     vi.useFakeTimers();
     try {

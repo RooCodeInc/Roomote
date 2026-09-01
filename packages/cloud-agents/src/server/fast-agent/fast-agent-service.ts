@@ -212,6 +212,7 @@ const showWidgetArgsSchema = z.object({
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS = 50_000;
 const FAST_AGENT_HUMAN_STEER_POLL_INTERVAL_MS = 250;
+const FAST_AGENT_HUMAN_STEER_QUIET_WINDOW_MS = 3_000;
 const FAST_AGENT_HUMAN_STEER_MAX_MESSAGES = 16;
 const FAST_AGENT_HUMAN_STEER_QUERY_LIMIT =
   FAST_AGENT_HUMAN_STEER_MAX_MESSAGES + 1;
@@ -1171,6 +1172,14 @@ export async function answerFastAgentQuestion({
         rows.length === 0 ||
         !nativeSteer ||
         activeToolExecutions > 0
+      ) {
+        return;
+      }
+      const newestPendingCreatedAt = rows.at(-1)?.createdAt.getTime();
+      if (
+        newestPendingCreatedAt !== undefined &&
+        Date.now() - newestPendingCreatedAt <
+          FAST_AGENT_HUMAN_STEER_QUIET_WINDOW_MS
       ) {
         return;
       }
