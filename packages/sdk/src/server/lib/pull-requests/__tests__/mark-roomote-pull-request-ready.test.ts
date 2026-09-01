@@ -5,20 +5,34 @@ const {
   mockCreateGitHubToken,
   mockFindAssociation,
   mockGetSetting,
+  mockGetPrAction,
   mockGetOctokit,
   mockGraphql,
   mockPullRequestGet,
   mockReleaseLifecycleLock,
+  mockResolveRepositoryRow,
+  mockResolveGitLabProviderContext,
+  mockResolveGiteaProviderContext,
+  mockResolveBitbucketProviderContext,
+  mockResolveAdoProviderContext,
+  mockSupportsDraftTransition,
   mockUpdateTaskPrStatus,
 } = vi.hoisted(() => ({
   mockAcquireLifecycleLock: vi.fn(),
   mockCreateGitHubToken: vi.fn(),
   mockFindAssociation: vi.fn(),
   mockGetSetting: vi.fn(),
+  mockGetPrAction: vi.fn(),
   mockGetOctokit: vi.fn(),
   mockGraphql: vi.fn(),
   mockPullRequestGet: vi.fn(),
   mockReleaseLifecycleLock: vi.fn(),
+  mockResolveRepositoryRow: vi.fn(),
+  mockResolveGitLabProviderContext: vi.fn(),
+  mockResolveGiteaProviderContext: vi.fn(),
+  mockResolveBitbucketProviderContext: vi.fn(),
+  mockResolveAdoProviderContext: vi.fn(),
+  mockSupportsDraftTransition: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
 }));
 
@@ -28,6 +42,12 @@ vi.mock('@roomote/auth', () => ({
 
 vi.mock('@roomote/github', () => ({
   getOctokit: (...args: unknown[]) => mockGetOctokit(...args),
+}));
+
+vi.mock('@roomote/types', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/types')>()),
+  supportsPullRequestDraftTransition: (...args: unknown[]) =>
+    mockSupportsDraftTransition(...args),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -40,6 +60,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   getDeploymentMarkRoomotePrReadyAfterCleanReview: (...args: unknown[]) =>
     mockGetSetting(...args),
+  getDeploymentPrAction: (...args: unknown[]) => mockGetPrAction(...args),
   taskPullRequests: {
     sourceControlProvider: 'sourceControlProvider',
     repository: 'repository',
@@ -50,6 +71,25 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('../update-task-pr-status', () => ({
   updateTaskPrStatus: (...args: unknown[]) => mockUpdateTaskPrStatus(...args),
+}));
+
+vi.mock('../source-control-pull-request-shared', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('../source-control-pull-request-shared')
+  >()),
+  resolveRepositoryRow: (...args: unknown[]) =>
+    mockResolveRepositoryRow(...args),
+}));
+
+vi.mock('../source-control-pull-request-provider-context', () => ({
+  resolveGitLabProviderContext: (...args: unknown[]) =>
+    mockResolveGitLabProviderContext(...args),
+  resolveGiteaProviderContext: (...args: unknown[]) =>
+    mockResolveGiteaProviderContext(...args),
+  resolveBitbucketProviderContext: (...args: unknown[]) =>
+    mockResolveBitbucketProviderContext(...args),
+  resolveAdoProviderContext: (...args: unknown[]) =>
+    mockResolveAdoProviderContext(...args),
 }));
 
 vi.mock('../../task-runs/github-pr-review-check', () => ({
@@ -84,14 +124,30 @@ async function markReady(
     findingCount: number | null;
     headSha: string | null;
   } = CLEAN_REVIEW,
+  options: {
+    provider?: 'github' | 'gitlab' | 'gitea' | 'ado' | 'bitbucket';
+    fetchImpl?: typeof fetch;
+  } = {},
 ) {
   return markRoomotePullRequestReadyAfterCleanReview({
-    installationId: 123,
+    sourceControlProvider: options.provider ?? 'github',
     repository: 'owner/repo',
     prNumber: 42,
     reviewHeadSha: REVIEW_HEAD_SHA,
     reviewResult,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
   });
+}
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function responseQueue(...bodies: unknown[]) {
+  return vi.fn(async () => jsonResponse(bodies.shift()));
 }
 
 describe('markRoomotePullRequestReadyAfterCleanReview', () => {
@@ -102,6 +158,43 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
     mockCreateGitHubToken.mockReset().mockResolvedValue('token');
     mockFindAssociation.mockReset().mockResolvedValue({ id: 'association' });
     mockGetSetting.mockReset().mockResolvedValue(true);
+    mockGetPrAction.mockReset().mockResolvedValue('draft');
+    mockSupportsDraftTransition.mockReset().mockReturnValue(true);
+    mockResolveRepositoryRow.mockReset().mockResolvedValue({
+      id: 'repo-id',
+      sourceControlProvider: 'github',
+      host: 'github.com',
+      installationId: '123',
+      externalRepoId: 'project-id',
+      fullName: 'owner/repo',
+      htmlUrl: 'https://github.com/owner/repo',
+    });
+    mockResolveGitLabProviderContext.mockReset().mockResolvedValue({
+      apiBaseUrl: 'https://gitlab.example/api/v4',
+      projectId: 'project-id',
+      token: 'gitlab-token',
+    });
+    mockResolveGiteaProviderContext.mockReset().mockResolvedValue({
+      apiBaseUrl: 'https://gitea.example/api/v1',
+      baseUrl: 'https://gitea.example',
+      owner: 'owner',
+      repo: 'repo',
+      token: 'gitea-token',
+    });
+    mockResolveBitbucketProviderContext.mockReset().mockResolvedValue({
+      apiBaseUrl: 'https://api.bitbucket.org/2.0',
+      authHeader: 'Bearer bitbucket-token',
+      baseUrl: 'https://bitbucket.org',
+      workspace: 'owner',
+      repo: 'repo',
+    });
+    mockResolveAdoProviderContext.mockReset().mockResolvedValue({
+      baseUrl: 'https://dev.azure.com',
+      organizationApiBaseUrl: 'https://dev.azure.com/org',
+      repositoryPullRequestsPath:
+        '/project/_apis/git/repositories/repo-id/pullrequests',
+      token: 'ado-token',
+    });
     mockGraphql.mockReset().mockResolvedValue({
       markPullRequestReadyForReview: {
         pullRequest: { headRefOid: REVIEW_HEAD_SHA, isDraft: false },
@@ -120,6 +213,25 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
     mockGetSetting.mockResolvedValue(false);
 
     await expect(markReady()).resolves.toBe('disabled');
+    expect(mockFindAssociation).not.toHaveBeenCalled();
+    expect(mockPullRequestGet).not.toHaveBeenCalled();
+  });
+
+  it.each(['create', 'push'] as const)(
+    'is inactive when pull request delivery is %s',
+    async (prAction) => {
+      mockGetPrAction.mockResolvedValue(prAction);
+
+      await expect(markReady()).resolves.toBe('disabled');
+      expect(mockFindAssociation).not.toHaveBeenCalled();
+      expect(mockPullRequestGet).not.toHaveBeenCalled();
+    },
+  );
+
+  it('fails closed when the provider lacks a ready transition capability', async () => {
+    mockSupportsDraftTransition.mockReturnValue(false);
+
+    await expect(markReady()).resolves.toBe('unsupported');
     expect(mockFindAssociation).not.toHaveBeenCalled();
     expect(mockPullRequestGet).not.toHaveBeenCalled();
   });
@@ -219,7 +331,7 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
 
     await expect(
       markRoomotePullRequestReadyAfterCleanReview({
-        installationId: 123,
+        sourceControlProvider: 'github',
         repository: 'owner/repo',
         prNumber: 42,
         reviewHeadSha: abbreviatedHead,
@@ -255,6 +367,179 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
     expect(mockPullRequestGet).toHaveBeenCalledTimes(2);
     expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
       'github',
+      'owner/repo',
+      42,
+      'open',
+    );
+  });
+
+  it('marks a GitLab draft merge request ready by removing its title prefix', async () => {
+    const fetchImpl = responseQueue(
+      {
+        iid: 42,
+        title: 'Draft: Add feature',
+        state: 'opened',
+        draft: true,
+        sha: REVIEW_HEAD_SHA,
+      },
+      {
+        iid: 42,
+        title: 'Add feature',
+        state: 'opened',
+        draft: false,
+        sha: REVIEW_HEAD_SHA,
+      },
+    );
+
+    await expect(
+      markReady(CLEAN_REVIEW, { provider: 'gitlab', fetchImpl }),
+    ).resolves.toBe('marked_ready');
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ title: 'Add feature' }),
+      }),
+    );
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'gitlab',
+      'owner/repo',
+      42,
+      'open',
+    );
+  });
+
+  it('marks a Gitea WIP pull request ready by removing its title prefix', async () => {
+    const fetchImpl = responseQueue(
+      {
+        number: 42,
+        title: 'WIP: Add feature',
+        state: 'open',
+        head: { sha: REVIEW_HEAD_SHA },
+      },
+      {
+        number: 42,
+        title: 'Add feature',
+        state: 'open',
+        head: { sha: REVIEW_HEAD_SHA },
+      },
+    );
+
+    await expect(
+      markReady(CLEAN_REVIEW, { provider: 'gitea', fetchImpl }),
+    ).resolves.toBe('marked_ready');
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ title: 'Add feature' }),
+      }),
+    );
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'gitea',
+      'owner/repo',
+      42,
+      'open',
+    );
+  });
+
+  it('fails closed for a Gitea native draft without title-prefix semantics', async () => {
+    const fetchImpl = responseQueue({
+      number: 42,
+      title: 'Add feature',
+      state: 'open',
+      draft: true,
+      head: { sha: REVIEW_HEAD_SHA },
+    });
+
+    await expect(
+      markReady(CLEAN_REVIEW, { provider: 'gitea', fetchImpl }),
+    ).resolves.toBe('unsupported');
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(mockUpdateTaskPrStatus).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when Gitea keeps its native draft flag after title update', async () => {
+    const fetchImpl = responseQueue(
+      {
+        number: 42,
+        title: 'WIP: Add feature',
+        state: 'open',
+        draft: true,
+        head: { sha: REVIEW_HEAD_SHA },
+      },
+      {
+        number: 42,
+        title: 'Add feature',
+        state: 'open',
+        draft: true,
+        head: { sha: REVIEW_HEAD_SHA },
+      },
+    );
+
+    await expect(
+      markReady(CLEAN_REVIEW, { provider: 'gitea', fetchImpl }),
+    ).rejects.toThrow('Gitea did not confirm ready transition');
+    expect(mockUpdateTaskPrStatus).not.toHaveBeenCalled();
+  });
+
+  it('marks a Bitbucket Cloud draft pull request ready', async () => {
+    const pullRequest = (draft: boolean) => ({
+      id: 42,
+      title: 'Add feature',
+      state: 'OPEN',
+      draft,
+      source: {
+        branch: { name: 'feature' },
+        commit: { hash: REVIEW_HEAD_SHA },
+      },
+    });
+    const fetchImpl = responseQueue(pullRequest(true), pullRequest(false));
+
+    await expect(
+      markReady(CLEAN_REVIEW, { provider: 'bitbucket', fetchImpl }),
+    ).resolves.toBe('marked_ready');
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ draft: false }),
+      }),
+    );
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'bitbucket',
+      'owner/repo',
+      42,
+      'open',
+    );
+  });
+
+  it('marks an Azure DevOps draft pull request ready', async () => {
+    const pullRequest = (isDraft: boolean) => ({
+      pullRequestId: 42,
+      title: 'Add feature',
+      status: 'active',
+      isDraft,
+      lastMergeSourceCommit: { commitId: REVIEW_HEAD_SHA },
+    });
+    const fetchImpl = responseQueue(pullRequest(true), pullRequest(false));
+
+    await expect(
+      markReady(CLEAN_REVIEW, { provider: 'ado', fetchImpl }),
+    ).resolves.toBe('marked_ready');
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ isDraft: false }),
+      }),
+    );
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'ado',
       'owner/repo',
       42,
       'open',

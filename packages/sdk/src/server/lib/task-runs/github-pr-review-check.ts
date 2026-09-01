@@ -166,7 +166,7 @@ function classifyReviewSummary(input: {
   };
 }
 
-function getTerminalReviewSummaryResult(input: {
+export function getTerminalReviewSummaryResult(input: {
   reviewSummaryBody?: string;
   expectedHeadSha: string;
 }) {

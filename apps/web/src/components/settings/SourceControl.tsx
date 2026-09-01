@@ -462,13 +462,7 @@ export function SourceControl() {
       ) : null}
       <Section icon={GitMerge} title="Source Control Settings">
         <div className="space-y-6">
-          {isAdmin ? (
-            <>
-              <PrActionSetting />
-              <MarkRoomotePrReadyAfterCleanReviewSetting />
-              <GitHubRoomoteMentionSetting />
-            </>
-          ) : null}
+          {isAdmin ? <SourceControlAdminSettings /> : null}
         </div>
       </Section>
       {providerBlocks.map((providerBlock) => (
@@ -478,6 +472,21 @@ export function SourceControl() {
         />
       ))}
     </div>
+  );
+}
+
+function SourceControlAdminSettings() {
+  const prActionQuery = usePrAction();
+  const currentPrAction = prActionQuery.data?.prAction ?? 'draft';
+
+  return (
+    <>
+      <PrActionSetting prActionQuery={prActionQuery} />
+      {currentPrAction === 'draft' ? (
+        <MarkRoomotePrReadyAfterCleanReviewSetting />
+      ) : null}
+      <GitHubRoomoteMentionSetting />
+    </>
   );
 }
 
@@ -507,9 +516,9 @@ function MarkRoomotePrReadyAfterCleanReviewSetting() {
           Mark Roomote PR ready after clean review
         </div>
         <p className="text-sm text-muted-foreground">
-          When Roomote creates a GitHub draft pull request, mark it ready for
-          human review after the automated reviewer finds no issues. This does
-          not approve or merge the pull request.
+          When Roomote creates a draft pull request or merge request, mark it
+          ready for human review after the automated reviewer finds no issues.
+          This does not approve or merge it.
         </p>
       </div>
     </div>
@@ -526,8 +535,11 @@ const PR_ACTION_LABELS: Record<PrAction, string> = {
  * Deployment-wide default for how repository-changing tasks deliver their
  * work, mirroring the task-run `prAction` setting.
  */
-function PrActionSetting() {
-  const prActionQuery = usePrAction();
+function PrActionSetting({
+  prActionQuery,
+}: {
+  prActionQuery: ReturnType<typeof usePrAction>;
+}) {
   const setPrAction = useSetPrAction();
   const currentPrAction = prActionQuery.data?.prAction ?? 'draft';
 

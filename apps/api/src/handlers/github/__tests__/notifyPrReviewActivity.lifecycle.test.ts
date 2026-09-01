@@ -182,7 +182,7 @@ describe('PR review-summary lifecycle replay', () => {
     expect(
       mockMarkRoomotePullRequestReadyAfterCleanReview,
     ).toHaveBeenCalledWith({
-      installationId: 1,
+      sourceControlProvider: 'github',
       repository: 'RooCodeInc/Roomote',
       prNumber: 1688,
       reviewHeadSha: REVIEW_HEAD_SHA,
