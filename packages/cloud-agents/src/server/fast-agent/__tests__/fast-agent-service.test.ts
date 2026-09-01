@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   markShutdownCloseoutSettled: vi.fn(),
   revokeMcpCapabilities: vi.fn(),
   reconcileRetryNotices: vi.fn(),
+  markRetryNoticeInterruption: vi.fn(),
   getUnifiedSession: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
@@ -87,7 +88,11 @@ vi.mock('../fast-agent-session', () => ({
 vi.mock('../fast-agent-conversation-repository', () => ({
   INTERRUPTED_INFERENCE_RETRY_MESSAGE:
     'The inference retry was interrupted before it completed. Please send the request again.',
+  RESTARTED_ACTIVE_TURN_MESSAGE:
+    'Roomote restarted while working on this request. Please send it again.',
   reconcileFastAgentInferenceRetryNotices: mocks.reconcileRetryNotices,
+  markFastAgentInferenceRetryNoticeInterruption:
+    mocks.markRetryNoticeInterruption,
 }));
 
 vi.mock('../../router', () => ({
@@ -373,6 +378,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.setOpenCodeSession.mockResolvedValue(undefined);
     mocks.upsertMessage.mockResolvedValue({ initialHumanTurn: true });
     mocks.reconcileRetryNotices.mockResolvedValue(0);
+    mocks.markRetryNoticeInterruption.mockResolvedValue(undefined);
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
@@ -2480,6 +2486,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).not.toHaveBeenCalled();
     expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
     expect(mocks.reconcileRetryNotices).toHaveBeenCalledOnce();
+    // No retry notice existed, so there is no orphan to attribute.
+    expect(mocks.markRetryNoticeInterruption).not.toHaveBeenCalled();
   });
 
   it('leaves a visible retry notice for the successor when lock loss cancels backoff', async () => {
@@ -2528,6 +2536,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
       expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
       expect(mocks.reconcileRetryNotices).toHaveBeenCalledOnce();
+      expect(mocks.markRetryNoticeInterruption).toHaveBeenCalledWith(
+        'conversation-1',
+        '100.2:retry-notice:0',
+        'lock_lost',
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -2578,6 +2591,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         inferenceRetryActive: true,
       });
       expect(mocks.reconcileRetryNotices).toHaveBeenCalledOnce();
+      expect(mocks.markRetryNoticeInterruption).toHaveBeenCalledWith(
+        'conversation-1',
+        '100.2:retry-notice:0',
+        'lock_lost',
+      );
       expect(mocks.touchSessionActivity).toHaveBeenCalledOnce();
       expect(mocks.touchSessionActivity).toHaveBeenCalledWith(
         expect.anything(),
@@ -2594,7 +2612,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const controller = new AbortController();
     const shutdown = new FastAgentProcessShutdownError('SIGTERM');
     const expectedCloseout =
-      'The inference retry was interrupted before it completed. Please send the request again.';
+      'Roomote restarted while working on this request. Please send it again.';
     const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
     const originalSetTimeout = globalThis.setTimeout;
     let shouldAbort = true;
@@ -2642,6 +2660,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           platformMessageId: 'closeout-1',
           inferenceRetryNotice: true,
           inferenceRetryActive: false,
+          interruptionReason: 'api_shutdown',
         },
       });
       expect(
