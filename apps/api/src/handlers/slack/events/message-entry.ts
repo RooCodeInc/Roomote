@@ -1479,6 +1479,49 @@ async function processAutomatedAppMentionTask(params: {
       return { handled: false };
     },
     onFresh: async () => {
+      // Same first hop as a human mention: give Fast the turn under the
+      // automation launch identity and let it delegate coding work itself.
+      // The direct task launch below stays as the fallback so an automated
+      // ticket is never dropped when the Fast turn cannot start.
+      const { ackEmoji } = await resolveSlackReactionNames();
+      const { activeMapping: launchUserMapping } =
+        launchIdentity.slackUserId === slackInstallation.botUserId
+          ? { activeMapping: null }
+          : await lookupSlackUserMapping({
+              slackUserId: launchIdentity.slackUserId,
+              teamId,
+            });
+      const fastStart = await startFastAgentResponse({
+        event: threadEvent,
+        slackInstallation,
+        ...(launchUserMapping ? { userMapping: launchUserMapping } : {}),
+        slack,
+        userId: launchIdentity.launchUserId,
+        teamId,
+        continuation: true,
+        directedAtRoomote: true,
+        resolveActiveTasks: () =>
+          resolveFastAgentReplyTasks({
+            slack,
+            slackTeamId: teamId,
+            channelId: event.channel,
+            threadTs: threadId,
+          }),
+        processingReactionName: ackEmoji,
+        errorLogPrefix: `❌ Background fast-agent response failed for automated mention thread ${threadId}:`,
+      });
+
+      if (fastStart.accepted) {
+        apiLogger.info(
+          `[SlackWebhook] Automated app_mention routed to Fast thread_id=${threadId} channel=${event.channel} app_id=${event.app_id}`,
+        );
+        return true;
+      }
+
+      apiLogger.warn(
+        `[SlackWebhook] Automated app_mention Fast entry not accepted (${fastStart.reason}); falling back to direct task launch for thread ${threadId}`,
+      );
+
       const { images, attachmentTexts, videoDescriptions } =
         await processSlackAttachments({
           slack,
@@ -1624,7 +1667,8 @@ async function startAutomatedAppMentionTaskWithLock(params: {
 export function startFastAgentResponse(params: {
   event: SlackEvent;
   slackInstallation: SlackInstallation;
-  userMapping: SlackUserMapping;
+  /** Absent only for automation-identity turns (no linked human author). */
+  userMapping?: SlackUserMapping;
   slack: SlackNotifier;
   userId: string;
   teamId: string;

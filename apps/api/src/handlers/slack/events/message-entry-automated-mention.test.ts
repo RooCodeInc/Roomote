@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   startTask: vi.fn(),
   processAttachments: vi.fn(),
   automationLaunchIdentity: vi.fn(),
+  processFastAgentMessage: vi.fn(),
+  lookupSlackUserMapping: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -42,6 +44,15 @@ vi.mock('../helpers/launch-identity.js', () => ({
   getSlackAutomationLaunchIdentity: mocks.automationLaunchIdentity,
 }));
 
+vi.mock('./fast-agent.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./fast-agent.js')>()),
+  processFastAgentMessage: mocks.processFastAgentMessage,
+}));
+
+vi.mock('../helpers/user-mapping.js', () => ({
+  lookupSlackUserMapping: mocks.lookupSlackUserMapping,
+}));
+
 vi.mock('./thread-follow-up-dispatch.js', () => ({
   resolveSlackThreadFollowUpRoute: vi.fn().mockResolvedValue({ kind: 'fresh' }),
   dispatchSlackThreadFollowUp: vi.fn(
@@ -72,9 +83,69 @@ describe('automated Slack message mentions', () => {
       runId: 'RUN_123',
       taskId: 'TASK_123',
     });
+    mocks.lookupSlackUserMapping.mockResolvedValue({
+      activeMapping: null,
+      hasInactiveMapping: false,
+    });
+    mocks.processFastAgentMessage.mockImplementation(
+      async ({ onAccepted }: { onAccepted?: (abort: () => void) => void }) => {
+        onAccepted?.(() => {});
+      },
+    );
   });
 
-  it('starts an automation task for an external bot_message mentioning Roomote', async () => {
+  it('routes an external bot_message mentioning Roomote to Fast under the automation identity', async () => {
+    const { handleMessageOrAppMentionEvent } =
+      await import('./message-entry.js');
+
+    await handleMessageOrAppMentionEvent({
+      event: {
+        type: 'message',
+        subtype: 'bot_message',
+        channel: 'C123',
+        channel_type: 'channel',
+        user: 'U_WORKFLOW',
+        bot_id: 'B_WORKFLOW',
+        app_id: 'A_WORKFLOW',
+        text: '<@U_ROOMOTE> investigate this deployment',
+        ts: '1712345678.000200',
+      },
+      context: {
+        slackInstallation: {
+          appId: 'A_ROOMOTE',
+          botUserId: 'U_ROOMOTE',
+          installedByUserId: 'USER_INSTALLER',
+        } as never,
+        slack: {} as never,
+        teamId: 'T123',
+      },
+    });
+
+    await vi.waitFor(() =>
+      expect(mocks.processFastAgentMessage).toHaveBeenCalledTimes(1),
+    );
+    expect(mocks.processFastAgentMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'USER_INSTALLER',
+        teamId: 'T123',
+        continuation: true,
+        directedAtRoomote: true,
+        event: expect.objectContaining({
+          channel: 'C123',
+          user: 'U_INSTALLER',
+        }),
+      }),
+    );
+    expect(mocks.startTask).not.toHaveBeenCalled();
+  }, 30000);
+
+  it('falls back to an automation task when the Fast turn is not accepted', async () => {
+    mocks.processFastAgentMessage.mockImplementation(
+      async ({ onRejected }: { onRejected?: () => void }) => {
+        onRejected?.();
+      },
+    );
+
     const { handleMessageOrAppMentionEvent } =
       await import('./message-entry.js');
 
