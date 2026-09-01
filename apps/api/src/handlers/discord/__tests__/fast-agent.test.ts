@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   resolveWorkspace: vi.fn(),
   startTask: vi.fn(),
   recordProviderMessage: vi.fn(),
+  admitHumanFollowUp: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -34,6 +35,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
@@ -103,6 +105,10 @@ describe('processDiscordFastAgentMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
+    mocks.admitHumanFollowUp.mockResolvedValue({
+      kind: 'turn',
+      turnLock: mocks.releaseLock,
+    });
     mocks.releaseLock.mockResolvedValue(undefined);
     mocks.fetchHistory.mockResolvedValue([]);
     mocks.getMessage.mockReturnValue({ id: 'source-1' });
@@ -117,6 +123,45 @@ describe('processDiscordFastAgentMessage', () => {
       launchResult: { taskId: 'task-1' },
       taskUrl: 'https://roomote.example.com/task/task-1',
     });
+  });
+
+  it('durably queues a follow-up instead of waiting on an active turn lock', async () => {
+    const abort = vi.fn().mockResolvedValue(undefined);
+    const onAccepted = vi.fn();
+    mocks.acquireLock.mockResolvedValue(null);
+    mocks.admitHumanFollowUp.mockResolvedValue({ kind: 'queued', abort });
+
+    await expect(
+      processDiscordFastAgentMessage({
+        eventId: 'event-2',
+        question: 'Use the corrected requirement',
+        sender: { id: 'discord-user-1', username: 'Matt' },
+        senderUserId: 'user-1',
+        provider: {} as never,
+        applicationId: 'app-1',
+        channel: {
+          channelId: 'dm-1',
+          channelType: 1,
+          isDirectMessage: true,
+          isThread: false,
+        } as never,
+        metadata: { communicationChannelId: 'dm-1' } as never,
+        conversationId: 'dm-1',
+        onAccepted,
+      }),
+    ).resolves.toBe(true);
+
+    expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          type: 'human_follow_up',
+          eventId: 'event-2',
+          question: 'Use the corrected requirement',
+        }),
+      }),
+    );
+    expect(onAccepted).toHaveBeenCalledWith(abort);
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
   });
 
   it('replaces a Fast retry notice in place', async () => {

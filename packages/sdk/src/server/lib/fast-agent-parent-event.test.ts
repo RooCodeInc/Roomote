@@ -2,6 +2,7 @@ const mocks = vi.hoisted(() => ({
   acquireTurnLock: vi.fn(),
   releaseTurnLock: Object.assign(vi.fn(), {
     signal: new AbortController().signal,
+    abort: vi.fn(),
   }),
   acquireRootBindingLock: vi.fn(),
   releaseRootBindingLock: vi.fn(),
@@ -202,7 +203,10 @@ vi.mock('./fast-automation-suggestions', () => ({
   postFastAutomationSuggestionsToTelegram: mocks.postTelegramSuggestions,
 }));
 
-import { deliverFastAgentParentEvent } from './fast-agent-parent-event';
+import {
+  deliverFastAgentParentEvent,
+  deliverFastAgentParentEventWithLock,
+} from './fast-agent-parent-event';
 
 const parent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
@@ -371,6 +375,49 @@ describe('deliverFastAgentParentEvent', () => {
           message: 'The proof is ready.',
           imageArtifactIds: ['artifact-1', 'artifact-1'],
         }),
+    );
+  });
+
+  it('delivers a human follow-up queued at response finalization as the next turn', async () => {
+    mocks.answerQuestion.mockResolvedValueOnce('Updated response');
+
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.003',
+          currentMessageId: '100.003',
+          userId: 'user-2',
+          question: 'Use the corrected requirement.',
+          images: ['data:image/png;base64,aGVsbG8='],
+          senderDisplayName: 'Matt',
+          senderExternalId: 'U123',
+        },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Use the corrected requirement.',
+        images: ['data:image/png;base64,aGVsbG8='],
+        userId: 'user-2',
+        currentMessageId: '100.003',
+        currentDurableHumanFollowUpEventId: '100.003',
+        senderDisplayName: 'Matt',
+        senderExternalId: 'U123',
+        turnSource: 'human',
+        signal: mocks.releaseTurnLock.signal,
+      }),
+    );
+    expect(mocks.createLauncher).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-2' }),
+    );
+    const answerInput = mocks.answerQuestion.mock.calls[0]?.[0];
+    await answerInput.adapter.resolveMcpServerConfigs();
+    expect(mocks.resolveUserMcpServerConfigs).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-2' }),
     );
   });
 

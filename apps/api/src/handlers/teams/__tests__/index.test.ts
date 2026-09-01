@@ -21,6 +21,7 @@ const {
   postMessageMock,
   processImageAttachmentsMock,
   redisEvalMock,
+  redisDelMock,
   redisGetMock,
   queueCommunicationMessageMock,
   redisSetMock,
@@ -80,6 +81,7 @@ const {
   postMessageMock: vi.fn(),
   processImageAttachmentsMock: vi.fn(),
   redisEvalMock: vi.fn(),
+  redisDelMock: vi.fn(),
   redisGetMock: vi.fn(),
   queueCommunicationMessageMock: vi.fn(),
   redisSetMock: vi.fn(),
@@ -120,6 +122,7 @@ vi.mock('@roomote/env', () => ({
 vi.mock('@roomote/redis', () => ({
   getRedis: vi.fn(() => ({
     eval: redisEvalMock,
+    del: redisDelMock,
     get: redisGetMock,
     set: redisSetMock,
   })),
@@ -875,7 +878,7 @@ describe('Teams webhook handler', () => {
       '19:conversation@thread.v2',
       'tenant-1',
     );
-    expect(continueFastReplyMock).toHaveBeenCalledWith(
+    expect(queueFastReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: '11111111-1111-4111-8111-111111111111',
         userId: 'mapped-user-1',
@@ -1113,6 +1116,47 @@ describe('Teams webhook handler', () => {
         images: ['data:image/png;base64,abc123'],
       }),
     );
+  });
+
+  it('does not acknowledge a Teams Fast reply when durable admission fails', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    findFastReplySessionMock.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'teams',
+        workspaceId: 'tenant-1',
+        conversationId: 'automation-run-1',
+        replyTarget: {
+          channelId: '19:conversation@thread.v2',
+          threadId: 'activity-root',
+        },
+      },
+    });
+    queueFastReplyMock.mockRejectedValueOnce(new Error('database unavailable'));
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          conversation: {
+            id: '19:conversation@thread.v2;messageid=activity-root',
+            tenantId: 'tenant-1',
+            conversationType: 'channel',
+          },
+          replyToId: 'fast-report-1',
+        }),
+      ),
+    });
+
+    expect(response.status).toBe(500);
+    expect(redisDelMock).toHaveBeenCalledWith('teams:activity:activity-2');
   });
 
   it('queues image-only Teams attachments for matching active task runs', async () => {
