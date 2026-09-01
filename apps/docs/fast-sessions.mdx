@@ -17,8 +17,9 @@ automations, and the web dashboard.
 On the home page, leave the workspace selector on **Auto** to start a
 conversation. Roomote answers directly when it can and delegates execution
 when the request needs a repository workspace. Selecting an environment or
-repository starts the execution directly, but Roomote still creates the
-owning Session and opens it with that execution selected.
+repository starts the execution directly and opens its task workspace. Roomote
+still creates the owning Session so the execution remains part of the same
+shared history.
 
 Fast is the default for **Auto** and other unpinned requests across the web
 dashboard and supported chat providers. Choose an environment or repository
@@ -97,8 +98,14 @@ In shared Slack and Discord conversations, Fast can stay silent when linked
 participants are talking to each other. A direct reply to Roomote, a mention,
 an explicit Fast command, or a direct message still requires a response.
 
-## Execution access
+## Session and execution access
 
-Session participants can see timeline summaries. Full execution details keep
-the existing task permissions, so joining a shared channel does not grant
-access to logs, terminals, diffs, previews, or private artifacts.
+Any signed-in deployment user with a Session link can view its timeline and
+contribute to the conversation, matching task access. The Sessions list remains
+focused: administrators see every Session, while other users see Sessions they
+own, participate in, or have spoken in. Replies are attributed to the teammate
+who sent them.
+
+Full execution details keep the existing task permissions, so joining a shared
+channel does not grant access to logs, terminals, diffs, previews, or private
+artifacts.
