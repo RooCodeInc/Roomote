@@ -61,6 +61,8 @@ vi.mock('@roomote/db/server', () => ({
   asc: vi.fn((value: unknown) => value),
   eq: vi.fn((...values: unknown[]) => values),
   isNull: vi.fn((value: unknown) => value),
+  lt: vi.fn((...values: unknown[]) => values),
+  or: vi.fn((...values: unknown[]) => values),
   sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
     strings: [...strings],
     values,
@@ -70,6 +72,8 @@ vi.mock('@roomote/db/server', () => ({
     conversationId: 'conversation_id',
     eventKey: 'event_key',
     attempts: 'attempts',
+    admission: 'admission',
+    claimedUntil: 'claimed_until',
     createdAt: 'created_at',
     deliveredAt: 'delivered_at',
     discardedAt: 'discarded_at',
@@ -335,6 +339,39 @@ describe('Fast parent event durable queue', () => {
       ]);
     },
   );
+
+  it('re-runs an interrupted inline-admitted human turn as a resumption', async () => {
+    const inlineRow = {
+      ...pendingRow('inline-1', {
+        type: 'human_follow_up' as const,
+        eventId: '100.2',
+        currentMessageId: '100.2',
+        userId: 'user-1',
+        question: 'What broke?',
+      }),
+      admission: 'inline' as const,
+      claimedUntil: null,
+    };
+    mocks.findPending
+      .mockResolvedValueOnce(inlineRow)
+      .mockResolvedValueOnce(inlineRow)
+      .mockResolvedValueOnce(undefined);
+    mocks.acquireLock.mockResolvedValueOnce(mocks.releaseLock);
+    mocks.deliver.mockResolvedValueOnce('delivered');
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: inlineRow.eventKey,
+    });
+
+    expect(mocks.deliver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: inlineRow.event,
+        resumedAfterInterruption: true,
+      }),
+      mocks.releaseLock,
+    );
+  });
 
   it('returns a retryable busy signal without occupying a worker slot', async () => {
     const first = pendingRow('event-1');

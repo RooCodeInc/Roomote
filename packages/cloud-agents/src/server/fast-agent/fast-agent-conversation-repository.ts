@@ -7,6 +7,7 @@ import {
   eq,
   fastAgentConversations,
   fastAgentMessages,
+  fastAgentParentEvents,
   ensureSessionForFastConversation,
   advanceSessionNotifiedCursor,
   advanceSessionReadCursor,
@@ -320,6 +321,85 @@ export async function findFastAgentUnresolvedRequest(
     return null;
   }
   return { turnId, text: prompt.text, reason };
+}
+
+/**
+ * Durable admission of human turns. The accepting process persists the turn
+ * as an inline-admitted parent event before running it, holds a claim lease
+ * while it works, and settles the row when it finishes. If the process dies
+ * first, the released or expired claim lets the parent-event queue re-run
+ * the turn, but only while replay is still safe.
+ */
+export const FAST_AGENT_DURABLE_TURN_CLAIM_MS = 15 * 60 * 1000;
+
+function pendingDurableTurnWhere(id: string) {
+  return and(
+    eq(fastAgentParentEvents.id, id),
+    isNull(fastAgentParentEvents.deliveredAt),
+    isNull(fastAgentParentEvents.discardedAt),
+  );
+}
+
+/** Extend the inline owner's claim; false once the row is no longer pending. */
+export async function renewFastAgentDurableTurnClaim(
+  id: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(fastAgentParentEvents)
+    .set({
+      claimedUntil: new Date(Date.now() + FAST_AGENT_DURABLE_TURN_CLAIM_MS),
+      updatedAt: new Date(),
+    })
+    .where(pendingDurableTurnWhere(id))
+    .returning({ id: fastAgentParentEvents.id });
+  return rows.length > 0;
+}
+
+/**
+ * Hand the turn to the queue: an interrupted owner clears its claim so the
+ * next drain or recovery sweep re-runs the turn immediately.
+ */
+export async function releaseFastAgentDurableTurnClaim(
+  id: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(fastAgentParentEvents)
+    .set({ claimedUntil: null, updatedAt: new Date() })
+    .where(pendingDurableTurnWhere(id))
+    .returning({ id: fastAgentParentEvents.id });
+  return rows.length > 0;
+}
+
+/**
+ * Permanently withdraw the turn from replay, recorded before the action
+ * that makes replay unsafe runs, so a crash after it can never re-run it.
+ */
+export async function revokeFastAgentDurableTurnReplay(
+  id: string,
+  reason: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(fastAgentParentEvents)
+    .set({
+      discardedAt: new Date(),
+      lastError: reason,
+      updatedAt: new Date(),
+    })
+    .where(pendingDurableTurnWhere(id))
+    .returning({ id: fastAgentParentEvents.id });
+  return rows.length > 0;
+}
+
+/** The turn produced its outcome; nothing is left to recover. */
+export async function markFastAgentDurableTurnDelivered(
+  id: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(fastAgentParentEvents)
+    .set({ deliveredAt: new Date(), lastError: null, updatedAt: new Date() })
+    .where(pendingDurableTurnWhere(id))
+    .returning({ id: fastAgentParentEvents.id });
+  return rows.length > 0;
 }
 
 /**

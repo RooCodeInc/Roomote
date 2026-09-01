@@ -27,8 +27,11 @@ import {
 } from '@roomote/communication';
 import {
   admitFastAgentHumanFollowUp,
+  persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
+  wakeFastAgentParentEventNow,
+  type FastAgentDurableTurn,
 } from '@roomote/sdk/server';
 import { ALL_REPOSITORIES, type TaskInitiator } from '@roomote/types';
 
@@ -177,33 +180,48 @@ export async function processDiscordFastAgentMessage(
       userId: input.senderUserId,
       conversation,
     });
+    const humanFollowUpEvent = {
+      type: 'human_follow_up' as const,
+      eventId,
+      currentMessageId: anchorMessageId ?? eventId,
+      userId: input.senderUserId,
+      question: input.question,
+      senderDisplayName:
+        input.interaction?.interaction.member?.nick ??
+        input.sender.global_name ??
+        input.sender.username,
+      senderExternalId: input.sender.id,
+    };
+    let durableTurn: FastAgentDurableTurn | null = null;
     if (!releaseFastAgentLock) {
       const admission = await admitFastAgentHumanFollowUp({
         parent: { sessionId: session.id, conversation },
-        event: {
-          type: 'human_follow_up',
-          eventId,
-          currentMessageId: anchorMessageId ?? eventId,
-          userId: input.senderUserId,
-          question: input.question,
-          senderDisplayName:
-            input.interaction?.interaction.member?.nick ??
-            input.sender.global_name ??
-            input.sender.username,
-          senderExternalId: input.sender.id,
-        },
+        event: humanFollowUpEvent,
       });
       if (admission.kind !== 'turn') {
         input.onAccepted?.(admission.abort);
         return true;
       }
       releaseFastAgentLock = admission.turnLock;
+      durableTurn = admission.durable;
     }
     if (!releaseFastAgentLock) {
       input.onRejected?.();
       return false;
     }
     const activeTurnLock = releaseFastAgentLock;
+    // Durable admission: the turn is persisted under this process's claim
+    // before it runs, so an interruption hands it to the queue.
+    durableTurn ??= await persistFastAgentInlineHumanTurn({
+      parent: { sessionId: session.id, conversation },
+      event: humanFollowUpEvent,
+    }).catch((error) => {
+      console.error(
+        `[DiscordFastAgent] Failed to persist Fast turn admission: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    });
+    const durableTurnForResume = durableTurn;
     const footerContext = await resolveFastSessionReplyFooterContext({
       sessionId: session.id,
     });
@@ -279,6 +297,9 @@ export async function processDiscordFastAgentMessage(
       conversation,
       currentMessageId: anchorMessageId ?? input.interaction?.interaction.id,
       signal: activeTurnLock.signal,
+      ...(durableTurnForResume
+        ? { durableAdmission: { eventId: durableTurnForResume.id } }
+        : {}),
       senderDisplayName:
         input.interaction?.interaction.member?.nick ??
         input.sender.global_name ??
@@ -293,6 +314,15 @@ export async function processDiscordFastAgentMessage(
             entry.user !== input.sender.id,
         ),
       adapter: {
+        ...(durableTurnForResume
+          ? {
+              requestDurableResume: () =>
+                wakeFastAgentParentEventNow({
+                  conversationId: session.id,
+                  eventKey: durableTurnForResume.eventKey,
+                }),
+            }
+          : {}),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId: input.senderUserId,

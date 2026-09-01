@@ -1485,6 +1485,9 @@ type FastAgentParentEventDeliveryParams = {
   /** Cap the turn-lock wait so callers holding an HTTP request can fail fast
    * and lean on their own retry instead of blocking. */
   lockWaitMs?: number;
+  /** The queue is re-running an inline-admitted human turn that was
+   * interrupted before it finished. */
+  resumedAfterInterruption?: boolean;
 };
 
 /** Give a structured child event to the Fast orchestrator for presentation. */
@@ -1582,6 +1585,9 @@ export async function deliverFastAgentParentEventWithLock(
       turnSource: humanFollowUp ? 'human' : 'platform_event',
       ...(humanFollowUp
         ? { currentDurableHumanFollowUpEventId: humanFollowUp.eventId }
+        : {}),
+      ...(params.resumedAfterInterruption
+        ? { resumedAfterInterruption: true }
         : {}),
       platformEventHandling:
         params.event.type === 'pull_request_feedback' ||

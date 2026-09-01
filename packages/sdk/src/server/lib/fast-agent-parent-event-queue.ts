@@ -10,6 +10,8 @@ import {
   eq,
   fastAgentParentEvents,
   isNull,
+  lt,
+  or,
   sql,
   taskRuns,
 } from '@roomote/db/server';
@@ -83,6 +85,17 @@ async function addWakeupJob(request: FastAgentParentEventQueueRequest) {
   await getFastAgentParentEventQueue().add('deliver', request, {
     jobId: request.eventKey,
   });
+}
+
+/**
+ * Wake the queue for a persisted row right away, for an interrupted inline
+ * owner handing its turn back. Failure is not fatal: the recovery sweep
+ * recreates the wakeup within its interval.
+ */
+export async function wakeFastAgentParentEventNow(
+  request: FastAgentParentEventQueueRequest,
+): Promise<void> {
+  await addWakeupJob(request);
 }
 
 function wakeFastAgentParentEvent(request: FastAgentParentEventQueueRequest) {
@@ -167,6 +180,13 @@ function pendingPredicate(conversationId?: string) {
       : []),
     isNull(fastAgentParentEvents.deliveredAt),
     isNull(fastAgentParentEvents.discardedAt),
+    // An inline-admitted turn stays with its live owner while the owner's
+    // claim is current; the queue takes over once the claim is released or
+    // expires.
+    or(
+      isNull(fastAgentParentEvents.claimedUntil),
+      lt(fastAgentParentEvents.claimedUntil, new Date()),
+    ),
   );
 }
 
@@ -273,6 +293,11 @@ export async function drainFastAgentParentEvents(
             parent: row.parent,
             event: row.event,
             ...(retryTaskStart ? { retryTaskStart } : {}),
+            // An inline-admitted row only reaches the queue after its owner
+            // was interrupted, so this delivery is a resumption.
+            ...(row.admission === 'inline'
+              ? { resumedAfterInterruption: true }
+              : {}),
           },
           turnLock,
         );

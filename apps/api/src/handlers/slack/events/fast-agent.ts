@@ -24,6 +24,9 @@ import {
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   admitFastAgentHumanFollowUp,
+  persistFastAgentInlineHumanTurn,
+  wakeFastAgentParentEventNow,
+  type FastAgentDurableTurn,
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
 } from '@roomote/sdk/server';
@@ -220,27 +223,30 @@ export async function processFastAgentMessage(params: {
       conversation.surface !== incomingConversation.surface ||
       conversation.workspaceId !== incomingConversation.workspaceId ||
       conversation.conversationId !== incomingConversation.conversationId;
+    const humanFollowUpEvent = {
+      type: 'human_follow_up' as const,
+      eventId: event.ts,
+      currentMessageId: event.ts,
+      userId,
+      question,
+      ...(attachments.images.length ? { images: attachments.images } : {}),
+      ...(currentMessage?.username
+        ? { senderDisplayName: currentMessage.username }
+        : {}),
+      ...(event.user ? { senderExternalId: event.user } : {}),
+    };
+    let durableTurn: FastAgentDurableTurn | null = null;
     if (needsCanonicalAdmission) {
       const admission = await admitFastAgentHumanFollowUp({
         parent: { sessionId: session.id, conversation },
-        event: {
-          type: 'human_follow_up',
-          eventId: event.ts,
-          currentMessageId: event.ts,
-          userId,
-          question,
-          ...(attachments.images.length ? { images: attachments.images } : {}),
-          ...(currentMessage?.username
-            ? { senderDisplayName: currentMessage.username }
-            : {}),
-          ...(event.user ? { senderExternalId: event.user } : {}),
-        },
+        event: humanFollowUpEvent,
       });
       if (admission.kind !== 'turn') {
         params.onAccepted?.(admission.abort);
         return;
       }
       releaseCanonicalFastAgentLock = admission.turnLock;
+      durableTurn = admission.durable;
     }
     const activeTurnLock =
       releaseCanonicalFastAgentLock ?? releaseFastAgentLock;
@@ -248,6 +254,17 @@ export async function processFastAgentMessage(params: {
       params.onRejected?.();
       return;
     }
+    // Durable admission: the turn is persisted under this process's claim
+    // before it runs, so an interruption hands it to the queue.
+    durableTurn ??= await persistFastAgentInlineHumanTurn({
+      parent: { sessionId: session.id, conversation },
+      event: humanFollowUpEvent,
+    }).catch((error) => {
+      console.error(
+        `[SlackWebhook] Failed to persist Fast turn admission: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    });
     params.onAccepted?.(() =>
       activeTurnLock.abort(
         new Error('Fast suggestion launch settlement failed.'),
@@ -264,6 +281,7 @@ export async function processFastAgentMessage(params: {
       conversation,
       currentMessageId: event.ts,
       signal: activeTurnLock.signal,
+      ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
       senderExternalId: event.user,
       senderDisplayName:
         currentMessage?.user === event.user
@@ -277,6 +295,15 @@ export async function processFastAgentMessage(params: {
         !directedAtRoomote,
       ...(roomoteSlackUserId ? { slackRoomoteUserId: roomoteSlackUserId } : {}),
       adapter: {
+        ...(durableTurn
+          ? {
+              requestDurableResume: () =>
+                wakeFastAgentParentEventNow({
+                  conversationId: session.id,
+                  eventKey: durableTurn.eventKey,
+                }),
+            }
+          : {}),
         activity: createFastAgentSlackSessionActivity({
           slack,
           workspaceId: teamId,

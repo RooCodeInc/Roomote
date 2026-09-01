@@ -4,6 +4,7 @@ import {
   eq,
   fastAgentConversations,
   fastAgentMessages,
+  fastAgentParentEvents,
   inArray,
   sessions,
   userFactory,
@@ -14,6 +15,10 @@ import {
   fastAgentConversationRepository,
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+  markFastAgentDurableTurnDelivered,
+  releaseFastAgentDurableTurnClaim,
+  renewFastAgentDurableTurnClaim,
+  revokeFastAgentDurableTurnReplay,
   markFastAgentInferenceRetryNoticeInterruption,
   reconcileExpiredFastAgentInferenceRetryNotices,
   reconcileFastAgentInferenceRetryNotices,
@@ -1098,6 +1103,78 @@ describe('Fast conversation repository', () => {
     await expect(
       findFastAgentUnresolvedRequest(session.id),
     ).resolves.toBeNull();
+  });
+
+  it('walks a durable turn row through claim, release, revoke, and delivery', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const parent = { sessionId: session.id, conversation: slackConversation };
+    const insertRow = async (eventKey: string) => {
+      const [row] = await db
+        .insert(fastAgentParentEvents)
+        .values({
+          conversationId: session.id,
+          eventKey,
+          parent,
+          event: { type: 'human_follow_up', eventId: eventKey },
+          admission: 'inline',
+          claimedUntil: new Date(Date.now() + 1_000),
+        })
+        .returning({ id: fastAgentParentEvents.id });
+      return row!.id;
+    };
+    const readRow = async (id: string) => {
+      const [row] = await db
+        .select({
+          claimedUntil: fastAgentParentEvents.claimedUntil,
+          deliveredAt: fastAgentParentEvents.deliveredAt,
+          discardedAt: fastAgentParentEvents.discardedAt,
+          lastError: fastAgentParentEvents.lastError,
+        })
+        .from(fastAgentParentEvents)
+        .where(eq(fastAgentParentEvents.id, id));
+      return row!;
+    };
+
+    // A live owner renews its claim, then hands the turn back on interruption.
+    const resumable = await insertRow('durable-resumable');
+    const before = (await readRow(resumable)).claimedUntil!;
+    await expect(renewFastAgentDurableTurnClaim(resumable)).resolves.toBe(true);
+    expect((await readRow(resumable)).claimedUntil!.getTime()).toBeGreaterThan(
+      before.getTime(),
+    );
+    await expect(releaseFastAgentDurableTurnClaim(resumable)).resolves.toBe(
+      true,
+    );
+    expect((await readRow(resumable)).claimedUntil).toBeNull();
+
+    // Revocation is terminal: later renewals, releases, and settlements no-op.
+    const acted = await insertRow('durable-acted');
+    await expect(
+      revokeFastAgentDurableTurnReplay(acted, 'Native tool launch_task'),
+    ).resolves.toBe(true);
+    const revoked = await readRow(acted);
+    expect(revoked.discardedAt).not.toBeNull();
+    expect(revoked.lastError).toBe('Native tool launch_task');
+    await expect(renewFastAgentDurableTurnClaim(acted)).resolves.toBe(false);
+    await expect(releaseFastAgentDurableTurnClaim(acted)).resolves.toBe(false);
+    await expect(markFastAgentDurableTurnDelivered(acted)).resolves.toBe(false);
+
+    // Delivery settles a pending row exactly once.
+    const completed = await insertRow('durable-completed');
+    await expect(markFastAgentDurableTurnDelivered(completed)).resolves.toBe(
+      true,
+    );
+    expect((await readRow(completed)).deliveredAt).not.toBeNull();
+    await expect(markFastAgentDurableTurnDelivered(completed)).resolves.toBe(
+      false,
+    );
+    await expect(
+      revokeFastAgentDurableTurnReplay(completed, 'late'),
+    ).resolves.toBe(false);
   });
 
   it('renews only a live responding lease', async () => {
