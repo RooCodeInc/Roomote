@@ -217,6 +217,10 @@ const serverSchema = {
   R_TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
   R_TELEGRAM_WEBHOOK_SECRET: z.string().min(1).optional(),
   TELEGRAM_API_BASE_URL: z.string().url().default('https://api.telegram.org'),
+  // Rollout gate for the email (AgentMail) channel: inbound, outbound, and
+  // the settings surface are all inert unless this is set. Read dynamically
+  // via isEmailChannelEnabled() so tests and runtime reads agree.
+  R_EMAIL_CHANNEL_ENABLED: optInBoolean(),
   R_AGENTMAIL_API_KEY: z.string().min(1).optional(),
   R_AGENTMAIL_WEBHOOK_SECRET: z.string().min(1).optional(),
   R_AGENTMAIL_INBOX_ID: z.string().min(1).optional(),
@@ -701,6 +705,18 @@ export type AuthKeypairEnvKey = (typeof AUTH_KEYPAIR_ENV_KEYS)[number];
 export function isEnvFlagEnabled(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
   return normalized === 'true' || normalized === '1';
+}
+
+/**
+ * Whether the email (AgentMail) channel is enabled for this deployment.
+ * Reads the process environment at call time — the same way the AgentMail
+ * credential resolver does — so the gate can never disagree with the
+ * credentials it guards.
+ */
+export function isEmailChannelEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return isEnvFlagEnabled(env.R_EMAIL_CHANNEL_ENABLED);
 }
 
 /** Whether Roomote Cloud-only behavior is enabled for this deployment. */

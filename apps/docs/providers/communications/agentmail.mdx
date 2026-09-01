@@ -14,6 +14,18 @@ inbound mail through a `message.received` webhook, so Roomote must be reachable
 at a stable public HTTPS URL. Each deployment brings its own AgentMail account
 and API key.
 
+## Enable the email channel
+
+Email is off by default. Set `R_EMAIL_CHANNEL_ENABLED=true` in the
+deployment's environment and restart. Until then the provider does not
+appear in settings, inbound webhook deliveries are acknowledged and dropped,
+and Roomote never sends email. On Roomote Cloud this is enabled per
+deployment by the Roomote team.
+
+Enabling the channel gives the deployment an email sender for the first
+time, so it also turns on account email verification (see
+[Account email verification](#account-email-verification) below).
+
 ## Connect an AgentMail inbox
 
 Create an AgentMail account and API key at
@@ -97,6 +109,25 @@ integration linked. Strict consent rules are enforced in code:
 
 Replying to a Roomote-initiated email works like any other thread: the reply
 routes back into the same conversation.
+
+## Account email verification
+
+Roomote only initiates email to an address it has verified. With the email
+channel enabled, that guarantee starts at the account:
+
+- New email-and-password sign-ups receive a verification email and must
+  confirm the address before signing in.
+- Existing accounts that never verified (sign-ups from before the channel
+  was enabled) receive a verification email the next time they sign in.
+- Sign-ins through Slack, Microsoft, GitHub, and the other OAuth providers
+  are unaffected; those providers assert a verified email.
+- Password reset links are emailed to the user as well as shown to the
+  admin who requested them.
+
+Verification and password-reset emails carry no unsubscribe link (the user
+asked for them) and are sent even to an address that unsubscribed from
+Roomote notifications. Addresses that bounced or filed a spam complaint are
+never emailed.
 
 ## Limitations
 

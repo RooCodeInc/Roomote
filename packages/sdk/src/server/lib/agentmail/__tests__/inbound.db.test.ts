@@ -52,9 +52,39 @@ function messageReceivedPayload(input: {
 
 describe('agentmail webhook event outbox (real database)', () => {
   beforeAll(() => {
+    process.env.R_EMAIL_CHANNEL_ENABLED = 'true';
     process.env.R_AGENTMAIL_API_KEY = 'am_test_key';
     process.env.R_AGENTMAIL_WEBHOOK_SECRET = 'whsec_dGVzdA==';
     process.env.R_AGENTMAIL_INBOX_ID = INBOX;
+  });
+
+  it('acknowledges and drops deliveries while the email channel is disabled', async () => {
+    process.env.R_EMAIL_CHANNEL_ENABLED = 'false';
+    try {
+      const deliveryId = `msg_${randomUUID()}`;
+      const result = await recordAgentMailWebhookEvent({
+        deliveryId,
+        eventId: null,
+        eventType: 'message.received',
+        payload: messageReceivedPayload({
+          eventId: `evt_${randomUUID()}`,
+          threadId: `thread-${randomUUID()}`,
+          messageId: `m-${randomUUID()}`,
+          from: `${randomUUID()}@example.com`,
+          text: 'Hello',
+        }),
+      });
+      expect(result).toEqual({
+        accepted: false,
+        reason: 'email_channel_disabled',
+      });
+      const row = await db.query.agentmailWebhookEvents.findFirst({
+        where: eq(agentmailWebhookEvents.deliveryId, deliveryId),
+      });
+      expect(row).toBeUndefined();
+    } finally {
+      process.env.R_EMAIL_CHANNEL_ENABLED = 'true';
+    }
   });
 
   it('records a delivery as received, dispatches it, and acks duplicates by row state', async () => {

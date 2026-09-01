@@ -12,8 +12,10 @@ import {
 } from '@roomote/db/server';
 
 import {
+  canStartAgentMailConversationWithUser,
   isAgentMailAddressSuppressed,
   resolveAgentMailOutboundAddress,
+  sendAgentMailSystemEmail,
   startAgentMailConversation,
   suppressAgentMailAddress,
 } from '../outbound';
@@ -127,9 +129,44 @@ describe('startAgentMailConversation (real database, stubbed AgentMail API)', ()
   const originalFetch = globalThis.fetch;
 
   beforeAll(() => {
+    process.env.R_EMAIL_CHANNEL_ENABLED = 'true';
     process.env.R_AGENTMAIL_API_KEY = 'am_test_key';
     process.env.R_AGENTMAIL_WEBHOOK_SECRET = 'whsec_dGVzdA==';
     process.env.R_AGENTMAIL_INBOX_ID = INBOX;
+  });
+
+  it('refuses to send while the email channel is disabled', async () => {
+    const accountEmail = uniqueEmail('gated');
+    const user = await createVerifiedUser(accountEmail);
+    let called = false;
+    globalThis.fetch = (async () => {
+      called = true;
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+
+    process.env.R_EMAIL_CHANNEL_ENABLED = 'false';
+    try {
+      expect(await canStartAgentMailConversationWithUser(user.id)).toBe(false);
+      expect(
+        await startAgentMailConversation({
+          userId: user.id,
+          subject: 'Gated',
+          text: 'nope',
+          logContext: 'outbound-test',
+        }),
+      ).toBe(false);
+      expect(
+        await sendAgentMailSystemEmail({
+          to: accountEmail,
+          subject: 'Gated',
+          text: 'nope',
+          logContext: 'outbound-test',
+        }),
+      ).toEqual({ sent: false, reason: 'channel_disabled' });
+      expect(called).toBe(false);
+    } finally {
+      process.env.R_EMAIL_CHANNEL_ENABLED = 'true';
+    }
   });
 
   afterEach(() => {
@@ -231,5 +268,87 @@ describe('startAgentMailConversation (real database, stubbed AgentMail API)', ()
 
     expect(sent).toBe(false);
     expect(called).toBe(false);
+  });
+});
+
+describe('sendAgentMailSystemEmail (real database, stubbed AgentMail API)', () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeAll(() => {
+    process.env.R_EMAIL_CHANNEL_ENABLED = 'true';
+    process.env.R_AGENTMAIL_API_KEY = 'am_test_key';
+    process.env.R_AGENTMAIL_WEBHOOK_SECRET = 'whsec_dGVzdA==';
+    process.env.R_AGENTMAIL_INBOX_ID = INBOX;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function stubSend() {
+    const requests: { body: Record<string, unknown> }[] = [];
+    globalThis.fetch = (async (
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      requests.push({
+        body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      });
+      return new Response(
+        JSON.stringify({ message_id: `<${randomUUID()}@agentmail.to>` }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    return requests;
+  }
+
+  it('sends to an unverified address with no unsubscribe header', async () => {
+    const requests = stubSend();
+    const to = uniqueEmail('unverified');
+
+    const result = await sendAgentMailSystemEmail({
+      to,
+      subject: 'Verify your email for Roomote',
+      text: '[Verify](https://example.test/verify)',
+      logContext: 'outbound-test',
+    });
+
+    expect(result).toEqual({ sent: true });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.body.to).toEqual([to.toLowerCase()]);
+    expect(requests[0]!.body.headers).toBeUndefined();
+    expect(String(requests[0]!.body.text)).not.toContain('unsubscribe');
+  });
+
+  it('still sends to an address that unsubscribed from notifications', async () => {
+    const requests = stubSend();
+    const to = uniqueEmail('unsubscribed');
+    await suppressAgentMailAddress({ emailAddress: to, reason: 'unsubscribe' });
+
+    const result = await sendAgentMailSystemEmail({
+      to,
+      subject: 'Reset your Roomote password',
+      text: 'reset',
+      logContext: 'outbound-test',
+    });
+
+    expect(result).toEqual({ sent: true });
+    expect(requests).toHaveLength(1);
+  });
+
+  it('never sends to a bounced or complained address', async () => {
+    const requests = stubSend();
+    const to = uniqueEmail('bounced');
+    await suppressAgentMailAddress({ emailAddress: to, reason: 'bounce' });
+
+    const result = await sendAgentMailSystemEmail({
+      to,
+      subject: 'Verify your email for Roomote',
+      text: 'verify',
+      logContext: 'outbound-test',
+    });
+
+    expect(result).toEqual({ sent: false, reason: 'suppressed' });
+    expect(requests).toHaveLength(0);
   });
 });

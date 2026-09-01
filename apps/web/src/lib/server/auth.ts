@@ -6,6 +6,9 @@ import { nextCookies } from 'better-auth/next-js';
 import { genericOAuth, microsoftEntraId, slack } from 'better-auth/plugins';
 import { drizzleAdapter } from '@better-auth/drizzle-adapter';
 import { normalizeAdoLinkedAccountKey } from '@roomote/ado';
+// Subpath import on purpose: the SDK barrel drags the whole server graph
+// into auth, which the auth unit tests mock only partially.
+import { sendAgentMailSystemEmail } from '@roomote/sdk/server/agentmail-outbound';
 import type { SourceControlTokenBackedProvider } from '@roomote/types';
 
 import {
@@ -20,7 +23,7 @@ import {
 } from '@roomote/db/server';
 import * as dbSchema from '@roomote/db/server';
 
-import { Env, getBetterAuthSecret } from './env';
+import { Env, getBetterAuthSecret, isEmailChannelEnabled } from './env';
 import { getBetterAuthBaseUrlConfig } from './better-auth-base-url';
 import { withCanonicalForwardedProto } from './canonical-forwarded-proto';
 import { bootstrapWebRuntimeEnv } from './bootstrap-runtime-env';
@@ -1025,6 +1028,8 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
       : []),
   ];
 
+  const emailChannelEnabled = isEmailChannelEnabled();
+
   return betterAuth({
     appName: 'Roomote',
     baseURL: getBetterAuthBaseUrlConfig({
@@ -1062,18 +1067,70 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
       modelName: 'authVerifications',
     },
     // Sign-up is gated by the invite/access checks in the database hooks
-    // below; password sign-in for existing accounts is always available.
+    // below. Password sign-in for existing accounts is always available,
+    // except that once the email channel is enabled the deployment has an
+    // email sender for the first time, so account emails become verifiable
+    // and verification is required: Roomote only ever initiates email to an
+    // address it has verified, and this is where that guarantee starts.
     emailAndPassword: {
       enabled: true,
+      requireEmailVerification: emailChannelEnabled,
       resetPasswordTokenExpiresIn: PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS,
       revokeSessionsOnPasswordReset: true,
-      sendResetPassword: async ({ url }) => {
+      sendResetPassword: async ({ user, url }) => {
+        // Admin-initiated resets capture the link for the settings UI; with
+        // the email channel on, the user also gets it by email.
         const capture = resetPasswordLinkCapture.getStore();
         if (capture) {
           capture.url = url;
         }
+        if (emailChannelEnabled) {
+          await sendAgentMailSystemEmail({
+            to: user.email,
+            subject: 'Reset your Roomote password',
+            text: [
+              'A password reset was requested for your Roomote account.',
+              '',
+              `[Reset your password](${url})`,
+              '',
+              `This link expires in ${Math.round(PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS / 60)} minutes. If you did not request a reset, you can ignore this email.`,
+            ].join('\n'),
+            logContext: 'auth.sendResetPassword',
+          });
+        }
       },
     },
+    ...(emailChannelEnabled
+      ? {
+          emailVerification: {
+            sendOnSignUp: true,
+            // An unverified account that signs in gets a fresh verification
+            // email instead of a dead-end 403 — this is how accounts created
+            // before the channel was enabled get verified.
+            sendOnSignIn: true,
+            autoSignInAfterVerification: true,
+            sendVerificationEmail: async ({ user, url }) => {
+              const result = await sendAgentMailSystemEmail({
+                to: user.email,
+                subject: 'Verify your email for Roomote',
+                text: [
+                  'Confirm this address to finish setting up your Roomote account.',
+                  '',
+                  `[Verify your email](${url})`,
+                  '',
+                  'If you did not create a Roomote account, you can ignore this email.',
+                ].join('\n'),
+                logContext: 'auth.sendVerificationEmail',
+              });
+              if (!result.sent) {
+                throw new Error(
+                  `Could not send the verification email (${result.reason}).`,
+                );
+              }
+            },
+          },
+        }
+      : {}),
     databaseHooks: {
       account: {
         create: {

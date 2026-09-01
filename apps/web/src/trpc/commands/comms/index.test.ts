@@ -245,6 +245,7 @@ vi.mock('@roomote/communication/teams-credential-validation', () => ({
 
 vi.mock('@/lib/server/env', () => ({
   Env: { R_APP_URL: 'https://app.example.com' },
+  isEmailChannelEnabled: () => process.env.R_EMAIL_CHANNEL_ENABLED === 'true',
 }));
 
 vi.mock('../environment-variables', () => ({
@@ -301,6 +302,11 @@ function buildMockAuth(
 }
 
 describe('comms commands', () => {
+  beforeAll(() => {
+    // The email channel is gated; the suite exercises it enabled.
+    process.env.R_EMAIL_CHANNEL_ENABLED = 'true';
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockTxSelect.mockReset();
@@ -787,6 +793,28 @@ describe('comms commands', () => {
           ]),
         }),
       );
+    });
+  });
+
+  describe('agentmail channel gate', () => {
+    it('keeps email out of the settings surface and refuses saves when disabled', async () => {
+      process.env.R_EMAIL_CHANNEL_ENABLED = 'false';
+      try {
+        const status = await getCommsStatusCommand(buildMockAuth());
+        expect(
+          status.providers.find((p) => p.id === 'agentmail'),
+        ).toBeUndefined();
+
+        await expect(
+          saveCommsAuthConfigCommand(buildMockAuth(), {
+            provider: 'agentmail',
+            values: { R_AGENTMAIL_API_KEY: 'am-key' },
+          }),
+        ).rejects.toThrow(/R_EMAIL_CHANNEL_ENABLED/);
+        expect(mockAgentMailListInboxes).not.toHaveBeenCalled();
+      } finally {
+        process.env.R_EMAIL_CHANNEL_ENABLED = 'true';
+      }
     });
   });
 

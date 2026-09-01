@@ -37,6 +37,7 @@ import {
   setTrustedRunActingUserOnSuccess,
   sql,
 } from '@roomote/db/server';
+import { isEmailChannelEnabled } from '@roomote/env';
 import { getRedis } from '@roomote/redis';
 import {
   parseAcpRequestUserInputAnswerReply,
@@ -121,7 +122,10 @@ async function addDrainJob(conversationId: string, dedupeSuffix: string) {
 
 type RecordAgentMailWebhookEventResult =
   | { accepted: true; duplicate: boolean }
-  | { accepted: false; reason: 'ignored_event_type' };
+  | {
+      accepted: false;
+      reason: 'ignored_event_type' | 'email_channel_disabled';
+    };
 
 /**
  * The ingestion outbox: record the verified delivery durably, then dispatch.
@@ -145,6 +149,11 @@ export async function recordAgentMailWebhookEvent(input: {
   eventType: string;
   payload: unknown;
 }): Promise<RecordAgentMailWebhookEventResult> {
+  // The rollout gate is a real kill switch: a webhook that is still
+  // registered at AgentMail is acknowledged and dropped, never queued.
+  if (!isEmailChannelEnabled()) {
+    return { accepted: false, reason: 'email_channel_disabled' };
+  }
   if (!ACCEPTED_EVENT_TYPES.has(input.eventType)) {
     return { accepted: false, reason: 'ignored_event_type' };
   }

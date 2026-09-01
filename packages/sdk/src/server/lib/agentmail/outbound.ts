@@ -4,6 +4,7 @@ import {
   AgentMailApiClient,
   buildAgentMailEmailBody,
 } from '@roomote/communication';
+import { isEmailChannelEnabled } from '@roomote/env';
 import {
   agentmailConversationParticipants,
   agentmailConversations,
@@ -122,6 +123,9 @@ export async function resolveAgentMailOutboundAddress(
 export async function canStartAgentMailConversationWithUser(
   userId: string,
 ): Promise<boolean> {
+  if (!isEmailChannelEnabled()) {
+    return false;
+  }
   const credentials = await resolveAgentMailRuntimeCredentials();
   if (!credentials.apiKey || !credentials.inboxId) {
     return false;
@@ -151,6 +155,9 @@ export async function startAgentMailConversation(input: {
    */
   clientSendId?: string;
 }): Promise<boolean> {
+  if (!isEmailChannelEnabled()) {
+    return false;
+  }
   const credentials = await resolveAgentMailRuntimeCredentials();
   if (!credentials.apiKey || !credentials.inboxId) {
     return false;
@@ -273,5 +280,74 @@ async function recordOutboundConversation(input: {
       conversationId: conversation.id,
       messageId: input.messageId,
     });
+  }
+}
+
+export type AgentMailSystemEmailResult =
+  | { sent: true }
+  | {
+      sent: false;
+      reason:
+        | 'channel_disabled'
+        | 'not_configured'
+        | 'suppressed'
+        | 'send_failed';
+    };
+
+/**
+ * Account-lifecycle email (verification, password reset): the one kind of
+ * outbound email that must be able to reach an address Roomote has NOT yet
+ * verified, because it is how the address gets verified. Deliberately
+ * narrower than startAgentMailConversation — no unsubscribe link or header
+ * (the recipient initiated the action and the mail is not a subscription),
+ * no conversation record (a reply has nothing to route to), and only
+ * bounce/complaint suppressions apply: an address that unsubscribed from
+ * notifications must still be able to verify itself or reset a password.
+ */
+export async function sendAgentMailSystemEmail(input: {
+  to: string;
+  subject: string;
+  text: string;
+  logContext: string;
+  clientSendId?: string;
+}): Promise<AgentMailSystemEmailResult> {
+  if (!isEmailChannelEnabled()) {
+    return { sent: false, reason: 'channel_disabled' };
+  }
+  const credentials = await resolveAgentMailRuntimeCredentials();
+  if (!credentials.apiKey || !credentials.inboxId) {
+    return { sent: false, reason: 'not_configured' };
+  }
+
+  const to = normalizeEmailAddress(input.to);
+  const suppression = await db.query.agentmailSuppressions.findFirst({
+    where: eq(agentmailSuppressions.emailAddress, to),
+    columns: { reason: true },
+  });
+  if (suppression && suppression.reason !== 'unsubscribe') {
+    console.warn(
+      `${LOG_PREFIX} [${input.logContext}] Not sending system email to ${to}: address is suppressed (${suppression.reason}).`,
+    );
+    return { sent: false, reason: 'suppressed' };
+  }
+
+  const body = buildAgentMailEmailBody(input.text);
+  try {
+    const client = new AgentMailApiClient({ apiKey: credentials.apiKey });
+    await client.sendMessage(
+      normalizeEmailAddress(credentials.inboxId),
+      { to: [to], subject: input.subject, text: body.text, html: body.html },
+      {
+        idempotencyKey: `agentmail:system:${input.clientSendId ?? randomUUID()}`,
+      },
+    );
+    return { sent: true };
+  } catch (error) {
+    console.warn(
+      `${LOG_PREFIX} [${input.logContext}] Failed to send system email to ${to}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return { sent: false, reason: 'send_failed' };
   }
 }

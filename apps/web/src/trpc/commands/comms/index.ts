@@ -45,7 +45,7 @@ import {
   syncDiscordInstallationChannels,
 } from '@roomote/sdk/server';
 
-import { Env } from '@/lib/server/env';
+import { Env, isEmailChannelEnabled } from '@/lib/server/env';
 import { buildDeploymentAppName } from '@/lib/server/deployment-app-name';
 import { DISCORD_INSTALL_PERMISSIONS } from '@/lib/discord-install';
 import {
@@ -647,6 +647,15 @@ function createAgentMailApiClient(apiKey: string) {
   });
 }
 
+const EMAIL_CHANNEL_DISABLED_MESSAGE =
+  'Email is not enabled for this deployment. Set R_EMAIL_CHANNEL_ENABLED=true and restart to configure it.';
+
+function assertEmailChannelEnabled(): void {
+  if (!isEmailChannelEnabled()) {
+    throw new Error(EMAIL_CHANNEL_DISABLED_MESSAGE);
+  }
+}
+
 /** Map AgentMail API / network failures into admin-facing setup copy. */
 /**
  * AgentMail keys carry fine-grained permissions
@@ -892,6 +901,7 @@ export async function listAgentMailInboxesCommand(
   proposedNewAddress: string;
 }> {
   assertAdmin(auth);
+  assertEmailChannelEnabled();
 
   invalidateAgentMailRuntimeCredentialsCache();
   const existing = await resolveAgentMailRuntimeCredentials();
@@ -985,6 +995,7 @@ async function reconcileAgentMailSetup(input: {
   enteredApiKey: string | null;
   enteredInboxId: string | null;
 }): Promise<AgentMailReconcileResult> {
+  assertEmailChannelEnabled();
   invalidateAgentMailRuntimeCredentialsCache();
   const existing = await resolveAgentMailRuntimeCredentials();
   const apiKey = input.enteredApiKey ?? existing.apiKey;
@@ -1522,7 +1533,11 @@ function withAdditionalCommsProviders(
       ...status.providers,
       buildProviderStatus(ADDITIONAL_COMMS_PROVIDERS.telegram),
       buildProviderStatus(ADDITIONAL_COMMS_PROVIDERS.discord),
-      buildProviderStatus(ADDITIONAL_COMMS_PROVIDERS.agentmail),
+      // Email is gated by R_EMAIL_CHANNEL_ENABLED (see isEmailChannelEnabled)
+      // and stays out of the settings surface entirely until it is set.
+      ...(isEmailChannelEnabled()
+        ? [buildProviderStatus(ADDITIONAL_COMMS_PROVIDERS.agentmail)]
+        : []),
     ],
   };
 }

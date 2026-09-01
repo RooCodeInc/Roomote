@@ -255,9 +255,11 @@ export {
   canStartAgentMailConversationWithUser,
   isAgentMailAddressSuppressed,
   resolveAgentMailOutboundAddress,
+  sendAgentMailSystemEmail,
   startAgentMailConversation,
   suppressAgentMailAddress,
   type AgentMailOutboundAddressResolution,
+  type AgentMailSystemEmailResult,
   type AgentMailSuppressionReason,
 } from './lib/agentmail/outbound';
 
