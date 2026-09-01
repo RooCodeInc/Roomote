@@ -1208,15 +1208,24 @@ export async function answerFastAgentQuestion({
   let durableTurnReplayable = Boolean(durableAdmission);
   /**
    * Withdraw the turn from replay before an action a re-run could duplicate.
-   * Resolves true once nothing can recover the row (the revocation landed,
-   * or the row was already settled). A write that did not land resolves
-   * false and the caller must not perform the action: a crash after an
-   * unrecorded launch or message would otherwise replay it.
+   * Resolves true only when this execution's revocation landed on its own
+   * still-pending row. A write that did not land, or a row that something
+   * else already settled (this execution is then a stale duplicate), both
+   * resolve false and the caller must not perform the action.
    */
   const revokeDurableTurnReplay = async (reason: string): Promise<boolean> => {
     if (!durableAdmission || !durableTurnReplayable) return true;
     try {
-      await revokeFastAgentDurableTurnReplay(durableAdmission.eventId, reason);
+      const revoked = await revokeFastAgentDurableTurnReplay(
+        durableAdmission.eventId,
+        reason,
+      );
+      if (!revoked) {
+        console.warn(
+          `[Fast Agent] Durable turn row ${durableAdmission.eventId} was no longer pending when replay revocation was attempted; refusing the action.`,
+        );
+        return false;
+      }
       durableTurnReplayable = false;
       return true;
     } catch (error) {

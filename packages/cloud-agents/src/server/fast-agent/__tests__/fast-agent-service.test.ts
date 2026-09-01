@@ -3330,6 +3330,38 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.revokeDurableReplay).toHaveBeenCalledTimes(2);
     });
 
+    it('refuses a non-replayable action when the row was already settled elsewhere', async () => {
+      mocks.revokeDurableReplay.mockResolvedValue(false);
+      const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+        success: true,
+        taskId: 'task-1',
+      }));
+      let launchResult: unknown;
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          launchResult = await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix the bug',
+            environmentId: 'env-1',
+            kickoffMessage: 'Starting.',
+          });
+          return 'Stopping.';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ launchTask }),
+        durableAdmission,
+      });
+
+      expect(launchTask).not.toHaveBeenCalled();
+      expect(launchResult).toMatchObject({
+        success: false,
+        error: expect.stringContaining('could not durably record'),
+      });
+    });
+
     it('hands a replay-safe turn to the queue on shutdown without a closeout', async () => {
       const controller = new AbortController();
       const shutdown = new FastAgentProcessShutdownError('SIGTERM');
