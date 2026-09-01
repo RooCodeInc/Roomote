@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { SetupAuthProviderStatus } from '@roomote/types';
 import type { AgentMailCommsStatus } from '@/trpc/commands/comms';
@@ -374,15 +374,33 @@ function AgentMailInboxChooser({
   const loadEnabled =
     keyAvailable && (!hasEnteredKey || loadedEnteredKey === enteredApiKey);
 
-  const inboxesQuery = useQuery(
-    trpc.comms.listAgentMailInboxes.queryOptions(
-      hasEnteredKey ? { apiKey: enteredApiKey } : {},
-      { enabled: loadEnabled, retry: false },
-    ),
+  // A mutation rather than a query: the typed API key travels in the POST
+  // body instead of being serialized into a GET URL (browser history, proxy
+  // logs, tracing).
+  const loadInboxes = useMutation(
+    trpc.comms.listAgentMailInboxes.mutationOptions(),
   );
+  const requestedKeyRef = useRef<string | null>(null);
+  const requestKey = hasEnteredKey ? enteredApiKey : '';
+  // savedSatisfied joins the signature so a save that just created the
+  // inbox refreshes the list (mutations have no query cache to invalidate).
+  const requestSignature = `${savedSatisfied ? 'saved' : 'unsaved'}:${requestKey}`;
+  const { mutate: loadInboxesMutate } = loadInboxes;
 
-  const inboxes = inboxesQuery.data?.inboxes ?? [];
-  const proposedNewAddress = inboxesQuery.data?.proposedNewAddress ?? null;
+  useEffect(() => {
+    if (!loadEnabled || requestedKeyRef.current === requestSignature) {
+      return;
+    }
+    requestedKeyRef.current = requestSignature;
+    loadInboxesMutate(requestKey ? { apiKey: requestKey } : {});
+  }, [loadEnabled, requestKey, requestSignature, loadInboxesMutate]);
+
+  const inboxesLoading =
+    loadInboxes.isPending ||
+    (loadEnabled && !loadInboxes.isSuccess && !loadInboxes.isError);
+
+  const inboxes = loadInboxes.data?.inboxes ?? [];
+  const proposedNewAddress = loadInboxes.data?.proposedNewAddress ?? null;
   const proposalAlreadyExists = Boolean(
     proposedNewAddress && inboxes.includes(proposedNewAddress),
   );
@@ -399,7 +417,7 @@ function AgentMailInboxChooser({
   const showManualInput =
     manualEntry ||
     !keyAvailable ||
-    (inboxesQuery.isSuccess &&
+    (loadInboxes.isSuccess &&
       normalizedValue.length > 0 &&
       selectValue === undefined);
 
@@ -464,22 +482,24 @@ function AgentMailInboxChooser({
           </Button>
           {manualEntryLink}
         </div>
-      ) : inboxesQuery.isPending ? (
+      ) : inboxesLoading ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner size="sm" />
           Loading inboxes…
         </div>
-      ) : inboxesQuery.isError ? (
+      ) : loadInboxes.isError ? (
         <div className="space-y-1">
           <p className="text-sm text-destructive">
-            {inboxesQuery.error.message}
+            {loadInboxes.error.message}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => inboxesQuery.refetch()}
+              onClick={() =>
+                loadInboxes.mutate(requestKey ? { apiKey: requestKey } : {})
+              }
               disabled={disabled}
             >
               <RefreshCw />
@@ -890,7 +910,7 @@ export function CommsProviderSection({
                   : !provider.runtimeSatisfied && provider.id === 'discord'
                     ? 'Roomote validates the token, derives the bot identity, and registers /new, /goal, /link, and /help when you save.'
                     : !provider.runtimeSatisfied && provider.id === 'agentmail'
-                      ? 'Roomote validates the API key, adopts or provisions an inbox, and registers the AgentMail webhook when you save. The key needs these AgentMail permissions (or full access): inbox_read, inbox_create, webhook_read, webhook_create, webhook_update, webhook_delete, message_read, message_send.'
+                      ? 'Roomote validates the API key, adopts or provisions an inbox, and registers the AgentMail webhook when you save. The key needs these AgentMail permissions (or full access): inbox_read, inbox_create, inbox_update, webhook_read, webhook_create, webhook_update, webhook_delete, message_read, message_send.'
                       : undefined
               }
               onCreateSlackApp={(configToken) =>

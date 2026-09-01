@@ -171,6 +171,32 @@ export function getAgentMailDeliveryFailureRecipients(
 }
 
 /**
+ * Index of the '>' that terminates the tag starting at `openAt`, skipping
+ * '>' characters inside single- or double-quoted attribute values, or -1
+ * when the tag never terminates.
+ */
+function findTagEnd(html: string, openAt: number): number {
+  let quote: '"' | "'" | null = null;
+  for (let index = openAt; index < html.length; index += 1) {
+    const char = html.charAt(index);
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === '>') {
+      return index;
+    }
+  }
+  return -1;
+}
+
+/**
  * Crude tag stripper for the HTML fallback body. Real sanitization happens
  * later in the pipeline — this only recovers readable text for routing.
  */
@@ -208,8 +234,10 @@ function stripElementWithContent(html: string, tagName: string): string {
 
     // Scan for the close tag only AFTER the opening tag ends; a literal
     // '</script>' inside the opening tag's attribute values must not
-    // terminate the block early and leak its content.
-    const openTagEnd = lower.indexOf('>', openAt);
+    // terminate the block early and leak its content. Finding where the
+    // opening tag ends must itself respect quoted attribute values — a '>'
+    // inside `data-note="> </script>"` is attribute text, not the tag end.
+    const openTagEnd = findTagEnd(html, openAt);
     if (openTagEnd === -1) {
       // Unterminated opening tag: drop the rest, matching sanitizer behavior.
       return result;

@@ -11,6 +11,7 @@ const {
   mockAgentMailListInboxes,
   mockAgentMailCreateInbox,
   mockAgentMailGetInbox,
+  mockAgentMailGetMessage,
   mockAgentMailListWebhooks,
   mockAgentMailCreateWebhook,
   mockAgentMailUpdateWebhook,
@@ -50,6 +51,7 @@ const {
   mockAgentMailListInboxes: vi.fn(),
   mockAgentMailCreateInbox: vi.fn(),
   mockAgentMailGetInbox: vi.fn(),
+  mockAgentMailGetMessage: vi.fn(),
   mockAgentMailListWebhooks: vi.fn(),
   mockAgentMailCreateWebhook: vi.fn(),
   mockAgentMailUpdateWebhook: vi.fn(),
@@ -195,10 +197,20 @@ vi.mock('@roomote/communication/agentmail-provider', () => ({
     listInboxes = mockAgentMailListInboxes;
     createInbox = mockAgentMailCreateInbox;
     getInbox = mockAgentMailGetInbox;
+    getMessage = mockAgentMailGetMessage;
     listWebhooks = mockAgentMailListWebhooks;
     createWebhook = mockAgentMailCreateWebhook;
     updateWebhook = mockAgentMailUpdateWebhook;
     deleteWebhook = mockAgentMailDeleteWebhook;
+  },
+  AgentMailApiError: class extends Error {
+    constructor(
+      message: string,
+      public readonly status: number,
+    ) {
+      super(message);
+      this.name = 'AgentMailApiError';
+    }
   },
 }));
 
@@ -250,6 +262,7 @@ vi.mock('../environment-variables', () => ({
 }));
 
 import { TeamsBotCredentialValidationError } from '@roomote/communication/teams-credential-validation';
+import { AgentMailApiError } from '@roomote/communication/agentmail-provider';
 
 import {
   classifyTelegramWebhookCheckError,
@@ -789,6 +802,11 @@ describe('comms commands', () => {
       mockDbTransaction.mockImplementation(async (callback) =>
         callback({} as never),
       );
+      // The message_read capability probe fetches a sentinel message id;
+      // 404 is the with-permission answer.
+      mockAgentMailGetMessage.mockRejectedValue(
+        new AgentMailApiError('AgentMail GET failed (404): Not Found', 404),
+      );
     });
 
     it("adopts the org's only existing inbox instead of creating a second", async () => {
@@ -811,6 +829,43 @@ describe('comms commands', () => {
       });
 
       expect(mockAgentMailCreateInbox).not.toHaveBeenCalled();
+    });
+
+    it('prefers the inbox email field over the inbox id when adopting', async () => {
+      mockAgentMailListInboxes.mockResolvedValue({
+        inboxes: [{ inbox_id: 'inbox_abc123', email: 'Existing@agentmail.to' }],
+      });
+      mockAgentMailCreateWebhook.mockResolvedValue({
+        webhook_id: 'wh-1',
+        url: expectedWebhookUrl,
+        secret: 'whsec_adopted',
+      });
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+          values: { R_AGENTMAIL_API_KEY: 'am-key' },
+        }),
+      ).resolves.toMatchObject({
+        agentmail: { inboxAddress: 'existing@agentmail.to' },
+      });
+    });
+
+    it('fails the save when the key lacks message_read', async () => {
+      mockAgentMailListInboxes.mockResolvedValue({
+        inboxes: [{ inbox_id: 'existing@agentmail.to' }],
+      });
+      mockAgentMailGetMessage.mockRejectedValue(
+        new AgentMailApiError('AgentMail GET failed (403): Forbidden', 403),
+      );
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+          values: { R_AGENTMAIL_API_KEY: 'am-key' },
+        }),
+      ).rejects.toThrow(/permission|403/i);
+      expect(mockAgentMailCreateWebhook).not.toHaveBeenCalled();
     });
 
     it('asks the operator to choose when the org has several inboxes', async () => {

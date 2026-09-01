@@ -117,6 +117,23 @@ describe('getAgentMailMessageBodyText', () => {
     ).toBe('visible');
   });
 
+  it('ignores a ">" inside a quoted attribute before an embedded close tag', () => {
+    expect(
+      getAgentMailMessageBodyText(
+        buildMessage({
+          html: '<script data-note="> </script>">hidden()</script>visible',
+        }),
+      ),
+    ).toBe('visible');
+    expect(
+      getAgentMailMessageBodyText(
+        buildMessage({
+          html: '<style media=\'>\' data-x="</style>">.a{}</style>after',
+        }),
+      ),
+    ).toBe('after');
+  });
+
   it('does not treat tags that merely start with script/style as blocks', () => {
     expect(
       getAgentMailMessageBodyText(

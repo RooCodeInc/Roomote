@@ -42,10 +42,6 @@ export function CommsProviders() {
         }
 
         if (result?.agentmail) {
-          // A save may have just created the inbox; refresh the chooser list.
-          await queryClient.invalidateQueries({
-            queryKey: trpc.comms.listAgentMailInboxes.queryKey(),
-          });
           toast.success(
             `Email connected. Roomote receives mail at ${result.agentmail.inboxAddress}.`,
           );

@@ -2,6 +2,7 @@ import { Queue } from 'bullmq';
 
 import {
   AgentMailApiClient,
+  AgentMailApiError,
   buildAgentMailButtonSections,
   escapeAgentMailHtml,
   getAgentMailDeliveryFailureRecipients,
@@ -287,11 +288,22 @@ async function maybeSendStrangerRefusal(input: {
       },
     );
   } catch (error) {
-    // Release the once-per-thread claim so a later email from this sender
-    // still gets its refusal; only a DELIVERED refusal should consume it.
-    await redis.del(key).catch(() => undefined);
+    // Release the once-per-thread claim only on a definite rejection (4xx:
+    // the provider did not process the request), so a later email from this
+    // sender still gets its refusal. A 5xx or network failure is ambiguous —
+    // AgentMail may have sent the refusal before failing — and a kept claim
+    // (worst case: one refusal silently lost) beats a released one (worst
+    // case: duplicate refusals on the next email, whose different message-id
+    // idempotency key would not dedupe them).
+    const definitelyNotSent =
+      error instanceof AgentMailApiError &&
+      error.status >= 400 &&
+      error.status < 500;
+    if (definitelyNotSent) {
+      await redis.del(key).catch(() => undefined);
+    }
     console.warn(
-      `${LOG_PREFIX} Failed to send stranger refusal for thread ${input.message.thread_id}: ${error instanceof Error ? error.message : String(error)}`,
+      `${LOG_PREFIX} Failed to send stranger refusal for thread ${input.message.thread_id} (claim ${definitelyNotSent ? 'released' : 'kept'}): ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }

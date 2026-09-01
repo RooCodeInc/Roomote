@@ -32,6 +32,22 @@ function toAgentMailIdempotencyHeader(logicalKey: string): string {
   return createHash('sha256').update(logicalKey).digest('hex');
 }
 
+/**
+ * A non-2xx AgentMail response. The `status` lets callers distinguish
+ * definite rejections (4xx: the request was not processed) from ambiguous
+ * failures (5xx/network: the provider may have acted before failing), which
+ * matters for send-adjacent bookkeeping like once-per-thread claims.
+ */
+export class AgentMailApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = 'AgentMailApiError';
+  }
+}
+
 /** Loop instead of a suffix regex (CodeQL js/polynomial-redos). */
 function trimTrailingSlashes(value: string): string {
   let end = value.length;
@@ -356,10 +372,11 @@ async function callAgentMailApi<T>(params: {
       ).catch(() => new Uint8Array());
       const bodyText = new TextDecoder().decode(bodyBytes).trim();
 
-      throw new Error(
+      throw new AgentMailApiError(
         `AgentMail ${params.method} ${params.path} failed (${response.status})${
           bodyText ? `: ${bodyText}` : ''
         }`,
+        response.status,
       );
     }
 
@@ -381,6 +398,8 @@ function delay(ms: number): Promise<void> {
 
 export type AgentMailInbox = {
   inbox_id: string;
+  /** Deliverable address. In practice equal to inbox_id today. */
+  email?: string;
   display_name?: string;
 } & Record<string, unknown>;
 
@@ -427,10 +446,43 @@ export class AgentMailApiClient {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_AGENTMAIL_TIMEOUT_MS;
   }
 
-  listInboxes(): Promise<
+  /**
+   * Lists ALL inboxes, following `next_page_token` pagination — a first-page
+   * read can make a many-inbox account look like it has exactly one, which
+   * would let setup silently adopt the wrong inbox. The page cap is a
+   * runaway guard far above any realistic account.
+   */
+  async listInboxes(): Promise<
     { inboxes?: AgentMailInbox[] } & Record<string, unknown>
   > {
-    return this.request('GET', '/v0/inboxes');
+    const inboxes: AgentMailInbox[] = [];
+    let pageToken: string | undefined;
+
+    for (let page = 0; page < 50; page += 1) {
+      const query = pageToken
+        ? `?page_token=${encodeURIComponent(pageToken)}`
+        : '';
+      const result = await this.request<
+        {
+          inboxes?: AgentMailInbox[];
+          next_page_token?: string;
+        } & Record<string, unknown>
+      >('GET', `/v0/inboxes${query}`);
+      inboxes.push(...(result.inboxes ?? []));
+
+      pageToken =
+        typeof result.next_page_token === 'string' &&
+        result.next_page_token.trim()
+          ? result.next_page_token
+          : undefined;
+      if (!pageToken) {
+        return { ...result, inboxes };
+      }
+    }
+
+    throw new Error(
+      'AgentMail inbox listing did not terminate within 50 pages.',
+    );
   }
 
   createInbox(input: {

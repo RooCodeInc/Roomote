@@ -27,6 +27,7 @@ import {
 } from '@roomote/db/server';
 import {
   AgentMailApiClient,
+  AgentMailApiError,
   type AgentMailWebhook,
 } from '@roomote/communication/agentmail-provider';
 import {
@@ -650,13 +651,14 @@ function createAgentMailApiClient(apiKey: string) {
  * the channel needs across setup, inbound processing, and replies.
  */
 const AGENTMAIL_REQUIRED_PERMISSIONS =
-  'inbox_read, inbox_create, webhook_read, webhook_create, webhook_update, webhook_delete, message_read, message_send';
+  'inbox_read, inbox_create, inbox_update, webhook_read, webhook_create, webhook_update, webhook_delete, message_read, message_send';
 
 function classifyAgentMailSetupError(
   error: unknown,
   operation:
     | 'validating the API key'
     | 'reading the inbox'
+    | 'reading inbox messages'
     | 'creating an inbox'
     | 'configuring the webhook' = 'validating the API key',
 ): string {
@@ -773,6 +775,20 @@ function normalizeAgentMailInboxAddress(
   return normalized || null;
 }
 
+/**
+ * The deliverable address of an inbox object. AgentMail's schema carries
+ * both `inbox_id` and `email` (equal today, with the docs' own examples
+ * keying API calls by the address); prefer `email` so a future divergence
+ * never persists or displays an opaque id as the "Inbox Email Address".
+ */
+function readAgentMailInboxAddress(
+  inbox: Record<string, unknown>,
+): string | null {
+  const email = typeof inbox.email === 'string' ? inbox.email : null;
+  const inboxId = typeof inbox.inbox_id === 'string' ? inbox.inbox_id : null;
+  return normalizeAgentMailInboxAddress(email ?? inboxId);
+}
+
 async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
   const credentials = await resolveAgentMailRuntimeCredentials();
   if (!credentials.apiKey) return null;
@@ -845,11 +861,7 @@ export async function listAgentMailInboxesCommand(
   try {
     const listed = await client.listInboxes();
     const inboxes = (listed.inboxes ?? [])
-      .map((inbox) =>
-        normalizeAgentMailInboxAddress(
-          typeof inbox.inbox_id === 'string' ? inbox.inbox_id : null,
-        ),
-      )
+      .map((inbox) => readAgentMailInboxAddress(inbox))
       .filter((address): address is string => Boolean(address));
 
     return {
@@ -886,9 +898,7 @@ async function createProposedAgentMailInbox(
       clientId: proposal.clientId,
       displayName: PRODUCT_NAME,
     });
-    const createdAddress = normalizeAgentMailInboxAddress(
-      typeof inbox.inbox_id === 'string' ? inbox.inbox_id : null,
-    );
+    const createdAddress = readAgentMailInboxAddress(inbox);
     if (!createdAddress) {
       throw new Error('AgentMail created an inbox but returned no inbox id.');
     }
@@ -936,9 +946,7 @@ async function reconcileAgentMailSetup(input: {
   try {
     const listed = await client.listInboxes();
     for (const inbox of listed.inboxes ?? []) {
-      const address = normalizeAgentMailInboxAddress(
-        typeof inbox.inbox_id === 'string' ? inbox.inbox_id : null,
-      );
+      const address = readAgentMailInboxAddress(inbox);
       if (!address) continue;
       orgInboxes.push(address);
       inboxDisplayNames.set(
@@ -970,10 +978,7 @@ async function reconcileAgentMailSetup(input: {
   if (requestedInboxId) {
     try {
       const inbox = await client.getInbox(requestedInboxId);
-      inboxAddress =
-        normalizeAgentMailInboxAddress(
-          typeof inbox.inbox_id === 'string' ? inbox.inbox_id : null,
-        ) ?? requestedInboxId;
+      inboxAddress = readAgentMailInboxAddress(inbox) ?? requestedInboxId;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/\(404\)|not found/iu.test(message)) {
@@ -1008,6 +1013,23 @@ async function reconcileAgentMailSetup(input: {
       client,
       buildAgentMailInboxProposal(Env.R_APP_URL),
     );
+  }
+
+  // Prove message_read without side effects: fetching a sentinel message id
+  // returns 404 when the permission exists and 403 when it does not. An
+  // already-converged inbox/webhook would otherwise let a key without
+  // message permissions reach the successful save path, deferring the
+  // failure to runtime (oversize-body re-fetches and every reply).
+  // message_send has no side-effect-free probe; it is exercised on the
+  // first reply.
+  try {
+    await client.getMessage(inboxAddress, 'roomote-permission-probe');
+  } catch (error) {
+    if (error instanceof AgentMailApiError && error.status !== 404) {
+      throw new Error(
+        classifyAgentMailSetupError(error, 'reading inbox messages'),
+      );
+    }
   }
 
   // Recipients see the inbox display name as the sender ("Roomote

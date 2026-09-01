@@ -2014,9 +2014,12 @@ export const appRouter = createRouter({
       repairTelegramWebhookCommand(auth),
     ),
 
+    // A mutation, not a query: the input can carry a freshly typed API key,
+    // and query inputs serialize into the GET URL (browser history, proxy
+    // and access logs, tracing). Mutations POST the input in the body.
     listAgentMailInboxes: protectedProcedure
       .input(z.object({ apiKey: z.string().trim().optional() }))
-      .query(({ ctx: { auth }, input }) =>
+      .mutation(({ ctx: { auth }, input }) =>
         listAgentMailInboxesCommand(auth, input),
       ),
 

@@ -193,6 +193,67 @@ describe('agentmail webhook event outbox (real database)', () => {
     expect(conversation).toBeUndefined();
   });
 
+  it('keeps the stranger-refusal claim on ambiguous failures, releases it on definite rejections', async () => {
+    const originalFetch = globalThis.fetch;
+    const deliverStranger = async (threadId: string, sender: string) => {
+      const deliveryId = `msg_${randomUUID()}`;
+      await recordAgentMailWebhookEvent({
+        deliveryId,
+        eventId: null,
+        eventType: 'message.received',
+        payload: messageReceivedPayload({
+          eventId: `evt_${randomUUID()}`,
+          threadId,
+          messageId: `m-${randomUUID()}`,
+          from: sender,
+          text: 'Hello from a stranger',
+        }),
+      });
+      await processAgentMailWebhookEvent(deliveryId);
+    };
+
+    try {
+      // Ambiguous failure (503 after retries): the provider may have sent
+      // the refusal, so the once-per-thread claim must be kept.
+      const ambiguousThread = `thread-${randomUUID()}`;
+      const ambiguousSender = `${randomUUID()}@example.com`;
+      globalThis.fetch = (async () =>
+        new Response('oops', { status: 503 })) as typeof fetch;
+      await deliverStranger(ambiguousThread, ambiguousSender);
+
+      let refusalAttempts = 0;
+      globalThis.fetch = (async () => {
+        refusalAttempts += 1;
+        return new Response(JSON.stringify({ message_id: 'm-refusal' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as typeof fetch;
+      await deliverStranger(ambiguousThread, ambiguousSender);
+      expect(refusalAttempts).toBe(0);
+
+      // Definite rejection (400): the refusal was never processed, so the
+      // claim is released and the next email gets its refusal.
+      const rejectedThread = `thread-${randomUUID()}`;
+      const rejectedSender = `${randomUUID()}@example.com`;
+      globalThis.fetch = (async () =>
+        new Response('bad request', { status: 400 })) as typeof fetch;
+      await deliverStranger(rejectedThread, rejectedSender);
+
+      globalThis.fetch = (async () => {
+        refusalAttempts += 1;
+        return new Response(JSON.stringify({ message_id: 'm-refusal' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as typeof fetch;
+      await deliverStranger(rejectedThread, rejectedSender);
+      expect(refusalAttempts).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('suppresses recipients of permanent bounces and complaints, but not transient bounces', async () => {
     const bounced = `${randomUUID()}@example.com`;
     const complained = `${randomUUID()}@example.com`;

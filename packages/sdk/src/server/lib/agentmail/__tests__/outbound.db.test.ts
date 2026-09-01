@@ -142,7 +142,11 @@ describe('startAgentMailConversation (real database, stubbed AgentMail API)', ()
     const threadId = `thread_${randomUUID()}`;
     const messageId = `<${randomUUID()}@agentmail.to>`;
 
-    const requests: { url: string; body: Record<string, unknown> }[] = [];
+    const requests: {
+      url: string;
+      body: Record<string, unknown>;
+      headers: Record<string, string>;
+    }[] = [];
     globalThis.fetch = (async (
       input: RequestInfo | URL,
       init?: RequestInit,
@@ -150,6 +154,7 @@ describe('startAgentMailConversation (real database, stubbed AgentMail API)', ()
       requests.push({
         url: String(input),
         body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+        headers: (init?.headers ?? {}) as Record<string, string>,
       });
       return new Response(
         JSON.stringify({ message_id: messageId, thread_id: threadId }),
@@ -175,6 +180,9 @@ describe('startAgentMailConversation (real database, stubbed AgentMail API)', ()
       /^<.*\/api\/webhooks\/agentmail\/unsubscribe\?token=.*>$/,
     );
     expect(headers['List-Unsubscribe-Post']).toBe('List-Unsubscribe=One-Click');
+    // Idempotency key present: the client's internal 5xx/lost-response
+    // retries replay the accepted send instead of emailing twice.
+    expect(requests[0]!.headers['idempotency-key']).toMatch(/^[0-9a-f]{64}$/);
 
     const conversation = await db.query.agentmailConversations.findFirst({
       where: eq(agentmailConversations.providerThreadId, threadId),

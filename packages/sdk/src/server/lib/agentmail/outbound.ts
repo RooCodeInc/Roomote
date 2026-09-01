@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   AgentMailApiClient,
   buildAgentMailEmailBody,
@@ -140,6 +142,14 @@ export async function startAgentMailConversation(input: {
   subject: string;
   text: string;
   logContext: string;
+  /**
+   * Stable logical-send id: retries carrying the same id replay the accepted
+   * send at the provider instead of emailing the user twice. Callers with a
+   * durable trigger (a webhook delivery, a queued job) should derive it from
+   * that trigger; without one, a per-invocation id still makes the client's
+   * internal retries (5xx / lost response) exactly-once.
+   */
+  clientSendId?: string;
 }): Promise<boolean> {
   const credentials = await resolveAgentMailRuntimeCredentials();
   if (!credentials.apiKey || !credentials.inboxId) {
@@ -163,19 +173,25 @@ export async function startAgentMailConversation(input: {
   let response: { message_id?: string; thread_id?: string };
   try {
     const client = new AgentMailApiClient({ apiKey: credentials.apiKey });
-    response = await client.sendMessage(inboxId, {
-      to: [resolution.emailAddress],
-      subject: input.subject,
-      text: `${body.text}\n\nTo stop receiving these emails: ${unsubscribeUrl}`,
-      html: `${body.html}<p style="color:#8a93a3;font-size:12px;margin-top:24px"><a href="${unsubscribeUrl}" style="color:#8a93a3">Stop receiving these emails</a></p>`,
-      headers: {
-        // RFC 8058 one-click unsubscribe; Gmail and Yahoo require it for
-        // sender reputation, and honoring it protects every tenant sharing
-        // the sending infrastructure.
-        'List-Unsubscribe': `<${unsubscribeUrl}>`,
-        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    response = await client.sendMessage(
+      inboxId,
+      {
+        to: [resolution.emailAddress],
+        subject: input.subject,
+        text: `${body.text}\n\nTo stop receiving these emails: ${unsubscribeUrl}`,
+        html: `${body.html}<p style="color:#8a93a3;font-size:12px;margin-top:24px"><a href="${unsubscribeUrl}" style="color:#8a93a3">Stop receiving these emails</a></p>`,
+        headers: {
+          // RFC 8058 one-click unsubscribe; Gmail and Yahoo require it for
+          // sender reputation, and honoring it protects every tenant sharing
+          // the sending infrastructure.
+          'List-Unsubscribe': `<${unsubscribeUrl}>`,
+          'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        },
       },
-    });
+      {
+        idempotencyKey: `agentmail:outbound:${input.clientSendId ?? randomUUID()}`,
+      },
+    );
   } catch (error) {
     console.warn(
       `${LOG_PREFIX} [${input.logContext}] Failed to send email to user ${input.userId}: ${
