@@ -93,7 +93,10 @@ import { RemoteFastAgentSettingsSkillSource } from './fast-agent-settings-skill-
 import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill-invocation';
 import {
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+  markFastAgentInferenceRetryNoticeInterruption,
   reconcileFastAgentInferenceRetryNotices,
+  RESTARTED_ACTIVE_TURN_MESSAGE,
+  type FastAgentInterruptionReason,
 } from './fast-agent-conversation-repository';
 import {
   bindFastAgentNativeToolExecutor,
@@ -1246,6 +1249,7 @@ export async function answerFastAgentQuestion({
     nativeMessage,
     inferenceRetryNotice = false,
     visibleInTranscript = true,
+    interruptionReason,
   }: {
     reply: FastAgentReply;
     event: { eventId: string; turnSeq: number };
@@ -1253,6 +1257,7 @@ export async function answerFastAgentQuestion({
     nativeMessage?: NonTaskOpenCodeCompletedMessage | null;
     inferenceRetryNotice?: boolean;
     visibleInTranscript?: boolean;
+    interruptionReason?: FastAgentInterruptionReason;
   }) =>
     persistCanonicalMessage(
       {
@@ -1274,6 +1279,7 @@ export async function answerFastAgentQuestion({
                 inferenceRetryActive: reply.purpose === 'progress',
               }
             : {}),
+          ...(interruptionReason ? { interruptionReason } : {}),
           ...(platformMessageId ? { platformMessageId } : {}),
         },
         payload: {
@@ -1400,6 +1406,7 @@ export async function answerFastAgentQuestion({
     reply: FastAgentReply,
     bestEffort = false,
     onDelivered?: () => void,
+    interruptionReason?: FastAgentInterruptionReason,
   ): Promise<boolean> => {
     if (!inferenceRetryCanonicalEvent) {
       return false;
@@ -1419,6 +1426,7 @@ export async function answerFastAgentQuestion({
         event: retryEvent,
         inferenceRetryNotice: true,
         visibleInTranscript: false,
+        interruptionReason,
       });
       return false;
     }
@@ -1433,6 +1441,7 @@ export async function answerFastAgentQuestion({
           reply,
           event: retryEvent,
           inferenceRetryNotice: true,
+          interruptionReason,
         });
         throw error;
       }
@@ -1450,6 +1459,7 @@ export async function answerFastAgentQuestion({
         event: retryEvent,
         inferenceRetryNotice: true,
         visibleInTranscript: false,
+        interruptionReason,
       });
       return false;
     }
@@ -1464,6 +1474,7 @@ export async function answerFastAgentQuestion({
         event: retryEvent,
         platformMessageId: inferenceRetryReply.messageId,
         inferenceRetryNotice: true,
+        interruptionReason,
       });
     }
     return true;
@@ -1534,7 +1545,10 @@ export async function answerFastAgentQuestion({
       FAST_AGENT_HUMAN_STEER_POLL_INTERVAL_MS,
     );
     humanSteerPollTimer.unref();
-    await reconcileFastAgentInferenceRetryNotices(session.id).catch((error) => {
+    await reconcileFastAgentInferenceRetryNotices(
+      session.id,
+      'next_turn_reconcile',
+    ).catch((error) => {
       console.warn(
         `[Fast Agent] Failed to reconcile interrupted inference retry notices: ${formatErrorForLog(error)}`,
       );
@@ -2989,6 +3003,15 @@ export async function answerFastAgentQuestion({
         terminalError instanceof FastAgentProcessShutdownError;
       const lockOwnershipLost =
         terminalError instanceof FastAgentTurnLockLostError;
+      const interruptionReason: FastAgentInterruptionReason =
+        shutdownInterrupted
+          ? 'api_shutdown'
+          : lockOwnershipLost
+            ? 'lock_lost'
+            : 'turn_aborted';
+      console.error(
+        `[Fast Agent] Turn interrupted (reason=${interruptionReason}, conversation=${canonicalConversationId ?? 'unknown'}, retryNoticeVisible=${Boolean(inferenceRetryReply)}, error=${formatErrorForLog(terminalError)})`,
+      );
       try {
         if (canonicalConversationId) {
           fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
@@ -2997,14 +3020,20 @@ export async function answerFastAgentQuestion({
           await replaceInferenceRetryReply(
             {
               purpose: 'closeout',
-              message: INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+              // A shutdown is a restart the user can see through honestly;
+              // other aborts keep the generic retry-interruption wording.
+              message: shutdownInterrupted
+                ? RESTARTED_ACTIVE_TURN_MESSAGE
+                : INTERRUPTED_INFERENCE_RETRY_MESSAGE,
             },
             true,
+            undefined,
+            interruptionReason,
           );
         } else if (shutdownInterrupted && !isInstructionClosed()) {
           const reply = {
             purpose: 'closeout' as const,
-            message: INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+            message: RESTARTED_ACTIVE_TURN_MESSAGE,
           };
           try {
             const posted = await adapter.postReply(reply);
@@ -3017,12 +3046,30 @@ export async function answerFastAgentQuestion({
                 allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
               platformMessageId: posted?.messageId,
               inferenceRetryNotice: Boolean(retryEvent),
+              interruptionReason,
             });
           } catch (postError) {
             console.error(
               `[Fast Agent] Failed to post shutdown closeout: ${formatErrorForLog(postError)}`,
             );
           }
+        } else if (
+          lockOwnershipLost &&
+          canonicalConversationId &&
+          inferenceRetryCanonicalEvent
+        ) {
+          // This owner is fenced off from terminal writes, but the fill-only
+          // cause stamp is safe: it no-ops once a successor reconciles the
+          // notice, and the reconciler folds it into its later closeout.
+          await markFastAgentInferenceRetryNoticeInterruption(
+            canonicalConversationId,
+            inferenceRetryCanonicalEvent.eventId,
+            'lock_lost',
+          ).catch((markError) => {
+            console.warn(
+              `[Fast Agent] Failed to record lock-lost interruption cause: ${formatErrorForLog(markError)}`,
+            );
+          });
         }
       } finally {
         if (shutdownInterrupted) {
@@ -3111,6 +3158,7 @@ export async function answerFastAgentQuestion({
       if (inferenceRetryAttempted) {
         await reconcileFastAgentInferenceRetryNotices(
           canonicalConversationId,
+          'turn_settled_reconcile',
         ).catch((error) => {
           console.warn(
             `[Fast Agent] Failed to reconcile settled inference retry notices: ${formatErrorForLog(error)}`,
