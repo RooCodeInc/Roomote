@@ -117,7 +117,7 @@ describe('ExperimentalSettings', () => {
     render(<ExperimentalSettings />);
 
     fireEvent.click(
-      screen.getByRole('switch', { name: 'Toggle composer Suggestions' }),
+      screen.getByRole('switch', { name: 'Toggle Composer Suggestions' }),
     );
 
     await waitFor(() => {
@@ -127,7 +127,7 @@ describe('ExperimentalSettings', () => {
       });
       expect(routerRefreshMock).toHaveBeenCalledTimes(1);
       expect(toastSuccessMock).toHaveBeenCalledWith(
-        'composer Suggestions enabled',
+        'Composer Suggestions enabled',
       );
     });
   });
@@ -137,7 +137,7 @@ describe('ExperimentalSettings', () => {
     render(<ExperimentalSettings />);
 
     fireEvent.click(
-      screen.getByRole('switch', { name: 'Toggle composer Suggestions' }),
+      screen.getByRole('switch', { name: 'Toggle Composer Suggestions' }),
     );
 
     await waitFor(() => {
