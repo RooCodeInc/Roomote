@@ -98,10 +98,15 @@ export async function markRoomotePullRequestReadyAfterCleanReview(input: {
     return 'review_not_clean';
   }
 
+  const repository = await resolveRepositoryRow({
+    provider: input.sourceControlProvider,
+    repositoryFullName: input.repository,
+    host: input.host,
+  });
   const association = await db.query.taskPullRequests.findFirst({
     where: and(
       eq(taskPullRequests.sourceControlProvider, input.sourceControlProvider),
-      eq(taskPullRequests.repository, input.repository),
+      eq(taskPullRequests.repositoryId, repository.id),
       eq(taskPullRequests.prNumber, input.prNumber),
       eq(taskPullRequests.createdByRoomote, true),
     ),
@@ -111,11 +116,6 @@ export async function markRoomotePullRequestReadyAfterCleanReview(input: {
     return 'not_roomote_created';
   }
 
-  const repository = await resolveRepositoryRow({
-    provider: input.sourceControlProvider,
-    repositoryFullName: input.repository,
-    host: input.host,
-  });
   const releaseLifecycleLock = await acquireGithubPrReviewLifecycleLock(
     `${input.sourceControlProvider}:${repository.host ?? ''}:${input.repository}`,
     input.prNumber,

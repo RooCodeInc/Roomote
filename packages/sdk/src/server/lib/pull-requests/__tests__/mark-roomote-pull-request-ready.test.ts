@@ -64,6 +64,7 @@ vi.mock('@roomote/db/server', () => ({
   taskPullRequests: {
     sourceControlProvider: 'sourceControlProvider',
     repository: 'repository',
+    repositoryId: 'repositoryId',
     prNumber: 'prNumber',
     createdByRoomote: 'createdByRoomote',
   },
@@ -299,6 +300,23 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
     await expect(markReady()).resolves.toBe('not_roomote_created');
     expect(mockPullRequestGet).not.toHaveBeenCalled();
     expect(mockGraphql).not.toHaveBeenCalled();
+  });
+
+  it('scopes Roomote creation provenance to the resolved repository identity', async () => {
+    await markReady();
+
+    expect(mockFindAssociation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          conditions: expect.arrayContaining([
+            expect.objectContaining({ left: 'repositoryId', right: 'repo-id' }),
+          ]),
+        }),
+      }),
+    );
+    expect(mockResolveRepositoryRow.mock.invocationCallOrder[0]).toBeLessThan(
+      mockFindAssociation.mock.invocationCallOrder[0]!,
+    );
   });
 
   it.each([
