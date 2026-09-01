@@ -233,7 +233,7 @@ export function SessionPromptInput({
                   type="button"
                   aria-label="Insert suggested message"
                   onClick={acceptGhostSuggestion}
-                  className="absolute right-3 top-3 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
+                  className="absolute right-4 top-4 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
                 >
                   Tab
                 </button>
