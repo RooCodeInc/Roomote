@@ -559,7 +559,7 @@ describe('Fast native OpenCode tool bridge', () => {
       {
         allowSkillAccess: true,
         allowSpillRecovery: true,
-        authorizeDirectTool: async () =>
+        authorizeSubstantiveTool: async () =>
           acknowledged
             ? undefined
             : {
@@ -588,8 +588,29 @@ describe('Fast native OpenCode tool bridge', () => {
       })
         .then((response) => response.json())
         .then((payload) => JSON.parse(payload.output));
+    const authorizeTask = () =>
+      fetch(
+        runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!.replace(
+          /\/tool$/u,
+          '/authorize-substantive-tool',
+        ),
+        {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ sessionID: sessionId, tool: 'task' }),
+        },
+      ).then((response) => response.json());
 
     try {
+      await expect(authorizeTask()).resolves.toMatchObject({
+        ok: true,
+        allowed: false,
+        error:
+          'Post an acknowledgement with send_chat_reply before this action.',
+      });
       await expect(callBridge()).resolves.toEqual({
         success: false,
         error:
@@ -598,6 +619,10 @@ describe('Fast native OpenCode tool bridge', () => {
       expect(list).not.toHaveBeenCalled();
 
       acknowledged = true;
+      await expect(authorizeTask()).resolves.toEqual({
+        ok: true,
+        allowed: true,
+      });
       await expect(callBridge()).resolves.toMatchObject({ success: true });
       expect(list).toHaveBeenCalledOnce();
     } finally {

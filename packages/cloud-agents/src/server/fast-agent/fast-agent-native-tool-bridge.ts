@@ -117,10 +117,16 @@ type FastAgentNativeToolBridge = {
   url: string;
 };
 
+type FastAgentSubstantiveToolAuthorizer = (call: {
+  sessionId: string;
+  name: FastAgentNativeToolName | 'task';
+  args: Record<string, unknown>;
+}) => Promise<unknown>;
+
 type ActiveExecutor = {
   allowSkillAccess: boolean;
   allowSpillRecovery: boolean;
-  authorizeDirectTool?: FastAgentNativeToolExecutor;
+  authorizeSubstantiveTool?: FastAgentSubstantiveToolAuthorizer;
   conversationId: string;
   executor: FastAgentNativeToolExecutor;
   skillStore: FastAgentSkillStore;
@@ -130,7 +136,7 @@ type ActiveExecutor = {
 type FastAgentNativeToolBindingOptions = {
   allowSkillAccess?: boolean;
   allowSpillRecovery: boolean;
-  authorizeDirectTool?: FastAgentNativeToolExecutor;
+  authorizeSubstantiveTool?: FastAgentSubstantiveToolAuthorizer;
   skillStore?: FastAgentSkillStore;
   spillBudget?: FastAgentSpillTurnBudget;
 };
@@ -177,6 +183,11 @@ const bridgeRequestSchema = z.object({
   ),
   args: z.record(z.unknown()),
   agent: z.string().min(1).optional(),
+});
+
+const substantiveToolAuthorizationSchema = z.object({
+  sessionID: z.string().min(1),
+  tool: z.literal('task'),
 });
 
 const spillReadArgsSchema = z.object({
@@ -892,6 +903,48 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
       return;
     }
 
+    if (
+      request.method === 'POST' &&
+      url.pathname === '/authorize-substantive-tool'
+    ) {
+      if (!tokenMatches(request.headers.authorization, token)) {
+        writeJson(response, 401, { ok: false, error: 'unauthorized' });
+        return;
+      }
+      try {
+        const parsed = substantiveToolAuthorizationSchema.parse(
+          await readRequestBody(request),
+        );
+        const activeExecutor = activeExecutors.get(parsed.sessionID);
+        if (!activeExecutor?.authorizeSubstantiveTool) {
+          writeJson(response, 409, {
+            ok: false,
+            error: 'The Fast turn is no longer active.',
+          });
+          return;
+        }
+        const authorizationResult =
+          await activeExecutor.authorizeSubstantiveTool({
+            sessionId: parsed.sessionID,
+            name: parsed.tool,
+            args: {},
+          });
+        writeJson(
+          response,
+          200,
+          authorizationResult
+            ? { ok: true, allowed: false, ...authorizationResult }
+            : { ok: true, allowed: true },
+        );
+      } catch {
+        writeJson(response, 400, {
+          ok: false,
+          error: FAST_AGENT_TOOL_BRIDGE_ERROR,
+        });
+      }
+      return;
+    }
+
     if (request.method !== 'POST' || url.pathname !== '/tool') {
       writeJson(response, 404, { ok: false, error: 'not_found' });
       return;
@@ -939,13 +992,13 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
         }
       }
       if (
-        activeExecutor.authorizeDirectTool &&
+        activeExecutor.authorizeSubstantiveTool &&
         (parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.listSkills ||
           parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill ||
           isFastAgentSpillTool(parsed.tool))
       ) {
         const authorizationResult =
-          await activeExecutor.authorizeDirectTool(call);
+          await activeExecutor.authorizeSubstantiveTool(call);
         if (authorizationResult) {
           writeJson(response, 200, {
             ok: true,
@@ -1323,7 +1376,7 @@ export function bindFastAgentNativeToolExecutor(
   activeExecutors.set(sessionID, {
     allowSkillAccess: options.allowSkillAccess ?? false,
     allowSpillRecovery: options.allowSpillRecovery,
-    authorizeDirectTool: options.authorizeDirectTool,
+    authorizeSubstantiveTool: options.authorizeSubstantiveTool,
     conversationId,
     executor,
     skillStore: options.skillStore ?? fastAgentSkillStore,

@@ -2967,7 +2967,7 @@ export async function answerFastAgentQuestion({
                             {
                               allowSkillAccess: true,
                               allowSpillRecovery: true,
-                              authorizeDirectTool: async () =>
+                              authorizeSubstantiveTool: async () =>
                                 requireAcknowledgement(),
                               skillStore,
                               spillBudget,
