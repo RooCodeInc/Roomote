@@ -128,7 +128,7 @@ async function generateSuggestion(
   return object.suggestion;
 }
 
-export type ComposerSuggestionResult = {
+type ComposerSuggestionResult = {
   suggestion: string | null;
   messageCount: number;
 };
