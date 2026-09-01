@@ -3421,13 +3421,19 @@ export async function answerFastAgentQuestion({
               `[Fast Agent] Failed to wake durable turn resume: ${formatErrorForLog(wakeError)}`,
             );
           });
-        } else if (durableAdmission) {
-          await revokeDurableTurnReplay(
-            `Turn interrupted without replay (${interruptionReason}).`,
-          );
         }
-        if (resumable) {
-          // Fall through to the rethrow below without a user-facing closeout.
+        // A terminal interruption closeout is only safe once the row can no
+        // longer be re-run; if that revocation did not land, post nothing
+        // and let recovery own the outcome.
+        const terminalCloseoutAllowed =
+          resumable || !durableAdmission
+            ? !resumable
+            : await revokeDurableTurnReplay(
+                `Turn interrupted without replay (${interruptionReason}).`,
+              );
+        if (!terminalCloseoutAllowed) {
+          // Resumable turns and unrevoked rows fall through to the rethrow
+          // below without a user-facing closeout.
         } else if (!lockOwnershipLost && inferenceRetryReply) {
           await replaceInferenceRetryReply(
             {

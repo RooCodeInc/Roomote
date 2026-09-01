@@ -3401,6 +3401,48 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(postReply).not.toHaveBeenCalled();
     });
 
+    it('posts no interruption closeout when a cancelled turn cannot be withdrawn from replay', async () => {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      const cancelled = new Error('Fast suggestion launch settlement failed.');
+      mocks.revokeDurableReplay.mockResolvedValue(false);
+      const postReply = vi.fn().mockImplementation(async () => {
+        // The visible retry notice is up; cancel during its backoff.
+        controller.abort(cancelled);
+        return { messageId: 'retry-1' };
+      });
+      const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
+      const rateLimitError = new Error('429 Too Many Requests') as Error & {
+        providerError: unknown;
+      };
+      rateLimitError.providerError = {
+        data: { responseHeaders: { 'retry-after': '60' } },
+      };
+      mocks.generateText.mockRejectedValue(rateLimitError);
+
+      try {
+        const resultPromise = answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ postReply, replaceReply }),
+          signal: controller.signal,
+          durableAdmission,
+        });
+        const rejection = expect(resultPromise).rejects.toBe(cancelled);
+        await vi.runAllTimersAsync();
+        await rejection;
+
+        expect(postReply).toHaveBeenCalledTimes(1);
+        expect(replaceReply).not.toHaveBeenCalled();
+        expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
+          'durable-row-1',
+          'Turn interrupted without replay (turn_aborted).',
+        );
+        expect(mocks.releaseDurableClaim).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('hands a replay-safe turn to the queue on shutdown without a closeout', async () => {
       const controller = new AbortController();
       const shutdown = new FastAgentProcessShutdownError('SIGTERM');
