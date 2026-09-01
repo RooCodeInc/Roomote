@@ -251,10 +251,10 @@ describe('slackAppMention', () => {
       'Do not add a separate sentence telling the user to use the task UI; the Slack thread reply tool already appends the standard footer.',
     );
     expect(result.harnessInstructions).toContain(
-      'When reactions are allowed and the latest directed user turn itself came from Slack, using `send_chat_reaction_emoji` on that current Slack message counts as answering that Slack turn. When the latest user turn did not come from Slack, `send_chat_reaction_emoji` does not count as satisfying the turn. When the user explicitly asks for a reaction on a different known Slack message, `add_reaction_to_slack_message` counts only when it targets that requested message.',
+      'When reactions are allowed and the latest directed user turn itself came from Slack, using `send_chat_reaction_emoji` on that current Slack message counts as answering that Slack turn. When the latest user turn did not come from Slack, `send_chat_reaction_emoji` does not count as satisfying the turn.',
     );
     expect(result.harnessInstructions).toContain(
-      "Every new Slack user turn that you answer still needs its own fresh Slack-visible satisfaction tool call. A prior turn's `send_chat_reply`, `send_chat_reaction_emoji`, or `add_reaction_to_slack_message` call on a different message does not satisfy a later turn. A reaction only counts for the turn it actually answers.",
+      "Every new Slack user turn that you answer still needs its own fresh Slack-visible satisfaction tool call. A prior turn's `send_chat_reply` or `send_chat_reaction_emoji` call does not satisfy a later turn. A reaction only counts for the turn it actually answers.",
     );
     expect(result.harnessInstructions).not.toContain(
       'Because this run originated from Slack, apply these Slack thread obligations before top-level workflow routing.',

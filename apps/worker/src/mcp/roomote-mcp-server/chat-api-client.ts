@@ -175,22 +175,6 @@ export async function addReactionToChatMessage(
   );
 }
 
-export async function addReactionToSlackMessage(
-  config: RoomoteConfig,
-  input: {
-    channel: string;
-    messageTs: string;
-    name: string;
-  },
-): Promise<SlackReactionAddResponse> {
-  return postToChatEndpoint<SlackReactionAddResponse>(
-    config,
-    'reaction_add',
-    input,
-    'Failed to add Slack reaction',
-  );
-}
-
 export async function getChatMessageContext(
   config: RoomoteConfig,
   input: {

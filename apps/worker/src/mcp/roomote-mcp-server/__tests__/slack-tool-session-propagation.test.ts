@@ -12,7 +12,6 @@ const mockState = vi.hoisted(() => ({
   handleSendChatReply: vi.fn(),
   handleRelayFastAgentChatReply: vi.fn(),
   handleSendChatReactionEmoji: vi.fn(),
-  handleAddReactionToSlackMessage: vi.fn(),
   recordChatReplySatisfaction: vi.fn(),
   recordChatReplyDeliveryFailure: vi.fn(),
 }));
@@ -54,10 +53,6 @@ vi.mock('../send-chat-reaction-emoji.js', () => ({
   handleSendChatReactionEmoji: mockState.handleSendChatReactionEmoji,
 }));
 
-vi.mock('../add-reaction-to-slack-message.js', () => ({
-  handleAddReactionToSlackMessage: mockState.handleAddReactionToSlackMessage,
-}));
-
 vi.mock('../chat-reply-satisfaction.js', () => ({
   recordChatReplySatisfaction: mockState.recordChatReplySatisfaction,
   recordChatReplyDeliveryFailure: mockState.recordChatReplyDeliveryFailure,
@@ -81,7 +76,6 @@ describe('roomote MCP Slack tool session propagation', () => {
     mockState.handleSendChatReply.mockReset();
     mockState.handleRelayFastAgentChatReply.mockReset();
     mockState.handleSendChatReactionEmoji.mockReset();
-    mockState.handleAddReactionToSlackMessage.mockReset();
     mockState.recordChatReplySatisfaction.mockReset();
     mockState.recordChatReplyDeliveryFailure.mockReset();
     mockState.recordChatReplyDeliveryFailure.mockReturnValue({

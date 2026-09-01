@@ -1203,7 +1203,6 @@ function createProofRunnerAgentConfig(
       roomote_report_platform_issue: false,
       roomote_get_chat_channel_messages: false,
       roomote_get_chat_message_context: false,
-      roomote_add_reaction_to_slack_message: false,
     },
   };
 }
