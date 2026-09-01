@@ -11,6 +11,7 @@ import {
   userFactory,
 } from '@roomote/db/server';
 
+import { createAgentMailCommunicationProviderFromRuntimeCredentials } from '../../agentmail-communication';
 import {
   canStartAgentMailConversationWithUser,
   isAgentMailAddressSuppressed,
@@ -146,6 +147,11 @@ describe('startAgentMailConversation (real database, stubbed AgentMail API)', ()
 
     process.env.R_EMAIL_CHANNEL_ENABLED = 'false';
     try {
+      // The shared reply-path factory is the kill switch for conversations
+      // that were admitted before the flag was turned off.
+      expect(
+        await createAgentMailCommunicationProviderFromRuntimeCredentials(),
+      ).toBeNull();
       expect(await canStartAgentMailConversationWithUser(user.id)).toBe(false);
       expect(
         await startAgentMailConversation({

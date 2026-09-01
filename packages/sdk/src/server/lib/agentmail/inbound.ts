@@ -365,6 +365,12 @@ async function processDeliveryFailureEvent(
 export async function processAgentMailWebhookEvent(
   deliveryId: string,
 ): Promise<void> {
+  // Disabled mid-flight: leave already-recorded events untouched (still
+  // `queued`), so nothing is refused or replied to while off, and the
+  // recovery sweep re-dispatches them if the channel is re-enabled.
+  if (!isEmailChannelEnabled()) {
+    return;
+  }
   const row = await db.query.agentmailWebhookEvents.findFirst({
     where: eq(agentmailWebhookEvents.deliveryId, deliveryId),
   });
@@ -670,6 +676,9 @@ async function deliverTurn(
 export async function drainAgentMailInboundTurns(
   conversationId: string,
 ): Promise<void> {
+  if (!isEmailChannelEnabled()) {
+    return;
+  }
   const first = await getNextPendingTurn(conversationId);
   if (!first) return;
 
