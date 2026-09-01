@@ -631,7 +631,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     authKind: 'api-key',
     // Requesty's models.dev slugs are provider-local rather than lab/model.
     suggestedTaskModels: mapRecommendedTaskModels({
-      'claude-fable-5-1': 'requesty/claude-fable-5-1',
       'claude-fable-5': 'requesty/claude-fable-5',
       'claude-haiku-4-5': 'requesty/claude-haiku-4-5',
       'claude-opus-5': 'requesty/claude-opus-5',
