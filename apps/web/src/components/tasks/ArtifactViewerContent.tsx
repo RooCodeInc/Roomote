@@ -9,7 +9,6 @@ import type { BundledLanguage } from 'shiki';
 import { toast } from 'sonner';
 
 import {
-  ALL_REPOSITORIES,
   DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
   type TaskPayload,
 } from '@roomote/types';
@@ -19,12 +18,13 @@ import type { ArtifactWithContent } from '@/types';
 import { useTRPC } from '@/trpc/client';
 
 import { humanizeFilename } from '@/lib';
+import { generateClientUuid } from '@/lib/client-uuid';
 import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 import { cn } from '@/lib/utils';
 
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useTask } from '@/hooks/tasks';
-import { useCreateStandardTaskRun } from '@/hooks/task-runs';
+import { useStartFastSession } from '@/hooks/task-runs';
 
 import {
   Download,
@@ -143,15 +143,21 @@ export function buildArtifactPlanDescription({
   artifactPath,
   artifactVersion,
   artifactContent,
+  environmentId,
+  modelId,
 }: {
   artifactPath: string;
   artifactVersion: number;
   artifactContent?: string | null;
+  environmentId: string;
+  modelId: string;
 }): string {
   const humanizedName = humanizeFilename(artifactPath);
   const planContent = artifactContent ?? '';
 
   return `Build the plan from ${humanizedName} (v${artifactVersion}).
+
+Start the implementation as a delegated task in Roomote environment ${environmentId} using model ${modelId}.
 
 The full plan content is included below. Implement it according to its specifications.
 
@@ -186,22 +192,23 @@ export function ArtifactViewerContent({
   const [isBuildDialogOpen, setIsBuildDialogOpen] = useState(false);
   const artifactTitle = artifact ? humanizeFilename(artifact.path) : '';
 
-  const createTaskRun = useCreateStandardTaskRun({
+  const buildSessionLaunchRef = useRef<{
+    key: string;
+    launchId: string;
+  } | null>(null);
+  const startFastSession = useStartFastSession({
     onSuccess: (result, variables) => {
-      if (result.success) {
-        const startedArtifactTitle = humanizeFilename(
-          variables.sourceArtifactPath ?? '',
-        );
-        toast.success(`Building ${startedArtifactTitle}.`, {
-          action: (
-            <Button asChild size="sm">
-              <Link href={`/task/${result.taskId}`}>View task</Link>
-            </Button>
-          ),
-        });
-      } else {
-        toast.error(result.error);
-      }
+      buildSessionLaunchRef.current = null;
+      const startedArtifactTitle = humanizeFilename(
+        variables.artifactBuild?.sourceArtifactPath ?? '',
+      );
+      toast.success(`Building ${startedArtifactTitle}.`, {
+        action: (
+          <Button asChild size="sm">
+            <Link href={`/sessions/${result.sessionId}`}>View Session</Link>
+          </Button>
+        ),
+      });
     },
     onError: (error) => toast.error(error.message),
   });
@@ -290,20 +297,35 @@ export function ArtifactViewerContent({
       artifactPath: artifact.path,
       artifactVersion: artifact.version,
       artifactContent: artifact.content,
+      environmentId: values.environmentId ?? '',
+      modelId: values.modelId,
     });
 
-    toast.info(`Starting new task to build ${artifactTitle}`);
-    createTaskRun.mutate({
-      model: values.modelId,
-      sourceTaskId: taskId,
-      sourceArtifactId: artifact.id,
-      sourceArtifactPath: artifact.path,
-      sourceArtifactVersion: artifact.version,
-      payload: {
-        repo: values.environmentId ? ALL_REPOSITORIES : values.repo,
-        branch: values.branch,
-        environmentId: values.environmentId,
-        description,
+    const launchKey = JSON.stringify([
+      taskId,
+      artifact.id,
+      artifact.version,
+      values.environmentId,
+      values.modelId,
+    ]);
+    if (buildSessionLaunchRef.current?.key !== launchKey) {
+      buildSessionLaunchRef.current = {
+        key: launchKey,
+        launchId: generateClientUuid(),
+      };
+    }
+
+    toast.info(`Starting new Session to build ${artifactTitle}`);
+    startFastSession.mutate({
+      text: description,
+      artifactBuild: {
+        launchId: buildSessionLaunchRef.current.launchId,
+        environmentId: values.environmentId ?? '',
+        taskModel: values.modelId,
+        sourceTaskId: taskId,
+        sourceArtifactId: artifact.id,
+        sourceArtifactPath: artifact.path,
+        sourceArtifactVersion: artifact.version,
       },
     });
     setIsBuildDialogOpen(false);
@@ -355,7 +377,7 @@ export function ArtifactViewerContent({
                     className="h-7 gap-1.5 px-2 text-sm font-medium hover:text-accent-foreground"
                     onClick={() => setIsBuildDialogOpen(true)}
                     disabled={
-                      createTaskRun.isPending ||
+                      startFastSession.isPending ||
                       Boolean(taskLaunchDisabledReason)
                     }
                   >
@@ -569,7 +591,7 @@ export function ArtifactViewerContent({
         taskBranch={taskPayload?.branch}
         taskEnvironmentId={taskPayload?.environmentId}
         onConfirm={handleCreateBuildTask}
-        isPending={createTaskRun.isPending}
+        isPending={startFastSession.isPending}
         taskLaunchDisabledReason={taskLaunchDisabledReason}
       />
     </>
