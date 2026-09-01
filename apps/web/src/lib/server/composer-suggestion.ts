@@ -35,7 +35,7 @@ Propose ONE short follow-up message the user is most likely to want to send next
 Rules:
 - Always suggest something. If the next step is uncertain, pick the most plausible concrete one rather than generic filler like "keep going" or "looks good".
 - Keep it to 5-10 words, on a single line, with no surrounding quotes, markdown, or emoji.
-- Write it in the user's voice, as an instruction or question addressed to the agent.
+- Write it as an instruction or question addressed to the agent, mimicking the voice and tone of the user's previous messages: match their casing, punctuation, formality, and phrasing habits so it reads like something they would actually type.
 - Make it specific to this conversation (reference the actual work).
 - Prefer a concrete next step: verifying the result, extending the change, covering a gap the agent mentioned, or shipping.
 
