@@ -77,6 +77,7 @@ const FAST_AGENT_NATIVE_RUNTIME_LIMIT = 250;
 
 export type FastAgentNativeToolCall = {
   agent?: string;
+  messageId?: string;
   sessionId?: string;
   name: FastAgentNativeToolName;
   args: Record<string, unknown>;
@@ -165,6 +166,7 @@ export function shouldSpillFastAgentModelOutput(output: string): boolean {
 
 const bridgeRequestSchema = z.object({
   sessionID: z.string().min(1),
+  messageID: z.string().min(1).optional(),
   tool: z.enum(
     Object.values(FAST_AGENT_NATIVE_TOOL_NAMES) as [
       FastAgentNativeToolName,
@@ -234,7 +236,7 @@ export const invoke = async (name, args, context) => {
       authorization: "Bearer " + token,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ sessionID: context.sessionID, agent: context.agent, tool: name, args }),
+    body: JSON.stringify({ sessionID: context.sessionID, messageID: context.messageID, agent: context.agent, tool: name, args }),
   })
   const payload = await response.json().catch(() => null)
   if (!response.ok || !payload?.ok) {
@@ -912,6 +914,7 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
         sessionId: parsed.sessionID,
         name: parsed.tool,
         args: parsed.args,
+        ...(parsed.messageID ? { messageId: parsed.messageID } : {}),
         ...(parsed.agent ? { agent: parsed.agent } : {}),
       };
       if (

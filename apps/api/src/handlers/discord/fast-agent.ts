@@ -193,17 +193,22 @@ export async function processDiscordFastAgentMessage(
           senderExternalId: input.sender.id,
         },
       });
-      if (admission.kind === 'queued') {
+      if (admission.kind !== 'turn') {
         input.onAccepted?.(admission.abort);
         return true;
       }
       releaseFastAgentLock = admission.turnLock;
     }
+    if (!releaseFastAgentLock) {
+      input.onRejected?.();
+      return false;
+    }
+    const activeTurnLock = releaseFastAgentLock;
     const footerContext = await resolveFastSessionReplyFooterContext({
       sessionId: session.id,
     });
     input.onAccepted?.(() =>
-      releaseFastAgentLock!.abort(
+      activeTurnLock.abort(
         new Error('Fast suggestion launch settlement failed.'),
       ),
     );
@@ -273,7 +278,7 @@ export async function processDiscordFastAgentMessage(
       apiBaseUrl,
       conversation,
       currentMessageId: anchorMessageId ?? input.interaction?.interaction.id,
-      signal: releaseFastAgentLock.signal,
+      signal: activeTurnLock.signal,
       senderDisplayName:
         input.interaction?.interaction.member?.nick ??
         input.sender.global_name ??

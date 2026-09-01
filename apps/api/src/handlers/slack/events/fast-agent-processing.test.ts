@@ -138,12 +138,12 @@ describe('processFastAgentMessage', () => {
     );
   });
 
-  it('durably queues a follow-up instead of waiting on an active turn lock', async () => {
+  it('durably steers an active Fast generation instead of waiting for its lock', async () => {
     const abort = vi.fn().mockResolvedValue(undefined);
     const onAccepted = vi.fn();
     mocks.acquireLock.mockResolvedValue(null);
     mocks.hasSession.mockResolvedValue(true);
-    mocks.admitHumanFollowUp.mockResolvedValue({ kind: 'queued', abort });
+    mocks.admitHumanFollowUp.mockResolvedValue({ kind: 'steered', abort });
     const slack = {
       addReaction: vi.fn().mockResolvedValue(true),
       removeReaction: vi.fn().mockResolvedValue(true),

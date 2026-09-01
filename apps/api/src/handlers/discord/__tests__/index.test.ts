@@ -1102,15 +1102,15 @@ describe('Discord Gateway event handler', () => {
     });
   });
 
-  it('durably queues the next Discord message while the Fast turn is active', async () => {
+  it('durably steers the active Fast turn when the next Discord message arrives', async () => {
     const releaseFirstLock = vi.fn().mockResolvedValue(undefined);
-    const abortQueued = vi.fn().mockResolvedValue(undefined);
+    const abortSteer = vi.fn().mockResolvedValue(undefined);
     mocks.acquireFastTurnLock
       .mockResolvedValueOnce(releaseFirstLock)
       .mockResolvedValueOnce(null);
     mocks.admitHumanFollowUp.mockResolvedValue({
-      kind: 'queued',
-      abort: abortQueued,
+      kind: 'steered',
+      abort: abortSteer,
     });
 
     let finishFirstTurn!: (response: string) => void;

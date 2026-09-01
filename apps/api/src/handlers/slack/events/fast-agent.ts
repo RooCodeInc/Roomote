@@ -240,7 +240,7 @@ export async function processFastAgentMessage(params: {
           ...(event.user ? { senderExternalId: event.user } : {}),
         },
       });
-      if (admission.kind === 'queued') {
+      if (admission.kind !== 'turn') {
         params.onAccepted?.(admission.abort);
         return;
       }

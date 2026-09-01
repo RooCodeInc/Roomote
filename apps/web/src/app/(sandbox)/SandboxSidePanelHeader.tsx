@@ -25,7 +25,9 @@ export function SandboxSidePanelHeader({
   onBack,
 }: SandboxSidePanelHeaderProps) {
   const { isSidebarVisible } = useSandboxLayout();
-  const isMdOrLarger = useMediaQuery('(min-width: 768px)');
+  const isMdOrLarger = useMediaQuery('(min-width: 768px)', {
+    initializeWithValue: false,
+  });
   const showCloseButton = isMdOrLarger || !isSidebarVisible;
 
   return (
