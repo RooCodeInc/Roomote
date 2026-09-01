@@ -44,11 +44,24 @@ function envelope(
   } as unknown as TaskMessageEnvelope;
 }
 
-const auth = { userId: 'user-1' } as UserAuthSuccess;
+const auth = {
+  userId: 'user-1',
+  featureFlags: { composerSuggestions: true },
+} as UserAuthSuccess;
+
+const flagOffAuth = { userId: 'user-1', featureFlags: {} } as UserAuthSuccess;
 
 describe('getComposerSuggestionCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('returns null without loading history when the flag is off', async () => {
+    await expect(
+      getComposerSuggestionCommand(flagOffAuth, { taskId: 'task-1' }),
+    ).resolves.toEqual({ suggestion: null, messageCount: 0 });
+    expect(mockGetTaskMessageEnvelopes).not.toHaveBeenCalled();
+    expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
   });
 
   it('returns null when the conversation is too short', async () => {

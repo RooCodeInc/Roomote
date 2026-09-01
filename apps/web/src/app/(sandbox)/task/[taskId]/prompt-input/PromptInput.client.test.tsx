@@ -109,6 +109,22 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: useTRPCMock,
 }));
 
+const userFlagsState = vi.hoisted(() => ({
+  current: { composerSuggestions: true } as Record<string, boolean>,
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useUser: () => ({
+    authStatus: 'signed-in',
+    isSignedIn: true,
+    user: {
+      name: null,
+      featureFlags: userFlagsState.current,
+      resource: { imageUrl: undefined },
+    },
+  }),
+}));
+
 vi.mock('sonner', () => ({
   toast: {
     error: toastErrorMock,
@@ -1246,6 +1262,7 @@ describe('PromptInput', () => {
 
 describe('PromptInput ghost suggestion', () => {
   function renderConnectedComposer() {
+    userFlagsState.current = { composerSuggestions: true };
     useSandboxTaskPhaseMock.mockReturnValue('waiting_for_prompt');
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
@@ -1340,6 +1357,25 @@ describe('PromptInput ghost suggestion', () => {
     expect(screen.getByPlaceholderText(/Message agent/i)).toHaveValue(
       'my own message',
     );
+  });
+
+  it('does not request a suggestion when the experimental flag is off', () => {
+    renderConnectedComposer();
+    cleanup();
+
+    userFlagsState.current = {};
+    render(
+      <PromptInput
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+        taskRun={createTaskRun(1)}
+      />,
+    );
+
+    const queryArg = useQueryMock.mock.calls.at(-1)?.[0] as {
+      enabled?: boolean;
+    };
+    expect(queryArg?.enabled).toBe(false);
   });
 
   it('hides the ghost suggestion while the agent is still working', () => {

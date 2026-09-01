@@ -15,6 +15,10 @@ export async function getComposerSuggestionCommand(
   auth: UserAuthSuccess,
   input: { taskId: string },
 ): Promise<ComposerSuggestionResult> {
+  if (auth.featureFlags?.composerSuggestions !== true) {
+    return { suggestion: null, messageCount: 0 };
+  }
+
   try {
     const messages = await getTaskMessageEnvelopes({ taskId: input.taskId });
 

@@ -19,6 +19,10 @@ export async function getFastSessionComposerSuggestionCommand(
   auth: UserAuthSuccess,
   input: { sessionId: string },
 ): Promise<ComposerSuggestionResult> {
+  if (auth.featureFlags?.composerSuggestions !== true) {
+    return { suggestion: null, messageCount: 0 };
+  }
+
   try {
     const session = await findAccessibleFastSession(auth, input.sessionId);
 

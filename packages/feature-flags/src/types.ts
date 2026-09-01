@@ -2,7 +2,9 @@
  * Feature flag types and configuration
  */
 
-export const FeatureFlag = {} as const;
+export const FeatureFlag = {
+  ComposerSuggestions: 'composerSuggestions',
+} as const;
 
 export type FeatureFlag = (typeof FeatureFlag)[keyof typeof FeatureFlag];
 
