@@ -143,6 +143,12 @@ import {
   type FastAgentTurnSource,
 } from './fast-agent-conversation';
 import { prepareShowWidget } from '../show-widget';
+import {
+  formatFastAgentStorageFullMessage,
+  inspectFastAgentStorageFullError,
+  isFastAgentStorageFullError,
+  wrapFastAgentStorageFullError,
+} from './fast-agent-storage-diagnostics';
 
 const LEGACY_SLACK_REACTION_TOOL = 'add_reaction_to_slack_message';
 
@@ -2970,13 +2976,21 @@ export async function answerFastAgentQuestion({
   } catch (error) {
     const terminalError =
       signal?.aborted && signal.reason instanceof Error ? signal.reason : error;
+    const storageFull = isFastAgentStorageFullError(terminalError);
+    const storageDiagnostic = storageFull
+      ? inspectFastAgentStorageFullError(terminalError)
+      : undefined;
     diagnostics.recordFailure(
       signal?.aborted
         ? 'cancelled'
-        : error instanceof FastAgentInferenceError
-          ? error.failure.reason
-          : 'unclassified',
-      terminalError,
+        : storageFull
+          ? `local_storage_${storageDiagnostic?.kind ?? 'unknown'}`
+          : error instanceof FastAgentInferenceError
+            ? error.failure.reason
+            : 'unclassified',
+      storageDiagnostic
+        ? wrapFastAgentStorageFullError(terminalError, storageDiagnostic)
+        : terminalError,
     );
     if (signal?.aborted) {
       const shutdownInterrupted =
@@ -3033,8 +3047,9 @@ export async function answerFastAgentQuestion({
     }
     if (platformEvent) throw error;
 
-    const message =
-      error instanceof FastAgentInferenceError
+    const message = storageFull
+      ? formatFastAgentStorageFullMessage(storageDiagnostic?.kind ?? 'unknown')
+      : error instanceof FastAgentInferenceError
         ? formatFastAgentInferenceFailure(
             error.failure,
             inferenceRetryAttempted,

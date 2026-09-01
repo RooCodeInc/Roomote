@@ -586,6 +586,38 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('reports local storage exhaustion instead of a generic Fast error', async () => {
+    const storageError = Object.assign(
+      new Error('ENOSPC: no space left on device, write'),
+      { code: 'ENOSPC' },
+    );
+    mocks.getNativeRuntime.mockRejectedValueOnce(storageError);
+    const adapter = callbacks();
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      await expect(
+        answerFastAgentQuestion({ ...baseParams, adapter }),
+      ).resolves.toContain("Fast's local working");
+
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: expect.stringContaining("Fast's local working"),
+      });
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining('reason="local_storage_'),
+      );
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining('filesystemPath=/tmp'),
+      );
+      expect(mocks.generateText).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it('injects durable human follow-ups with native steering between tool calls', async () => {
     vi.useFakeTimers();
     try {
