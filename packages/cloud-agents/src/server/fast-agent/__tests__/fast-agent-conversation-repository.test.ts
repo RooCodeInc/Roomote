@@ -12,6 +12,7 @@ import {
 
 import {
   fastAgentConversationRepository,
+  findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   markFastAgentInferenceRetryNoticeInterruption,
   reconcileExpiredFastAgentInferenceRetryNotices,
@@ -980,6 +981,123 @@ describe('Fast conversation repository', () => {
         interruptionReason: stamped ? 'lock_lost' : 'next_turn_reconcile',
       });
     }
+  });
+
+  it('surfaces the interrupted request the conversation still owes', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const write = (
+      message: Parameters<
+        typeof fastAgentConversationRepository.upsertMessage
+      >[0]['message'],
+    ) =>
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message,
+      });
+    const prompt = (
+      turnId: string,
+      ts: number,
+      text: string,
+      metadata: Record<string, unknown> = {},
+    ) =>
+      write({
+        eventId: `${turnId}:user`,
+        turnId,
+        turnSeq: 0,
+        ts,
+        eventType: 'roomote_runtime.user_prompt',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text }],
+        metadata: {
+          visibleInTranscript: true,
+          turnSource: 'human',
+          ...metadata,
+        },
+        payload: {},
+        source: 'slack',
+      });
+    const closeout = (
+      turnId: string,
+      ts: number,
+      metadata: Record<string, unknown> = {},
+    ) =>
+      write({
+        eventId: `${turnId}:assistant:0`,
+        turnId,
+        turnSeq: 1,
+        ts,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'closeout' }],
+        metadata: {
+          visibleInTranscript: true,
+          purpose: 'closeout',
+          ...metadata,
+        },
+        payload: { purpose: 'closeout' },
+        source: 'slack',
+      });
+
+    await expect(
+      findFastAgentUnresolvedRequest(session.id),
+    ).resolves.toBeNull();
+
+    // A turn that ended in an interruption closeout is still owed.
+    await prompt('turn-1', 100, 'Break down the duplicate validation');
+    await closeout('turn-1', 110, { interruptionReason: 'api_shutdown' });
+    await expect(findFastAgentUnresolvedRequest(session.id)).resolves.toEqual({
+      turnId: 'turn-1',
+      text: 'Break down the duplicate validation',
+      reason: 'api_shutdown',
+    });
+
+    // Platform events and reactions that arrive afterward neither answer nor
+    // supersede the request, so they must not mask it.
+    await prompt('turn-1b', 150, '<platform_event>{}</platform_event>', {
+      visibleInTranscript: false,
+      turnSource: 'platform_event',
+    });
+    await closeout('turn-1b', 160);
+    await prompt('turn-1c', 170, 'reacted', {
+      inputKind: FAST_AGENT_REACTION_INPUT_TYPE,
+    });
+    await closeout('turn-1c', 180);
+    await expect(findFastAgentUnresolvedRequest(session.id)).resolves.toEqual({
+      turnId: 'turn-1',
+      text: 'Break down the duplicate validation',
+      reason: 'api_shutdown',
+    });
+
+    // A nudge that resumed it and was interrupted again still surfaces the
+    // original request, not the nudge.
+    await prompt('turn-2', 200, 'hey', { resumesTurnId: 'turn-1' });
+    await closeout('turn-2', 210, { interruptionReason: 'lock_lost' });
+    await expect(findFastAgentUnresolvedRequest(session.id)).resolves.toEqual({
+      turnId: 'turn-1',
+      text: 'Break down the duplicate validation',
+      reason: 'lock_lost',
+    });
+
+    // A completed turn settles the debt.
+    await prompt('turn-3', 300, 'Thanks, what about the release?');
+    await closeout('turn-3', 310);
+    await expect(
+      findFastAgentUnresolvedRequest(session.id),
+    ).resolves.toBeNull();
+
+    // An interrupted platform-event turn is not a request the user is owed.
+    await prompt('turn-4', 400, '<platform_event>{}</platform_event>', {
+      visibleInTranscript: false,
+      turnSource: 'platform_event',
+    });
+    await closeout('turn-4', 410, { interruptionReason: 'api_shutdown' });
+    await expect(
+      findFastAgentUnresolvedRequest(session.id),
+    ).resolves.toBeNull();
   });
 
   it('renews only a live responding lease', async () => {

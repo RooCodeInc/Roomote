@@ -3,6 +3,7 @@ import {
   and,
   type CreateFastAgentMessage,
   db,
+  desc,
   eq,
   fastAgentConversations,
   fastAgentMessages,
@@ -207,6 +208,118 @@ export async function markFastAgentInferenceRetryNoticeInterruption(
     )
     .returning({ id: fastAgentMessages.id });
   return stamped.length > 0;
+}
+
+export type FastAgentUnresolvedRequest = {
+  /** Turn whose human request never received a completed answer. */
+  turnId: string;
+  text: string;
+  reason: string;
+};
+
+const UNRESOLVED_REQUEST_CHAIN_LIMIT = 8;
+
+async function findFastAgentTurnPrompt(
+  conversationId: string,
+  turnId: string,
+): Promise<{ text: string; metadata: Record<string, unknown> } | null> {
+  const [prompt] = await db
+    .select({
+      contentBlocks: fastAgentMessages.contentBlocks,
+      metadata: fastAgentMessages.metadata,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.turnId, turnId),
+        eq(fastAgentMessages.role, 'user'),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+      ),
+    )
+    .limit(1);
+  if (!prompt) return null;
+  const text = prompt.contentBlocks
+    .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+    .join('\n')
+    .trim();
+  return { text, metadata: prompt.metadata ?? {} };
+}
+
+/**
+ * The human request the conversation still owes an answer to, if the most
+ * recent turn ended in an interruption closeout instead of a completed reply.
+ * A turn that itself resumed an earlier interrupted request records that
+ * lineage in its prompt metadata, so the original request is what surfaces
+ * even after repeated interruptions.
+ */
+export async function findFastAgentUnresolvedRequest(
+  conversationId: string,
+): Promise<FastAgentUnresolvedRequest | null> {
+  // Anchor on the latest substantive human prompt: platform events and
+  // reactions are persisted as prompts too, but their turns neither answer
+  // nor supersede a human request, so they must not mask an owed one.
+  const [latestPrompt] = await db
+    .select({ turnId: fastAgentMessages.turnId })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.role, 'user'),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
+        or(
+          sql`${fastAgentMessages.metadata}->>'inputKind' IS NULL`,
+          sql`${fastAgentMessages.metadata}->>'inputKind' <> ${FAST_AGENT_REACTION_INPUT_TYPE}`,
+        ),
+      ),
+    )
+    .orderBy(desc(fastAgentMessages.ts), desc(fastAgentMessages.turnSeq))
+    .limit(1);
+  if (!latestPrompt) return null;
+
+  const [interruption] = await db
+    .select({ metadata: fastAgentMessages.metadata })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.turnId, latestPrompt.turnId),
+        eq(fastAgentMessages.role, 'assistant'),
+        sql`${fastAgentMessages.metadata}->>'interruptionReason' IS NOT NULL`,
+      ),
+    )
+    .limit(1);
+  if (!interruption) return null;
+  const reason = interruption.metadata?.interruptionReason;
+  if (typeof reason !== 'string') return null;
+
+  let turnId = latestPrompt.turnId;
+  let prompt = await findFastAgentTurnPrompt(conversationId, turnId);
+  for (
+    let hop = 0;
+    prompt &&
+    typeof prompt.metadata.resumesTurnId === 'string' &&
+    hop < UNRESOLVED_REQUEST_CHAIN_LIMIT;
+    hop += 1
+  ) {
+    const rootPrompt = await findFastAgentTurnPrompt(
+      conversationId,
+      prompt.metadata.resumesTurnId,
+    );
+    if (!rootPrompt) break;
+    turnId = prompt.metadata.resumesTurnId;
+    prompt = rootPrompt;
+  }
+  if (
+    !prompt ||
+    !prompt.text ||
+    prompt.metadata.turnSource !== 'human' ||
+    prompt.metadata.inputKind === FAST_AGENT_REACTION_INPUT_TYPE
+  ) {
+    return null;
+  }
+  return { turnId, text: prompt.text, reason };
 }
 
 /**

@@ -60,6 +60,22 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(nonAdminPrompt).toContain('provide a copy-pasteable draft');
   });
 
+  it('tells human turns how to handle an unresolved earlier request', () => {
+    const humanPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+    const eventPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+    });
+
+    expect(humanPrompt).toContain('`<unresolved_request>` envelope');
+    expect(humanPrompt).toContain('resume that request now');
+    expect(humanPrompt).toContain('Never drop the earlier request silently');
+    expect(eventPrompt).not.toContain('<unresolved_request>');
+  });
+
   it('omits the release identifier when no version is resolved', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 

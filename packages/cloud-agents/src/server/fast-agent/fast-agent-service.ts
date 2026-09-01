@@ -93,12 +93,14 @@ import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import { RemoteFastAgentSettingsSkillSource } from './fast-agent-settings-skill-source';
 import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill-invocation';
 import {
+  findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   markFastAgentInferenceRetryNoticeInterruption,
   reconcileFastAgentInferenceRetryNotices,
   renewFastSessionRespondingLease,
   RESTARTED_ACTIVE_TURN_MESSAGE,
   type FastAgentInterruptionReason,
+  type FastAgentUnresolvedRequest,
 } from './fast-agent-conversation-repository';
 import {
   bindFastAgentNativeToolExecutor,
@@ -740,6 +742,21 @@ function escapeFastAgentEnvelopeJson(value: Record<string, string>): string {
     .replaceAll('>', '&gt;');
 }
 
+const UNRESOLVED_REQUEST_TEXT_MAX_CHARS = 2_000;
+
+function wrapFastAgentUnresolvedRequest(
+  request: FastAgentUnresolvedRequest,
+): string {
+  const text =
+    request.text.length > UNRESOLVED_REQUEST_TEXT_MAX_CHARS
+      ? `${request.text.slice(0, UNRESOLVED_REQUEST_TEXT_MAX_CHARS)}…`
+      : request.text;
+  return `<unresolved_request>\n${escapeFastAgentEnvelopeJson({
+    reason: request.reason,
+    text,
+  })}\n</unresolved_request>`;
+}
+
 function wrapFastAgentThreadContext(
   threadContext: FastAgentThreadMessage[],
 ): string | undefined {
@@ -771,6 +788,7 @@ function buildFastAgentMessages({
   reactionInput,
   turnSource,
   slackRoomoteUserId,
+  unresolvedRequest,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -786,6 +804,7 @@ function buildFastAgentMessages({
   reactionInput: boolean;
   turnSource: FastAgentTurnSource;
   slackRoomoteUserId?: string;
+  unresolvedRequest?: FastAgentUnresolvedRequest | null;
 }): {
   bootstrapMessages: ModelMessage[];
   turnMessages: ModelMessage[];
@@ -824,6 +843,11 @@ function buildFastAgentMessages({
     .filter((entry): entry is string => Boolean(entry))
     .join('\n\n');
   const turnMessage = buildUserTextMessage(currentUserMessageText);
+  // The envelope travels with the turn delta (not only the bootstrap) so a
+  // warm session also learns that the previous request is still owed.
+  const unresolvedRequestText = unresolvedRequest
+    ? wrapFastAgentUnresolvedRequest(unresolvedRequest)
+    : undefined;
 
   if (compatibilityMessages.length > 0) {
     const supplementalThreadContext = buildSupplementalThreadContext({
@@ -835,6 +859,9 @@ function buildFastAgentMessages({
     const turnMessages = [
       ...(supplementalThreadContext
         ? [buildUserTextMessage(supplementalThreadContext)]
+        : []),
+      ...(unresolvedRequestText
+        ? [buildUserTextMessage(unresolvedRequestText)]
         : []),
       turnMessage,
     ];
@@ -859,6 +886,7 @@ function buildFastAgentMessages({
   const bootstrapText = [
     serializedThreadContext,
     replyingTo,
+    unresolvedRequestText,
     currentUserMessageText,
   ]
     .filter((entry): entry is string => Boolean(entry))
@@ -1600,6 +1628,17 @@ export async function answerFastAgentQuestion({
     durableOpenCodeSessionId = session.openCodeSessionId;
     activeOpenCodeSessionId = session.openCodeSessionId;
     diagnostics.setCanonicalConversationId(session.id);
+    // Look up before this turn's own prompt is persisted, so "the latest
+    // turn" is the previous one. Only a substantive human turn can resume an
+    // owed request; platform events and reactions leave it for the next one.
+    const unresolvedRequest = substantiveHumanInput
+      ? await findFastAgentUnresolvedRequest(session.id).catch((error) => {
+          console.warn(
+            `[Fast Agent] Failed to look up an unresolved request: ${formatErrorForLog(error)}`,
+          );
+          return null;
+        })
+      : null;
     const userEvent = allocateCanonicalEvent('user');
     const userMessageResult = await persistCanonicalMessage(
       {
@@ -1621,6 +1660,11 @@ export async function answerFastAgentQuestion({
             ? { inputKind: FAST_AGENT_REACTION_INPUT_TYPE }
             : {}),
           ...(platformEvent ? { platformEventKind } : {}),
+          // Lineage back to the interrupted request this turn is resuming,
+          // so the original still surfaces if this turn is interrupted too.
+          ...(unresolvedRequest
+            ? { resumesTurnId: unresolvedRequest.turnId }
+            : {}),
           userId,
           ...(senderDisplayName ? { userName: senderDisplayName } : {}),
           ...(senderDisplayName ? { senderDisplayName } : {}),
@@ -1678,6 +1722,7 @@ export async function answerFastAgentQuestion({
       reactionInput,
       turnSource,
       slackRoomoteUserId,
+      unresolvedRequest,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
       Env.RELEASE_PRODUCT_VERSION,
