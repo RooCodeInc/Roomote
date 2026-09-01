@@ -189,6 +189,7 @@ export {
   agentmailConversationParticipantsRelations,
   agentmailWebhookEvents,
   agentmailInboundTurns,
+  agentmailSuppressions,
   discordInstallations,
   discordInstallationsRelations,
   discordInstallationChannels,

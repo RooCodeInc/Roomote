@@ -28,8 +28,9 @@ In the Roomote UI (**Settings > Communications > Email (AgentMail)**),
 paste the API key, then save. Roomote proposes a deployment inbox address such as
 `roomote-yourhost-a1b2c3@agentmail.to`; edit the address before creation, or
 supply the address of an existing AgentMail inbox instead. On save, Roomote
-creates the inbox and registers the `message.received` webhook automatically.
-The connected inbox address and the registered webhook URL are shown in
+creates the inbox and registers a webhook for `message.received`,
+`message.bounced`, and `message.complained` events automatically. The
+connected inbox address and the registered webhook URL are shown in
 settings.
 
 For self-hosted env-var configuration instead of the UI, all values are
@@ -74,13 +75,33 @@ tap exists so corporate mail link scanners cannot answer on your behalf.)
 You can always answer by replying to the email instead. Multi-question
 prompts are answered by reply, one answer per line.
 
+## Roomote-initiated email
+
+Roomote can also initiate email — for example, notifying you that a GitHub
+App installation you requested was approved when you have no chat
+integration linked. Strict consent rules are enforced in code:
+
+- Roomote only initiates email to your own verified account address, or to
+  an address you explicitly linked to your account through the email-link
+  flow. It never emails an address just because someone typed it in.
+- Every Roomote-initiated email carries a one-click unsubscribe link
+  (RFC 8058 `List-Unsubscribe`). Unsubscribing stops Roomote from initiating
+  new email to that address; replies to email you send Roomote are
+  unaffected.
+- Addresses that bounce permanently or file a spam complaint are suppressed
+  automatically and never emailed again.
+- If you also have a chat integration linked (Slack, Teams, Telegram, or
+  Discord), broadcast-style notices go there instead of email — email is the
+  fallback reach, not another copy.
+
+Replying to a Roomote-initiated email works like any other thread: the reply
+routes back into the same conversation.
+
 ## Limitations
 
 In this first version:
 
-- email is inbound-initiated only; Roomote never emails first, so
-  notifications, automation reports, and direct messages are not delivered
-  over email
+- automation reports and channel-style posting are not delivered over email
 - reactions are not supported
 - attachments from inbound email are not yet processed
 - each deployment has one inbox

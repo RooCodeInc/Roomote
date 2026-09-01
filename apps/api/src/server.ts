@@ -82,6 +82,8 @@ const SELF_AUTHENTICATING_WEBHOOK_PATHS = new Set([
   // Signed one-click answer links from question emails authenticate via
   // their own token; see handlers/agentmail.
   '/api/webhooks/agentmail/answer',
+  // Signed List-Unsubscribe links/one-click posts, same token trust model.
+  '/api/webhooks/agentmail/unsubscribe',
   '/api/internal/discord/events',
   '/api/internal/discord/events/process',
   '/api/internal/cloud/deployment-access',

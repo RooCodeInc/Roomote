@@ -881,7 +881,11 @@ describe('comms commands', () => {
         // sharing one AgentMail account never adopt each other's webhook.
         clientId: `roomote-agentmail-webhook-${hostHash}`,
         inboxIds: [`${expectedUsername}@agentmail.to`],
-        eventTypes: ['message.received'],
+        eventTypes: [
+          'message.received',
+          'message.bounced',
+          'message.complained',
+        ],
       });
       expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
         expect.anything(),
@@ -998,6 +1002,11 @@ describe('comms commands', () => {
       expect(mockAgentMailUpdateWebhook).toHaveBeenCalledWith('wh-1', {
         url: expectedWebhookUrl,
         inboxIds: ['support@agentmail.to'],
+        eventTypes: [
+          'message.received',
+          'message.bounced',
+          'message.complained',
+        ],
       });
       expect(mockAgentMailCreateWebhook).not.toHaveBeenCalled();
       expect(mockAgentMailDeleteWebhook).not.toHaveBeenCalled();
@@ -1037,6 +1046,11 @@ describe('comms commands', () => {
       expect(mockAgentMailUpdateWebhook).toHaveBeenCalledWith('wh-1', {
         url: expectedWebhookUrl,
         inboxIds: ['new-inbox@agentmail.to'],
+        eventTypes: [
+          'message.received',
+          'message.bounced',
+          'message.complained',
+        ],
       });
       expect(mockAgentMailCreateWebhook).not.toHaveBeenCalled();
       expect(mockAgentMailDeleteWebhook).not.toHaveBeenCalled();
@@ -1063,6 +1077,11 @@ describe('comms commands', () => {
             url: expectedWebhookUrl,
             client_id: `roomote-agentmail-webhook-${hostHash}`,
             inbox_ids: ['support@agentmail.to'],
+            event_types: [
+              'message.received',
+              'message.bounced',
+              'message.complained',
+            ],
           },
         ],
       });
@@ -1111,7 +1130,11 @@ describe('comms commands', () => {
         url: expectedWebhookUrl,
         clientId: `roomote-agentmail-webhook-${hostHash}`,
         inboxIds: ['support@agentmail.to'],
-        eventTypes: ['message.received'],
+        eventTypes: [
+          'message.received',
+          'message.bounced',
+          'message.complained',
+        ],
       });
     });
 

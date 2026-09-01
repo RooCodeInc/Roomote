@@ -721,6 +721,12 @@ function readAgentMailWebhookInboxIds(webhook: AgentMailWebhook): string[] {
   return Array.isArray(webhook.inbox_ids) ? webhook.inbox_ids.map(String) : [];
 }
 
+function readAgentMailWebhookEventTypes(webhook: AgentMailWebhook): string[] {
+  return Array.isArray(webhook.event_types)
+    ? webhook.event_types.map(String)
+    : [];
+}
+
 function findRoomoteAgentMailWebhook(
   webhooks: readonly AgentMailWebhook[] | undefined,
 ): AgentMailWebhook | null {
@@ -1024,6 +1030,14 @@ async function reconcileAgentMailSetup(input: {
   // longer verify deliveries for is recreated.
   const webhookUrl = buildExpectedAgentMailWebhookUrl();
   const desiredInboxIds = [inboxAddress];
+  // Bounce/complaint events feed the outbound suppression list; a webhook
+  // created by an earlier release only carries message.received, so event
+  // types are converged like the URL and inbox scope.
+  const desiredEventTypes = [
+    'message.received',
+    'message.bounced',
+    'message.complained',
+  ];
   let webhookSecret = existing.webhookSecret;
 
   try {
@@ -1034,7 +1048,7 @@ async function reconcileAgentMailSetup(input: {
         url: webhookUrl,
         clientId: buildAgentMailWebhookClientId(Env.R_APP_URL),
         inboxIds: desiredInboxIds,
-        eventTypes: ['message.received'],
+        eventTypes: desiredEventTypes,
       });
       return typeof created.secret === 'string' && created.secret.trim()
         ? created.secret.trim()
@@ -1046,10 +1060,20 @@ async function reconcileAgentMailSetup(input: {
       const inboxScopeMatches =
         registeredInboxIds.length === desiredInboxIds.length &&
         desiredInboxIds.every((id) => registeredInboxIds.includes(id));
-      if (existingWebhook.url !== webhookUrl || !inboxScopeMatches) {
+      const registeredEventTypes =
+        readAgentMailWebhookEventTypes(existingWebhook);
+      const eventTypesMatch =
+        registeredEventTypes.length === desiredEventTypes.length &&
+        desiredEventTypes.every((type) => registeredEventTypes.includes(type));
+      if (
+        existingWebhook.url !== webhookUrl ||
+        !inboxScopeMatches ||
+        !eventTypesMatch
+      ) {
         await client.updateWebhook(existingWebhook.webhook_id, {
           url: webhookUrl,
           inboxIds: desiredInboxIds,
+          eventTypes: desiredEventTypes,
         });
       }
       const apiSecret =

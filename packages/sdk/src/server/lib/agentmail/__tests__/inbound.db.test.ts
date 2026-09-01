@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   agentmailConversations,
   agentmailInboundTurns,
+  agentmailSuppressions,
   agentmailUserMappings,
   agentmailWebhookEvents,
   db,
@@ -14,6 +15,7 @@ import {
   processAgentMailWebhookEvent,
   recordAgentMailWebhookEvent,
 } from '../inbound';
+import { isAgentMailAddressSuppressed } from '../outbound';
 
 const INBOX = 'roomote-test@agentmail.to';
 
@@ -189,5 +191,79 @@ describe('agentmail webhook event outbox (real database)', () => {
       where: eq(agentmailConversations.providerThreadId, threadId),
     });
     expect(conversation).toBeUndefined();
+  });
+
+  it('suppresses recipients of permanent bounces and complaints, but not transient bounces', async () => {
+    const bounced = `${randomUUID()}@example.com`;
+    const complained = `${randomUUID()}@example.com`;
+    const transient = `${randomUUID()}@example.com`;
+
+    const record = async (eventType: string, payload: unknown) => {
+      const deliveryId = `msg_${randomUUID()}`;
+      await recordAgentMailWebhookEvent({
+        deliveryId,
+        eventId: null,
+        eventType,
+        payload,
+      });
+      await processAgentMailWebhookEvent(deliveryId);
+      const row = await db.query.agentmailWebhookEvents.findFirst({
+        where: eq(agentmailWebhookEvents.deliveryId, deliveryId),
+      });
+      expect(row?.state).toBe('processed');
+    };
+
+    await record('message.bounced', {
+      type: 'event',
+      event_type: 'message.bounced',
+      event_id: `evt_${randomUUID()}`,
+      bounce: {
+        inbox_id: INBOX,
+        message_id: `<${randomUUID()}@agentmail.to>`,
+        type: 'Permanent',
+        sub_type: 'General',
+        recipients: [{ address: bounced, status: 'bounced' }],
+      },
+    });
+    await record('message.complained', {
+      type: 'event',
+      event_type: 'message.complained',
+      event_id: `evt_${randomUUID()}`,
+      complaint: {
+        inbox_id: INBOX,
+        message_id: `<${randomUUID()}@agentmail.to>`,
+        type: 'abuse',
+        sub_type: 'spam',
+        recipients: [complained],
+      },
+    });
+    await record('message.bounced', {
+      type: 'event',
+      event_type: 'message.bounced',
+      event_id: `evt_${randomUUID()}`,
+      bounce: {
+        inbox_id: INBOX,
+        message_id: `<${randomUUID()}@agentmail.to>`,
+        type: 'Transient',
+        sub_type: 'MailboxFull',
+        recipients: [{ address: transient, status: 'bounced' }],
+      },
+    });
+
+    expect(await isAgentMailAddressSuppressed(bounced)).toBe(true);
+    expect(await isAgentMailAddressSuppressed(complained)).toBe(true);
+    expect(await isAgentMailAddressSuppressed(transient)).toBe(false);
+
+    const bounceRow = await db.query.agentmailSuppressions.findFirst({
+      where: eq(agentmailSuppressions.emailAddress, bounced),
+    });
+    expect(bounceRow).toMatchObject({
+      reason: 'bounce',
+      details: 'Permanent/General',
+    });
+    const complaintRow = await db.query.agentmailSuppressions.findFirst({
+      where: eq(agentmailSuppressions.emailAddress, complained),
+    });
+    expect(complaintRow?.reason).toBe('complaint');
   });
 });

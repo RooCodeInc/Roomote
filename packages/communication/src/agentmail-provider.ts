@@ -118,7 +118,7 @@ export class AgentMailCommunicationProvider implements CommunicationProviderAdap
         provider: 'agentmail',
         operation: 'postMessage',
         message: 'AgentMail does not support unsolicited outbound email.',
-        help: 'Email is inbound-initiated in v1: sends must reply within an existing conversation (pass the internal conversation id as threadId).',
+        help: 'Adapter sends must reply within an existing conversation (pass the internal conversation id as threadId). Roomote-initiated email goes through the consent-checked startAgentMailConversation entry point instead.',
       });
     }
 
@@ -389,6 +389,7 @@ export type AgentMailWebhook = {
   url: string;
   secret?: string;
   inbox_ids?: string[];
+  event_types?: string[];
 } & Record<string, unknown>;
 
 export type AgentMailApiClientOptions = {
@@ -405,6 +406,8 @@ export type AgentMailOutboundBody = {
   subject?: string;
   text?: string;
   html?: string;
+  /** Extra RFC 5322 headers on the sent message (e.g. List-Unsubscribe). */
+  headers?: Record<string, string>;
 };
 
 /**
@@ -483,7 +486,7 @@ export class AgentMailApiClient {
 
   updateWebhook(
     webhookId: string,
-    input: { url?: string; inboxIds?: string[] },
+    input: { url?: string; inboxIds?: string[]; eventTypes?: string[] },
   ): Promise<AgentMailWebhook> {
     return this.request(
       'PATCH',
@@ -491,6 +494,9 @@ export class AgentMailApiClient {
       {
         ...(input.url ? { url: input.url } : {}),
         ...(input.inboxIds ? { inbox_ids: input.inboxIds } : {}),
+        // A non-empty list REPLACES the subscription in full (AgentMail
+        // semantics); an omitted/empty list leaves it unchanged.
+        ...(input.eventTypes?.length ? { event_types: input.eventTypes } : {}),
       },
     );
   }

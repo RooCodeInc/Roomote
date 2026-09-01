@@ -58,6 +58,46 @@ export const agentMailThreadSummarySchema = z
   })
   .passthrough();
 
+/**
+ * `message.bounced` recipients arrive as `{address, status}` objects;
+ * `message.complained` recipients arrive as bare strings. Accept both shapes
+ * for both events.
+ */
+const agentMailDeliveryFailureRecipientSchema = z.union([
+  z.string(),
+  z
+    .object({
+      address: z.string().optional(),
+      status: z.string().optional(),
+    })
+    .passthrough(),
+]);
+
+export const agentMailBounceSchema = z
+  .object({
+    inbox_id: z.string(),
+    thread_id: z.string().optional(),
+    message_id: z.string().optional(),
+    timestamp: z.string().optional(),
+    /** 'Permanent' or 'Transient'. */
+    type: z.string().optional(),
+    sub_type: z.string().optional(),
+    recipients: z.array(agentMailDeliveryFailureRecipientSchema).optional(),
+  })
+  .passthrough();
+
+export const agentMailComplaintSchema = z
+  .object({
+    inbox_id: z.string(),
+    thread_id: z.string().optional(),
+    message_id: z.string().optional(),
+    timestamp: z.string().optional(),
+    type: z.string().optional(),
+    sub_type: z.string().optional(),
+    recipients: z.array(agentMailDeliveryFailureRecipientSchema).optional(),
+  })
+  .passthrough();
+
 export const agentMailWebhookEventSchema = z
   .object({
     type: z.literal('event').optional(),
@@ -65,6 +105,8 @@ export const agentMailWebhookEventSchema = z
     event_id: z.string().optional(),
     message: agentMailMessageSchema.optional(),
     thread: agentMailThreadSummarySchema.optional(),
+    bounce: agentMailBounceSchema.optional(),
+    complaint: agentMailComplaintSchema.optional(),
   })
   .passthrough();
 
@@ -84,10 +126,48 @@ export function parseAgentMailWebhookEvent(
   return parsed.success ? parsed.data : null;
 }
 
+export type AgentMailDeliveryFailure = z.infer<typeof agentMailBounceSchema>;
+
 export function isAgentMailMessageReceivedEvent(
   event: AgentMailWebhookEvent,
 ): boolean {
   return event.event_type === 'message.received';
+}
+
+export function isAgentMailMessageBouncedEvent(
+  event: AgentMailWebhookEvent,
+): boolean {
+  return event.event_type === 'message.bounced';
+}
+
+export function isAgentMailMessageComplainedEvent(
+  event: AgentMailWebhookEvent,
+): boolean {
+  return event.event_type === 'message.complained';
+}
+
+/**
+ * Only a permanent bounce proves the address is undeliverable; transient
+ * bounces (full mailbox, greylisting) must not poison the address forever.
+ */
+export function isAgentMailPermanentBounce(
+  bounce: AgentMailDeliveryFailure,
+): boolean {
+  return (bounce.type ?? '').trim().toLowerCase() === 'permanent';
+}
+
+/** Normalized recipient addresses of a bounce/complaint payload. */
+export function getAgentMailDeliveryFailureRecipients(
+  failure: AgentMailDeliveryFailure,
+): string[] {
+  const addresses = (failure.recipients ?? [])
+    .map((recipient) =>
+      normalizeAgentMailAddress(
+        typeof recipient === 'string' ? recipient : (recipient.address ?? ''),
+      ),
+    )
+    .filter((address): address is string => Boolean(address));
+  return [...new Set(addresses)];
 }
 
 /**

@@ -117,8 +117,26 @@ export type MockAgentMailInboundEmail = {
   duplicate?: boolean;
 };
 
+/**
+ * A delivery-failure notification (`message.bounced` / `message.complained`)
+ * as a scenario author writes it, for exercising the outbound suppression
+ * pipeline. Bounce recipients deliver as `{address, status}` objects and
+ * complaint recipients as bare strings, matching real AgentMail payloads.
+ */
+export type MockAgentMailDeliveryFailure = {
+  kind: 'bounce' | 'complaint';
+  inboxId: string;
+  recipients: string[];
+  messageId?: string;
+  threadId?: string;
+  /** Bounce only; defaults to 'Permanent'. */
+  bounceType?: string;
+  subType?: string;
+};
+
 export type MockAgentMailReplayEvent =
   | MockAgentMailInboundEmail
+  | MockAgentMailDeliveryFailure
   | {
       /** Redeliver a past event verbatim, reusing its original svix-id. */
       kind: 'redeliver';
@@ -135,6 +153,16 @@ type MockAgentMailDispatchResult = {
 
 const AGENTMAIL_DEFAULT_DOMAIN = 'agentmail.to';
 const AGENTMAIL_MESSAGE_RECEIVED_EVENT = 'message.received';
+
+/**
+ * `kind` is optional on inbound emails, so the union is not a discriminated
+ * union TypeScript narrows on its own; this guard does the narrowing.
+ */
+function isMockDeliveryFailure(
+  event: MockAgentMailReplayEvent,
+): event is MockAgentMailDeliveryFailure {
+  return event.kind === 'bounce' || event.kind === 'complaint';
+}
 
 function cloneState<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -349,6 +377,10 @@ export class MockAgentMailServer {
       return this.redeliver(stored);
     }
 
+    if (isMockDeliveryFailure(event)) {
+      return this.dispatchDeliveryFailure(event);
+    }
+
     if (event.duplicate) {
       const previous = (this.state.events ?? []).at(-1);
 
@@ -376,6 +408,53 @@ export class MockAgentMailServer {
       event_type: AGENTMAIL_MESSAGE_RECEIVED_EVENT,
       inbox_id: message.inbox_id,
       message_id: message.message_id,
+      payload: JSON.stringify(payload),
+      deliveries: [],
+    };
+    this.state.events = [...(this.state.events ?? []), stored];
+
+    return this.redeliver(stored);
+  }
+
+  private async dispatchDeliveryFailure(
+    event: MockAgentMailDeliveryFailure,
+  ): Promise<MockAgentMailDispatchResult> {
+    const inbox = this.findInbox(event.inboxId);
+
+    if (!inbox) {
+      throw new Error(`Unknown inboxId: ${event.inboxId}`);
+    }
+
+    const bounce = event.kind === 'bounce';
+    const eventId = this.nextId('evt');
+    const messageId = event.messageId ?? `<${this.nextId('msg')}@mock>`;
+    const threadId = event.threadId ?? this.nextId('thread');
+    const failure = {
+      inbox_id: inbox.inbox_id,
+      thread_id: threadId,
+      message_id: messageId,
+      timestamp: new Date().toISOString(),
+      type: bounce ? (event.bounceType ?? 'Permanent') : 'abuse',
+      sub_type: event.subType ?? (bounce ? 'General' : 'spam'),
+      // Real payload shapes differ: bounce recipients are objects,
+      // complaint recipients are bare strings.
+      recipients: bounce
+        ? event.recipients.map((address) => ({ address, status: 'bounced' }))
+        : event.recipients,
+    };
+    const payload = {
+      type: 'event',
+      event_type: bounce ? 'message.bounced' : 'message.complained',
+      event_id: eventId,
+      ...(bounce ? { bounce: failure } : { complaint: failure }),
+    };
+
+    const stored: MockAgentMailDeliveredEvent = {
+      event_id: eventId,
+      svix_id: this.nextId('svix'),
+      event_type: String(payload.event_type),
+      inbox_id: inbox.inbox_id,
+      message_id: messageId,
       payload: JSON.stringify(payload),
       deliveries: [],
     };
@@ -426,14 +505,20 @@ export class MockAgentMailServer {
     event.deliveries = [...event.deliveries, ...deliveries];
 
     const parsed = JSON.parse(event.payload) as {
-      message: { thread_id: string };
+      message?: { thread_id: string };
+      bounce?: { thread_id?: string };
+      complaint?: { thread_id?: string };
     };
 
     return {
       eventId: event.event_id,
       svixId: event.svix_id,
       messageId: event.message_id,
-      threadId: parsed.message.thread_id,
+      threadId:
+        parsed.message?.thread_id ??
+        parsed.bounce?.thread_id ??
+        parsed.complaint?.thread_id ??
+        '',
       deliveries,
     };
   }

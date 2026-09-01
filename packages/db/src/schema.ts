@@ -2917,7 +2917,9 @@ export const agentmailConversationParticipants = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     role: text('role').notNull().$type<'owner' | 'participant'>(),
-    source: text('source').notNull().$type<'initiator' | 'cc' | 'link_code'>(),
+    source: text('source')
+      .notNull()
+      .$type<'initiator' | 'cc' | 'link_code' | 'outbound'>(),
     addedAt: timestamp('added_at').notNull().defaultNow(),
   },
   (table) => [
@@ -2946,7 +2948,7 @@ export const agentmailConversationParticipants = pgTable(
     ),
     check(
       'agentmail_conversation_participants_source_check',
-      sql`${table.source} in ('initiator', 'cc', 'link_code')`,
+      sql`${table.source} in ('initiator', 'cc', 'link_code', 'outbound')`,
     ),
   ],
 );
@@ -3052,6 +3054,38 @@ export const agentmailInboundTurns = pgTable(
     check(
       'agentmail_inbound_turns_state_check',
       sql`${table.state} in ('pending', 'consumed')`,
+    ),
+  ],
+);
+
+/**
+ * agentmail_suppressions
+ *
+ * Addresses Roomote must never initiate email to: permanent bounces, spam
+ * complaints, and one-click unsubscribes. Consulted only on the
+ * outbound-initiation path — replying within a conversation the recipient
+ * started (or is actively participating in) is never suppressed. A row is
+ * intentionally sticky: it survives account changes and re-links, and only an
+ * explicit operator action should remove one.
+ */
+export const agentmailSuppressions = pgTable(
+  'agentmail_suppressions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    emailAddress: text('email_address').notNull(),
+    reason: text('reason')
+      .notNull()
+      .$type<'bounce' | 'complaint' | 'unsubscribe'>(),
+    /** Human-readable provenance, e.g. the bounce type/sub-type. */
+    details: text('details'),
+    providerMessageId: text('provider_message_id'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('agentmail_suppressions_email_unique').on(table.emailAddress),
+    check(
+      'agentmail_suppressions_reason_check',
+      sql`${table.reason} in ('bounce', 'complaint', 'unsubscribe')`,
     ),
   ],
 );

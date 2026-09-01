@@ -505,6 +505,13 @@
       "when": 1788206480608,
       "tag": "0071_milky_the_fallen",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1788236835780,
+      "tag": "0072_lethal_iron_fist",
+      "breakpoints": true
     }
   ]
 }

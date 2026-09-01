@@ -251,8 +251,9 @@ function fastDestination(
     conversation.surface === 'agentmail'
   ) {
     // Identity-only surfaces have no reply channel; delivery resolves the
-    // Fast conversation itself. Email is inbound-initiated in v1, so PR-review
-    // notifications never post to it directly either.
+    // Fast conversation itself. PR-review notifications never post to email
+    // directly either (only the consent-checked outbound entry point may
+    // initiate email).
     return {
       destinationKey,
       routeProvider: null,

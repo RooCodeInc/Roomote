@@ -9,7 +9,9 @@ import {
 import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
 import {
   recordAgentMailWebhookEvent,
+  suppressAgentMailAddress,
   verifyAgentMailRuiAnswerToken,
+  verifyAgentMailUnsubscribeToken,
 } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../logging.js';
@@ -166,6 +168,71 @@ agentmail.post('/answer', async (c) => {
     answerPage(
       `Answer recorded: ${optionLabel}`,
       'Roomote will continue and reply in the email thread. You can close this tab.',
+    ),
+  );
+});
+
+/**
+ * Unsubscribe from Roomote-initiated (transactional) email. Two entry
+ * points share the signed token: mail providers fire an RFC 8058 one-click
+ * POST straight at the List-Unsubscribe URL, and a human clicking the footer
+ * link lands on the GET, which — like the answer links — stays strictly
+ * read-only (mail scanners GET every URL) and confirms via form POST.
+ * Suppression only stops Roomote from *initiating* email; replying to the
+ * user's own emails is unaffected.
+ */
+agentmail.get('/unsubscribe', async (c) => {
+  const token = c.req.query('token');
+  const payload = token ? verifyAgentMailUnsubscribeToken(token) : null;
+  if (!payload) {
+    return c.html(
+      answerPage(
+        'This link is no longer valid',
+        'The unsubscribe link is malformed or has expired.',
+      ),
+      400,
+    );
+  }
+
+  const confirmForm = `<form method="post" action="unsubscribe"><input type="hidden" name="token" value="${escapeAgentMailHtml(token ?? '')}" /><button type="submit" style="padding:10px 20px;border:1px solid #c4c9d4;border-radius:6px;background:#f4f6f9;color:#1b2430;font-size:1rem;cursor:pointer">Unsubscribe ${escapeAgentMailHtml(payload.emailAddress)}</button></form>`;
+  return c.html(
+    answerPage(
+      'Stop receiving emails from Roomote?',
+      `Confirm to stop Roomote from sending new emails to ${payload.emailAddress}. Replies to emails you send Roomote are not affected.`,
+    ).replace('</body>', `${confirmForm}</body>`),
+  );
+});
+
+agentmail.post('/unsubscribe', async (c) => {
+  // One-click posts carry the token in the query string; the confirm form
+  // carries it in the body. Accept either.
+  let token = c.req.query('token');
+  if (!token) {
+    const form = await c.req.parseBody().catch(() => ({}) as never);
+    token = typeof form.token === 'string' ? form.token : undefined;
+  }
+
+  const payload = token ? verifyAgentMailUnsubscribeToken(token) : null;
+  if (!payload) {
+    return c.html(
+      answerPage(
+        'This link is no longer valid',
+        'The unsubscribe link is malformed or has expired.',
+      ),
+      400,
+    );
+  }
+
+  await suppressAgentMailAddress({
+    emailAddress: payload.emailAddress,
+    reason: 'unsubscribe',
+  });
+  apiLogger.info(`[agentmail] Unsubscribed ${payload.emailAddress}`);
+
+  return c.html(
+    answerPage(
+      'Unsubscribed',
+      `Roomote will no longer send new emails to ${payload.emailAddress}. You can close this tab.`,
     ),
   );
 });

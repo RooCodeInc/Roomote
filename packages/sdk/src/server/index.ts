@@ -241,8 +241,21 @@ export {
 export {
   buildAgentMailEmailLinkToken,
   buildAgentMailEmailLinkUrl,
+  buildAgentMailUnsubscribeToken,
+  buildAgentMailUnsubscribeUrl,
   verifyAgentMailEmailLinkToken,
+  verifyAgentMailUnsubscribeToken,
 } from './lib/agentmail/email-link-tokens';
+
+export {
+  canStartAgentMailConversationWithUser,
+  isAgentMailAddressSuppressed,
+  resolveAgentMailOutboundAddress,
+  startAgentMailConversation,
+  suppressAgentMailAddress,
+  type AgentMailOutboundAddressResolution,
+  type AgentMailSuppressionReason,
+} from './lib/agentmail/outbound';
 
 export {
   AGENTMAIL_WEBHOOK_EVENT_QUEUE_NAME,

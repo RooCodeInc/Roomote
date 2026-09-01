@@ -245,6 +245,58 @@ describe('MockAgentMailServer', () => {
     });
   });
 
+  it('delivers bounce and complaint events with real payload shapes', async () => {
+    const received: ReceivedDelivery[] = [];
+    const listener = await startStubWebhook(received);
+    onCleanup(() => listener.stop());
+
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    await api(baseUrl, 'POST', '/v0/webhooks', {
+      url: listener.url,
+      inbox_ids: [INBOX_ID],
+      event_types: ['message.bounced', 'message.complained'],
+    });
+
+    const bounce = await server.dispatch({
+      kind: 'bounce',
+      inboxId: INBOX_ID,
+      recipients: ['gone@example.com'],
+    });
+    expect(bounce.deliveries).toHaveLength(1);
+    expect(bounce.deliveries[0]?.status).toBe(200);
+
+    const complaint = await server.dispatch({
+      kind: 'complaint',
+      inboxId: INBOX_ID,
+      recipients: ['angry@example.com'],
+    });
+    expect(complaint.deliveries).toHaveLength(1);
+
+    const bouncePayload = JSON.parse(received[0]!.body) as Record<
+      string,
+      unknown
+    >;
+    expect(bouncePayload.event_type).toBe('message.bounced');
+    // Bounce recipients are objects; complaint recipients are bare strings.
+    expect(bouncePayload.bounce).toMatchObject({
+      inbox_id: INBOX_ID,
+      type: 'Permanent',
+      recipients: [{ address: 'gone@example.com', status: 'bounced' }],
+    });
+
+    const complaintPayload = JSON.parse(received[1]!.body) as Record<
+      string,
+      unknown
+    >;
+    expect(complaintPayload.event_type).toBe('message.complained');
+    expect(complaintPayload.complaint).toMatchObject({
+      inbox_id: INBOX_ID,
+      recipients: ['angry@example.com'],
+    });
+  });
+
   it('redelivers duplicates and explicit redeliveries with the same svix-id', async () => {
     const received: ReceivedDelivery[] = [];
     const listener = await startStubWebhook(received);

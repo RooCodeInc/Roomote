@@ -112,6 +112,17 @@ curl -s -X POST http://127.0.0.1:3015/mock/events \
 curl -s -X POST http://127.0.0.1:3015/mock/events \
   -H 'Content-Type: application/json' \
   -d '{ "kind": "redeliver", "eventId": "<eventId>" }'
+
+# Permanent bounce → the app must suppress the recipient (message.bounced).
+# bounceType defaults to "Permanent"; pass "Transient" to assert NO suppression.
+curl -s -X POST http://127.0.0.1:3015/mock/events \
+  -H 'Content-Type: application/json' \
+  -d '{ "kind": "bounce", "inboxId": "roomote@agentmail.to", "recipients": ["gone@example.com"] }'
+
+# Spam complaint → the app must suppress the recipient (message.complained)
+curl -s -X POST http://127.0.0.1:3015/mock/events \
+  -H 'Content-Type: application/json' \
+  -d '{ "kind": "complaint", "inboxId": "roomote@agentmail.to", "recipients": ["angry@example.com"] }'
 ```
 
 Every response carries `dispatchResult` with `eventId`, `svixId`, `messageId`, `threadId`, and per-webhook `deliveries` (status + body from the Roomote endpoint).
@@ -148,6 +159,7 @@ To reset between scenarios, `POST /mock/state` with a fresh state object (it rep
 - **`auto-submitted-loop-guard`** — `autoSubmitted: true` → automated senders must not trigger reply loops
 - **`webhook-registration`** — app boots, registers its webhook via `POST /v0/webhooks` (idempotent per `client_id`), and the secret round-trips into signature verification
 - **`reply-idempotency`** — app retries a reply with the same `Idempotency-Key` → exactly one outbound message in `/mock/state`
+- **`bounce-suppression`** — `kind: 'bounce'` (Permanent) / `kind: 'complaint'` → the recipient lands in `agentmail_suppressions` and outbound-initiated email to them is refused; `bounceType: 'Transient'` must NOT suppress
 
 ## Guardrails
 
