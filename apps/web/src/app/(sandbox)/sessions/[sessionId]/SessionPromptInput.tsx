@@ -64,6 +64,7 @@ export function SessionPromptInput({
   onSend,
   historyMessageCount = 0,
   assistantMessageCount = 0,
+  taskStateRevision = '',
   agentWorking = false,
   initialModel = null,
   initialReasoningEffort = null,
@@ -78,6 +79,9 @@ export function SessionPromptInput({
   /** Persisted assistant messages with text; each completed agent turn
    * advances the suggestion query key. */
   assistantMessageCount?: number;
+  /** Fingerprint of the delegated tasks' state; a task finishing while the
+   * session is idle refreshes the suggestion through this key. */
+  taskStateRevision?: string;
   /** True while the agent is still responding; suggestions only exist while
    * the agent is waiting for the human. */
   agentWorking?: boolean;
@@ -108,7 +112,11 @@ export function SessionPromptInput({
 
   const composerSuggestionQuery = useQuery(
     trpc.fastSessions.composerSuggestion.queryOptions(
-      { sessionId, historyRevision: assistantMessageCount },
+      {
+        sessionId,
+        historyRevision: assistantMessageCount,
+        taskStateRevision: taskStateRevision || undefined,
+      },
       {
         // The mid-turn gate matters here too: assistant messages land while
         // the agent is still working, and each would otherwise generate and

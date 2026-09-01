@@ -5,12 +5,12 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import {
   getReasoningEffortLabel,
   isActivelyRunningTask,
@@ -34,6 +34,7 @@ import {
   getSessionSurfaceLabel,
 } from '@/components/sessions/session-surfaces';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
+import { computeTaskStateRevision } from '@/lib/composer-suggestion-task-state';
 import { useTRPC } from '@/trpc/client';
 import { FramedSurface, WorkspaceSurface } from '@/components/layout';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
@@ -81,6 +82,7 @@ import {
   OpenSessionTaskPanelContext,
   OpenSessionTasksPanelContext,
   SessionRunningTaskCountContext,
+  SessionTaskStateRevisionContext,
 } from './session-task-panel-context';
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
 import { useArtifactByPath } from '../../task/[taskId]/hooks/use-artifact-by-path';
@@ -663,7 +665,6 @@ export function SessionWorkspace({
   // fourth panel and always wins over `panel` when both are set.
   const [panel, setPanel] = useState<WorkspacePanel | null>(null);
   const trpc = useTRPC();
-  const queryClient = useQueryClient();
   const router = useRouter();
   const searchParams = useSearchParams();
   const isFastTaskSource = session.taskSource === 'fast';
@@ -700,22 +701,15 @@ export function SessionWorkspace({
     isActivelyRunningTask(task.latestRun?.status, task.latestRun?.taskPhase),
   );
   const runningTaskCount = runningTasks.length;
+  const taskStateRevision = useMemo(
+    () => computeTaskStateRevision(taskCards),
+    [taskCards],
+  );
   const singleRunningTaskId =
     runningTaskCount === 1 ? runningTasks[0]?.taskId : null;
   const selectedTaskId = searchParams.get('task');
   const selectedTask = taskCards.find((task) => task.taskId === selectedTaskId);
   const panelOpen = panel !== null || Boolean(selectedTask);
-
-  // Fast task state polls independently from the transcript. Invalidate the
-  // suggestion when that state changes so an idle composer can incorporate a
-  // delegated task completing, failing, or producing a new artifact.
-  useEffect(() => {
-    if (!isFastTaskSource || !currentFastTasks) return;
-
-    void queryClient.invalidateQueries({
-      queryKey: trpc.fastSessions.composerSuggestion.queryKey(),
-    });
-  }, [currentFastTasks, isFastTaskSource, queryClient, trpc]);
 
   const selectTask = useCallback(
     (taskId: string | null) => {
@@ -826,9 +820,13 @@ export function SessionWorkspace({
           main={
             <SessionPullRequestsContext.Provider value={sessionPullRequests}>
               <SessionRunningTaskCountContext.Provider value={runningTaskCount}>
-                <OpenSessionTasksPanelContext.Provider value={openTasksPanel}>
-                  {children}
-                </OpenSessionTasksPanelContext.Provider>
+                <SessionTaskStateRevisionContext.Provider
+                  value={taskStateRevision}
+                >
+                  <OpenSessionTasksPanelContext.Provider value={openTasksPanel}>
+                    {children}
+                  </OpenSessionTasksPanelContext.Provider>
+                </SessionTaskStateRevisionContext.Provider>
               </SessionRunningTaskCountContext.Provider>
             </SessionPullRequestsContext.Provider>
           }

@@ -159,6 +159,7 @@ export async function suggestNextComposerMessage({
   taskId = null,
   fastConversationId = null,
   context = null,
+  contextRevision = null,
 }: {
   messages: SuggestableMessage[];
   cacheScope: string;
@@ -168,6 +169,9 @@ export async function suggestNextComposerMessage({
   /** Optional preformatted state the transcript alone cannot convey (for
    * example the session's delegated tasks), inserted before the conversation. */
   context?: string | null;
+  /** Fingerprint of `context`; joins the cache key so state changes between
+   * assistant turns regenerate instead of serving the stale generation. */
+  contextRevision?: string | null;
 }): Promise<ComposerSuggestionResult> {
   let messageCount = 0;
 
@@ -197,7 +201,7 @@ export async function suggestNextComposerMessage({
     const generator = unstable_cache(
       (prompt: string) =>
         generateSuggestion(prompt, userId, taskId, fastConversationId),
-      ['composer-suggestion', cacheScope, generationKey],
+      ['composer-suggestion', cacheScope, generationKey, contextRevision ?? ''],
       {
         revalidate: CACHE_TTL_SECONDS,
         tags: [`composer-suggestion:${cacheScope}`],

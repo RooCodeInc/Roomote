@@ -42,6 +42,7 @@ import {
   useOpenSessionTaskPanel,
   useOpenSessionTasksPanel,
   useSessionRunningTaskCount,
+  useSessionTaskStateRevision,
 } from './session-task-panel-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
@@ -265,6 +266,7 @@ export function FastSessionTranscript({
   const openTaskPanel = useOpenSessionTaskPanel();
   const openTasksPanel = useOpenSessionTasksPanel();
   const runningTaskCount = useSessionRunningTaskCount();
+  const taskStateRevision = useSessionTaskStateRevision();
   const { enabled: narrationModeEnabled } = useNarrationMode();
   const displayMode = narrationModeEnabled ? 'narration' : 'default';
   const [serverMessages, setServerMessages] = useState<
@@ -621,6 +623,7 @@ export function FastSessionTranscript({
             onSend={sendReply}
             historyMessageCount={suggestionHistory.messageCount}
             assistantMessageCount={suggestionHistory.assistantCount}
+            taskStateRevision={taskStateRevision}
             agentWorking={
               isSending ||
               conversationResponding === true ||

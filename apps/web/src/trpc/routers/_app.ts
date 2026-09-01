@@ -2866,11 +2866,12 @@ export const appRouter = createRouter({
       .input(
         z.object({
           sessionId: z.string().uuid(),
-          // Client-side cache key: bumps when the live transcript meaningfully
-          // changes so stale suggestions are never shown for newer history.
-          // The server derives its own regeneration bucket from persisted
-          // messages, so this field only shapes client caching.
+          // Client-side cache keys: bump when the live transcript or the
+          // delegated tasks' state meaningfully change so stale suggestions
+          // are never shown. The server derives its own cache keys from
+          // persisted data, so these fields only shape client caching.
           historyRevision: z.number().int().nonnegative().optional(),
+          taskStateRevision: z.string().max(64).optional(),
         }),
       )
       .query(({ ctx: { auth }, input }) =>

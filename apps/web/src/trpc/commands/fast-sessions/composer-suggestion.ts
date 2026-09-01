@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import type { UserAuthSuccess } from '@/types';
 
 import {
@@ -11,14 +9,10 @@ import {
   type ComposerSuggestionResult,
   suggestNextComposerMessage,
 } from '@/lib/server/composer-suggestion';
+import { computeTaskStateRevision } from '@/lib/composer-suggestion-task-state';
 
 // Bound the task context so a session with many delegations stays cheap.
 const MAX_CONTEXT_TASKS = 20;
-
-type SessionTaskContext = {
-  text: string | null;
-  revision: string;
-};
 
 /**
  * The session's delegated tasks as a compact context block. Their live state
@@ -28,12 +22,12 @@ type SessionTaskContext = {
 async function buildSessionTaskContext(
   auth: UserAuthSuccess,
   sessionId: string,
-): Promise<SessionTaskContext> {
+): Promise<{ context: string | null; revision: string | null }> {
   try {
     const tasks = await getFastSessionTasks(auth, sessionId);
 
     if (!tasks || tasks.length === 0) {
-      return { text: null, revision: 'none' };
+      return { context: null, revision: null };
     }
 
     const contextTasks = tasks.slice(0, MAX_CONTEXT_TASKS);
@@ -49,37 +43,19 @@ async function buildSessionTaskContext(
       return `- ${title} (${state}${artifacts})`;
     });
 
-    const revision = createHash('sha256')
-      .update(
-        JSON.stringify(
-          contextTasks.map((task) => ({
-            taskId: task.taskId,
-            title: task.title,
-            status: task.latestRun.status,
-            taskPhase: task.latestRun.taskPhase,
-            artifacts: task.artifacts.map((artifact) => ({
-              id: artifact.id,
-              version: artifact.version,
-            })),
-          })),
-        ),
-      )
-      .digest('hex')
-      .slice(0, 16);
-
     return {
-      text: [
+      context: [
         'Tasks the agent has delegated in this session, with their current status:',
         ...lines,
       ].join('\n'),
-      revision,
+      revision: computeTaskStateRevision(contextTasks),
     };
   } catch (error) {
     console.error(
       'Error loading session tasks for composer suggestion:',
       error,
     );
-    return { text: null, revision: 'unavailable' };
+    return { context: null, revision: null };
   }
 }
 
@@ -111,10 +87,11 @@ export async function getFastSessionComposerSuggestionCommand(
 
     return await suggestNextComposerMessage({
       messages,
-      cacheScope: `session:${session.id}:tasks:${taskContext.revision}`,
+      cacheScope: `session:${session.id}`,
       userId: auth.userId ?? null,
       fastConversationId: session.id,
-      context: taskContext.text,
+      context: taskContext.context,
+      contextRevision: taskContext.revision,
     });
   } catch (error) {
     console.error(
