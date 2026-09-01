@@ -7,6 +7,76 @@ import YAML from 'yaml';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 
+test('release preparation delegates duplicated broad checks to PR CI', () => {
+  const ciWorkflow = YAML.parse(
+    readFileSync(join(repoRoot, '.github/workflows/CI.yml'), 'utf8'),
+  );
+  const docsWorkflow = YAML.parse(
+    readFileSync(join(repoRoot, '.github/workflows/docs.yml'), 'utf8'),
+  );
+  const skill = readFileSync(
+    join(repoRoot, '.agents/skills/changeset-release-pr/SKILL.md'),
+    'utf8',
+  );
+
+  assert.deepEqual(ciWorkflow.on.pull_request.branches, ['main', 'develop']);
+  const ciCommands = Object.values(ciWorkflow.jobs)
+    .flatMap((job) => job.steps ?? [])
+    .map((step) => step.run)
+    .filter((command) => typeof command === 'string');
+  for (const command of [
+    'pnpm lint',
+    'pnpm knip',
+    'pnpm check-types',
+    'pnpm test:ci',
+    'pnpm test:release-scripts',
+  ]) {
+    assert.ok(ciCommands.includes(command), `${command} must remain in PR CI`);
+  }
+
+  assert.deepEqual(docsWorkflow.on.pull_request.branches, ['main', 'develop']);
+  assert.ok(
+    docsWorkflow.on.pull_request.paths.includes('apps/docs/**'),
+    'docs changes must trigger docs PR validation',
+  );
+  assert.ok(
+    docsWorkflow.jobs.docs.steps.some(
+      (step) => step.run === 'pnpm --filter @roomote/docs check',
+    ),
+    'docs PR validation must include validation and broken-link checks',
+  );
+
+  assert.equal(
+    skill.match(/allow the ordinary push hook to run exactly once/g)?.length,
+    2,
+  );
+  assert.equal(
+    skill.match(
+      /when `apps\/docs` changed, the \*\*Docs\*\*\s+workflow succeed/g,
+    )?.length,
+    2,
+  );
+  assert.match(
+    skill,
+    /Do not merge the release PR until the\n\*\*CI\*\* workflow/,
+  );
+  assert.match(
+    skill,
+    /Do not merge the production\nhotfix PR until the \*\*CI\*\* workflow/,
+  );
+  assert.doesNotMatch(skill, /pnpm test:release-scripts/);
+  assert.doesNotMatch(skill, /pnpm exec oxfmt --check/);
+  assert.doesNotMatch(skill, /node scripts\/pre-push-checks\.mjs/);
+
+  // Release-specific transition guards remain local to the canonical procedure.
+  assert.match(skill, /Start from the current `origin\/develop` tip/);
+  assert.match(skill, /`HEAD` is exactly `origin\/main`/);
+  assert.match(skill, /root version is exactly one patch above/);
+  assert.match(skill, /git diff --exit-code origin\/develop -- \.changeset/);
+  assert.match(skill, /Wait for \*\*Tag Product Release\*\* to succeed/);
+  assert.match(skill, /Wait for the tag-triggered \*\*Publish GHCR Images\*\*/);
+});
+
 test('release workflow keeps promotion as the only automated PR gate', () => {
   const workflow = YAML.parse(
     readFileSync(join(repoRoot, '.github/workflows/release.yml'), 'utf8'),
