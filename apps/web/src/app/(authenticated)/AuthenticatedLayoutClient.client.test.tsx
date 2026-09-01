@@ -160,11 +160,36 @@ describe('AuthenticatedLayoutClient', () => {
     });
   });
 
-  it('waits for the setup-session lookup before redirecting an incomplete admin', () => {
+  it('keeps non-setup pages gated while an incomplete admin setup-session lookup is pending', () => {
     useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
       data:
         options.queryKey[0] === 'setup.sessionStatus'
           ? undefined
+          : {
+              hasGitHub: false,
+              hasEnvironments: false,
+              setupCompletedAt: null,
+            },
+      isLoading: options.queryKey[0] === 'setup.sessionStatus',
+      isError: false,
+    }));
+
+    render(
+      <AuthenticatedLayoutClient>
+        <div>Home content</div>
+      </AuthenticatedLayoutClient>,
+    );
+
+    expect(screen.queryByText('Home content')).not.toBeInTheDocument();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps a known setup Session accessible while its status refreshes', () => {
+    mockPathname = '/sessions/setup-session-id';
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: 'setup-session-id', completed: false }
           : {
               hasGitHub: false,
               hasEnvironments: false,

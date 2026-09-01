@@ -190,10 +190,10 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(skillListSource).toContain(
       'exactly one of environmentId or repositoryId',
     );
-    expect(requestUserInputSource).toContain('args: {');
+    expect(requestUserInputSource).toContain('args: z.union');
     expect(requestUserInputSource).toContain('questions: z.array');
     expect(requestUserInputSource).toContain('preset: z.enum');
-    expect(requestUserInputSource).not.toContain('args: z.union');
+    expect(requestUserInputSource).toContain('.strict()');
     expect(skillSource).toContain('Exact skill ID returned by list_skills');
     expect(skillSource).not.toContain('"explore-and-act"');
     expect(skillSource).toContain(

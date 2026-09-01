@@ -63,6 +63,7 @@ const nativeToolNames = vi.hoisted(
       sendChatReaction: 'send_chat_reaction',
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
+      requestUserInput: 'request_user_input',
       listSkills: 'list_skills',
       loadSkill: 'load_skill',
       showWidget: 'show_widget',
@@ -585,6 +586,44 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       sessionId: 'conversation-1',
       openCodeSessionId: 'opencode-session-1',
     });
+  });
+
+  it('rejects request_user_input calls that mix questions with a trusted preset', async () => {
+    let toolResult: unknown;
+    const requestUserInput = vi.fn();
+    const resolveUserInputPreset = vi.fn();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        toolResult = await invokeTool(nativeToolNames.requestUserInput, {
+          preset: 'setup_starter_tasks',
+          questions: [
+            {
+              id: 'starter-work',
+              header: 'First work',
+              question: 'What should I work on first?',
+            },
+          ],
+        });
+        return 'Please choose your first task.';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'setup-session-1',
+      },
+      setupSession: true,
+      adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+    });
+
+    expect(toolResult).toMatchObject({ success: false });
+    expect(requestUserInput).not.toHaveBeenCalled();
+    expect(resolveUserInputPreset).not.toHaveBeenCalled();
   });
 
   it('injects durable human follow-ups with native steering between tool calls', async () => {

@@ -58,16 +58,26 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
         staleTime: 10_000,
       }),
     );
-  const effectiveSetupRedirectPath =
-    setupRedirectPath && isSetupSessionLoading
-      ? null
-      : setupRedirectPath && setupSessionStatus?.sessionId
-        ? `/sessions/${setupSessionStatus.sessionId}`
-        : setupRedirectPath;
+  const setupSessionPath = setupSessionStatus?.sessionId
+    ? `/sessions/${setupSessionStatus.sessionId}`
+    : null;
+  const isOnKnownSetupSession =
+    setupSessionPath !== null &&
+    (pathname === setupSessionPath ||
+      pathname.startsWith(`${setupSessionPath}/`));
+  // An incomplete administrator must not briefly see another authenticated
+  // page while we look up their setup Session. A known setup Session remains
+  // accessible during a background refresh.
+  const isSetupSessionLookupPending =
+    setupRedirectPath !== null &&
+    isSetupSessionLoading &&
+    !isOnKnownSetupSession;
+  const effectiveSetupRedirectPath = setupSessionPath ?? setupRedirectPath;
 
   // Treat the redirect target itself and any page beneath it as allowed so
   // setup can keep ownership of any remaining required bootstrap screens.
   const isRedirectingForSetup =
+    !isSetupSessionLookupPending &&
     effectiveSetupRedirectPath !== null &&
     pathname !== effectiveSetupRedirectPath &&
     !pathname.startsWith(`${effectiveSetupRedirectPath}/`);
@@ -97,7 +107,10 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
   }
 
   if (
-    (shouldCheckSetup && (isSetupLoading || isRedirectingForSetup)) ||
+    (shouldCheckSetup &&
+      (isSetupLoading ||
+        isSetupSessionLookupPending ||
+        isRedirectingForSetup)) ||
     (shouldCheckOnboarding &&
       (isOnboardingLoading || isRedirectingForOnboarding))
   ) {

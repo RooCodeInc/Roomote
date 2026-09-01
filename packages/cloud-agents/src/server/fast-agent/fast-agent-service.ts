@@ -383,10 +383,12 @@ const requestUserInputQuestionSchema = z.object({
 });
 const fastAgentInputPresetSchema = z.enum(['setup_starter_tasks']);
 const requestUserInputArgsSchema = z.union([
-  z.object({
-    questions: z.array(requestUserInputQuestionSchema).min(1).max(4),
-  }),
-  z.object({ preset: fastAgentInputPresetSchema }),
+  z
+    .object({
+      questions: z.array(requestUserInputQuestionSchema).min(1).max(4),
+    })
+    .strict(),
+  z.object({ preset: fastAgentInputPresetSchema }).strict(),
 ]);
 
 function normalizeThreadText(text: string): string {
