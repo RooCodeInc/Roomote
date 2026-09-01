@@ -2570,7 +2570,7 @@ export async function answerFastAgentQuestion({
               questions,
             });
             visibleUpdatePosted = true;
-            closed = true;
+            closedInstructionVersions.add(instructionVersion);
             return { success: true, requestId, closed: true };
           }
 

@@ -71,7 +71,7 @@ describe('setup prompt guidance and snapshot injection', () => {
     expect(prompt).toContain('setup_starter_tasks');
     expect(prompt).toContain('launch_task');
     expect(prompt).toContain(
-      'The renderer automatically presents the trusted controls appropriate to the setup snapshot',
+      'The renderer owns presentation of trusted setup controls, but some controls require an explicit tool call from you',
     );
     expect(prompt).toContain(
       'Keep those controls separate from my side of the conversation',
@@ -87,6 +87,16 @@ describe('setup prompt guidance and snapshot injection', () => {
     );
     expect(prompt).toContain(
       'I need a workspace where I can run the work you selected',
+    );
+    expect(prompt).toContain(
+      'you must call `request_user_input` with exactly `{ preset: "setup_starter_tasks" }`',
+    );
+    expect(prompt).toContain('the server emits a starter-request setup event');
+    expect(prompt).toContain(
+      'Do not send a closeout first: that tool call creates the user-visible first-work control and is the terminal response for the turn',
+    );
+    expect(prompt).toContain(
+      'Do not replace the required tool call with prose asking the user to choose',
     );
     expect(prompt).not.toContain(
       'Direct the administrator to the relevant card',
@@ -115,6 +125,9 @@ describe('setup prompt guidance and snapshot injection', () => {
     });
     expect(setupEvent).toContain('Setup Platform Event');
     expect(setupEvent).toContain('Reconcile them against the setup snapshot');
+    expect(setupEvent).toContain(
+      'For a starter-request event, call `request_user_input` exactly once',
+    );
 
     const inputResponseEvent = buildFastAgentSystemPrompt({
       ...baseInput,

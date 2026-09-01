@@ -55,6 +55,7 @@ type SetupPlatformEventKind =
   | 'session_creation'
   | 'provider_selection'
   | 'source_connection'
+  | 'starter_request'
   | 'compute_readiness'
   | 'starter_selection'
   | 'recommendation_readiness';
@@ -523,6 +524,21 @@ export async function reconcileSetupPlatformEvents(
           provider: provider.provider,
           repositoryCount: provider.repositoryCount ?? 0,
         })),
+      },
+    });
+  }
+  // The source-connection turn may already have closed without requesting the
+  // trusted starter choices. A dedicated, stable event both owns that action
+  // for new sessions and repairs existing sessions on their next reconcile.
+  if (synchronized.length > 0 && !setupSession.starterTaskSelection) {
+    events.push({
+      kind: 'starter_request',
+      fingerprint: `v${setupSession.workflowVersion}:setup_starter_tasks`,
+      payload: {
+        repositoryCount: synchronized.reduce(
+          (total, provider) => total + (provider.repositoryCount ?? 0),
+          0,
+        ),
       },
     });
   }

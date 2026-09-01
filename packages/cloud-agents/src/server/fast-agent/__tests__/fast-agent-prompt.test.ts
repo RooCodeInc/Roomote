@@ -519,7 +519,9 @@ describe('buildFastAgentSystemPrompt', () => {
       retryTaskStartAvailable: true,
     });
 
-    expect(prompt).toContain('post exactly one closeout');
+    expect(prompt).toContain(
+      'produce exactly one user-visible terminal response',
+    );
     expect(prompt.indexOf('## Turn Startup (Highest Priority)')).toBeLessThan(
       prompt.indexOf('## Delegated Task Platform Event'),
     );
@@ -661,7 +663,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('requires a visible closeout for visibility-required platform events', () => {
+  it('requires a visible terminal response for visibility-required platform events', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       turnSource: 'platform_event',
@@ -669,12 +671,15 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(prompt).toContain(
-      'requires a user-visible closeout because it carries user-useful substance',
+      'requires one user-visible terminal response because it carries user-useful substance',
     );
     expect(prompt).toContain(
       'Present its result, changed expectation, required decision, or recovery action; never narrate lifecycle state alone',
     );
     expect(prompt).toContain('Do not call "ignore_event"');
+    expect(prompt).toContain(
+      'Use a closeout unless the setup instructions require `request_user_input`',
+    );
     expect(prompt).not.toContain(
       'Call "ignore_event" when it is routine, redundant, or not worth interrupting the user',
     );

@@ -626,6 +626,79 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(resolveUserInputPreset).not.toHaveBeenCalled();
   });
 
+  it('lets a required setup platform event end with trusted structured input', async () => {
+    const questions = [
+      {
+        id: 'setup-starter-tasks',
+        header: 'First work',
+        question: 'What should Roomote work on first?',
+        isOther: false,
+        isSecret: false,
+        multiple: true,
+        options: [
+          {
+            label: 'fix-flaky-tests',
+            description: 'Find and fix flaky tests.',
+          },
+        ],
+      },
+    ];
+    const requestUserInput = vi.fn();
+    const resolveUserInputPreset = vi.fn(async () => questions);
+    let toolResult: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        toolResult = await invokeTool(nativeToolNames.requestUserInput, {
+          preset: 'setup_starter_tasks',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks({
+      requestUserInput,
+      resolveUserInputPreset,
+    });
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'setup-session-1',
+      },
+      turnSource: 'platform_event',
+      platformEventKind: 'setup',
+      platformEventVisibility: 'required',
+      setupSession: true,
+      adapter,
+    });
+
+    expect(toolResult).toEqual({
+      success: true,
+      requestId: expect.any(String),
+      closed: true,
+    });
+    expect(resolveUserInputPreset).toHaveBeenCalledWith('setup_starter_tasks');
+    expect(requestUserInput).toHaveBeenCalledWith({
+      requestId: expect.any(String),
+      preset: 'setup_starter_tasks',
+      questions,
+    });
+    expect(adapter.postReply).not.toHaveBeenCalled();
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventType: 'roomote_runtime.request_user_input',
+          payload: expect.objectContaining({
+            preset: 'setup_starter_tasks',
+            status: 'pending',
+          }),
+        }),
+      }),
+    );
+  });
+
   it('injects durable human follow-ups with native steering between tool calls', async () => {
     vi.useFakeTimers();
     try {
