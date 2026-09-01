@@ -52,9 +52,7 @@ async function findAccessibleSession(sessionId: string) {
   const [session] = await db
     .select()
     .from(sessions)
-    .where(
-      and(eq(sessions.id, sessionId), eq(sessions.visibility, 'visible')),
-    )
+    .where(and(eq(sessions.id, sessionId), eq(sessions.visibility, 'visible')))
     .limit(1);
   return session ?? null;
 }

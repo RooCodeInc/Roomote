@@ -206,12 +206,17 @@ describe('Fast session communication through task routes', () => {
     });
   });
 
-  it('hides Fast sessions from bystanders and rejects absent or invalid IDs', async () => {
+  it('shares Fast sessions with bystanders but rejects absent or invalid IDs', async () => {
     const owner = await userFactory.create();
     const bystander = await userFactory.create();
     const session = await createSession(owner.id);
 
-    for (const taskId of [session.id, crypto.randomUUID(), 'not-an-id']) {
+    const shared = await createApp(userAuth(bystander.id)).request(
+      `/tasks/${session.id}/messages`,
+    );
+    expect(shared.status).toBe(200);
+
+    for (const taskId of [crypto.randomUUID(), 'not-an-id']) {
       const response = await createApp(userAuth(bystander.id)).request(
         `/tasks/${taskId}/messages`,
       );
@@ -332,15 +337,15 @@ describe('Fast session communication through task routes', () => {
     const bystander = await userFactory.create();
     const session = await createSession(owner.id);
 
-    const denied = await createApp(userAuth(bystander.id)).request(
+    const bystanderSend = await createApp(userAuth(bystander.id)).request(
       `/tasks/${session.id}/send_message`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: 'Not allowed' }),
+        body: JSON.stringify({ message: 'Deployment users can reply' }),
       },
     );
-    expect(denied.status).toBe(404);
+    expect(bystanderSend.status).toBe(200);
 
     const deploymentRun: RunTokenContext = {
       runId: 1,
