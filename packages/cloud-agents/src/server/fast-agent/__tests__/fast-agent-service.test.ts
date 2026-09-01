@@ -28,6 +28,8 @@ const mocks = vi.hoisted(() => ({
   markShutdownCloseoutSettled: vi.fn(),
   revokeMcpCapabilities: vi.fn(),
   reconcileRetryNotices: vi.fn(),
+  getUnifiedSession: vi.fn(),
+  touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
@@ -93,9 +95,9 @@ vi.mock('@roomote/db/server', () => ({
   appendFastAgentMemory: mocks.appendMemory,
   isBrainEnabled: mocks.isBrainEnabled,
   db: {},
-  getSessionForFastConversation: vi.fn().mockResolvedValue(null),
+  getSessionForFastConversation: mocks.getUnifiedSession,
   getSessionForTask: mocks.getSessionForTask,
-  touchSessionActivity: vi.fn().mockResolvedValue(undefined),
+  touchSessionActivity: mocks.touchSessionActivity,
 }));
 
 vi.mock('../../non-task-provider-usage', () => ({
@@ -278,6 +280,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.nativeExecutor = undefined;
     mocks.mcpExecutor = undefined;
     mocks.mcpCapabilityAvailable = false;
+    mocks.getUnifiedSession.mockResolvedValue(null);
+    mocks.touchSessionActivity.mockResolvedValue(undefined);
     mocks.getSessionForTask.mockResolvedValue(null);
     mocks.getNativeRuntime.mockImplementation(async () => {
       mocks.mcpCapabilityAvailable = true;
@@ -1801,6 +1805,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   it('does not start another attempt when lock loss follows backoff expiry', async () => {
     const controller = new AbortController();
     const lockLost = new FastAgentTurnLockLostError();
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
     const postReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
     const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
     const originalSetTimeout = globalThis.setTimeout;
@@ -1842,6 +1847,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         inferenceRetryActive: true,
       });
       expect(mocks.reconcileRetryNotices).toHaveBeenCalledOnce();
+      expect(mocks.touchSessionActivity).toHaveBeenCalledOnce();
+      expect(mocks.touchSessionActivity).toHaveBeenCalledWith(
+        expect.anything(),
+        'session-1',
+        expect.any(Number),
+        { respondingUntil: expect.any(Date) },
+      );
     } finally {
       timeout.mockRestore();
     }
