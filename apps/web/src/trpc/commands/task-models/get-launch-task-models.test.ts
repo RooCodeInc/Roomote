@@ -78,6 +78,8 @@ function buildMockAuth(): UserAuthSuccess {
 }
 
 describe('getLaunchTaskModelsCommand', () => {
+  const originalOrchestrationModel = process.env.R_ORCHESTRATION_MODEL;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsChatGptSubscriptionConnected.mockResolvedValue(false);
@@ -85,6 +87,15 @@ describe('getLaunchTaskModelsCommand', () => {
     mockIsXaiSubscriptionConnected.mockResolvedValue(true);
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
     mockSyncConnectedXaiTaskModels.mockResolvedValue(0);
+    delete process.env.R_ORCHESTRATION_MODEL;
+  });
+
+  afterAll(() => {
+    if (originalOrchestrationModel === undefined) {
+      delete process.env.R_ORCHESTRATION_MODEL;
+    } else {
+      process.env.R_ORCHESTRATION_MODEL = originalOrchestrationModel;
+    }
   });
 
   it('includes newly published Grok chat models without a Settings refresh', async () => {
@@ -134,6 +145,33 @@ describe('getLaunchTaskModelsCommand', () => {
       expect.arrayContaining([
         expect.objectContaining({ id: 'xai/grok-4.6' }),
         expect.objectContaining({ id: 'xai/grok-4.7' }),
+      ]),
+    );
+  });
+
+  it('includes an env-managed orchestration default outside the allowed models', async () => {
+    process.env.R_ORCHESTRATION_MODEL = 'xai/grok-env-only';
+    mockFindDeploymentSettings.mockResolvedValue({
+      taskModelSettings: {
+        models: [
+          {
+            id: 'xai/grok-4.6',
+            displayName: 'Grok 4.6',
+            family: 'Grok',
+          },
+        ],
+        allowedModelIds: ['xai/grok-4.6'],
+        defaultModelId: 'xai/grok-4.6',
+      },
+      runtimeModelConfig: {},
+    });
+
+    const result = await getLaunchTaskModelsCommand(buildMockAuth());
+
+    expect(result.defaultFastModelId).toBe('xai/grok-env-only');
+    expect(result.models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'xai/grok-env-only' }),
       ]),
     );
   });

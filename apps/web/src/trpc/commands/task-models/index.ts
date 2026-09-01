@@ -1127,6 +1127,13 @@ export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
     githubCopilotConnected,
     xaiSubscriptionConnected,
   });
+  const connectedProviderIds = collectConnectedTaskModelProviderIds({
+    runtimeEnv: process.env,
+    persistedEnvVarNames,
+    chatgptConnected,
+    githubCopilotConnected,
+    xaiSubscriptionConnected,
+  });
   const isApiKeyProviderConnected = (providerId: SetupModelProviderId) =>
     Boolean(
       providerSetup.providers.find(
@@ -1141,18 +1148,24 @@ export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
     settingsDefaultModelId: settings.defaultModelId,
     persisted: persistedRuntimeModelConfig,
   });
+  const defaultFastModelId =
+    runtimeModels.orchestrationModel.effectiveModelId ?? defaultModel.id;
+  const selectableModels = appendSelectedTaskModels({
+    models: enabledModels,
+    selectedModelIds: new Set([defaultFastModelId]),
+    connectedProviderIds,
+  });
 
   return {
     defaultModelId: defaultModel.id,
-    defaultFastModelId:
-      runtimeModels.orchestrationModel.effectiveModelId ?? defaultModel.id,
+    defaultFastModelId,
     chatgptConnected,
     openaiConnected: isApiKeyProviderConnected('openai'),
     // Display-grouping inputs: `xai/` models group under the Grok
     // subscription only when the API-key sibling is not also connected.
     xaiSubscriptionConnected,
     xaiConnected: isApiKeyProviderConnected('xai'),
-    models: enabledModels.map((option) => ({
+    models: selectableModels.map((option) => ({
       ...option,
       isDefault: option.id === defaultModel.id,
     })),
