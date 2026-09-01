@@ -40,6 +40,7 @@ import {
   taskMessages,
   taskRuns,
   tasks,
+  touchTaskActivity,
 } from '@roomote/db/server';
 import { httpBatchLink, TRPCClientError } from '@trpc/client';
 import { TRPCError } from '@trpc/server';
@@ -378,6 +379,8 @@ export async function sendSandboxPromptCommand(
   let discordReplyQuoteId: string | null = null;
 
   try {
+    await touchTaskActivity(db, parsed.taskId);
+
     // The actor switch must land before the prompt reaches the sandbox so the
     // worker's sender-vs-acting-user guard passes (critical for runs that
     // start without an acting user, e.g. automation-started tasks).
@@ -520,6 +523,8 @@ export async function answerSandboxUserInputRequestCommand(
   let didSwitchActingUser = false;
 
   try {
+    await touchTaskActivity(db, parsed.taskId);
+
     // Same trusted pre-delivery actor switch as sendSandboxPromptCommand: the
     // worker blocks answers whose sender is not the run's acting user. Note
     // this resolves the actor before delivery rather than through the atomic

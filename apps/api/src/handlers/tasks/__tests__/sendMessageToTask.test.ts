@@ -17,6 +17,7 @@ const {
   mockUserFindFirst,
   mockTaskPullRequestFindFirst,
   mockTaskRunFindFirst,
+  mockTouchTaskActivity,
   MockSnapshotResumeAlreadyExistsError,
   mockAnd,
   mockEq,
@@ -39,6 +40,7 @@ const {
   mockUserFindFirst: vi.fn(),
   mockTaskPullRequestFindFirst: vi.fn(),
   mockTaskRunFindFirst: vi.fn(),
+  mockTouchTaskActivity: vi.fn(),
   MockSnapshotResumeAlreadyExistsError: class extends Error {},
   mockAnd: vi.fn((...conditions: unknown[]) => conditions),
   mockEq: vi.fn((left: unknown, right: unknown) => ({ left, right })),
@@ -124,6 +126,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     ...actual,
     findReusableGitHubPrFollowUpOwner: mockFindReusableGitHubPrFollowUpOwner,
     getTaskGoalForRun: mockGetTaskGoalForRun,
+    touchTaskActivity: mockTouchTaskActivity,
     and: mockAnd,
     eq: mockEq,
     db: {
@@ -226,6 +229,7 @@ describe('sendMessageToTask', () => {
     mockTaskRunFindFirst.mockResolvedValue(null);
     mockTrackLatestUserMessageForSlackQuote.mockResolvedValue(undefined);
     mockTrackLatestUserMessageForReplyQuote.mockResolvedValue(undefined);
+    mockTouchTaskActivity.mockResolvedValue(undefined);
     mockRestoreActingUserIdAfterFailedDelivery.mockResolvedValue(undefined);
     mockUpdateActingUserIdIfNeeded.mockImplementation(
       async ({ currentActingUserId, nextActingUserId, preserveActor }) =>
@@ -235,6 +239,24 @@ describe('sendMessageToTask', () => {
       name: 'Alice',
       email: 'alice@example.com',
     });
+  });
+
+  it('touches task activity before delivering a live prompt', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
+
+    await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Keep going.',
+    });
+
+    expect(mockTouchTaskActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      'task-1',
+    );
+    expect(mockTouchTaskActivity.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockSendPromptMutate.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('delegates Fast child answer-or-steer dispatch to the worker', async () => {
@@ -267,6 +289,9 @@ describe('sendMessageToTask', () => {
       answerPendingInput: true,
       suppressSlackReplyQuote: true,
     });
+    expect(mockTouchTaskActivity.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockSteerTaskMutate.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('marks Fast child messages for worker-owned pending-input dispatch', async () => {

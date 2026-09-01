@@ -14,6 +14,7 @@ import {
   type TaskRun,
   db,
   taskRuns,
+  tasks,
   createComputeProviderMutationEventRecorder,
   recordTaskRunEvent,
   eq,
@@ -22,6 +23,7 @@ import {
   isNull,
   isNotNull,
   inArray,
+  exists,
   asc,
   desc,
   gt,
@@ -64,6 +66,7 @@ const SLEEP_CHECK_PROVIDERS = sleepCheckManagedComputeProviders;
 type SleepCheckPath =
   | 'due_sleep'
   | 'manual_sleep'
+  | 'merged_pr'
   | 'stale_worker'
   | 'hard_limit'
   | 'booting_no_heartbeat';
@@ -591,6 +594,26 @@ function warnIfSleepCheckBatchLimitReached(
   );
 }
 
+function taskActivityClaimGuard(
+  job: SleepCheckJob,
+  expectedTaskActivityAt?: number,
+) {
+  return expectedTaskActivityAt === undefined
+    ? undefined
+    : exists(
+        db
+          .select({ id: tasks.id })
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.id, job.taskId),
+              eq(tasks.state, 'active'),
+              eq(tasks.activityAt, expectedTaskActivityAt),
+            ),
+          ),
+      );
+}
+
 /**
  * Optimistically claim the snapshot slot for a job and enqueue a snapshot.
  * Returns `'enqueued'` when a snapshot job was added, `'duplicate'` when a
@@ -601,6 +624,7 @@ function warnIfSleepCheckBatchLimitReached(
 async function claimAndSnapshot(
   job: SleepCheckJob,
   path: SleepCheckPath,
+  expectedTaskActivityAt?: number,
 ): Promise<'enqueued' | 'duplicate' | 'skipped' | 'error'> {
   const now = new Date();
   const snapshotIntentId = `${path}-${job.id}-${now.getTime()}`;
@@ -614,9 +638,11 @@ async function claimAndSnapshot(
     .where(
       and(
         eq(taskRuns.id, job.id),
+        eq(taskRuns.status, job.status),
         isNull(taskRuns.sleepRequestedAt),
         isNull(taskRuns.snapshotRequestedAt),
         isNull(taskRuns.snapshotId),
+        taskActivityClaimGuard(job, expectedTaskActivityAt),
       ),
     )
     .returning({ id: taskRuns.id });
@@ -699,6 +725,7 @@ async function claimAndEnterStandby(
   job: SleepCheckJob,
   client: ComputeProviderClient,
   path: SleepCheckPath,
+  expectedTaskActivityAt?: number,
 ): Promise<'completed' | 'skipped' | 'error'> {
   const requestedAt = new Date();
   const [claimed] = await db
@@ -707,9 +734,11 @@ async function claimAndEnterStandby(
     .where(
       and(
         eq(taskRuns.id, job.id),
+        eq(taskRuns.status, job.status),
         isNull(taskRuns.sleepRequestedAt),
         isNull(taskRuns.snapshotRequestedAt),
         isNull(taskRuns.snapshotId),
+        taskActivityClaimGuard(job, expectedTaskActivityAt),
       ),
     )
     .returning({ id: taskRuns.id });
@@ -834,7 +863,11 @@ async function claimResumableSleep(
  * Process a user-requested sleep immediately. Unlike the scheduled due-sleep
  * path, this intentionally does not extend the deadline for an active phase.
  */
-export async function sleepTaskRunNow(runId: number): Promise<void> {
+export async function sleepTaskRunNow(
+  runId: number,
+  path: Extract<SleepCheckPath, 'manual_sleep' | 'merged_pr'> = 'manual_sleep',
+  expectedTaskActivityAt?: number,
+): Promise<void> {
   const job = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, runId),
     columns: {
@@ -861,6 +894,10 @@ export async function sleepTaskRunNow(runId: number): Promise<void> {
 
   if (!ACTIVE_SLEEP_CHECK_STATUSES.includes(job.status)) {
     throw new Error(`Task run #${runId} is not active`);
+  }
+
+  if (path === 'merged_pr' && job.status !== RunStatus.Idle) {
+    return;
   }
 
   if (!job.machineId || !job.vendor) {
@@ -890,7 +927,12 @@ export async function sleepTaskRunNow(runId: number): Promise<void> {
   }
 
   if (isStandbyResumeCapableComputeProvider(job.vendor)) {
-    const result = await claimAndEnterStandby(job, client, 'manual_sleep');
+    const result = await claimAndEnterStandby(
+      job,
+      client,
+      path,
+      expectedTaskActivityAt,
+    );
 
     if (result === 'error') {
       throw new Error(`Failed to put task run #${runId} on standby`);
@@ -899,7 +941,7 @@ export async function sleepTaskRunNow(runId: number): Promise<void> {
     return;
   }
 
-  const result = await claimAndSnapshot(job, 'manual_sleep');
+  const result = await claimAndSnapshot(job, path, expectedTaskActivityAt);
 
   if (result === 'error') {
     throw new Error(`Failed to snapshot task run #${runId}`);
@@ -1644,6 +1686,8 @@ function describeSleepCheckPath(path: SleepCheckPath): string {
       return 'Due sleep handling';
     case 'manual_sleep':
       return 'Manual sleep handling';
+    case 'merged_pr':
+      return 'Merged pull request sleep handling';
     case 'hard_limit':
       return 'Provider-timeout backstop';
     case 'stale_worker':
