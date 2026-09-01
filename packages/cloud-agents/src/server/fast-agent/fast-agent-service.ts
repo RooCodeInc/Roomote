@@ -951,6 +951,12 @@ export async function answerFastAgentQuestion({
     | undefined;
   let inferenceRetryAttempted = false;
   let inferenceRetryRecoveryEligible = false;
+  let inferenceRetryRecoveryContext:
+    | {
+        currentMessageAgentContext?: string;
+        threadContext?: FastAgentThreadMessage[];
+      }
+    | undefined;
   // Anchors the silent-recovery window: set on the first retry signal of a
   // continuous no-progress stretch, cleared whenever the provider makes
   // visible progress again (completed message or successful attempt).
@@ -1192,6 +1198,17 @@ export async function answerFastAgentQuestion({
 
     const retryEvent = inferenceRetryCanonicalEvent;
     const retryMessageIndex = inferenceRetryMessageIndex;
+    const retryPersistence = {
+      inferenceRetryNotice: true,
+      ...(reply.purpose === 'progress'
+        ? {
+            inferenceRetryRecoveryEligible,
+            ...(inferenceRetryRecoveryContext
+              ? { inferenceRetryRecoveryContext }
+              : {}),
+          }
+        : {}),
+    };
     if (!inferenceRetryReply || !adapter.replaceReply) {
       if (
         retryMessageIndex !== undefined &&
@@ -1202,7 +1219,7 @@ export async function answerFastAgentQuestion({
       await persistAssistantReply({
         reply,
         event: retryEvent,
-        inferenceRetryNotice: true,
+        ...retryPersistence,
         visibleInTranscript: false,
       });
       return false;
@@ -1217,7 +1234,7 @@ export async function answerFastAgentQuestion({
         await persistAssistantReply({
           reply,
           event: retryEvent,
-          inferenceRetryNotice: true,
+          ...retryPersistence,
         });
         throw error;
       }
@@ -1233,7 +1250,7 @@ export async function answerFastAgentQuestion({
       await persistAssistantReply({
         reply,
         event: retryEvent,
-        inferenceRetryNotice: true,
+        ...retryPersistence,
         visibleInTranscript: false,
       });
       return false;
@@ -1248,7 +1265,7 @@ export async function answerFastAgentQuestion({
         reply,
         event: retryEvent,
         platformMessageId: inferenceRetryReply.messageId,
-        inferenceRetryNotice: true,
+        ...retryPersistence,
       });
     }
     return true;
@@ -1559,6 +1576,20 @@ export async function answerFastAgentQuestion({
         (conversation.surface === 'web' ||
           conversation.surface === 'slack' ||
           conversation.surface === 'discord');
+      inferenceRetryRecoveryContext = inferenceRetryRecoveryEligible
+        ? {
+            ...(currentMessageAgentContext
+              ? { currentMessageAgentContext }
+              : {}),
+            ...(threadContext.some((message) => message.ts !== currentMessageId)
+              ? {
+                  threadContext: threadContext.filter(
+                    (message) => message.ts !== currentMessageId,
+                  ),
+                }
+              : {}),
+          }
+        : undefined;
 
       // Silence is a presentation choice, not permission to keep recovery
       // entirely in memory. Persist the first retry immediately so an owner
@@ -1572,23 +1603,8 @@ export async function answerFastAgentQuestion({
         event: inferenceRetryCanonicalEvent,
         inferenceRetryNotice: true,
         inferenceRetryRecoveryEligible,
-        ...(inferenceRetryRecoveryEligible
-          ? {
-              inferenceRetryRecoveryContext: {
-                ...(currentMessageAgentContext
-                  ? { currentMessageAgentContext }
-                  : {}),
-                ...(threadContext.some(
-                  (message) => message.ts !== currentMessageId,
-                )
-                  ? {
-                      threadContext: threadContext.filter(
-                        (message) => message.ts !== currentMessageId,
-                      ),
-                    }
-                  : {}),
-              },
-            }
+        ...(inferenceRetryRecoveryContext
+          ? { inferenceRetryRecoveryContext }
           : {}),
         visibleInTranscript: false,
       });
@@ -1630,6 +1646,9 @@ export async function answerFastAgentQuestion({
           platformMessageId: inferenceRetryReply?.messageId,
           inferenceRetryNotice: true,
           inferenceRetryRecoveryEligible,
+          ...(inferenceRetryRecoveryContext
+            ? { inferenceRetryRecoveryContext }
+            : {}),
         });
       }
       diagnostics.recordVisibleReply({ assistantResponse: false });
@@ -1687,6 +1706,7 @@ export async function answerFastAgentQuestion({
     const disableInferenceRetryRecoveryBeforeTool = async () => {
       nativeToolInvoked = true;
       inferenceRetryRecoveryEligible = false;
+      inferenceRetryRecoveryContext = undefined;
       if (canonicalConversationId && inferenceRetryCanonicalEvent) {
         await disableFastAgentInferenceRetryRecovery({
           conversationId: canonicalConversationId,

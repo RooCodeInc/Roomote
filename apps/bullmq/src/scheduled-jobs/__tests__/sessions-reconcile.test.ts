@@ -1,9 +1,16 @@
+const mocks = vi.hoisted(() => ({
+  enqueueFastAgentParentEvent: vi.fn(),
+}));
+
+vi.mock('@roomote/sdk/server', () => ({
+  enqueueFastAgentParentEvent: mocks.enqueueFastAgentParentEvent,
+}));
+
 import {
   db,
   eq,
   fastAgentConversations,
   fastAgentMessages,
-  fastAgentParentEvents,
   inArray,
   sessionBackfillState,
   sessionFactory,
@@ -17,6 +24,13 @@ import { sessionsReconcileJob } from '../sessions-reconcile';
 const BACKFILL_KEY = 'unified-sessions-v1';
 
 describe('sessionsReconcileJob', () => {
+  beforeEach(() => {
+    mocks.enqueueFastAgentParentEvent.mockResolvedValue({
+      eventKey: 'retry-recovery-event',
+      queued: true,
+    });
+  });
+
   it('backfills Fast conversations and visible tasks idempotently', async () => {
     const user = await userFactory.create();
     const [conversation] = await db
@@ -335,14 +349,13 @@ describe('sessionsReconcileJob', () => {
     await sessionsReconcileJob();
     await sessionsReconcileJob();
 
-    const queued = await db
-      .select({ event: fastAgentParentEvents.event })
-      .from(fastAgentParentEvents)
-      .where(eq(fastAgentParentEvents.conversationId, conversation!.id));
-    expect(queued).toHaveLength(1);
-    expect(queued[0]?.event).toMatchObject({
-      type: 'inference_retry_resume',
-      retryEventId: 'recoverable-turn:retry-notice:0',
+    expect(mocks.enqueueFastAgentParentEvent).toHaveBeenCalledWith({
+      parent: expect.objectContaining({ sessionId: conversation!.id }),
+      event: {
+        type: 'inference_retry_resume',
+        eventId: 'recoverable-turn:retry-notice:0',
+        retryEventId: 'recoverable-turn:retry-notice:0',
+      },
     });
 
     const [notice] = await db

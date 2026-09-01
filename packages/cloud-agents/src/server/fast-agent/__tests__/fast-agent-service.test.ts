@@ -1884,6 +1884,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await expect(
         answerFastAgentQuestion({
           ...baseParams,
+          currentMessageAgentContext: 'Attached context',
           adapter: callbacks({ postReply }),
           signal: controller.signal,
         }),
@@ -1901,6 +1902,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           inferenceRetryNotice: true,
           inferenceRetryActive: true,
           inferenceRetryRecoveryEligible: true,
+          inferenceRetryRecoveryContext: {
+            currentMessageAgentContext: 'Attached context',
+          },
         },
       });
       expect(mocks.reconcileRetryNotices).toHaveBeenCalledOnce();
