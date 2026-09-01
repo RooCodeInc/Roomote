@@ -776,17 +776,18 @@ function normalizeAgentMailInboxAddress(
 }
 
 /**
- * The deliverable address of an inbox object. AgentMail's schema carries
- * both `inbox_id` and `email` (equal today, with the docs' own examples
- * keying API calls by the address); prefer `email` so a future divergence
- * never persists or displays an opaque id as the "Inbox Email Address".
+ * The value setup persists and every later call routes by. AgentMail's
+ * schema carries both `inbox_id` and `email` (equal today), but `inbox_id`
+ * is the key the API contract requires in request paths and webhook
+ * `inbox_ids` filters — so it must win if the fields ever diverge. `email`
+ * is only a display fallback for a hypothetical object without an id.
  */
 function readAgentMailInboxAddress(
   inbox: Record<string, unknown>,
 ): string | null {
-  const email = typeof inbox.email === 'string' ? inbox.email : null;
   const inboxId = typeof inbox.inbox_id === 'string' ? inbox.inbox_id : null;
-  return normalizeAgentMailInboxAddress(email ?? inboxId);
+  const email = typeof inbox.email === 'string' ? inbox.email : null;
+  return normalizeAgentMailInboxAddress(inboxId ?? email);
 }
 
 async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {

@@ -831,9 +831,16 @@ describe('comms commands', () => {
       expect(mockAgentMailCreateInbox).not.toHaveBeenCalled();
     });
 
-    it('prefers the inbox email field over the inbox id when adopting', async () => {
+    it('routes by inbox_id, not the email field, when adopting', async () => {
+      // inbox_id is the API key (paths, webhook inbox_ids filters); it must
+      // win over the display email if the fields ever diverge.
       mockAgentMailListInboxes.mockResolvedValue({
-        inboxes: [{ inbox_id: 'inbox_abc123', email: 'Existing@agentmail.to' }],
+        inboxes: [
+          {
+            inbox_id: 'Existing@agentmail.to',
+            email: 'display-alias@agentmail.to',
+          },
+        ],
       });
       mockAgentMailCreateWebhook.mockResolvedValue({
         webhook_id: 'wh-1',
