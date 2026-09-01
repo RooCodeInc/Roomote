@@ -47,44 +47,48 @@ export async function persistFastAgentInlineHumanTurn(params: {
   event: FastAgentHumanFollowUpEvent;
 }): Promise<FastAgentDurableTurn | null> {
   const eventKey = buildFastAgentParentEventKey(params);
-  await db
-    .insert(fastAgentParentEvents)
-    .values({
-      conversationId: params.parent.sessionId,
-      eventKey,
-      parent: params.parent,
-      event: params.event,
-      admission: 'inline',
-      claimedUntil: new Date(Date.now() + FAST_AGENT_DURABLE_TURN_CLAIM_MS),
-    })
-    .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
+  // Admission and supersession commit together, so recovery can never see
+  // the new row without the older interrupted row already retired.
+  return db.transaction(async (tx) => {
+    await tx
+      .insert(fastAgentParentEvents)
+      .values({
+        conversationId: params.parent.sessionId,
+        eventKey,
+        parent: params.parent,
+        event: params.event,
+        admission: 'inline',
+        claimedUntil: new Date(Date.now() + FAST_AGENT_DURABLE_TURN_CLAIM_MS),
+      })
+      .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
 
-  const row = await db.query.fastAgentParentEvents.findFirst({
-    where: eq(fastAgentParentEvents.eventKey, eventKey),
-    columns: { id: true, deliveredAt: true, discardedAt: true },
+    const row = await tx.query.fastAgentParentEvents.findFirst({
+      where: eq(fastAgentParentEvents.eventKey, eventKey),
+      columns: { id: true, deliveredAt: true, discardedAt: true },
+    });
+    if (!row || row.deliveredAt || row.discardedAt) {
+      return null;
+    }
+
+    await tx
+      .update(fastAgentParentEvents)
+      .set({
+        discardedAt: new Date(),
+        lastError: 'Superseded by a newer human message.',
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(fastAgentParentEvents.conversationId, params.parent.sessionId),
+          eq(fastAgentParentEvents.admission, 'inline'),
+          ne(fastAgentParentEvents.eventKey, eventKey),
+          isNull(fastAgentParentEvents.deliveredAt),
+          isNull(fastAgentParentEvents.discardedAt),
+        ),
+      );
+
+    return { id: row.id, eventKey };
   });
-  if (!row || row.deliveredAt || row.discardedAt) {
-    return null;
-  }
-
-  await db
-    .update(fastAgentParentEvents)
-    .set({
-      discardedAt: new Date(),
-      lastError: 'Superseded by a newer human message.',
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(fastAgentParentEvents.conversationId, params.parent.sessionId),
-        eq(fastAgentParentEvents.admission, 'inline'),
-        ne(fastAgentParentEvents.eventKey, eventKey),
-        isNull(fastAgentParentEvents.deliveredAt),
-        isNull(fastAgentParentEvents.discardedAt),
-      ),
-    );
-
-  return { id: row.id, eventKey };
 }
 
 /**

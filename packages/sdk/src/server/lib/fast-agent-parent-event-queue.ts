@@ -296,7 +296,13 @@ export async function drainFastAgentParentEvents(
             // An inline-admitted row only reaches the queue after its owner
             // was interrupted, so this delivery is a resumption.
             ...(row.admission === 'inline'
-              ? { resumedAfterInterruption: true }
+              ? {
+                  resumedAfterInterruption: true,
+                  // The resumed run owns the same row: it revokes replay
+                  // before any non-replayable action, so a worker death
+                  // after such an action cannot drain the row again.
+                  durableAdmission: { eventId: row.id },
+                }
               : {}),
           },
           turnLock,

@@ -502,6 +502,7 @@ export async function startFastSessionCommand(
       attachmentTexts: input.attachmentTexts,
       model: settings.model,
       reasoningEffort: settings.reasoningEffort,
+      durableSessionId: session.id,
       ...(kickoffTurnId && kickoffPromptEventId
         ? {
             currentMessageId: kickoffTurnId,

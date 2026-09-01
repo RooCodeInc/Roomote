@@ -25,15 +25,21 @@ vi.mock('@roomote/db/server', () => ({
     deliveredAt: 'deliveredAt',
     discardedAt: 'discardedAt',
   },
-  db: {
-    insert: vi.fn(() => ({
-      values: vi.fn(() => ({ onConflictDoNothing: mocks.insertOnConflict })),
-    })),
-    update: vi.fn(() => ({
-      set: vi.fn(() => ({ where: mocks.updateWhere })),
-    })),
-    query: { fastAgentParentEvents: { findFirst: mocks.findFirst } },
-  },
+  db: (() => {
+    const tx = {
+      insert: vi.fn(() => ({
+        values: vi.fn(() => ({ onConflictDoNothing: mocks.insertOnConflict })),
+      })),
+      update: vi.fn(() => ({
+        set: vi.fn(() => ({ where: mocks.updateWhere })),
+      })),
+      query: { fastAgentParentEvents: { findFirst: mocks.findFirst } },
+    };
+    return {
+      ...tx,
+      transaction: vi.fn(async (run: (client: unknown) => unknown) => run(tx)),
+    };
+  })(),
 }));
 
 vi.mock('./fast-agent-parent-event-queue', () => ({

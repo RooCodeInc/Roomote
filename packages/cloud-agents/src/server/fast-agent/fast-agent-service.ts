@@ -1206,18 +1206,28 @@ export async function answerFastAgentQuestion({
   // and an interruption hands the turn to the queue instead of the user.
   // Flips off, durably, before the first action a replay could duplicate.
   let durableTurnReplayable = Boolean(durableAdmission);
-  const revokeDurableTurnReplay = async (reason: string) => {
-    if (!durableAdmission || !durableTurnReplayable) return;
-    durableTurnReplayable = false;
-    await revokeFastAgentDurableTurnReplay(
-      durableAdmission.eventId,
-      reason,
-    ).catch((error) => {
+  /**
+   * Withdraw the turn from replay before an action a re-run could duplicate.
+   * Resolves true once nothing can recover the row (the revocation landed,
+   * or the row was already settled). A write that did not land resolves
+   * false and the caller must not perform the action: a crash after an
+   * unrecorded launch or message would otherwise replay it.
+   */
+  const revokeDurableTurnReplay = async (reason: string): Promise<boolean> => {
+    if (!durableAdmission || !durableTurnReplayable) return true;
+    try {
+      await revokeFastAgentDurableTurnReplay(durableAdmission.eventId, reason);
+      durableTurnReplayable = false;
+      return true;
+    } catch (error) {
       console.warn(
         `[Fast Agent] Failed to revoke durable turn replay: ${formatErrorForLog(error)}`,
       );
-    });
+      return false;
+    }
   };
+  const DURABLE_REVOKE_FAILED_TOOL_ERROR =
+    'Roomote could not durably record this action before running it. Try the action again.';
   const settleDurableTurn = async () => {
     if (!durableAdmission) return;
     durableTurnReplayable = false;
@@ -2246,10 +2256,13 @@ export async function answerFastAgentQuestion({
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
         turnProgressMarker += 1;
-        if (!isReplaySafeFastAgentMcpCall(call)) {
-          await revokeDurableTurnReplay(
+        if (
+          !isReplaySafeFastAgentMcpCall(call) &&
+          !(await revokeDurableTurnReplay(
             `MCP call ${call.integrationId}/${call.toolName} is not replay-safe.`,
-          );
+          ))
+        ) {
+          return { success: false, error: DURABLE_REVOKE_FAILED_TOOL_ERROR };
         }
 
         if (platformEventHandling === 'present_only') {
@@ -2421,10 +2434,13 @@ export async function answerFastAgentQuestion({
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
         turnProgressMarker += 1;
-        if (!isReplaySafeFastAgentNativeTool(call)) {
-          await revokeDurableTurnReplay(
+        if (
+          !isReplaySafeFastAgentNativeTool(call) &&
+          !(await revokeDurableTurnReplay(
             `Native tool ${call.name} is not replay-safe.`,
-          );
+          ))
+        ) {
+          return { success: false, error: DURABLE_REVOKE_FAILED_TOOL_ERROR };
         }
 
         if (

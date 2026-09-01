@@ -1488,6 +1488,8 @@ type FastAgentParentEventDeliveryParams = {
   /** The queue is re-running an inline-admitted human turn that was
    * interrupted before it finished. */
   resumedAfterInterruption?: boolean;
+  /** The inline-admitted row the resumed run executes and settles. */
+  durableAdmission?: { eventId: string };
 };
 
 /** Give a structured child event to the Fast orchestrator for presentation. */
@@ -1588,6 +1590,9 @@ export async function deliverFastAgentParentEventWithLock(
         : {}),
       ...(params.resumedAfterInterruption
         ? { resumedAfterInterruption: true }
+        : {}),
+      ...(params.durableAdmission
+        ? { durableAdmission: params.durableAdmission }
         : {}),
       platformEventHandling:
         params.event.type === 'pull_request_feedback' ||

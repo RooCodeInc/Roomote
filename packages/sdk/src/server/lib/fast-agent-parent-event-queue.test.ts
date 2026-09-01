@@ -368,6 +368,7 @@ describe('Fast parent event durable queue', () => {
       expect.objectContaining({
         event: inlineRow.event,
         resumedAfterInterruption: true,
+        durableAdmission: { eventId: 'inline-1' },
       }),
       mocks.releaseLock,
     );
