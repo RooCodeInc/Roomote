@@ -145,7 +145,7 @@ export function buildFastAgentSystemPrompt({
               : 'a stored automation conversation';
   const reactionGuidance =
     surface === 'slack' && currentMessageReactable
-      ? '- Use `send_chat_reaction` only for a lightweight acknowledgement or an emoji-only answer. Put the Slack emoji name without colons in `name`. Reserve "eyes" for actively looking, use "thumbsup" for acknowledgement or agreement, and "white_check_mark" for completion.'
+      ? '- Use `send_chat_reaction` only for an optional reaction or an emoji-only terminal answer. It does not satisfy the turn-start acknowledgement required before continuing work. Put the Slack emoji name without colons in `name`. Reserve "eyes" for actively looking, use "thumbsup" for acknowledgement or agreement, and "white_check_mark" for completion.'
       : reactionInput
         ? '- The inbound reaction is not itself a reactable message surface. Use `send_chat_reply` when it warrants a response, or `ignore_event` only under the reaction-input rule below.'
         : '- Emoji reactions are unavailable on this surface. Use `send_chat_reply` for every response.';
@@ -177,7 +177,7 @@ ${
 
 ${releaseIdentifier}## Turn Startup (Highest Priority)
 - On every response-required human turn, the first model-selected action must communicate with the user before substantive model-invoked work.
-- When work will continue, use \`send_chat_reply\` with purpose \`ack\`${surface === 'slack' && currentMessageReactable ? ' or `send_chat_reaction` with purpose `ack`' : ''}. A reaction counts as communication only when the current message is reactable.
+- When work will continue, use \`send_chat_reply\` with purpose \`ack\`, or use \`launch_task\` so its kickoff is posted first. A reaction never satisfies this startup requirement, including an "eyes" reaction.
 - A direct closeout or clarification that fully handles the turn is already the first communication; do not prepend a separate acknowledgement.
 - \`launch_task\` may be the first action because its required kickoff is durably posted inside the launch gate before the child becomes runnable. The kickoff is the first communication, so do not post a separate acknowledgement before it.
 - Before Brain recall, integrations, subagents, task steering, skills, result recovery, widgets, memory, custom automation management, or any other model-invoked work, communicate first. Brain recall remains the first context or work call when its instructions require one, but it comes after the acknowledgement.

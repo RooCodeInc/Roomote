@@ -544,6 +544,67 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
+  it('authorizes direct skill tools before reading their catalog', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'authorized-native-skills',
+      [],
+    );
+    const sessionId = 'authorized-native-skills-parent';
+    const list = vi.fn().mockResolvedValue({ skills: [], warnings: [] });
+    let acknowledged = false;
+    const unbind = bindFastAgentNativeToolExecutor(
+      sessionId,
+      'authorized-native-skills-conversation',
+      async () => null,
+      {
+        allowSkillAccess: true,
+        allowSpillRecovery: true,
+        authorizeDirectTool: async () =>
+          acknowledged
+            ? undefined
+            : {
+                success: false,
+                error:
+                  'Post an acknowledgement with send_chat_reply before this action.',
+              },
+        skillStore: new FastAgentSkillStore(undefined, {
+          list,
+          read: vi.fn(),
+        }),
+      },
+    );
+    const callBridge = () =>
+      fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionID: sessionId,
+          tool: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
+          args: { environmentId: 'environment-1' },
+        }),
+      })
+        .then((response) => response.json())
+        .then((payload) => JSON.parse(payload.output));
+
+    try {
+      await expect(callBridge()).resolves.toEqual({
+        success: false,
+        error:
+          'Post an acknowledgement with send_chat_reply before this action.',
+      });
+      expect(list).not.toHaveBeenCalled();
+
+      acknowledged = true;
+      await expect(callBridge()).resolves.toMatchObject({ success: true });
+      expect(list).toHaveBeenCalledOnce();
+    } finally {
+      unbind();
+    }
+  });
+
   it('keeps an accepted 8 MiB skill recoverable despite JSON escaping', async () => {
     const runtime = await getFastAgentNativeToolRuntime('max-skill', []);
     const sessionId = 'max-skill-parent';

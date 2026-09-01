@@ -12,7 +12,6 @@ import {
   FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
-  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   ROOMOTE_MCP_ID,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
@@ -1844,6 +1843,7 @@ export async function answerFastAgentQuestion({
       releaseVersion,
     });
     let visibleUpdatePosted = false;
+    let substantiveWorkAcknowledged = false;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
 
@@ -1889,6 +1889,9 @@ export async function answerFastAgentQuestion({
       inferenceRetryCanonicalEvent = undefined;
       lastVisibleMessage = reply.message;
       visibleUpdatePosted = true;
+      if (reply.purpose === 'ack' || reply.kickoff) {
+        substantiveWorkAcknowledged = true;
+      }
       if (reply.purpose === 'closeout' || reply.purpose === 'clarification') {
         closedInstructionVersions.add(instructionVersion);
       }
@@ -2070,7 +2073,7 @@ export async function answerFastAgentQuestion({
       }
     };
     const requireAcknowledgement = () =>
-      !platformEvent && !visibleUpdatePosted
+      !platformEvent && !substantiveWorkAcknowledged
         ? {
             success: false as const,
             error:
@@ -2169,13 +2172,10 @@ export async function answerFastAgentQuestion({
                     }
                   : chatScopedIntegrationArguments
             : chatScopedIntegrationArguments;
-        const managesCustomAutomations =
-          call.integrationId === ROOMOTE_MCP_ID &&
-          call.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
         const sendsChatReaction =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME;
-        if (!managesCustomAutomations && !sendsChatReaction) {
+        if (!sendsChatReaction) {
           const ackError = requireAcknowledgement();
           if (ackError) return ackError;
         }
@@ -2275,6 +2275,17 @@ export async function answerFastAgentQuestion({
             error:
               'This platform event may only be presented to the user with a closeout.',
           };
+        }
+
+        if (
+          call.name !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply &&
+          call.name !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction &&
+          call.name !== FAST_AGENT_NATIVE_TOOL_NAMES.launchTask &&
+          call.name !== FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart &&
+          call.name !== FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent
+        ) {
+          const ackError = requireAcknowledgement();
+          if (ackError) return ackError;
         }
 
         switch (call.name) {
@@ -2523,6 +2534,7 @@ export async function answerFastAgentQuestion({
               currentTasks.set(result.taskId, { taskId: result.taskId });
               if (result.kickoffDelivered) {
                 visibleUpdatePosted = true;
+                substantiveWorkAcknowledged = true;
               }
               if (!kickoffDelivered && !result.kickoffDelivered) {
                 await deliverKickoff(result);
@@ -2565,8 +2577,6 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask: {
             const args = taskIdArgsSchema.parse(call.args);
-            const ackError = requireAcknowledgement();
-            if (ackError) return ackError;
             const target = selectActiveTaskId(args.taskId, currentTasks);
             if (!target.taskId) return { success: false, error: target.error };
             const targetTask = currentTasks.get(target.taskId);
@@ -2957,6 +2967,8 @@ export async function answerFastAgentQuestion({
                             {
                               allowSkillAccess: true,
                               allowSpillRecovery: true,
+                              authorizeDirectTool: async () =>
+                                requireAcknowledgement(),
                               skillStore,
                               spillBudget,
                             },

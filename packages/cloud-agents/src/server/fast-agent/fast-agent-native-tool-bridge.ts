@@ -120,6 +120,7 @@ type FastAgentNativeToolBridge = {
 type ActiveExecutor = {
   allowSkillAccess: boolean;
   allowSpillRecovery: boolean;
+  authorizeDirectTool?: FastAgentNativeToolExecutor;
   conversationId: string;
   executor: FastAgentNativeToolExecutor;
   skillStore: FastAgentSkillStore;
@@ -129,6 +130,7 @@ type ActiveExecutor = {
 type FastAgentNativeToolBindingOptions = {
   allowSkillAccess?: boolean;
   allowSpillRecovery: boolean;
+  authorizeDirectTool?: FastAgentNativeToolExecutor;
   skillStore?: FastAgentSkillStore;
   spillBudget?: FastAgentSpillTurnBudget;
 };
@@ -936,6 +938,26 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
           return;
         }
       }
+      if (
+        activeExecutor.authorizeDirectTool &&
+        (parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.listSkills ||
+          parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill ||
+          isFastAgentSpillTool(parsed.tool))
+      ) {
+        const authorizationResult =
+          await activeExecutor.authorizeDirectTool(call);
+        if (authorizationResult) {
+          writeJson(response, 200, {
+            ok: true,
+            ...(await formatFastAgentNativeToolResult(
+              parsed.sessionID,
+              authorizationResult,
+              { allowSpill: false },
+            )),
+          });
+          return;
+        }
+      }
       if (parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.listSkills) {
         try {
           const args = listSkillsArgsSchema.parse(
@@ -1301,6 +1323,7 @@ export function bindFastAgentNativeToolExecutor(
   activeExecutors.set(sessionID, {
     allowSkillAccess: options.allowSkillAccess ?? false,
     allowSpillRecovery: options.allowSpillRecovery,
+    authorizeDirectTool: options.authorizeDirectTool,
     conversationId,
     executor,
     skillStore: options.skillStore ?? fastAgentSkillStore,
