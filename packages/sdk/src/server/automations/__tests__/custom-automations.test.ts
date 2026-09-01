@@ -87,7 +87,6 @@ vi.mock('@roomote/db/server', () => ({
   getCustomAutomationFrequency: vi.fn(),
   listEnabledCustomAutomations: vi.fn(),
   recordCustomAutomationRunOutcome: vi.fn(),
-  releaseCustomAutomationLaunchClaim: vi.fn(),
   slackInstallationChannels: { channelId: 'slack_channels.channel_id' },
   tryClaimCustomAutomationLaunch: vi.fn(),
   slackInstallations: {},
@@ -131,7 +130,6 @@ import {
   getCustomAutomationFrequency,
   listEnabledCustomAutomations,
   recordCustomAutomationRunOutcome,
-  releaseCustomAutomationLaunchClaim,
   tryClaimCustomAutomationLaunch,
 } from '@roomote/db/server';
 import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
@@ -181,6 +179,7 @@ describe('customAutomationsJob', () => {
     ]);
     vi.mocked(getCustomAutomationFrequency).mockReturnValue('daily');
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(new Date());
+    vi.mocked(recordCustomAutomationRunOutcome).mockResolvedValue(true);
     vi.mocked(isRunDue).mockReturnValue(true);
     vi.mocked(db.query.environments.findFirst).mockResolvedValue({
       id: automation.environmentId,
@@ -388,6 +387,40 @@ describe('customAutomationsJob', () => {
       db,
       expect.objectContaining({ status: 'failed' }),
     );
+  });
+
+  it('keeps the claim fenced when the failed outcome cannot be persisted', async () => {
+    const claimAt = new Date('2026-09-01T15:15:00.000Z');
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        target: {},
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+    vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(claimAt);
+    fastMocks.deliverParentEvent.mockRejectedValueOnce(
+      new Error('parent turn failed'),
+    );
+    vi.mocked(recordCustomAutomationRunOutcome).mockRejectedValueOnce(
+      new Error('database offline'),
+    );
+
+    const result = await customAutomationsJob();
+
+    expect(result.errors).toEqual([
+      expect.stringContaining('Failed to settle custom automation'),
+    ]);
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledOnce();
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(db, {
+      id: automation.id,
+      status: 'failed',
+      error: 'parent turn failed',
+      lastRunAt: claimAt,
+      launchClaimedAt: claimAt,
+    });
   });
 
   it('preserves Discord channel thread delivery for Fast automations', async () => {
@@ -803,6 +836,7 @@ describe('customAutomationsJob', () => {
       status: 'failed',
       error: 'The previous Fast automation run was interrupted.',
       lastLaunchedTaskId: null,
+      lastRunAt: staleClaim,
       launchClaimedAt: staleClaim,
     });
   });
@@ -1270,6 +1304,7 @@ describe('runCustomAutomationNow', () => {
     vi.mocked(getCustomAutomationById).mockResolvedValue(automation as never);
     vi.mocked(getCustomAutomationFrequency).mockReturnValue('daily');
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(new Date());
+    vi.mocked(recordCustomAutomationRunOutcome).mockResolvedValue(true);
     vi.mocked(db.query.environments.findFirst).mockResolvedValue({
       id: automation.environmentId,
     } as never);
@@ -1315,7 +1350,7 @@ describe('runCustomAutomationNow', () => {
     expect(enqueueTask).not.toHaveBeenCalled();
   });
 
-  it('releases the launch claim when enqueue fails', async () => {
+  it('atomically records the failed launch when enqueue fails', async () => {
     const claimAt = new Date('2026-07-21T00:00:00.000Z');
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(claimAt);
     vi.mocked(enqueueTask).mockRejectedValue(new Error('queue down'));
@@ -1323,10 +1358,82 @@ describe('runCustomAutomationNow', () => {
     const result = await runCustomAutomationNow(automation.id);
 
     expect(result.outcome).toBe('failed');
-    expect(releaseCustomAutomationLaunchClaim).toHaveBeenCalledWith(
-      automation.id,
-      claimAt,
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(db, {
+      id: automation.id,
+      status: 'failed',
+      error: 'queue down',
+      lastRunAt: claimAt,
+      launchClaimedAt: claimAt,
+    });
+  });
+
+  it('reuses the failed occurrence when manually recovering a Fast run', async () => {
+    const failedClaim = new Date('2026-09-01T15:15:00.000Z');
+    vi.mocked(getCustomAutomationById).mockResolvedValue({
+      ...automation,
+      executionMode: 'fast',
+      environmentId: null,
+      target: {
+        provider: 'slack',
+        targetKind: 'slack_user',
+        externalRef: 'user-1',
+      },
+      createdByUserId: 'user-1',
+      lastRunAt: failedClaim,
+      lastFailedAt: new Date('2026-09-01T15:16:27.282Z'),
+      lastError: 'transcript persistence failed',
+    } as never);
+    vi.mocked(findUserDirectMessageDestination).mockResolvedValue({
+      channelId: 'D123',
+      teamId: 'T123',
+    });
+    vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+      teamId: 'T123',
+    } as never);
+
+    const result = await runCustomAutomationNow(automation.id);
+
+    expect(result).toEqual({ outcome: 'completed' });
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: `${automation.id}:${failedClaim.toISOString()}`,
+        replyTarget: { channelId: 'D123' },
+      },
+    });
+  });
+
+  it('preserves the original occurrence when Fast recovery fails again', async () => {
+    const failedClaim = new Date('2026-09-01T15:15:00.000Z');
+    const recoveryClaim = new Date('2026-09-01T15:24:00.000Z');
+    vi.mocked(getCustomAutomationById).mockResolvedValue({
+      ...automation,
+      executionMode: 'fast',
+      environmentId: null,
+      target: {},
+      createdByUserId: 'user-1',
+      lastRunAt: failedClaim,
+      lastFailedAt: new Date('2026-09-01T15:16:27.282Z'),
+      lastError: 'transcript persistence failed',
+    } as never);
+    vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(recoveryClaim);
+    fastMocks.deliverParentEvent.mockRejectedValueOnce(
+      new Error('recovery failed'),
     );
+
+    const result = await runCustomAutomationNow(automation.id);
+
+    expect(result).toEqual({ outcome: 'failed', error: 'recovery failed' });
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(db, {
+      id: automation.id,
+      status: 'failed',
+      error: 'recovery failed',
+      lastRunAt: failedClaim,
+      launchClaimedAt: recoveryClaim,
+    });
   });
 
   it('fails when automation is disabled', async () => {
