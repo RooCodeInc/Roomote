@@ -32,7 +32,7 @@ import {
 } from '@roomote/types';
 
 import type { Variables } from '../../types';
-import type { McpAuth } from '../mcp/middleware';
+import { resolveMcpTaskOrSessionUserId, type McpAuth } from '../mcp/middleware';
 import { getMembershipRole } from './membership';
 import { logHandlerError } from '../utils';
 
@@ -154,7 +154,11 @@ async function resolveLaunchComputeProvider({
 export async function launchTask(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
 ): Promise<Response> {
-  const auth = c.get('mcpAuth');
+  const requestAuth = c.get('mcpAuth');
+  const auth = {
+    ...requestAuth,
+    userId: await resolveMcpTaskOrSessionUserId(requestAuth),
+  };
 
   if (!auth.userId) {
     return c.json({ error: 'User context required' }, 403);

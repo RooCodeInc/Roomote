@@ -1,6 +1,7 @@
 import {
   db,
   eq,
+  ensureAutomationRows,
   fastAgentConversations,
   llmUsageEvents,
   recordLlmUsage,
@@ -20,6 +21,7 @@ import {
   deriveSessionStatus,
   ensureSessionForFastConversation,
   ensureSessionForTask,
+  getTaskHumanOwnerUserIds,
   touchSessionActivity,
 } from '../sessions';
 
@@ -388,6 +390,32 @@ describe('session helpers', () => {
         .from(sessionTasks)
         .where(eq(sessionTasks.sessionId, first!.id)),
     ).toHaveLength(2);
+  });
+
+  it('resolves the Session owner for an automation-delegated task', async () => {
+    await ensureAutomationRows(db);
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+    });
+    createdSessionIds.push(session.id);
+    const task = await taskFactory.create({
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation: 'slack_channel_auto_start',
+    });
+    createdTaskIds.push(task.id);
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'fast_delegation',
+    });
+
+    await expect(getTaskHumanOwnerUserIds(db, task.id)).resolves.toEqual([
+      owner.id,
+    ]);
   });
 
   it('ignores an unknown Fast conversation id instead of aborting', async () => {

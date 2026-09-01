@@ -1421,7 +1421,8 @@ export const taskRuns = pgTable(
      * The launching or most recently acting human for this run; null for
      * automation runs. THE ONLY user column on runs. Set at enqueue, updated
      * by follow-up senders/resumers. Run tokens and MCP OAuth key off it,
-     * falling back to the deployment service principal when null.
+     * falling back to the task's durable human owner and then the deployment
+     * service principal when null.
      */
     actingUserId: text('acting_user_id').references(() => users.id),
     // Runtime payload dispatch key (renamed from `type`). No query outside

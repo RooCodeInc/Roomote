@@ -34,7 +34,7 @@ import {
 } from '@roomote/types';
 
 import type { Variables } from '../../types';
-import type { McpAuth } from '../mcp/middleware';
+import { resolveMcpTaskOrSessionUserId, type McpAuth } from '../mcp/middleware';
 import { logHandlerError } from '../utils';
 import { getLatestTaskRunsByTaskIds } from '../tasks/helpers';
 import {
@@ -171,7 +171,7 @@ function serializeSession(
 }
 
 async function startSession(c: SessionContext): Promise<Response> {
-  const userId = c.get('mcpAuth').userId;
+  const userId = await resolveMcpTaskOrSessionUserId(c.get('mcpAuth'));
   if (!userId) return c.json({ error: 'User context required' }, 403);
 
   let body: { message?: string };
