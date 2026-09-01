@@ -236,6 +236,18 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'On a human-authored turn, acknowledge first, then send the instruction immediately',
     );
+    expect(prompt).toContain(
+      'This tool call is mandatory before claiming, promising, or implying that the task will follow the new instruction',
+    );
+    expect(prompt).toContain(
+      'a conversational acknowledgement or closeout does not deliver anything to the task',
+    );
+    expect(prompt).toContain(
+      'do not launch a replacement task or merely say what you will change',
+    );
+    expect(prompt).toContain(
+      'if delivery fails, say so instead of claiming the task was updated',
+    );
     expect(prompt).toContain('kickoffMessage');
     expect(prompt).toContain('"includeAttachments"');
     expect(prompt).toContain('attachments are not forwarded by default');
