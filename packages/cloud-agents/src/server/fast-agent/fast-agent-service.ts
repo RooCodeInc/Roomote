@@ -35,6 +35,7 @@ import {
   getDeploymentTaskModelOptions,
   getSessionForFastConversation,
   getSessionForTask,
+  inArray,
   isBrainEnabled,
   isNull,
   sql,
@@ -223,11 +224,11 @@ function buildFastAgentNativeSteerMessageId(
   return `msg_${sortable.toString(16).padStart(12, '0')}${suffix}`;
 }
 
-async function getNextPendingFastAgentHumanFollowUp(
+async function getPendingFastAgentHumanFollowUps(
   sessionId: string,
   excludedEventId?: string,
 ) {
-  return db.query.fastAgentParentEvents.findFirst({
+  return db.query.fastAgentParentEvents.findMany({
     where: and(
       eq(fastAgentParentEvents.conversationId, sessionId),
       isNull(fastAgentParentEvents.deliveredAt),
@@ -246,13 +247,17 @@ async function getNextPendingFastAgentHumanFollowUp(
   });
 }
 
-async function markFastAgentHumanFollowUpDelivered(id: string): Promise<void> {
+async function markFastAgentHumanFollowUpsDelivered(
+  ids: string[],
+): Promise<void> {
+  if (ids.length === 0) return;
+
   await db
     .update(fastAgentParentEvents)
     .set({ deliveredAt: new Date(), lastError: null, updatedAt: new Date() })
     .where(
       and(
-        eq(fastAgentParentEvents.id, id),
+        inArray(fastAgentParentEvents.id, ids),
         isNull(fastAgentParentEvents.deliveredAt),
         isNull(fastAgentParentEvents.discardedAt),
       ),
@@ -1150,105 +1155,148 @@ export async function answerFastAgentQuestion({
     }
 
     for (;;) {
-      const row = await getNextPendingFastAgentHumanFollowUp(
+      const rows = await getPendingFastAgentHumanFollowUps(
         canonicalConversationId,
         currentDurableHumanFollowUpEventId,
       );
-      if (signal?.aborted || !row || !nativeSteer || activeToolExecutions > 0) {
+      if (
+        signal?.aborted ||
+        rows.length === 0 ||
+        !nativeSteer ||
+        activeToolExecutions > 0
+      ) {
         return;
       }
 
-      const parsed = fastAgentHumanFollowUpEventSchema.safeParse(row.event);
-      if (!parsed.success || row.parent.sessionId !== canonicalConversationId) {
-        await db
-          .update(fastAgentParentEvents)
-          .set({
-            discardedAt: new Date(),
-            lastError: 'Queued Fast human follow-up was invalid.',
-            updatedAt: new Date(),
-          })
-          .where(eq(fastAgentParentEvents.id, row.id));
-        continue;
-      }
+      const alreadyInjectedIds: string[] = [];
+      const batch: Array<{
+        row: (typeof rows)[number];
+        followUp: z.infer<typeof fastAgentHumanFollowUpEventSchema>;
+        followUpTurnId: string;
+        turnMessages: ModelMessage[];
+        files: NonTaskPromptFile[];
+      }> = [];
+      let blockedByDifferentUser = false;
 
-      if (injectedHumanFollowUpIds.has(row.id)) {
-        await markFastAgentHumanFollowUpDelivered(row.id);
-        continue;
-      }
+      for (const row of rows) {
+        const parsed = fastAgentHumanFollowUpEventSchema.safeParse(row.event);
+        if (
+          !parsed.success ||
+          row.parent.sessionId !== canonicalConversationId
+        ) {
+          await db
+            .update(fastAgentParentEvents)
+            .set({
+              discardedAt: new Date(),
+              lastError: 'Queued Fast human follow-up was invalid.',
+              updatedAt: new Date(),
+            })
+            .where(eq(fastAgentParentEvents.id, row.id));
+          continue;
+        }
 
-      const followUp = parsed.data;
-      if (followUp.userId !== userId) {
-        // The active turn's tools and integration clients are scoped to its
-        // initiating user. Leave another participant's message durable so the
-        // queue drainer starts a separately authorized turn after this one.
-        return;
-      }
-      const followUpTurnId = buildFastAgentTurnId({
-        currentMessageId: followUp.currentMessageId,
-        conversation,
-        question: followUp.question,
-      });
-      const { turnMessages: followUpTurnMessages } = buildFastAgentMessages({
-        question: followUp.question,
-        threadContext: [],
-        compatibilityMessages: [],
-        currentMessageTs: followUp.currentMessageId,
-        currentMessageSender: {
-          slackUserId: followUp.senderExternalId,
-          displayName: followUp.senderDisplayName,
-        },
-        surface: conversation.surface,
-        reactionInput: false,
-        turnSource: 'human',
-        slackRoomoteUserId,
-      });
-      const serializedFollowUpPrompt =
-        serializeFastAgentMessages(followUpTurnMessages);
-      if (signal?.aborted) return;
-      await persistCanonicalMessage({
-        eventId: `${followUpTurnId}:user`,
-        turnId: followUpTurnId,
-        turnSeq:
-          humanFollowUpTurnSeqs.get(row.id) ??
-          (() => {
-            const turnSeq = nextTurnSeq++;
-            humanFollowUpTurnSeqs.set(row.id, turnSeq);
-            return turnSeq;
-          })(),
-        ts: row.createdAt.getTime(),
-        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-        role: 'user',
-        contentBlocks: buildFastAgentUserContentBlocks(
-          normalizeThreadText(followUp.question),
-          followUp.images ?? [],
-        ),
-        metadata: {
-          visibleInTranscript: true,
+        if (injectedHumanFollowUpIds.has(row.id)) {
+          alreadyInjectedIds.push(row.id);
+          continue;
+        }
+
+        const followUp = parsed.data;
+        if (followUp.userId !== userId) {
+          // The active turn's tools and integration clients are scoped to its
+          // initiating user. Preserve global queue order: deliver the current
+          // actor's contiguous prefix, then leave this participant and every
+          // later message durable for separately authorized turns.
+          blockedByDifferentUser = true;
+          break;
+        }
+
+        const followUpTurnId = buildFastAgentTurnId({
+          currentMessageId: followUp.currentMessageId,
+          conversation,
+          question: followUp.question,
+        });
+        const { turnMessages } = buildFastAgentMessages({
+          question: followUp.question,
+          threadContext: [],
+          compatibilityMessages: [],
+          currentMessageTs: followUp.currentMessageId,
+          currentMessageSender: {
+            slackUserId: followUp.senderExternalId,
+            displayName: followUp.senderDisplayName,
+          },
+          surface: conversation.surface,
+          reactionInput: false,
           turnSource: 'human',
-          userId: followUp.userId,
-          ...(followUp.senderDisplayName
-            ? {
-                userName: followUp.senderDisplayName,
-                senderDisplayName: followUp.senderDisplayName,
-              }
-            : {}),
-          ...(followUp.senderExternalId
-            ? { senderExternalId: followUp.senderExternalId }
-            : {}),
-        },
-        payload: {},
-        source: conversation.surface,
-        nativeSessionId: activeOpenCodeSessionId,
-      });
+          slackRoomoteUserId,
+        });
+        batch.push({
+          row,
+          followUp,
+          followUpTurnId,
+          turnMessages,
+          files: getFastAgentImageFiles(followUp.images ?? []),
+        });
+      }
+
+      await markFastAgentHumanFollowUpsDelivered(alreadyInjectedIds);
+      if (batch.length === 0) {
+        if (blockedByDifferentUser) return;
+        continue;
+      }
+
+      if (signal?.aborted) return;
+      for (const { row, followUp, followUpTurnId } of batch) {
+        await persistCanonicalMessage({
+          eventId: `${followUpTurnId}:user`,
+          turnId: followUpTurnId,
+          turnSeq:
+            humanFollowUpTurnSeqs.get(row.id) ??
+            (() => {
+              const turnSeq = nextTurnSeq++;
+              humanFollowUpTurnSeqs.set(row.id, turnSeq);
+              return turnSeq;
+            })(),
+          ts: row.createdAt.getTime(),
+          eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          role: 'user',
+          contentBlocks: buildFastAgentUserContentBlocks(
+            normalizeThreadText(followUp.question),
+            followUp.images ?? [],
+          ),
+          metadata: {
+            visibleInTranscript: true,
+            turnSource: 'human',
+            userId: followUp.userId,
+            ...(followUp.senderDisplayName
+              ? {
+                  userName: followUp.senderDisplayName,
+                  senderDisplayName: followUp.senderDisplayName,
+                }
+              : {}),
+            ...(followUp.senderExternalId
+              ? { senderExternalId: followUp.senderExternalId }
+              : {}),
+          },
+          payload: {},
+          source: conversation.surface,
+          nativeSessionId: activeOpenCodeSessionId,
+        });
+      }
       if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) return;
+      const batchMessages = batch.flatMap(({ turnMessages }) => turnMessages);
+      const batchFiles = batch.flatMap(({ files }) => files);
+      const firstRow = batch[0]!.row;
       const previousInstructionVersion = currentInstructionVersion;
       const steerInstructionVersion = previousInstructionVersion + 1;
       currentInstructionVersion = steerInstructionVersion;
       try {
         await nativeSteer({
-          messageId: buildFastAgentNativeSteerMessageId(row.id, row.createdAt),
-          text: serializedFollowUpPrompt,
-          files: getFastAgentImageFiles(followUp.images ?? []),
+          messageId: buildFastAgentNativeSteerMessageId(
+            firstRow.id,
+            firstRow.createdAt,
+          ),
+          text: serializeFastAgentMessages(batchMessages),
+          files: batchFiles,
         });
       } catch (error) {
         if (currentInstructionVersion === steerInstructionVersion) {
@@ -1257,11 +1305,12 @@ export async function answerFastAgentQuestion({
         throw error;
       }
       if (signal?.aborted) return;
-      injectedHumanFollowUpIds.add(row.id);
-      injectedHumanFollowUpMessages.push(...followUpTurnMessages);
-      injectedHumanFollowUpFiles.push(
-        ...getFastAgentImageFiles(followUp.images ?? []),
+      console.info(
+        `[Fast Agent] Native steer accepted. conversationId="${canonicalConversationId}" followUpCount=${batch.length}`,
       );
+      for (const { row } of batch) injectedHumanFollowUpIds.add(row.id);
+      injectedHumanFollowUpMessages.push(...batchMessages);
+      injectedHumanFollowUpFiles.push(...batchFiles);
       // Native steering starts a new human instruction boundary inside the
       // same OpenCode run. Prior tool results remain in-session, while local
       // duplicate guards reset so the user may intentionally repeat an action.
@@ -1269,8 +1318,10 @@ export async function answerFastAgentQuestion({
       completedChatReactionSignatures.clear();
       completedChatReplySignatures.clear();
       completedTaskActions.clear();
-      turnVisibleMessages.push(...followUpTurnMessages);
-      await markFastAgentHumanFollowUpDelivered(row.id);
+      turnVisibleMessages.push(...batchMessages);
+      await markFastAgentHumanFollowUpsDelivered(
+        batch.map(({ row }) => row.id),
+      );
     }
   };
   const schedulePendingHumanSteerDrain = () => {

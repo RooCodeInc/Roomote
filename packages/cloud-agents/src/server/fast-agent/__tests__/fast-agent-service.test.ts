@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
   getPendingHumanFollowUp: vi.fn(),
+  inArray: vi.fn((...values: unknown[]) => values),
   updateParentEventWhere: vi.fn(),
   nativeSteer: vi.fn(),
   nativeExecutor: undefined as
@@ -107,6 +108,7 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...values) => values),
   asc: vi.fn((value) => value),
   eq: vi.fn((...values) => values),
+  inArray: mocks.inArray,
   isNull: vi.fn((value) => value),
   sql: vi.fn(),
   fastAgentParentEvents: {
@@ -122,7 +124,7 @@ vi.mock('@roomote/db/server', () => ({
   isBrainEnabled: mocks.isBrainEnabled,
   db: {
     query: {
-      fastAgentParentEvents: { findFirst: mocks.getPendingHumanFollowUp },
+      fastAgentParentEvents: { findMany: mocks.getPendingHumanFollowUp },
     },
     update: vi.fn(() => ({
       set: vi.fn(() => ({ where: mocks.updateParentEventWhere })),
@@ -323,7 +325,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.getUnifiedSession.mockResolvedValue(null);
     mocks.touchSessionActivity.mockResolvedValue(undefined);
     mocks.getSessionForTask.mockResolvedValue(null);
-    mocks.getPendingHumanFollowUp.mockResolvedValue(undefined);
+    mocks.getPendingHumanFollowUp.mockResolvedValue([]);
     mocks.updateParentEventWhere.mockResolvedValue(undefined);
     mocks.nativeSteer.mockResolvedValue(undefined);
     mocks.getNativeRuntime.mockImplementation(async () => {
@@ -619,11 +621,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         },
       };
       mocks.getPendingHumanFollowUp
-        .mockResolvedValueOnce(queuedFollowUp)
+        .mockResolvedValueOnce([queuedFollowUp])
         // A stale read after promptAsync succeeds must not inject the same
         // durable event twice before deliveredAt becomes visible.
-        .mockResolvedValueOnce(queuedFollowUp)
-        .mockResolvedValue(undefined);
+        .mockResolvedValueOnce([queuedFollowUp])
+        .mockResolvedValue([]);
       let finishNativeSteer: (() => void) | undefined;
       mocks.nativeSteer.mockImplementationOnce(
         () =>
@@ -706,6 +708,125 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('batches the pending same-user prefix into one native steer', async () => {
+    vi.useFakeTimers();
+    try {
+      const first = {
+        id: '11111111-1111-4111-8111-111111111111',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.3',
+          currentMessageId: '100.3',
+          userId: 'user-1',
+          question: 'First pending correction.',
+          images: ['data:image/png;base64,Zmlyc3Q='],
+        },
+      };
+      const second = {
+        id: '22222222-2222-4222-8222-222222222222',
+        createdAt: new Date('2026-08-31T12:00:01.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.4',
+          currentMessageId: '100.4',
+          userId: 'user-1',
+          question: 'Second pending correction.',
+          images: ['data:image/jpeg;base64,c2Vjb25k'],
+        },
+      };
+      const otherParticipant = {
+        id: '33333333-3333-4333-8333-333333333333',
+        createdAt: new Date('2026-08-31T12:00:02.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.5',
+          currentMessageId: '100.5',
+          userId: 'user-2',
+          question: 'Keep this for my authorized turn.',
+        },
+      };
+      const laterOriginalParticipant = {
+        id: '44444444-4444-4444-8444-444444444444',
+        createdAt: new Date('2026-08-31T12:00:03.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.6',
+          currentMessageId: '100.6',
+          userId: 'user-1',
+          question: 'Do not jump this ahead of another participant.',
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([
+          first,
+          second,
+          otherParticipant,
+          laterOriginalParticipant,
+        ])
+        .mockResolvedValueOnce([otherParticipant, laterOriginalParticipant]);
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+
+      const steer = mocks.nativeSteer.mock.calls[0]?.[0];
+      expect(steer?.text).toContain('First pending correction.');
+      expect(steer?.text).toContain('Second pending correction.');
+      expect(steer?.text).not.toContain('Keep this for my authorized turn.');
+      expect(steer?.text).not.toContain(
+        'Do not jump this ahead of another participant.',
+      );
+      expect(steer?.text.indexOf('First pending correction.')).toBeLessThan(
+        steer?.text.indexOf('Second pending correction.') ?? -1,
+      );
+      expect(steer?.files).toEqual([
+        { mime: 'image/png', url: 'data:image/png;base64,Zmlyc3Q=' },
+        { mime: 'image/jpeg', url: 'data:image/jpeg;base64,c2Vjb25k' },
+      ]);
+      expect(mocks.inArray).toHaveBeenCalledWith('id', [first.id, second.id]);
+      expect(mocks.upsertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({ eventId: '100.3:user' }),
+        }),
+      );
+      expect(mocks.upsertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({ eventId: '100.4:user' }),
+        }),
+      );
+      expect(mocks.upsertMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({ eventId: '100.5:user' }),
+        }),
+      );
+
+      finishGeneration?.('Combined steered answer');
+      await expect(resultPromise).resolves.toBe('Combined steered answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('lets a native steer close independently from the response already in progress', async () => {
     vi.useFakeTimers();
     try {
@@ -722,8 +843,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         },
       };
       mocks.getPendingHumanFollowUp
-        .mockResolvedValueOnce(queuedFollowUp)
-        .mockResolvedValue(undefined);
+        .mockResolvedValueOnce([queuedFollowUp])
+        .mockResolvedValue([]);
 
       let continueGeneration: (() => void) | undefined;
       const generationPaused = new Promise<void>((resolve) => {
@@ -821,19 +942,21 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     vi.useFakeTimers();
     try {
       mocks.getPendingHumanFollowUp
-        .mockResolvedValueOnce({
-          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
-          createdAt: new Date('2026-08-31T12:00:00.000Z'),
-          parent: { sessionId: 'conversation-1' },
-          event: {
-            type: 'human_follow_up',
-            eventId: '100.3',
-            currentMessageId: '100.3',
-            userId: 'user-1',
-            question: 'Use the corrected requirement.',
+        .mockResolvedValueOnce([
+          {
+            id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+            createdAt: new Date('2026-08-31T12:00:00.000Z'),
+            parent: { sessionId: 'conversation-1' },
+            event: {
+              type: 'human_follow_up',
+              eventId: '100.3',
+              currentMessageId: '100.3',
+              userId: 'user-1',
+              question: 'Use the corrected requirement.',
+            },
           },
-        })
-        .mockResolvedValue(undefined);
+        ])
+        .mockResolvedValue([]);
       let finishPreSteerPrompt: (() => void) | undefined;
       const preSteerPromptBlocked = new Promise<void>((resolve) => {
         finishPreSteerPrompt = resolve;
@@ -882,19 +1005,21 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     vi.useFakeTimers();
     try {
       mocks.getPendingHumanFollowUp
-        .mockResolvedValueOnce({
-          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
-          createdAt: new Date('2026-08-31T12:00:00.000Z'),
-          parent: { sessionId: 'conversation-1' },
-          event: {
-            type: 'human_follow_up',
-            eventId: '100.3',
-            currentMessageId: '100.3',
-            userId: 'user-1',
-            question: 'Use the corrected requirement.',
+        .mockResolvedValueOnce([
+          {
+            id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+            createdAt: new Date('2026-08-31T12:00:00.000Z'),
+            parent: { sessionId: 'conversation-1' },
+            event: {
+              type: 'human_follow_up',
+              eventId: '100.3',
+              currentMessageId: '100.3',
+              userId: 'user-1',
+              question: 'Use the corrected requirement.',
+            },
           },
-        })
-        .mockResolvedValue(undefined);
+        ])
+        .mockResolvedValue([]);
       let startSteeredAssistant: (() => void) | undefined;
       let finishNativeSteer: (() => void) | undefined;
       mocks.nativeSteer.mockImplementationOnce(
@@ -975,9 +1100,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         },
       };
       mocks.getPendingHumanFollowUp
-        .mockResolvedValueOnce(queuedFollowUp)
-        .mockResolvedValueOnce(queuedFollowUp)
-        .mockResolvedValue(undefined);
+        .mockResolvedValueOnce([queuedFollowUp])
+        .mockResolvedValueOnce([queuedFollowUp])
+        .mockResolvedValue([]);
 
       let notePersistenceStarted: (() => void) | undefined;
       const persistenceStarted = new Promise<void>((resolve) => {
@@ -1065,18 +1190,20 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   it('leaves another participant follow-up queued for its own authorized turn', async () => {
     vi.useFakeTimers();
     try {
-      mocks.getPendingHumanFollowUp.mockResolvedValueOnce({
-        id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
-        createdAt: new Date('2026-08-31T12:00:00.000Z'),
-        parent: { sessionId: 'conversation-1' },
-        event: {
-          type: 'human_follow_up',
-          eventId: '100.3',
-          currentMessageId: '100.3',
-          userId: 'different-user',
-          question: 'Use my integrations, not theirs.',
+      mocks.getPendingHumanFollowUp.mockResolvedValueOnce([
+        {
+          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+          createdAt: new Date('2026-08-31T12:00:00.000Z'),
+          parent: { sessionId: 'conversation-1' },
+          event: {
+            type: 'human_follow_up',
+            eventId: '100.3',
+            currentMessageId: '100.3',
+            userId: 'different-user',
+            question: 'Use my integrations, not theirs.',
+          },
         },
-      });
+      ]);
       let finishGeneration: ((value: string) => void) | undefined;
       mocks.generateText.mockImplementation(
         async (_params, _session, options) => {
@@ -1110,21 +1237,23 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     vi.useFakeTimers();
     try {
       mocks.getPendingHumanFollowUp
-        .mockResolvedValueOnce({
-          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
-          createdAt: new Date('2026-08-31T12:00:00.000Z'),
-          parent: { sessionId: 'conversation-1' },
-          event: {
-            type: 'human_follow_up',
-            eventId: '100.3',
-            currentMessageId: '100.3',
-            userId: 'user-1',
-            question: '$create-pr',
-            senderDisplayName: 'Matt',
-            senderExternalId: 'U123',
+        .mockResolvedValueOnce([
+          {
+            id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+            createdAt: new Date('2026-08-31T12:00:00.000Z'),
+            parent: { sessionId: 'conversation-1' },
+            event: {
+              type: 'human_follow_up',
+              eventId: '100.3',
+              currentMessageId: '100.3',
+              userId: 'user-1',
+              question: '$create-pr',
+              senderDisplayName: 'Matt',
+              senderExternalId: 'U123',
+            },
           },
-        })
-        .mockResolvedValue(undefined);
+        ])
+        .mockResolvedValue([]);
       let finishGeneration: ((value: string) => void) | undefined;
       mocks.generateText.mockImplementation(
         async (_params, _session, options) => {
@@ -1164,19 +1293,21 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     vi.useFakeTimers();
     try {
       mocks.getPendingHumanFollowUp
-        .mockResolvedValueOnce({
-          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
-          createdAt: new Date('2026-08-31T12:00:00.000Z'),
-          parent: { sessionId: 'conversation-1' },
-          event: {
-            type: 'human_follow_up',
-            eventId: '100.3',
-            currentMessageId: '100.3',
-            userId: 'user-1',
-            question: 'Use the corrected requirement.',
+        .mockResolvedValueOnce([
+          {
+            id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+            createdAt: new Date('2026-08-31T12:00:00.000Z'),
+            parent: { sessionId: 'conversation-1' },
+            event: {
+              type: 'human_follow_up',
+              eventId: '100.3',
+              currentMessageId: '100.3',
+              userId: 'user-1',
+              question: 'Use the corrected requirement.',
+            },
           },
-        })
-        .mockResolvedValue(undefined);
+        ])
+        .mockResolvedValue([]);
       let failFirstAttempt: ((error: Error) => void) | undefined;
       let attempt = 0;
       mocks.generateText.mockImplementation(
@@ -1226,20 +1357,22 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         openCodeSessionId: 'missing-session',
       });
       mocks.getPendingHumanFollowUp
-        .mockResolvedValueOnce({
-          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
-          createdAt: new Date('2026-08-31T12:00:00.000Z'),
-          parent: { sessionId: 'conversation-1' },
-          event: {
-            type: 'human_follow_up',
-            eventId: '100.3',
-            currentMessageId: '100.3',
-            userId: 'user-1',
-            question: 'Preserve this fallback correction.',
-            images: ['data:image/png;base64,aGVsbG8='],
+        .mockResolvedValueOnce([
+          {
+            id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+            createdAt: new Date('2026-08-31T12:00:00.000Z'),
+            parent: { sessionId: 'conversation-1' },
+            event: {
+              type: 'human_follow_up',
+              eventId: '100.3',
+              currentMessageId: '100.3',
+              userId: 'user-1',
+              question: 'Preserve this fallback correction.',
+              images: ['data:image/png;base64,aGVsbG8='],
+            },
           },
-        })
-        .mockResolvedValue(undefined);
+        ])
+        .mockResolvedValue([]);
       let failHeldSession: ((error: Error) => void) | undefined;
       let attempt = 0;
       mocks.generateText.mockImplementation(
