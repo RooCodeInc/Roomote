@@ -63,6 +63,8 @@ const REQUEST_HEADER_DENYLIST = new Set([
   'x-real-ip',
 ]);
 
+const ROOMOTE_USER_AGENT_PRODUCT = 'roomote';
+
 function recordLiteLlmResponseCost(options: {
   requestId: string;
   runId: number;
@@ -403,6 +405,15 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
   }
 
   const { upstreamUrl, headers: injectedHeaders } = resolution.resolved;
+
+  if (providerId === 'opencode-go') {
+    injectedHeaders['user-agent'] = [
+      ROOMOTE_USER_AGENT_PRODUCT,
+      c.req.header('user-agent')?.trim(),
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
 
   if (providerId === 'github-copilot') {
     injectedHeaders['x-initiator'] =
