@@ -12,12 +12,13 @@ import { enqueueFastAgentParentEvent } from './fast-agent-parent-event-queue';
 
 export type FastAgentHumanFollowUpAdmission =
   | { kind: 'turn'; turnLock: FastAgentTurnLockHandle }
-  | { kind: 'queued'; abort: () => Promise<void> };
+  | { kind: 'queued'; abort: () => Promise<void> }
+  | { kind: 'steered'; abort: () => Promise<void> };
 
 /**
  * Start a human turn immediately when the conversation is idle. While another
- * Fast generation owns the turn lock, durably admit the message so the parent
- * event queue runs it as a subsequent serialized turn.
+ * Fast generation owns the turn lock, durably admit the message for native
+ * OpenCode steering instead of waiting to run it as a separate whole turn.
  */
 export async function admitFastAgentHumanFollowUp(params: {
   parent: FastAgentParent;
@@ -39,7 +40,7 @@ export async function admitFastAgentHumanFollowUp(params: {
     event: params.event,
   });
   return {
-    kind: 'queued',
+    kind: params.forceQueue ? 'queued' : 'steered',
     abort: async () => {
       await db
         .update(fastAgentParentEvents)

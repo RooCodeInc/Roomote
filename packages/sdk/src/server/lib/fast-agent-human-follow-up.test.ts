@@ -63,7 +63,7 @@ describe('admitFastAgentHumanFollowUp', () => {
     expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
   });
 
-  it('durably deduplicates a follow-up for a subsequent turn when busy', async () => {
+  it('durably deduplicates a follow-up before native steering when busy', async () => {
     mocks.acquireTurnLock.mockResolvedValue(null);
     mocks.enqueueParentEvent.mockResolvedValue({
       eventKey: 'stable-event-key',
@@ -72,9 +72,9 @@ describe('admitFastAgentHumanFollowUp', () => {
 
     const admission = await admitFastAgentHumanFollowUp({ parent, event });
 
-    expect(admission.kind).toBe('queued');
+    expect(admission.kind).toBe('steered');
     expect(mocks.enqueueParentEvent).toHaveBeenCalledWith({ parent, event });
-    if (admission.kind === 'queued') await admission.abort();
+    if (admission.kind === 'steered') await admission.abort();
     expect(mocks.updateWhere).toHaveBeenCalled();
   });
 

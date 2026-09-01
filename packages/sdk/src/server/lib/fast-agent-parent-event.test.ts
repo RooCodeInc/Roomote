@@ -3,6 +3,8 @@ const mocks = vi.hoisted(() => ({
   releaseTurnLock: Object.assign(vi.fn(), {
     signal: new AbortController().signal,
     abort: vi.fn(),
+    abortForShutdown: vi.fn(),
+    shutdownCloseoutSettled: Promise.resolve(),
   }),
   acquireRootBindingLock: vi.fn(),
   releaseRootBindingLock: vi.fn(),

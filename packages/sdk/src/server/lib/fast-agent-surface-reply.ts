@@ -518,7 +518,7 @@ export async function continueFastAgentSurfaceReply(
   }
 
   const admission = await admitFastAgentSurfaceHumanFollowUp(params, delivery);
-  if (admission?.kind === 'queued') return true;
+  if (admission && admission.kind !== 'turn') return true;
 
   return runFastAgentSurfaceReply({ ...params, delivery, admission });
 }
