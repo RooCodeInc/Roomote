@@ -325,7 +325,7 @@ async function notifySlackThreadsAboutArtifactBuild({
   }
 }
 
-async function notifySourceTaskArtifactBuild({
+export async function notifySourceTaskArtifactBuild({
   auth,
   sourceTaskId,
   sourceArtifactId,
