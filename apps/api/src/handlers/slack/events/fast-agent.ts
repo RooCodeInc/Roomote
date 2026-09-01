@@ -23,7 +23,6 @@ import {
 } from '@roomote/slack';
 import {
   appendAttachmentTextsToPromptText,
-  hasLeadingSlackProductAddress,
   stripLeadingSlackProductMention,
 } from '@roomote/cloud-agents';
 import {
@@ -120,9 +119,6 @@ export async function processFastAgentMessage(params: {
     await slack.normalizeIncomingText(
       stripLeadingFastCommandMention(event.authoredText ?? event.text),
     ),
-  );
-  const addressedByProductName = hasLeadingSlackProductAddress(
-    event.authoredText ?? event.text,
   );
   const baseQuestion = extractFastQuestion(normalizedText, continuation) ?? '';
 
@@ -282,8 +278,7 @@ export async function processFastAgentMessage(params: {
         event.channel_type !== 'im' &&
         event.channel_type !== 'mpim' &&
         hasOtherHumanParticipant &&
-        !directedAtRoomote &&
-        !addressedByProductName,
+        !directedAtRoomote,
       ...(roomoteSlackUserId ? { slackRoomoteUserId: roomoteSlackUserId } : {}),
       adapter: {
         activity: createFastAgentSlackSessionActivity({

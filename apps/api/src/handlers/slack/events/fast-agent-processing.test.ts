@@ -59,8 +59,6 @@ vi.mock('@roomote/cloud-agents', () => ({
   }) => [text, ...attachmentTexts].filter(Boolean).join('\n\n'),
   isRoomoteTextExtractableAttachment: ({ mimeType }: { mimeType?: string }) =>
     mimeType?.startsWith('text/') ?? false,
-  hasLeadingSlackProductAddress: (text: string) =>
-    /^\s*(?:(?:hey|hi|hello)\s+)?@?roomote(?=$|\s|[,:;.!?-])/i.test(text),
   stripLeadingSlackProductMention: (text: string) => text,
 }));
 
@@ -1138,50 +1136,6 @@ describe('processFastAgentMessage', () => {
           postReaction: expect.any(Function),
         }),
       }),
-    );
-  });
-
-  it('requires a response when a first-time participant addresses Roomote by name', async () => {
-    const slack = {
-      addReaction: vi.fn().mockResolvedValue(true),
-      removeReaction: vi.fn().mockResolvedValue(true),
-      normalizeIncomingText: vi.fn(async (text: string) => text),
-      fetchThreadMessages: vi.fn(async () => [
-        { user: 'U111', username: 'Dan', text: '!fast hi', ts: '100.000' },
-        {
-          user: 'UBOT',
-          username: 'Roomote',
-          bot_id: 'B999',
-          text: 'Hi Dan.',
-          ts: '100.001',
-        },
-        {
-          user: 'U222',
-          username: 'Matt',
-          text: 'Hey Roomote, can you check this too?',
-          ts: '100.002',
-        },
-      ]),
-    };
-
-    await processFastAgentMessage({
-      event: {
-        type: 'message',
-        channel: 'C123',
-        user: 'U222',
-        text: 'Hey Roomote, can you check this too?',
-        ts: '100.002',
-        thread_ts: '100.000',
-      } as never,
-      slack: slack as never,
-      userId: 'user-2',
-      teamId: 'T123',
-      continuation: true,
-      isExistingConversation: true,
-    });
-
-    expect(mocks.answerQuestion).toHaveBeenCalledWith(
-      expect.objectContaining({ allowSilentAmbientReply: false }),
     );
   });
 

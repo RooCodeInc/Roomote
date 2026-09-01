@@ -505,13 +505,19 @@ describe('buildFastAgentSystemPrompt', () => {
       'Before applying Turn Startup or Evidence-Driven Workflow, decide whether the current sender is specifically addressing Roomote',
     );
     expect(ambientPrompt).toContain(
-      'asking a peer to act is ambient even when it contains an actionable request',
+      'addressed to the whole group rather than specifically to Roomote defaults to ambient',
     );
     expect(ambientPrompt).toContain(
-      'For a short acknowledgement whose addressee is genuinely ambiguous, prefer a lightweight `send_chat_reaction`',
+      'Respond to a whole-group message only when Roomote has a particular, materially useful contribution beyond what participants have already said',
     );
     expect(ambientPrompt).toContain(
-      'A first-time participant is not ambient merely because they are new; respond when they address Roomote',
+      'Apply a higher response bar than for an ordinary response-required message',
+    );
+    expect(ambientPrompt).toContain(
+      'use a lightweight `send_chat_reaction` only when acknowledgement itself is useful',
+    );
+    expect(ambientPrompt).toContain(
+      'A first-time participant is not ambient merely because they are new; respond when the conversation context shows they are addressing Roomote',
     );
     expect(ambientPrompt).toContain(
       "a direct answer to Roomote's latest question, a request to act on Roomote's work, or a clearly directed follow-up requires a response",
