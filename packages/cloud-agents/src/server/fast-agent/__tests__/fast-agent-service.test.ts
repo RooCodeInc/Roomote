@@ -789,6 +789,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await vi.advanceTimersByTimeAsync(250);
       await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
 
+      expect(mocks.getPendingHumanFollowUp).toHaveBeenCalledWith(
+        expect.objectContaining({ limit: 17 }),
+      );
       const steer = mocks.nativeSteer.mock.calls[0]?.[0];
       expect(steer?.text).toContain('First pending correction.');
       expect(steer?.text).toContain('Second pending correction.');
@@ -822,6 +825,62 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       finishGeneration?.('Combined steered answer');
       await expect(resultPromise).resolves.toBe('Combined steered answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('chunks an oversized pending prefix into bounded native steers', async () => {
+    vi.useFakeTimers();
+    try {
+      const queuedFollowUps = Array.from({ length: 17 }, (_, index) => ({
+        id: `${String(index + 1).padStart(8, '0')}-1111-4111-8111-111111111111`,
+        createdAt: new Date(Date.UTC(2026, 7, 31, 12, 0, index)),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: `100.${index + 3}`,
+          currentMessageId: `100.${index + 3}`,
+          userId: 'user-1',
+          question: `Batch update ${index}.`,
+        },
+      }));
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce(queuedFollowUps)
+        .mockResolvedValueOnce([queuedFollowUps[16]])
+        .mockResolvedValue([]);
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() =>
+        expect(mocks.nativeSteer).toHaveBeenCalledTimes(2),
+      );
+
+      const firstSteer = mocks.nativeSteer.mock.calls[0]?.[0];
+      expect(firstSteer?.text).toContain('Batch update 0.');
+      expect(firstSteer?.text).toContain('Batch update 15.');
+      expect(firstSteer?.text).not.toContain('Batch update 16.');
+      expect(mocks.nativeSteer.mock.calls[1]?.[0]?.text).toContain(
+        'Batch update 16.',
+      );
+
+      finishGeneration?.('Chunked steered answer');
+      await expect(resultPromise).resolves.toBe('Chunked steered answer');
     } finally {
       vi.useRealTimers();
     }

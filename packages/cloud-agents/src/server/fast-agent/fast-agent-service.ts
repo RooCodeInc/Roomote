@@ -212,6 +212,12 @@ const showWidgetArgsSchema = z.object({
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS = 50_000;
 const FAST_AGENT_HUMAN_STEER_POLL_INTERVAL_MS = 250;
+const FAST_AGENT_HUMAN_STEER_MAX_MESSAGES = 16;
+const FAST_AGENT_HUMAN_STEER_QUERY_LIMIT =
+  FAST_AGENT_HUMAN_STEER_MAX_MESSAGES + 1;
+const FAST_AGENT_HUMAN_STEER_MAX_TEXT_BYTES = 64 * 1024;
+const FAST_AGENT_HUMAN_STEER_MAX_FILES = 16;
+const FAST_AGENT_HUMAN_STEER_MAX_FILE_BYTES = 24 * 1024 * 1024;
 
 function buildFastAgentNativeSteerMessageId(
   rowId: string,
@@ -244,6 +250,7 @@ async function getPendingFastAgentHumanFollowUps(
       asc(fastAgentParentEvents.createdAt),
       asc(fastAgentParentEvents.id),
     ],
+    limit: FAST_AGENT_HUMAN_STEER_QUERY_LIMIT,
   });
 }
 
@@ -1174,8 +1181,12 @@ export async function answerFastAgentQuestion({
         followUp: z.infer<typeof fastAgentHumanFollowUpEventSchema>;
         followUpTurnId: string;
         turnMessages: ModelMessage[];
+        serializedPrompt: string;
         files: NonTaskPromptFile[];
       }> = [];
+      let batchTextBytes = 0;
+      let batchFileCount = 0;
+      let batchFileBytes = 0;
       let blockedByDifferentUser = false;
 
       for (const row of rows) {
@@ -1229,12 +1240,39 @@ export async function answerFastAgentQuestion({
           turnSource: 'human',
           slackRoomoteUserId,
         });
+        const serializedPrompt = serializeFastAgentMessages(turnMessages);
+        const files = getFastAgentImageFiles(followUp.images ?? []);
+        const serializedPromptBytes = Buffer.byteLength(
+          serializedPrompt,
+          'utf8',
+        );
+        const filesBytes = files.reduce(
+          (total, file) =>
+            total +
+            Buffer.byteLength(file.url, 'utf8') +
+            Buffer.byteLength(file.mime, 'utf8') +
+            Buffer.byteLength(file.filename ?? '', 'utf8'),
+          0,
+        );
+        const separatorBytes = batch.length > 0 ? 2 : 0;
+        const exceedsBatchLimit =
+          batch.length >= FAST_AGENT_HUMAN_STEER_MAX_MESSAGES ||
+          batchTextBytes + separatorBytes + serializedPromptBytes >
+            FAST_AGENT_HUMAN_STEER_MAX_TEXT_BYTES ||
+          batchFileCount + files.length > FAST_AGENT_HUMAN_STEER_MAX_FILES ||
+          batchFileBytes + filesBytes > FAST_AGENT_HUMAN_STEER_MAX_FILE_BYTES;
+        if (batch.length > 0 && exceedsBatchLimit) break;
+
+        batchTextBytes += separatorBytes + serializedPromptBytes;
+        batchFileCount += files.length;
+        batchFileBytes += filesBytes;
         batch.push({
           row,
           followUp,
           followUpTurnId,
           turnMessages,
-          files: getFastAgentImageFiles(followUp.images ?? []),
+          serializedPrompt,
+          files,
         });
       }
 
@@ -1285,6 +1323,9 @@ export async function answerFastAgentQuestion({
       if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) return;
       const batchMessages = batch.flatMap(({ turnMessages }) => turnMessages);
       const batchFiles = batch.flatMap(({ files }) => files);
+      const batchPrompt = batch
+        .map(({ serializedPrompt }) => serializedPrompt)
+        .join('\n\n');
       const firstRow = batch[0]!.row;
       const previousInstructionVersion = currentInstructionVersion;
       const steerInstructionVersion = previousInstructionVersion + 1;
@@ -1295,7 +1336,7 @@ export async function answerFastAgentQuestion({
             firstRow.id,
             firstRow.createdAt,
           ),
-          text: serializeFastAgentMessages(batchMessages),
+          text: batchPrompt,
           files: batchFiles,
         });
       } catch (error) {
