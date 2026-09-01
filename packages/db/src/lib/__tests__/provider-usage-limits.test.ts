@@ -1,9 +1,25 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { mockGetChatGptSubscription, mockGetFreshChatGptAccessToken } =
+  vi.hoisted(() => ({
+    mockGetChatGptSubscription: vi.fn(),
+    mockGetFreshChatGptAccessToken: vi.fn(),
+  }));
 
 vi.mock('../../encryption', () => ({
   encryptJSON: (value: unknown) => JSON.stringify(value),
   decryptSecrets: async (value: string) => JSON.parse(value) as unknown,
 }));
+
+vi.mock('../chatgpt-subscription', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../chatgpt-subscription')>();
+  return {
+    ...actual,
+    getChatGptSubscription: mockGetChatGptSubscription,
+    getFreshChatGptAccessToken: mockGetFreshChatGptAccessToken,
+  };
+});
 
 import {
   fingerprintProviderCredential,
@@ -28,6 +44,11 @@ describe('fingerprintProviderCredential', () => {
 });
 
 describe('getProviderUsageLimitSnapshots', () => {
+  beforeEach(() => {
+    mockGetChatGptSubscription.mockReset().mockResolvedValue(null);
+    mockGetFreshChatGptAccessToken.mockReset().mockResolvedValue(null);
+  });
+
   it('uses weekly limit_remaining instead of all-time OpenRouter usage', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       jsonResponse({
@@ -125,5 +146,96 @@ describe('getProviderUsageLimitSnapshots', () => {
         resetsAt: '2026-08-24T00:00:00.000Z',
       }),
     ]);
+  });
+
+  it('includes connected ChatGPT subscription quota windows', async () => {
+    mockGetChatGptSubscription.mockResolvedValue({
+      refresh: 'refresh-token',
+      access: 'chatgpt-access',
+      expires: Date.now() + 60 * 60 * 1000,
+      accountId: 'acct-1',
+      status: 'connected',
+      fastMode: false,
+      connectedAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    });
+    mockGetFreshChatGptAccessToken.mockResolvedValue({
+      access: 'chatgpt-access',
+      accountId: 'acct-1',
+    });
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        plan_type: 'pro',
+        rate_limit: {
+          primary_window: {
+            used_percent: 86,
+            limit_window_seconds: 604_800,
+            reset_at: 1_788_134_400,
+          },
+        },
+      }),
+    );
+
+    const snapshots = await getProviderUsageLimitSnapshots({ fetchImpl });
+
+    expect(snapshots).toEqual([
+      expect.objectContaining({
+        providerId: 'chatgpt',
+        providerName: 'ChatGPT Subscription',
+        credentialFingerprint: expect.stringMatching(/^[a-f0-9]{12}$/),
+        windowLabel: 'Weekly limit',
+        usedPercent: 86,
+        resetsAt: new Date(1_788_134_400 * 1000).toISOString(),
+      }),
+    ]);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://chatgpt.com/backend-api/wham/usage',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer chatgpt-access',
+          'ChatGPT-Account-Id': 'acct-1',
+        }),
+      }),
+    );
+  });
+
+  it('keeps the ChatGPT fingerprint stable when refresh tokens rotate', async () => {
+    const subscription = {
+      access: 'chatgpt-access',
+      expires: Date.now() + 60 * 60 * 1000,
+      status: 'connected' as const,
+      fastMode: false,
+      connectedAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    };
+    mockGetChatGptSubscription
+      .mockResolvedValueOnce({
+        ...subscription,
+        refresh: 'first-refresh-token',
+      })
+      .mockResolvedValueOnce({
+        ...subscription,
+        refresh: 'rotated-refresh-token',
+      });
+    mockGetFreshChatGptAccessToken.mockResolvedValue({
+      access: 'chatgpt-access',
+    });
+    const fetchImpl = vi.fn().mockImplementation(async () =>
+      jsonResponse({
+        rate_limit: {
+          primary_window: {
+            used_percent: 86,
+            limit_window_seconds: 604_800,
+          },
+        },
+      }),
+    );
+
+    const first = await getProviderUsageLimitSnapshots({ fetchImpl });
+    const second = await getProviderUsageLimitSnapshots({ fetchImpl });
+
+    expect(first[0]?.credentialFingerprint).toBe(
+      second[0]?.credentialFingerprint,
+    );
   });
 });
