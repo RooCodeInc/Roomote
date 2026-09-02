@@ -741,6 +741,31 @@ describe('custom-automations MCP routes', () => {
       );
     });
 
+    it('clears reasoning effort when the model is cleared', async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue({
+        ...existing,
+        model: 'openai/gpt-5.6-luna',
+        reasoningEffort: 'high',
+      });
+      mockUpdateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: null }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockUpdateCustomAutomation).toHaveBeenCalledWith(
+        'automation-1',
+        expect.objectContaining({
+          model: null,
+          reasoningEffort: null,
+        }),
+      );
+    });
+
     it('switches an existing automation to all repositories', async () => {
       const { app } = createApp();
       mockGetCustomAutomationById.mockResolvedValue(existing);

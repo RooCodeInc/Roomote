@@ -179,7 +179,13 @@ export function createFastAgentSlackTaskLauncher(
     afterKickoff: params.afterKickoff,
     onQueueFailure: params.onQueueFailure,
     rendersTaskLink: params.rendersTaskLink,
-    buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
+    buildTask: ({
+      prompt,
+      environmentId,
+      model,
+      reasoningEffort,
+      parentSessionId,
+    }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
         repo: ALL_REPOSITORIES,
@@ -214,6 +220,7 @@ export function createFastAgentSlackTaskLauncher(
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
       },
     }),
   });
@@ -238,6 +245,7 @@ export function createFastAgentWebTaskLauncher(params: {
       branch,
       launchIdempotencyKey,
       model,
+      reasoningEffort,
       parentSessionId,
     }) => ({
       type: TaskPayloadKind.StandardTask,
@@ -256,6 +264,7 @@ export function createFastAgentWebTaskLauncher(params: {
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
       },
     }),
   });

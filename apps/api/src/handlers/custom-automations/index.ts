@@ -422,7 +422,7 @@ customAutomationsRouter.patch('/:id', async (c) => {
     const model =
       parsed.data.model === null ? null : (parsed.data.model ?? existing.model);
     const reasoningEffort =
-      parsed.data.reasoningEffort === null
+      parsed.data.model === null || parsed.data.reasoningEffort === null
         ? null
         : (parsed.data.reasoningEffort ?? existing.reasoningEffort);
     await assertEnabledModel(model, reasoningEffort);

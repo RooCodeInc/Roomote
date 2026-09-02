@@ -908,7 +908,13 @@ export function createFastAgentDiscordTaskLauncher(params: {
     userId: params.userId,
     surface: 'discord',
     taskUrlCampaign: 'fast-delegation',
-    buildTask: async ({ prompt, environmentId, model, parentSessionId }) => {
+    buildTask: async ({
+      prompt,
+      environmentId,
+      model,
+      reasoningEffort,
+      parentSessionId,
+    }) => {
       const isDirectMessage = params.conversation.workspaceId === 'dm';
       const thread = isDirectMessage
         ? null
@@ -953,6 +959,7 @@ export function createFastAgentDiscordTaskLauncher(params: {
           ...(model
             ? { harnessModelOverrides: { 'opencode-server': model } }
             : {}),
+          ...(reasoningEffort ? { reasoningEffort } : {}),
         },
       } satisfies StandardTask;
     },
@@ -971,7 +978,13 @@ export function createFastAgentCommunicationTaskLauncher(params: {
     userId: params.userId,
     surface: params.conversation.surface,
     taskUrlCampaign: 'fast-delegation',
-    buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
+    buildTask: ({
+      prompt,
+      environmentId,
+      model,
+      reasoningEffort,
+      parentSessionId,
+    }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
         repo: ALL_REPOSITORIES,
@@ -997,6 +1010,7 @@ export function createFastAgentCommunicationTaskLauncher(params: {
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
       },
     }),
   });

@@ -1514,6 +1514,7 @@ describe('deliverFastAgentParentEvent', () => {
           prompt: 'Fix the follow-up regression',
           environmentId: null,
           model: 'anthropic/claude-sonnet-5',
+          reasoningEffort: 'high',
           parentSessionId: parent.sessionId,
           postKickoff,
         }),
@@ -1544,6 +1545,7 @@ describe('deliverFastAgentParentEvent', () => {
             harnessModelOverrides: {
               'opencode-server': 'anthropic/claude-sonnet-5',
             },
+            reasoningEffort: 'high',
             communicationContextInherited: true,
             fastAgentSessionId: parent.sessionId,
             fastAgentParent: {
@@ -1596,6 +1598,7 @@ describe('deliverFastAgentParentEvent', () => {
             prompt: 'Fix the follow-up regression',
             environmentId: null,
             model: null,
+            reasoningEffort: 'xhigh',
             parentSessionId: parent.sessionId,
             postKickoff: vi.fn().mockResolvedValue(undefined),
           }),
@@ -1632,6 +1635,7 @@ describe('deliverFastAgentParentEvent', () => {
               ...(serviceUrl ? { communicationServiceUrl: serviceUrl } : {}),
               communicationContextInherited: true,
               fastAgentSessionId: parent.sessionId,
+              reasoningEffort: 'xhigh',
             }),
           }),
         }),
