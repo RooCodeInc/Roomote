@@ -1333,6 +1333,7 @@ export async function triagePrReviewActivity({
 function filterHandledReviewEvents(
   events: PrReviewActivityEvent[],
   context: PrReviewTriageContext,
+  requireLiveHead: boolean,
 ): PrReviewActivityEvent[] {
   const handledCommentIds = new Set(
     (context.reviewThreads ?? []).flatMap((thread) =>
@@ -1364,14 +1365,14 @@ function filterHandledReviewEvents(
       }
     }
 
-    return (
-      !context.currentHeadSha ||
-      !event.reviewHeadSha ||
-      (event.kind !== 'review' &&
-        event.kind !== 'ci_failure' &&
-        event.kind !== 'review_summary') ||
-      event.reviewHeadSha === context.currentHeadSha
-    );
+    const isHeadScoped =
+      event.reviewHeadSha &&
+      (event.kind === 'review' ||
+        event.kind === 'ci_failure' ||
+        event.kind === 'review_summary');
+    if (!isHeadScoped) return true;
+    if (!context.currentHeadSha) return !requireLiveHead;
+    return event.reviewHeadSha === context.currentHeadSha;
   });
 }
 
@@ -1394,7 +1395,11 @@ export async function preparePrReviewNotificationDelivery({
     sourceControlProvider: request.sourceControlProvider,
     telemetry,
   });
-  const liveEvents = filterHandledReviewEvents(events, context);
+  const liveEvents = filterHandledReviewEvents(
+    events,
+    context,
+    normalizeSourceControlProvider(request.sourceControlProvider) === 'github',
+  );
   const eventsToTriage = context.latestTerminalReviewSummaryHeadSha
     ? liveEvents.filter(
         (event) =>

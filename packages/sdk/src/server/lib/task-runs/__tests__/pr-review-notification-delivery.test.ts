@@ -264,6 +264,27 @@ describe('preparePrReviewNotificationDelivery', () => {
     expect(mockGenerateObject).not.toHaveBeenCalled();
   });
 
+  it('suppresses head-scoped GitHub events when the live PR head is unavailable', async () => {
+    mockPullsGet.mockRejectedValue(new Error('github unavailable'));
+
+    await expect(
+      preparePrReviewNotificationDelivery({
+        taskRun,
+        request: { ...request, sourceControlProvider: 'github' },
+        events: [
+          {
+            kind: 'review_summary',
+            authorLogin: 'roomote[bot]',
+            summary: 'One issue remains.',
+            reviewHeadSha: 'old-head',
+          },
+        ],
+      }),
+    ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
+
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+  });
+
   it('propagates GitHub rate limits so durable delivery can defer', async () => {
     const rateLimitError = Object.assign(new Error('API rate limit exceeded'), {
       status: 403,
