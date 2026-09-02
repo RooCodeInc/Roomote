@@ -2430,11 +2430,16 @@ export async function answerFastAgentQuestion({
       // the first failure instead of restarting on every handoff.
       const now = Date.now();
       inferenceRecoveryEpisodeStartedAt ??= now;
+      // The upsert replaces metadata, so a notice that is already visible
+      // (posted by this run or inherited from a parked predecessor) keeps
+      // its message id and visibility; otherwise a later run could not
+      // find the message to edit and would post a second notice.
       await persistAssistantReply({
         reply,
         event: inferenceRetryCanonicalEvent,
         inferenceRetryNotice: true,
-        visibleInTranscript: false,
+        visibleInTranscript: Boolean(inferenceRetryReply),
+        platformMessageId: inferenceRetryReply?.messageId,
         ts: inferenceRecoveryEpisodeStartedAt,
       });
 

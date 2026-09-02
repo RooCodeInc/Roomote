@@ -3962,6 +3962,59 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       }
     });
 
+    it('keeps the inherited notice message id through a further park', async () => {
+      mocks.findActiveRetryNotice.mockResolvedValueOnce({
+        eventId: '100.2:retry-notice:0',
+        ts: Date.now() - 40_000,
+        text: 'The inference provider returned a temporary error. Retrying automatically…',
+        platformMessageId: 'notice-1',
+      });
+      mocks.generateText.mockImplementationOnce(
+        async (params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          await params.onProviderRetry?.({
+            attempt: 1,
+            message: 'Provider temporarily unavailable',
+            nextRetryAtMs: Date.now() + 5_000,
+          });
+          if (options.signal.aborted) throw options.signal.reason;
+          return '';
+        },
+      );
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'notice-2' });
+      const replaceReply = vi.fn().mockResolvedValue({ messageId: 'notice-1' });
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({
+            postReply,
+            replaceReply,
+            requestDurableRetry: vi.fn().mockResolvedValue(undefined),
+          }),
+          durableAdmission: { eventId: 'durable-row-1', inferenceRetries: 4 },
+          resumedAfterInferenceRetry: true,
+        }),
+      ).rejects.toBeInstanceOf(FastAgentDurableRetryScheduledError);
+
+      // Same notice text: nothing new is posted, and every marker write in
+      // this run keeps the visible message's id so the next run can still
+      // edit it.
+      expect(postReply).not.toHaveBeenCalled();
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites.length).toBeGreaterThan(0);
+      for (const write of retryWrites) {
+        expect(write.metadata).toMatchObject({
+          platformMessageId: 'notice-1',
+          visibleInTranscript: true,
+          inferenceRetryActive: true,
+        });
+      }
+    });
+
     it('stops parking provider backoff once the per-turn retry cap is spent', async () => {
       mocks.generateText.mockImplementationOnce(
         async (params, _session, options) => {
