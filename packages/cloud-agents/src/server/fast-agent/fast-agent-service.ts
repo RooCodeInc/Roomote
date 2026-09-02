@@ -391,7 +391,7 @@ const launchTaskArgsSchema = z.object({
   environmentId: z.string().trim().min(1).nullable().optional(),
   model: z.string().trim().min(1).nullable().optional(),
   includeAttachments: z.boolean().optional().default(false),
-  kickoffMessage: z.string().trim().min(1),
+  kickoffMessage: z.string().trim().min(1).optional(),
 });
 const taskMessageArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
@@ -2401,6 +2401,7 @@ export async function answerFastAgentQuestion({
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
     });
+    const usesNativeAssistantOutput = conversation.surface === 'web';
     diagnostics.recordPromptContext({
       systemPromptChars: system.length,
       environmentCount: availableEnvironments.length,
@@ -2438,12 +2439,15 @@ export async function answerFastAgentQuestion({
       mirrorImmediately = false,
       nativeMessage?: NonTaskOpenCodeCompletedMessage | null,
       instructionVersion = currentInstructionVersion,
+      deliverExternally = true,
     ) => {
       const replacedRetry = await replaceInferenceRetryReply(reply, true, () =>
         diagnostics.recordVisibleReply(),
       );
       if (!replacedRetry) {
-        const posted = await adapter.postReply(reply);
+        const posted = deliverExternally
+          ? await adapter.postReply(reply)
+          : undefined;
         diagnostics.recordVisibleReply();
         turnVisibleMessages.push(buildAssistantTextMessage(reply.message));
         await persistAssistantReply({
@@ -2669,6 +2673,7 @@ export async function answerFastAgentQuestion({
     ]);
     const authorizeToolStart = (toolId: string) =>
       platformEvent ||
+      usesNativeAssistantOutput ||
       substantiveWorkAcknowledged ||
       acknowledgementExemptToolIds.has(toolId)
         ? null
@@ -3114,6 +3119,13 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask: {
             const args = launchTaskArgsSchema.parse(call.args);
+            if (!usesNativeAssistantOutput && !args.kickoffMessage) {
+              return {
+                success: false,
+                error:
+                  'A kickoff message is required for this chat destination.',
+              };
+            }
             const validEnvironmentIds = new Set([
               ALL_REPOSITORIES,
               ...availableEnvironments.map((environment) => environment.id),
@@ -3160,6 +3172,10 @@ export async function answerFastAgentQuestion({
               taskUrl?: string;
               taskLinkRendered?: boolean;
             }) => {
+              if (usesNativeAssistantOutput) {
+                kickoffDelivered = true;
+                return;
+              }
               let linkedSession: Awaited<ReturnType<typeof getSessionForTask>> =
                 null;
               try {
@@ -3182,10 +3198,10 @@ export async function answerFastAgentQuestion({
               // that nothing can update later, so it must not carry
               // transient "preparing" copy.
               const message = [
-                args.kickoffMessage,
+                args.kickoffMessage!,
                 destinationUrl &&
                 !task.taskLinkRendered &&
-                !args.kickoffMessage.includes(destinationUrl)
+                !args.kickoffMessage!.includes(destinationUrl)
                   ? `[Open in Roomote](${destinationUrl})`
                   : undefined,
               ]
@@ -3229,6 +3245,9 @@ export async function answerFastAgentQuestion({
             }
             if (result.success) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
+              if (usesNativeAssistantOutput) {
+                visibleUpdatePosted = true;
+              }
               if (result.kickoffDelivered) {
                 visibleUpdatePosted = true;
                 substantiveWorkAcknowledged = true;
@@ -4036,6 +4055,7 @@ export async function answerFastAgentQuestion({
           false,
           completedOpenCodeMessage,
           terminalInstructionVersion,
+          !usesNativeAssistantOutput,
         );
       } else if (!visibleUpdatePosted) {
         // A delivered update is already a complete visible response. Stay

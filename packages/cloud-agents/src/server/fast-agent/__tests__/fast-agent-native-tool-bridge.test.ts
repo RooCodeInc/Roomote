@@ -207,6 +207,10 @@ describe('Fast native OpenCode tool bridge', () => {
       'exactly one of environmentId or repositoryId',
     );
     expect(requestUserInputSource).toContain('args: z.union');
+    expect(launchTaskSource).toContain(
+      'kickoffMessage: z.string().min(1).optional()',
+    );
+    expect(launchTaskSource).toContain('required for chat destinations');
     expect(requestUserInputSource).toContain('questions: z.array');
     expect(requestUserInputSource).toContain('preset: z.enum');
     expect(requestUserInputSource).toContain('.strict()');

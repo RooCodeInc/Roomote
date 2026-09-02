@@ -4,6 +4,50 @@ import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { createMemoryMcpInstructions } from '@roomote/types';
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('uses native assistant output for web Sessions without the chat reply contract', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      surface: 'web',
+    });
+
+    expect(prompt).toContain(
+      'answer through ordinary assistant output. The runtime persists that native output in the web Session',
+    );
+    expect(prompt).toContain(
+      'Omit `kickoffMessage`, do not add a separate kickoff',
+    );
+    expect(prompt).toContain(
+      'child updates continue to relay into this Session',
+    );
+    expect(prompt).not.toContain('send_chat_reply');
+    expect(prompt).not.toContain(
+      'first model-selected action must communicate with the user',
+    );
+  });
+
+  it('preserves the chat reply contract for external destinations', () => {
+    for (const surface of [
+      'slack',
+      'discord',
+      'teams',
+      'telegram',
+      'automation',
+    ] as const) {
+      const prompt = buildFastAgentSystemPrompt({
+        availableEnvironments: [],
+        surface,
+      });
+
+      expect(prompt).toContain('send_chat_reply');
+      expect(prompt).toContain(
+        'first model-selected action must communicate with the user',
+      );
+      expect(prompt).toContain(
+        '"launch_task" carries its first communication in "kickoffMessage"',
+      );
+    }
+  });
+
   it('includes a resolved release identifier before turn startup and environments', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
