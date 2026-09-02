@@ -82,4 +82,24 @@ describe('createProofRunnerAgentPrompt', () => {
       'Omit the section entirely when no artifacts were uploaded.',
     );
   });
+
+  it('allows briefed simulation while requiring provenance and proof limits', () => {
+    const prompt = createProofRunnerAgentPrompt('http://127.0.0.1:3000');
+
+    expect(prompt).toContain(
+      'Prefer genuine application, database, authentication, and backend state when practical.',
+    );
+    expect(prompt).toContain(
+      'When the brief explicitly authorizes a transparent simulation',
+    );
+    expect(prompt).toContain(
+      'For every simulation, list each mock, source modification, hardcoded value, network response, DOM arrangement, or rendered-state setup supplied by the brief.',
+    );
+    expect(prompt).toContain(
+      'simulated artifacts prove only visual appearance, layout, or interaction under that state, not real data flow, authorization, backend behavior, network integration, or end-to-end correctness.',
+    );
+    expect(prompt).toContain(
+      'Never fabricate or alter screenshot pixels, hide simulated state',
+    );
+  });
 });
