@@ -1673,7 +1673,7 @@ describe('buildAcpRenderBlocks', () => {
     expect(entries[1].msg.id).toBe('tool-subagent-pending');
   });
 
-  it('hides Roomote Slack reply tool rows when internal transcript rows are disabled', () => {
+  it('keeps Roomote chat reply rows visible when internal transcript rows are disabled', () => {
     const entries = buildAcpRenderBlocks(
       [
         explorationToolMessage({
@@ -1692,14 +1692,40 @@ describe('buildAcpRenderBlocks', () => {
     expect(entries).toEqual([
       {
         kind: 'message',
-        msg: expect.objectContaining({
-          id: 'assistant-2',
-        }),
+        msg: expect.objectContaining({ id: 'tool-send-chat' }),
+      },
+      {
+        kind: 'message',
+        msg: expect.objectContaining({ id: 'assistant-2' }),
       },
     ]);
   });
 
-  it('hides Roomote Slack reply tool results in narration mode', () => {
+  it('hides effect-free Roomote lifecycle rows when internal transcript rows are disabled', () => {
+    const entries = buildAcpRenderBlocks(
+      [
+        explorationToolMessage({
+          id: 'tool-ignore',
+          ts: 1,
+          title: 'ignore_event',
+          text: '{"success":true,"ignored":true}',
+          kind: 'mcp',
+          toolName: 'ignore_event',
+        }),
+        textMessage('assistant-2', 2),
+      ],
+      { showInternalMessages: false },
+    );
+
+    expect(entries).toEqual([
+      {
+        kind: 'message',
+        msg: expect.objectContaining({ id: 'assistant-2' }),
+      },
+    ]);
+  });
+
+  it('keeps Roomote chat reply receipts standalone in narration mode', () => {
     const entries = buildAcpRenderBlocks(
       [
         explorationToolMessage({
@@ -1742,10 +1768,21 @@ describe('buildAcpRenderBlocks', () => {
       { displayMode: 'narration' },
     );
 
-    expect(entries).toEqual([]);
+    // Like send_task_message: a consequential receipt, never folded into an
+    // exploration group and never dropped by narration mode.
+    expect(entries).toEqual([
+      {
+        kind: 'message',
+        msg: expect.objectContaining({ id: 'tool-send-chat' }),
+      },
+      {
+        kind: 'message',
+        msg: expect.objectContaining({ id: 'tool-send-chat-closeout' }),
+      },
+    ]);
   });
 
-  it('keeps Roomote Slack reply tool results visible in narration mode when debug UI is enabled', () => {
+  it('keeps Roomote chat reply results visible in narration mode when debug UI is enabled', () => {
     const entries = buildAcpRenderBlocks(
       [
         explorationToolMessage({

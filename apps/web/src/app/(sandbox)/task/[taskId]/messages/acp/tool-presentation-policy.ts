@@ -37,6 +37,9 @@ const CONSEQUENTIAL_RECEIPTS = new Set([
   'cancel_task',
   'retry_task_start',
   'send_task_message',
+  'send_chat_reply',
+  'post_to_channel',
+  'send_chat_reaction_emoji',
   'save_memory',
 ]);
 
