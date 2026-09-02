@@ -337,7 +337,7 @@ describe('Session detail page', () => {
     });
     getSessionByIdCommandMock.mockResolvedValue({
       id: '6a1f8f1e-0000-4000-8000-000000000004',
-      title: 'Task-only session',
+      title: 'Task-only session with a title that wraps on narrow screens',
       ownerName: 'User',
       ownerEmail: 'user@example.com',
       ownerImageUrl: null,
@@ -366,7 +366,12 @@ describe('Session detail page', () => {
 
     expect(getFastSessionByIdMock).not.toHaveBeenCalled();
     expect(transcriptMock).not.toHaveBeenCalled();
-    expect(html).toContain('Task-only session');
+    expect(html).toContain(
+      'Task-only session with a title that wraps on narrow screens',
+    );
+    expect(html).toContain(
+      'class="min-w-0 flex-1 break-words text-sm font-medium @[600px]:truncate"',
+    );
     expect(html).toContain('session-task-timeline');
     expect(html).not.toContain('completed');
     expect(sessionTaskTimelineMock).toHaveBeenCalledWith(
