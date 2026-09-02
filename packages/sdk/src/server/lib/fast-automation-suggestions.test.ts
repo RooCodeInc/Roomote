@@ -2,10 +2,12 @@ import {
   and,
   db,
   eq,
+  environmentFactory,
   trackedMessages,
   userFactory,
   workItems,
 } from '@roomote/db/server';
+import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
 
 import {
   appendFastAutomationSuggestionInstruction,
@@ -79,6 +81,137 @@ describe('Fast automation suggestions', () => {
         launchRouting: 'router',
       }),
     });
+  });
+
+  it('persists an independent concrete, all-repositories, or Fast target per suggestion', async () => {
+    const user = await userFactory.create();
+    const environment = await environmentFactory.create({
+      createdByUserId: user.id,
+      isEval: false,
+    });
+    let messageSequence = 0;
+    const postMessage = vi.fn(async () => `targeted-${++messageSequence}`);
+
+    await postFastAutomationSuggestionsToSlack({
+      slack: { postMessage },
+      channelId: 'C-targets',
+      threadTs: 'targets-root',
+      eventId: 'automation-targets',
+      createdByUserId: user.id,
+      suggestions: [
+        {
+          title: 'Concrete target',
+          brief: 'Run in one environment.',
+          environmentId: environment.id,
+        },
+        {
+          title: 'All repositories target',
+          brief: 'Run across every repository.',
+          environmentId: ALL_REPOSITORIES,
+        },
+        {
+          title: 'Fast target',
+          brief: 'Handle this without an initial sandbox.',
+          environmentId: FAST_EXECUTION,
+        },
+      ],
+    });
+
+    const persisted = await db
+      .select({
+        id: workItems.id,
+        title: workItems.title,
+        targetEnvironmentId: workItems.targetEnvironmentId,
+        targetRepositoryFullName: workItems.targetRepositoryFullName,
+      })
+      .from(workItems);
+    expect(persisted).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: 'Concrete target',
+          targetEnvironmentId: environment.id,
+          targetRepositoryFullName: null,
+        }),
+        expect.objectContaining({
+          title: 'All repositories target',
+          targetEnvironmentId: null,
+          targetRepositoryFullName: ALL_REPOSITORIES,
+        }),
+        expect.objectContaining({
+          title: 'Fast target',
+          targetEnvironmentId: null,
+          targetRepositoryFullName: FAST_EXECUTION,
+        }),
+      ]),
+    );
+
+    const tracked = await db
+      .select({ metadata: trackedMessages.metadata })
+      .from(trackedMessages)
+      .where(eq(trackedMessages.surface, 'slack'));
+    expect(tracked.map((card) => card.metadata)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ launchTarget: environment.id }),
+        expect.objectContaining({ launchTarget: ALL_REPOSITORIES }),
+        expect.objectContaining({ launchTarget: FAST_EXECUTION }),
+      ]),
+    );
+    expect(
+      tracked
+        .filter((card) => card.metadata?.launchTarget)
+        .some((card) => card.metadata?.launchRouting === 'router'),
+    ).toBe(false);
+  });
+
+  it('rejects an unavailable target before posting a suggestion card', async () => {
+    const user = await userFactory.create();
+    const postMessage = vi.fn();
+
+    await expect(
+      postFastAutomationSuggestionsToSlack({
+        slack: { postMessage },
+        channelId: 'C-invalid',
+        threadTs: 'invalid-root',
+        eventId: 'automation-invalid-target',
+        createdByUserId: user.id,
+        suggestions: [
+          {
+            title: 'Invalid target',
+            brief: 'This must not launch.',
+            environmentId: 'not-an-environment-id',
+          },
+        ],
+      }),
+    ).rejects.toThrow('target environment is unavailable');
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejects a user-scoped environment outside the Fast catalog', async () => {
+    const user = await userFactory.create();
+    const environment = await environmentFactory.create({
+      userId: user.id,
+      createdByUserId: user.id,
+      isEval: false,
+    });
+    const postMessage = vi.fn();
+
+    await expect(
+      postFastAutomationSuggestionsToSlack({
+        slack: { postMessage },
+        channelId: 'C-user-scoped',
+        threadTs: 'user-scoped-root',
+        eventId: 'automation-user-scoped-target',
+        createdByUserId: user.id,
+        suggestions: [
+          {
+            title: 'User-scoped target',
+            brief: 'This target is not in the shared Fast catalog.',
+            environmentId: environment.id,
+          },
+        ],
+      }),
+    ).rejects.toThrow('target environment is unavailable');
+    expect(postMessage).not.toHaveBeenCalled();
   });
 
   it('persists and tracks reaction-launchable Discord suggestion cards', async () => {

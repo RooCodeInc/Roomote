@@ -1,4 +1,5 @@
 import { resolveSuggestionLaunchWorkspaceFromMetadata } from '../suggestion-workspace-resolver.js';
+import { ALL_REPOSITORIES } from '@roomote/types';
 
 const { mockDbSelect } = vi.hoisted(() => ({
   mockDbSelect: vi.fn(),
@@ -33,16 +34,45 @@ describe('resolveSuggestionLaunchWorkspaceFromMetadata', () => {
     mockDbSelect.mockReset();
   });
 
-  it('fails when the suggestion has no target repository', async () => {
+  it('derives the repository from a concrete target environment', async () => {
+    setEnvironmentRows([
+      {
+        id: 'env-1',
+        name: 'Env One',
+        config: { repositories: [{ repository: 'roo/repo' }] },
+      },
+    ]);
     const result = await resolveSuggestionLaunchWorkspaceFromMetadata({
       targetRepositoryFullName: null,
       targetEnvironmentId: 'env-1',
       readinessMessage: null,
     });
 
-    expect(result.workspace).toBeNull();
-    expect(result.failureReason).toContain('target repository');
+    expect(result.failureReason).toBeNull();
+    expect(result.workspace).toEqual({
+      repoForPayload: 'roo/repo',
+      environmentId: 'env-1',
+      workspaceDisplayName: 'Env One',
+      readinessMessage: null,
+    });
+  });
+
+  it('resolves the all-repositories sentinel without an environment lookup', async () => {
+    const result = await resolveSuggestionLaunchWorkspaceFromMetadata({
+      targetRepositoryFullName: ALL_REPOSITORIES,
+      targetEnvironmentId: null,
+      readinessMessage: null,
+    });
+
     expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      workspace: {
+        repoForPayload: ALL_REPOSITORIES,
+        workspaceDisplayName: 'all repositories',
+        readinessMessage: null,
+      },
+      failureReason: null,
+    });
   });
 
   it('resolves a bare-repo workspace without an environment lookup', async () => {

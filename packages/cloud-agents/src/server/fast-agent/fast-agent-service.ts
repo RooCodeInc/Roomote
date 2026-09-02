@@ -9,6 +9,7 @@ import {
   CHAT_CHANNELS_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
   CHAT_REACTION_EMOJI_TOOL_NAME,
+  FAST_EXECUTION,
   FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
@@ -207,6 +208,7 @@ const chatReplyArgsSchema = z.object({
       z.object({
         title: z.string().trim().min(1).max(140),
         brief: z.string().trim().min(1).max(2000),
+        environmentId: z.string().trim().min(1).optional(),
       }),
     )
     .max(10)
@@ -2876,6 +2878,24 @@ export async function answerFastAgentQuestion({
                   'Launchable suggestions are available only on chat automation closeouts.',
               };
             }
+            const validSuggestionEnvironmentIds = new Set([
+              ALL_REPOSITORIES,
+              FAST_EXECUTION,
+              ...availableEnvironments.map((environment) => environment.id),
+            ]);
+            if (
+              args.suggestions?.some(
+                (suggestion) =>
+                  suggestion.environmentId &&
+                  !validSuggestionEnvironmentIds.has(suggestion.environmentId),
+              )
+            ) {
+              return {
+                success: false,
+                error:
+                  'A suggested task selected an environment that was not found.',
+              };
+            }
             if (
               platformEventHandling === 'present_only' &&
               args.purpose !== 'closeout'
@@ -2906,6 +2926,7 @@ export async function answerFastAgentQuestion({
               args.purpose,
               args.message,
               args.imageArtifactIds ?? [],
+              args.suggestions ?? [],
             ]);
             if (completedChatReplySignatures.has(signature)) {
               return {
