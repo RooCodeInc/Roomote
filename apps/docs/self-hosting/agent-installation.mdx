@@ -1,81 +1,39 @@
 ---
-title: Automated self-hosting contract
-description: A concise contract for an agent installing and verifying Roomote.
+title: Local Docker setup for agents
+description: Start Roomote locally with Docker Compose and a temporary HTTPS tunnel.
 ---
 
-This page is the execution contract for an agent asked to follow the
-[self-hosting guide](/self-hosting). Detect the host, choose the matching default
-below, and continue until a real Roomote task works.
+Use this page to try Roomote locally on macOS, Windows, or Linux. You need Git
+and Docker with the Compose plugin. Docker Desktop works on macOS and Windows.
 
-## Choose the path
+## Start Roomote
 
-| Target | Default |
-| --- | --- |
-| Local macOS, Windows, or Linux with Docker | Run the full local self-host stack directly with the checked-in Docker Compose files. |
-| Fresh dedicated Ubuntu or Debian VPS/server | Use the [one-command installer](/self-hosting#one-command-install). |
-| Durable production | Use the installer on a dedicated Ubuntu/Debian server with stable DNS and public HTTPS. |
+Clone Roomote, open the repository root, and create an uncommitted `.env.local`:
 
-Do not run the Linux installer directly on macOS or Windows. For the local path,
-Docker provides the Linux container runtime: use Docker Desktop on macOS or
-Windows, or Docker Engine with Compose on Linux. Docker must run Linux
-containers, and the default Docker socket must be available because the local
-Docker sandbox overlay mounts `/var/run/docker.sock` into the controller and
-BullMQ containers. Do not claim native Windows-container support.
+```sh
+cp .env.local.example .env.local
+```
 
-Proceed through safe, reversible local steps without asking the user to choose
-tools or topology. Pause only when:
+Add a random setup token so the public setup page is not open to other visitors:
 
-- a credential, secret, browser sign-in, or OAuth authorization is required
-- the agent does not already have permission to run Docker or write local files
-- a durable external change is required, such as DNS, firewall, router, or
-  account-owned tunnel configuration
-- an action would overwrite or delete existing data
-- no documented safe default applies
+```dotenv
+SETUP_TOKEN=<random-value>
+```
 
-Never ask the user to paste secrets or tokenized setup URLs into chat.
-
-## Local evaluation with Docker Compose
-
-Use this path on macOS, Windows, or Linux when Docker Engine and the Compose
-plugin are available.
-
-1. Clone Roomote and work from the repository root.
-2. Create `.env.local` from `.env.local.example`; do not commit it.
-3. Set `DOCKER_WORKER_PLATFORM=linux/arm64` on an ARM host or
-   `DOCKER_WORKER_PLATFORM=linux/amd64` on an x86-64 host.
-4. Generate a random `SETUP_TOKEN` in `.env.local` before exposing the setup
-   flow outside the machine.
-5. If public OAuth or webhook HTTPS is needed, add the temporary Quick Tunnel
-   service below. Otherwise skip to starting Roomote and use
-   `http://localhost:13000`.
-
-Start the checked-in local self-host and Docker sandbox shapes with this exact
-Compose file set:
+Start the local self-host stack:
 
 ```sh
 docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.self-host.yml -f docker-compose.compute-docker.yml up -d --build
 ```
 
-This runs PostgreSQL, Redis, MinIO, web, API, controller, BullMQ, preview proxy,
-and task workers as Linux containers. The app and datastore ports bind to
-`127.0.0.1`; do not expose them directly to the LAN or internet. This is the
-repository's local self-host configuration, not the durable production/Caddy
-deployment.
+This starts the Roomote app, API, controller, queues, PostgreSQL, Redis, MinIO,
+preview proxy, and local Docker task runtime. Open
+`http://localhost:13000/setup` when no external HTTPS callback is needed.
 
-On Docker Desktop or another engine without writable-layer quota support,
-Docker task creation can fail closed. Do not disable the guard automatically.
-Use **Settings → Sandboxes → Local Docker → Validate environment** and follow
-the [Docker sandbox guidance](/providers/compute/docker) if validation reports
-that the disk limit is unsupported.
+## Add temporary HTTPS
 
-### Add a temporary HTTPS Quick Tunnel
-
-Use this only when a local evaluation needs public OAuth or webhook reachability
-and no stable public domain was supplied. A Quick Tunnel is temporary, has no
-uptime guarantee, and receives a new `trycloudflare.com` hostname when
-recreated.
-
-Create an untracked `docker-compose.cloudflared.yml` in the Roomote checkout:
+OAuth and webhook providers need a public HTTPS URL. Create an uncommitted
+`docker-compose.cloudflared.yml`:
 
 ```yaml
 services:
@@ -87,94 +45,43 @@ services:
       - web
 ```
 
-This tunnel is only the temporary browser, OAuth, and webhook edge for the local
-Docker-compute path. The web service handles browser callbacks and proxies
-`/api/webhooks/*` to the API. It does not turn the local stack into the
-production Caddy deployment or expose wildcard previews.
-
-The local stack must already be running. Start the tunnel service with the same
-checked-in Compose shapes:
+Start the tunnel and read its URL:
 
 ```sh
 docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.self-host.yml -f docker-compose.compute-docker.yml -f docker-compose.cloudflared.yml up -d cloudflared
 docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.self-host.yml -f docker-compose.compute-docker.yml -f docker-compose.cloudflared.yml logs cloudflared
 ```
 
-Read the generated `https://<random>.trycloudflare.com` URL from the logs. Set
-`R_PUBLIC_URL` in `.env.local`, without posting it to chat:
+Find the generated `https://<random>.trycloudflare.com` URL in the logs. Set it
+in `.env.local`:
 
 ```dotenv
 R_PUBLIC_URL=https://<random>.trycloudflare.com
 ```
 
-Then start or recreate the full stack with the tunnel override included:
+Recreate the stack so Roomote generates links and callbacks from that URL:
 
 ```sh
 docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.self-host.yml -f docker-compose.compute-docker.yml -f docker-compose.cloudflared.yml up -d --build
 ```
 
-Use that exact HTTPS origin for provider redirects and webhooks. Important paths
-include:
+Use the generated HTTPS origin in provider configuration. Common callbacks are:
 
-| Purpose | URL |
-| --- | --- |
-| GitHub setup/callback | `<origin>/github/callback` |
-| GitHub webhook | `<origin>/api/webhooks/github` |
-| Slack OAuth callback | `<origin>/api/slack/callback` |
-| Slack events/interactivity | `<origin>/api/webhooks/slack` |
-| Slack sign-in | `<origin>/api/auth/oauth2/callback/slack` |
-| Microsoft sign-in | `<origin>/api/auth/oauth2/callback/microsoft-entra-id` |
-| Microsoft Teams bot | `<origin>/api/webhooks/teams` |
-
-Quick Tunnels do not provide Roomote's worker API or wildcard preview hostnames;
-this path is for local Docker-compute evaluation. Signed artifact view and raw
-links use the web route and work through the tunnel. If the tunnel hostname
-changes, update `R_PUBLIC_URL`, recreate the Compose services, and update every
-provider redirect and webhook before testing again.
-
-## Dedicated server or production
-
-On a fresh dedicated Ubuntu or Debian host, prefer the installer:
-
-```sh
-curl -fsSL https://get.roomote.dev | sudo bash -s -- --domain roomote.example.com
+```text
+GitHub callback: <origin>/github/callback
+GitHub webhook:  <origin>/api/webhooks/github
+Slack callback:  <origin>/api/slack/callback
+Slack webhook:   <origin>/api/webhooks/slack
 ```
 
-For durable use, require stable app and wildcard preview DNS plus public TCP
-ports 80 and 443. Caddy terminates HTTPS and routes app, API, webhook, artifact,
-and preview traffic. Use the `sslip.io` installer default only for a short VPS
-evaluation, not production. Use a named Cloudflare Tunnel with
-`--tls-mode internal` only when the operator deliberately chooses stable
-closed-port ingress. DNS, firewall, router, and provider-account changes require
-user approval.
+Open `<origin>/setup` and enter the `SETUP_TOKEN` from `.env.local`. Complete
+provider sign-in and credentials in the browser, not in the agent conversation.
 
-The installer is idempotent: rerunning it preserves existing secrets and the
-existing domain unless a replacement is supplied. Use the installed `roomote`
-CLI for status, logs, backup, upgrade, rollback, and restore.
+Quick Tunnel URLs are temporary. If cloudflared creates a new URL, update
+`R_PUBLIC_URL`, recreate the stack, and update the provider callback URLs.
 
-## Complete and verify
+## Verify
 
-For local Compose, open `http://localhost:13000/setup` or the Quick Tunnel's
-`/setup` path and enter `SETUP_TOKEN` yourself. For an installer deployment, run
-`sudo roomote setup-url` in a trusted terminal. Never print or capture the
-tokenized URL in agent output.
-
-Pause while the user completes credentials and browser authorization. Then
-continue until all applicable checks pass:
-
-1. long-running Compose services are running, healthchecked services are
-   healthy, and one-shot services such as `db-migrate` and `worker-image`
-   exited successfully (`docker compose ... ps`); on an installer host,
-   `sudo roomote status` is healthy
-2. sign-in works and expected repositories appear
-3. **Validate environment** succeeds for the selected sandbox provider
-4. a small task clones a repository and runs a harmless command
-5. task logs and an uploaded artifact are accessible
-6. every configured OAuth callback or webhook works through the configured
-   HTTPS origin
-7. a live preview works when the chosen ingress supports preview hostnames
-
-For local Compose, use the same `--env-file` and `-f` arguments for `ps`,
-`logs`, `up`, and `down`; include `docker-compose.cloudflared.yml` when the
-tunnel is enabled. Removing the Quick Tunnel override and stopping its container
-reverses the temporary public exposure.
+Run the same Compose command with `ps` instead of `up -d --build`. Confirm the
+long-running services are running, healthchecked services are healthy, and
+`db-migrate` and `worker-image` exited successfully.
