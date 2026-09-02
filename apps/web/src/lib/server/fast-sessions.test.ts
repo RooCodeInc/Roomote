@@ -355,7 +355,11 @@ describe('Fast session queries', () => {
   });
 
   it('reads canonical messages in timestamp and turn sequence order', async () => {
-    const owner = await userFactory.create();
+    const owner = await userFactory.create({
+      name: 'Slack Sender',
+      email: 'sender@example.com',
+      imageUrl: 'https://example.com/sender.png',
+    });
     const session = await createFastSession({
       userId: owner.id,
       conversationId: 'ordered-session',
@@ -374,6 +378,7 @@ describe('Fast session queries', () => {
       ts: 100,
       role: 'user',
       eventType: 'roomote_runtime.user_prompt',
+      metadata: { visibleInTranscript: true, userId: owner.id },
     });
 
     const result = await getFastSessionById(
@@ -385,6 +390,11 @@ describe('Fast session queries', () => {
       'turn-1:user',
       'turn-1:assistant:0',
     ]);
+    expect(result?.messages[0]).toMatchObject({
+      userName: 'Slack Sender',
+      userEmail: 'sender@example.com',
+      userImageUrl: 'https://example.com/sender.png',
+    });
   });
 
   it('does not fall back to compatibility messages for existing sessions', async () => {
@@ -566,7 +576,7 @@ describe('Fast session queries', () => {
   });
 
   it('streams only rows updated after the cursor and advances it', async () => {
-    const owner = await userFactory.create();
+    const owner = await userFactory.create({ name: 'Stream Sender' });
     const session = await createFastSession({
       userId: owner.id,
       conversationId: 'stream-session',
@@ -579,6 +589,11 @@ describe('Fast session queries', () => {
       ts: 1,
       role: 'user',
       eventType: 'roomote_runtime.user_prompt',
+      metadata: {
+        visibleInTranscript: true,
+        userId: owner.id,
+        userName: 'Slack Display Name',
+      },
     });
     await createFastMessage({
       conversationId: session.id,
@@ -594,6 +609,10 @@ describe('Fast session queries', () => {
     expect(first.messages.map((message) => message.eventId)).toEqual([
       'turn-1:user',
     ]);
+    expect(first.messages[0]).toMatchObject({
+      userName: 'Slack Display Name',
+      userEmail: expect.any(String),
+    });
     expect(first.cursor).toBeGreaterThan(0);
 
     const second = await getFastSessionMessagesSince(session.id, first.cursor);
