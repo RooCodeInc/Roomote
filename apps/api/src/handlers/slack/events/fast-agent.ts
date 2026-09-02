@@ -265,6 +265,7 @@ export async function processFastAgentMessage(params: {
       );
       return null;
     });
+    if (durableTurn) activeTurnLock.durableRowId = durableTurn.id;
     params.onAccepted?.(() =>
       activeTurnLock.abort(
         new Error('Fast suggestion launch settlement failed.'),

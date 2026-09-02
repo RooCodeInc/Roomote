@@ -6,6 +6,14 @@ vi.mock('@roomote/redis', () => ({
   acquireRedisLock: acquireRedisLockMock,
 }));
 
+const { releaseDurableClaimMock } = vi.hoisted(() => ({
+  releaseDurableClaimMock: vi.fn(),
+}));
+
+vi.mock('../fast-agent-conversation-repository', () => ({
+  releaseFastAgentDurableTurnClaim: releaseDurableClaimMock,
+}));
+
 type TurnLockModule = typeof import('../fast-agent-turn-lock');
 
 const conversation = {
@@ -90,6 +98,28 @@ describe('Fast turn shutdown drain', () => {
     expect(straggler!.signal.aborted).toBe(false);
 
     await straggler!();
+  });
+
+  it('releases the durable claim of every bound turn during shutdown', async () => {
+    releaseDurableClaimMock.mockResolvedValue(true);
+    const boundLock = await turnLock.acquireFastAgentTurnLock({ conversation });
+    boundLock!.durableRowId = 'durable-row-1';
+    const unboundLock = await turnLock.acquireFastAgentTurnLock({
+      conversation: otherConversation,
+    });
+
+    await expect(
+      turnLock.abortActiveFastAgentTurns(
+        new turnLock.FastAgentProcessShutdownError('SIGTERM'),
+      ),
+    ).resolves.toBe(2);
+
+    // A turn interrupted before it reached its own abort handling still gets
+    // its row handed to the queue; unbound turns are untouched.
+    expect(releaseDurableClaimMock).toHaveBeenCalledTimes(1);
+    expect(releaseDurableClaimMock).toHaveBeenCalledWith('durable-row-1');
+    await boundLock!();
+    await unboundLock!();
   });
 
   it('aborts stragglers with the reason the drain began with', async () => {

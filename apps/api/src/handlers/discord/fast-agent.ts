@@ -222,6 +222,9 @@ export async function processDiscordFastAgentMessage(
       return null;
     });
     const durableTurnForResume = durableTurn;
+    if (durableTurnForResume) {
+      activeTurnLock.durableRowId = durableTurnForResume.id;
+    }
     const footerContext = await resolveFastSessionReplyFooterContext({
       sessionId: session.id,
     });

@@ -251,6 +251,7 @@ async function runWebFastAgentTurn({
             return null;
           })
         : null;
+    if (durableTurn) release.durableRowId = durableTurn.id;
     await answerFastAgentQuestion({
       question,
       images,

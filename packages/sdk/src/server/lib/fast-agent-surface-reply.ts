@@ -605,6 +605,7 @@ async function runFastAgentSurfaceReply(
           );
           return null;
         })));
+    if (durableTurn) release.durableRowId = durableTurn.id;
     await answerFastAgentQuestion({
       question: params.question,
       images: params.images,
