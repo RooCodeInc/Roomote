@@ -23,10 +23,11 @@ import {
   type ReasoningEffort,
   type RunStatus,
   type TaskMessageContentBlock,
-  INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
   matchIntegrationTools,
   type IntegrationToolCandidate,
+  CALL_INTEGRATION_TOOL_TOOL,
+  FIND_INTEGRATION_TOOLS_TOOL,
 } from '@roomote/types';
 import {
   and,
@@ -387,22 +388,13 @@ const taskIdArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
 });
 const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
-const findIntegrationToolsArgsSchema = z.object({
-  integrationId: z.string().trim().min(1).optional(),
-  toolName: z.string().trim().min(1).optional(),
-  query: z.string().trim().min(1).optional(),
-  limit: z
-    .number()
-    .int()
-    .positive()
-    .max(INTEGRATION_TOOL_LOOKUP_MAX_LIMIT)
-    .optional(),
-});
-const callIntegrationToolArgsSchema = z.object({
-  integrationId: z.string().trim().min(1),
-  toolName: z.string().trim().min(1),
-  args: z.record(z.unknown()).optional(),
-});
+const findIntegrationToolsArgsSchema = z.object(
+  FIND_INTEGRATION_TOOLS_TOOL.inputSchema,
+);
+const callIntegrationToolArgsSchema = z.object(
+  CALL_INTEGRATION_TOOL_TOOL.inputSchema,
+);
+
 /**
  * Resolve on-demand integration tools for `find_integration_tools` from the
  * in-memory catalog; matching and ranking are shared with task sandboxes.
