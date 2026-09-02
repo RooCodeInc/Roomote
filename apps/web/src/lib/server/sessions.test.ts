@@ -1053,6 +1053,14 @@ describe('unified Session queries', () => {
     expect(timeline?.events.map((event) => event.id)).toEqual([
       'fast:after-cursor',
     ]);
+    expect(timeline?.cursor).toBe(101);
+
+    const next = await getSessionTimeline(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+      timeline!.cursor as number,
+    );
+    expect(next).toEqual({ events: [], cursor: 101 });
   });
 
   it('hydrates uploaded artifacts for every associated task without collapsing shared paths', async () => {

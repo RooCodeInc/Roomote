@@ -1015,6 +1015,9 @@ export async function getSessionTimeline(
   for (const event of events) {
     if (event.at === nextAt) nextSeenIds.add(event.id);
   }
+  if (legacySince !== null) {
+    return { events, cursor: nextAt };
+  }
   return {
     events,
     cursor: {
