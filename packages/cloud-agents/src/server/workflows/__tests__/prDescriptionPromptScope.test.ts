@@ -197,6 +197,9 @@ describe('PR description prompt scope', () => {
       expect(skillContent).toContain(
         'use those records to recover uploads after a lost child result and refresh their signed URLs',
       );
+      expect(skillContent).toContain(
+        'delete `/tmp/roomote-visual-proof-attempt.json`',
+      );
     }
 
     expect(createDraftPrSkill).toContain(

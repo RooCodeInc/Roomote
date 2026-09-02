@@ -996,6 +996,10 @@ describe('OpenCode visual proof deadline', () => {
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('shared 5000ms deadline'),
       );
+      harness.dispose();
+      await expect(
+        fs.readFile(VISUAL_PROOF_ATTEMPT_STATE_PATH, 'utf8'),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       harness.dispose();
     }

@@ -159,6 +159,7 @@ You are executing a command to create a draft pull request with the current chan
           <action>Collect the pull request number and URL returned by each successful `mcp__roomote__manage_source_control` result, and treat that tool result as the live pull request reference instead of treating the final message as proof that the pull request exists.</action>
           <action>After the first creation or refresh pass, if this run produced or refreshed more than one pull request for the same task, rebuild each PR body so it includes a `## Related PRs` section linking the sibling pull requests by repository or surface label, then call `mcp__roomote__manage_source_control` again for each sibling pull request to backfill those cross-links.</action>
           <action>When maintaining the `## Related PRs` section, omit self-links, keep only sibling pull requests from the current task split, and remove stale links to superseded or unrelated PRs.</action>
+          <action>After every repository's final PR metadata call has completed, delete `/tmp/roomote-visual-proof-attempt.json` so a later delivery cycle cannot reuse the consumed attempt marker. Do not delete it between repositories in a multi-repository delivery.</action>
         </actions>
         <pr-metadata-update-recipe>
           <item>Run `git diff $(git merge-base HEAD origin/<base-branch-for-this-repo> 2>/dev/null || echo "HEAD~1") HEAD` to capture the full PR diff for the branch. Use this local git diff for every provider.</item>

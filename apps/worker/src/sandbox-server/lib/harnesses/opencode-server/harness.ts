@@ -1962,8 +1962,7 @@ export class OpenCodeServerHarness
     this.clearQueuedPromptRetryTimer();
     this.clearProviderErrorRecoveryState();
     this.clearVisualProofTimeout();
-    this.visualProofAttemptId = null;
-    rmSync(VISUAL_PROOF_ATTEMPT_STATE_PATH, { force: true });
+    this.clearVisualProofAttemptState();
     this.clearAllExecuteToolProgress();
     void this.cleanupVisualAttachmentDirectories();
     this.rejectEventStreamReady?.(
@@ -2161,6 +2160,7 @@ export class OpenCodeServerHarness
         this.currentWorkflowPhase = null;
         this.activeWorkflowSkill = null;
         this.clearVisualProofTimeout();
+        this.clearVisualProofAttemptState();
         this.inFlight = false;
         this.prompts.clear();
         this.clearQueuedPromptRetryTimer();
@@ -2222,6 +2222,7 @@ export class OpenCodeServerHarness
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
     this.activeWorkflowSkill = null;
     this.clearVisualProofTimeout();
+    this.clearVisualProofAttemptState();
     this.cancelRequestedBeforeSession = false;
     this.resetSessionCreateAbortController();
 
@@ -3752,6 +3753,11 @@ export class OpenCodeServerHarness
 
     clearTimeout(this.visualProofTimeoutTimer);
     this.visualProofTimeoutTimer = null;
+  }
+
+  private clearVisualProofAttemptState(): void {
+    this.visualProofAttemptId = null;
+    rmSync(VISUAL_PROOF_ATTEMPT_STATE_PATH, { force: true });
   }
 
   private async recoverVisualProofTimeout(): Promise<void> {
