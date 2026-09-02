@@ -241,13 +241,12 @@ function buildProviderUsageLimitAlertBlock(
   snapshot: ProviderUsageLimitSnapshot,
 ): SlackBlock {
   const percent = Math.round(snapshot.usedPercent * 10) / 10;
-  const usage = formatUsage(snapshot, percent);
 
   return buildAutomationResultBlocks({
     title: 'Inference Provider Usage Alert',
     subtitle: {
       type: 'mrkdwn',
-      text: `${snapshot.providerName} is at ${percent}% (${usage})`,
+      text: `${snapshot.providerName} is at ${percent}%`,
     },
     iconUrl: buildAutomationIconUrl('battery-warning'),
     configureUrl: buildManagerSlackSettingsUrl(
