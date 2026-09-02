@@ -56,6 +56,14 @@ describe('Capture visual proof skill', () => {
       'git diff "$(git merge-base HEAD origin/HEAD 2>/dev/null || echo HEAD~1)" > /tmp/capture-visual-proof/diff-at-start.patch',
     );
     expect(skillContent).toContain('Do not snapshot only `git diff HEAD`');
+    // Untracked files must be captured by content, not as a path list, or a
+    // new source file would surface as drift once it is staged for delivery.
+    expect(skillContent).toContain(
+      'git ls-files --others --exclude-standard -z | xargs -0 -I{} git diff --no-index -- /dev/null {} >> /tmp/capture-visual-proof/diff-at-start.patch',
+    );
+    expect(skillContent).not.toContain(
+      'git ls-files --others --exclude-standard >>',
+    );
     expect(skillContent).toContain(
       'Any source change you make after the snapshot, whether for simulation or for a fix, must be listed in the `Simulation disclosure` section or reverted before this skill returns.',
     );
