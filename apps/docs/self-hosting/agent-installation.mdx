@@ -1,370 +1,180 @@
 ---
 title: Automated self-hosting contract
-description: A deterministic, safety-conscious contract for an agent installing Roomote.
+description: A concise contract for an agent installing and verifying Roomote.
 ---
 
-This page is the installation contract for an agent asked to follow the
-[self-hosting guide](/self-hosting). It complements the human-facing guide; it
-does not replace the installer or authorize an agent to make privileged or
-external-account changes without approval.
+This page is the execution contract for an agent asked to follow the
+[self-hosting guide](/self-hosting). Detect the host, choose the matching default
+below, and continue until a real Roomote task works.
 
-<Warning>
-  Never ask the user to paste provider credentials, setup tokens, backup
-  passphrases, or private keys into chat. Use Roomote's browser setup, the
-  provider's own authorization page, or a protected secret store.
-</Warning>
+## Choose the path
 
-## Required outcome
+| Target | Default |
+| --- | --- |
+| Local macOS, Windows, or Linux with Docker | Run the full local self-host stack directly with the checked-in Docker Compose files. |
+| Fresh dedicated Ubuntu or Debian VPS/server | Use the [one-command installer](/self-hosting#one-command-install). |
+| Durable production | Use the installer on a dedicated Ubuntu/Debian server with stable DNS and public HTTPS. |
 
-Complete the installation only when all of these are true:
+Do not run the Linux installer directly on macOS or Windows. For the local path,
+Docker provides the Linux container runtime: use Docker Desktop on macOS or
+Windows, or Docker Engine with Compose on Linux. Docker must run Linux
+containers, and the default Docker socket must be available because the local
+Docker sandbox overlay mounts `/var/run/docker.sock` into the controller and
+BullMQ containers. Do not claim native Windows-container support.
 
-- Roomote runs on a supported Linux host and its systemd unit is enabled for
-  reboot persistence.
-- An HTTPS origin appropriate to the deployment reaches Roomote: private when
-  no external reachability is needed, temporary for local callback evaluation,
-  or stable and public for a durable deployment.
-- The first admin completed the token-protected browser setup.
-- Source control, inference, and a sandbox provider are configured.
-- A real task can clone a repository, run a command, and return its result.
-- Artifact upload works, and a live preview works when preview ports are
-  configured and the selected ingress supports wildcard preview hostnames.
-- The operator has the status, logs, backup, restore, upgrade, and rollback
-  commands and knows where encrypted backups are stored.
+Proceed through safe, reversible local steps without asking the user to choose
+tools or topology. Pause only when:
 
-Services being merely `running` is not a completed installation.
+- a credential, secret, browser sign-in, or OAuth authorization is required
+- the agent does not already have permission to run Docker or write local files
+- a durable external change is required, such as DNS, firewall, router, or
+  account-owned tunnel configuration
+- an action would overwrite or delete existing data
+- no documented safe default applies
 
-## Safety and confirmation contract
+Never ask the user to paste secrets or tokenized setup URLs into chat.
 
-Perform read-only detection without asking. Then select the documented default
-for the detected host instead of asking the user to choose among equivalent
-topologies. Summarize the chosen topology, public-ingress plan, exact installer
-command, and expected changes before proceeding.
+## Local evaluation with Docker Compose
 
-Proceed with safe, reversible documented defaults when the required privileges
-are already available. Ask only when crossing one of these boundaries:
+Use this path on macOS, Windows, or Linux when Docker Engine and the Compose
+plugin are available.
 
-- the required command cannot run with the privileges already granted to the
-  agent and needs the user to provide or approve access
-- the next step needs a credential, secret, browser sign-in, OAuth consent, or
-  provider-app installation from the user
-- the next step changes durable external state, including DNS, a cloud or router
-  firewall, port forwarding, an account-owned tunnel, or a billed resource
-- the next step is destructive or difficult to reverse, including restore,
-  volume deletion, infrastructure destruction, or an upgrade without a backup
-- an existing Roomote deployment, domain, TLS mode, preview layout, operator
-  override, shared production workload, or port conflict makes the documented
-  default unsafe
-- detection finds no documented safe default
+1. Clone Roomote and work from the repository root.
+2. Create `.env.local` from `.env.local.example`; do not commit it.
+3. Set `DOCKER_WORKER_PLATFORM=linux/arm64` on an ARM host or
+   `DOCKER_WORKER_PLATFORM=linux/amd64` on an x86-64 host.
+4. Generate a random `SETUP_TOKEN` in `.env.local` before exposing the setup
+   flow outside the machine.
+5. If public OAuth or webhook HTTPS is needed, add the temporary Quick Tunnel
+   service below. Otherwise skip to starting Roomote and use
+   `http://localhost:13000`.
 
-Batch closely related approvals when the exact actions are known. Do not ask the
-user to choose a topology when the table below supplies one, or ask merely
-because a reversible command uses `sudo`. OS inspection, resource checks,
-creating a local evaluation VM, installing documented prerequisites,
-downloading and reading the installer, DNS lookups, `roomote status`, and
-redacted health checks do not need confirmation when the agent already has the
-required access. A temporary Quick Tunnel publicly exposes the local instance,
-so state that consequence and ask once immediately before starting it unless the
-user already authorized public evaluation ingress.
-
-The user must personally provide credentials and complete browser sign-in,
-OAuth consent, and billing acceptance when a provider requires them. Pause for
-those steps, then continue documented non-secret setup after approval. Do not
-capture the browser, setup URL, tokens, or secrets in a transcript.
-
-## Detect before choosing a path
-
-Report, without changing the machine:
-
-- host OS and version, kernel, architecture, and whether execution is inside a
-  VM, container, WSL, or bare metal
-- CPU count, total memory, free disk, and whether other production workloads
-  share the host
-- whether Docker Engine and the Compose plugin are installed and healthy
-- whether `systemd`, `curl`, and `openssl` are available
-- whether TCP ports 80 or 443 are already in use
-- default route, public IPv4 detection, DNS control, NAT/CGNAT constraints, and
-  firewall ownership
-
-Roomote publishes Linux images for `amd64` and `arm64`. Use at least 4 GB RAM;
-prefer 4 vCPU, 8 GB RAM, and 60 GB of quota-capable disk when Docker task
-sandboxes share the host. Stop and ask the user to choose a larger or different
-host when resources are below that practical baseline, the target is an LXC
-container, or unrelated production workloads share the host.
-
-## Choose the supported topology
-
-| Detected environment | Default path | Contract |
-| --- | --- | --- |
-| Fresh Ubuntu or Debian VPS/server, `amd64` or `arm64` | Install directly | Preferred and fully automated installer path. Use a stable domain for production. |
-| Other native Linux | Do not assume automatic support | The installer can continue only when Docker Engine and Compose are already installed and the host provides systemd. Prefer an Ubuntu/Debian VM instead of adapting package-manager or service behavior. |
-| Local macOS | Existing compatible Linux VM, otherwise Ubuntu 24.04 in Multipass | The installer rejects macOS. Select and create or reuse this guest without asking the user to choose a topology. Run Docker and Roomote inside the guest. |
-| Local Windows | Existing compatible Linux VM, otherwise Ubuntu 24.04 in Multipass | The installer rejects Windows. Use the full Linux guest for local evaluation; do not substitute Docker Desktop or WSL2. |
-| WSL2 | Do not use as the default | WSL2 is not a supported installer recommendation because Docker, `systemd`, reboot persistence, and inbound networking vary. Do not claim support based only on a Linux `uname`; use a full Linux VM or VPS. |
-| LXC/container | Stop | The default Docker sandbox path depends on networking, cgroups, packet filtering, and writable-layer quotas. Move to a full VM or server. |
-
-### macOS evaluation VM
-
-Docker Desktop is supported for developing Roomote from source, but it is not a
-substitute for the Linux server expected by the self-hosting installer. The
-supported local installer topology is a Linux guest with its own Docker Engine,
-`systemd`, filesystem, and network stack. Do not mount the macOS Docker socket
-into the guest.
-
-Reuse an existing compatible Linux VM when one is available. Otherwise, if the
-agent has the required host access, create the installer-documented evaluation
-VM without asking the user to choose another topology:
+Start the checked-in local self-host and Docker sandbox shapes with this exact
+Compose file set:
 
 ```sh
-brew install --cask multipass
-multipass launch 24.04 --name roomote --cpus 4 --memory 6G --disk 40G
-multipass shell roomote
+docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.self-host.yml -f docker-compose.compute-docker.yml up -d --build
 ```
 
-Install Docker and Roomote inside the guest. Docker Desktop may coexist on the
-Mac, but it is not part of this topology.
+This runs PostgreSQL, Redis, MinIO, web, API, controller, BullMQ, preview proxy,
+and task workers as Linux containers. The app and datastore ports bind to
+`127.0.0.1`; do not expose them directly to the LAN or internet. This is the
+repository's local self-host configuration, not the durable production/Caddy
+deployment.
 
-### Windows evaluation VM
+On Docker Desktop or another engine without writable-layer quota support,
+Docker task creation can fail closed. Do not disable the guard automatically.
+Use **Settings → Sandboxes → Local Docker → Validate environment** and follow
+the [Docker sandbox guidance](/providers/compute/docker) if validation reports
+that the disk limit is unsupported.
 
-Reuse an existing compatible Linux VM when one is available. Otherwise use the
-installer-documented, PowerShell-friendly evaluation VM without asking the user
-to choose between Linux runtimes:
+### Add a temporary HTTPS Quick Tunnel
 
-```powershell
-winget install -e --id Canonical.Multipass
-multipass launch 24.04 --name roomote --cpus 4 --memory 6G --disk 40G
-multipass shell roomote
+Use this only when a local evaluation needs public OAuth or webhook reachability
+and no stable public domain was supplied. A Quick Tunnel is temporary, has no
+uptime guarantee, and receives a new `trycloudflare.com` hostname when
+recreated.
+
+Create an untracked `docker-compose.cloudflared.yml` in the Roomote checkout:
+
+```yaml
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://web:3000
+    depends_on:
+      - web
 ```
 
-Docker Desktop's WSL2 backend does not make Windows itself a supported Roomote
-installer host. Do not install into WSL2 unless the user explicitly chooses an
-unsupported experiment after being told to expect differences in service and
-network behavior.
+This tunnel is only the temporary browser, OAuth, and webhook edge for the local
+Docker-compute path. The web service handles browser callbacks and proxies
+`/api/webhooks/*` to the API. It does not turn the local stack into the
+production Caddy deployment or expose wildcard previews.
 
-For durable use from either macOS or Windows, default to a Linux VPS rather than
-trying to make the local evaluation VM permanent.
-
-### Native Linux or VPS
-
-Use a fresh Ubuntu or Debian host. The installer runs as root, installs Docker
-Engine and Compose when missing, writes the deployment under `/opt/roomote`,
-installs `/usr/local/bin/roomote`, and enables the `roomote-compose` systemd
-unit. It requires `curl` and `openssl`; automatic Docker installation is only
-implemented for Ubuntu and Debian.
-
-The installer publishes only Caddy's TCP ports 80 and 443. PostgreSQL, Redis,
-MinIO, the API, preview proxy, and queue dashboard remain on internal Docker
-networks. Never expose those services to work around ingress problems.
-
-## Choose public ingress
-
-Roomote derives browser links, auth redirects, webhooks, artifact URLs, and
-preview URLs from its public origin. For durable deployments, choose the final
-stable hostname before browser setup. For a local evaluation that needs OAuth
-or webhook reachability and has no supplied stable domain, use the temporary
-Quick Tunnel default below and treat every provider registration as temporary.
-When no public callbacks are required, do not expose Roomote with a Quick Tunnel
-solely by default; use an existing private HTTPS origin, or ask when none exists.
-
-### Production default: domain, public DNS, and Caddy
-
-Use this path for a VPS or server with public ingress:
-
-1. Ask for the final app domain and confirm the user controls its DNS.
-2. For the default flat preview layout, require A records for the app hostname
-   and its first-level wildcard, plus matching AAAA records when IPv6 is used.
-3. Confirm TCP 80 and 443 are allowed by the cloud/host firewall and not used by
-   another service.
-4. Run the installer with `--domain` after approval.
+The local stack must already be running. Start the tunnel service with the same
+checked-in Compose shapes:
 
 ```sh
-curl -fsSL https://get.roomote.dev -o /tmp/roomote-install.sh
-less /tmp/roomote-install.sh
-sudo bash /tmp/roomote-install.sh --domain roomote.example.com
+docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.self-host.yml -f docker-compose.compute-docker.yml -f docker-compose.cloudflared.yml up -d cloudflared
+docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.self-host.yml -f docker-compose.compute-docker.yml -f docker-compose.cloudflared.yml logs cloudflared
 ```
 
-The default flat preview name is
-`<task>-<port>-preview.roomote.example.com`, covered by
-`*.roomote.example.com`. A separate `--preview-domain
-preview.roomote.example.com` uses `<task>-<port>.preview.roomote.example.com`
-and requires both the preview hostname and its wildcard plus certificate
-coverage for the nested wildcard. Do not select the dedicated layout unless
-the user needs nested previews or dedicated preview-cookie isolation and their
-DNS/TLS provider supports it.
+Read the generated `https://<random>.trycloudflare.com` URL from the logs. Set
+`R_PUBLIC_URL` in `.env.local`, without posting it to chat:
 
-Without `--domain`, the installer derives an `sslip.io` hostname from the
-server's public IPv4. Treat that as a short evaluation path only: it is tied to
-the IP and shares public certificate rate limits.
+```dotenv
+R_PUBLIC_URL=https://<random>.trycloudflare.com
+```
 
-### Local evaluation default: Cloudflare Quick Tunnel
-
-When the target is a local Linux VM, OAuth or webhooks need public reachability,
-and the user did not supply a stable public domain, install `cloudflared` inside
-the guest using Cloudflare's [official
-Linux package instructions](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/).
-A Quick Tunnel needs no Cloudflare account and provides a temporary public HTTPS
-origin for browser setup, OAuth callbacks, and webhooks. State that it publicly
-exposes Roomote, then ask once before starting it unless the user already
-authorized public evaluation ingress.
-
-Start the tunnel inside the guest and keep the process running:
+Then start or recreate the full stack with the tunnel override included:
 
 ```sh
-cloudflared tunnel --url https://localhost:443 --no-tls-verify
+docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.self-host.yml -f docker-compose.compute-docker.yml -f docker-compose.cloudflared.yml up -d --build
 ```
 
-Read the generated `https://<random>.trycloudflare.com` URL from cloudflared's
-output. Use only its hostname as the installer domain, and use internal Caddy
-TLS because Cloudflare terminates the public certificate:
-
-```sh
-curl -fsSL https://get.roomote.dev -o /tmp/roomote-install.sh
-sudo bash /tmp/roomote-install.sh \
-  --domain <random>.trycloudflare.com \
-  --tls-mode internal
-```
-
-The tunnel can start before Caddy is ready and remain running while the
-installer brings up Roomote. Verify the generated public URL before browser
-setup, then use that exact origin for provider callbacks. Roomote's Compose
-configuration derives `R_PUBLIC_URL`, `R_APP_URL`, `TRPC_URL`, and artifact URLs
-from the installer domain.
-
-Quick Tunnels are for testing and development only. They have no uptime SLA,
-their hostname changes when recreated, and they do not provide the wildcard
-hostnames required for normal live previews. Do not require preview verification
-on this path. If cloudflared restarts with a new hostname, rerun the installer
-with the new `--domain` and `--tls-mode internal`, then recreate or update every
-OAuth callback and webhook registration before continuing.
-
-### Stable tunnel alternative
-
-When the user supplies a stable domain but inbound ports should stay closed, use
-a named Cloudflare Tunnel as described in the [Homelab deployment
-guide](/homelab#cloudflare-tunnel). This is an account-owned external change, so
-obtain confirmation before creating it. Route the app and flat wildcard preview
-hostnames to Caddy, install with `--domain <host> --tls-mode internal`, and
-enable **Match SNI to Host** for wildcard previews.
-
-## Install and resume safely
-
-Download the installer to a temporary file, identify the exact version and
-flags, and make the path available for inspection. When the agent already has
-the required privileges and this is a new dedicated host or evaluation VM,
-continue without another confirmation. If privileges are unavailable or the
-host has existing workloads or conflicting state, stop at the applicable
-boundary above. Do not recreate the Compose stack manually.
-
-The installer supports safe reruns. An existing `/opt/roomote/.env` preserves
-generated secrets and the existing domain when no replacement is supplied,
-while deployment-owned image and URL metadata are refreshed. On a failed or
-interrupted install:
-
-1. inspect `sudo roomote status` when the CLI exists
-2. inspect only the relevant service with `sudo roomote logs <service>` and
-   redact secrets and tokenized URLs
-3. correct the prerequisite, DNS, port, or Docker failure
-4. rerun the same installer command; do not delete `/opt/roomote/.env` or Docker
-   volumes
-
-Ask before changing an existing domain, preview domain, TLS mode, or manual env
-override. Never “start clean” by deleting state unless the user explicitly
-chooses data loss after a backup.
-
-## Browser setup and generated URLs
-
-When services are healthy, ask the user to run this in a separate trusted
-terminal and open the result themselves:
-
-```sh
-sudo roomote setup-url
-```
-
-Do not run that command in a captured agent terminal, print its output, or
-repeat the tokenized URL. The link grants first-admin bootstrap access.
-
-The user can create the first admin with email/password; Slack or Microsoft SSO
-can be configured later. The user must then configure source control, inference,
-a sandbox provider, optional communications, and the first environment in the
-browser.
-
-Provider registrations must use the exact final public origin. Important paths
+Use that exact HTTPS origin for provider redirects and webhooks. Important paths
 include:
 
-| Purpose | Public URL |
+| Purpose | URL |
 | --- | --- |
-| GitHub setup and callback | `<origin>/github/callback` |
-| GitHub webhook | `<origin>/_roomote-api/api/webhooks/github` |
+| GitHub setup/callback | `<origin>/github/callback` |
+| GitHub webhook | `<origin>/api/webhooks/github` |
 | Slack OAuth callback | `<origin>/api/slack/callback` |
-| Slack events and interactivity | `<origin>/_roomote-api/api/webhooks/slack` |
-| Slack sign-in redirect | `<origin>/api/auth/oauth2/callback/slack` |
-| Microsoft sign-in redirect | `<origin>/api/auth/oauth2/callback/microsoft-entra-id` |
-| Microsoft Teams bot endpoint | `<origin>/api/webhooks/teams` |
+| Slack events/interactivity | `<origin>/api/webhooks/slack` |
+| Slack sign-in | `<origin>/api/auth/oauth2/callback/slack` |
+| Microsoft sign-in | `<origin>/api/auth/oauth2/callback/microsoft-entra-id` |
+| Microsoft Teams bot | `<origin>/api/webhooks/teams` |
 
-Use the relevant [source-control](/source-control) and
-[communications-provider](/communications) pages for complete permissions and
-provider-specific URLs. Discord uses its Gateway service rather than a public
-webhook callback.
+Quick Tunnels do not provide Roomote's wildcard preview hostnames. Do not claim
+public artifact, worker API, or wildcard-preview coverage on this path; it is
+for local Docker-compute evaluation. If the tunnel hostname changes, update
+`R_PUBLIC_URL`, recreate the Compose services, and update every provider redirect
+and webhook before testing again.
 
-## Verify before declaring success
+## Dedicated server or production
 
-For an installer deployment, use `sudo roomote status`; `pnpm run doctor` is a
-source-checkout/local-development command and is not the host CLI's production
-health check.
-
-Verify in this order:
-
-1. `sudo roomote status` reports the Compose services healthy.
-2. Open the configured origin from an appropriate client. When callbacks,
-   webhooks, or other external access are required, test from outside the host
-   or home LAN and verify a publicly trusted certificate.
-3. Confirm sign-in succeeds and the expected repositories appear after source
-   control is connected.
-4. Validate the configured sandbox provider in **Settings → Sandboxes**.
-5. Run a small task that clones a repository and executes a harmless command.
-6. Confirm its transcript/logs and a generated artifact are accessible.
-7. If the ingress supports wildcard previews and the environment declares a
-   preview port, open its generated preview from an external network and verify
-   wildcard DNS, TLS, and proxy routing.
-8. For each configured communications provider, send one real message and
-   confirm Roomote receives and replies to it.
-9. Review **Settings → Deployment → Diagnostics** for the running application
-   version and schema migration.
-
-`roomote status` and the local development doctor primarily prove local service
-health. They do not by themselves prove public DNS, TLS, OAuth redirects,
-provider webhook delivery, or wildcard previews; run the applicable external
-checks above whenever the deployment requires those capabilities.
-
-## Leave a recoverable deployment
-
-Give the operator these commands:
+On a fresh dedicated Ubuntu or Debian host, prefer the installer:
 
 ```sh
-sudo roomote status
-sudo roomote logs [service...]
-sudo roomote restart [service...]
-sudo roomote up
-sudo roomote down
-sudo roomote backup
-sudo roomote upgrade
-sudo roomote rollback
-sudo roomote restore /path/to/backup.roomote --yes
+curl -fsSL https://get.roomote.dev | sudo bash -s -- --domain roomote.example.com
 ```
 
-Create an encrypted backup after setup if the user approves the brief
-application-writer pause. Store the `.roomote` bundle off-host and its
-12-or-more-character
-passphrase separately. Use `--include-redis` only when queued work, schedules,
-sessions, and transient Redis state must be preserved. External object storage
-requires its own provider-level backup.
+For durable use, require stable app and wildcard preview DNS plus public TCP
+ports 80 and 443. Caddy terminates HTTPS and routes app, API, webhook, artifact,
+and preview traffic. Use the `sslip.io` installer default only for a short VPS
+evaluation, not production. Use a named Cloudflare Tunnel with
+`--tls-mode internal` only when the operator deliberately chooses stable
+closed-port ingress. DNS, firewall, router, and provider-account changes require
+user approval.
 
-`roomote upgrade` creates an encrypted pre-upgrade backup by default and
-preserves the previous release as the supported rollback target. Never skip the
-backup without explicit approval. `roomote restore ... --yes` overwrites
-configuration and data; verify the bundle and obtain a separate destructive
-confirmation immediately before running it.
+The installer is idempotent: rerunning it preserves existing secrets and the
+existing domain unless a replacement is supplied. Use the installed `roomote`
+CLI for status, logs, backup, upgrade, rollback, and restore.
 
-Finish with a concise report containing the topology, public origin and whether
-it is temporary or durable, ingress and preview layout, configured provider
-categories, verification results, backup location (never its passphrase), and
-any unsupported choices or remaining operator action.
+## Complete and verify
+
+For local Compose, open `http://localhost:13000/setup` or the Quick Tunnel's
+`/setup` path and enter `SETUP_TOKEN` yourself. For an installer deployment, run
+`sudo roomote setup-url` in a trusted terminal. Never print or capture the
+tokenized URL in agent output.
+
+Pause while the user completes credentials and browser authorization. Then
+continue until all applicable checks pass:
+
+1. long-running Compose services are running, healthchecked services are
+   healthy, and one-shot services such as `db-migrate` and `worker-image`
+   exited successfully (`docker compose ... ps`); on an installer host,
+   `sudo roomote status` is healthy
+2. sign-in works and expected repositories appear
+3. **Validate environment** succeeds for the selected sandbox provider
+4. a small task clones a repository and runs a harmless command
+5. task logs and an uploaded artifact are accessible
+6. every configured OAuth callback or webhook works through the configured
+   HTTPS origin
+7. a live preview works when the chosen ingress supports preview hostnames
+
+For local Compose, use the same `--env-file` and `-f` arguments for `ps`,
+`logs`, `up`, and `down`; include `docker-compose.cloudflared.yml` when the
+tunnel is enabled. Removing the Quick Tunnel override and stopping its container
+reverses the temporary public exposure.

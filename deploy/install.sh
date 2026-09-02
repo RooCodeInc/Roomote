@@ -151,10 +151,8 @@ fi
 # Before anything else (including the root check, so nobody sudo-pipes a
 # script for nothing): this installer manages Docker, systemd, and /opt on
 # the host, so it only runs on a Linux server. The non-Linux message is
-# OS-specific so macOS/Windows users get a concrete local-trial path
-# (Multipass VM) instead of only the SSH-into-a-server guidance, but the
-# installer never installs Multipass, launches VMs, or mutates the host on a
-# non-Linux system.
+# OS-specific so macOS/Windows users get the Docker Compose local-evaluation
+# path instead of trying to adapt this dedicated-server installer.
 host_kernel="$(uname -s)"
 if [ "$host_kernel" != 'Linux' ]; then
   case "$host_kernel" in
@@ -163,16 +161,10 @@ if [ "$host_kernel" != 'Linux' ]; then
 this installer sets up a Linux server (Ubuntu/Debian, x86_64 or arm64) and
 cannot run on macOS.
 
-If you must try the installer locally, spin up an Ubuntu VM with Multipass and run it
-inside:
+For local evaluation on this Mac, use Docker Desktop and Roomote's checked-in
+Docker Compose files instead:
 
-  brew install --cask multipass
-  multipass launch 24.04 --name roomote --cpus 4 --memory 6G --disk 40G
-  multipass shell roomote
-  curl -fsSL https://get.roomote.dev | sudo bash
-
-Note: a local VM is for trying the installer only, not a production path.
-Networking, domains, and webhooks may behave differently than on a real VPS.
+  https://docs.roomote.dev/self-hosting/agent-installation
 
 For production, SSH into the Ubuntu/Debian server you want to run Roomote on
 and run the installer there (or look for alternatives in https://docs.roomote.dev).
@@ -186,18 +178,10 @@ EOF
 this installer sets up a Linux server (Ubuntu/Debian, x86_64 or arm64) and
 cannot run on Windows.
 
-Run it on a real Linux server, or try it locally inside an Ubuntu VM. The
-closest PowerShell-friendly option is Multipass on Windows (install it
-optionally with `winget install -e --id Canonical.Multipass`):
+For local evaluation on this Windows machine, use Docker Desktop with Linux
+containers and Roomote's checked-in Docker Compose files instead:
 
-  multipass launch 24.04 --name roomote --cpus 4 --memory 6G --disk 40G
-  multipass shell roomote
-  curl -fsSL https://get.roomote.dev | sudo bash
-
-Note: a local VM is for trying the installer only, not a production path.
-Networking, domains, and webhooks may behave differently than on a real VPS.
-WSL2 is not recommended because the installer expects a server-like Linux
-host with Docker, systemd, and full networking.
+  https://docs.roomote.dev/self-hosting/agent-installation
 
 For production, SSH into the Ubuntu/Debian server you want to run Roomote on
 and run the installer there.
