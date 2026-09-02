@@ -4572,7 +4572,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledOnce();
   });
 
-  it('posts final assistant text only as a defensive fallback', async () => {
+  it('posts final assistant text only as a defensive fallback on chat surfaces', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -4601,6 +4601,54 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           ts: 200,
           nativeSessionId: 'opencode-session-1',
           nativeMessageId: 'native-message-1',
+        }),
+      }),
+    );
+  });
+
+  it('persists native assistant output directly for web Sessions', async () => {
+    mocks.appendMemory.mockResolvedValue({ saved: true });
+    let memoryResult: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        memoryResult = await invokeTool(nativeToolNames.saveMemory, {
+          memory: 'Prefer concise status summaries.',
+        });
+        await options.onMessageCompleted?.({
+          id: 'native-web-message-1',
+          sessionId: 'opencode-session-1',
+          createdAtMs: 100,
+          completedAtMs: 200,
+        });
+        return 'The preference is saved.';
+      },
+    );
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        conversation: {
+          surface: 'web',
+          workspaceId: 'user-1',
+          conversationId: 'web-session-1',
+        },
+        adapter,
+      }),
+    ).resolves.toBe('The preference is saved.');
+
+    expect(memoryResult).toMatchObject({ success: true });
+    expect(adapter.postReply).not.toHaveBeenCalled();
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+          contentBlocks: [{ type: 'text', text: 'The preference is saved.' }],
+          source: 'web',
+          nativeSessionId: 'opencode-session-1',
+          nativeMessageId: 'native-web-message-1',
+          metadata: expect.objectContaining({ purpose: 'closeout' }),
         }),
       }),
     );
@@ -4948,6 +4996,81 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(results[0]).toEqual(acknowledgementRequired);
       expect(results[1]).toMatchObject({ success: true, taskId: 'task-1' });
       expect(results[2]).toMatchObject({ success: true });
+    });
+
+    it('requires launch_task kickoff text for chat destinations', async () => {
+      let result: unknown;
+      const adapter = callbacks();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          result = await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix checkout.',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'I need a kickoff before starting that work.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({ ...baseParams, adapter });
+
+      expect(result).toEqual({
+        success: false,
+        error: 'A kickoff message is required for this chat destination.',
+      });
+      expect(adapter.launchTask).not.toHaveBeenCalled();
+    });
+
+    it('launches web tasks without a separate kickoff message', async () => {
+      let launchResult: unknown;
+      const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
+        await postKickoff({
+          taskId: 'task-1',
+          taskUrl: 'https://roomote.example/task-1',
+          taskLinkRendered: true,
+        });
+        return {
+          success: true,
+          taskId: 'task-1',
+          taskUrl: 'https://roomote.example/task-1',
+        };
+      });
+      const adapter = callbacks({ launchTask });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          launchResult = await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix checkout.',
+          });
+          return '';
+        },
+      );
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          conversation: {
+            surface: 'web',
+            workspaceId: 'user-1',
+            conversationId: 'web-session-1',
+          },
+          adapter,
+        }),
+      ).resolves.toBe('');
+
+      expect(launchResult).toMatchObject({ success: true, taskId: 'task-1' });
+      expect(adapter.postReply).not.toHaveBeenCalled();
+      expect(
+        mocks.upsertMessage.mock.calls
+          .map(([input]) => input.message)
+          .filter(
+            (message) =>
+              message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+          ),
+      ).toHaveLength(0);
     });
 
     it('allows an emoji-only terminal reaction without a text acknowledgement', async () => {
@@ -6397,6 +6520,44 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       purpose: 'closeout',
       message: 'There is new pull request feedback to review.',
     });
+  });
+
+  it('persists a required child-task relay as native web output', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        return 'The checkout fix is ready for review.';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question:
+        '<platform_event>{"type":"task_settled","taskId":"task-1"}</platform_event>',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'web-session-1',
+      },
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      platformEventVisibility: 'required',
+      adapter,
+    });
+
+    expect(adapter.postReply).not.toHaveBeenCalled();
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+          contentBlocks: [
+            { type: 'text', text: 'The checkout fix is ready for review.' },
+          ],
+          source: 'web',
+        }),
+      }),
+    );
   });
 
   it('only permits a closeout for presentation-only platform events', async () => {

@@ -33,6 +33,27 @@ describe('Fast structured input tool filtering', () => {
       ],
     ).toBe(true);
   });
+
+  it('uses native assistant output instead of communication tools on web', () => {
+    const webTools = buildFastAgentToolFilter([], { surface: 'web' });
+
+    expect(webTools[FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]).toBe(false);
+    expect(webTools[FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction]).toBe(false);
+    expect(webTools[FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]).toBe(true);
+    for (const surface of [
+      'slack',
+      'discord',
+      'teams',
+      'telegram',
+      'automation',
+    ] as const) {
+      expect(
+        buildFastAgentToolFilter([], { surface })[
+          FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply
+        ],
+      ).toBe(true);
+    }
+  });
 });
 
 describe('setup prompt guidance and snapshot injection', () => {
