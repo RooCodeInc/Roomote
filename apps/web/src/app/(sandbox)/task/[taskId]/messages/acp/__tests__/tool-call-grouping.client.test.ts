@@ -1566,7 +1566,7 @@ describe('buildAcpRenderBlocks', () => {
     expect(entries[1].childBlocks).toBeUndefined();
   });
 
-  it('hides child-session output when debug-gated subagent rows are hidden', () => {
+  it('nests child-session output under the parent subagent row in the default transcript', () => {
     const entries = buildAcpRenderBlocks(
       [
         textMessage('assistant-1', 1),
@@ -1586,16 +1586,26 @@ describe('buildAcpRenderBlocks', () => {
       { showInternalMessages: false },
     );
 
-    expect(entries).toHaveLength(2);
-    expect(entries.map((entry) => entry.kind)).toEqual(['message', 'message']);
-    expect(
-      entries.some(
-        (entry) =>
-          entry.kind === 'message' &&
-          entry.msg.kind === 'text' &&
-          entry.msg.text === 'Child agent says hello.',
-      ),
-    ).toBe(false);
+    expect(entries).toHaveLength(3);
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+    ]);
+
+    if (entries[1]?.kind !== 'message') {
+      throw new Error('Expected completed subagent row');
+    }
+
+    expect(entries[1].msg.id).toBe('tool-subagent-finished');
+    expect(entries[1].childBlocks).toHaveLength(1);
+    expect(entries[1].childBlocks?.[0]).toEqual({
+      kind: 'message',
+      msg: expect.objectContaining({
+        id: 'assistant-child-1',
+        text: 'Child agent says hello.',
+      }),
+    });
   });
 
   it('keeps the in-progress subagent spawn row visible in the default transcript', () => {
@@ -1640,7 +1650,7 @@ describe('buildAcpRenderBlocks', () => {
     expect(entries[2].msg.data.title).toBe('Spawned subagent');
   });
 
-  it('keeps spawn rows but hides thread-bound subagent rows when internal transcript rows are disabled', () => {
+  it('keeps pending and thread-bound spawn rows when internal transcript rows are disabled', () => {
     const entries = buildAcpRenderBlocks(
       [
         textMessage('assistant-1', 1),
@@ -1659,18 +1669,20 @@ describe('buildAcpRenderBlocks', () => {
       { showInternalMessages: false },
     );
 
-    expect(entries).toHaveLength(3);
+    expect(entries).toHaveLength(4);
     expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
       'message',
       'message',
       'message',
     ]);
 
-    if (entries[1]?.kind !== 'message') {
-      throw new Error('Expected pending spawn row entry');
+    if (entries[1]?.kind !== 'message' || entries[2]?.kind !== 'message') {
+      throw new Error('Expected pending and thread-bound spawn row entries');
     }
 
     expect(entries[1].msg.id).toBe('tool-subagent-pending');
+    expect(entries[2].msg.id).toBe('tool-subagent-completed');
   });
 
   it('keeps Roomote chat reply rows visible when internal transcript rows are disabled', () => {
