@@ -544,7 +544,13 @@ export function FastSessionTranscript({
         )
         .map((message) => {
           const uiMessage = toAcpUiMessage({
-            id: message.id,
+            // A reply keeps the id its streamed chunks rendered under, so the
+            // persisted row reconciles in place instead of remounting.
+            id:
+              message.role === 'assistant' &&
+              message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage
+                ? `assistant:${message.eventId}`
+                : message.id,
             ts: message.ts,
             eventType: message.eventType as AcpEventType,
             role: message.role,

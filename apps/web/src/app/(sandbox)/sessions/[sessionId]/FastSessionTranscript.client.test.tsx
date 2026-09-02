@@ -1818,8 +1818,10 @@ describe('FastSessionTranscript', () => {
       );
     });
     expect(screen.getByText('Looking into it')).toBeInTheDocument();
+    const streamedNode = screen.getByText('Looking into it');
 
-    // The persisted row lands under the same eventId and takes over.
+    // The persisted row lands under the same eventId and takes over in
+    // place: the same element is updated rather than remounted.
     act(() => {
       FakeEventSource.instances[0]!.emit('messages', {
         messages: [
@@ -1832,7 +1834,7 @@ describe('FastSessionTranscript', () => {
         ],
       });
     });
-    expect(screen.getByText('Looking into it now.')).toBeInTheDocument();
+    expect(screen.getByText('Looking into it now.')).toBe(streamedNode);
     expect(screen.queryByText('Looking into it')).not.toBeInTheDocument();
 
     // A later reply streams as its own message.
