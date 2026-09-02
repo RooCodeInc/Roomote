@@ -62,6 +62,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 30
+      start_period: 120s
   redis:
     image: redis:7-alpine
     command: redis-server --appendonly yes
@@ -102,7 +103,7 @@ write_fixture "$source_root" 'source-encryption-key-that-must-survive'
 printf 'correct horse battery staple\n' >"$passphrase_file"
 chmod 600 "$passphrase_file"
 
-compose_at "$source_root" up -d --wait --wait-timeout 120
+compose_at "$source_root" up -d --wait --wait-timeout 180
 compose_at "$source_root" exec -T postgres \
   psql -U postgres -d roomote -v ON_ERROR_STOP=1 \
   -c "CREATE TABLE recovery_probe (value text NOT NULL); INSERT INTO recovery_probe VALUES ('database-survived');"
