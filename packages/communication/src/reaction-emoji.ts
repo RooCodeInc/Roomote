@@ -2,8 +2,13 @@ import reactionEmojiData from './reaction-emoji-data.json';
 
 const SKIN_TONE_SUFFIX = /^(.*)::skin-tone-([2-6])$/u;
 const PROVIDER_REACTION_SHORTCODE_ALIASES: Readonly<Record<string, string>> = {
-  // Microsoft Teams reports its thumbs-up reaction as "like".
+  // Microsoft Teams reports these provider-native names instead of Slack names.
   like: '+1',
+  heart: 'heart',
+  laugh: 'laughing',
+  surprised: 'open_mouth',
+  sad: 'cry',
+  angry: 'angry',
 };
 const shortcodeToUnified: Readonly<Record<string, string>> =
   reactionEmojiData.shortcodes;
@@ -34,19 +39,23 @@ function resolveReactionEmoji(value: string): string | null {
   return variation ? unifiedToEmoji(variation) : null;
 }
 
+function stripWrappingColons(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charCodeAt(start) === 58) start += 1;
+  while (end > start && value.charCodeAt(end - 1) === 58) end -= 1;
+  return value.slice(start, end);
+}
+
 export function normalizeReactionEmoji(value: string): string {
   const trimmed = value.trim();
-  let start = 0;
-  let end = trimmed.length;
-  while (start < end && trimmed.charCodeAt(start) === 58) start += 1;
-  while (end > start && trimmed.charCodeAt(end - 1) === 58) end -= 1;
-  const normalized = trimmed.slice(start, end).toLowerCase();
+  const normalized = stripWrappingColons(trimmed).toLowerCase();
   return resolveReactionEmoji(normalized) ?? normalized;
 }
 
 export function formatReactionEmojiForDisplay(value: string): string {
   const trimmed = value.trim();
-  const normalized = trimmed.replace(/^:+|:+$/gu, '').toLowerCase();
+  const normalized = stripWrappingColons(trimmed).toLowerCase();
   const resolved = resolveReactionEmoji(normalized);
   if (resolved) return resolved;
   return /^[a-z0-9_+-]+(?:::[a-z0-9_+-]+)*$/u.test(normalized)

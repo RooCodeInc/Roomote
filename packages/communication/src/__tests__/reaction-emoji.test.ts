@@ -15,6 +15,21 @@ describe('reaction emoji matching', () => {
   it('strips long colon runs in linear time', () => {
     const colons = ':'.repeat(100_000);
     expect(normalizeReactionEmoji(`${colons}ship_it${colons}`)).toBe('ship_it');
+    expect(formatReactionEmojiForDisplay(`${colons}ship_it${colons}`)).toBe(
+      ':ship_it:',
+    );
+  });
+
+  it.each([
+    ['like', '👍'],
+    ['heart', '❤️'],
+    ['laugh', '😆'],
+    ['surprised', '😮'],
+    ['sad', '😢'],
+    ['angry', '😠'],
+  ])('normalizes Teams reaction %s to %s', (reaction, emoji) => {
+    expect(normalizeReactionEmoji(reaction)).toBe(emoji);
+    expect(formatReactionEmojiForDisplay(reaction)).toBe(emoji);
   });
 
   it('matches provider aliases for the same reaction', () => {
