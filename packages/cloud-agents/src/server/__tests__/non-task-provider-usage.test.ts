@@ -415,6 +415,18 @@ describe('resolveOpenCodeSmallModel', () => {
             delta: 'ing',
           },
         };
+        // A reasoning part streams deltas under the same field name; it was
+        // never announced as a text part, so it is not reply text.
+        yield {
+          type: 'message.part.delta',
+          properties: {
+            sessionID: 'session-1',
+            messageID: 'assistant-message-1',
+            partID: 'reasoning-part-1',
+            field: 'text',
+            delta: '**Thinking about the request**',
+          },
+        };
         // The user prompt's own text part is not assistant reply text.
         yield {
           type: 'message.part.updated' as const,

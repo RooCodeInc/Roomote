@@ -1181,6 +1181,9 @@ async function runNonTaskSdkPrompt(
     let eventMonitor: Promise<void> | undefined;
     const observedAssistantMessageIds = new Set<string>();
     const completedAssistantMessageIds = new Set<string>();
+    // Reasoning parts stream deltas under the same `field: "text"`; only
+    // parts announced as text parts are reply text.
+    const assistantTextPartIds = new Set<string>();
     const needsEventMonitor = Boolean(
       params.onProviderRetry ||
       options.onAssistantMessageStarted ||
@@ -1244,11 +1247,12 @@ async function runNonTaskSdkPrompt(
                   assistantText &&
                   observedAssistantMessageIds.has(assistantText.messageId)
                 ) {
+                  assistantTextPartIds.add(assistantText.partId);
                   options.onAssistantTextUpdated?.(assistantText);
                 }
               } else if (
                 isOpenCodeTextPartDeltaEvent(event, sessionId) &&
-                observedAssistantMessageIds.has(event.properties.messageID)
+                assistantTextPartIds.has(event.properties.partID)
               ) {
                 options.onAssistantTextUpdated?.({
                   messageId: event.properties.messageID,
