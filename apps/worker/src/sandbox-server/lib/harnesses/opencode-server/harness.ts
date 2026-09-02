@@ -2386,6 +2386,7 @@ export class OpenCodeServerHarness
 
   private async handleCancelTask(command?: CancelTaskCommand): Promise<void> {
     this.clearVisualProofTimeout();
+    this.clearVisualProofAttemptState();
     const sessionId = this.sessionId;
 
     if (!sessionId) {

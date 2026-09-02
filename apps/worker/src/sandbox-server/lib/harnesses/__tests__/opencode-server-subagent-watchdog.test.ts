@@ -1040,6 +1040,36 @@ describe('OpenCode visual proof deadline', () => {
     }
   });
 
+  it('clears proof attempt state when the task is cancelled', async () => {
+    const client = new FakeOpenCodeServerClient();
+    const { harness } = createHarness(client, {
+      visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+    });
+
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part: createSkillToolPart('capture-visual-proof') },
+      });
+
+      await expect(
+        fs.readFile(VISUAL_PROOF_ATTEMPT_STATE_PATH, 'utf8'),
+      ).resolves.toContain('attemptId');
+
+      harness.sendCommand({ commandName: TaskCommandName.CancelTask });
+
+      await vi.waitFor(async () => {
+        await expect(
+          fs.readFile(VISUAL_PROOF_ATTEMPT_STATE_PATH, 'utf8'),
+        ).rejects.toMatchObject({ code: 'ENOENT' });
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('does not reset the deadline for a delegated capture retry', async () => {
     const client = new FakeOpenCodeServerClient();
     const { harness } = createHarness(client, {
