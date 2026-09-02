@@ -214,4 +214,23 @@ describe('tool presentation policy', () => {
       }).rowVisibility,
     ).toBe('visible');
   });
+
+  it('hides integration tool discovery outside internal transcript debugging', () => {
+    const message = toolMessage({
+      title: 'find_integration_tools',
+      toolName: 'find_integration_tools',
+      kind: 'search',
+    });
+
+    expect(
+      resolveToolPresentationPolicy(message, {
+        showInternalMessages: false,
+      }).rowVisibility,
+    ).toBe('debug-only');
+    expect(
+      resolveToolPresentationPolicy(message, {
+        showInternalMessages: true,
+      }).rowVisibility,
+    ).toBe('visible');
+  });
 });

@@ -19,6 +19,7 @@ const INTERNAL_DEBUG_TOOL_CALLS_BY_SOURCE = new Map([
   [
     'roomote',
     new Set([
+      'find_integration_tools',
       'ignore_event',
       'post_to_channel',
       'send_chat_reaction_emoji',
