@@ -117,16 +117,22 @@ type FastAgentNativeToolBridge = {
   url: string;
 };
 
-type FastAgentSubstantiveToolAuthorizer = (call: {
-  sessionId: string;
-  name: FastAgentNativeToolName | 'task';
-  args: Record<string, unknown>;
-}) => Promise<unknown>;
+type FastAgentToolStartDenial = { success: false; error: string };
+
+/**
+ * Decides whether an OpenCode tool call may start for the bound session.
+ * `toolId` is OpenCode's tool identifier: a native tool name, an MCP tool
+ * such as `roomote_send_chat_reaction_emoji`, or a built-in such as `task`.
+ * Returns `null` to allow the call or a denial to reject it.
+ */
+type FastAgentToolStartAuthorizer = (
+  toolId: string,
+) => FastAgentToolStartDenial | null | Promise<FastAgentToolStartDenial | null>;
 
 type ActiveExecutor = {
   allowSkillAccess: boolean;
   allowSpillRecovery: boolean;
-  authorizeSubstantiveTool?: FastAgentSubstantiveToolAuthorizer;
+  authorizeToolStart?: FastAgentToolStartAuthorizer;
   conversationId: string;
   executor: FastAgentNativeToolExecutor;
   skillStore: FastAgentSkillStore;
@@ -136,7 +142,7 @@ type ActiveExecutor = {
 type FastAgentNativeToolBindingOptions = {
   allowSkillAccess?: boolean;
   allowSpillRecovery: boolean;
-  authorizeSubstantiveTool?: FastAgentSubstantiveToolAuthorizer;
+  authorizeToolStart?: FastAgentToolStartAuthorizer;
   skillStore?: FastAgentSkillStore;
   spillBudget?: FastAgentSpillTurnBudget;
 };
@@ -185,9 +191,9 @@ const bridgeRequestSchema = z.object({
   agent: z.string().min(1).optional(),
 });
 
-const substantiveToolAuthorizationSchema = z.object({
+const toolAuthorizationSchema = z.object({
   sessionID: z.string().min(1),
-  tool: z.literal('task'),
+  tool: z.string().min(1),
 });
 
 const spillReadArgsSchema = z.object({
@@ -903,37 +909,27 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
       return;
     }
 
-    if (
-      request.method === 'POST' &&
-      url.pathname === '/authorize-substantive-tool'
-    ) {
+    if (request.method === 'POST' && url.pathname === '/authorize') {
       if (!tokenMatches(request.headers.authorization, token)) {
         writeJson(response, 401, { ok: false, error: 'unauthorized' });
         return;
       }
       try {
-        const parsed = substantiveToolAuthorizationSchema.parse(
+        const parsed = toolAuthorizationSchema.parse(
           await readRequestBody(request),
         );
-        const activeExecutor = activeExecutors.get(parsed.sessionID);
-        if (!activeExecutor?.authorizeSubstantiveTool) {
-          writeJson(response, 409, {
-            ok: false,
-            error: 'The Fast turn is no longer active.',
-          });
-          return;
-        }
-        const authorizationResult =
-          await activeExecutor.authorizeSubstantiveTool({
-            sessionId: parsed.sessionID,
-            name: parsed.tool,
-            args: {},
-          });
+        // Only sessions bound with an authorizer (the Fast parent) are gated.
+        // Subagent sessions and sessions without an active Fast turn keep
+        // OpenCode's own tool handling; the `/tool` and MCP handlers still
+        // reject work for sessions without an active executor.
+        const denial = await activeExecutors
+          .get(parsed.sessionID)
+          ?.authorizeToolStart?.(parsed.tool);
         writeJson(
           response,
           200,
-          authorizationResult
-            ? { ok: true, allowed: false, ...authorizationResult }
+          denial
+            ? { ok: true, allowed: false, error: denial.error }
             : { ok: true, allowed: true },
         );
       } catch {
@@ -985,26 +981,6 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
                 success: false,
                 error: 'Skill access is reserved for the Fast parent agent.',
               },
-              { allowSpill: false },
-            )),
-          });
-          return;
-        }
-      }
-      if (
-        activeExecutor.authorizeSubstantiveTool &&
-        (parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.listSkills ||
-          parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill ||
-          isFastAgentSpillTool(parsed.tool))
-      ) {
-        const authorizationResult =
-          await activeExecutor.authorizeSubstantiveTool(call);
-        if (authorizationResult) {
-          writeJson(response, 200, {
-            ok: true,
-            ...(await formatFastAgentNativeToolResult(
-              parsed.sessionID,
-              authorizationResult,
               { allowSpill: false },
             )),
           });
@@ -1183,6 +1159,7 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
     env: {
       ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: token,
       ROOMOTE_FAST_TOOL_BRIDGE_URL: `http://127.0.0.1:${address.port}/tool`,
+      ROOMOTE_FAST_TOOL_BRIDGE_AUTHORIZE_URL: `http://127.0.0.1:${address.port}/authorize`,
     },
   };
 }
@@ -1376,7 +1353,7 @@ export function bindFastAgentNativeToolExecutor(
   activeExecutors.set(sessionID, {
     allowSkillAccess: options.allowSkillAccess ?? false,
     allowSpillRecovery: options.allowSpillRecovery,
-    authorizeSubstantiveTool: options.authorizeSubstantiveTool,
+    authorizeToolStart: options.authorizeToolStart,
     conversationId,
     executor,
     skillStore: options.skillStore ?? fastAgentSkillStore,

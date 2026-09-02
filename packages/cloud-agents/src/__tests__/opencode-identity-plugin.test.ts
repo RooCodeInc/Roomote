@@ -98,22 +98,72 @@ describe('OPENCODE_IDENTITY_PLUGIN_SCRIPT', () => {
     expect(output.system).toEqual(original);
   });
 
-  it('requires Fast task subagents to pass bridge authorization before execution', async () => {
-    const originalUrl = process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL;
-    const originalToken = process.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN;
-    process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL = 'http://127.0.0.1:1234/tool';
-    process.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN = 'secret';
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        allowed: false,
-        error:
-          'Post an acknowledgement with send_chat_reply before this action.',
-      }),
+  function withBridgeEnv(
+    values: Record<string, string | undefined>,
+    run: () => Promise<void>,
+  ): Promise<void> {
+    const originals = Object.fromEntries(
+      Object.keys(values).map((key) => [key, process.env[key]]),
+    );
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    return run().finally(() => {
+      vi.unstubAllGlobals();
+      for (const [key, value] of Object.entries(originals)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
     });
-    vi.stubGlobal('fetch', fetchMock);
+  }
 
-    try {
+  const bridgeEnv = {
+    ROOMOTE_FAST_TOOL_BRIDGE_AUTHORIZE_URL: 'http://127.0.0.1:1234/authorize',
+    ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: 'secret',
+  };
+
+  it.each(['task', 'send_chat_reply', 'roomote_search_code', 'list_skills'])(
+    'asks the bridge to authorize every tool call before it runs (%s)',
+    (tool) =>
+      withBridgeEnv(bridgeEnv, async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+          ok: true,
+          json: vi.fn().mockResolvedValue({ ok: true, allowed: true }),
+        });
+        vi.stubGlobal('fetch', fetchMock);
+        const hook = (await loadHooks())['tool.execute.before'];
+
+        await expect(
+          hook({ tool, sessionID: 'fast-parent-session' }),
+        ).resolves.toBeUndefined();
+        expect(fetchMock).toHaveBeenCalledWith(
+          'http://127.0.0.1:1234/authorize',
+          expect.objectContaining({
+            method: 'POST',
+            headers: expect.objectContaining({
+              authorization: 'Bearer secret',
+            }),
+            body: JSON.stringify({ sessionID: 'fast-parent-session', tool }),
+          }),
+        );
+      }),
+  );
+
+  it('rejects the tool call with the bridge denial message', () =>
+    withBridgeEnv(bridgeEnv, async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: vi.fn().mockResolvedValue({
+            ok: true,
+            allowed: false,
+            error:
+              'Post an acknowledgement with send_chat_reply before this action.',
+          }),
+        }),
+      );
       const hook = (await loadHooks())['tool.execute.before'];
 
       await expect(
@@ -121,55 +171,48 @@ describe('OPENCODE_IDENTITY_PLUGIN_SCRIPT', () => {
       ).rejects.toThrow(
         'Post an acknowledgement with send_chat_reply before this action.',
       );
-      expect(fetchMock).toHaveBeenCalledWith(
-        'http://127.0.0.1:1234/authorize-substantive-tool',
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({
-            sessionID: 'fast-parent-session',
-            tool: 'task',
-          }),
-        }),
-      );
-    } finally {
-      vi.unstubAllGlobals();
-      if (originalUrl === undefined) {
-        delete process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL;
-      } else {
-        process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL = originalUrl;
-      }
-      if (originalToken === undefined) {
-        delete process.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN;
-      } else {
-        process.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN = originalToken;
-      }
-    }
-  });
+    }));
 
-  it('does not authorize non-task tools or non-Fast task sessions', async () => {
-    const originalUrl = process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL;
-    delete process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL;
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-
-    try {
+  it.each([
+    {
+      name: 'a non-2xx bridge response',
+      response: {
+        ok: false,
+        json: vi.fn().mockResolvedValue({ ok: false, error: 'unauthorized' }),
+      },
+      message: 'unauthorized',
+    },
+    {
+      name: 'a non-JSON bridge response',
+      response: {
+        ok: true,
+        json: vi.fn().mockRejectedValue(new SyntaxError('bad json')),
+      },
+      message: 'Roomote Fast tool authorization failed.',
+    },
+  ])('fails closed on $name', ({ response, message }) =>
+    withBridgeEnv(bridgeEnv, async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
       const hook = (await loadHooks())['tool.execute.before'];
-      await expect(
-        hook({ tool: 'task', sessionID: 'standard-session' }),
-      ).resolves.toBeUndefined();
 
-      process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL = 'http://127.0.0.1:1234/tool';
       await expect(
-        hook({ tool: 'read', sessionID: 'fast-parent-session' }),
-      ).resolves.toBeUndefined();
-      expect(fetchMock).not.toHaveBeenCalled();
-    } finally {
-      vi.unstubAllGlobals();
-      if (originalUrl === undefined) {
-        delete process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL;
-      } else {
-        process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL = originalUrl;
-      }
-    }
-  });
+        hook({ tool: 'task', sessionID: 'fast-parent-session' }),
+      ).rejects.toThrow(message);
+    }),
+  );
+
+  it('does nothing outside a Fast tool bridge runtime', () =>
+    withBridgeEnv(
+      { ROOMOTE_FAST_TOOL_BRIDGE_AUTHORIZE_URL: undefined },
+      async () => {
+        const fetchMock = vi.fn();
+        vi.stubGlobal('fetch', fetchMock);
+        const hook = (await loadHooks())['tool.execute.before'];
+
+        await expect(
+          hook({ tool: 'task', sessionID: 'standard-session' }),
+        ).resolves.toBeUndefined();
+        expect(fetchMock).not.toHaveBeenCalled();
+      },
+    ));
 });

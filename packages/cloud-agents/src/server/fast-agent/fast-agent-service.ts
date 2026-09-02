@@ -1889,9 +1889,10 @@ export async function answerFastAgentQuestion({
       inferenceRetryCanonicalEvent = undefined;
       lastVisibleMessage = reply.message;
       visibleUpdatePosted = true;
-      if (reply.purpose === 'ack' || reply.kickoff) {
-        substantiveWorkAcknowledged = true;
-      }
+      // Any text reply posted by the model (acknowledgement, first progress
+      // update, or task kickoff) is the textual communication the work-start
+      // gate requires. Reactions deliberately do not set this flag.
+      substantiveWorkAcknowledged = true;
       if (reply.purpose === 'closeout' || reply.purpose === 'clarification') {
         closedInstructionVersions.add(instructionVersion);
       }
@@ -2072,14 +2073,27 @@ export async function answerFastAgentQuestion({
         return toolFailure(error);
       }
     };
-    const requireAcknowledgement = () =>
-      !platformEvent && !substantiveWorkAcknowledged
-        ? {
+    // Single owner of the human-turn work-start gate. OpenCode's plugin hook
+    // asks the bridge to authorize every tool call (native, MCP, skills, spill
+    // recovery, built-in `task`) before it runs, so this predicate is the only
+    // place that decides which tools may precede the acknowledgement.
+    const acknowledgementExemptToolIds = new Set<string>([
+      FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
+      FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
+      FAST_AGENT_NATIVE_TOOL_NAMES.launchTask,
+      FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+      `${ROOMOTE_MCP_ID}_${CHAT_REACTION_EMOJI_TOOL_NAME}`,
+    ]);
+    const authorizeToolStart = (toolId: string) =>
+      platformEvent ||
+      substantiveWorkAcknowledged ||
+      acknowledgementExemptToolIds.has(toolId)
+        ? null
+        : {
             success: false as const,
             error:
               'Post an acknowledgement with send_chat_reply before this action.',
-          }
-        : null;
+          };
 
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
@@ -2175,10 +2189,6 @@ export async function answerFastAgentQuestion({
         const sendsChatReaction =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME;
-        if (!sendsChatReaction) {
-          const ackError = requireAcknowledgement();
-          if (ackError) return ackError;
-        }
         const signature = buildIntegrationCallSignature({
           integrationId: call.integrationId,
           toolName: call.toolName,
@@ -2275,17 +2285,6 @@ export async function answerFastAgentQuestion({
             error:
               'This platform event may only be presented to the user with a closeout.',
           };
-        }
-
-        if (
-          call.name !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply &&
-          call.name !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction &&
-          call.name !== FAST_AGENT_NATIVE_TOOL_NAMES.launchTask &&
-          call.name !== FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart &&
-          call.name !== FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent
-        ) {
-          const ackError = requireAcknowledgement();
-          if (ackError) return ackError;
         }
 
         switch (call.name) {
@@ -2967,8 +2966,7 @@ export async function answerFastAgentQuestion({
                             {
                               allowSkillAccess: true,
                               allowSpillRecovery: true,
-                              authorizeSubstantiveTool: async () =>
-                                requireAcknowledgement(),
+                              authorizeToolStart,
                               skillStore,
                               spillBudget,
                             },

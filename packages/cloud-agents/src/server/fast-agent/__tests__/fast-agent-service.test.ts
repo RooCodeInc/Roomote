@@ -54,6 +54,9 @@ const mocks = vi.hoisted(() => ({
       }) => Promise<unknown>)
     | undefined,
   mcpCapabilityAvailable: false,
+  authorizeToolStart: undefined as
+    | ((toolId: string) => { success: false; error: string } | null)
+    | undefined,
 }));
 
 const nativeToolNames = vi.hoisted(
@@ -315,12 +318,29 @@ async function invokeMcpTool(
   return mocks.mcpExecutor({ integrationId, toolName, args });
 }
 
+/**
+ * Mirrors the OpenCode plugin hook: the bridge asks the bound Fast turn
+ * whether a tool call may start before OpenCode executes it.
+ */
+function authorizeTool(toolId: string) {
+  if (!mocks.authorizeToolStart) {
+    throw new Error('Tool start authorizer is not bound.');
+  }
+  return mocks.authorizeToolStart(toolId);
+}
+
+const acknowledgementRequired = {
+  success: false,
+  error: 'Post an acknowledgement with send_chat_reply before this action.',
+};
+
 describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.refreshTitle.mockResolvedValue(null);
     mocks.nativeExecutor = undefined;
     mocks.mcpExecutor = undefined;
+    mocks.authorizeToolStart = undefined;
     mocks.mcpCapabilityAvailable = false;
     mocks.getUnifiedSession.mockResolvedValue(null);
     mocks.touchSessionActivity.mockResolvedValue(undefined);
@@ -357,10 +377,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }),
     );
     mocks.bindExecutor.mockImplementation(
-      (_sessionID, _conversationId, executor) => {
+      (_sessionID, _conversationId, executor, options) => {
         mocks.nativeExecutor = executor;
+        const authorizer = options?.authorizeToolStart;
+        if (authorizer) mocks.authorizeToolStart = authorizer;
         return () => {
           mocks.nativeExecutor = undefined;
+          if (authorizer) mocks.authorizeToolStart = undefined;
         };
       },
     );
@@ -3404,16 +3427,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       mocks.generateText.mockImplementation(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
-          toolResults.push(
-            await invokeMcpTool(integrationId, 'search_code', {
-              query: 'fast agent',
-              nested: { exact: true },
-            }),
-          );
+          toolResults.push(authorizeTool(`${integrationId}_search_code`));
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'ack',
             message: 'I’ll check.',
           });
+          expect(authorizeTool(`${integrationId}_search_code`)).toBeNull();
           toolResults.push(
             await invokeMcpTool(integrationId, 'search_code', {
               query: 'fast agent',
@@ -3451,61 +3470,211 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
-  it('does not let an acknowledgement reaction unlock integration work', async () => {
-    mocks.listIntegrations.mockResolvedValue([
-      {
-        id: 'github',
-        name: 'GitHub',
-        description: 'Read GitHub',
-        tools: [{ name: 'search_code', inputSchema: { type: 'object' } }],
-      },
-    ]);
-    const toolResults: unknown[] = [];
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.sendChatReaction, {
-          name: 'eyes',
-          purpose: 'ack',
-        });
-        toolResults.push(
-          await invokeMcpTool('github', 'search_code', {
+  describe('tool start authorization', () => {
+    const gatedToolIds = [
+      'task',
+      'github_search_code',
+      'roomote_manage_custom_automations',
+      nativeToolNames.listSkills,
+      nativeToolNames.loadSkill,
+      nativeToolNames.spillRead,
+      nativeToolNames.spillGrep,
+      nativeToolNames.saveMemory,
+      nativeToolNames.showWidget,
+      nativeToolNames.sendTaskMessage,
+      nativeToolNames.cancelTask,
+    ];
+    const exemptToolIds = [
+      nativeToolNames.sendChatReply,
+      nativeToolNames.sendChatReaction,
+      nativeToolNames.launchTask,
+      nativeToolNames.ignoreEvent,
+      'roomote_send_chat_reaction_emoji',
+    ];
+
+    it('does not let an acknowledgement reaction unlock work, but a text acknowledgement does', async () => {
+      mocks.listIntegrations.mockResolvedValue([
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Read GitHub',
+          tools: [{ name: 'search_code', inputSchema: { type: 'object' } }],
+        },
+      ]);
+      const decisions: Record<string, unknown[]> = {};
+      const record = (phase: string) => {
+        decisions[phase] = gatedToolIds.map((toolId) => authorizeTool(toolId));
+      };
+      let mcpResult: unknown;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          expect(exemptToolIds.map(authorizeTool)).toEqual(
+            exemptToolIds.map(() => null),
+          );
+          record('before any communication');
+          expect(authorizeTool('roomote_send_chat_reaction_emoji')).toBeNull();
+          await invokeTool(nativeToolNames.sendChatReaction, {
+            name: 'eyes',
+            purpose: 'ack',
+          });
+          record('after a reaction');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’ll check.',
+          });
+          record('after a text acknowledgement');
+          mcpResult = await invokeMcpTool('github', 'search_code', {
             query: 'fast agent',
-          }),
-        );
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'ack',
-          message: 'I’ll check.',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'I found it.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(decisions['before any communication']).toEqual(
+        gatedToolIds.map(() => acknowledgementRequired),
+      );
+      expect(decisions['after a reaction']).toEqual(
+        gatedToolIds.map(() => acknowledgementRequired),
+      );
+      expect(decisions['after a text acknowledgement']).toEqual(
+        gatedToolIds.map(() => null),
+      );
+      expect(mcpResult).toEqual({
+        success: true,
+        result: { matches: ['fast-agent.ts'] },
+      });
+    });
+
+    it('treats a first progress text reply as the acknowledgement', async () => {
+      const decisions: unknown[] = [];
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          decisions.push(authorizeTool(nativeToolNames.saveMemory));
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'progress',
+            message: 'Looking at the deploy history now.',
+          });
+          decisions.push(authorizeTool(nativeToolNames.saveMemory));
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Done.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(decisions).toEqual([acknowledgementRequired, null]);
+    });
+
+    it.each([
+      ['the adapter delivers the kickoff', true],
+      ['the runtime posts the kickoff', false],
+    ])(
+      'lets launch_task be the first action and unlocks work once %s',
+      async (_case, kickoffDelivered) => {
+        const decisions: unknown[] = [];
+        const adapter = callbacks({
+          launchTask: vi.fn(async () => ({
+            success: true as const,
+            taskId: 'task-1',
+            taskUrl: 'https://roomote.example/task-1',
+            kickoffDelivered,
+          })),
         });
-        toolResults.push(
-          await invokeMcpTool('github', 'search_code', {
-            query: 'fast agent',
-          }),
+        mocks.generateText.mockImplementation(
+          async (_params, _session, options) => {
+            await options.onSessionReady('opencode-session-1');
+            decisions.push(authorizeTool(nativeToolNames.launchTask));
+            decisions.push(authorizeTool(nativeToolNames.sendTaskMessage));
+            await invokeTool(nativeToolNames.launchTask, {
+              prompt: 'Fix checkout.',
+              kickoffMessage: 'I’m delegating the checkout fix.',
+            });
+            decisions.push(authorizeTool(nativeToolNames.sendTaskMessage));
+            return '';
+          },
         );
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'closeout',
-          message: 'I found it.',
-        });
-        return '';
+
+        await answerFastAgentQuestion({ ...baseParams, adapter });
+
+        expect(decisions).toEqual([null, acknowledgementRequired, null]);
+        expect(adapter.postReply).toHaveBeenCalledTimes(
+          kickoffDelivered ? 0 : 1,
+        );
       },
     );
 
-    await answerFastAgentQuestion({
-      ...baseParams,
-      adapter: callbacks(),
+    it('allows an emoji-only terminal reaction without a text acknowledgement', async () => {
+      let reactionResult: unknown;
+      const adapter = callbacks();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          expect(authorizeTool(nativeToolNames.sendChatReaction)).toBeNull();
+          reactionResult = await invokeTool(nativeToolNames.sendChatReaction, {
+            name: 'white_check_mark',
+            purpose: 'closeout',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({ ...baseParams, adapter });
+
+      expect(reactionResult).toEqual({
+        success: true,
+        delivered: true,
+        closed: true,
+      });
+      expect(adapter.postReaction).toHaveBeenCalledWith({
+        name: 'white_check_mark',
+        purpose: 'closeout',
+        messageId: '100.2',
+      });
+      expect(adapter.postReply).not.toHaveBeenCalled();
     });
 
-    expect(toolResults).toEqual([
-      {
-        success: false,
-        error:
-          'Post an acknowledgement with send_chat_reply before this action.',
-      },
-      {
-        success: true,
-        result: { matches: ['fast-agent.ts'] },
-      },
-    ]);
+    it('does not gate platform-event turns', async () => {
+      const decisions: unknown[] = [];
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          decisions.push(...gatedToolIds.map(authorizeTool));
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'The automation finished.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        question:
+          '<platform_event>{"type":"automation_triggered"}</platform_event>',
+        userId: 'user-1',
+        conversation: {
+          surface: 'automation',
+          workspaceId: 'deployment-1',
+          conversationId: 'automation-1',
+        },
+        currentMessageId: 'automation-event-1',
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        adapter: callbacks(),
+      });
+
+      expect(decisions).toEqual(gatedToolIds.map(() => null));
+    });
   });
 
   it('stays silent after an acknowledgement when an integration has no result to report', async () => {
@@ -3978,11 +4147,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
-        toolResults.push(
-          await invokeMcpTool('roomote', 'manage_custom_automations', {
-            action: 'list',
-          }),
-        );
+        toolResults.push(authorizeTool('roomote_manage_custom_automations'));
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'ack',
           message: 'I’ll check the automations.',
@@ -4007,10 +4172,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       adapter: callbacks({ resolveMcpServerConfigs }),
     });
 
-    expect(toolResults[0]).toEqual({
-      success: false,
-      error: 'Post an acknowledgement with send_chat_reply before this action.',
-    });
+    expect(toolResults[0]).toEqual(acknowledgementRequired);
     expect(toolResults[1]).toEqual({
       success: true,
       result: { automations: [] },
@@ -4545,21 +4707,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       mocks.generateText.mockImplementation(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
-          await expect(
-            invokeTool(nativeToolNames.sendTaskMessage, {
-              taskId: 'task-1',
-              message: 'Include the failing test.',
-              includeAttachments: true,
-            }),
-          ).resolves.toEqual({
-            success: false,
-            error:
-              'Post an acknowledgement with send_chat_reply before this action.',
-          });
+          expect(authorizeTool(nativeToolNames.sendTaskMessage)).toEqual(
+            acknowledgementRequired,
+          );
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'ack',
             message: 'I’ll update the task.',
           });
+          expect(authorizeTool(nativeToolNames.sendTaskMessage)).toBeNull();
           await expect(
             invokeTool(nativeToolNames.sendTaskMessage, {
               taskId: 'task-1',
@@ -4657,17 +4812,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       mocks.generateText.mockImplementation(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
-          await expect(
-            invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
-          ).resolves.toEqual({
-            success: false,
-            error:
-              'Post an acknowledgement with send_chat_reply before this action.',
-          });
+          expect(authorizeTool(nativeToolNames.cancelTask)).toEqual(
+            acknowledgementRequired,
+          );
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'ack',
             message: 'I’ll stop it.',
           });
+          expect(authorizeTool(nativeToolNames.cancelTask)).toBeNull();
           await expect(
             invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
           ).resolves.toEqual({ success: true });

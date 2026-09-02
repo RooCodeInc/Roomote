@@ -544,37 +544,135 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
-  it('authorizes direct skill tools before reading their catalog', async () => {
+  it('authorizes tool starts for the bound Fast parent through /authorize', async () => {
     const runtime = await getFastAgentNativeToolRuntime(
-      'authorized-native-skills',
+      'authorized-tool-start',
       [],
     );
-    const sessionId = 'authorized-native-skills-parent';
-    const list = vi.fn().mockResolvedValue({ skills: [], warnings: [] });
-    let acknowledged = false;
+    const sessionId = 'authorized-tool-start-parent';
+    const authorizeToolStart = vi.fn((toolId: string) =>
+      toolId === FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply
+        ? null
+        : {
+            success: false as const,
+            error:
+              'Post an acknowledgement with send_chat_reply before this action.',
+          },
+    );
     const unbind = bindFastAgentNativeToolExecutor(
       sessionId,
-      'authorized-native-skills-conversation',
+      'authorized-tool-start-conversation',
       async () => null,
       {
         allowSkillAccess: true,
         allowSpillRecovery: true,
-        authorizeSubstantiveTool: async () =>
-          acknowledged
-            ? undefined
-            : {
-                success: false,
-                error:
-                  'Post an acknowledgement with send_chat_reply before this action.',
-              },
+        authorizeToolStart,
+      },
+    );
+    const authorize = (
+      body: unknown,
+      token = runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN,
+    ) =>
+      fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_AUTHORIZE_URL!, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      }).then(async (response) => ({
+        status: response.status,
+        payload: await response.json(),
+      }));
+
+    try {
+      expect(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_AUTHORIZE_URL).toBe(
+        runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!.replace(
+          /\/tool$/u,
+          '/authorize',
+        ),
+      );
+      for (const tool of [
+        'task',
+        FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
+        FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
+        'github_search_code',
+      ]) {
+        await expect(
+          authorize({ sessionID: sessionId, tool }),
+        ).resolves.toEqual({
+          status: 200,
+          payload: {
+            ok: true,
+            allowed: false,
+            error:
+              'Post an acknowledgement with send_chat_reply before this action.',
+          },
+        });
+      }
+      await expect(
+        authorize({
+          sessionID: sessionId,
+          tool: FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
+        }),
+      ).resolves.toEqual({
+        status: 200,
+        payload: { ok: true, allowed: true },
+      });
+      expect(authorizeToolStart).toHaveBeenCalledTimes(5);
+      expect(authorizeToolStart).toHaveBeenLastCalledWith(
+        FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
+      );
+
+      // Sessions without an authorizer (subagents, no active turn) are not
+      // gated by the acknowledgement rule.
+      await expect(
+        authorize({ sessionID: 'unbound-session', tool: 'task' }),
+      ).resolves.toEqual({
+        status: 200,
+        payload: { ok: true, allowed: true },
+      });
+      await expect(
+        authorize({ sessionID: sessionId, tool: 'task' }, 'wrong-token'),
+      ).resolves.toMatchObject({ status: 401 });
+      await expect(authorize({ sessionID: sessionId })).resolves.toMatchObject({
+        status: 400,
+      });
+    } finally {
+      unbind();
+    }
+  });
+
+  it('serves skill tools without a bridge-local acknowledgement gate', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'ungated-native-skills',
+      [],
+    );
+    const sessionId = 'ungated-native-skills-parent';
+    const list = vi.fn().mockResolvedValue({ skills: [], warnings: [] });
+    const authorizeToolStart = vi.fn(() => ({
+      success: false as const,
+      error: 'Post an acknowledgement with send_chat_reply before this action.',
+    }));
+    const unbind = bindFastAgentNativeToolExecutor(
+      sessionId,
+      'ungated-native-skills-conversation',
+      async () => null,
+      {
+        allowSkillAccess: true,
+        allowSpillRecovery: true,
+        authorizeToolStart,
         skillStore: new FastAgentSkillStore(undefined, {
           list,
           read: vi.fn(),
         }),
       },
     );
-    const callBridge = () =>
-      fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+
+    try {
+      // The plugin hook owns the gate before OpenCode reaches the bridge, so
+      // the /tool handler itself does not consult the authorizer.
+      const payload = await fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
         method: 'POST',
         headers: {
           authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
@@ -585,46 +683,10 @@ describe('Fast native OpenCode tool bridge', () => {
           tool: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
           args: { environmentId: 'environment-1' },
         }),
-      })
-        .then((response) => response.json())
-        .then((payload) => JSON.parse(payload.output));
-    const authorizeTask = () =>
-      fetch(
-        runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!.replace(
-          /\/tool$/u,
-          '/authorize-substantive-tool',
-        ),
-        {
-          method: 'POST',
-          headers: {
-            authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
-            'content-type': 'application/json',
-          },
-          body: JSON.stringify({ sessionID: sessionId, tool: 'task' }),
-        },
-      ).then((response) => response.json());
-
-    try {
-      await expect(authorizeTask()).resolves.toMatchObject({
-        ok: true,
-        allowed: false,
-        error:
-          'Post an acknowledgement with send_chat_reply before this action.',
-      });
-      await expect(callBridge()).resolves.toEqual({
-        success: false,
-        error:
-          'Post an acknowledgement with send_chat_reply before this action.',
-      });
-      expect(list).not.toHaveBeenCalled();
-
-      acknowledged = true;
-      await expect(authorizeTask()).resolves.toEqual({
-        ok: true,
-        allowed: true,
-      });
-      await expect(callBridge()).resolves.toMatchObject({ success: true });
+      }).then((response) => response.json());
+      expect(JSON.parse(payload.output)).toMatchObject({ success: true });
       expect(list).toHaveBeenCalledOnce();
+      expect(authorizeToolStart).not.toHaveBeenCalled();
     } finally {
       unbind();
     }
