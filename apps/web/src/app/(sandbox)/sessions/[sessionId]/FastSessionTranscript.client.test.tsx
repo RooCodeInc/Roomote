@@ -203,6 +203,7 @@ describe('FastSessionTranscript', () => {
     visible = true,
     turnSeq = role === 'user' ? 0 : 1,
     inputKind,
+    userId,
   }: {
     id: string;
     role: 'user' | 'assistant';
@@ -211,6 +212,7 @@ describe('FastSessionTranscript', () => {
     visible?: boolean;
     turnSeq?: number;
     inputKind?: string;
+    userId?: string;
   }) => ({
     id,
     eventId: `${id}:event`,
@@ -226,6 +228,7 @@ describe('FastSessionTranscript', () => {
     metadata: {
       visibleInTranscript: visible,
       ...(inputKind ? { inputKind } : {}),
+      ...(userId ? { userId } : {}),
     },
     payload: {},
     source: 'web',
@@ -487,6 +490,36 @@ describe('FastSessionTranscript', () => {
     expect(status).toHaveTextContent(label);
     expect(status.closest('.chat-reasoning-message')).toHaveClass(
       'is-assistant',
+    );
+  });
+
+  it('resolves a setup receipt avatar from the session owner', () => {
+    const receipt = textMessage({
+      id: 'setup-receipt',
+      role: 'user',
+      text: 'GitHub connected with 17 repositories.',
+      ts: 1,
+      inputKind: SETUP_RECEIPT_INPUT_KIND,
+      userId: 'user-1',
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[receipt]}
+        owner={{
+          userId: 'user-1',
+          name: 'Test User',
+          email: 'test@example.com',
+          imageUrl: 'https://example.com/avatar.png',
+        }}
+      />,
+    );
+
+    const avatar = screen.getByLabelText('Test User');
+    expect(avatar.querySelector('img')).toHaveAttribute(
+      'src',
+      'https://example.com/avatar.png',
     );
   });
 

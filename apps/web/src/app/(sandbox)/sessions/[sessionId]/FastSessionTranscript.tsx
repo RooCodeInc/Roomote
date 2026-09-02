@@ -69,6 +69,13 @@ type TranscriptMessage = Omit<FastSessionMessage, 'createdAt'> & {
 
 type TranscriptOrder = Pick<TranscriptMessage, 'id' | 'ts' | 'turnSeq'>;
 
+type TranscriptOwner = {
+  userId: string;
+  name: string | null;
+  email: string | null;
+  imageUrl: string | null;
+};
+
 const ROOMOTE_KICKOFF_LINK = /\r?\n\r?\n\[Open in Roomote\]\([^\r\n]+\)\s*$/;
 
 function getTranscriptMessageText(message: TranscriptMessage) {
@@ -263,6 +270,7 @@ export function FastSessionTranscript({
   sessionReasoningEffort = null,
   defaultModelId = null,
   defaultReasoningEffort = null,
+  owner,
   headerExtras,
   timelineExtras,
 }: {
@@ -276,6 +284,7 @@ export function FastSessionTranscript({
   sessionReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
   defaultReasoningEffort?: ReasoningEffort | null;
+  owner?: TranscriptOwner;
   headerExtras?: ReactNode;
   timelineExtras?: ReactNode;
 }) {
@@ -450,8 +459,8 @@ export function FastSessionTranscript({
             message.eventType !==
               ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
         )
-        .map((message) =>
-          toAcpUiMessage({
+        .map((message) => {
+          const uiMessage = toAcpUiMessage({
             id: message.id,
             ts: message.ts,
             eventType: message.eventType as AcpEventType,
@@ -461,9 +470,24 @@ export function FastSessionTranscript({
             metadata: message.metadata,
             payload: message.payload,
             text: getTranscriptMessageText(message),
-          }),
-        ),
-    [messages],
+          });
+
+          if (
+            uiMessage.role !== 'user' ||
+            !owner ||
+            uiMessage.userId !== owner.userId
+          ) {
+            return uiMessage;
+          }
+
+          return {
+            ...uiMessage,
+            userName: uiMessage.userName ?? owner.name,
+            userEmail: uiMessage.userEmail ?? owner.email,
+            userImageUrl: uiMessage.userImageUrl ?? owner.imageUrl,
+          };
+        }),
+    [messages, owner],
   );
   const hasVisibleAssistantMessage = useMemo(
     () =>
