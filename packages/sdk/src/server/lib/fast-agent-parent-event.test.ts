@@ -1151,6 +1151,11 @@ describe('deliverFastAgentParentEvent', () => {
       event,
     });
 
+    // The adapter hands back the posted message so a later edit (a retry
+    // notice becoming the answer) can target it, also from a resumed run.
+    await expect(
+      mocks.answerQuestion.mock.results.at(-1)!.value,
+    ).resolves.toEqual({ messageId: 'message-1' });
     expect(mocks.discordPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: 'channel-1',
@@ -1681,6 +1686,12 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id).toBe(
       firstClientMessageId,
     );
+    // The adapter hands back the posted message so the turn (or a run the
+    // queue resumes) can edit it later, for example a retry notice that
+    // becomes the answer.
+    await expect(
+      mocks.answerQuestion.mock.results.at(-1)!.value,
+    ).resolves.toEqual({ messageId: '101.001' });
   });
 
   it('delivers pull request feedback as a platform event with a stable idempotency key', async () => {

@@ -875,6 +875,9 @@ async function createSlackFastAgentParentTurn(
           }
         }
         params.onReplyPosted();
+        // The handle lets the turn edit this message later (a retry notice
+        // becoming the answer), including from a run the queue resumes.
+        return { messageId: messageTs };
       },
     },
   };
@@ -1224,6 +1227,9 @@ async function createDiscordFastAgentParentTurn(
         }
       }
       params.onReplyPosted();
+      // The handle lets the turn edit this message later (a retry notice
+      // becoming the answer), including from a run the queue resumes.
+      return { messageId: posted.messageId };
     },
   };
   // A resumed turn edits the retry notice its predecessor posted; an
