@@ -5583,7 +5583,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         status: 'in_progress',
         isSubagentSpawn: true,
         senderThreadId: 'opencode-session-1',
-        receiverThreadIds: ['opencode-subagent-1'],
+        receiverThreadIds: [],
         agentType: 'general',
         rawInput: {
           prompt: 'Inspect the relevant code.',

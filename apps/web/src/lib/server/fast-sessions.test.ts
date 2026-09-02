@@ -559,7 +559,7 @@ describe('Fast session queries', () => {
         status: 'completed',
         isSubagentSpawn: true,
         senderThreadId: 'opencode-session-1',
-        receiverThreadIds: ['opencode-subagent-1'],
+        receiverThreadIds: [],
         agentType: 'general',
         output: 'Implementation looks correct.',
       },

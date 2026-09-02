@@ -2019,7 +2019,7 @@ export async function answerFastAgentQuestion({
       command: null,
       isSubagentSpawn: true,
       senderThreadId: part.sessionId,
-      receiverThreadIds: part.childSessionId ? [part.childSessionId] : [],
+      receiverThreadIds: [],
       agentType: part.agentType ?? null,
       rawInput: part.input,
       ...(terminal ? { exitCode: null, output } : {}),
