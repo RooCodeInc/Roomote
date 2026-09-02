@@ -640,7 +640,7 @@ describe('OpenCode subagent settlement recovery', () => {
     }
   });
 
-  it('never aborts a child whose latest assistant message is still in flight', async () => {
+  it('bounds recovery when a terminal child leaves an incomplete assistant message', async () => {
     const { client, harness, logger } = createHarness();
 
     try {
@@ -648,9 +648,10 @@ describe('OpenCode subagent settlement recovery', () => {
       vi.useFakeTimers();
       await armSpawn(client, harness);
 
-      // The child looks terminal, but its persisted state says it is still
-      // mid-message — a silent revival or a lookup we cannot trust. Recovery
-      // must keep waiting instead of killing possibly-live work.
+      // Provider timeouts can leave the child terminal while its persisted
+      // assistant message never receives a completion timestamp. Preserve one
+      // conservative re-check, then recover the leaked spawn if no child event
+      // proves that work resumed.
       client.messages.mockResolvedValue([
         {
           info: {
@@ -668,26 +669,12 @@ describe('OpenCode subagent settlement recovery', () => {
         properties: { sessionID: 'ses_child_1' },
       });
 
-      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS);
 
       expect(client.abort).not.toHaveBeenCalled();
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('not aborting'),
       );
-
-      // Once the child's work is genuinely finished, the next re-check
-      // recovers the still-unsettled spawn.
-      client.messages.mockResolvedValue([
-        {
-          info: {
-            id: 'msg_child_live',
-            sessionID: 'ses_child_1',
-            role: 'assistant',
-            time: { created: 1, completed: 2 },
-          },
-          parts: [],
-        },
-      ] as unknown as OpenCodeSessionMessage[]);
 
       await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS);
 
@@ -749,6 +736,45 @@ describe('OpenCode subagent settlement recovery', () => {
         },
       });
 
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('cancels recovery when the child resumes during verification', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      let resolveMessages!: (messages: OpenCodeSessionMessage[]) => void;
+      client.messages.mockImplementationOnce(
+        () =>
+          new Promise<OpenCodeSessionMessage[]>((resolve) => {
+            resolveMessages = resolve;
+          }),
+      );
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS);
+      await vi.waitFor(() => expect(client.messages).toHaveBeenCalledOnce());
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildToolPart({ callId: 'c_retry', command: 'ls' }),
+        },
+      });
+      resolveMessages([]);
+      await Promise.resolve();
       await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
 
       expect(client.abort).not.toHaveBeenCalled();
