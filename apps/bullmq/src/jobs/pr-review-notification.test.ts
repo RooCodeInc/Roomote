@@ -792,6 +792,46 @@ describe('prReviewNotificationJob', () => {
     );
   });
 
+  it('retires a canonical Slack prompt that loses its posting fence', async () => {
+    const deliveryId = '77777777-7777-4777-8777-777777777777';
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'Old review feedback.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the old review feedback.',
+    });
+    mockAttachPendingPrReviewActionMessage.mockResolvedValue({
+      attached: false,
+      superseded: [],
+    });
+
+    await expect(
+      prReviewNotificationJob(
+        makeJob({
+          ownershipVersion: 'canonical',
+          deliveryId,
+          notificationUnitId: '88888888-8888-4888-8888-888888888888',
+          deliveryState: 'claimed',
+          destinationKey: 'task-1',
+          dispatchKey: `pr-review-delivery:${deliveryId}`,
+          deliveryIds: [deliveryId],
+          leaseToken: '99999999-9999-4999-8999-999999999999',
+          events,
+        }) as never,
+      ),
+    ).rejects.toThrow('Canonical PR review prompt lost its posting fence');
+    expect(mockRetirePrReviewActionMessages).toHaveBeenCalledWith(
+      [expect.objectContaining({ nonce: deliveryId, messageId: '999.888' })],
+      'Superseded by newer PR activity.',
+    );
+  });
+
   it('posts callback buttons and stores the pending offer for Telegram routes', async () => {
     mockPrepareDelivery.mockResolvedValue({
       post: true,

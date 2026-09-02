@@ -20,6 +20,7 @@ import {
   prReviewNotificationUnitEvents,
   prReviewNotificationUnits,
   releaseCanonicalPrReviewActionDispatch,
+  retireCanonicalPrReviewActionsForPullRequest,
   runFactory,
   taskFactory,
   taskPullRequests,
@@ -1199,6 +1200,93 @@ describe('canonical PR review notification ownership', () => {
         prReviewAction: { deliveryId: firstDeliveryId, status: 'dismissed' },
       },
     });
+  });
+
+  it('retires only awaiting offers from older PR heads after a new commit', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/new-commit-${task.id}`;
+    await associate(task.id, repository, 24);
+
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 24,
+        eventKey: `old-head-${task.id}`,
+        headSha: 'old-head',
+      }),
+    );
+    const oldDeliveryId = await postAction(repository);
+
+    await expect(
+      retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 24,
+        currentHeadSha: 'new-head',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        deliveryId: oldDeliveryId,
+        repository,
+        prNumber: 24,
+      }),
+    ]);
+    await expect(deliveryStatusOf(oldDeliveryId)).resolves.toBe('dismissed');
+
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 24,
+        eventKey: `new-head-${task.id}`,
+        headSha: 'new-head',
+      }),
+    );
+    const newDeliveryId = await postAction(repository);
+    await expect(
+      retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 24,
+        currentHeadSha: 'new-head',
+      }),
+    ).resolves.toEqual([]);
+    await expect(deliveryStatusOf(newDeliveryId)).resolves.toBe(
+      'awaiting_user_action',
+    );
+  });
+
+  it('fences an older-head offer that is still posting', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/posting-new-commit-${task.id}`;
+    await associate(task.id, repository, 25);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 25,
+        eventKey: `posting-old-head-${task.id}`,
+        headSha: 'old-head',
+      }),
+    );
+    const claim = await claimToPromptPosting(repository);
+
+    await expect(
+      retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 25,
+        currentHeadSha: 'new-head',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ deliveryId: claim.deliveryId }),
+    ]);
+    await expect(deliveryStatusOf(claim.deliveryId)).resolves.toBe('dismissed');
+    await expect(
+      attachCanonicalPrReviewActionMessage(
+        claim.deliveryId,
+        'late-message',
+        claim.leaseToken,
+      ),
+    ).resolves.toBe(false);
   });
 
   it('keeps exactly one awaiting offer when two actions attach concurrently', async () => {

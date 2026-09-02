@@ -20,6 +20,7 @@ const {
   mockQueuePrReviewActivityNotification,
   mockQueuePrReviewSummaryNotification,
   mockQueuePrCiFailureNotification,
+  mockRetirePendingPrReviewActionsForPullRequest,
   mockRecordWebhook,
   mockResolveConfiguredGitHubAppSlug,
   mockResolveGitHubRoomoteMentionEnabled,
@@ -58,6 +59,7 @@ const {
   mockQueuePrReviewActivityNotification: vi.fn(),
   mockQueuePrReviewSummaryNotification: vi.fn(),
   mockQueuePrCiFailureNotification: vi.fn(),
+  mockRetirePendingPrReviewActionsForPullRequest: vi.fn(),
   mockRecordWebhook: vi.fn(),
   mockResolveConfiguredGitHubAppSlug: vi.fn(),
   mockResolveGitHubRoomoteMentionEnabled: vi.fn(),
@@ -126,6 +128,8 @@ vi.mock('@roomote/sdk/server', () => ({
   upsertGitHubPullRequestFactFromWebhook:
     mockUpsertGitHubPullRequestFactFromWebhook,
   recordPrStatusChangeInTaskHistory: mockRecordPrStatusChangeInTaskHistory,
+  retirePendingPrReviewActionsForPullRequest:
+    mockRetirePendingPrReviewActionsForPullRequest,
 }));
 
 vi.mock('../../logging', () => ({
@@ -203,7 +207,7 @@ vi.mock('../notifyPrCiFailure', () => ({
 }));
 
 function makePullRequestPayload(
-  action: 'opened' | 'reopened' | 'closed',
+  action: 'opened' | 'reopened' | 'synchronize' | 'closed',
   overrides: Record<string, unknown> = {},
 ) {
   return {
@@ -226,7 +230,8 @@ function makePullRequestPayload(
       updated_at: '2026-08-06T12:00:00Z',
       user: { login: 'author' },
       merged_by: null,
-      base: { ref: 'develop' },
+      head: { ref: 'feature', sha: 'new-head' },
+      base: { ref: 'develop', sha: 'base-head' },
       ...overrides,
     },
     sender: { login: 'actor' },
@@ -256,6 +261,7 @@ describe('github webhook router', () => {
     mockQueuePrReviewActivityNotification.mockReset();
     mockQueuePrReviewSummaryNotification.mockReset();
     mockQueuePrCiFailureNotification.mockReset();
+    mockRetirePendingPrReviewActionsForPullRequest.mockReset();
     mockRecordWebhook.mockReset();
     mockResolveConfiguredGitHubAppSlug.mockReset();
     mockResolveGitHubRoomoteMentionEnabled.mockReset();
@@ -273,10 +279,12 @@ describe('github webhook router', () => {
     mockResolveDeploymentEnvVar.mockResolvedValue('test-secret');
     mockIsFromKnownInstallation.mockResolvedValue(true);
     mockVerify.mockResolvedValue(true);
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
     mockHandlePrComment.mockResolvedValue({ status: 'ok' });
     mockHandleGitHubIssueComment.mockResolvedValue({ status: 'ok' });
     mockHandleGitHubIssueFixer.mockResolvedValue({ status: 'ok' });
     mockHandlePushConflictCheck.mockResolvedValue({ status: 'ok' });
+    mockHandlePrSynchronize.mockResolvedValue({ status: 'ok' });
     mockHandleMergeAnnouncerPush.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
       async (
@@ -651,6 +659,34 @@ describe('github webhook router', () => {
     expect(
       mockQueuePrCiFailureNotification.mock.invocationCallOrder[0],
     ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
+  });
+
+  it('retires pending review actions before handling a synchronized PR', async () => {
+    const payload = makePullRequestPayload('synchronize');
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-sync-1',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockRetirePendingPrReviewActionsForPullRequest).toHaveBeenCalledWith(
+      {
+        sourceControlProvider: 'github',
+        repository: 'test-org/test-repo',
+        prNumber: 42,
+        currentHeadSha: 'new-head',
+      },
+    );
+    expect(
+      mockRetirePendingPrReviewActionsForPullRequest.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(mockHandlePrSynchronize.mock.invocationCallOrder[0]!);
   });
 
   it('routes plain issue comments through handleGitHubIssueComment', async () => {

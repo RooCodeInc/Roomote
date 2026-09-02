@@ -9,6 +9,7 @@ const {
   mockUpsertPreference,
   mockFindPreference,
   mockRetireCanonical,
+  mockRetireCanonicalForPullRequest,
   mockAttachCanonical,
 } = vi.hoisted(() => {
   const mockUpdateReturning = vi.fn();
@@ -25,6 +26,7 @@ const {
     mockUpsertPreference: vi.fn(),
     mockFindPreference: vi.fn(),
     mockRetireCanonical: vi.fn(),
+    mockRetireCanonicalForPullRequest: vi.fn(),
     mockAttachCanonical: vi.fn(),
   };
 });
@@ -50,6 +52,8 @@ vi.mock('@roomote/db/server', async () => {
     claimCanonicalPrReviewAction: vi.fn().mockResolvedValue(null),
     retireCanonicalPrReviewActionsForDestination: (...args: unknown[]) =>
       mockRetireCanonical(...args),
+    retireCanonicalPrReviewActionsForPullRequest: (...args: unknown[]) =>
+      mockRetireCanonicalForPullRequest(...args),
     upsertPrReviewAutoPreference: (...args: unknown[]) =>
       mockUpsertPreference(...args),
     findPrReviewAutoPreference: (...args: unknown[]) =>
@@ -75,6 +79,7 @@ import {
   claimPendingPrReviewAction,
   claimPendingPrReviewActionsForThread,
   enableAutoHandlePrReviewFeedback,
+  retirePendingPrReviewActionsForPullRequest,
   setPendingPrReviewAction,
   findAutoHandlePrReviewFeedbackPreference,
 } from '../pr-review-action';
@@ -90,6 +95,7 @@ describe('PR review action state', () => {
     mockUpsertPreference.mockResolvedValue(undefined);
     mockFindPreference.mockResolvedValue(null);
     mockRetireCanonical.mockResolvedValue([]);
+    mockRetireCanonicalForPullRequest.mockResolvedValue([]);
     mockAttachCanonical.mockResolvedValue(false);
   });
 
@@ -403,6 +409,22 @@ describe('PR review action state', () => {
       'pr-review-action:thread:slack:T2:C-shared:111.222',
       'pr-review-action:',
     );
+  });
+
+  it('retires canonical offers for older heads when a PR receives a commit', async () => {
+    await retirePendingPrReviewActionsForPullRequest({
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+      currentHeadSha: 'new-head',
+    });
+
+    expect(mockRetireCanonicalForPullRequest).toHaveBeenCalledWith({
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+      currentHeadSha: 'new-head',
+    });
   });
 
   it('fails when auto-handling cannot be persisted to the linked PR', async () => {

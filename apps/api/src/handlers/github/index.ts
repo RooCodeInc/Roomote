@@ -10,6 +10,7 @@ import {
 import {
   handleMergeAnnouncerPush,
   recordPrStatusChangeInTaskHistory,
+  retirePendingPrReviewActionsForPullRequest,
   updateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook,
 } from '@roomote/sdk/server';
@@ -387,6 +388,12 @@ github.post('/', async (c) => {
 
     webhooks.on('pull_request.synchronize', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+        await retirePendingPrReviewActionsForPullRequest({
+          sourceControlProvider: 'github',
+          repository: payload.repository.full_name,
+          prNumber: payload.pull_request.number,
+          currentHeadSha: payload.pull_request.head.sha,
+        });
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
           repositoryFullName: payload.repository.full_name,

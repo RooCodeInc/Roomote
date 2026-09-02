@@ -1,6 +1,17 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, desc, eq, gt, inArray, isNull, lte, ne, sql } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  ne,
+  or,
+  sql,
+} from 'drizzle-orm';
 
 import {
   activeRunStatuses,
@@ -1493,6 +1504,53 @@ export async function retireCanonicalPrReviewActionsForDestination(input: {
         input.threadId
           ? eq(prReviewNotificationDeliveries.routeThreadId, input.threadId)
           : isNull(prReviewNotificationDeliveries.routeThreadId),
+      ),
+    )
+    .returning({ id: prReviewNotificationDeliveries.id });
+  return Promise.all(rows.map(({ id }) => getCanonicalPrReviewAction(id)));
+}
+
+export async function retireCanonicalPrReviewActionsForPullRequest(input: {
+  sourceControlProvider: SourceControlProvider;
+  repository: string;
+  prNumber: number;
+  currentHeadSha: string;
+}) {
+  const matchingUnits = db
+    .select({ id: prReviewNotificationUnits.id })
+    .from(prReviewNotificationUnits)
+    .where(
+      and(
+        eq(
+          prReviewNotificationUnits.sourceControlProvider,
+          input.sourceControlProvider,
+        ),
+        eq(prReviewNotificationUnits.repository, input.repository),
+        eq(prReviewNotificationUnits.prNumber, input.prNumber),
+        or(
+          isNull(prReviewNotificationUnits.headSha),
+          ne(prReviewNotificationUnits.headSha, input.currentHeadSha),
+        ),
+      ),
+    );
+  const rows = await db
+    .update(prReviewNotificationDeliveries)
+    .set({
+      status: 'dismissed',
+      actionClaimedAt: new Date(),
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        inArray(prReviewNotificationDeliveries.status, [
+          'prompt_posting',
+          'awaiting_user_action',
+        ]),
+        inArray(
+          prReviewNotificationDeliveries.notificationUnitId,
+          matchingUnits,
+        ),
       ),
     )
     .returning({ id: prReviewNotificationDeliveries.id });

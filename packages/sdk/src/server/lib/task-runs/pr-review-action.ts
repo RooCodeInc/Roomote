@@ -7,6 +7,7 @@ import {
   eq,
   findPrReviewAutoPreference,
   retireCanonicalPrReviewActionsForDestination,
+  retireCanonicalPrReviewActionsForPullRequest,
   slackInstallations,
   upsertPrReviewAutoPreference,
 } from '@roomote/db/server';
@@ -363,6 +364,7 @@ async function retireLegacyPrReviewActionsForContext(
 /** Removes controls from superseded review offers without failing delivery. */
 export async function retirePrReviewActionMessagesBestEffort(
   pendingActions: PendingPrReviewAction[],
+  resolution = 'Superseded by newer review feedback.',
 ): Promise<void> {
   for (const pending of pendingActions) {
     if (!pending.messageId) continue;
@@ -391,10 +393,7 @@ export async function retirePrReviewActionMessagesBestEffort(
           channel: pending.channelId,
           ts: pending.messageId,
           message: {
-            blocks: buildResolvedSlackPrReviewMessageBlocks(
-              blocks,
-              'Superseded by newer review feedback.',
-            ),
+            blocks: buildResolvedSlackPrReviewMessageBlocks(blocks, resolution),
           },
         });
         continue;
@@ -433,6 +432,47 @@ export async function retirePrReviewActionMessagesBestEffort(
       );
     }
   }
+}
+
+export async function retirePendingPrReviewActionsForPullRequest(input: {
+  sourceControlProvider: SourceControlProvider;
+  repository: string;
+  prNumber: number;
+  currentHeadSha: string;
+}): Promise<void> {
+  const pending = (
+    await retireCanonicalPrReviewActionsForPullRequest(input)
+  ).flatMap((action) =>
+    action?.provider &&
+    action.provider !== 'teams' &&
+    action.taskId &&
+    action.channelId &&
+    action.followUpPrompt
+      ? [
+          {
+            nonce: action.deliveryId,
+            canonicalDeliveryId: action.deliveryId,
+            provider: action.provider,
+            ...(action.provider === 'slack' && action.slackTeamId
+              ? { slackTeamId: action.slackTeamId }
+              : {}),
+            taskId: action.taskId,
+            repository: action.repository,
+            prNumber: action.prNumber,
+            prUrl: action.prUrl,
+            channelId: action.channelId,
+            threadId: action.threadId,
+            followUpPrompt: action.followUpPrompt,
+            messageId: action.messageId,
+          } satisfies PendingPrReviewAction,
+        ]
+      : [],
+  );
+
+  await retirePrReviewActionMessagesBestEffort(
+    pending,
+    'Superseded by a new commit.',
+  );
 }
 
 export async function claimPendingPrReviewAction(

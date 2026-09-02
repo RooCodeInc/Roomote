@@ -305,6 +305,12 @@ async function postPrReviewNotification({
           },
         );
       if (canonicalDeliveryId && !attached) {
+        if (pendingAction) {
+          await retirePrReviewActionMessagesBestEffort(
+            [{ ...pendingAction, messageId: messageTs }],
+            'Superseded by newer PR activity.',
+          );
+        }
         throw new Error('Canonical PR review prompt lost its posting fence');
       }
       if (superseded.length > 0) {
@@ -358,6 +364,17 @@ async function postPrReviewNotification({
         },
       );
     if (canonicalDeliveryId && !attached) {
+      if (pendingAction) {
+        await retirePrReviewActionMessagesBestEffort(
+          [
+            {
+              ...pendingAction,
+              messageId: posted.lastTextMessageId ?? posted.messageId,
+            },
+          ],
+          'Superseded by newer PR activity.',
+        );
+      }
       throw new Error('Canonical PR review prompt lost its posting fence');
     }
     if (superseded.length > 0) {
