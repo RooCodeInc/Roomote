@@ -2,12 +2,6 @@ import type { Redis } from 'ioredis';
 
 export type { Redis } from 'ioredis';
 export { getRedis } from './client';
-export {
-  disconnectSessionPresence,
-  isSessionUserPresent,
-  refreshSessionPresence,
-  SESSION_PRESENCE_LEASE_MS,
-} from './session-presence';
 
 export const REDIS_KEYS = {
   MENTIONED_THREADS: 'slack:mentioned_threads',
