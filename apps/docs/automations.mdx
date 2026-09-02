@@ -134,11 +134,13 @@ When creating an automation through Roomote chat, ask for **suggested tasks** or
 **launchable follow-ups** if qualifying findings should become tasks that
 teammates can start from the report. Asking only for a summary or list of action
 items keeps those actions as report text. Launchable suggestions require a chat
-report destination. Runs scoped to **All repositories** pin each suggestion to a
-concrete repository, then start it in a matching named environment when one is
-available. Those runs prepare every active repository, so they can take longer
-in large deployments. Use a named environment when the automation only needs a
-specific repository set.
+report destination. Each suggestion can select its own named environment,
+**All repositories**, or **Fast** target, so one report can offer follow-ups for
+different workspaces and execution modes. Runs scoped to **All repositories**
+pin each suggestion to a concrete repository, then start it in a matching named
+environment when one is available. Those runs prepare every active repository,
+so they can take longer in large deployments. Use a named environment when the
+automation only needs a specific repository set.
 
 Admins can also choose **Custom schedule** and enter either a standard
 five-field cron expression or a natural-language schedule such as “weekdays at
@@ -387,7 +389,10 @@ projects.
 active repositories and suggests tightly scoped follow-up update tasks. It
 does not open PRs directly from the scheduled scan. Follow-up remediation
 preserves the repository's dependency minimum-age and exclusion policies and
-uses only versions those policies allow. When every repository is scanned
+uses only versions those policies allow. When a matching Dependabot update entry
+or Renovate rule names reviewers or assignees, the remediation pull request
+requests those reviewers and assigns those owners after creation. Roomote does
+not infer dependency owners from `CODEOWNERS`. When every repository is scanned
 successfully and no alerts are open, Roomote stays silent instead of posting an
 empty report. Access failures, actionable alerts, and remediation work still
 produce a report.

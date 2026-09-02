@@ -36,8 +36,10 @@ conversation to execution to review without changing identity.
 
 A Session timeline shows prompts, replies, and delegated execution activity.
 Execution cards show their status, workspace, pull requests, artifacts, latest
-error, and cost. Select a card to open the lightweight details panel, or choose
-**Open full workspace** for terminal, logs, diff, and preview tools.
+error, and cost. Select a card to open its details panel. For a live nested
+task, you can reply, attach files, use commands, answer pending requests, cancel
+work, or wake a sleeping task without leaving the Session. Choose **Open full
+workspace** for terminal, logs, diff, and preview tools.
 
 When delegated tasks keep working after the conversation becomes idle, the
 timeline shows the live task count. Select that activity to open the **Tasks**
@@ -104,18 +106,23 @@ for a separate turn under that participant's identity. This keeps shared
 conversations ordered without losing instructions that arrive during active
 work.
 
+Replay-safe Fast turns also survive API or worker interruptions. Roomote
+durably admits the turn before acknowledging it, then resumes unfinished work
+on a live process without repeating the acknowledgement or already-completed
+side effects. If an inference provider asks Roomote to retry later, replay-safe
+turns can wait durably and resume at the scheduled time; longer waits use one
+visible retry notice that the eventual answer replaces.
+
 ### Message Suggestions
 
-Admins can enable **Message Suggestions** under **Settings > Experimental**.
-When enabled, an empty task or Session composer can show one contextual
-follow-up after an agent turn completes. Press **Tab** or select the suggestion
-to insert it, press **Escape** to dismiss it, or start typing to replace it with
-your own message.
+An empty task or Session composer can show one contextual follow-up after an
+agent turn completes. Press **Tab** or select the suggestion to insert it, press
+**Escape** to dismiss it, or start typing to replace it with your own message.
 
 Roomote generates each suggestion with the deployment's helper model using a
 bounded view of visible conversation history. This adds one small inference
 call per completed turn for each task or Session where the suggestion is
-requested. The setting is off by default.
+requested.
 
 In shared Slack and Discord conversations, Fast can stay silent when linked
 participants are talking to each other. A direct reply to Roomote, a mention,
