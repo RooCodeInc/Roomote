@@ -62,6 +62,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 30
+      start_period: 120s
   redis:
     image: redis:7-alpine
     command: redis-server --appendonly yes
