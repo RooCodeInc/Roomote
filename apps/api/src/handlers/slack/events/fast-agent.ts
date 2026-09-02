@@ -65,6 +65,16 @@ export function extractFastQuestion(
   return trimmedQuestion.length > 0 ? trimmedQuestion : null;
 }
 
+/**
+ * Registers a no-op rejection handler so a promise started ahead of its await
+ * cannot surface as an unhandled rejection while other work runs. Awaiting the
+ * returned promise later still throws.
+ */
+function keepRejectionForLater<T>(promise: Promise<T>): Promise<T> {
+  promise.catch(() => undefined);
+  return promise;
+}
+
 export async function processFastAgentMessage(params: {
   event: SlackEvent;
   slack: SlackNotifier;
@@ -118,7 +128,28 @@ export async function processFastAgentMessage(params: {
     : stripLeadingFastCommandMention(authoredText);
   const baseQuestion = extractFastQuestion(questionText, continuation) ?? '';
 
+  // Every Slack round trip from the control plane costs a few hundred
+  // milliseconds, and the thread history, processing reaction, attachments,
+  // and session lookups do not depend on one another. Start the independent
+  // ones as soon as the turn is serialized so they overlap instead of adding
+  // up before inference can begin.
+  const threadContextPromise: Promise<
+    Awaited<ReturnType<typeof slack.fetchThreadMessages>>
+  > = slack
+    .fetchThreadMessages({
+      channel: event.channel,
+      threadTs: threadId,
+    })
+    .catch((error: unknown) => {
+      console.error(
+        `[SlackWebhook] Failed to fetch thread context for fast agent: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return [];
+    });
+
   let didAddProcessingReaction = false;
+  let processingReactionPromise: Promise<boolean> | null = null;
+  let processingReactionSettled = false;
   let releaseCanonicalFastAgentLock: Awaited<
     ReturnType<typeof acquireFastAgentTurnLock>
   > = null;
@@ -148,26 +179,16 @@ export async function processFastAgentMessage(params: {
     })();
     const conversation = session.conversation;
     if (!hasExistingConversation) {
-      didAddProcessingReaction = await slack.addReaction({
-        channel: event.channel,
-        timestamp: event.ts,
-        name: processingReactionName,
-      });
-    }
-
-    let threadContext: Awaited<ReturnType<typeof slack.fetchThreadMessages>> =
-      [];
-
-    try {
-      threadContext = await slack.fetchThreadMessages({
-        channel: event.channel,
-        threadTs: threadId,
-      });
-    } catch (error) {
-      console.error(
-        `[SlackWebhook] Failed to fetch thread context for fast agent: ${error instanceof Error ? error.message : String(error)}`,
+      processingReactionPromise = keepRejectionForLater(
+        slack.addReaction({
+          channel: event.channel,
+          timestamp: event.ts,
+          name: processingReactionName,
+        }),
       );
     }
+
+    const threadContext = await threadContextPromise;
 
     let didSendVisibleResponse = false;
     const currentMessage = threadContext.find(
@@ -178,12 +199,19 @@ export async function processFastAgentMessage(params: {
       eventFiles: event.files,
       messages: threadContext,
     });
-    const attachments = await processSlackAttachments({
-      slack,
-      files: currentMessageFiles,
-      userId,
-      userTextContext: baseQuestion,
-    });
+    const [attachments, footerContext] = await Promise.all([
+      processSlackAttachments({
+        slack,
+        files: currentMessageFiles,
+        userId,
+        userTextContext: baseQuestion,
+      }),
+      resolveFastSessionReplyFooterContext({ sessionId: session.id }),
+    ]);
+    if (processingReactionPromise) {
+      didAddProcessingReaction = await processingReactionPromise;
+      processingReactionSettled = true;
+    }
     const attachmentTexts = [
       ...attachments.attachmentTexts,
       ...attachments.videoDescriptions,
@@ -209,12 +237,6 @@ export async function processFastAgentMessage(params: {
         message.user !== event.user,
     );
 
-    const resolvedActiveTasks = resolveActiveTasks
-      ? await resolveActiveTasks()
-      : activeTasks;
-    const footerContext = await resolveFastSessionReplyFooterContext({
-      sessionId: session.id,
-    });
     const needsCanonicalAdmission =
       !releaseFastAgentLock ||
       conversation.surface !== incomingConversation.surface ||
@@ -253,6 +275,12 @@ export async function processFastAgentMessage(params: {
         new Error('Fast suggestion launch settlement failed.'),
       ),
     );
+    // Resolving reply tasks claims pending PR-review actions for this turn,
+    // so it must wait until the turn is actually admitted: a steered or
+    // queued follow-up must not consume actions it will never carry.
+    const resolvedActiveTasks = resolveActiveTasks
+      ? await resolveActiveTasks()
+      : activeTasks;
     const responseText = await answerFastAgentQuestion({
       question,
       images: attachments.images,
@@ -428,6 +456,13 @@ export async function processFastAgentMessage(params: {
       }
     }
   } finally {
+    // A failure before the reaction result was read must still clear a
+    // reaction that landed on the message.
+    if (processingReactionPromise && !processingReactionSettled) {
+      didAddProcessingReaction = await processingReactionPromise.catch(
+        () => false,
+      );
+    }
     if (didAddProcessingReaction) {
       await slack
         .removeReaction({
