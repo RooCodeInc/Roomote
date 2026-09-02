@@ -261,6 +261,12 @@ function validateComposeShape(shape) {
         config.services.gbrain?.healthcheck?.test?.length,
         'installer-production: gbrain must have a healthcheck for upgrade validation',
       );
+      assert(
+        config.services.gbrain?.depends_on?.postgres?.condition ===
+          'service_healthy' &&
+          config.services.gbrain?.depends_on?.postgres?.required === false,
+        'installer-production: gbrain must wait for optional local Postgres health',
+      );
     }
 
     if (
