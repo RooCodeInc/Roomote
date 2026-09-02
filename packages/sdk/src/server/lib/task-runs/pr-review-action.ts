@@ -361,9 +361,20 @@ async function retireLegacyPrReviewActionsForContext(
   return retired;
 }
 
+/**
+ * The subset of a pending action needed to strip controls from its posted
+ * message. Retirement must not depend on task linkage: the originating task
+ * can be deleted (which nulls the delivery's task id) while the message and
+ * its buttons remain live.
+ */
+export type RetirablePrReviewActionMessage = Pick<
+  PendingPrReviewAction,
+  'provider' | 'slackTeamId' | 'channelId' | 'threadId' | 'messageId'
+>;
+
 /** Removes controls from superseded review offers without failing delivery. */
 export async function retirePrReviewActionMessagesBestEffort(
-  pendingActions: PendingPrReviewAction[],
+  pendingActions: RetirablePrReviewActionMessage[],
   resolution = 'Superseded by newer review feedback.',
 ): Promise<void> {
   for (const pending of pendingActions) {
@@ -440,31 +451,25 @@ export async function retirePendingPrReviewActionsForPullRequest(input: {
   prNumber: number;
   currentHeadSha: string;
 }): Promise<void> {
+  // Only offers that posted controls carry a follow-up prompt; text-only
+  // messages have nothing to retire.
   const pending = (
     await retireCanonicalPrReviewActionsForPullRequest(input)
   ).flatMap((action) =>
     action?.provider &&
     action.provider !== 'teams' &&
-    action.taskId &&
     action.channelId &&
     action.followUpPrompt
       ? [
           {
-            nonce: action.deliveryId,
-            canonicalDeliveryId: action.deliveryId,
             provider: action.provider,
             ...(action.provider === 'slack' && action.slackTeamId
               ? { slackTeamId: action.slackTeamId }
               : {}),
-            taskId: action.taskId,
-            repository: action.repository,
-            prNumber: action.prNumber,
-            prUrl: action.prUrl,
             channelId: action.channelId,
             threadId: action.threadId,
-            followUpPrompt: action.followUpPrompt,
             messageId: action.messageId,
-          } satisfies PendingPrReviewAction,
+          } satisfies RetirablePrReviewActionMessage,
         ]
       : [],
   );

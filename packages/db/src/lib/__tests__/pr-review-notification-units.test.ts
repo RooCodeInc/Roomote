@@ -1439,6 +1439,43 @@ describe('canonical PR review notification ownership', () => {
     ]);
   });
 
+  it('treats an abbreviated recorded head as current when it prefixes the live head', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/short-sha-${task.id}`;
+    await associate(task.id, repository, 29);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 29,
+        eventKey: `short-sha-${task.id}`,
+        headSha: 'abc1234',
+      }),
+    );
+    const deliveryId = await postAction(repository);
+
+    await expect(
+      retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 29,
+        currentHeadSha: 'abc1234def5678901234567890abcdef12345678',
+      }),
+    ).resolves.toEqual([]);
+    await expect(deliveryStatusOf(deliveryId)).resolves.toBe(
+      'awaiting_user_action',
+    );
+
+    await expect(
+      retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 29,
+        currentHeadSha: 'def5678abc1234567890abcdef1234567890abcd',
+      }),
+    ).resolves.toEqual([expect.objectContaining({ deliveryId })]);
+    await expect(deliveryStatusOf(deliveryId)).resolves.toBe('dismissed');
+  });
+
   it('leaves an awaiting offer whose unit has no recorded head', async () => {
     const task = await taskFactory.create();
     const repository = `owner/headless-new-commit-${task.id}`;

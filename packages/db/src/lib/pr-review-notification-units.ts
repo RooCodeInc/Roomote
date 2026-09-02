@@ -1532,7 +1532,9 @@ export async function retireCanonicalPrReviewActionsForPullRequest(input: {
         // whose marker sha could not be parsed) cannot be proven stale, so
         // they are left alone rather than retired on every push.
         isNotNull(prReviewNotificationUnits.headSha),
-        ne(prReviewNotificationUnits.headSha, input.currentHeadSha),
+        // Roomote summary markers may record an abbreviated sha, so compare
+        // by prefix the same way the review-check paths do.
+        sql`NOT starts_with(${input.currentHeadSha}, ${prReviewNotificationUnits.headSha})`,
       ),
     );
   const rows = await db.transaction(async (tx) => {

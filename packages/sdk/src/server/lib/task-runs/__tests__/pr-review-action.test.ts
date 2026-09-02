@@ -11,6 +11,7 @@ const {
   mockRetireCanonical,
   mockRetireCanonicalForPullRequest,
   mockAttachCanonical,
+  mockGetCommunicationProviderAdapter,
 } = vi.hoisted(() => {
   const mockUpdateReturning = vi.fn();
   const mockUpdateWhere = vi.fn(() => ({ returning: mockUpdateReturning }));
@@ -28,8 +29,14 @@ const {
     mockRetireCanonical: vi.fn(),
     mockRetireCanonicalForPullRequest: vi.fn(),
     mockAttachCanonical: vi.fn(),
+    mockGetCommunicationProviderAdapter: vi.fn(),
   };
 });
+
+vi.mock('../../communication-providers', () => ({
+  getCommunicationProviderAdapter: (...args: unknown[]) =>
+    mockGetCommunicationProviderAdapter(...args),
+}));
 
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({
@@ -97,6 +104,7 @@ describe('PR review action state', () => {
     mockRetireCanonical.mockResolvedValue([]);
     mockRetireCanonicalForPullRequest.mockResolvedValue([]);
     mockAttachCanonical.mockResolvedValue(false);
+    mockGetCommunicationProviderAdapter.mockResolvedValue(null);
   });
 
   it('creates and orders each nonce atomically without overwriting retries', async () => {
@@ -424,6 +432,47 @@ describe('PR review action state', () => {
       repository: 'owner/repo',
       prNumber: 42,
       currentHeadSha: 'new-head',
+    });
+  });
+
+  it('retires a superseded chat message even when its task link is gone', async () => {
+    const editMessageReplyMarkup = vi.fn().mockResolvedValue(undefined);
+    mockGetCommunicationProviderAdapter.mockResolvedValue({
+      provider: 'telegram',
+      editMessageReplyMarkup,
+    });
+    mockRetireCanonicalForPullRequest.mockResolvedValue([
+      {
+        deliveryId: '33333333-3333-4333-8333-333333333333',
+        destinationKind: 'task',
+        status: 'dismissed',
+        provider: 'telegram',
+        slackTeamId: null,
+        taskId: null,
+        sourceControlProvider: 'github',
+        host: null,
+        repositoryId: null,
+        repository: 'owner/repo',
+        prNumber: 42,
+        prUrl: 'https://github.com/owner/repo/pull/42',
+        channelId: 'chat-1',
+        threadId: null,
+        followUpPrompt: 'Resolve the review feedback.',
+        messageId: '456',
+        destinationKey: 'task-1',
+      },
+    ]);
+
+    await retirePendingPrReviewActionsForPullRequest({
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+      currentHeadSha: 'new-head',
+    });
+
+    expect(editMessageReplyMarkup).toHaveBeenCalledWith({
+      channelId: 'chat-1',
+      messageId: '456',
     });
   });
 
