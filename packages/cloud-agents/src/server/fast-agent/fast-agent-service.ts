@@ -629,6 +629,23 @@ export class FastAgentDurableRetryScheduledError extends Error {
   }
 }
 
+/**
+ * Find a park signal inside an error chain: an aborted OpenCode prompt may
+ * surface the abort reason wrapped as a prompt error's cause.
+ */
+function findFastAgentDurableRetryScheduledError(
+  error: unknown,
+): FastAgentDurableRetryScheduledError | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < 6 && current; depth += 1) {
+    if (current instanceof FastAgentDurableRetryScheduledError) return current;
+    if (typeof current !== 'object') return null;
+    const record = current as { cause?: unknown; providerError?: unknown };
+    current = record.cause ?? record.providerError;
+  }
+  return null;
+}
+
 class FastAgentInferenceError extends Error {
   constructor(
     public readonly failure: FastAgentInferenceFailure,
@@ -766,6 +783,10 @@ async function runFastAgentInferenceWithRetries<T>(
       options.signal?.throwIfAborted();
       return await run();
     } catch (error) {
+      // A prompt aborted because the turn parked itself on OpenCode's own
+      // provider backoff is not a failure to classify or retry here.
+      const parked = findFastAgentDurableRetryScheduledError(error);
+      if (parked) throw parked;
       // Session loss is the session manager's bootstrap signal, not a
       // provider failure this loop should absorb.
       if (isNonTaskOpenCodeSessionNotFoundError(error)) {
@@ -1398,6 +1419,9 @@ export async function answerFastAgentQuestion({
   // row, its retry notice, and the responding lease now belong to the run
   // the queue starts at the scheduled time, so nothing here may settle them.
   let durableTurnDeferred = false;
+  // Automatic retries this turn has consumed across all of its executions,
+  // whether Roomote's loop or OpenCode's internal backoff scheduled them.
+  let durableRetriesConsumed = durableAdmission?.inferenceRetries ?? 0;
   /**
    * Move a pending inference retry out of this process. Only a turn that is
    * still replay-safe can be re-run elsewhere; anything else keeps its
@@ -1436,6 +1460,7 @@ export async function answerFastAgentQuestion({
     if (!scheduled) return false;
     durableTurnReplayable = false;
     durableTurnDeferred = true;
+    durableRetriesConsumed = notice.totalRetryCount;
     await adapter.requestDurableRetry(retryAt).catch((error) => {
       console.warn(
         `[Fast Agent] Failed to queue the durable inference retry wakeup: ${formatErrorForLog(error)}`,
@@ -3409,6 +3434,38 @@ export async function answerFastAgentQuestion({
                           providerRetryTimeout.unref();
                         }
                         await reportProviderRetryEvent(event);
+                        // OpenCode is about to sleep out its own backoff
+                        // inside this process, which is the wait a restart
+                        // interrupts most often. A replay-safe turn parks
+                        // at that time instead and lets the queue re-prompt;
+                        // the abort below ends this prompt with the park as
+                        // its reason. The per-turn cap bounds the handoffs,
+                        // after which OpenCode's in-process retries resume.
+                        if (
+                          event.nextRetryAtMs !== undefined &&
+                          durableRetriesConsumed <
+                            FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN
+                        ) {
+                          const delayMs = Math.max(
+                            0,
+                            event.nextRetryAtMs - Date.now(),
+                          );
+                          const parked = await deferInferenceRetry({
+                            failure: classifyNonTaskInferenceError(
+                              new Error(event.message),
+                            ),
+                            attemptNumber: durableRetriesConsumed + 1,
+                            delayMs,
+                            totalRetryCount: durableRetriesConsumed + 1,
+                          });
+                          if (parked) {
+                            providerRetryAbortController.abort(
+                              new FastAgentDurableRetryScheduledError(
+                                new Date(Date.now() + delayMs),
+                              ),
+                            );
+                          }
+                        }
                       },
                       ...(imageFilesForAttempt.length
                         ? {
@@ -3572,6 +3629,10 @@ export async function answerFastAgentQuestion({
                   });
                   return '';
                 }
+                // A parked turn ended this prompt on purpose; the outer
+                // handler records the outcome, not a failed attempt.
+                const parked = findFastAgentDurableRetryScheduledError(error);
+                if (parked) throw parked;
                 const failure = classifyNonTaskInferenceError(error);
                 const attemptStage = !resolvedInferenceModel
                   ? 'model_resolution'

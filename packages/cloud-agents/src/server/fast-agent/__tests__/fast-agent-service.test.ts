@@ -3854,6 +3854,100 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ).not.toContainEqual({ respondingUntil: null });
     });
 
+    it('parks a replay-safe turn when OpenCode schedules its own provider backoff', async () => {
+      const before = Date.now();
+      mocks.generateText.mockImplementationOnce(
+        async (params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          await params.onProviderRetry?.({
+            attempt: 1,
+            message: '429 Too Many Requests',
+            nextRetryAtMs: Date.now() + 45_000,
+          });
+          // The park aborts this prompt with itself as the reason.
+          if (options.signal.aborted) throw options.signal.reason;
+          return '';
+        },
+      );
+      const requestDurableRetry = vi.fn().mockResolvedValue(undefined);
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'notice-1' });
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ postReply, requestDurableRetry }),
+          durableAdmission,
+        }),
+      ).rejects.toBeInstanceOf(FastAgentDurableRetryScheduledError);
+
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      const [rowId, schedule] = mocks.scheduleDurableRetry.mock.calls[0]!;
+      expect(rowId).toBe('durable-row-1');
+      expect(schedule.inferenceRetries).toBe(1);
+      expect(schedule.retryAt.getTime()).toBeGreaterThanOrEqual(
+        before + 44_000,
+      );
+      expect(schedule.retryAt.getTime()).toBeLessThanOrEqual(
+        Date.now() + 45_000,
+      );
+      expect(requestDurableRetry).toHaveBeenCalledWith(schedule.retryAt);
+      // A 45s wait exceeds the silent window, so the notice went out and
+      // was recorded with its message id before the turn parked.
+      expect(postReply).toHaveBeenCalledOnce();
+      expect(postReply).toHaveBeenCalledWith({
+        purpose: 'progress',
+        message:
+          'The inference provider is rate limiting requests. Retrying automatically…',
+      });
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites.at(-1)?.metadata).toMatchObject({
+        inferenceRetryActive: true,
+        platformMessageId: 'notice-1',
+      });
+      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+    });
+
+    it('stops parking provider backoff once the per-turn retry cap is spent', async () => {
+      mocks.generateText.mockImplementationOnce(
+        async (params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          await params.onProviderRetry?.({
+            attempt: 1,
+            message: '429 Too Many Requests',
+            nextRetryAtMs: Date.now() + 2_000,
+          });
+          expect(options.signal.aborted).toBe(false);
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Recovered in place.',
+          });
+          return '';
+        },
+      );
+      const requestDurableRetry = vi.fn().mockResolvedValue(undefined);
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ requestDurableRetry }),
+          durableAdmission: {
+            eventId: 'durable-row-1',
+            inferenceRetries: FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN,
+          },
+          resumedAfterInferenceRetry: true,
+        }),
+      ).resolves.toBe('Recovered in place.');
+
+      expect(mocks.scheduleDurableRetry).not.toHaveBeenCalled();
+      expect(requestDurableRetry).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
     it('keeps the retry in process once the turn is no longer replay-safe', async () => {
       vi.useFakeTimers();
       try {
