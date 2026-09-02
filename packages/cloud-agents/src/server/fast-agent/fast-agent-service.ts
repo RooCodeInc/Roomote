@@ -1758,6 +1758,7 @@ export async function answerFastAgentQuestion({
     inferenceRetryNotice = false,
     visibleInTranscript = true,
     interruptionReason,
+    ts,
   }: {
     reply: FastAgentReply;
     event: { eventId: string; turnSeq: number };
@@ -1766,6 +1767,8 @@ export async function answerFastAgentQuestion({
     inferenceRetryNotice?: boolean;
     visibleInTranscript?: boolean;
     interruptionReason?: FastAgentInterruptionReason;
+    /** Explicit event time; retry notices pin it to the episode start. */
+    ts?: number;
   }) =>
     persistCanonicalMessage(
       {
@@ -1774,7 +1777,7 @@ export async function answerFastAgentQuestion({
         // createdAtMs predates the turn's tool events and would sort the
         // reply above the tool activity that produced it, so fall straight
         // through to the persist-time clock when completion time is missing.
-        ts: nativeMessage?.completedAtMs ?? Date.now(),
+        ts: ts ?? nativeMessage?.completedAtMs ?? Date.now(),
         eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
         role: 'assistant',
         contentBlocks: [{ type: 'text', text: reply.message }],
@@ -1922,6 +1925,12 @@ export async function answerFastAgentQuestion({
 
     const retryEvent = inferenceRetryCanonicalEvent;
     const retryMessageIndex = inferenceRetryMessageIndex;
+    // A progress notice keeps the episode's start time; a terminal
+    // replacement takes the clock like any other reply.
+    const noticeTs =
+      reply.purpose === 'progress'
+        ? inferenceRecoveryEpisodeStartedAt
+        : undefined;
     if (!inferenceRetryReply || !adapter.replaceReply) {
       if (
         retryMessageIndex !== undefined &&
@@ -1935,6 +1944,7 @@ export async function answerFastAgentQuestion({
         inferenceRetryNotice: true,
         visibleInTranscript: false,
         interruptionReason,
+        ts: noticeTs,
       });
       return false;
     }
@@ -1950,6 +1960,7 @@ export async function answerFastAgentQuestion({
           event: retryEvent,
           inferenceRetryNotice: true,
           interruptionReason,
+          ts: noticeTs,
         });
         throw error;
       }
@@ -1968,6 +1979,7 @@ export async function answerFastAgentQuestion({
         inferenceRetryNotice: true,
         visibleInTranscript: false,
         interruptionReason,
+        ts: noticeTs,
       });
       return false;
     }
@@ -1983,6 +1995,7 @@ export async function answerFastAgentQuestion({
         platformMessageId: inferenceRetryReply.messageId,
         inferenceRetryNotice: true,
         interruptionReason,
+        ts: noticeTs,
       });
     }
     return true;
@@ -2412,11 +2425,17 @@ export async function answerFastAgentQuestion({
       inferenceRetryCanonicalEvent ??= allocateCanonicalEvent(
         `retry-notice:${nextRetryNoticeOrdinal++}`,
       );
+      // The marker's timestamp is the recovery episode's start. A run the
+      // queue resumes inherits it, so the silent window keeps counting from
+      // the first failure instead of restarting on every handoff.
+      const now = Date.now();
+      inferenceRecoveryEpisodeStartedAt ??= now;
       await persistAssistantReply({
         reply,
         event: inferenceRetryCanonicalEvent,
         inferenceRetryNotice: true,
         visibleInTranscript: false,
+        ts: inferenceRecoveryEpisodeStartedAt,
       });
 
       if (platformEvent) return;
@@ -2425,8 +2444,6 @@ export async function answerFastAgentQuestion({
       // would absorb it invisibly. A notice is only worth interrupting the
       // user for when the pending wait pushes the continuous no-progress
       // stretch past the silent window.
-      const now = Date.now();
-      inferenceRecoveryEpisodeStartedAt ??= now;
       const projectedRecoveryMs =
         now - inferenceRecoveryEpisodeStartedAt + (notice.delayMs ?? 0);
       if (projectedRecoveryMs < FAST_AGENT_SILENT_RECOVERY_WINDOW_MS) {
@@ -2449,6 +2466,7 @@ export async function answerFastAgentQuestion({
           event: inferenceRetryCanonicalEvent,
           platformMessageId: inferenceRetryReply?.messageId,
           inferenceRetryNotice: true,
+          ts: inferenceRecoveryEpisodeStartedAt,
         });
       }
       diagnostics.recordVisibleReply({ assistantResponse: false });
