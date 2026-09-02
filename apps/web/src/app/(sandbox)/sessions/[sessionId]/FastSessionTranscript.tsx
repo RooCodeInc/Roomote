@@ -12,6 +12,7 @@ import {
 import { useReducedMotion } from 'motion/react';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  SETUP_RECEIPT_INPUT_KIND,
   getImageUrisFromContentBlocks,
   getTextFromContentBlocks,
   inferAcpMessageKind,
@@ -48,6 +49,11 @@ import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { truncatePageTitle } from '@/lib/page-title';
 import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
+import {
+  findPendingSessionInputRequest,
+  SessionUserInputCard,
+} from './SessionUserInputCard';
+import { SetupStarterTasksCard } from './setup/SetupStarterTasksCard';
 
 import {
   AcpTranscriptBlockList,
@@ -62,6 +68,13 @@ type TranscriptMessage = Omit<FastSessionMessage, 'createdAt'> & {
 };
 
 type TranscriptOrder = Pick<TranscriptMessage, 'id' | 'ts' | 'turnSeq'>;
+
+type TranscriptOwner = {
+  userId: string;
+  name: string | null;
+  email: string | null;
+  imageUrl: string | null;
+};
 
 const ROOMOTE_KICKOFF_LINK = /\r?\n\r?\n\[Open in Roomote\]\([^\r\n]+\)\s*$/;
 
@@ -138,6 +151,7 @@ export function pendingResponseReducer(
         action.type === 'hydrate' || action.newEventIds.has(message.eventId);
       if (
         message.role === 'user' &&
+        message.metadata?.inputKind !== SETUP_RECEIPT_INPUT_KIND &&
         isNewMessage &&
         (action.type === 'hydrate' ||
           pendingThreshold === null ||
@@ -256,6 +270,7 @@ export function FastSessionTranscript({
   sessionReasoningEffort = null,
   defaultModelId = null,
   defaultReasoningEffort = null,
+  owner,
   headerExtras,
   timelineExtras,
 }: {
@@ -269,6 +284,7 @@ export function FastSessionTranscript({
   sessionReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
   defaultReasoningEffort?: ReasoningEffort | null;
+  owner?: TranscriptOwner;
   headerExtras?: ReactNode;
   timelineExtras?: ReactNode;
 }) {
@@ -436,22 +452,58 @@ export function FastSessionTranscript({
 
   const uiMessages = useMemo(
     () =>
-      messages.map((message) =>
-        toAcpUiMessage({
-          id: message.id,
-          ts: message.ts,
-          eventType: message.eventType as AcpEventType,
-          role: message.role,
-          kind: inferAcpMessageKind(message.eventType),
-          contentBlocks: message.contentBlocks,
-          metadata: message.metadata,
-          payload: message.payload,
-          text: getTranscriptMessageText(message),
-          userName: message.userName,
-          userEmail: message.userEmail,
-          userImageUrl: message.userImageUrl,
+      messages
+        .filter(
+          (message) =>
+            message.eventType !== ACP_ENVELOPE_EVENT_TYPES.RequestUserInput &&
+            message.eventType !==
+              ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+        )
+        .map((message) => {
+          const uiMessage = toAcpUiMessage({
+            id: message.id,
+            ts: message.ts,
+            eventType: message.eventType as AcpEventType,
+            role: message.role,
+            kind: inferAcpMessageKind(message.eventType),
+            contentBlocks: message.contentBlocks,
+            metadata: message.metadata,
+            payload: message.payload,
+            text: getTranscriptMessageText(message),
+            userName: message.userName,
+            userEmail: message.userEmail,
+            userImageUrl: message.userImageUrl,
+          });
+
+          if (
+            uiMessage.role !== 'user' ||
+            !owner ||
+            uiMessage.userId !== owner.userId
+          ) {
+            return uiMessage;
+          }
+
+          return {
+            ...uiMessage,
+            userName: uiMessage.userName ?? owner.name,
+            userEmail: uiMessage.userEmail ?? owner.email,
+            userImageUrl: uiMessage.userImageUrl ?? owner.imageUrl,
+          };
         }),
+    [messages, owner],
+  );
+  const hasVisibleAssistantMessage = useMemo(
+    () =>
+      messages.some(
+        (message) =>
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          message.metadata?.visibleInTranscript !== false &&
+          Boolean(getTextFromContentBlocks(message.contentBlocks)?.trim()),
       ),
+    [messages],
+  );
+  const pendingInputRequest = useMemo(
+    () => findPendingSessionInputRequest(messages),
     [messages],
   );
   const reviewOffers = useMemo(
@@ -599,13 +651,13 @@ export function FastSessionTranscript({
               Older messages in this session are not shown.
             </p>
           ) : null}
-          {timelineExtras}
           <AcpTranscriptBlockList
             blocks={renderBlocks}
             showInternalMessages={false}
             onSuppress={suppressMessage}
             onOpenDelegatedTask={openTaskPanel ?? undefined}
           />
+          {hasVisibleAssistantMessage ? timelineExtras : null}
           {pendingResponseState.pendingAfter !== null ? (
             <ThinkingMessage />
           ) : !isSending &&
@@ -628,10 +680,25 @@ export function FastSessionTranscript({
               }
             />
           ))}
+          {pendingInputRequest ? (
+            <div className="mt-3">
+              {pendingInputRequest.preset === 'setup_starter_tasks' ? (
+                <SetupStarterTasksCard
+                  sessionId={sessionId}
+                  request={pendingInputRequest}
+                />
+              ) : (
+                <SessionUserInputCard
+                  sessionId={sessionId}
+                  request={pendingInputRequest}
+                />
+              )}
+            </div>
+          ) : null}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
-      {canReply ? (
+      {canReply && !pendingInputRequest ? (
         <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card transition-colors @[56rem]:rounded-t-lg">
           <SessionPromptInput
             sessionId={sessionId}

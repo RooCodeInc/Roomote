@@ -27,12 +27,8 @@ import {
   Spinner,
 } from '@/components/system';
 
-import { StepTitle } from './StepTitle';
-import { SetupFooter } from './SetupFooter';
-import { getComputeCredentialsHint } from './computeSetupCopy';
-import { getSetupStepDefinition } from './types';
-
-const COMPUTE_CONFIG_STEP = getSetupStepDefinition('compute-config');
+import { getComputeCredentialsHint } from '../../../../(onboarding)/setup/computeSetupCopy';
+import { SetupSessionActionCardActions } from './SetupSessionActionCard';
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 const SHARED_WORKER_IMAGE_ENV_VAR = 'DOCKER_WORKER_IMAGE';
 
@@ -63,7 +59,7 @@ function getNonSecretFieldInitialValues(
   return next;
 }
 
-export function StepComputeConfig({
+export function SandboxConfiguration({
   computeSetup,
   selectedProviderId,
   onContinue,
@@ -320,10 +316,8 @@ export function StepComputeConfig({
   };
 
   return (
-    <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
-      <StepTitle text={COMPUTE_CONFIG_STEP.title} />
-
-      <div className="space-y-5 mt-6">
+    <div className="space-y-4">
+      <div className="space-y-5">
         <div className="flex gap-2 items-start">
           <span className="rounded-full bg-foreground text-background font-bold size-8 inline-flex items-center justify-center shrink-0 mt-1">
             1
@@ -517,15 +511,13 @@ export function StepComputeConfig({
         </Alert>
       ) : null}
 
-      <SetupFooter
+      <SetupSessionActionCardActions
         onBack={onBack}
         backDisabled={saveComputeConfig.isPending}
-        className={
-          templateBuildRunning || templateBuildFailed ? 'mt-2' : 'mt-8'
-        }
       >
         <Button
           type="button"
+          size="sm"
           onClick={() => void handleContinue()}
           disabled={isActionDisabled}
         >
@@ -538,7 +530,7 @@ export function StepComputeConfig({
                 : 'Save and continue'}
           {saveComputeConfig.isPending ? <Spinner /> : <ArrowRight />}
         </Button>
-      </SetupFooter>
+      </SetupSessionActionCardActions>
     </div>
   );
 }

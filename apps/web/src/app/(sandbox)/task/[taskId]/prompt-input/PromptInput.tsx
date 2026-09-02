@@ -129,6 +129,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const { user } = useUser();
     const pendingUserInputState = useOptionalPendingUserInputRequestState();
     const [prompt, setPrompt] = useState(initialPrompt);
+    const [isTextareaFocused, setIsTextareaFocused] = useState(false);
     const [sending, setSending] = useState(false);
     const cancellingRef = useRef(false);
     const steeringQueuedMessageRef = useRef(false);
@@ -814,7 +815,11 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
                 ref={textareaRef}
                 value={prompt}
                 onChange={handleChange}
-                onBlur={() => flushDraft()}
+                onFocus={() => setIsTextareaFocused(true)}
+                onBlur={() => {
+                  setIsTextareaFocused(false);
+                  flushDraft();
+                }}
                 onKeyDown={handleTextareaKeyDown}
                 placeholder={ghostSuggestion ?? placeholder}
                 aria-describedby={
@@ -828,14 +833,17 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
                     Suggested message: {ghostSuggestion}. Press Tab to accept or
                     Escape to dismiss.
                   </span>
-                  <button
-                    type="button"
-                    aria-label="Insert suggested message"
-                    onClick={acceptGhostSuggestion}
-                    className="absolute right-4 top-4 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
-                  >
-                    Tab
-                  </button>
+                  {isTextareaFocused && (
+                    <button
+                      type="button"
+                      aria-label="Insert suggested message"
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={acceptGhostSuggestion}
+                      className="absolute right-4 top-4 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
+                    >
+                      Tab to accept
+                    </button>
+                  )}
                 </>
               )}
             </div>

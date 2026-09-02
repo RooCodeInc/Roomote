@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
@@ -26,7 +27,8 @@ export function SandboxShell({
   requireAuth = true,
 }: SandboxShellProps) {
   const router = useRouter();
-  const { authStatus, isSignedIn } = useUser();
+  const { authStatus, isSignedIn, user } = useUser();
+  const pathname = usePathname();
   const shouldRedirectToSignIn = requireAuth && authStatus === 'signed-out';
 
   useRedirectToSignIn(shouldRedirectToSignIn);
@@ -50,19 +52,57 @@ export function SandboxShell({
       staleTime: 30_000,
     }),
   );
+  const { data: setupStatus } = useQuery(
+    trpc.setup.status.queryOptions(undefined, {
+      enabled: onboardingQueryEnabled && user?.isAdmin === true,
+      staleTime: 30_000,
+    }),
+  );
+  const { data: setupSessionStatus, isLoading: isSetupSessionLoading } =
+    useQuery(
+      trpc.setup.sessionStatus.queryOptions(undefined, {
+        enabled:
+          onboardingQueryEnabled &&
+          user?.isAdmin === true &&
+          setupStatus?.setupCompletedAt == null,
+        staleTime: 10_000,
+      }),
+    );
 
   const needsOnboarding =
-    onboardingStatus && !onboardingStatus.onboardingCompletedAt;
+    user?.isAdmin !== true &&
+    onboardingStatus &&
+    !onboardingStatus.onboardingCompletedAt;
+  const setupSessionPath = setupSessionStatus?.sessionId
+    ? `/sessions/${setupSessionStatus.sessionId}`
+    : null;
+  const needsAdminSetup =
+    user?.isAdmin === true && setupStatus?.setupCompletedAt == null;
+  const isAllowedSetupSession =
+    setupSessionPath !== null && pathname === setupSessionPath;
   const sandboxLayoutValue = useMemo(
     () => ({ isSidebarVisible, setSidebarVisible, toggleSidebar }),
     [isSidebarVisible, setSidebarVisible, toggleSidebar],
   );
 
   useEffect(() => {
-    if (needsOnboarding || isOnboardingError) {
+    // Wait for the setup-session lookup before routing. Otherwise a direct
+    // visit to the in-progress setup session can briefly see no session ID
+    // and be redirected to /setup before the lookup resolves.
+    if (needsAdminSetup && !isSetupSessionLoading && !isAllowedSetupSession) {
+      router.replace(setupSessionPath ?? '/setup');
+    } else if (needsOnboarding || isOnboardingError) {
       router.replace('/onboarding');
     }
-  }, [isOnboardingError, needsOnboarding, router]);
+  }, [
+    isAllowedSetupSession,
+    isOnboardingError,
+    isSetupSessionLoading,
+    needsAdminSetup,
+    needsOnboarding,
+    router,
+    setupSessionPath,
+  ]);
 
   if (shouldRedirectToSignIn) {
     return (

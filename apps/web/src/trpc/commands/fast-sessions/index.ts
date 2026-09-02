@@ -10,6 +10,10 @@ import {
   FastAgentDurableRetryScheduledError,
   getOrCreateFastAgentSession,
   resolveApiBaseUrl,
+  type FastAgentPlatformEventKind,
+  type FastAgentPlatformEventVisibility,
+  type FastAgentTurnSource,
+  upsertFastAgentMessage,
 } from '@roomote/cloud-agents/server';
 import {
   buildFastAgentSurfaceReplyDelivery,
@@ -34,15 +38,25 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  formatRequestUserInputResponseText,
   formatErrorForLog,
+  getAcpRequestUserInputValidationError,
   getUserDisplayName,
+  parseAcpRequestUserInputAnswers,
+  parseAcpRequestUserInputPayload,
+  parseAcpRequestUserInputResponsePayload,
+  type AcpRequestUserInputAnswers,
+  type AcpRequestUserInputPayload,
   type ReasoningEffort,
 } from '@roomote/types';
+import type { FastAgentTurnAdapter } from '@roomote/cloud-agents/server';
 
 import type { UserAuthSuccess } from '@/types';
 import {
   findAccessibleFastSession,
   buildFastSessionPrReviewDestinationKey,
+  getFastSessionById,
   getFastSessionPrReviewOfferStatus,
   getFastSessionTasks,
   updateFastSessionPrReviewOfferStatus,
@@ -118,9 +132,9 @@ type WebFastAgentTurnInput = {
   model?: string;
   reasoningEffort?: ReasoningEffort;
   senderDisplayName?: string;
-  /** Present for trusted platform-generated turns (e.g. the setup kickoff);
-   * absent for human-authored web messages. */
-  platformEventKind?: 'setup';
+  turnSource?: FastAgentTurnSource;
+  platformEventKind?: FastAgentPlatformEventKind;
+  platformEventVisibility?: FastAgentPlatformEventVisibility;
   /** Deterministic turn ID override. Canonical event IDs derive from it, so a
    * fixed value lets a turn be claimed idempotently across retries. */
   currentMessageId?: string;
@@ -139,6 +153,13 @@ type WebFastAgentTurnInput = {
     artifactBuildLaunchId?: string;
     artifactBuildSessionId?: string;
   };
+  /** Skip an idempotent platform turn only after it has a durable terminal
+   * response. The synthetic prompt is deliberately not a completion marker:
+   * it is persisted before inference and must remain retryable after failure. */
+  skipIfTurnCompleted?: { conversationId: string; turnId: string };
+  setupSnapshot?: string;
+  setupSession?: boolean;
+  adapterExtensions?: Partial<FastAgentTurnAdapter>;
 };
 
 function findArtifactBuildTask(sessionId: string, launchId: string) {
@@ -154,6 +175,28 @@ function findArtifactBuildTask(sessionId: string, launchId: string) {
       ),
     )
     .limit(1);
+}
+
+async function hasCompletedWebFastAgentTurn(input: {
+  conversationId: string;
+  turnId: string;
+}): Promise<boolean> {
+  const [completion] = await db
+    .select({ id: fastAgentMessages.id })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, input.conversationId),
+        eq(fastAgentMessages.turnId, input.turnId),
+        sql`(
+          (${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.AssistantMessage}
+            AND ${fastAgentMessages.metadata} ->> 'purpose' IN ('closeout', 'clarification'))
+          OR ${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.RequestUserInput}
+        )`,
+      ),
+    )
+    .limit(1);
+  return Boolean(completion);
 }
 
 /**
@@ -173,9 +216,15 @@ async function runWebFastAgentTurn({
   model,
   reasoningEffort,
   senderDisplayName,
-  platformEventKind,
   currentMessageId,
   skipIfEventExists,
+  skipIfTurnCompleted,
+  turnSource,
+  platformEventKind,
+  platformEventVisibility,
+  setupSnapshot,
+  setupSession,
+  adapterExtensions,
   durableSessionId,
 }: WebFastAgentTurnInput): Promise<void> {
   const conversation = delivery.conversation;
@@ -230,6 +279,15 @@ async function runWebFastAgentTurn({
       }
     }
 
+    if (skipIfTurnCompleted) {
+      if (await hasCompletedWebFastAgentTurn(skipIfTurnCompleted)) {
+        console.log(
+          `[Fast Web] Skipping completed turn for ${conversation.conversationId}: turn ${skipIfTurnCompleted.turnId} already finished.`,
+        );
+        return;
+      }
+    }
+
     const turnMessageId = currentMessageId ?? `web-${randomUUID()}`;
     // Durable admission: a human web turn is persisted under this process's
     // claim before it runs, so an interruption hands it to the queue.
@@ -274,13 +332,15 @@ async function runWebFastAgentTurn({
       model,
       reasoningEffort,
       senderDisplayName,
-      ...(platformEventKind
+      ...(turnSource
         ? {
-            turnSource: 'platform_event' as const,
-            platformEventKind,
-            platformEventVisibility: 'required' as const,
+            turnSource,
+            ...(platformEventKind ? { platformEventKind } : {}),
+            ...(platformEventVisibility ? { platformEventVisibility } : {}),
           }
         : {}),
+      ...(setupSnapshot ? { setupSnapshot } : {}),
+      setupSession,
       adapter: {
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
@@ -306,6 +366,7 @@ async function runWebFastAgentTurn({
             }
           : {}),
         ...delivery.adapter,
+        ...adapterExtensions,
       },
     });
   } catch (error) {
@@ -329,7 +390,6 @@ export function scheduleWebFastAgentTurn(input: WebFastAgentTurnInput): void {
   // A detached promise can be suspended between a retry notice and its timer.
   after(() => runWebFastAgentTurn(input));
 }
-
 type ArtifactBuildInput = {
   launchId: string;
   environmentId: string;
@@ -440,7 +500,6 @@ async function startArtifactBuildInParentSession(
     fastConversationId: parentFastConversationId,
   };
 }
-
 export async function startFastSessionCommand(
   auth: UserAuthSuccess,
   input: {
@@ -573,26 +632,17 @@ export async function startSetupFastSessionCommand(
     conversation,
   });
 
-  // The kickoff turn runs under a deterministic turn ID, so its persisted
-  // prompt row has a knowable event ID. Claiming on that exact row (rather
-  // than transcript emptiness) means an early human reply in the new session
-  // can never masquerade as an already-run kickoff.
+  // The kickoff turn runs under a deterministic turn ID. Only a durable
+  // terminal response completes it; a prompt row left by failed inference is
+  // intentionally retried.
   const kickoffTurnId = `setup-kickoff:${session.id}`;
-  const kickoffPromptEventId = `${kickoffTurnId}:user`;
 
   let scheduleKickoff = session.created;
   if (!scheduleKickoff) {
-    const [existingKickoff] = await db
-      .select({ id: fastAgentMessages.id })
-      .from(fastAgentMessages)
-      .where(
-        and(
-          eq(fastAgentMessages.conversationId, session.id),
-          eq(fastAgentMessages.eventId, kickoffPromptEventId),
-        ),
-      )
-      .limit(1);
-    scheduleKickoff = !existingKickoff;
+    scheduleKickoff = !(await hasCompletedWebFastAgentTurn({
+      conversationId: session.id,
+      turnId: kickoffTurnId,
+    }));
   }
 
   if (scheduleKickoff) {
@@ -630,11 +680,13 @@ export async function startSetupFastSessionCommand(
         },
       },
       question: `<platform_event>${JSON.stringify(input.event)}</platform_event>`,
+      turnSource: 'platform_event',
       platformEventKind: 'setup',
+      platformEventVisibility: 'required',
       currentMessageId: kickoffTurnId,
-      skipIfEventExists: {
+      skipIfTurnCompleted: {
         conversationId: session.id,
-        eventId: kickoffPromptEventId,
+        turnId: kickoffTurnId,
       },
     });
   }
@@ -675,6 +727,29 @@ export async function getFastSessionTasksCommand(
       };
     }),
   }));
+}
+
+/** Client-facing Fast transcript load: canonical rows plus paging state. */
+export async function getFastSessionMessagesCommand(
+  auth: UserAuthSuccess,
+  sessionId: string,
+) {
+  const session = await findAccessibleFastSession(auth, sessionId);
+  if (!session) {
+    throw new Error('Fast session not found');
+  }
+  const detail = await getFastSessionById(auth, sessionId);
+  if (!detail) {
+    throw new Error('Fast session not found');
+  }
+  return {
+    sessionId: detail.id,
+    title: detail.title,
+    model: detail.model,
+    reasoningEffort: detail.reasoningEffort,
+    messages: detail.messages,
+    hasOlderMessages: detail.hasOlderMessages,
+  };
 }
 
 export async function updateFastSessionModelSelectionCommand(
@@ -788,4 +863,203 @@ export async function handleFastSessionPrReviewActionCommand(
         status,
       ),
   });
+}
+
+/**
+ * Submit an authenticated structured response to a Fast session's pending
+ * `request_user_input` request. The response is persisted as a canonical
+ * transcript event, duplicate or already-resolved submissions are rejected,
+ * and the same Fast conversation resumes automatically with a hidden
+ * normalized answer payload while the visible transcript keeps only the
+ * structured response event.
+ */
+export async function submitFastSessionUserInputCommand(
+  auth: UserAuthSuccess,
+  input: {
+    sessionId: string;
+    requestId: string;
+    answers: Record<string, { answers: string[] }>;
+    resolution?: 'submitted' | 'cancelled';
+  },
+  options: {
+    adapterExtensions?: Partial<FastAgentTurnAdapter>;
+    setupSnapshot?: string;
+    setupSession?: boolean;
+    persistSetupPresetResponse?: (input: {
+      fastConversationId: string;
+      request: {
+        eventId: string;
+        turnId: string;
+        payload: AcpRequestUserInputPayload;
+      };
+      answers: Record<string, { answers: string[] }>;
+    }) => Promise<unknown>;
+  } = {},
+): Promise<{ success: true }> {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) {
+    throw new Error('Fast session not found');
+  }
+
+  const [request] = await db
+    .select({
+      eventId: fastAgentMessages.eventId,
+      turnId: fastAgentMessages.turnId,
+      payload: fastAgentMessages.payload,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, session.id),
+        sql`${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.RequestUserInput}`,
+        sql`(${fastAgentMessages.payload}->>'requestId') = ${input.requestId}`,
+      ),
+    )
+    .orderBy(sql`${fastAgentMessages.ts} desc`)
+    .limit(1);
+
+  if (!request) {
+    throw new Error('This input request does not exist in the session.');
+  }
+
+  const [existingResponse] = await db
+    .select({
+      eventId: fastAgentMessages.eventId,
+      payload: fastAgentMessages.payload,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, session.id),
+        sql`${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse}`,
+        sql`(${fastAgentMessages.payload}->>'requestId') = ${input.requestId}`,
+      ),
+    )
+    .limit(1);
+  const requestPayload = parseAcpRequestUserInputPayload(request.payload);
+  if (!requestPayload) {
+    throw new Error('This input request is no longer valid.');
+  }
+  const submitted = parseAcpRequestUserInputAnswers(input.answers) ?? {};
+  const resolution = input.resolution ?? 'submitted';
+  if (requestPayload.preset && resolution === 'cancelled') {
+    throw new Error('This required setup choice cannot be cancelled.');
+  }
+  const validationError = getAcpRequestUserInputValidationError(
+    requestPayload.questions,
+    submitted,
+    resolution,
+  );
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
+  const scheduleResponseTurn = (answers: AcpRequestUserInputAnswers) => {
+    const responseTurnId = `input-response:${input.requestId}`;
+    scheduleWebFastAgentTurn({
+      userId: auth.userId,
+      delivery: {
+        conversation: {
+          surface: 'web',
+          workspaceId: session.userId,
+          conversationId: session.conversationId,
+        },
+        adapter: {
+          launchTask: createFastAgentWebTaskLauncher({
+            userId: session.userId,
+            conversation: {
+              surface: 'web',
+              workspaceId: session.userId,
+              conversationId: session.conversationId,
+            },
+          }),
+          postReply: async () => {},
+        },
+      },
+      question: `<structured_input_response>${JSON.stringify({
+        requestId: input.requestId,
+        answers,
+      })}</structured_input_response>`,
+      turnSource: 'platform_event',
+      platformEventKind: 'input_response',
+      platformEventVisibility: 'required',
+      currentMessageId: responseTurnId,
+      skipIfTurnCompleted: {
+        conversationId: session.id,
+        turnId: responseTurnId,
+      },
+      ...(options.adapterExtensions
+        ? { adapterExtensions: options.adapterExtensions }
+        : {}),
+      ...(options.setupSnapshot
+        ? { setupSnapshot: options.setupSnapshot }
+        : {}),
+      setupSession: options.setupSession ?? false,
+    });
+  };
+
+  if (existingResponse) {
+    const persistedResponse = parseAcpRequestUserInputResponsePayload(
+      existingResponse.payload,
+    );
+    if (
+      !requestPayload.preset &&
+      persistedResponse?.resolution === 'submitted'
+    ) {
+      scheduleResponseTurn(persistedResponse.answers);
+    }
+    return { success: true };
+  }
+
+  const responseEventId = `${request.eventId}:response`;
+  if (requestPayload.preset) {
+    if (!options.persistSetupPresetResponse || resolution !== 'submitted') {
+      throw new Error('This trusted setup response cannot be handled here.');
+    }
+    await options.persistSetupPresetResponse({
+      fastConversationId: session.id,
+      request: {
+        eventId: request.eventId,
+        turnId: request.turnId,
+        payload: requestPayload,
+      },
+      answers: submitted,
+    });
+    return { success: true };
+  }
+  await upsertFastAgentMessage({
+    sessionId: session.id,
+    message: {
+      eventId: responseEventId,
+      turnId: request.turnId,
+      turnSeq: 2_000_000_000,
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+      role: 'user',
+      contentBlocks: [
+        {
+          type: 'text' as const,
+          text: formatRequestUserInputResponseText(requestPayload, {
+            answers: submitted,
+            resolution,
+          }),
+        },
+      ],
+      metadata: { visibleInTranscript: true },
+      payload: {
+        requestId: input.requestId,
+        sessionId: session.id,
+        turnId: request.turnId,
+        callId: input.requestId,
+        answers: submitted,
+        resolution,
+      },
+      source: 'web',
+    },
+  });
+
+  if (resolution === 'cancelled') return { success: true };
+  scheduleResponseTurn(submitted);
+
+  return { success: true };
 }

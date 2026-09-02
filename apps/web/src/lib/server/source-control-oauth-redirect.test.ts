@@ -1,5 +1,6 @@
 import {
   addSourceControlOAuthResult,
+  buildSetupSessionSourceControlReturnTarget,
   normalizeSourceControlOAuthReturnTarget,
   resolveSourceControlOAuthReturnTarget,
   SOURCE_CONTROL_SETTINGS_PATH,
@@ -51,5 +52,34 @@ describe('source-control OAuth redirect handling', () => {
         'connected',
       ),
     ).toBe('/setup?step=source-control-connect&gitlab=connected&sync=1');
+  });
+
+  it('builds a provider-preserving setup Session return target', () => {
+    const target = buildSetupSessionSourceControlReturnTarget({
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      provider: 'gitlab',
+    });
+
+    expect(target).toBe(
+      '/sessions/11111111-1111-4111-8111-111111111111?setup=source-control&provider=gitlab',
+    );
+    expect(addSourceControlOAuthResult(target, 'gitlab', 'connected')).toBe(
+      '/sessions/11111111-1111-4111-8111-111111111111?setup=source-control&provider=gitlab&gitlab=connected&sync=1',
+    );
+  });
+
+  it('preserves first-party provider errors on the setup Session return', () => {
+    const target = buildSetupSessionSourceControlReturnTarget({
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      provider: 'gitea',
+    });
+    expect(
+      addSourceControlOAuthResult(
+        target,
+        'gitea',
+        'error',
+        'The user cancelled authorization.',
+      ),
+    ).toContain('reason=The+user+cancelled+authorization.');
   });
 });

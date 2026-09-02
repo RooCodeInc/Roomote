@@ -192,24 +192,6 @@ start_stack() {
     postgres redis minio minio-init db-migrate api web controller bullmq preview-proxy
 }
 
-verify_setup_page() {
-  local attempt
-
-  for attempt in 1 2 3; do
-    if compose exec -T web curl -fsS --max-time 30 "http://127.0.0.1:3000/setup?token=$setup_token" >/dev/null; then
-      return 0
-    fi
-
-    if [ "$attempt" -lt 3 ]; then
-      printf 'Setup page probe failed (attempt %s/3); retrying after cold-start initialization\n' "$attempt" >&2
-      sleep 2
-    fi
-  done
-
-  printf 'Setup page did not respond after 3 attempts\n' >&2
-  return 1
-}
-
 verify_stack() {
   # 'candidate' (default) also asserts the runtime tools the current code
   # ships in its control-plane images; 'baseline' skips those, because the
@@ -230,7 +212,7 @@ verify_stack() {
 
   compose exec -T api curl -fsS --max-time 5 http://127.0.0.1:3001/health/liveness >/dev/null
   compose exec -T web curl -fsS --max-time 5 http://127.0.0.1:3000/health >/dev/null
-  verify_setup_page
+  compose exec -T web curl -fsS --max-time 10 "http://127.0.0.1:3000/setup?token=$setup_token" >/dev/null
   compose exec -T controller curl -fsS --max-time 5 http://api:3001/health/controller >/dev/null
   compose exec -T bullmq curl -fsS --max-time 5 http://127.0.0.1:3002/admin/health >/dev/null
 

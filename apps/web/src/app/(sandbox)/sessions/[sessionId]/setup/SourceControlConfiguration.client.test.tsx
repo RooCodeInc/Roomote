@@ -56,7 +56,7 @@ vi.mock('@/hooks/github', () => ({
   }),
 }));
 
-import { StepSourceControlConfig } from './StepSourceControlConfig';
+import { SourceControlConfiguration } from './SourceControlConfiguration';
 
 function buildSourceControlSetup(
   overrides: Partial<SetupSourceControlStatus> = {},
@@ -158,14 +158,14 @@ function buildCatalogProviderSetup(
   });
 }
 
-describe('StepSourceControlConfig', () => {
+describe('SourceControlConfiguration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('defaults GitHub setup to the manifest CTA', () => {
     render(
-      <StepSourceControlConfig
+      <SourceControlConfiguration
         sourceControlSetup={buildSourceControlSetup()}
         selectedProviderId="github"
         onContinue={vi.fn()}
@@ -187,25 +187,9 @@ describe('StepSourceControlConfig', () => {
     expect(screen.queryByText('GitHub App ID')).not.toBeInTheDocument();
   });
 
-  it('shows Back on the GitHub create screen when a previous step exists', () => {
-    const onBack = vi.fn();
-
-    render(
-      <StepSourceControlConfig
-        sourceControlSetup={buildSourceControlSetup()}
-        selectedProviderId="github"
-        onContinue={vi.fn()}
-        onBack={onBack}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: /^Back$/i }));
-    expect(onBack).toHaveBeenCalledOnce();
-  });
-
   it('creates the app on the personal account when no organization is entered', () => {
     render(
-      <StepSourceControlConfig
+      <SourceControlConfiguration
         sourceControlSetup={buildSourceControlSetup()}
         selectedProviderId="github"
         onContinue={vi.fn()}
@@ -222,7 +206,7 @@ describe('StepSourceControlConfig', () => {
 
   it('passes the entered organization through to app creation', () => {
     render(
-      <StepSourceControlConfig
+      <SourceControlConfiguration
         sourceControlSetup={buildSourceControlSetup()}
         selectedProviderId="github"
         onContinue={vi.fn()}
@@ -245,7 +229,7 @@ describe('StepSourceControlConfig', () => {
 
   it('keeps the GitHub field form hidden without a manual entry path', () => {
     render(
-      <StepSourceControlConfig
+      <SourceControlConfiguration
         sourceControlSetup={buildSourceControlSetup()}
         selectedProviderId="github"
         onContinue={vi.fn()}
@@ -261,7 +245,7 @@ describe('StepSourceControlConfig', () => {
 
   it('guides GitLab OAuth application setup', () => {
     render(
-      <StepSourceControlConfig
+      <SourceControlConfiguration
         sourceControlSetup={buildCatalogProviderSetup('gitlab')}
         selectedProviderId="gitlab"
         onContinue={vi.fn()}
@@ -282,7 +266,7 @@ describe('StepSourceControlConfig', () => {
 
   it('guides Gitea OAuth application setup', () => {
     render(
-      <StepSourceControlConfig
+      <SourceControlConfiguration
         sourceControlSetup={buildCatalogProviderSetup('gitea')}
         selectedProviderId="gitea"
         onContinue={vi.fn()}
@@ -311,7 +295,7 @@ describe('StepSourceControlConfig', () => {
 
   it('guides Bitbucket OAuth client creation', () => {
     render(
-      <StepSourceControlConfig
+      <SourceControlConfiguration
         sourceControlSetup={buildCatalogProviderSetup('bitbucket')}
         selectedProviderId="bitbucket"
         onContinue={vi.fn()}
@@ -393,7 +377,7 @@ describe('StepSourceControlConfig', () => {
 
   it('defaults Azure DevOps setup to delegated authentication', () => {
     render(
-      <StepSourceControlConfig
+      <SourceControlConfiguration
         sourceControlSetup={buildAdoSourceControlSetup()}
         selectedProviderId="ado"
         onContinue={vi.fn()}
@@ -418,7 +402,7 @@ describe('StepSourceControlConfig', () => {
 
   it('shows mode-specific Azure DevOps creation instructions in step two', () => {
     render(
-      <StepSourceControlConfig
+      <SourceControlConfiguration
         sourceControlSetup={buildAdoSourceControlSetup()}
         selectedProviderId="ado"
         onContinue={vi.fn()}
@@ -461,7 +445,7 @@ describe('StepSourceControlConfig', () => {
 
   it('reveals optional Azure DevOps fields without showing the webhook secret', () => {
     render(
-      <StepSourceControlConfig
+      <SourceControlConfiguration
         sourceControlSetup={buildAdoSourceControlSetup()}
         selectedProviderId="ado"
         onContinue={vi.fn()}
@@ -494,7 +478,7 @@ describe('StepSourceControlConfig', () => {
 
   it('keeps optional Azure DevOps fields closed when switching auth modes', () => {
     render(
-      <StepSourceControlConfig
+      <SourceControlConfiguration
         sourceControlSetup={buildAdoSourceControlSetup()}
         selectedProviderId="ado"
         onContinue={vi.fn()}
@@ -533,7 +517,7 @@ describe('StepSourceControlConfig', () => {
 
   it('does not block continue on hidden optional Azure DevOps fields', () => {
     render(
-      <StepSourceControlConfig
+      <SourceControlConfiguration
         sourceControlSetup={buildAdoSourceControlSetup()}
         selectedProviderId="ado"
         onContinue={vi.fn()}
@@ -566,7 +550,7 @@ describe('StepSourceControlConfig', () => {
     baseUrlField.satisfiedByEnvVarName = 'ADO_BASE_URL';
 
     render(
-      <StepSourceControlConfig
+      <SourceControlConfiguration
         sourceControlSetup={setup}
         selectedProviderId="ado"
         onContinue={vi.fn()}
@@ -597,7 +581,7 @@ describe('StepSourceControlConfig', () => {
 
   it('keeps Entra values separate from PAT values', async () => {
     render(
-      <StepSourceControlConfig
+      <SourceControlConfiguration
         sourceControlSetup={buildAdoSourceControlSetup()}
         selectedProviderId="ado"
         onContinue={vi.fn()}

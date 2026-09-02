@@ -2781,6 +2781,16 @@ export async function startSetupRecommendationsCommand(auth: UserAuthSuccess) {
       connectedRepositories[0]?.sourceControlProvider ?? null,
     );
     const existingBatch = state.automationRecommendations;
+    if (
+      existingBatch?.inputFingerprint === fingerprint &&
+      (existingBatch.status === 'pending' || existingBatch.status === 'ready')
+    ) {
+      return {
+        batch: existingBatch,
+        repositoryIds: recommendationRepositoryIds,
+        shouldEnqueue: false,
+      };
+    }
     const batch = {
       ...(existingBatch?.inputFingerprint === fingerprint
         ? existingBatch
@@ -2803,8 +2813,14 @@ export async function startSetupRecommendationsCommand(auth: UserAuthSuccess) {
       normalizeSetupNewState({ ...state, automationRecommendations: batch }),
       tx,
     );
-    return { batch, repositoryIds: recommendationRepositoryIds };
+    return {
+      batch,
+      repositoryIds: recommendationRepositoryIds,
+      shouldEnqueue: true,
+    };
   });
+
+  if (!result.shouldEnqueue) return result.batch;
 
   try {
     await enqueueAutomationRecommendations({

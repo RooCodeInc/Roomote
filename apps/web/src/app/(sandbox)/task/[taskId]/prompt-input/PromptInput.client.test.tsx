@@ -1307,9 +1307,21 @@ describe('PromptInput ghost suggestion', () => {
 
     expect(textarea).toBeInTheDocument();
     expect(
+      screen.queryByRole('button', { name: 'Insert suggested message' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.focus(textarea);
+
+    expect(
       screen.getByRole('button', { name: 'Insert suggested message' }),
-    ).toBeInTheDocument();
+    ).toHaveTextContent('Tab to accept');
     expect(screen.getByText(/Press Tab to accept/)).toBeInTheDocument();
+
+    fireEvent.blur(textarea);
+
+    expect(
+      screen.queryByRole('button', { name: 'Insert suggested message' }),
+    ).not.toBeInTheDocument();
   });
 
   it('accepts the suggestion with Tab', () => {
@@ -1322,6 +1334,17 @@ describe('PromptInput ghost suggestion', () => {
     expect(
       screen.queryByRole('button', { name: 'Insert suggested message' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('accepts the focused suggestion when its hint is clicked', () => {
+    const textarea = renderConnectedComposer();
+    fireEvent.focus(textarea);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Insert suggested message' }),
+    );
+
+    expect(textarea).toHaveValue('Add a regression test for that');
   });
 
   it('dismisses the suggestion with Escape and does not re-show it', () => {
