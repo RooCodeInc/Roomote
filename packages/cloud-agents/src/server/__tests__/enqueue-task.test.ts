@@ -1006,6 +1006,56 @@ describe('enqueueTask Session linkage', () => {
     ).resolves.toEqual([{ fastConversationId: fastAgentSessionId }]);
   });
 
+  it('creates a replacement when cancellation wins before keyed reuse', async () => {
+    const userId = await createUser();
+    const launchIdempotencyKey = 'setup-starter:canceled-before-reuse';
+    const task = standardTaskInput({
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: 'Investigate CI performance',
+        launchIdempotencyKey,
+      },
+    });
+    const first = await launchFresh({
+      task,
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    let releaseCancellation!: () => void;
+    const cancellationHeld = new Promise<void>((resolve) => {
+      releaseCancellation = resolve;
+    });
+    let cancellationStarted!: () => void;
+    const cancellationReady = new Promise<void>((resolve) => {
+      cancellationStarted = resolve;
+    });
+    const cancellation = db.transaction(async (tx) => {
+      await tx
+        .update(taskRuns)
+        .set({ canceledAt: new Date(), status: RunStatus.Canceled })
+        .where(eq(taskRuns.id, first.id));
+      cancellationStarted();
+      await cancellationHeld;
+    });
+    await cancellationReady;
+
+    const retry = launchFresh({
+      task,
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    releaseCancellation();
+    await cancellation;
+    const replacement = await retry;
+
+    expect(replacement.id).not.toBe(first.id);
+    expect(replacement.taskId).not.toBe(first.taskId);
+  });
+
   it('rejects keyed reuse when the persisted Session attachment conflicts', async () => {
     const userId = await createUser();
     const firstConversationId = crypto.randomUUID();

@@ -1583,12 +1583,17 @@ async function enqueueFreshLaunch(
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`task-launch:${launchIdempotencyKey}`}, 0))`,
         );
-        const existingRun = await tx.query.taskRuns.findFirst({
-          where: and(
-            sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
-            isNull(taskRuns.canceledAt),
-          ),
-        });
+        const [existingRun] = await tx
+          .select()
+          .from(taskRuns)
+          .where(
+            and(
+              sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
+              isNull(taskRuns.canceledAt),
+            ),
+          )
+          .limit(1)
+          .for('update');
         if (existingRun) {
           const existingFastParent = getFastAgentParentFromPayload(
             existingRun.payload,
