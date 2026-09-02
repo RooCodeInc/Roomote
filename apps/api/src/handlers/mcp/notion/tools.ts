@@ -43,6 +43,16 @@ const pageParentSchema = z.union([
     data_source_id: nonEmptyStringSchema,
   }),
 ]);
+const databaseParentSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('page_id'),
+    page_id: nonEmptyStringSchema,
+  }),
+  z.object({
+    type: z.literal('workspace'),
+    workspace: z.literal(true),
+  }),
+]);
 const markdownOperationSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('update_content'),
@@ -292,6 +302,77 @@ function registerCreatePagesTool(
   );
 }
 
+function registerCreateDatabaseTool(
+  server: McpServer,
+  config: McpConnectionNotionConfig,
+) {
+  const toolName = 'notion-create-database';
+  server.registerTool(
+    toolName,
+    {
+      title: 'Create Notion Database',
+      description:
+        'Create a database, its initial data source, and its first table view beneath a shared page or as a private workspace page. Requires Insert content capability and access to the parent page.',
+      inputSchema: {
+        parent: databaseParentSchema.describe(
+          'A shared page parent, or the workspace for a private database.',
+        ),
+        title: z
+          .array(jsonObjectSchema)
+          .max(100)
+          .optional()
+          .describe('Notion rich-text objects for the database title.'),
+        description: z
+          .array(jsonObjectSchema)
+          .max(100)
+          .optional()
+          .describe('Notion rich-text objects for the database description.'),
+        is_inline: z
+          .boolean()
+          .optional()
+          .describe('Display the database inline in its parent page.'),
+        initial_data_source: z
+          .object({ properties: jsonObjectSchema.optional() })
+          .optional()
+          .describe(
+            'Optional initial data source schema, with property names mapped to Notion property configuration objects.',
+          ),
+        icon: jsonObjectSchema.optional(),
+        cover: jsonObjectSchema.optional(),
+      },
+      outputSchema: z.object({}).passthrough(),
+      annotations: WRITE_ANNOTATIONS,
+    },
+    async ({
+      parent,
+      title,
+      description,
+      is_inline: isInline,
+      initial_data_source: initialDataSource,
+      icon,
+      cover,
+    }) => {
+      const database = await notionApiRequestJson<Record<string, unknown>>({
+        config,
+        path: 'databases',
+        method: 'POST',
+        body: {
+          parent,
+          ...(title ? { title } : {}),
+          ...(description ? { description } : {}),
+          ...(isInline !== undefined ? { is_inline: isInline } : {}),
+          ...(initialDataSource
+            ? { initial_data_source: initialDataSource }
+            : {}),
+          ...(icon ? { icon } : {}),
+          ...(cover ? { cover } : {}),
+        },
+      });
+      return toMcpToolResult({ database });
+    },
+  );
+}
+
 function registerUpdatePageTool(
   server: McpServer,
   config: McpConnectionNotionConfig,
@@ -499,6 +580,7 @@ export function registerNotionTools(
   registerQueryDataSourceTool(server, config);
   registerGetCommentsTool(server, config);
   registerCreatePagesTool(server, config);
+  registerCreateDatabaseTool(server, config);
   registerUpdatePageTool(server, config);
   registerGetAsyncTaskTool(server, config);
   registerMovePagesTool(server, config);

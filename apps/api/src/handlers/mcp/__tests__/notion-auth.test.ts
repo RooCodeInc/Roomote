@@ -138,6 +138,7 @@ describe('native Notion MCP', () => {
         'notion-query-data-sources',
         'notion-get-comments',
         'notion-create-pages',
+        'notion-create-database',
         'notion-update-page',
         'notion-get-async-task',
         'notion-move-pages',
@@ -207,6 +208,116 @@ describe('native Notion MCP', () => {
         method: 'PATCH',
         body: JSON.stringify({ children, position: { type: 'start' } }),
       }),
+    );
+  });
+
+  it('creates a database with its initial data source and table view', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        object: 'database',
+        id: 'database-id',
+        data_sources: [{ id: 'data-source-id', name: 'Projects' }],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const title = [{ type: 'text', text: { content: 'Projects' } }];
+    const description = [
+      { type: 'text', text: { content: 'Active projects' } },
+    ];
+    const initialDataSource = {
+      properties: {
+        Name: { type: 'title', title: {} },
+        Status: { type: 'status', status: {} },
+      },
+    };
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createToolCallRequest('notion-create-database', {
+        parent: { type: 'page_id', page_id: 'parent-page' },
+        title,
+        description,
+        is_inline: true,
+        initial_data_source: initialDataSource,
+        icon: {
+          type: 'external',
+          external: { url: 'https://example.com/icon.png' },
+        },
+        cover: { type: 'external', external: { url: 'https://example.com' } },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL('https://api.notion.com/v1/databases'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          parent: { type: 'page_id', page_id: 'parent-page' },
+          title,
+          description,
+          is_inline: true,
+          initial_data_source: initialDataSource,
+          icon: {
+            type: 'external',
+            external: { url: 'https://example.com/icon.png' },
+          },
+          cover: {
+            type: 'external',
+            external: { url: 'https://example.com' },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('validates database parents before calling Notion', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createToolCallRequest('notion-create-database', {
+        parent: { type: 'workspace', workspace: false },
+      }),
+    );
+    const body = (await response.json()) as {
+      result: { isError?: boolean; content: Array<{ text: string }> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0]?.text).toContain('workspace');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns Notion capability errors from database creation', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json(
+        {
+          object: 'error',
+          code: 'restricted_resource',
+          message: 'This integration does not have Insert content capability.',
+        },
+        { status: 403 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createToolCallRequest('notion-create-database', {
+        parent: { type: 'page_id', page_id: 'parent-page' },
+      }),
+    );
+    const body = (await response.json()) as {
+      result: { isError?: boolean; content: Array<{ text: string }> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0]?.text).toContain(
+      'does not have Insert content capability',
     );
   });
 
