@@ -741,6 +741,55 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByText('Thinking')).toBeInTheDocument();
   });
 
+  it('waits for the first visible assistant message before showing timeline extras', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        timelineExtras={<div>Connect source control</div>}
+      />,
+    );
+
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.queryByText('Connect source control')).toBeNull();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'hidden-assistant-activity',
+            role: 'assistant',
+            text: 'Internal setup activity',
+            ts: 1,
+            visible: false,
+          }),
+        ],
+      });
+    });
+
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.queryByText('Connect source control')).toBeNull();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'assistant-introduction',
+            role: 'assistant',
+            text: 'First, let’s connect your source code.',
+            ts: 2,
+          }),
+        ],
+      });
+    });
+
+    expect(
+      screen.getByText('First, let’s connect your source code.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Connect source control')).toBeInTheDocument();
+    expect(screen.queryByText('Thinking')).toBeNull();
+  });
+
   it('shows Thinking after a follow-up until streamed output arrives', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(2);
     replyMutate.mockResolvedValue({ success: true });

@@ -465,6 +465,16 @@ export function FastSessionTranscript({
         ),
     [messages],
   );
+  const hasVisibleAssistantMessage = useMemo(
+    () =>
+      messages.some(
+        (message) =>
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          message.metadata?.visibleInTranscript !== false &&
+          Boolean(getTextFromContentBlocks(message.contentBlocks)?.trim()),
+      ),
+    [messages],
+  );
   const pendingInputRequest = useMemo(
     () => findPendingSessionInputRequest(messages),
     [messages],
@@ -617,7 +627,7 @@ export function FastSessionTranscript({
             onSuppress={suppressMessage}
             onOpenDelegatedTask={openTaskPanel ?? undefined}
           />
-          {timelineExtras}
+          {hasVisibleAssistantMessage ? timelineExtras : null}
           {pendingResponseState.pendingAfter !== null ? (
             <ThinkingMessage />
           ) : !isSending &&
