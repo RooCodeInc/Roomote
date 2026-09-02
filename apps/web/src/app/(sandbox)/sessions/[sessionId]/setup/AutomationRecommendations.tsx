@@ -99,6 +99,19 @@ export function AutomationRecommendations({
       },
     }),
   );
+  const skipRecommendations = useMutation(
+    trpc.automations.skipRecommendations.mutationOptions({
+      onSuccess: (skippedBatch) => {
+        if (skippedBatch) {
+          queryClient.setQueryData(
+            trpc.automations.listRecommendations.queryKey(),
+            skippedBatch,
+          );
+        }
+        onContinue(skippedBatch);
+      },
+    }),
+  );
   const recoveryAttemptedRef = useRef(false);
   const [pendingTooLong, setPendingTooLong] = useState(false);
   const startRecommendations = useMutation(
@@ -142,7 +155,13 @@ export function AutomationRecommendations({
   const failed = batch?.status === 'failed';
   const handleContinue = () => {
     if (batch?.status === 'ready') {
-      applyRecommendations.mutate();
+      if (
+        batch.recommendations.some((recommendation) => recommendation.enabled)
+      ) {
+        applyRecommendations.mutate();
+      } else {
+        skipRecommendations.mutate();
+      }
     }
   };
   const hasSelection =
@@ -211,6 +230,14 @@ export function AutomationRecommendations({
             {applyRecommendations.error.message}
           </AlertDescription>
         </Alert>
+      ) : skipRecommendations.error ? (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertDescription>
+            Could not skip the automation recommendations:{' '}
+            {skipRecommendations.error.message}
+          </AlertDescription>
+        </Alert>
       ) : pendingTooLong ? (
         <Alert>
           <AlertTriangle className="size-4" />
@@ -243,10 +270,17 @@ export function AutomationRecommendations({
           disabled={
             setEnabled.isPending ||
             applyRecommendations.isPending ||
-            !hasSelection
+            skipRecommendations.isPending ||
+            batch?.status !== 'ready'
           }
         >
-          {applyRecommendations.isPending ? 'Enabling...' : 'Enable'}
+          {applyRecommendations.isPending
+            ? 'Enabling...'
+            : skipRecommendations.isPending
+              ? 'Skipping...'
+              : hasSelection
+                ? 'Enable'
+                : 'Skip'}
         </Button>
       </SetupSessionActionCardActions>
     </div>
