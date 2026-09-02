@@ -247,6 +247,8 @@ import {
 import {
   answerFastAgentQuestion,
   FastAgentDurableRetryScheduledError,
+  FAST_AGENT_DURABLE_RETRY_HORIZON_MS,
+  FAST_AGENT_DURABLE_RETRY_MAX_PARKS,
   FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN,
 } from '../fast-agent-service';
 import {
@@ -3805,24 +3807,31 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       }
     });
 
-    it('parks a replay-safe turn for a durable retry instead of sleeping in process', async () => {
+    it('rides out the first short retry in place and parks from the second', async () => {
+      vi.useFakeTimers();
       const before = Date.now();
       mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
-      mocks.generateText.mockRejectedValueOnce(
-        new Error('TypeError: fetch failed'),
-      );
+      mocks.generateText
+        .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
+        .mockRejectedValueOnce(new Error('TypeError: fetch failed'));
       const requestDurableRetry = vi.fn().mockResolvedValue(undefined);
       const postReply = vi.fn().mockResolvedValue(undefined);
 
-      await expect(
-        answerFastAgentQuestion({
-          ...baseParams,
-          adapter: callbacks({ postReply, requestDurableRetry }),
-          durableAdmission,
-        }),
-      ).rejects.toBeInstanceOf(FastAgentDurableRetryScheduledError);
+      const result = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply, requestDurableRetry }),
+        durableAdmission,
+      });
+      result.catch(() => undefined);
+      await vi.runAllTimersAsync();
+      vi.useRealTimers();
+      await expect(result).rejects.toBeInstanceOf(
+        FastAgentDurableRetryScheduledError,
+      );
 
-      expect(mocks.generateText).toHaveBeenCalledOnce();
+      // The first retry was a short in-process wait; the second left the
+      // process as a park.
+      expect(mocks.generateText).toHaveBeenCalledTimes(2);
       expect(mocks.scheduleDurableRetry).toHaveBeenCalledOnce();
       const [rowId, schedule] = mocks.scheduleDurableRetry.mock.calls[0]!;
       expect(rowId).toBe('durable-row-1');
@@ -3925,7 +3934,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           await options.onSessionReady('opencode-session-1');
           options.onPromptStarted?.();
           await params.onProviderRetry?.({
-            attempt: 1,
+            attempt: 2,
             message: 'Provider temporarily unavailable',
             nextRetryAtMs: Date.now() + 10_000,
           });
@@ -3974,7 +3983,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           await options.onSessionReady('opencode-session-1');
           options.onPromptStarted?.();
           await params.onProviderRetry?.({
-            attempt: 1,
+            attempt: 2,
             message: 'Provider temporarily unavailable',
             nextRetryAtMs: Date.now() + 5_000,
           });
@@ -4015,13 +4024,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       }
     });
 
-    it('stops parking provider backoff once the per-turn retry cap is spent', async () => {
+    it('stops parking provider backoff once the handoff cap is spent', async () => {
       mocks.generateText.mockImplementationOnce(
         async (params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
           options.onPromptStarted?.();
           await params.onProviderRetry?.({
-            attempt: 1,
+            attempt: 2,
             message: '429 Too Many Requests',
             nextRetryAtMs: Date.now() + 2_000,
           });
@@ -4041,7 +4050,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           adapter: callbacks({ requestDurableRetry }),
           durableAdmission: {
             eventId: 'durable-row-1',
-            inferenceRetries: FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN,
+            inferenceRetries: FAST_AGENT_DURABLE_RETRY_MAX_PARKS,
           },
           resumedAfterInferenceRetry: true,
         }),
@@ -4103,6 +4112,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       try {
         mocks.scheduleDurableRetry.mockResolvedValueOnce(false);
         mocks.generateText
+          // First retry stays in place by design; the second tries to park.
+          .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
           .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
           .mockImplementationOnce(async (_params, _session, options) => {
             await options.onSessionReady('opencode-session-1');
@@ -4122,7 +4133,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         await vi.runAllTimersAsync();
 
         await expect(result).resolves.toBe('Recovered.');
-        expect(mocks.generateText).toHaveBeenCalledTimes(2);
+        expect(mocks.generateText).toHaveBeenCalledTimes(3);
         expect(mocks.scheduleDurableRetry).toHaveBeenCalledOnce();
         expect(requestDurableRetry).not.toHaveBeenCalled();
         expect(mocks.markDurableDelivered).toHaveBeenCalledWith(
@@ -4133,32 +4144,92 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       }
     });
 
-    it('continues the inherited retry budget on a resumed run', async () => {
-      mocks.generateText.mockRejectedValueOnce(
-        new Error('TypeError: fetch failed'),
+    it('stops parking once the retry horizon from the first failure is spent', async () => {
+      // The predecessor's marker says the episode began just over the
+      // horizon ago; from here the in-process retries own the outcome.
+      mocks.findActiveRetryNotice.mockResolvedValueOnce({
+        eventId: '100.2:retry-notice:0',
+        ts: Date.now() - FAST_AGENT_DURABLE_RETRY_HORIZON_MS - 1_000,
+        text: 'The inference provider returned a temporary error. Retrying automatically…',
+        platformMessageId: null,
+      });
+      mocks.generateText.mockImplementationOnce(
+        async (params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          await params.onProviderRetry?.({
+            attempt: 2,
+            message: 'Provider temporarily unavailable',
+            nextRetryAtMs: Date.now() + 5_000,
+          });
+          expect(options.signal.aborted).toBe(false);
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Recovered in place.',
+          });
+          return '';
+        },
       );
-      const postReply = vi.fn().mockResolvedValue(undefined);
       const requestDurableRetry = vi.fn().mockResolvedValue(undefined);
 
-      await answerFastAgentQuestion({
-        ...baseParams,
-        adapter: callbacks({ postReply, requestDurableRetry }),
-        durableAdmission: {
-          eventId: 'durable-row-1',
-          inferenceRetries: FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN,
-        },
-        resumedAfterInferenceRetry: true,
-      });
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ requestDurableRetry }),
+          durableAdmission: { eventId: 'durable-row-1', inferenceRetries: 8 },
+          resumedAfterInferenceRetry: true,
+        }),
+      ).resolves.toBe('Recovered in place.');
 
-      // Earlier executions spent the per-turn cap, so this one neither
-      // retries nor schedules again; it posts the honest terminal failure.
-      expect(mocks.generateText).toHaveBeenCalledOnce();
       expect(mocks.scheduleDurableRetry).not.toHaveBeenCalled();
       expect(requestDurableRetry).not.toHaveBeenCalled();
-      expect(postReply).toHaveBeenCalledWith(
-        expect.objectContaining({ purpose: 'closeout' }),
-      );
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('backs off across handoffs instead of re-prompting at the provider cadence', async () => {
+      const before = Date.now();
+      mocks.findActiveRetryNotice.mockResolvedValueOnce({
+        eventId: '100.2:retry-notice:0',
+        ts: before - 60_000,
+        text: 'The inference provider returned a temporary error. Retrying automatically…',
+        platformMessageId: 'notice-1',
+      });
+      mocks.generateText.mockImplementationOnce(
+        async (params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          await params.onProviderRetry?.({
+            attempt: 2,
+            message: 'Provider temporarily unavailable',
+            nextRetryAtMs: Date.now() + 2_000,
+          });
+          if (options.signal.aborted) throw options.signal.reason;
+          return '';
+        },
+      );
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({
+            replaceReply: vi.fn().mockResolvedValue({ messageId: 'notice-1' }),
+            requestDurableRetry: vi.fn().mockResolvedValue(undefined),
+          }),
+          durableAdmission: { eventId: 'durable-row-1', inferenceRetries: 5 },
+          resumedAfterInferenceRetry: true,
+        }),
+      ).rejects.toBeInstanceOf(FastAgentDurableRetryScheduledError);
+
+      // Five handoffs in: the park waits the capped backoff (60s), not the
+      // provider's 2s, and the count keeps climbing.
+      const [, schedule] = mocks.scheduleDurableRetry.mock.calls[0]!;
+      expect(schedule.inferenceRetries).toBe(6);
+      expect(schedule.retryAt.getTime()).toBeGreaterThanOrEqual(
+        before + 59_000,
+      );
+      expect(schedule.retryAt.getTime()).toBeLessThanOrEqual(
+        Date.now() + 61_000,
+      );
     });
 
     it('edits the inherited retry notice on a resumed run instead of reconciling it', async () => {

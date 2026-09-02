@@ -558,6 +558,17 @@ const FAST_AGENT_SILENT_RECOVERY_WINDOW_MS = 30_000;
 // Progress-based budget resets are bounded so one turn cannot retry forever:
 // this caps total automatic retries across every reset within a single turn.
 export const FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN = 12;
+// Durable retry scheduling: a replay-safe turn parks instead of waiting out
+// provider backoff in process. Parks keep going for a wall-clock horizon
+// measured from the first failure (a real outage is meant to be ridden out,
+// not given up on), with a safety cap on handoffs since every park re-prompts
+// from scratch. The first short in-process retry stays in place: a one-off
+// blip is cheapest to absorb where it happened.
+export const FAST_AGENT_DURABLE_RETRY_HORIZON_MS = 15 * 60_000;
+export const FAST_AGENT_DURABLE_RETRY_MAX_PARKS = 30;
+const FAST_AGENT_DURABLE_RETRY_IMMEDIATE_PARK_WAIT_MS = 10_000;
+const FAST_AGENT_DURABLE_RETRY_PARK_BASE_DELAY_MS = 2_000;
+const FAST_AGENT_DURABLE_RETRY_PARK_MAX_DELAY_MS = 60_000;
 const FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS = 5 * 60_000;
 const FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO = 0.2;
 const FAST_AGENT_PROVIDER_RECOVERY_PROMPT =
@@ -584,14 +595,8 @@ type FastAgentInferenceRetryOptions = {
    * loop then throws FastAgentDurableRetryScheduledError.
    */
   deferRetry?: (
-    notice: FastAgentInferenceRetryNotice & { totalRetryCount: number },
-  ) => Promise<boolean>;
-  /**
-   * Automatic retries already consumed by earlier executions of this turn,
-   * so a resumed run continues the same bounded budget (and the same
-   * backoff progression) instead of starting a fresh one.
-   */
-  initialRetryCount?: number;
+    notice: FastAgentInferenceRetryNotice & { inProcessAttempt: number },
+  ) => Promise<Date | null>;
   /**
    * Consume forward progress made since the previous failure. Returning true
    * grants a fresh bounded retry budget, mirroring how standard-task provider
@@ -777,8 +782,8 @@ async function runFastAgentInferenceWithRetries<T>(
   onRetry?: (notice: FastAgentInferenceRetryNotice) => Promise<void>,
   options: FastAgentInferenceRetryOptions = {},
 ): Promise<T> {
-  let totalRetryCount = options.initialRetryCount ?? 0;
-  for (let retryNumber = totalRetryCount; ; retryNumber += 1) {
+  let totalRetryCount = 0;
+  for (let retryNumber = 0; ; retryNumber += 1) {
     try {
       options.signal?.throwIfAborted();
       return await run();
@@ -835,19 +840,15 @@ async function runFastAgentInferenceWithRetries<T>(
       }
       // The notice is recorded first so a resumed run can find and keep
       // editing it; only then may the wait leave this process.
-      if (
-        options.deferRetry &&
-        (await options.deferRetry({
-          failure,
-          attemptNumber,
-          maxAttempts: maxRetries,
-          delayMs,
-          totalRetryCount,
-        }))
-      ) {
-        throw new FastAgentDurableRetryScheduledError(
-          new Date(Date.now() + delayMs),
-        );
+      const parkedUntil = await options.deferRetry?.({
+        failure,
+        attemptNumber,
+        maxAttempts: maxRetries,
+        delayMs,
+        inProcessAttempt: attemptNumber,
+      });
+      if (parkedUntil) {
+        throw new FastAgentDurableRetryScheduledError(parkedUntil);
       }
       await options.prepareRetry?.();
       await waitForFastAgentInferenceRetry(delayMs, options.signal);
@@ -1430,8 +1431,8 @@ export async function answerFastAgentQuestion({
    * in-process wait, so durability here is best effort like admission.
    */
   const deferInferenceRetry = async (
-    notice: FastAgentInferenceRetryNotice & { totalRetryCount: number },
-  ): Promise<boolean> => {
+    notice: FastAgentInferenceRetryNotice & { inProcessAttempt: number },
+  ): Promise<Date | null> => {
     if (
       !durableAdmission ||
       !durableTurnReplayable ||
@@ -1441,15 +1442,45 @@ export async function answerFastAgentQuestion({
       signal?.aborted ||
       isInstructionClosed()
     ) {
-      return false;
+      return null;
     }
-    const retryAt = new Date(Date.now() + notice.delayMs);
+    // A one-off blip is cheapest to ride out where it happened: the first
+    // in-process retry stays in place unless its wait is already long.
+    // From the second attempt on, the wait leaves the process.
+    if (
+      notice.inProcessAttempt < 2 &&
+      notice.delayMs < FAST_AGENT_DURABLE_RETRY_IMMEDIATE_PARK_WAIT_MS
+    ) {
+      return null;
+    }
+    // Parks back off across handoffs (each one re-prompts from scratch) and
+    // never shorten a provider-issued wait. The episode as a whole is bounded
+    // by the horizon from its first failure plus the handoff cap; past that,
+    // the in-process retries and their honest terminal failure take over.
+    const now = Date.now();
+    const episodeStartedAt = inferenceRecoveryEpisodeStartedAt ?? now;
+    const parkDelayMs = Math.max(
+      notice.delayMs,
+      Math.min(
+        FAST_AGENT_DURABLE_RETRY_PARK_MAX_DELAY_MS,
+        FAST_AGENT_DURABLE_RETRY_PARK_BASE_DELAY_MS *
+          2 ** durableRetriesConsumed,
+      ),
+    );
+    if (
+      durableRetriesConsumed >= FAST_AGENT_DURABLE_RETRY_MAX_PARKS ||
+      now + parkDelayMs - episodeStartedAt > FAST_AGENT_DURABLE_RETRY_HORIZON_MS
+    ) {
+      return null;
+    }
+    const retryAt = new Date(now + parkDelayMs);
+    const inferenceRetries = durableRetriesConsumed + 1;
     const scheduled = await scheduleFastAgentDurableTurnRetry(
       durableAdmission.eventId,
       {
         retryAt,
-        inferenceRetries: notice.totalRetryCount,
-        reason: `Inference retry ${notice.attemptNumber}${notice.maxAttempts ? `/${notice.maxAttempts}` : ''} scheduled (${notice.failure.reason}).`,
+        inferenceRetries,
+        reason: `Inference retry ${inferenceRetries} scheduled (${notice.failure.reason}).`,
       },
     ).catch((error) => {
       console.warn(
@@ -1457,19 +1488,19 @@ export async function answerFastAgentQuestion({
       );
       return false;
     });
-    if (!scheduled) return false;
+    if (!scheduled) return null;
     durableTurnReplayable = false;
     durableTurnDeferred = true;
-    durableRetriesConsumed = notice.totalRetryCount;
+    durableRetriesConsumed = inferenceRetries;
     await adapter.requestDurableRetry(retryAt).catch((error) => {
       console.warn(
         `[Fast Agent] Failed to queue the durable inference retry wakeup: ${formatErrorForLog(error)}`,
       );
     });
     console.info(
-      `[Fast Agent] Parked the turn for a durable inference retry (row=${durableAdmission.eventId}, retryAt=${retryAt.toISOString()}, retries=${notice.totalRetryCount}, reason=${notice.failure.reason}).`,
+      `[Fast Agent] Parked the turn for a durable inference retry (row=${durableAdmission.eventId}, retryAt=${retryAt.toISOString()}, retries=${inferenceRetries}, reason=${notice.failure.reason}).`,
     );
-    return true;
+    return retryAt;
   };
   let activeHumanSteerPoll = Promise.resolve();
   const injectedHumanFollowUpIds = new Set<string>();
@@ -3462,29 +3493,25 @@ export async function answerFastAgentQuestion({
                         // interrupts most often. A replay-safe turn parks
                         // at that time instead and lets the queue re-prompt;
                         // the abort below ends this prompt with the park as
-                        // its reason. The per-turn cap bounds the handoffs,
-                        // after which OpenCode's in-process retries resume.
-                        if (
-                          event.nextRetryAtMs !== undefined &&
-                          durableRetriesConsumed <
-                            FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN
-                        ) {
-                          const delayMs = Math.max(
-                            0,
-                            event.nextRetryAtMs - Date.now(),
-                          );
-                          const parked = await deferInferenceRetry({
+                        // its reason. The horizon and handoff cap bound the
+                        // parks, after which OpenCode's in-process retries
+                        // resume.
+                        if (event.nextRetryAtMs !== undefined) {
+                          const parkedUntil = await deferInferenceRetry({
                             failure: classifyNonTaskInferenceError(
                               new Error(event.message),
                             ),
                             attemptNumber: durableRetriesConsumed + 1,
-                            delayMs,
-                            totalRetryCount: durableRetriesConsumed + 1,
+                            delayMs: Math.max(
+                              0,
+                              event.nextRetryAtMs - Date.now(),
+                            ),
+                            inProcessAttempt: event.attempt,
                           });
-                          if (parked) {
+                          if (parkedUntil) {
                             providerRetryAbortController.abort(
                               new FastAgentDurableRetryScheduledError(
-                                new Date(Date.now() + delayMs),
+                                parkedUntil,
                               ),
                             );
                           }
@@ -3750,9 +3777,6 @@ export async function answerFastAgentQuestion({
                 promptTimeoutMs = FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS;
               },
               deferRetry: deferInferenceRetry,
-              ...(durableAdmission?.inferenceRetries
-                ? { initialRetryCount: durableAdmission.inferenceRetries }
-                : {}),
               signal,
             },
           );
