@@ -24,7 +24,23 @@ export function SetupAutomationRecommendationsCard({
   const trpc = useTRPC();
   const { user } = useUser();
   const [dismissed, setDismissed] = useState(false);
-  const status = useQuery(trpc.setupNew.status.queryOptions());
+  const status = useQuery(
+    trpc.setupNew.status.queryOptions(undefined, {
+      // This card is gated on the setup status, while the recommendation
+      // worker updates that status asynchronously after source-control sync.
+      // Keep polling until the batch becomes available; otherwise the card
+      // can remain hidden forever because its child (which also polls) never
+      // mounts while the batch is pending.
+      refetchInterval: (query) => {
+        const recommendationStatus =
+          query.state.data?.setupNewState.automationRecommendations?.status;
+        return recommendationStatus === undefined ||
+          recommendationStatus === 'pending'
+          ? 2_000
+          : false;
+      },
+    }),
+  );
   const tasks = useQuery(trpc.fastSessions.tasks.queryOptions({ sessionId }));
   const recommendations = status.data?.setupNewState.automationRecommendations;
 
