@@ -101,12 +101,9 @@ export function createSlackFastReplyStream(params: {
         }),
       });
       if (!updated) {
-        // The streamed draft stays as it is; the caller posts the reply in
-        // full rather than treating the draft as the delivery.
         console.warn(
-          `[Fast Agent] Slack did not accept the final body for streamed reply ${ts}; posting the reply instead.`,
+          `[Fast Agent] Slack did not accept the final body for streamed reply ${ts}; keeping the streamed message as the delivery.`,
         );
-        return undefined;
       }
       await recordFastAgentConversationMessageBestEffort({
         sessionId: params.sessionId,

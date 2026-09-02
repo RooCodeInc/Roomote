@@ -153,7 +153,7 @@ describe('createSlackFastReplyStream', () => {
     );
   });
 
-  it('yields no delivery when the final rewrite is rejected so the reply is posted instead', async () => {
+  it('keeps the streamed message as the delivery when the final rewrite is rejected', async () => {
     const slack = slackMock();
     mocks.updateWithFooter.mockResolvedValue(false);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -162,10 +162,12 @@ describe('createSlackFastReplyStream', () => {
     await stream.append('Looking');
     await expect(
       stream.finish({ purpose: 'closeout', message: 'Looking.' }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ messageId: '200.1' });
     expect(slack.stopMessageStream).toHaveBeenCalledTimes(1);
-    expect(mocks.recordMessage).not.toHaveBeenCalled();
-    expect(onDelivered).not.toHaveBeenCalled();
+    expect(mocks.recordMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'session-1', messageId: '200.1' }),
+    );
+    expect(onDelivered).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('did not accept the final body'),
     );
