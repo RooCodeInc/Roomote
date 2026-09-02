@@ -55,11 +55,8 @@ import { findUserDirectMessageDestination } from '../lib/user-direct-message';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../lib/discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../lib/teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../lib/telegram-communication';
-import {
-  deliverFastAgentParentEvent,
-  FastAgentParentEventDeliveryError,
-  type FastAgentParentEvent,
-} from '../lib/fast-agent-parent-event';
+import type { FastAgentParentEvent } from '../lib/fast-agent-parent-event';
+import { enqueueFastAgentParentEvent } from '../lib/fast-agent-parent-event-queue';
 import { recordFastAgentConversationMessage } from '../lib/fast-agent-provider-message';
 
 const LOG_PREFIX = '[custom-automations]';
@@ -416,6 +413,7 @@ async function runFastCustomAutomation(params: {
   automation: CustomAutomation;
   destination: ResolvedAutomationDestination | null;
   eventClaimedAt: Date;
+  launchClaimedAt: Date;
   trigger: 'schedule' | 'manual';
 }): Promise<void> {
   if (!params.automation.createdByUserId) {
@@ -449,6 +447,7 @@ async function runFastCustomAutomation(params: {
       eventId,
       automationId: params.automation.id,
       automationName: params.automation.name,
+      launchClaimedAt: params.launchClaimedAt.toISOString(),
       prompt: params.automation.prompt,
       trigger: params.trigger,
       ...(params.automation.model
@@ -456,21 +455,11 @@ async function runFastCustomAutomation(params: {
         : {}),
       ...(rootMessageId ? { rootMessageId } : {}),
     };
-    await deliverFastAgentParentEvent({
+    await enqueueFastAgentParentEvent({
       parent: { sessionId: session.id, conversation },
       event,
     });
   } catch (error) {
-    if (
-      error instanceof FastAgentParentEventDeliveryError &&
-      error.replyPosted
-    ) {
-      console.warn(
-        `${LOG_PREFIX} Fast automation ${params.automation.id} reported after delivery: ${error.message}`,
-      );
-      return;
-    }
-
     const message = `${params.automation.name} failed: ${error instanceof Error ? error.message : String(error)}`;
     try {
       if (conversation.surface === 'discord' && rootMessageId) {
@@ -752,16 +741,9 @@ async function launchCustomAutomationRow(
         automation,
         destination,
         eventClaimedAt,
+        launchClaimedAt,
         trigger: opts.manualTrigger ? 'manual' : 'schedule',
       });
-      const settled = await recordCustomAutomationRunOutcome(db, {
-        id: automation.id,
-        status: 'succeeded',
-        launchClaimedAt,
-      });
-      if (!settled) {
-        throw new Error('The launch claim is no longer current.');
-      }
       result.completed = true;
       return result;
     }

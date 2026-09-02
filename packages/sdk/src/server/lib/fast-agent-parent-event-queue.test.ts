@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => {
     }),
     deliver: vi.fn(),
     retryStartup: vi.fn(),
+    recordAutomationOutcome: vi.fn(),
     DeliveryError,
   };
 });
@@ -63,6 +64,7 @@ vi.mock('@roomote/db/server', () => ({
   isNull: vi.fn((value: unknown) => value),
   lt: vi.fn((...values: unknown[]) => values),
   or: vi.fn((...values: unknown[]) => values),
+  recordCustomAutomationRunOutcome: mocks.recordAutomationOutcome,
   sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
     strings: [...strings],
     values,
@@ -210,6 +212,150 @@ describe('Fast parent event durable queue', () => {
     const first = buildFastAgentParentEventKey({ parent, event });
     expect(buildFastAgentParentEventKey({ parent, event })).toBe(first);
     expect(first).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('admits each fenced recovery of the same automation occurrence once', () => {
+    const automationEvent = {
+      type: 'automation_triggered' as const,
+      eventId: 'automation-1:2026-09-01T15:11:12.289Z',
+      automationId: 'automation-1',
+      automationName: 'Nightly scan',
+      prompt: 'Find useful work.',
+      trigger: 'manual' as const,
+    };
+    const firstRecovery = buildFastAgentParentEventKey({
+      parent,
+      event: {
+        ...automationEvent,
+        launchClaimedAt: '2026-09-01T15:14:52.418Z',
+      },
+    });
+    const retryOfFirstRecovery = buildFastAgentParentEventKey({
+      parent,
+      event: {
+        ...automationEvent,
+        launchClaimedAt: '2026-09-01T15:14:52.418Z',
+      },
+    });
+    const secondRecovery = buildFastAgentParentEventKey({
+      parent,
+      event: {
+        ...automationEvent,
+        launchClaimedAt: '2026-09-01T15:24:00.000Z',
+      },
+    });
+
+    expect(retryOfFirstRecovery).toBe(firstRecovery);
+    expect(secondRecovery).not.toBe(firstRecovery);
+  });
+
+  it('releases a Fast automation launch claim only after delivery settles', async () => {
+    const eventClaimedAt = new Date('2026-09-01T15:11:12.289Z');
+    const launchClaimedAt = new Date('2026-09-01T15:14:52.418Z');
+    const automationEvent = {
+      type: 'automation_triggered' as const,
+      eventId: `automation-1:${eventClaimedAt.toISOString()}`,
+      automationId: 'automation-1',
+      automationName: 'Nightly scan',
+      launchClaimedAt: launchClaimedAt.toISOString(),
+      prompt: 'Find useful work.',
+      trigger: 'manual' as const,
+    };
+    const row = pendingRow('automation-event', automationEvent);
+    mocks.findPending
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(undefined);
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    });
+
+    expect(mocks.recordAutomationOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        id: 'automation-1',
+        launchClaimedAt,
+        status: 'succeeded',
+      },
+    );
+  });
+
+  it('records a permanent Fast automation delivery failure', async () => {
+    const launchClaimedAt = new Date('2026-09-01T14:25:14.129Z');
+    const automationEvent = {
+      type: 'automation_triggered' as const,
+      eventId: `automation-1:${launchClaimedAt.toISOString()}`,
+      automationId: 'automation-1',
+      automationName: 'Nightly scan',
+      launchClaimedAt: launchClaimedAt.toISOString(),
+      prompt: 'Find useful work.',
+      trigger: 'manual' as const,
+    };
+    const row = pendingRow('automation-event', automationEvent);
+    mocks.findPending
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(undefined);
+    mocks.deliver.mockRejectedValueOnce(
+      new mocks.DeliveryError('parent session missing', {
+        replyPosted: false,
+        permanent: true,
+      }),
+    );
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    });
+
+    expect(mocks.recordAutomationOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        id: 'automation-1',
+        launchClaimedAt,
+        status: 'failed',
+        error: 'parent session missing',
+      },
+    );
+  });
+
+  it('records success when delivery fails after a reply was posted', async () => {
+    const launchClaimedAt = new Date('2026-09-01T15:18:41.782Z');
+    const automationEvent = {
+      type: 'automation_triggered' as const,
+      eventId: `automation-1:${launchClaimedAt.toISOString()}`,
+      automationId: 'automation-1',
+      automationName: 'Nightly scan',
+      launchClaimedAt: launchClaimedAt.toISOString(),
+      prompt: 'Find useful work.',
+      trigger: 'manual' as const,
+    };
+    const row = pendingRow('automation-replied', automationEvent);
+    mocks.findPending
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(undefined);
+    mocks.deliver.mockRejectedValueOnce(
+      new mocks.DeliveryError('transcript persistence failed', {
+        replyPosted: true,
+      }),
+    );
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    });
+
+    expect(mocks.recordAutomationOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        id: 'automation-1',
+        launchClaimedAt,
+        status: 'succeeded',
+      },
+    );
   });
 
   it('uses the stable event key as the sole durable admission claim', async () => {

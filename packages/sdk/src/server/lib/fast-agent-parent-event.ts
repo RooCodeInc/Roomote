@@ -131,6 +131,7 @@ export type FastAgentParentEvent =
       eventId: string;
       automationId: string;
       automationName: string;
+      launchClaimedAt?: string;
       prompt: string;
       trigger: 'schedule' | 'manual';
       defaultTaskModel?: string;

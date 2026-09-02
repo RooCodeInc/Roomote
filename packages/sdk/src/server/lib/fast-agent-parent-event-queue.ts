@@ -12,6 +12,7 @@ import {
   isNull,
   lt,
   or,
+  recordCustomAutomationRunOutcome,
   sql,
   taskRuns,
 } from '@roomote/db/server';
@@ -74,11 +75,17 @@ export function buildFastAgentParentEventKey(params: {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
 }): string {
-  return createHash('sha256')
+  const hash = createHash('sha256')
     .update(params.parent.sessionId)
     .update('\0')
-    .update(buildEventClientMessageSeed(params.event))
-    .digest('hex');
+    .update(buildEventClientMessageSeed(params.event));
+  if (
+    params.event.type === 'automation_triggered' &&
+    params.event.launchClaimedAt
+  ) {
+    hash.update('\0').update(params.event.launchClaimedAt);
+  }
+  return hash.digest('hex');
 }
 
 async function addWakeupJob(request: FastAgentParentEventQueueRequest) {
@@ -246,6 +253,37 @@ async function markDiscarded(id: string, error: unknown) {
     .where(eq(fastAgentParentEvents.id, id));
 }
 
+function getAutomationLaunchClaim(event: FastAgentParentEvent) {
+  if (event.type !== 'automation_triggered') return null;
+
+  const prefix = `${event.automationId}:`;
+  if (!event.eventId.startsWith(prefix)) return null;
+
+  const launchClaimedAt = new Date(
+    event.launchClaimedAt ?? event.eventId.slice(prefix.length),
+  );
+  if (Number.isNaN(launchClaimedAt.getTime())) return null;
+
+  return { id: event.automationId, launchClaimedAt };
+}
+
+async function finalizeAutomationLaunch(
+  event: FastAgentParentEvent,
+  status: 'succeeded' | 'failed',
+  error?: unknown,
+) {
+  const claim = getAutomationLaunchClaim(event);
+  if (!claim) return;
+
+  await recordCustomAutomationRunOutcome(db, {
+    ...claim,
+    status,
+    ...(status === 'failed'
+      ? { error: error instanceof Error ? error.message : String(error) }
+      : {}),
+  });
+}
+
 /** Drain one parent's durable inbox in creation order under one turn lock. */
 export async function drainFastAgentParentEvents(
   request: FastAgentParentEventQueueRequest,
@@ -325,15 +363,18 @@ export async function drainFastAgentParentEvents(
           );
           return;
         }
+        await finalizeAutomationLaunch(row.event, 'succeeded');
         await markDelivered(row.id);
       } catch (error) {
         const deliveryError =
           error instanceof FastAgentParentEventDeliveryError ? error : null;
         if (deliveryError?.replyPosted) {
+          await finalizeAutomationLaunch(row.event, 'succeeded');
           await markDelivered(row.id);
           continue;
         }
         if (deliveryError?.permanent) {
+          await finalizeAutomationLaunch(row.event, 'failed', deliveryError);
           await markDiscarded(row.id, deliveryError);
           continue;
         }
