@@ -1954,22 +1954,22 @@ describe('prReviewNotificationJob', () => {
     mockNotifyFastAgentParent.mockResolvedValue(true);
     mockDispatchFollowUp.mockResolvedValue({ outcome: 'unavailable' });
 
-    await prReviewNotificationJob(
-      makeJob({
-        ownershipVersion: 'canonical',
-        deliveryId,
-        notificationUnitId: '12121212-1212-4212-8212-121212121212',
-        deliveryState: 'auto_dispatch_pending',
-        targetTaskId: 'task-1',
-        actingUserId: 'user-1',
-        destinationKey,
-        dispatchKey: `pr-review-delivery:${deliveryId}`,
-        deliveryIds: [deliveryId],
-        leaseToken,
-        deferrals: 3,
-        events,
-      }) as never,
-    );
+    const job = makeJob({
+      ownershipVersion: 'canonical',
+      deliveryId,
+      notificationUnitId: '12121212-1212-4212-8212-121212121212',
+      deliveryState: 'auto_dispatch_pending',
+      targetTaskId: 'task-1',
+      actingUserId: 'user-1',
+      destinationKey,
+      dispatchKey: `pr-review-delivery:${deliveryId}`,
+      deliveryIds: [deliveryId],
+      leaseToken,
+      deferrals: 3,
+      events,
+    });
+
+    await prReviewNotificationJob(job as never);
 
     expect(mockReleaseCanonicalWebAutoDispatch).toHaveBeenCalledWith(
       expect.objectContaining({ deliveryId }),
@@ -1992,6 +1992,18 @@ describe('prReviewNotificationJob', () => {
       { leaseToken },
     );
     expect(mockFinalize).not.toHaveBeenCalled();
+
+    mockAttachPendingPrReviewActionMessage.mockResolvedValueOnce({
+      attached: false,
+      superseded: [],
+    });
+    await expect(prReviewNotificationJob(job as never)).rejects.toThrow(
+      'Canonical Fast web review fallback lost its publish fence',
+    );
+    expect(mockUpdateFastAgentPrReviewOfferStatus).toHaveBeenCalledWith({
+      deliveryIds: [deliveryId],
+      status: 'dismissed',
+    });
   });
 
   it('reuses the canonical dispatch key for automatic follow-up retries', async () => {

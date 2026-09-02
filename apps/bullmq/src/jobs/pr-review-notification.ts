@@ -912,6 +912,10 @@ ${delivery.text}`;
               { leaseToken: data.leaseToken },
             );
           if (!attached) {
+            await updateFastAgentPrReviewOfferStatus({
+              deliveryIds: [data.deliveryId],
+              status: 'dismissed',
+            });
             throw new Error(
               'Canonical Fast web review fallback lost its publish fence',
             );
