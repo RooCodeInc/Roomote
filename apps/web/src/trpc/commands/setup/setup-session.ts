@@ -577,35 +577,45 @@ export async function reconcileSetupPlatformEvents(
     });
   }
 
-  await recordSetupFunnelMilestones([
-    ...(state.sourceControlProvider
-      ? [
-          {
-            milestone: 'source_control_configured' as const,
-            provider: state.sourceControlProvider,
-            preexisting: false,
-          },
-        ]
-      : []),
-    ...(synchronized.length > 0 && status.sourceControlSetup.setupSatisfied
-      ? [
-          {
-            milestone: 'source_control_authed' as const,
-            provider: state.sourceControlProvider ?? undefined,
-            preexisting: false,
-          },
-        ]
-      : []),
-    ...(status.computeSetup.setupSatisfied && state.computeProvider
-      ? [
-          {
-            milestone: 'sandbox_configured' as const,
-            provider: state.computeProvider,
-            preexisting: false,
-          },
-        ]
-      : []),
-  ]);
+  const selectedSourceControlStatus = state.sourceControlProvider
+    ? status.sourceControlSetup.providers.find(
+        (provider) => provider.provider === state.sourceControlProvider,
+      )
+    : null;
+
+  await recordSetupFunnelMilestones(
+    [
+      ...(state.sourceControlProvider &&
+      selectedSourceControlStatus?.configStepSatisfied
+        ? [
+            {
+              milestone: 'source_control_configured' as const,
+              provider: state.sourceControlProvider,
+              preexisting: false,
+            },
+          ]
+        : []),
+      ...(synchronized.length > 0 && status.sourceControlSetup.setupSatisfied
+        ? [
+            {
+              milestone: 'source_control_authed' as const,
+              provider: state.sourceControlProvider ?? undefined,
+              preexisting: false,
+            },
+          ]
+        : []),
+      ...(status.computeSetup.setupSatisfied && state.computeProvider
+        ? [
+            {
+              milestone: 'sandbox_configured' as const,
+              provider: state.computeProvider,
+              preexisting: false,
+            },
+          ]
+        : []),
+    ],
+    { allowAfterSetupCompletion: true },
+  );
 
   for (const event of events) {
     const turn = await buildSetupPlatformEventTurn(auth, event, {
