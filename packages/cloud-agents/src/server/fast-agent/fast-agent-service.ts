@@ -463,6 +463,18 @@ type FastAgentInferenceRetryOptions = {
   signal?: AbortSignal;
 };
 
+/**
+ * Abort reason for the OpenCode prompt once the turn has delivered its
+ * closeout. Any further model request would only produce post-closeout text
+ * that is never shown, while holding the conversation's turn lock.
+ */
+class FastAgentTurnClosedError extends Error {
+  constructor() {
+    super('The Fast turn delivered its closeout.');
+    this.name = 'FastAgentTurnClosedError';
+  }
+}
+
 class FastAgentInferenceError extends Error {
   constructor(
     public readonly failure: FastAgentInferenceFailure,
@@ -2858,9 +2870,12 @@ export async function answerFastAgentQuestion({
           const result = await runFastAgentInferenceWithRetries(
             async () => {
               const providerRetryAbortController = new AbortController();
-              const promptSignal = signal
-                ? AbortSignal.any([signal, providerRetryAbortController.signal])
-                : providerRetryAbortController.signal;
+              const closeoutAbortController = new AbortController();
+              const promptSignal = AbortSignal.any([
+                ...(signal ? [signal] : []),
+                providerRetryAbortController.signal,
+                closeoutAbortController.signal,
+              ]);
               let providerRetryTimeout:
                 | ReturnType<typeof setTimeout>
                 | undefined;
@@ -2946,13 +2961,30 @@ export async function answerFastAgentQuestion({
                         turnProgressMarker += 1;
                         noteInferenceRecoveryProgress();
                       },
-                      onAssistantMessageStarted: (
+                      onAssistantMessageStarted: async (
                         message: NonTaskOpenCodeAssistantMessage,
                       ) => {
                         diagnostics.recordAssistantMessageStarted();
                         assistantInstructionVersions.set(
                           message.id,
                           currentInstructionVersion,
+                        );
+                        if (!isInstructionClosed()) return;
+                        // A model request starting after the closeout is the
+                        // trailing request that only ever produces unseen
+                        // text. Let an in-flight steer drain land first: a
+                        // queued follow-up reopens the turn instead.
+                        await activeHumanSteerPoll.catch(() => undefined);
+                        if (
+                          !isInstructionClosed() ||
+                          activeToolExecutions > 0 ||
+                          closeoutAbortController.signal.aborted
+                        ) {
+                          return;
+                        }
+                        diagnostics.recordCloseoutAbort();
+                        closeoutAbortController.abort(
+                          new FastAgentTurnClosedError(),
                         );
                       },
                       onAssistantMessageCompleted: (message) => {
@@ -3041,6 +3073,25 @@ export async function answerFastAgentQuestion({
                 });
                 return result;
               } catch (error) {
+                if (closeoutAbortController.signal.aborted) {
+                  // The visible closeout already went out; the aborted
+                  // request was the trailing one. The turn is complete.
+                  captureFastAgentInferenceAttemptOutcome({
+                    userId,
+                    sessionId: session.id,
+                    turnId,
+                    surface: conversation.surface,
+                    sessionPath: attemptSessionPath,
+                    promptKind,
+                    attemptNumber: inferenceAttemptNumber,
+                    outcome: 'success',
+                    stage: 'model_generation',
+                    elapsedMs: Date.now() - attemptStartedAt,
+                    resolvedModel: resolvedInferenceModel,
+                    providerRetryEventCount,
+                  });
+                  return '';
+                }
                 const failure = classifyNonTaskInferenceError(error);
                 const attemptStage = !resolvedInferenceModel
                   ? 'model_resolution'

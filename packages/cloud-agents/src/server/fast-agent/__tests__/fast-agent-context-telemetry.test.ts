@@ -209,6 +209,7 @@ describe('captureFastAgentInferenceContext', () => {
         completed_model_request_count: null,
         first_model_response_duration_ms: null,
         post_reply_inference_duration_ms: null,
+        aborted_after_closeout: null,
         input_tokens: null,
         cache_read_tokens: null,
         cache_write_tokens: null,
