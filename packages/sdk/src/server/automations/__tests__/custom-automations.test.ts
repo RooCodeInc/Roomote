@@ -920,7 +920,11 @@ describe('customAutomationsJob', () => {
 
   it('passes a model override through to the launch', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
-      { ...automation, model: 'anthropic/claude-sonnet-5' } as never,
+      {
+        ...automation,
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'high',
+      } as never,
     ]);
 
     await customAutomationsJob();
@@ -933,6 +937,7 @@ describe('customAutomationsJob', () => {
             harnessModelOverrides: {
               'opencode-server': 'anthropic/claude-sonnet-5',
             },
+            reasoningEffort: 'high',
           }),
         }),
       }),
@@ -1310,6 +1315,8 @@ describe('runCustomAutomationNow', () => {
       environmentId: null,
       target: {},
       createdByUserId: 'user-1',
+      model: 'anthropic/claude-sonnet-5',
+      reasoningEffort: 'xhigh',
     } as never);
 
     const result = await runCustomAutomationNow(automation.id);
@@ -1322,6 +1329,8 @@ describe('runCustomAutomationNow', () => {
           automationId: automation.id,
           launchClaimedAt: expect.any(String),
           trigger: 'manual',
+          defaultTaskModel: 'anthropic/claude-sonnet-5',
+          defaultTaskReasoningEffort: 'xhigh',
         }),
       }),
     );

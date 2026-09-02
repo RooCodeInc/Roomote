@@ -3,6 +3,7 @@ import {
   buildFastAgentChildTaskMetadata,
   buildSlackThreadPermalink,
   TaskPayloadKind,
+  type ReasoningEffort,
   type StandardTask,
   type TaskInitiator,
   type TaskSurface,
@@ -42,6 +43,7 @@ export function createFastAgentTaskLauncher(
       branch?: string;
       launchIdempotencyKey?: string;
       model?: string | null;
+      reasoningEffort?: ReasoningEffort | null;
       parentSessionId: string;
     }) => StandardTask | Promise<StandardTask>;
   } & FastAgentTaskLaunchHooks,
@@ -53,6 +55,7 @@ export function createFastAgentTaskLauncher(
     branch,
     launchIdempotencyKey,
     model,
+    reasoningEffort,
     parentSessionId,
     postKickoff,
   }) => {
@@ -62,6 +65,7 @@ export function createFastAgentTaskLauncher(
       branch,
       launchIdempotencyKey,
       model,
+      reasoningEffort,
       parentSessionId,
     });
     const taskWithLaunchOverrides =

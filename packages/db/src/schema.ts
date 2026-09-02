@@ -3912,6 +3912,8 @@ export const customAutomations = pgTable(
      * deployment default task model.
      */
     model: text('model'),
+    /** Optional reasoning override for the selected model. */
+    reasoningEffort: text('reasoning_effort').$type<ReasoningEffort>(),
     environmentId: uuid('environment_id').references(() => environments.id, {
       onDelete: 'set null',
     }),

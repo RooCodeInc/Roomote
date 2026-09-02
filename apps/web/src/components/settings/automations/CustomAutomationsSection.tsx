@@ -10,6 +10,7 @@ import {
   isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
   type CustomAutomationScheduleMode,
+  type ReasoningEffort,
 } from '@roomote/types';
 
 import { tryParseCronSchedule } from '@/lib/cron-schedule';
@@ -46,6 +47,8 @@ import {
 } from '@/components/system';
 
 import { ModelSelect } from '@/components/tasks/ModelSelect';
+import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
+import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 
 import {
   AutomationDestinationPicker,
@@ -66,6 +69,7 @@ type CustomAutomationFormState = {
   cronExpression: string;
   /** Provider/model launch override; empty string means deployment default. */
   model: string;
+  reasoningEffort: ReasoningEffort | null;
   targetProvider: 'none' | 'slack' | 'discord' | 'teams' | 'telegram';
   targetMode: 'channel' | 'direct_message';
   targetChannelId: string;
@@ -79,6 +83,7 @@ const EMPTY_FORM: CustomAutomationFormState = {
   environmentId: '',
   cronExpression: '',
   model: '',
+  reasoningEffort: null,
   targetProvider: 'slack',
   targetMode: 'channel',
   targetChannelId: '',
@@ -234,6 +239,7 @@ function formFromRow(
     environmentId: row.environmentId ?? '',
     cronExpression: row.cronExpression ?? '',
     model: row.model ?? '',
+    reasoningEffort: row.reasoningEffort,
     targetProvider: targetIsConnected ? target.provider : 'none',
     targetMode: target.mode,
     targetChannelId: targetIsConnected ? target.channelId : '',
@@ -250,6 +256,7 @@ function writeInputFromRow(row: CustomAutomationListItem) {
     scheduleMode: row.scheduleMode,
     cronExpression: row.cronExpression,
     model: row.model,
+    reasoningEffort: row.reasoningEffort,
     environmentId: row.environmentId ?? '',
     ...(target.provider !== 'none'
       ? {
@@ -287,6 +294,7 @@ export function CustomAutomationsSection() {
   );
   const settingsQuery = useQuery(trpc.automations.getSettings.queryOptions());
   const miscSettingsQuery = useQuery(trpc.miscSettings.get.queryOptions());
+  const taskModelsQuery = useLaunchTaskModels();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -473,6 +481,12 @@ export function CustomAutomationsSection() {
     updateMutation.isPending ||
     deleteMutation.isPending ||
     toggleMutation.isPending;
+  const selectedModel = taskModelsQuery.data?.models.find(
+    (model) => model.id === form.model,
+  );
+  const selectedModelSupportsReasoning = Boolean(
+    selectedModel && selectedModel.metadata?.supportsReasoning !== false,
+  );
 
   const closeEditor = () => {
     setIsCreating(false);
@@ -587,6 +601,7 @@ export function CustomAutomationsSection() {
       cronExpression:
         form.scheduleMode === 'cron' ? effectiveResolvedCron : null,
       model: form.model || null,
+      reasoningEffort: form.model ? form.reasoningEffort : null,
       environmentId: form.environmentId,
       ...(form.targetProvider !== 'none'
         ? {
@@ -752,7 +767,7 @@ export function CustomAutomationsSection() {
             </Select>
           </div>
 
-          <div className="space-y-2">
+          <div className="min-w-0 flex-1 space-y-2">
             <Label>
               {form.environmentId === FAST_EXECUTION
                 ? 'Delegated task model'
@@ -767,9 +782,38 @@ export function CustomAutomationsSection() {
                   ? 'Default delegated task model'
                   : 'Default coding model'
               }
+              className="w-full"
               disabled={busy}
-              onValueChange={(value) =>
-                setForm((current) => ({ ...current, model: value }))
+              onValueChange={(value) => {
+                const nextModel = taskModelsQuery.data?.models.find(
+                  (model) => model.id === value,
+                );
+                const supportsReasoning = Boolean(
+                  nextModel && nextModel.metadata?.supportsReasoning !== false,
+                );
+                setForm((current) => ({
+                  ...current,
+                  model: value,
+                  reasoningEffort: supportsReasoning
+                    ? current.reasoningEffort
+                    : null,
+                }));
+              }}
+            />
+          </div>
+
+          <div className="space-y-2 sm:w-40">
+            <Label>Effort</Label>
+            <ReasoningEffortSelect
+              value={form.reasoningEffort}
+              defaultEffort="medium"
+              emptyOptionLabel="Model default"
+              ariaLabel="Automation effort"
+              className="w-full"
+              size="default"
+              disabled={busy || !selectedModelSupportsReasoning}
+              onChange={(reasoningEffort) =>
+                setForm((current) => ({ ...current, reasoningEffort }))
               }
             />
           </div>

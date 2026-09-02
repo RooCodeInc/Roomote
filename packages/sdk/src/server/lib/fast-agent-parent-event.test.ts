@@ -1056,6 +1056,7 @@ describe('deliverFastAgentParentEvent', () => {
         prompt: 'Find actionable regressions.',
         trigger: 'schedule',
         defaultTaskModel: 'openai/gpt-5.6-luna',
+        defaultTaskReasoningEffort: 'high',
       },
     });
 
@@ -1072,6 +1073,7 @@ describe('deliverFastAgentParentEvent', () => {
           harnessModelOverrides: {
             'opencode-server': 'openai/gpt-5.6-luna',
           },
+          reasoningEffort: 'high',
         }),
       }),
     });
