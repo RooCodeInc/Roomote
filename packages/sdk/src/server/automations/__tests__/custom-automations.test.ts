@@ -258,7 +258,7 @@ describe('customAutomationsJob', () => {
 
     const result = await customAutomationsJob();
 
-    expect(result.completed).toBe(true);
+    expect(result).toMatchObject({ queued: true, completed: false });
     expect(enqueueTask).not.toHaveBeenCalled();
     expect(fastMocks.getSession).toHaveBeenCalledWith({
       userId: 'user-1',
@@ -408,7 +408,7 @@ describe('customAutomationsJob', () => {
 
     const result = await customAutomationsJob();
 
-    expect(result.completed).toBe(true);
+    expect(result).toMatchObject({ queued: true, completed: false });
     expect(fastMocks.createDiscordThread).toHaveBeenCalledWith({
       channelId: 'discord-channel-1',
       name: 'Flaky tests',
@@ -478,7 +478,7 @@ describe('customAutomationsJob', () => {
 
     const result = await customAutomationsJob();
 
-    expect(result.completed).toBe(true);
+    expect(result).toMatchObject({ queued: true, completed: false });
     expect(findUserDirectMessageDestination).toHaveBeenCalledWith(
       'slack',
       'user-1',
@@ -616,7 +616,7 @@ describe('customAutomationsJob', () => {
 
       const result = await customAutomationsJob();
 
-      expect(result.completed).toBe(true);
+      expect(result).toMatchObject({ queued: true, completed: false });
       expect(fastMocks.getSession).toHaveBeenCalledWith({
         userId: 'user-1',
         conversation: expect.objectContaining({

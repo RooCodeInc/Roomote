@@ -744,7 +744,7 @@ async function launchCustomAutomationRow(
         launchClaimedAt,
         trigger: opts.manualTrigger ? 'manual' : 'schedule',
       });
-      result.completed = true;
+      result.queued = true;
       return result;
     }
 
@@ -872,6 +872,9 @@ export async function customAutomationsJob(
       if (rowResult.launchedTaskId) {
         result.launchedTaskId ??= rowResult.launchedTaskId;
         processed++;
+      } else if (rowResult.queued) {
+        result.queued = true;
+        processed++;
       } else if (rowResult.completed) {
         result.completed = true;
         processed++;
@@ -938,10 +941,12 @@ export async function runCustomAutomationNow(
       return { outcome: 'skipped', reason: result.skippedReason };
     }
 
+    if (result.queued) {
+      return { outcome: 'queued' };
+    }
+
     if (result.completed) {
-      return automation.executionMode === 'fast'
-        ? { outcome: 'queued' }
-        : { outcome: 'completed' };
+      return { outcome: 'completed' };
     }
 
     return { outcome: 'skipped', reason: 'Nothing to do.' };
