@@ -436,7 +436,11 @@ describe('native Notion MCP', () => {
     const createResponse = await postMcp(
       app,
       createToolCallRequest('notion-create-view', {
-        parent: { type: 'database_id', database_id: 'database' },
+        parent: {
+          type: 'database_id',
+          database_id: 'database',
+          position: { type: 'end' },
+        },
         data_source_id: 'data-source',
         name: 'High priority',
         type: 'table',
@@ -446,7 +450,6 @@ describe('native Notion MCP', () => {
         },
         sorts: [{ property: 'Name', direction: 'ascending' }],
         configuration: { type: 'table', wrap_cells: true },
-        position: { type: 'end' },
       }),
     );
     const updateResponse = await postMcp(
@@ -470,6 +473,7 @@ describe('native Notion MCP', () => {
         method: 'POST',
         body: JSON.stringify({
           database_id: 'database',
+          position: { type: 'end' },
           data_source_id: 'data-source',
           name: 'High priority',
           type: 'table',
@@ -479,7 +483,6 @@ describe('native Notion MCP', () => {
           },
           sorts: [{ property: 'Name', direction: 'ascending' }],
           configuration: { type: 'table', wrap_cells: true },
-          position: { type: 'end' },
         }),
       }),
     );
@@ -498,6 +501,49 @@ describe('native Notion MCP', () => {
       }),
     );
   });
+
+  it.each([
+    {
+      parent: {
+        type: 'view_id',
+        view_id: 'dashboard-view',
+        position: { type: 'end' },
+      },
+      invalidField: 'position',
+    },
+    {
+      parent: {
+        type: 'database_id',
+        database_id: 'database',
+        placement: { type: 'new_row' },
+      },
+      invalidField: 'placement',
+    },
+  ])(
+    'rejects $invalidField for an incompatible view parent',
+    async ({ parent, invalidField }) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+
+      const response = await postMcp(
+        createApp(createRunToken()),
+        createToolCallRequest('notion-create-view', {
+          parent,
+          data_source_id: 'data-source',
+          name: 'Invalid view',
+          type: 'table',
+        }),
+      );
+      const body = (await response.json()) as {
+        result: { isError?: boolean; content: Array<{ text: string }> };
+      };
+
+      expect(response.status).toBe(200);
+      expect(body.result.isError).toBe(true);
+      expect(body.result.content[0]?.text).toContain(invalidField);
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('deletes a database view', async () => {
     const fetchMock = vi

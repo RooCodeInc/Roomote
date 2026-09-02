@@ -62,31 +62,6 @@ const dataSourceParentSchema = z.object({
   type: z.literal('database_id'),
   database_id: nonEmptyStringSchema,
 });
-const viewParentSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('database_id'),
-    database_id: nonEmptyStringSchema,
-  }),
-  z.object({
-    type: z.literal('view_id'),
-    view_id: nonEmptyStringSchema,
-  }),
-  z.object({
-    type: z.literal('create_database'),
-    create_database: z.object({
-      parent: z.object({
-        type: z.literal('page_id'),
-        page_id: nonEmptyStringSchema,
-      }),
-      position: z
-        .object({
-          type: z.literal('after_block'),
-          block_id: nonEmptyStringSchema,
-        })
-        .optional(),
-    }),
-  }),
-]);
 const viewPositionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('start') }),
   z.object({ type: z.literal('end') }),
@@ -104,6 +79,39 @@ const viewPlacementSchema = z.discriminatedUnion('type', [
     type: z.literal('existing_row'),
     row_index: z.number().int().min(0),
   }),
+]);
+const viewParentSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('database_id'),
+      database_id: nonEmptyStringSchema,
+      position: viewPositionSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('view_id'),
+      view_id: nonEmptyStringSchema,
+      placement: viewPlacementSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('create_database'),
+      create_database: z.object({
+        parent: z.object({
+          type: z.literal('page_id'),
+          page_id: nonEmptyStringSchema,
+        }),
+        position: z
+          .object({
+            type: z.literal('after_block'),
+            block_id: nonEmptyStringSchema,
+          })
+          .optional(),
+      }),
+    })
+    .strict(),
 ]);
 const viewTypeSchema = z.enum([
   'table',
@@ -588,8 +596,6 @@ function registerCreateViewTool(
         sorts: z.array(jsonObjectSchema).max(100).optional(),
         quick_filters: z.record(z.string(), jsonObjectSchema).optional(),
         configuration: jsonObjectSchema.optional(),
-        position: viewPositionSchema.optional(),
-        placement: viewPlacementSchema.optional(),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: WRITE_ANNOTATIONS,
@@ -603,8 +609,6 @@ function registerCreateViewTool(
       sorts,
       quick_filters: quickFilters,
       configuration,
-      position,
-      placement,
     }) => {
       const view = await notionApiRequestJson<Record<string, unknown>>({
         config,
@@ -612,9 +616,15 @@ function registerCreateViewTool(
         method: 'POST',
         body: {
           ...(parent.type === 'database_id'
-            ? { database_id: parent.database_id }
+            ? {
+                database_id: parent.database_id,
+                ...(parent.position ? { position: parent.position } : {}),
+              }
             : parent.type === 'view_id'
-              ? { view_id: parent.view_id }
+              ? {
+                  view_id: parent.view_id,
+                  ...(parent.placement ? { placement: parent.placement } : {}),
+                }
               : { create_database: parent.create_database }),
           data_source_id: dataSourceId,
           name,
@@ -623,8 +633,6 @@ function registerCreateViewTool(
           ...(sorts ? { sorts } : {}),
           ...(quickFilters ? { quick_filters: quickFilters } : {}),
           ...(configuration ? { configuration } : {}),
-          ...(position ? { position } : {}),
-          ...(placement ? { placement } : {}),
         },
       });
       return toMcpToolResult({ view });
