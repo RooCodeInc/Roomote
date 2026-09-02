@@ -594,6 +594,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'vercel/openai/gpt-5.6-terra',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'vercel/anthropic/claude-fable-5.1',
       'claude-fable-5': 'vercel/anthropic/claude-fable-5',
       'claude-haiku-4-5': 'vercel/anthropic/claude-haiku-4.5',
       'claude-opus-5': 'vercel/anthropic/claude-opus-5',
@@ -630,6 +631,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     authKind: 'api-key',
     // Requesty's models.dev slugs are provider-local rather than lab/model.
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'requesty/claude-fable-5-1',
       'claude-fable-5': 'requesty/claude-fable-5',
       'claude-haiku-4-5': 'requesty/claude-haiku-4-5',
       'claude-opus-5': 'requesty/claude-opus-5',
@@ -767,6 +769,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'anthropic/claude-sonnet-5',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'anthropic/claude-fable-5-1',
       'claude-fable-5': 'anthropic/claude-fable-5',
       'claude-haiku-4-5': 'anthropic/claude-haiku-4-5',
       'claude-opus-5': 'anthropic/claude-opus-5',
@@ -844,6 +847,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'opencode/big-pickle',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'opencode/claude-fable-5-1',
       'claude-fable-5': 'opencode/claude-fable-5',
       'claude-haiku-4-5': 'opencode/claude-haiku-4-5',
       'claude-opus-5': 'opencode/claude-opus-5',
@@ -931,6 +935,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'bedrock-mantle/anthropic.claude-sonnet-5',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'bedrock-mantle/anthropic.claude-fable-5-1',
       'claude-fable-5': 'bedrock-mantle/anthropic.claude-fable-5',
       'claude-haiku-4-5': 'bedrock-mantle/anthropic.claude-haiku-4-5',
       'claude-opus-5': 'bedrock-mantle/anthropic.claude-opus-5',
@@ -1049,6 +1054,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'github-copilot/gpt-5.6-luna',
     authKind: 'oauth',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'github-copilot/claude-fable-5.1',
       'claude-fable-5': 'github-copilot/claude-fable-5',
       'claude-haiku-4-5': 'github-copilot/claude-haiku-4.5',
       'claude-opus-5': 'github-copilot/claude-opus-5',

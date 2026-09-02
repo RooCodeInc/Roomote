@@ -1,5 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 
+import { createEmptySetupNewState } from '@roomote/types';
+
 import {
   taskRuns,
   deploymentSettings,
@@ -158,9 +160,75 @@ describe('seedDemoData', () => {
     }
   });
 
+  it('repairs incomplete setup without changing other deployment settings', async () => {
+    const settingsBefore = await db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+    });
+    const staleSetupNewState = {
+      ...createEmptySetupNewState(),
+      computeProvider: 'modal' as const,
+      sourceControlProvider: 'github' as const,
+    };
+    const staleMetadata = { preserveDuringDemoSeed: true };
+
+    if (settingsBefore) {
+      await db
+        .update(deploymentSettings)
+        .set({
+          metadata: staleMetadata,
+          setupCompletedAt: null,
+          setupNewState: staleSetupNewState,
+        })
+        .where(eq(deploymentSettings.id, 'default'));
+    } else {
+      await db.insert(deploymentSettings).values({
+        id: 'default',
+        metadata: staleMetadata,
+        setupCompletedAt: null,
+        setupNewState: staleSetupNewState,
+      });
+    }
+
+    const staleSettings = await db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+    });
+
+    try {
+      const summary = await seedDemoData();
+      const settingsAfter = await db.query.deploymentSettings.findFirst({
+        where: eq(deploymentSettings.id, 'default'),
+      });
+
+      expect(summary.created).toContain('deployment settings default');
+      expect(settingsAfter).toEqual({
+        ...staleSettings,
+        setupCompletedAt: expect.any(Date),
+      });
+    } finally {
+      if (settingsBefore) {
+        await db
+          .update(deploymentSettings)
+          .set({
+            metadata: settingsBefore.metadata,
+            setupCompletedAt: settingsBefore.setupCompletedAt,
+            setupNewState: settingsBefore.setupNewState,
+            updatedAt: settingsBefore.updatedAt,
+          })
+          .where(eq(deploymentSettings.id, 'default'));
+      } else {
+        await db
+          .delete(deploymentSettings)
+          .where(eq(deploymentSettings.id, 'default'));
+      }
+    }
+  });
+
   it('is idempotent and leaves existing rows untouched on re-run', async () => {
     await seedDemoData();
 
+    const settingsBefore = await db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+    });
     const userBefore = await db.query.users.findFirst({
       where: eq(users.id, demoSeedUserId),
     });
@@ -175,9 +243,13 @@ describe('seedDemoData', () => {
         demoSeedPullRequests.length,
     );
 
+    const settingsAfter = await db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+    });
     const userAfter = await db.query.users.findFirst({
       where: eq(users.id, demoSeedUserId),
     });
+    expect(settingsAfter).toEqual(settingsBefore);
     expect(userAfter?.updatedAt).toEqual(userBefore?.updatedAt);
 
     const seededTasks = await db.query.tasks.findMany({

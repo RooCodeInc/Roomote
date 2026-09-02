@@ -24,11 +24,13 @@ import {
   environmentRepositoryMappings,
   environmentVariables,
   getDeploymentGitHubRoomoteMentionEnabled,
+  getDeploymentMarkRoomotePrReadyAfterCleanReview,
   getDeploymentPrAction,
   resolveDeploymentEnvVar,
   repositories,
   setDeploymentPrAction,
   setDeploymentGitHubRoomoteMentionEnabled,
+  setDeploymentMarkRoomotePrReadyAfterCleanReview,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 
@@ -670,6 +672,29 @@ export async function setPrActionCommand(
   assertAdmin(auth);
 
   return { prAction: await setDeploymentPrAction(input.prAction) };
+}
+
+export async function getMarkRoomotePrReadyAfterCleanReviewCommand(
+  auth: UserAuthSuccess,
+) {
+  assertAdmin(auth);
+
+  return {
+    enabled: await getDeploymentMarkRoomotePrReadyAfterCleanReview(),
+  };
+}
+
+export async function setMarkRoomotePrReadyAfterCleanReviewCommand(
+  auth: UserAuthSuccess,
+  input: { enabled: boolean },
+) {
+  assertAdmin(auth);
+
+  return {
+    enabled: await setDeploymentMarkRoomotePrReadyAfterCleanReview(
+      input.enabled,
+    ),
+  };
 }
 
 export async function getGitHubRoomoteMentionCommand(auth: UserAuthSuccess) {

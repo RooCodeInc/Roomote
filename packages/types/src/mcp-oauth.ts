@@ -469,6 +469,8 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     url: 'https://mcp.linear.app/mcp',
     description: `Enable Linear so this deployment can route issue context and task entry through it.`,
     icon: 'linear',
+    instructions:
+      'Use Linear tools to read and update Linear issues. Add issue discussion with the dedicated comment-creation tool; do not pass comment text to an issue-update or status-update tool. Use issue-update tools only for issue fields such as status, title, description, assignee, or labels. Before calling a mutation tool, follow its advertised input schema exactly. If a Linear tool rejects a request, report the returned tool error verbatim instead of inferring a different failure reason.',
     connectionScope: 'deployment',
     connectionMode: 'oauth',
     serverMode: 'upstream_proxy',

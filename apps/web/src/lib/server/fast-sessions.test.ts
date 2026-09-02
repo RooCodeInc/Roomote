@@ -11,7 +11,7 @@ import {
   taskFactory,
   userFactory,
 } from '@roomote/db/server';
-import { RunStatus } from '@roomote/types';
+import { ACP_ENVELOPE_EVENT_TYPES, RunStatus } from '@roomote/types';
 
 import {
   findAccessibleFastSession,
@@ -20,6 +20,7 @@ import {
   getFastSessionTasks,
   getFastSessionMessagesSince,
   getFastSessionDisplayTitle,
+  getFastSessionSuggestableMessages,
   updateFastSessionPrReviewOfferStatus,
 } from './fast-sessions';
 
@@ -87,6 +88,71 @@ async function createFastMessage({
 }
 
 describe('Fast session queries', () => {
+  it('returns only the newest 60 visible conversational suggestion messages', async () => {
+    const owner = await userFactory.create();
+    const conversation = await createFastSession({
+      userId: owner.id,
+      conversationId: 'bounded-composer-suggestion-history',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+
+    await db.insert(fastAgentMessages).values([
+      ...Array.from({ length: 61 }, (_, index) => ({
+        conversationId: conversation.id,
+        eventId: `suggestion-message-${index}`,
+        turnId: `turn-${index}`,
+        turnSeq: 0,
+        ts: index + 1,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant' as const,
+        contentBlocks: [
+          { type: 'text' as const, text: `suggestion-message-${index}` },
+        ],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+        source: 'web',
+      })),
+      {
+        conversationId: conversation.id,
+        eventId: 'hidden-suggestion-message',
+        turnId: 'hidden-turn',
+        turnSeq: 0,
+        ts: 62,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user' as const,
+        contentBlocks: [{ type: 'text' as const, text: 'hidden prompt' }],
+        metadata: { visibleInTranscript: false },
+        payload: {},
+        source: 'web',
+      },
+      {
+        conversationId: conversation.id,
+        eventId: 'tool-suggestion-message',
+        turnId: 'tool-turn',
+        turnSeq: 0,
+        ts: 63,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+        role: 'tool' as const,
+        contentBlocks: [{ type: 'text' as const, text: 'tool payload' }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+        source: 'web',
+      },
+    ]);
+
+    const messages = await getFastSessionSuggestableMessages(conversation.id);
+
+    expect(messages).toHaveLength(60);
+    expect(messages[0]?.text).toBe('suggestion-message-1');
+    expect(messages.at(-1)?.text).toBe('suggestion-message-60');
+    expect(messages.map((message) => message.text)).not.toContain(
+      'hidden prompt',
+    );
+    expect(messages.map((message) => message.text)).not.toContain(
+      'tool payload',
+    );
+  });
+
   it('prefers the unified Session title for live Fast updates', async () => {
     const owner = await userFactory.create();
     const conversation = await createFastSession({

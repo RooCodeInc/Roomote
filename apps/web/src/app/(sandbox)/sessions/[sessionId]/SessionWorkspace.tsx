@@ -5,6 +5,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useMemo,
   useState,
   type ReactNode,
 } from 'react';
@@ -12,7 +13,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
   getReasoningEffortLabel,
-  isActivelyRunningTask,
+  isTaskExecutingTurn,
   type ReasoningEffort,
   type RunStatus,
 } from '@roomote/types';
@@ -33,6 +34,7 @@ import {
   getSessionSurfaceLabel,
 } from '@/components/sessions/session-surfaces';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
+import { computeTaskStateRevision } from '@/lib/composer-suggestion-task-state';
 import { useTRPC } from '@/trpc/client';
 import { FramedSurface, WorkspaceSurface } from '@/components/layout';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
@@ -80,6 +82,7 @@ import {
   OpenSessionTaskPanelContext,
   OpenSessionTasksPanelContext,
   SessionRunningTaskCountContext,
+  SessionTaskStateRevisionContext,
 } from './session-task-panel-context';
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
 import { useArtifactByPath } from '../../task/[taskId]/hooks/use-artifact-by-path';
@@ -305,12 +308,18 @@ function getLatestSessionArtifacts(
 }
 
 function SessionArtifactViewer({
-  entry,
+  selection,
+  backLabel,
   closeLabel,
   onBack,
   onClose,
 }: {
-  entry: SessionArtifactEntry;
+  selection: {
+    taskId: string;
+    path: string;
+    version?: number;
+  };
+  backLabel: string;
   closeLabel: string;
   onBack: () => void;
   onClose: () => void;
@@ -319,28 +328,24 @@ function SessionArtifactViewer({
     data: artifact,
     isPending,
     isError,
-  } = useArtifactByPath(
-    entry.taskId,
-    entry.artifact.path,
-    entry.artifact.version,
-  );
+  } = useArtifactByPath(selection.taskId, selection.path, selection.version);
 
   return (
     <>
       <div className="flex min-w-0 shrink-0 items-center gap-2 border-b-2 border-card px-4 py-2">
-        <BasicTooltip content="Back to artifacts">
+        <BasicTooltip content={backLabel}>
           <Button
             variant="ghost"
             size="icon"
             className="size-7 shrink-0"
-            aria-label="Back to artifacts"
+            aria-label={backLabel}
             onClick={onBack}
           >
             <ArrowLeft />
           </Button>
         </BasicTooltip>
         <h2 className="min-w-0 flex-1 truncate text-sm font-medium">
-          {humanizeFilename(entry.artifact.path)}
+          {humanizeFilename(selection.path)}
         </h2>
         <BasicTooltip content="Close">
           <Button
@@ -368,7 +373,7 @@ function SessionArtifactViewer({
         ) : (
           <ArtifactViewerContent
             artifact={artifact}
-            taskId={entry.taskId}
+            taskId={selection.taskId}
             className="h-full border-0"
           />
         )}
@@ -417,7 +422,12 @@ function SessionArtifactsPanel({
     >
       {selectedArtifact ? (
         <SessionArtifactViewer
-          entry={selectedArtifact}
+          selection={{
+            taskId: selectedArtifact.taskId,
+            path: selectedArtifact.artifact.path,
+            version: selectedArtifact.artifact.version,
+          }}
+          backLabel="Back to artifacts"
           closeLabel="Close artifacts"
           onBack={() => setSelectedArtifact(null)}
           onClose={onClose}
@@ -644,11 +654,21 @@ function SessionInfoPanel({
   );
 }
 
-type WorkspacePanel =
+type BaseWorkspacePanel =
   | { kind: 'info' }
   | { kind: 'tasks' }
   | { kind: 'artifacts' }
   | { kind: 'nested'; taskId: string };
+
+type WorkspacePanel =
+  | BaseWorkspacePanel
+  | {
+      kind: 'artifact';
+      taskId: string;
+      path: string;
+      version?: number;
+      returnTo: BaseWorkspacePanel | null;
+    };
 
 export function SessionWorkspace({
   session,
@@ -657,9 +677,8 @@ export function SessionWorkspace({
   session: SessionInfo;
   children: ReactNode;
 }) {
-  // Exactly one side panel can be active: the discriminated union makes an
-  // impossible combination unrepresentable. The URL's ?task= selection is the
-  // fourth panel and always wins over `panel` when both are set.
+  // Exactly one local side panel can be active. A URL-selected task normally
+  // takes precedence, except while its artifact detail temporarily overlays it.
   const [panel, setPanel] = useState<WorkspacePanel | null>(null);
   const trpc = useTRPC();
   const router = useRouter();
@@ -695,9 +714,13 @@ export function SessionWorkspace({
   const artifactTasks = isFastTaskSource ? fastTasks : sessionTasks;
   const sessionPullRequests = getSessionPullRequests(sessionTasks);
   const runningTasks = taskCards.filter((task) =>
-    isActivelyRunningTask(task.latestRun?.status, task.latestRun?.taskPhase),
+    isTaskExecutingTurn(task.latestRun?.status, task.latestRun?.taskPhase),
   );
   const runningTaskCount = runningTasks.length;
+  const taskStateRevision = useMemo(
+    () => computeTaskStateRevision(taskCards),
+    [taskCards],
+  );
   const singleRunningTaskId =
     runningTaskCount === 1 ? runningTasks[0]?.taskId : null;
   const selectedTaskId = searchParams.get('task');
@@ -742,21 +765,59 @@ export function SessionWorkspace({
     setPanel((previous) => (previous?.kind === kind ? null : { kind }));
     selectTask(null);
   };
-  const panelContent = selectedTask ? (
-    <NestedTaskSidePanel taskId={selectedTask.taskId} onClose={closePanel} />
-  ) : panel?.kind === 'nested' ? (
-    <NestedTaskSidePanel taskId={panel.taskId} onClose={closePanel} />
-  ) : panel?.kind === 'tasks' ? (
-    <SessionTasksPanel
-      tasks={taskCards}
-      onOpenTask={openTaskPanel}
-      onClose={closePanel}
-    />
-  ) : panel?.kind === 'artifacts' ? (
-    <SessionArtifactsPanel tasks={artifactTasks} onClose={closePanel} />
-  ) : (
-    <SessionInfoPanel session={session} onClose={closePanel} />
-  );
+  const panelContent =
+    panel?.kind === 'artifact' ? (
+      <FramedSurface
+        frameClassName="p-0"
+        surfaceClassName="relative flex flex-col overflow-hidden"
+      >
+        <SessionArtifactViewer
+          selection={panel}
+          backLabel="Back to task"
+          closeLabel="Close artifact"
+          onBack={() => setPanel(panel.returnTo)}
+          onClose={closePanel}
+        />
+      </FramedSurface>
+    ) : selectedTask ? (
+      <NestedTaskSidePanel
+        taskId={selectedTask.taskId}
+        onClose={closePanel}
+        onOpenArtifact={(path, version) =>
+          setPanel({
+            kind: 'artifact',
+            taskId: selectedTask.taskId,
+            path,
+            version,
+            returnTo: null,
+          })
+        }
+      />
+    ) : panel?.kind === 'nested' ? (
+      <NestedTaskSidePanel
+        taskId={panel.taskId}
+        onClose={closePanel}
+        onOpenArtifact={(path, version) =>
+          setPanel({
+            kind: 'artifact',
+            taskId: panel.taskId,
+            path,
+            version,
+            returnTo: panel,
+          })
+        }
+      />
+    ) : panel?.kind === 'tasks' ? (
+      <SessionTasksPanel
+        tasks={taskCards}
+        onOpenTask={openTaskPanel}
+        onClose={closePanel}
+      />
+    ) : panel?.kind === 'artifacts' ? (
+      <SessionArtifactsPanel tasks={artifactTasks} onClose={closePanel} />
+    ) : (
+      <SessionInfoPanel session={session} onClose={closePanel} />
+    );
   const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
   useResponsiveSandboxSidebar(session.id);
 
@@ -813,9 +874,13 @@ export function SessionWorkspace({
           main={
             <SessionPullRequestsContext.Provider value={sessionPullRequests}>
               <SessionRunningTaskCountContext.Provider value={runningTaskCount}>
-                <OpenSessionTasksPanelContext.Provider value={openTasksPanel}>
-                  {children}
-                </OpenSessionTasksPanelContext.Provider>
+                <SessionTaskStateRevisionContext.Provider
+                  value={taskStateRevision}
+                >
+                  <OpenSessionTasksPanelContext.Provider value={openTasksPanel}>
+                    {children}
+                  </OpenSessionTasksPanelContext.Provider>
+                </SessionTaskStateRevisionContext.Provider>
               </SessionRunningTaskCountContext.Provider>
             </SessionPullRequestsContext.Provider>
           }

@@ -219,13 +219,14 @@ These numbers come from unofficial provider endpoints, so the usage line is
 hidden whenever the provider does not return usable data.
 
 Under **Settings > Automations > Inference Provider Usage Alerts**, admins can
-configure hourly checks for queryable limits from OpenRouter, Kimi for Coding,
-OpenCode Go, Z.AI, and Z.AI Coding Plan. Roomote posts one warning when a
-credential crosses its configured threshold in a limit window, plus a critical
-warning at 100%. Alerts can report through Slack or Discord destinations and
-supported primary conversations in Teams, Telegram, or Discord. The warning
-names the provider, credential fingerprint or label, limit window, and reported
-usage. A provider that does not return usable quota data is skipped.
+configure hourly checks for queryable limits from ChatGPT subscription, GitHub
+Copilot, xAI Grok subscription, OpenRouter, Kimi for Coding, OpenCode Go, Z.AI,
+and Z.AI Coding Plan. Roomote posts one warning when a credential crosses its
+configured threshold in a limit window, plus a critical warning at 100%. Alerts
+can report through Slack or Discord destinations and supported primary
+conversations in Teams, Telegram, or Discord. The warning names the provider,
+credential fingerprint or label, limit window, and reported usage. A provider
+that does not return usable quota data is skipped.
 
 xAI can be connected with an API key, a SuperGrok or eligible X Premium+
 subscription, or both. When both are configured, the subscription is preferred

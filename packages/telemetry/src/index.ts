@@ -183,14 +183,14 @@ export interface PingEvent {
 
 export interface PingEventsRequest {
   instanceId: string;
-  appVersion?: string;
+  appVersion: string;
   sentAt: string;
   events: PingEvent[];
 }
 
 export interface PingInstanceReportRequest {
   instanceId: string;
-  appVersion?: string;
+  appVersion: string;
   cloud: boolean;
   sentAt: string;
   report: Record<string, unknown>;
@@ -198,7 +198,7 @@ export interface PingInstanceReportRequest {
 
 export interface PingVersionCheckRequest {
   instanceId: string;
-  appVersion?: string;
+  appVersion: string;
 }
 
 export interface PingVersionCheckResponse {

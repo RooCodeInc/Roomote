@@ -333,6 +333,10 @@ export {
 
 export { updateTaskPrStatus } from './lib/pull-requests/update-task-pr-status';
 export {
+  markRoomotePullRequestReadyAfterCleanReview,
+  type MarkRoomotePullRequestReadyResult,
+} from './lib/pull-requests/mark-roomote-pull-request-ready';
+export {
   manageSourceControlIssueForTaskRun,
   sourceControlIssueInputSchema,
   SourceControlIssueError,

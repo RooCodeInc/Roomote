@@ -64,15 +64,26 @@ export function createFastAgentTaskLauncher(
       model,
       parentSessionId,
     });
+    const taskWithLaunchOverrides =
+      branch || launchIdempotencyKey
+        ? {
+            ...builtTask,
+            payload: {
+              ...builtTask.payload,
+              ...(branch ? { branch } : {}),
+              ...(launchIdempotencyKey ? { launchIdempotencyKey } : {}),
+            },
+          }
+        : builtTask;
     const task = images?.length
       ? {
-          ...builtTask,
+          ...taskWithLaunchOverrides,
           payload: {
-            ...builtTask.payload,
+            ...taskWithLaunchOverrides.payload,
             images,
           },
         }
-      : builtTask;
+      : taskWithLaunchOverrides;
     let taskUrl: string | undefined;
     let preparedTaskRun: { id: number; taskId: string } | undefined;
 

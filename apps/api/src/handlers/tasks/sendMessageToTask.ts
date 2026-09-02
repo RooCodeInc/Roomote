@@ -15,6 +15,7 @@ import {
   getTaskGoalForRun,
   taskPullRequests,
   taskRuns,
+  touchTaskActivity,
   users,
 } from '@roomote/db/server';
 import type {
@@ -1036,6 +1037,8 @@ export async function sendMessageToTask({
     let didSwitchActingUser = false;
 
     try {
+      await touchTaskActivity(db, taskId);
+
       await maybeCreateSlackReplyQuoteContext({
         runId: run.id,
         payload: run.payload as Record<string, unknown> | null,
@@ -1222,6 +1225,8 @@ export async function steerMessageToTask({
     let didSwitchActingUser = false;
 
     try {
+      await touchTaskActivity(db, taskId);
+
       await maybeCreateSlackReplyQuoteContext({
         runId: run.id,
         payload: run.payload as Record<string, unknown> | null,

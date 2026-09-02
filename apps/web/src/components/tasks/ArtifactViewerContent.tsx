@@ -316,7 +316,7 @@ export function ArtifactViewerContent({
       };
     }
 
-    toast.info(`Starting new Session to build ${artifactTitle}`);
+    toast.info(`Starting task in this Session to build ${artifactTitle}`);
     startFastSession.mutate({
       text: description,
       artifactBuild: {
@@ -324,7 +324,6 @@ export function ArtifactViewerContent({
         environmentId: values.environmentId ?? '',
         branch: values.branch,
         taskModel: values.modelId,
-        sourceTaskId: taskId,
         sourceArtifactId: artifact.id,
         sourceArtifactPath: artifact.path,
         sourceArtifactVersion: artifact.version,
