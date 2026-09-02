@@ -247,6 +247,9 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   onAssistantMessageStarted?: (
     message: NonTaskOpenCodeAssistantMessage,
   ) => Promise<void> | void;
+  onAssistantMessageCompleted?: (
+    message: NonTaskOpenCodeCompletedMessage,
+  ) => Promise<void> | void;
   onPromptStarted?: () => void;
   onNativeSteerReady?: (steer: NonTaskOpenCodeNativeSteer) => void;
   onNativeSteerClosed?: () => void;
@@ -821,6 +824,9 @@ async function runNonTaskSdkPrompt(
     onAssistantMessageStarted?: (
       message: NonTaskOpenCodeAssistantMessage,
     ) => Promise<void> | void;
+    onAssistantMessageCompleted?: (
+      message: NonTaskOpenCodeCompletedMessage,
+    ) => Promise<void> | void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
@@ -991,9 +997,11 @@ async function runNonTaskSdkPrompt(
     });
     let eventMonitor: Promise<void> | undefined;
     const observedAssistantMessageIds = new Set<string>();
+    const completedAssistantMessageIds = new Set<string>();
     const needsEventMonitor = Boolean(
       params.onProviderRetry ||
       options.onAssistantMessageStarted ||
+      options.onAssistantMessageCompleted ||
       options.onSubagentSessionReady ||
       options.trackSessionTreeUsage,
     );
@@ -1043,6 +1051,26 @@ async function runNonTaskSdkPrompt(
                       sessionId,
                       parentId: asString(info.parentID) ?? null,
                       createdAtMs: asFiniteNumber(info.time.created) ?? null,
+                    });
+                  } catch (error) {
+                    rejectSessionError(error);
+                    return;
+                  }
+                }
+                if (
+                  info.sessionID === sessionId &&
+                  messageId &&
+                  info.time.completed !== undefined &&
+                  !completedAssistantMessageIds.has(messageId)
+                ) {
+                  completedAssistantMessageIds.add(messageId);
+                  try {
+                    await options.onAssistantMessageCompleted?.({
+                      id: messageId,
+                      sessionId,
+                      createdAtMs: asFiniteNumber(info.time.created) ?? null,
+                      completedAtMs:
+                        asFiniteNumber(info.time.completed) ?? null,
                     });
                   } catch (error) {
                     rejectSessionError(error);
@@ -1477,6 +1505,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       onNativeSteerReady: options.onNativeSteerReady,
       onNativeSteerClosed: options.onNativeSteerClosed,
       onAssistantMessageStarted: options.onAssistantMessageStarted,
+      onAssistantMessageCompleted: options.onAssistantMessageCompleted,
       onMessageCompleted: options.onMessageCompleted,
       onSessionReady: options.onSessionReady,
       onSubagentSessionReady: options.onSubagentSessionReady,
