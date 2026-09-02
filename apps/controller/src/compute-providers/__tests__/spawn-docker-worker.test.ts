@@ -483,6 +483,9 @@ describe('preflightDockerSpawn', () => {
       TaskRunErrorCode.DockerImageMissing,
     );
     expect((failure as Error).message).toContain(IMAGE);
+    expect((failure as Error).message).toContain(
+      'docker build -f apps/worker/Dockerfile -t roomote-worker:local .',
+    );
     expect((failure as Error).message).toContain('pull access denied');
   });
 

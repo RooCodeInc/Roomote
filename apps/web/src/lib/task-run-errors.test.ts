@@ -41,6 +41,24 @@ docker run -d --name roomote-worker-12 roomote-worker:local sleep infinity`;
     expect(display).not.toMatch(/^docker run -d/);
   });
 
+  it('keeps the controller remediation for a missing local worker image', () => {
+    const error = `Docker worker image roomote-worker:local is not available locally and could not be pulled.
+The configured image uses a local-only tag. From the Roomote repository root, run \`docker build -f apps/worker/Dockerfile -t roomote-worker:local .\`, or use \`pnpm dev\`, which builds the local worker image automatically. Compose deployments must include \`docker-compose.compute-docker.yml\`.
+
+Failed to run docker pull.
+
+pull access denied for roomote-worker`;
+
+    const display = getTaskRunErrorDisplayMessage(
+      error,
+      'docker_image_missing',
+    );
+
+    expect(display).toContain('roomote-worker:local');
+    expect(display).toContain('docker build -f apps/worker/Dockerfile');
+    expect(display).toContain('docker-compose.compute-docker.yml');
+  });
+
   it('explains Docker daemon connectivity failures', () => {
     const error = `Failed to run docker run.
 

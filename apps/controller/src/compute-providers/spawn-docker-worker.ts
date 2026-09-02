@@ -22,6 +22,7 @@ import {
 import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
   buildDockerWorkerEnv,
+  getDockerWorkerImageRemediation,
   resolveAuthBypassHeaderName,
   resolveAuthBypassValue,
 } from '@roomote/compute-providers';
@@ -111,7 +112,7 @@ export async function preflightDockerSpawn(
     throw new DockerBootError(
       TaskRunErrorCode.DockerImageMissing,
       [
-        `Docker worker image ${image} is not available locally and could not be pulled.`,
+        `Docker worker image ${image} is not available locally and could not be pulled.\n${getDockerWorkerImageRemediation(image)}`,
         error instanceof Error ? error.message : String(error),
       ].join('\n\n'),
     );

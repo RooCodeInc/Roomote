@@ -25,6 +25,19 @@ export interface DockerEnvironmentValidationResult {
 
 type DockerRunner = (args: string[]) => Promise<string>;
 
+export function getDockerWorkerImageRemediation(image: string): string {
+  if (!image.includes('/')) {
+    const buildCommand =
+      image === 'roomote-worker:local'
+        ? '`docker build -f apps/worker/Dockerfile -t roomote-worker:local .`'
+        : 'a `docker build -f apps/worker/Dockerfile -t <configured-image> .` command using the configured tag';
+
+    return `The configured image uses a local-only tag. From the Roomote repository root, run ${buildCommand}, or use \`pnpm dev\`, which builds the local worker image automatically. Compose deployments must include \`docker-compose.compute-docker.yml\`.`;
+  }
+
+  return `Run \`docker pull ${image}\` on the Docker host used by the controller. If the registry is private, run \`docker login\` first and confirm \`DOCKER_WORKER_IMAGE\` exactly matches the published image.`;
+}
+
 async function runDockerCli(args: string[]): Promise<string> {
   const { stdout } = await execFileAsync('docker', args, {
     maxBuffer: 10 * 1024 * 1024,
@@ -123,7 +136,7 @@ export async function validateDockerEnvironment(params: {
         checks.push({
           id: 'worker_image',
           status: 'fail',
-          message: `Worker image ${params.image} is not available locally and could not be pulled: ${errorMessage(error)}`,
+          message: `Worker image ${params.image} is not available locally and could not be pulled. ${getDockerWorkerImageRemediation(params.image)} Docker reported: ${errorMessage(error)}`,
         });
       }
     }

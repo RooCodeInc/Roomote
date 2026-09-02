@@ -81,7 +81,26 @@ describe('validateDockerEnvironment', () => {
 
     expect(result.ok).toBe(false);
     expect(result.checks[1]?.status).toBe('fail');
+    expect(result.checks[1]?.message).toContain(
+      'docker build -f apps/worker/Dockerfile -t roomote-worker:local .',
+    );
     expect(result.checks[1]?.message).toContain('pull access denied');
+  });
+
+  it('gives registry authentication and pull guidance for a missing published image', async () => {
+    const image = 'registry.example.com/roomote/worker:v1';
+    const result = await validateDockerEnvironment({
+      image,
+      runDocker: async (args) => {
+        if (args[0] === 'version') return '28.0.1';
+        throw new Error('unauthorized');
+      },
+      fileExists: () => true,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.checks[1]?.message).toContain(`docker pull ${image}`);
+    expect(result.checks[1]?.message).toContain('docker login');
   });
 
   it('marks the archive check skipped when no path is configured and failed when missing', async () => {

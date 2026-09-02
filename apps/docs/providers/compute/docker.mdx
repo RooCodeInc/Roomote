@@ -148,15 +148,26 @@ one to a fix.
   Docker Engine service) and confirm the host running the controller can access
   the Docker socket. In production Compose, check the socket proxy container.
 - **Roomote couldn't find or pull the worker image.** Build or publish the
-  worker image configured in `DOCKER_WORKER_IMAGE` (for local development,
-  `pnpm dev` builds `roomote-worker:local`). For private registries, make sure
-  the host is logged in.
+  worker image configured in `DOCKER_WORKER_IMAGE`. For a source checkout, use
+  `pnpm dev`, or build the default local tag directly from the repository root:
+
+  ```sh
+  docker build -f apps/worker/Dockerfile -t roomote-worker:local .
+  ```
+
+  For a Compose deployment, include `docker-compose.compute-docker.yml` and run
+  the documented `docker compose ... up -d --build` command; the `worker-image`
+  service builds the configured tag before the controller starts. For a
+  deployment that reuses a prebuilt registry-qualified image instead of
+  building the source Compose service, run `docker pull "$DOCKER_WORKER_IMAGE"`
+  on the controller's Docker host and run `docker login` first when the
+  registry is private.
 - **A required host port is already in use.** Another process holds a port the
   sandbox needs. Stop it, or change the conflicting service's port, then retry.
 - **The worker release archive is missing.** The Docker provider installs the
-  worker from a local release archive. For local development, run
-  `pnpm dev --use-release` (or the worker-release build step) so the archive
-  exists before starting tasks.
+  worker from a local release archive. For local development, run `pnpm dev`
+  without `--use-release` so the local worker-release build step creates the
+  archive before starting tasks.
 - **The worker failed while contacting the Roomote API (`fetch failed`).**
   The container cannot reach the API URL from inside Docker. Verify
   `R_PUBLIC_URL`/the API address resolves from a container (often via

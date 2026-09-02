@@ -729,6 +729,26 @@ DOCKER_WORKER_IMAGE=roomote-worker:local
 DOCKER_WORKER_PLATFORM=linux/amd64
 ```
 
+When using the source Compose stack, always include
+`docker-compose.compute-docker.yml` in the `docker compose` command. Its
+`worker-image` service builds the configured local image before the controller
+starts. If the image needs to be rebuilt independently, run:
+
+```sh
+docker compose --env-file .env.production \
+  -f docker-compose.yml \
+  -f docker-compose.self-host.yml \
+  -f docker-compose.compute-docker.yml \
+  -f docker-compose.production.yml \
+  build worker-image
+```
+
+If you intentionally reuse a prebuilt registry-qualified
+`DOCKER_WORKER_IMAGE` with Compose `--no-build`, run
+`docker pull "$DOCKER_WORKER_IMAGE"` on the controller's Docker host and use
+`docker login` first for a private registry. The standard source Compose
+command uses `--build` and builds the configured tag locally instead.
+
 If you do not want the controller to access the host Docker socket, choose a
 hosted provider instead and omit `docker-compose.compute-docker.yml`:
 

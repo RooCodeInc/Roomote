@@ -87,7 +87,7 @@ function extractDockerDiagnosticReason(error: string): string | undefined {
     }
 
     if (
-      /pull access denied|Unable to find image|Error response from daemon|Cannot connect to the Docker daemon|failed to connect to the docker API|port is already allocated|fetch failed/i.test(
+      /^Docker worker image \S+ is not available locally and could not be pulled|pull access denied|Unable to find image|Error response from daemon|Cannot connect to the Docker daemon|failed to connect to the docker API|port is already allocated|fetch failed/i.test(
         block,
       )
     ) {
