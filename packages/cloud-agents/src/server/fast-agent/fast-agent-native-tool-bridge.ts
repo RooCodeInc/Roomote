@@ -19,7 +19,14 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS,
+  CALL_INTEGRATION_TOOL_TOOL,
+  FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS,
+  FIND_INTEGRATION_TOOLS_TOOL,
+  INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
+} from '@roomote/types';
 import { z } from 'zod';
 
 import {
@@ -374,12 +381,12 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Look up on-demand deployment MCP tools by server, name, or keywords. Returns each match's server id, name, description, and input schema so it can be called with call_integration_tool.",
+  description: ${JSON.stringify(FIND_INTEGRATION_TOOLS_TOOL.description)},
   args: {
-    integrationId: z.string().min(1).optional().describe("Exact server id from Deployment MCP Servers to list that server's tools"),
-    toolName: z.string().min(1).optional().describe("Exact tool name to fetch one tool's schema"),
-    query: z.string().min(1).optional().describe("Keywords matched against tool names and descriptions"),
-    limit: z.number().int().positive().max(25).optional(),
+    integrationId: z.string().min(1).optional().describe(${JSON.stringify(FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS.integrationId)}),
+    toolName: z.string().min(1).optional().describe(${JSON.stringify(FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS.toolName)}),
+    query: z.string().min(1).optional().describe(${JSON.stringify(FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS.query)}),
+    limit: z.number().int().positive().max(${INTEGRATION_TOOL_LOOKUP_MAX_LIMIT}).optional().describe(${JSON.stringify(FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS.limit)}),
   },
   execute: (args, context) => invoke("find_integration_tools", args, context),
 }
@@ -390,11 +397,11 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Call an on-demand deployment MCP tool by server id and tool name with arguments matching the schema returned by find_integration_tools.",
+  description: ${JSON.stringify(CALL_INTEGRATION_TOOL_TOOL.description)},
   args: {
-    integrationId: z.string().min(1).describe("Exact server id from Deployment MCP Servers"),
-    toolName: z.string().min(1).describe("Exact tool name on that server"),
-    args: z.record(z.string(), z.unknown()).optional().describe("Tool arguments matching the tool's input schema"),
+    integrationId: z.string().min(1).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.integrationId)}),
+    toolName: z.string().min(1).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.toolName)}),
+    args: z.record(z.string(), z.unknown()).optional().describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args)}),
   },
   execute: (args, context) => invoke("call_integration_tool", args, context),
 }

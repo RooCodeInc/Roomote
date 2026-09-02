@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
-  INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
   matchIntegrationTools,
 } from '@roomote/types';
@@ -41,44 +40,6 @@ type OnDemandMcpTool = {
   name: string;
   description?: string;
   inputSchema?: unknown;
-};
-
-export const findIntegrationToolsInputSchema = {
-  integrationId: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Exact on-demand server id from the connected integrations guidance',
-    ),
-  toolName: z
-    .string()
-    .min(1)
-    .optional()
-    .describe("Exact tool name to fetch one tool's input schema"),
-  query: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Keywords matched against tool names and descriptions'),
-  limit: z
-    .number()
-    .int()
-    .positive()
-    .max(INTEGRATION_TOOL_LOOKUP_MAX_LIMIT)
-    .optional(),
-};
-
-export const callIntegrationToolInputSchema = {
-  integrationId: z
-    .string()
-    .min(1)
-    .describe('Exact on-demand server id from find_integration_tools'),
-  toolName: z.string().min(1).describe('Exact tool name on that server'),
-  args: z
-    .record(z.unknown())
-    .optional()
-    .describe("Tool arguments matching the tool's input schema"),
 };
 
 // A tool call may legitimately run long; discovery must not. Lookups fan out
