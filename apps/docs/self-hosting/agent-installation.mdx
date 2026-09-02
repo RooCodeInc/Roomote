@@ -126,11 +126,11 @@ include:
 | Microsoft sign-in | `<origin>/api/auth/oauth2/callback/microsoft-entra-id` |
 | Microsoft Teams bot | `<origin>/api/webhooks/teams` |
 
-Quick Tunnels do not provide Roomote's wildcard preview hostnames. Do not claim
-public artifact, worker API, or wildcard-preview coverage on this path; it is
-for local Docker-compute evaluation. If the tunnel hostname changes, update
-`R_PUBLIC_URL`, recreate the Compose services, and update every provider redirect
-and webhook before testing again.
+Quick Tunnels do not provide Roomote's worker API or wildcard preview hostnames;
+this path is for local Docker-compute evaluation. Signed artifact view and raw
+links use the web route and work through the tunnel. If the tunnel hostname
+changes, update `R_PUBLIC_URL`, recreate the Compose services, and update every
+provider redirect and webhook before testing again.
 
 ## Dedicated server or production
 
