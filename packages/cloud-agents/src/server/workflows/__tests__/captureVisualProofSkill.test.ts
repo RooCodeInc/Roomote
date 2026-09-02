@@ -95,6 +95,22 @@ describe('Capture visual proof skill', () => {
     );
   });
 
+  it('requires real local state setup before blocking without permitting fabricated UI proof', () => {
+    const skillContent = read(
+      '../skills/standard/capture-visual-proof/SKILL.md',
+    );
+
+    expect(skillContent).toContain(
+      'attempt existing repository-supported demo seed or setup helpers, or create or update realistic records in the real local application database, before declaring proof blocked',
+    );
+    expect(skillContent).toContain(
+      'include any runner-owned database or auth actions explicitly in the proof brief',
+    );
+    expect(skillContent).toContain(
+      'never modify application source, patch UI components, inject hardcoded state, mock UI or network responses, manipulate DOM or rendered component state directly, fabricate screenshots, or bypass normal rendering',
+    );
+  });
+
   it('blocks proof honestly when the proof-runner subagent is unavailable', () => {
     const skillContent = read(
       '../skills/standard/capture-visual-proof/SKILL.md',
