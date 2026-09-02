@@ -23,11 +23,7 @@ import { WorkspaceHeader } from '@/components/layout';
 import { findDeploymentSetupSessionId } from '@/trpc/commands/setup/setup-session';
 import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionTaskTimeline } from './SessionTaskTimeline';
-import {
-  SessionHeaderExtras,
-  SessionWorkspace,
-  type SessionInfo,
-} from './SessionWorkspace';
+import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
 import { SessionReadTracker } from './SessionReadTracker';
 import { SetupAutomationRecommendationsCard } from './setup/SetupAutomationRecommendationsCard';
 import { SetupSandboxCard } from './setup/SetupSandboxCard';
@@ -168,12 +164,6 @@ export default async function SessionDetailPage({
                         },
                       }
                     : {})}
-                  headerExtras={
-                    <SessionHeaderExtras
-                      key="session-header-extras"
-                      status={unifiedSession.status}
-                    />
-                  }
                   {...(isSetupSession
                     ? { timelineExtras: setupTimelineExtras }
                     : {})}
@@ -189,7 +179,6 @@ export default async function SessionDetailPage({
                 <h1 className="min-w-0 flex-1 break-words text-sm font-medium @[600px]:truncate">
                   {unifiedSession.title}
                 </h1>
-                <SessionHeaderExtras status={unifiedSession.status} />
               </WorkspaceHeader>
               <SessionTaskTimeline
                 sessionId={unifiedSession.id}
