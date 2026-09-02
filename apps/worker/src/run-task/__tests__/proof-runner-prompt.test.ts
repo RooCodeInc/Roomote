@@ -93,6 +93,15 @@ describe('createProofRunnerAgentPrompt', () => {
       'When the brief explicitly authorizes a transparent simulation',
     );
     expect(prompt).toContain(
+      'This scope boundary is not a blanket prohibition on source modifications or simulated payload, DOM, or rendered state',
+    );
+    expect(prompt).toContain(
+      'the caller, not the proof runner, makes and discloses any application-source changes',
+    );
+    expect(prompt).not.toContain(
+      'Do not create source modifications or simulate payload/DOM state.',
+    );
+    expect(prompt).toContain(
       'For every simulation, list each mock, source modification, hardcoded value, network response, DOM arrangement, or rendered-state setup supplied by the brief.',
     );
     expect(prompt).toContain(
