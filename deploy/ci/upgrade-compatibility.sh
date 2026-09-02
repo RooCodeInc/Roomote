@@ -486,7 +486,7 @@ compose up \
   --detach \
   --wait \
   --wait-timeout 600 \
-  postgres redis minio minio-init db-migrate api web controller bullmq preview-proxy
+  postgres redis minio minio-init db-migrate api web controller bullmq gbrain preview-proxy
 
 migration_container="$(compose ps --all --quiet db-migrate)"
 [ -n "$migration_container" ] || {

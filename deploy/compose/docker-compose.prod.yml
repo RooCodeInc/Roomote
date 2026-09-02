@@ -551,6 +551,17 @@ services:
       - gbrain_data:/data
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      # The image is bun-based and ships no curl or wget.
+      test:
+        [
+          'CMD-SHELL',
+          'bun -e "const r = await fetch(\"http://127.0.0.1:8931/health\"); process.exit(r.ok ? 0 : 1)"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
 
   # Self-run embedding model for the Brain (opt-in, CPU).
   # Enable with the `local-inference` compose profile. The upstream URLs are

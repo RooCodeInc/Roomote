@@ -17,6 +17,7 @@ const read = (path) => readFileSync(join(root, path), 'utf8');
 const catalog = JSON.parse(read('deploy/deployment-catalog.json'));
 const installer = read('deploy/install.sh');
 const deployer = read('deploy/scripts/deploy.sh');
+const upgradeCompatibility = read('deploy/ci/upgrade-compatibility.sh');
 const productionEnvExample = read('.env.production.example');
 
 function fail(message) {
@@ -87,6 +88,11 @@ assert(
   digitalOceanTerraform.includes('local.preview_domain == var.dns_zone') &&
     digitalOceanTerraform.includes('var.domain == var.dns_zone'),
   'DigitalOcean Terraform: zone-apex domains must map to "@"/"*" record names',
+);
+assert(
+  upgradeCompatibility.includes('COMPOSE_PROFILES=local-postgres,brain') &&
+    upgradeCompatibility.includes('bullmq gbrain preview-proxy'),
+  'upgrade compatibility: the Brain profile must boot gbrain explicitly',
 );
 
 function commandText(command) {
@@ -250,6 +256,10 @@ function validateComposeShape(shape) {
       assert(
         overrideConfig.services.gbrain?.image === overrideImage,
         'installer-production: explicit GBRAIN_IMAGE must override the matching release default',
+      );
+      assert(
+        config.services.gbrain?.healthcheck?.test?.length,
+        'installer-production: gbrain must have a healthcheck for upgrade validation',
       );
     }
 
