@@ -95,6 +95,7 @@ import {
   type NonTaskOpenCodeCompletedMessage,
   type NonTaskOpenCodeAssistantMessage,
   type NonTaskOpenCodeNativeSteer,
+  type NonTaskOpenCodeTaskPart,
 } from '../non-task-provider-usage';
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import { RemoteFastAgentSettingsSkillSource } from './fast-agent-settings-skill-source';
@@ -1980,6 +1981,69 @@ export async function answerFastAgentQuestion({
       true,
     );
   };
+  const canonicalSubagentEvents = new Map<
+    string,
+    { eventId: string; turnSeq: number }
+  >();
+  const persistOpenCodeTaskPart = async (part: NonTaskOpenCodeTaskPart) => {
+    const eventKey = `${part.sessionId}:${part.messageId}:${part.toolCallId}`;
+    let canonicalEvent = canonicalSubagentEvents.get(eventKey);
+    if (!canonicalEvent) {
+      canonicalEvent = allocateCanonicalEvent(
+        `subagent:${part.messageId}:${part.partId}`,
+      );
+      canonicalSubagentEvents.set(eventKey, canonicalEvent);
+    }
+
+    const terminal = part.status !== 'in_progress';
+    const rawOutput = part.output ?? part.error ?? '';
+    const { text: output, truncation } = truncateAcpOutputText(
+      typeof rawOutput === 'string'
+        ? rawOutput
+        : stringifyFastAgentToolOutput(rawOutput),
+      FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS,
+    );
+    const truncated = truncation !== null;
+    const payload = {
+      sessionId: part.sessionId,
+      turnId: part.messageId,
+      toolCallId: part.toolCallId,
+      kind: 'subagent',
+      title: part.title,
+      status: part.status,
+      isExecute: false,
+      isRead: false,
+      isMcp: false,
+      mcpServerName: null,
+      mcpToolName: null,
+      command: null,
+      isSubagentSpawn: true,
+      senderThreadId: part.sessionId,
+      receiverThreadIds: [],
+      agentType: part.agentType ?? null,
+      rawInput: part.input,
+      ...(terminal ? { exitCode: null, output } : {}),
+    };
+
+    await persistCanonicalMessage({
+      ...canonicalEvent,
+      turnId,
+      ts: Date.now(),
+      eventType: terminal
+        ? ACP_ENVELOPE_EVENT_TYPES.ToolResult
+        : ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+      role: 'tool',
+      contentBlocks: terminal && output ? [{ type: 'text', text: output }] : [],
+      metadata: {
+        visibleInTranscript: true,
+        ...(terminal ? { truncated } : {}),
+      },
+      payload,
+      source: conversation.surface,
+      nativeSessionId: part.sessionId,
+      nativeMessageId: part.messageId,
+    });
+  };
 
   const replaceInferenceRetryReply = async (
     reply: FastAgentReply,
@@ -3783,6 +3847,7 @@ export async function answerFastAgentQuestion({
                           ),
                         );
                       },
+                      onParentTaskPartUpdated: persistOpenCodeTaskPart,
                     },
                   );
                 const result = await resultPromise;
