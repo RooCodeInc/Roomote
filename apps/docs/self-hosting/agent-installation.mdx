@@ -20,6 +20,9 @@ Add a random setup token so the public setup page is not open to other visitors:
 SETUP_TOKEN=<random-value>
 ```
 
+On an ARM machine, also set `DOCKER_WORKER_PLATFORM=linux/arm64`. The Compose
+overlay already defaults to `linux/amd64` on x86-64 machines.
+
 Start the local self-host stack:
 
 ```sh
