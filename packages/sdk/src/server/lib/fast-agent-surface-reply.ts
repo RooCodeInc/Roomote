@@ -19,10 +19,7 @@ import {
 import {
   createFastAgentSlackLiveTaskLauncher,
   createFastAgentSlackSessionActivity,
-  getSlackThreadReplyFooterMessageTs,
   postSlackThreadMessageWithFooterText,
-  withSlackThreadReplyFooterLock,
-  buildSlackThreadReplyFooterBlock,
   SlackNotifier,
   ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
 } from '@roomote/slack';
@@ -36,6 +33,12 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import { findTeamsConversationRoute } from '../automations/destination';
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
+import {
+  createDiscordFastReplyReplacer,
+  createSlackFastReplyReplacer,
+  createTeamsFastReplyReplacer,
+  createTelegramFastReplyReplacer,
+} from './fast-agent-reply-replacement';
 import {
   admitFastAgentHumanFollowUp,
   persistFastAgentInlineHumanTurn,
@@ -277,51 +280,14 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           });
           return { messageId: messageTs };
         },
-        replaceReply: async (handle, { message }) => {
-          // Keep the sticky footer when the edited message is its current
-          // carrier; the lookup and edit share the footer lock so a
-          // concurrent relocation cannot slip in between them.
-          const updated = await withSlackThreadReplyFooterLock({
-            channel: conversation.replyTarget.channelId,
-            threadTs: threadId,
-            fn: async () => {
-              const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
-                conversation.replyTarget.channelId,
-                threadId,
-              ).catch(() => null);
-              return slack.updateMessage({
-                channel: conversation.replyTarget.channelId,
-                ts: handle.messageId,
-                message: {
-                  text: message,
-                  blocks: [
-                    { type: 'markdown', text: message },
-                    ...(footerMessageTs === handle.messageId
-                      ? [
-                          buildSlackThreadReplyFooterBlock({
-                            footerText: buildFastSessionReplyFooterText({
-                              provider: 'slack',
-                              sessionId: session.id,
-                              ...footerContext,
-                            }),
-                          }),
-                        ]
-                      : []),
-                  ],
-                },
-              });
-            },
-          });
-          if (!updated) {
-            throw new Error('Slack did not update the Fast reply.');
-          }
-          await recordFastAgentConversationMessageBestEffort({
-            sessionId: session.id,
-            conversation,
-            messageId: handle.messageId,
-          });
-          return handle;
-        },
+        replaceReply: createSlackFastReplyReplacer({
+          slack,
+          conversation,
+          channelId: conversation.replyTarget.channelId,
+          threadTs: threadId,
+          sessionId: session.id,
+          footerContext,
+        }),
       },
     };
   }
@@ -340,69 +306,76 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           text: params.question,
         });
 
-    return {
-      conversation,
-      adapter: {
-        launchTask: createFastAgentDiscordTaskLauncher({
-          provider,
-          userId: params.userId,
-          conversation,
-        }),
-        postReply: async ({ message }) => {
-          const quote = pendingQuote;
-          pendingQuote = null;
-          const footerText = buildFastSessionReplyFooterText({
-            provider: 'discord',
-            sessionId: session.id,
-            ...footerContext,
-          });
-          const bodyText = quote ? `${quote}\n\n${message}` : message;
-          const textWithFooter = `${bodyText}\n\n${footerText}`;
-          const channelId = conversation.replyTarget.channelId;
-          const footerStateThreadId =
-            conversation.replyTarget.threadId ?? 'root';
-          const footerMessageChannelId =
-            conversation.replyTarget.threadId ?? channelId;
+    const adapter: FastAgentTurnAdapter = {
+      launchTask: createFastAgentDiscordTaskLauncher({
+        provider,
+        userId: params.userId,
+        conversation,
+      }),
+      postReply: async ({ message }) => {
+        const quote = pendingQuote;
+        pendingQuote = null;
+        const footerText = buildFastSessionReplyFooterText({
+          provider: 'discord',
+          sessionId: session.id,
+          ...footerContext,
+        });
+        const bodyText = quote ? `${quote}\n\n${message}` : message;
+        const textWithFooter = `${bodyText}\n\n${footerText}`;
+        const channelId = conversation.replyTarget.channelId;
+        const footerStateThreadId = conversation.replyTarget.threadId ?? 'root';
+        const footerMessageChannelId =
+          conversation.replyTarget.threadId ?? channelId;
 
-          const posted = await deliverManagedThreadReplyFooter({
-            provider: 'discord',
-            providerLabel: 'Discord',
-            channelId,
-            footerStateThreadId,
-            lockKey: `discord:thread_reply_footer_lock:${channelId}:${footerStateThreadId}`,
-            logRef: `fast session ${session.id}`,
-            logContext: 'fastAgentSurfaceReply',
-            postReplyWithFooter: async () => {
-              const result = await provider.postMessage({
-                ...conversation.replyTarget,
-                text: textWithFooter,
-                textFormat: 'markdown',
-              });
-              return {
-                messageId: result.lastTextMessageId ?? result.messageId,
-                textWithoutFooter: getDiscordFooterlessFinalChunk({
-                  textWithFooter,
-                  footerText,
-                }),
-              };
-            },
-            clearPreviousFooter: async (previousFooterRecord) => {
-              await provider.editMessage({
-                channelId: footerMessageChannelId,
-                messageId: previousFooterRecord.messageId,
-                text: previousFooterRecord.textWithoutFooter,
-              });
-            },
-          });
-          await recordFastAgentConversationMessageBestEffort({
-            sessionId: session.id,
-            conversation,
-            messageId: posted.messageId,
-          });
-          return { messageId: posted.messageId };
-        },
+        const posted = await deliverManagedThreadReplyFooter({
+          provider: 'discord',
+          providerLabel: 'Discord',
+          channelId,
+          footerStateThreadId,
+          lockKey: `discord:thread_reply_footer_lock:${channelId}:${footerStateThreadId}`,
+          logRef: `fast session ${session.id}`,
+          logContext: 'fastAgentSurfaceReply',
+          postReplyWithFooter: async () => {
+            const result = await provider.postMessage({
+              ...conversation.replyTarget,
+              text: textWithFooter,
+              textFormat: 'markdown',
+            });
+            return {
+              messageId: result.lastTextMessageId ?? result.messageId,
+              textWithoutFooter: getDiscordFooterlessFinalChunk({
+                textWithFooter,
+                footerText,
+              }),
+            };
+          },
+          clearPreviousFooter: async (previousFooterRecord) => {
+            await provider.editMessage({
+              channelId: footerMessageChannelId,
+              messageId: previousFooterRecord.messageId,
+              text: previousFooterRecord.textWithoutFooter,
+            });
+          },
+        });
+        await recordFastAgentConversationMessageBestEffort({
+          sessionId: session.id,
+          conversation,
+          messageId: posted.messageId,
+        });
+        return { messageId: posted.messageId };
       },
     };
+    adapter.replaceReply = createDiscordFastReplyReplacer({
+      provider,
+      conversation,
+      channelId: conversation.replyTarget.channelId,
+      threadId: conversation.replyTarget.threadId,
+      sessionId: session.id,
+      footerContext,
+      postReplacement: (text) =>
+        adapter.postReply({ purpose: 'closeout', message: text }),
+    });
+    return { conversation, adapter };
   }
 
   if (conversation.surface === 'teams') {
@@ -445,21 +418,14 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           });
           return { messageId: posted.messageId };
         },
-        replaceReply: async (handle, { message }) => {
-          await provider.updateMessage({
-            channelId: conversation.replyTarget.channelId,
-            messageId: handle.messageId,
-            serviceUrl,
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id, ...footerContext })}`,
-            textFormat: 'markdown',
-          });
-          await recordFastAgentConversationMessageBestEffort({
-            sessionId: session.id,
-            conversation,
-            messageId: handle.messageId,
-          });
-          return handle;
-        },
+        replaceReply: createTeamsFastReplyReplacer({
+          provider,
+          conversation,
+          channelId: conversation.replyTarget.channelId,
+          serviceUrl,
+          sessionId: session.id,
+          footerContext,
+        }),
       },
     };
   }
@@ -495,20 +461,13 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           });
           return { messageId: posted.messageId };
         },
-        replaceReply: async (handle, { message }) => {
-          await provider.editMessageText({
-            channelId: conversation.replyTarget.channelId,
-            messageId: handle.messageId,
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id, ...footerContext })}`,
-            textFormat: 'markdown',
-          });
-          await recordFastAgentConversationMessageBestEffort({
-            sessionId: session.id,
-            conversation,
-            messageId: handle.messageId,
-          });
-          return handle;
-        },
+        replaceReply: createTelegramFastReplyReplacer({
+          provider,
+          conversation,
+          channelId: conversation.replyTarget.channelId,
+          sessionId: session.id,
+          footerContext,
+        }),
       },
     };
   }
