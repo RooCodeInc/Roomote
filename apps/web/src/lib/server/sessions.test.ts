@@ -913,6 +913,93 @@ describe('unified Session queries', () => {
     expect(taskEvent).not.toHaveProperty('task.pullRequests');
   });
 
+  it('paginates late timeline events with equal timestamps regardless of id order', async () => {
+    const owner = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      fastConversationId: conversation!.id,
+    });
+    const auth = { userId: owner.id, isAdmin: false };
+
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: 'same-time-z',
+      turnId: 'turn-1',
+      turnSeq: 0,
+      ts: 100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'First' }],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+    });
+
+    const first = await getSessionTimeline(auth, session.id);
+    expect(first?.events.map((event) => event.id)).toEqual([
+      'fast:same-time-z',
+    ]);
+    expect(first?.cursor).toEqual({
+      at: 100,
+      seenIdsAtTimestamp: ['fast:same-time-z'],
+    });
+
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: 'same-time-a',
+      turnId: 'turn-1',
+      turnSeq: 1,
+      ts: 100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Second' }],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+    });
+
+    const second = await getSessionTimeline(auth, session.id, first!.cursor);
+    expect(second?.events.map((event) => event.id)).toEqual([
+      'fast:same-time-a',
+    ]);
+    expect(second?.cursor).toEqual({
+      at: 100,
+      seenIdsAtTimestamp: ['fast:same-time-a', 'fast:same-time-z'],
+    });
+
+    await expect(
+      getSessionTimeline(auth, session.id, second!.cursor),
+    ).resolves.toEqual({ events: [], cursor: second!.cursor });
+
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: 'next-time',
+      turnId: 'turn-1',
+      turnSeq: 2,
+      ts: 101,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Later' }],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+    });
+
+    const third = await getSessionTimeline(auth, session.id, second!.cursor);
+    expect(third?.events.map((event) => event.id)).toEqual(['fast:next-time']);
+    expect(third?.cursor).toEqual({
+      at: 101,
+      seenIdsAtTimestamp: ['fast:next-time'],
+    });
+  });
+
   it('hydrates uploaded artifacts for every associated task without collapsing shared paths', async () => {
     const owner = await userFactory.create();
     const session = await sessionFactory.create({
