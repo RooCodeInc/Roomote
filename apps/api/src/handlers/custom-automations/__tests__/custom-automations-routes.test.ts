@@ -210,6 +210,63 @@ describe('custom-automations MCP routes', () => {
       });
     });
 
+    it('returns compact automation records without changing the API response', async () => {
+      const authContext: AuthTokenContext = {
+        userId: 'admin-1',
+        tokenType: 'auth',
+        version: 1,
+      };
+      const { handler } = registerApiHostedTool({
+        userId: 'admin-1',
+        authContext,
+      });
+      mockListCustomAutomations.mockResolvedValue([
+        {
+          id: 'automation-1',
+          name: 'Nightly report',
+          prompt: 'Large private prompt',
+          enabled: true,
+          scheduleMode: 'daily',
+          cronExpression: null,
+          model: null,
+          environmentId: ENVIRONMENT_ID,
+          allRepositories: false,
+          executionMode: 'sandbox_task',
+          target: {},
+          createdByUser: { id: 'admin-1', email: 'admin@example.com' },
+          lastError: 'previous failure',
+        },
+      ]);
+
+      const toolResult = (await handler({ action: 'list' })) as {
+        structuredContent: unknown;
+      };
+      expect(toolResult.structuredContent).toEqual({
+        automations: [
+          {
+            id: 'automation-1',
+            name: 'Nightly report',
+            enabled: true,
+            schedule: 'daily',
+            model: null,
+            environmentId: ENVIRONMENT_ID,
+          },
+        ],
+      });
+
+      const { app } = createApp();
+      const apiResult = await app.request('/custom-automations');
+      expect(await apiResult.json()).toMatchObject({
+        automations: [
+          {
+            prompt: 'Large private prompt',
+            createdByUser: { email: 'admin@example.com' },
+            lastError: 'previous failure',
+          },
+        ],
+      });
+    });
+
     it('routes create actions through the existing custom automation domain handler', async () => {
       const authContext: AuthTokenContext = {
         userId: 'admin-1',

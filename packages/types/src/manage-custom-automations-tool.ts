@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
-import { SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES } from './background-agents';
+import {
+  isBackgroundAutomationUserTargetKind,
+  SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
+} from './background-agents';
 import { ALL_REPOSITORIES, FAST_EXECUTION } from './constants';
 
 export const MANAGE_CUSTOM_AUTOMATIONS_ACTIONS = [
@@ -80,6 +83,133 @@ export type ManageCustomAutomationsRequest = {
 export type ManageCustomAutomationsRequestResult =
   | { ok: true; request: ManageCustomAutomationsRequest }
   | { ok: false; error: string };
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function pickDefined(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): Record<string, unknown> {
+  return Object.fromEntries(
+    keys
+      .filter((key) => value[key] !== undefined)
+      .map((key) => [key, value[key]]),
+  );
+}
+
+function compactAutomation(value: unknown): Record<string, unknown> {
+  const automation = asRecord(value);
+  if (!automation) return {};
+
+  const result = pickDefined(automation, [
+    'id',
+    'name',
+    'enabled',
+    'model',
+    'environmentId',
+  ]);
+  const schedule =
+    automation.scheduleMode === 'cron'
+      ? automation.cronExpression
+      : automation.scheduleMode;
+  if (schedule !== undefined) result.schedule = schedule;
+
+  const target = asRecord(automation.target);
+  if (target?.provider !== undefined) {
+    result.targetProvider = target.provider;
+    const directMessage = isBackgroundAutomationUserTargetKind(
+      target.targetKind,
+    );
+    result.targetMode = directMessage ? 'direct_message' : 'channel';
+    if (!directMessage && target.externalRef !== undefined) {
+      result.targetChannelId = target.externalRef;
+    }
+  }
+
+  return result;
+}
+
+function compactScheduleResolution(value: unknown): Record<string, unknown> {
+  const resolution = asRecord(value);
+  return resolution
+    ? pickDefined(resolution, [
+        'status',
+        'cronExpression',
+        'summary',
+        'clarification',
+        'timeZone',
+        'nextRunAt',
+      ])
+    : {};
+}
+
+/**
+ * Reduce the authoritative API payload to the fields an agent needs for its
+ * next call or user-facing report. API and UI consumers keep the full records.
+ */
+export function compactManageCustomAutomationsResult(
+  action: ManageCustomAutomationsInput['action'],
+  payload: unknown,
+): Record<string, unknown> {
+  const result = asRecord(payload) ?? {};
+
+  if (
+    result.status === 'ambiguous' &&
+    (action === 'create' || action === 'update')
+  ) {
+    return {
+      resolutionStatus: 'ambiguous',
+      ...pickDefined(result, ['clarification']),
+      ...(result.resolution
+        ? { resolution: compactScheduleResolution(result.resolution) }
+        : {}),
+    };
+  }
+  if (result.error !== undefined) {
+    return pickDefined(result, ['outcome', 'error', 'reason', 'clarification']);
+  }
+
+  switch (action) {
+    case 'list':
+      return {
+        automations: Array.isArray(result.automations)
+          ? result.automations.map(compactAutomation)
+          : [],
+      };
+    case 'list_models':
+      return {
+        models: Array.isArray(result.models)
+          ? result.models.map((model) => {
+              const record = asRecord(model);
+              return record ? pickDefined(record, ['id', 'displayName']) : {};
+            })
+          : [],
+        ...pickDefined(result, ['defaultModelId']),
+      };
+    case 'resolve_schedule':
+      return compactScheduleResolution(result);
+    case 'create':
+    case 'update':
+      return {
+        automation: compactAutomation(result.automation),
+        ...(result.resolution
+          ? { resolution: compactScheduleResolution(result.resolution) }
+          : {}),
+      };
+    case 'delete': {
+      const deleted = asRecord(result.deleted);
+      return {
+        deleted: deleted ? pickDefined(deleted, ['id', 'name']) : {},
+      };
+    }
+    case 'run_now':
+      return pickDefined(result, ['outcome', 'taskId', 'reason', 'error']);
+  }
+}
 
 /**
  * Single source of truth for mapping a manage_custom_automations call onto
