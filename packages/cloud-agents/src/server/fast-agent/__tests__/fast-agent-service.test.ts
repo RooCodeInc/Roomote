@@ -5524,6 +5524,88 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('upserts parent OpenCode task parts as one canonical subagent lifecycle', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await options.onParentTaskPartUpdated({
+          partId: 'task-part-1',
+          messageId: 'assistant-message-1',
+          sessionId: 'opencode-session-1',
+          toolCallId: 'task-call-1',
+          title: 'Review the implementation',
+          status: 'in_progress',
+          input: {
+            description: 'Review the implementation',
+            prompt: 'Inspect the relevant code.',
+            subagent_type: 'general',
+          },
+          childSessionId: 'opencode-subagent-1',
+          agentType: 'general',
+        });
+        await options.onParentTaskPartUpdated({
+          partId: 'task-part-1',
+          messageId: 'assistant-message-1',
+          sessionId: 'opencode-session-1',
+          toolCallId: 'task-call-1',
+          title: 'Review the implementation',
+          status: 'completed',
+          input: {
+            description: 'Review the implementation',
+            prompt: 'Inspect the relevant code.',
+            subagent_type: 'general',
+          },
+          output: 'Implementation looks correct.',
+          childSessionId: 'opencode-subagent-1',
+          agentType: 'general',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks(),
+    });
+
+    const subagentWrites = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .filter((message) => message.payload?.kind === 'subagent');
+    expect(subagentWrites).toHaveLength(2);
+    expect(subagentWrites[0]).toMatchObject({
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+      metadata: { visibleInTranscript: true },
+      nativeSessionId: 'opencode-session-1',
+      nativeMessageId: 'assistant-message-1',
+      payload: {
+        toolCallId: 'task-call-1',
+        kind: 'subagent',
+        status: 'in_progress',
+        isSubagentSpawn: true,
+        senderThreadId: 'opencode-session-1',
+        receiverThreadIds: ['opencode-subagent-1'],
+        agentType: 'general',
+        rawInput: {
+          prompt: 'Inspect the relevant code.',
+          subagent_type: 'general',
+        },
+      },
+    });
+    expect(subagentWrites[1]).toMatchObject({
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      metadata: { visibleInTranscript: true, truncated: false },
+      contentBlocks: [{ type: 'text', text: 'Implementation looks correct.' }],
+      payload: {
+        toolCallId: 'task-call-1',
+        kind: 'subagent',
+        status: 'completed',
+        output: 'Implementation looks correct.',
+      },
+    });
+    expect(subagentWrites[1]?.eventId).toBe(subagentWrites[0]?.eventId);
+    expect(subagentWrites[1]?.turnSeq).toBe(subagentWrites[0]?.turnSeq);
+  });
+
   it('posts and mirrors a model-authored kickoff before opening the launch gate', async () => {
     const order: string[] = [];
     const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {

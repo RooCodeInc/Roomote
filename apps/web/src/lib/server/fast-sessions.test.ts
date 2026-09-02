@@ -539,6 +539,52 @@ describe('Fast session queries', () => {
     expect(payload.output).toContain('[output truncated');
   });
 
+  it('returns a persisted canonical subagent row in cold transcript history', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'cold-subagent-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:subagent:assistant-1:part-1',
+      turnSeq: 1,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      role: 'tool',
+      payload: {
+        toolCallId: 'task-call-1',
+        kind: 'subagent',
+        title: 'Review the implementation',
+        status: 'completed',
+        isSubagentSpawn: true,
+        senderThreadId: 'opencode-session-1',
+        receiverThreadIds: ['opencode-subagent-1'],
+        agentType: 'general',
+        output: 'Implementation looks correct.',
+      },
+    });
+
+    const result = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(result?.messages).toEqual([
+      expect.objectContaining({
+        eventId: 'turn-1:subagent:assistant-1:part-1',
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        metadata: { visibleInTranscript: true },
+        payload: expect.objectContaining({
+          kind: 'subagent',
+          status: 'completed',
+          agentType: 'general',
+          output: 'Implementation looks correct.',
+        }),
+      }),
+    ]);
+  });
+
   it('windows long transcripts to whole turns and flags older messages', async () => {
     const owner = await userFactory.create();
     const session = await createFastSession({

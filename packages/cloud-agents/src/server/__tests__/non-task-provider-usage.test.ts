@@ -317,6 +317,81 @@ describe('resolveOpenCodeSmallModel', () => {
           },
         };
         yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'task-part-1',
+              messageID: 'assistant-message-1',
+              sessionID: 'session-1',
+              type: 'tool' as const,
+              callID: 'task-call-1',
+              tool: 'task',
+              state: {
+                status: 'running' as const,
+                title: 'Check the implementation',
+                input: {
+                  description: 'Review the implementation',
+                  prompt: 'Inspect the relevant code.',
+                  subagent_type: 'general',
+                },
+                metadata: { sessionId: 'subagent-session-1' },
+              },
+            },
+          },
+        };
+        yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'ignored-child-task',
+              messageID: 'child-message-1',
+              sessionID: 'subagent-session-1',
+              type: 'tool' as const,
+              callID: 'child-task-call',
+              tool: 'task',
+              state: { status: 'running' as const, input: {} },
+            },
+          },
+        };
+        yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'ignored-parent-tool',
+              messageID: 'assistant-message-1',
+              sessionID: 'session-1',
+              type: 'tool' as const,
+              callID: 'bash-call-1',
+              tool: 'bash',
+              state: { status: 'completed' as const, input: {} },
+            },
+          },
+        };
+        yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'task-part-1',
+              messageID: 'assistant-message-1',
+              sessionID: 'session-1',
+              type: 'tool' as const,
+              callID: 'task-call-1',
+              tool: 'task',
+              state: {
+                status: 'completed' as const,
+                title: 'Check the implementation',
+                input: {
+                  description: 'Review the implementation',
+                  prompt: 'Inspect the relevant code.',
+                  subagent_type: 'general',
+                },
+                output: 'Implementation looks correct.',
+                metadata: { sessionId: 'subagent-session-1' },
+              },
+            },
+          },
+        };
+        yield {
           type: 'session.created',
           properties: {
             sessionID: 'subagent-session-1',
@@ -354,6 +429,7 @@ describe('resolveOpenCodeSmallModel', () => {
     const onAssistantMessageStarted = vi.fn();
     const onAssistantMessageCompleted = vi.fn();
     const onSubagentSessionReady = vi.fn(() => markSubagentReady());
+    const onParentTaskPartUpdated = vi.fn();
     const session: { id?: string } = {};
 
     await expect(
@@ -381,6 +457,7 @@ describe('resolveOpenCodeSmallModel', () => {
           onPromptStarted,
           onSessionReady,
           onSubagentSessionReady,
+          onParentTaskPartUpdated,
           permission: FAST_AGENT_SESSION_PERMISSIONS,
           promptOnlySubagents: true,
         },
@@ -410,6 +487,30 @@ describe('resolveOpenCodeSmallModel', () => {
     expect(onPromptStarted).toHaveBeenCalledOnce();
     expect(onSessionReady).toHaveBeenCalledWith('session-1');
     expect(onSubagentSessionReady).toHaveBeenCalledWith('subagent-session-1');
+    expect(onParentTaskPartUpdated).toHaveBeenCalledTimes(2);
+    expect(onParentTaskPartUpdated).toHaveBeenNthCalledWith(1, {
+      partId: 'task-part-1',
+      messageId: 'assistant-message-1',
+      sessionId: 'session-1',
+      toolCallId: 'task-call-1',
+      title: 'Check the implementation',
+      status: 'in_progress',
+      input: {
+        description: 'Review the implementation',
+        prompt: 'Inspect the relevant code.',
+        subagent_type: 'general',
+      },
+      childSessionId: 'subagent-session-1',
+      agentType: 'general',
+    });
+    expect(onParentTaskPartUpdated).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        partId: 'task-part-1',
+        status: 'completed',
+        output: 'Implementation looks correct.',
+      }),
+    );
     expect(onModelResolved.mock.invocationCallOrder[0]!).toBeLessThan(
       onPromptStarted.mock.invocationCallOrder[0]!,
     );

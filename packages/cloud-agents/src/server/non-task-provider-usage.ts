@@ -273,6 +273,20 @@ export type NonTaskOpenCodeNativeSteer = (input: {
   files?: NonTaskPromptFile[];
 }) => Promise<void>;
 
+export type NonTaskOpenCodeTaskPart = {
+  partId: string;
+  messageId: string;
+  sessionId: string;
+  toolCallId: string;
+  title: string;
+  status: 'in_progress' | 'completed' | 'failed';
+  input: Record<string, unknown>;
+  output?: unknown;
+  error?: unknown;
+  childSessionId?: string;
+  agentType?: string;
+};
+
 export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
   env?: Partial<Record<string, string>>;
@@ -291,6 +305,9 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   onNativeSteerClosed?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
+  onParentTaskPartUpdated?: (
+    part: NonTaskOpenCodeTaskPart,
+  ) => Promise<void> | void;
   permission?: PermissionRuleset;
   promptOnlySubagents?: boolean;
   signal?: AbortSignal;
@@ -370,6 +387,58 @@ function asFiniteNumber(value: unknown): number | undefined {
   }
 
   return undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function normalizeParentOpenCodeTaskPart(
+  value: unknown,
+  parentSessionId: string,
+): NonTaskOpenCodeTaskPart | undefined {
+  const part = asRecord(value);
+  if (
+    part?.type !== 'tool' ||
+    part.tool !== 'task' ||
+    part.sessionID !== parentSessionId
+  ) {
+    return undefined;
+  }
+
+  const partId = asString(part.id);
+  const messageId = asString(part.messageID);
+  if (!partId || !messageId) return undefined;
+
+  const state = asRecord(part.state);
+  const input = asRecord(state?.input) ?? {};
+  const metadata = asRecord(state?.metadata);
+  const rawStatus = asString(state?.status);
+  const childSessionId =
+    asString(metadata?.sessionId) ?? asString(metadata?.jobId);
+  const agentType = asString(input.subagent_type);
+  const status =
+    rawStatus === 'completed'
+      ? 'completed'
+      : ['error', 'failed', 'cancelled', 'canceled'].includes(rawStatus ?? '')
+        ? 'failed'
+        : 'in_progress';
+
+  return {
+    partId,
+    messageId,
+    sessionId: parentSessionId,
+    toolCallId: asString(part.callID) ?? partId,
+    title: asString(state?.title) ?? 'task',
+    status,
+    input,
+    ...(state && 'output' in state ? { output: state.output } : {}),
+    ...(state && 'error' in state ? { error: state.error } : {}),
+    ...(childSessionId ? { childSessionId } : {}),
+    ...(agentType ? { agentType } : {}),
+  };
 }
 
 function openCodeTimestampToDate(value: unknown): Date | undefined {
@@ -865,6 +934,9 @@ async function runNonTaskSdkPrompt(
     ) => Promise<void> | void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
+    onParentTaskPartUpdated?: (
+      part: NonTaskOpenCodeTaskPart,
+    ) => Promise<void> | void;
     permission?: PermissionRuleset;
     preserveReasoning?: boolean;
     promptOnlySubagents?: boolean;
@@ -1049,6 +1121,7 @@ async function runNonTaskSdkPrompt(
       options.onAssistantMessageStarted ||
       options.onAssistantMessageCompleted ||
       options.onSubagentSessionReady ||
+      options.onParentTaskPartUpdated ||
       options.trackSessionTreeUsage,
     );
 
@@ -1079,6 +1152,19 @@ async function runNonTaskSdkPrompt(
                 } catch (error) {
                   rejectSessionError(error);
                   return;
+                }
+              } else if (event.type === 'message.part.updated') {
+                const taskPart = normalizeParentOpenCodeTaskPart(
+                  event.properties.part,
+                  sessionId,
+                );
+                if (taskPart) {
+                  try {
+                    await options.onParentTaskPartUpdated?.(taskPart);
+                  } catch (error) {
+                    rejectSessionError(error);
+                    return;
+                  }
                 }
               } else if (
                 event.type === 'message.updated' &&
@@ -1564,6 +1650,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       onMessageCompleted: options.onMessageCompleted,
       onSessionReady: options.onSessionReady,
       onSubagentSessionReady: options.onSubagentSessionReady,
+      onParentTaskPartUpdated: options.onParentTaskPartUpdated,
       permission: options.permission,
       preserveReasoning: true,
       promptOnlySubagents: options.promptOnlySubagents,
