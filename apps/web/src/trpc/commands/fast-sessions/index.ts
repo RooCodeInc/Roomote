@@ -1,3 +1,5 @@
+export { getFastSessionComposerSuggestionCommand } from './composer-suggestion';
+
 import { randomUUID } from 'node:crypto';
 import { after } from 'next/server';
 
@@ -14,7 +16,9 @@ import {
 } from '@roomote/cloud-agents/server';
 import {
   buildFastAgentSurfaceReplyDelivery,
+  persistFastAgentInlineHumanTurn,
   resolveUserMcpServerConfigs,
+  wakeFastAgentParentEventNow,
   type FastAgentSurfaceReplyDelivery,
 } from '@roomote/sdk/server';
 import {
@@ -132,6 +136,9 @@ type WebFastAgentTurnInput = {
   /** Deterministic turn ID override. Canonical event IDs derive from it, so a
    * fixed value lets a turn be claimed idempotently across retries. */
   currentMessageId?: string;
+  /** Fast conversation id for durable admission of a human turn. Platform
+   * turns (kickoffs, artifact builds) omit it and stay non-replayable. */
+  durableSessionId?: string;
   /** Skip the turn if this exact canonical event row already exists when the
    * turn acquires its lock. This is the atomic claim for the setup kickoff:
    * concurrent submits can both pass the pre-schedule check, but the first
@@ -216,6 +223,7 @@ async function runWebFastAgentTurn({
   setupSnapshot,
   setupSession,
   adapterExtensions,
+  durableSessionId,
 }: WebFastAgentTurnInput): Promise<void> {
   const conversation = delivery.conversation;
   const release = await acquireFastAgentTurnLock({ conversation });
@@ -278,6 +286,37 @@ async function runWebFastAgentTurn({
       }
     }
 
+    const turnMessageId = currentMessageId ?? `web-${randomUUID()}`;
+    // Durable admission: a human web turn is persisted under this process's
+    // claim before it runs, so an interruption hands it to the queue.
+    const durableTurn =
+      durableSessionId && !platformEventKind
+        ? await persistFastAgentInlineHumanTurn({
+            parent: { sessionId: durableSessionId, conversation },
+            event: {
+              type: 'human_follow_up',
+              eventId: turnMessageId,
+              currentMessageId: turnMessageId,
+              userId,
+              question,
+              ...(images?.length ? { images } : {}),
+              ...(senderDisplayName ? { senderDisplayName } : {}),
+            },
+          }).catch((error) => {
+            console.error(
+              `[Fast Web] Failed to persist turn admission: ${formatErrorForLog(error)}`,
+            );
+            return null;
+          })
+        : null;
+    if (durableTurn && durableSessionId) {
+      release.durableRowId = durableTurn.id;
+      release.durableResume = () =>
+        wakeFastAgentParentEventNow({
+          conversationId: durableSessionId,
+          eventKey: durableTurn.eventKey,
+        });
+    }
     await answerFastAgentQuestion({
       question,
       images,
@@ -285,8 +324,9 @@ async function runWebFastAgentTurn({
       userId,
       apiBaseUrl,
       conversation,
-      currentMessageId: currentMessageId ?? `web-${randomUUID()}`,
+      currentMessageId: turnMessageId,
       signal: release.signal,
+      ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
       model,
       reasoningEffort,
       senderDisplayName,
@@ -306,6 +346,15 @@ async function runWebFastAgentTurn({
             apiBaseUrl,
             includeRoomoteMemberTools: true,
           }),
+        ...(durableTurn && durableSessionId
+          ? {
+              requestDurableResume: () =>
+                wakeFastAgentParentEventNow({
+                  conversationId: durableSessionId,
+                  eventKey: durableTurn.eventKey,
+                }),
+            }
+          : {}),
         ...delivery.adapter,
         ...adapterExtensions,
       },
@@ -520,6 +569,7 @@ export async function startFastSessionCommand(
       attachmentTexts: input.attachmentTexts,
       model: settings.model,
       reasoningEffort: settings.reasoningEffort,
+      durableSessionId: session.id,
       ...(kickoffTurnId && kickoffPromptEventId
         ? {
             currentMessageId: kickoffTurnId,
@@ -762,6 +812,7 @@ export async function replyToFastSessionCommand(
     model: settings.model,
     reasoningEffort: settings.reasoningEffort,
     ...(senderDisplayName ? { senderDisplayName } : {}),
+    durableSessionId: session.id,
   });
 
   return { success: true };

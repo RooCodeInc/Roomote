@@ -1565,7 +1565,11 @@ export async function handleTaskConfiguration(
       );
     }
 
-    slack = new SlackNotifier(slackInstallation.botAccessToken);
+    slack = new SlackNotifier(slackInstallation.botAccessToken, {
+      botUserId: slackInstallation.botUserId,
+      botName: slackInstallation.botName,
+      appName: slackInstallation.appName,
+    });
 
     const images = originalEvent.processedImages || [];
 
@@ -2301,7 +2305,11 @@ export async function autoConfirmRouting(
     return;
   }
 
-  const slack = new SlackNotifier(slackInstallation.botAccessToken);
+  const slack = new SlackNotifier(slackInstallation.botAccessToken, {
+    botUserId: slackInstallation.botUserId,
+    botName: slackInstallation.botName,
+    appName: slackInstallation.appName,
+  });
   const deliveryTracker = new SlackThreadDeliveryTracker(
     originalEvent.channel,
     threadId,
@@ -2876,7 +2884,11 @@ export async function handleRoutingConfirmOk(payload: SlackInteractivePayload) {
     return;
   }
 
-  const slack = new SlackNotifier(slackInstallation.botAccessToken);
+  const slack = new SlackNotifier(slackInstallation.botAccessToken, {
+    botUserId: slackInstallation.botUserId,
+    botName: slackInstallation.botName,
+    appName: slackInstallation.appName,
+  });
   const deliveryTracker = new SlackThreadDeliveryTracker(
     originalEvent.channel,
     threadId,
@@ -3044,7 +3056,11 @@ export async function handleRoutingRejectNo(payload: SlackInteractivePayload) {
     return;
   }
 
-  const slack = new SlackNotifier(slackInstallation.botAccessToken);
+  const slack = new SlackNotifier(slackInstallation.botAccessToken, {
+    botUserId: slackInstallation.botUserId,
+    botName: slackInstallation.botName,
+    appName: slackInstallation.appName,
+  });
 
   // Replace the routing confirmation with the manual selection UI
   // (skip routing to avoid looping)

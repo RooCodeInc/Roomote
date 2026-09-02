@@ -4,6 +4,7 @@ import { type TaskRun } from '@roomote/db/server';
 import {
   getSourceControlProviderLabel,
   sourceControlProviderSchema,
+  TaskPayloadKind,
   type SourceControlProvider,
 } from '@roomote/types';
 import { z } from 'zod';
@@ -32,6 +33,9 @@ import {
   type FetchImpl,
   type RepositoryRow,
 } from './source-control-pull-request-shared';
+import { markRoomotePullRequestReadyAfterCleanReview } from './mark-roomote-pull-request-ready';
+import { getTerminalReviewSummaryResult } from '../task-runs/github-pr-review-check';
+import { enqueuePrReviewNotification } from '../task-runs/pr-review-notification';
 
 const ADO_API_VERSION = '7.1';
 // `/_apis/connectionData` is a preview-only resource: Azure DevOps answers
@@ -313,28 +317,146 @@ export async function writeSourceControlPullRequestForTaskRun({
     host: payloadHost,
   });
 
+  let result: SourceControlPullRequestWriteResult;
   switch (provider) {
     case 'github':
-      return writeGitHubPullRequest({ input, repository, provider });
+      result = await writeGitHubPullRequest({ input, repository, provider });
+      break;
     case 'gitlab':
-      return writeGitLabMergeRequest({
+      result = await writeGitLabMergeRequest({
         input,
         repository,
         provider,
         fetchImpl,
       });
+      break;
     case 'gitea':
-      return writeGiteaPullRequest({ input, repository, provider, fetchImpl });
-    case 'bitbucket':
-      return writeBitbucketPullRequest({
+      result = await writeGiteaPullRequest({
         input,
         repository,
         provider,
         fetchImpl,
       });
+      break;
+    case 'bitbucket':
+      result = await writeBitbucketPullRequest({
+        input,
+        repository,
+        provider,
+        fetchImpl,
+      });
+      break;
     case 'ado':
-      return writeAdoPullRequest({ input, repository, provider, fetchImpl });
+      result = await writeAdoPullRequest({
+        input,
+        repository,
+        provider,
+        fetchImpl,
+      });
+      break;
   }
+
+  await maybeMarkPullRequestReadyAfterReviewSummary({
+    taskRun,
+    input,
+    result,
+    provider,
+    host: payloadHost,
+    fetchImpl,
+  });
+  return result;
+}
+
+async function maybeMarkPullRequestReadyAfterReviewSummary({
+  taskRun,
+  input,
+  result,
+  provider,
+  host,
+  fetchImpl,
+}: {
+  taskRun: TaskRun;
+  input: SourceControlPullRequestWriteInput;
+  result: SourceControlPullRequestWriteResult;
+  provider: SourceControlProvider;
+  host?: string;
+  fetchImpl: FetchImpl;
+}): Promise<void> {
+  if (
+    !result.applied ||
+    (input.action !== 'create_pull_request_comment' &&
+      input.action !== 'update_pull_request_comment') ||
+    !input.body ||
+    (taskRun.payloadKind !== TaskPayloadKind.GithubPrReview &&
+      taskRun.payloadKind !== TaskPayloadKind.GithubPrReviewSync)
+  ) {
+    return;
+  }
+
+  const payload = getPayloadRecord(taskRun.payload);
+  const reviewHeadSha =
+    typeof payload.headSha === 'string'
+      ? payload.headSha
+      : typeof payload.sha === 'string'
+        ? payload.sha
+        : null;
+  if (!reviewHeadSha) return;
+
+  const terminalResult = getTerminalReviewSummaryResult({
+    reviewSummaryBody: input.body,
+    expectedHeadSha: reviewHeadSha,
+  });
+  if (terminalResult?.conclusion !== 'success') return;
+
+  // GitHub's issue-comment webhook owns durable summary persistence and then
+  // calls the same provider-neutral transition. Other providers do not expose
+  // an equivalent edited-summary webhook consistently, so the successful
+  // Roomote comment write is their authoritative persistence boundary.
+  if (provider === 'github') return;
+
+  const notificationResult = await enqueuePrReviewNotification({
+    repository: input.repositoryFullName,
+    prNumber: input.prNumber,
+    prUrl:
+      typeof payload.prUrl === 'string' ? payload.prUrl : (result.url ?? ''),
+    sourceControlProvider: provider,
+    event: {
+      kind: 'review_summary',
+      providerEventId: `roomote-review-summary:${provider}:${result.commentId ?? input.commentId ?? 'unknown'}:${reviewHeadSha}`,
+      authorLogin: 'roomote',
+      reviewHeadSha,
+      reviewTaskId: taskRun.taskId,
+      reviewResult: {
+        reviewKind:
+          taskRun.payloadKind === TaskPayloadKind.GithubPrReviewSync
+            ? 'sync'
+            : 'initial',
+        outcome: 'clean',
+        findingCount: 0,
+        approvalStatus: null,
+        headSha: reviewHeadSha,
+      },
+      summary: terminalResult.summary,
+      ...(result.url ? { url: result.url } : {}),
+      observedAt: Date.now(),
+      roomoteAuthored: true,
+    },
+  });
+  if (notificationResult.reason === 'stale_review_cycle') return;
+
+  await markRoomotePullRequestReadyAfterCleanReview({
+    sourceControlProvider: provider,
+    repository: input.repositoryFullName,
+    ...(host ? { host } : {}),
+    prNumber: input.prNumber,
+    reviewHeadSha,
+    reviewResult: {
+      outcome: 'clean',
+      findingCount: 0,
+      headSha: reviewHeadSha,
+    },
+    fetchImpl,
+  });
 }
 
 function normalizeOptionalWriteIds(

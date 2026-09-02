@@ -3,13 +3,17 @@ import {
   and,
   type CreateFastAgentMessage,
   db,
+  desc,
   eq,
   fastAgentConversations,
   fastAgentMessages,
+  fastAgentParentEvents,
   ensureSessionForFastConversation,
   advanceSessionNotifiedCursor,
   advanceSessionReadCursor,
   getSessionForFastConversation,
+  gt,
+  isNotNull,
   isNull,
   lt,
   or,
@@ -60,6 +64,22 @@ export type FastAgentMessageUpsertResult = {
 export const INTERRUPTED_INFERENCE_RETRY_MESSAGE =
   'The inference retry was interrupted before it completed. Please send the request again.';
 
+export const RESTARTED_ACTIVE_TURN_MESSAGE =
+  'Roomote restarted while working on this request. Please send it again.';
+
+/**
+ * Why an accepted Fast turn ended without a real answer. Stamped into the
+ * terminal message's metadata by every writer so occurrence counts can be
+ * attributed per cause instead of investigated per incident.
+ */
+export type FastAgentInterruptionReason =
+  | 'api_shutdown'
+  | 'turn_aborted'
+  | 'lock_lost'
+  | 'next_turn_reconcile'
+  | 'turn_settled_reconcile'
+  | 'expired_lease_reconcile';
+
 function isLegacyPlatformEventMessage(message: ModelMessage): boolean {
   if (message.role !== 'user') return false;
 
@@ -93,6 +113,7 @@ async function reconcileInferenceRetryNotices(
   database: DatabaseOrTransaction,
   conversationId: string,
   requireExpiredLease: boolean,
+  reason: FastAgentInterruptionReason,
 ): Promise<number> {
   await database.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
@@ -108,49 +129,304 @@ async function reconcileInferenceRetryNotices(
     }
   }
 
-  const notices = await database
-    .select({
-      id: fastAgentMessages.id,
-      metadata: fastAgentMessages.metadata,
-      payload: fastAgentMessages.payload,
+  // One set-based statement with no prior read: the terminal metadata is
+  // derived from each row's current value under its row lock, so a cause an
+  // interrupted owner commits concurrently (e.g. lock_lost) cannot be
+  // overwritten by a stale snapshot; the reconciler's own reason only fills
+  // in when nobody recorded one.
+  const reconciled = await database
+    .update(fastAgentMessages)
+    .set({
+      contentBlocks: [
+        { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
+      ],
+      metadata: sql`coalesce(${fastAgentMessages.metadata}, '{}'::jsonb)
+        || ${JSON.stringify({
+          visibleInTranscript: true,
+          purpose: 'closeout',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: false,
+        })}::jsonb
+        || jsonb_build_object('interruptionReason', coalesce(${fastAgentMessages.metadata}->>'interruptionReason', ${reason}::text))`,
+      payload: sql`coalesce(${fastAgentMessages.payload}, '{}'::jsonb) || '{"purpose":"closeout"}'::jsonb`,
+      updatedAt: new Date(),
     })
-    .from(fastAgentMessages)
     .where(
       and(
         eq(fastAgentMessages.conversationId, conversationId),
         activeInferenceRetryNoticeWhere(),
       ),
-    );
+    )
+    .returning({ id: fastAgentMessages.id });
 
-  for (const notice of notices) {
-    await database
-      .update(fastAgentMessages)
-      .set({
-        contentBlocks: [
-          { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
-        ],
-        metadata: {
-          ...(notice.metadata ?? {}),
-          visibleInTranscript: true,
-          purpose: 'closeout',
-          inferenceRetryNotice: true,
-          inferenceRetryActive: false,
-        },
-        payload: { ...notice.payload, purpose: 'closeout' },
-        updatedAt: new Date(),
-      })
-      .where(eq(fastAgentMessages.id, notice.id));
+  if (reconciled.length > 0) {
+    console.warn(
+      `[Fast Agent] Reconciled ${reconciled.length} interrupted inference retry notice(s) (conversation=${conversationId}, reason=${reason}).`,
+    );
   }
 
-  return notices.length;
+  return reconciled.length;
 }
 
 export async function reconcileFastAgentInferenceRetryNotices(
   conversationId: string,
+  reason: Extract<
+    FastAgentInterruptionReason,
+    'next_turn_reconcile' | 'turn_settled_reconcile'
+  >,
 ): Promise<number> {
   return db.transaction((tx) =>
-    reconcileInferenceRetryNotices(tx, conversationId, false),
+    reconcileInferenceRetryNotices(tx, conversationId, false, reason),
   );
+}
+
+/**
+ * Record why an active retry notice was orphaned without flipping it to a
+ * terminal closeout. Used by an owner that lost the conversation lock: it is
+ * fenced off from terminal writes (a successor may already own the turn), but
+ * this guarded, fill-only stamp is a no-op whenever a successor got there
+ * first, and the lease-gated reconciler later folds the cause into its
+ * closeout.
+ */
+export async function markFastAgentInferenceRetryNoticeInterruption(
+  conversationId: string,
+  eventId: string,
+  reason: FastAgentInterruptionReason,
+): Promise<boolean> {
+  const stamped = await db
+    .update(fastAgentMessages)
+    .set({
+      metadata: sql`coalesce(${fastAgentMessages.metadata}, '{}'::jsonb) || ${JSON.stringify({ interruptionReason: reason })}::jsonb`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.eventId, eventId),
+        activeInferenceRetryNoticeWhere(),
+        sql`${fastAgentMessages.metadata}->>'interruptionReason' IS NULL`,
+      ),
+    )
+    .returning({ id: fastAgentMessages.id });
+  return stamped.length > 0;
+}
+
+export type FastAgentUnresolvedRequest = {
+  /** Turn whose human request never received a completed answer. */
+  turnId: string;
+  text: string;
+  reason: string;
+};
+
+const UNRESOLVED_REQUEST_CHAIN_LIMIT = 8;
+
+async function findFastAgentTurnPrompt(
+  conversationId: string,
+  turnId: string,
+): Promise<{ text: string; metadata: Record<string, unknown> } | null> {
+  const [prompt] = await db
+    .select({
+      contentBlocks: fastAgentMessages.contentBlocks,
+      metadata: fastAgentMessages.metadata,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.turnId, turnId),
+        eq(fastAgentMessages.role, 'user'),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+      ),
+    )
+    .limit(1);
+  if (!prompt) return null;
+  const text = prompt.contentBlocks
+    .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+    .join('\n')
+    .trim();
+  return { text, metadata: prompt.metadata ?? {} };
+}
+
+/**
+ * The human request the conversation still owes an answer to, if the most
+ * recent turn ended in an interruption closeout instead of a completed reply.
+ * A turn that itself resumed an earlier interrupted request records that
+ * lineage in its prompt metadata, so the original request is what surfaces
+ * even after repeated interruptions.
+ */
+export async function findFastAgentUnresolvedRequest(
+  conversationId: string,
+): Promise<FastAgentUnresolvedRequest | null> {
+  // Anchor on the latest substantive human prompt: platform events and
+  // reactions are persisted as prompts too, but their turns neither answer
+  // nor supersede a human request, so they must not mask an owed one.
+  const [latestPrompt] = await db
+    .select({ turnId: fastAgentMessages.turnId })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.role, 'user'),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
+        or(
+          sql`${fastAgentMessages.metadata}->>'inputKind' IS NULL`,
+          sql`${fastAgentMessages.metadata}->>'inputKind' <> ${FAST_AGENT_REACTION_INPUT_TYPE}`,
+        ),
+      ),
+    )
+    .orderBy(desc(fastAgentMessages.ts), desc(fastAgentMessages.turnSeq))
+    .limit(1);
+  if (!latestPrompt) return null;
+
+  const [interruption] = await db
+    .select({ metadata: fastAgentMessages.metadata })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.turnId, latestPrompt.turnId),
+        eq(fastAgentMessages.role, 'assistant'),
+        sql`${fastAgentMessages.metadata}->>'interruptionReason' IS NOT NULL`,
+      ),
+    )
+    .limit(1);
+  if (!interruption) return null;
+  const reason = interruption.metadata?.interruptionReason;
+  if (typeof reason !== 'string') return null;
+
+  let turnId = latestPrompt.turnId;
+  let prompt = await findFastAgentTurnPrompt(conversationId, turnId);
+  for (
+    let hop = 0;
+    prompt &&
+    typeof prompt.metadata.resumesTurnId === 'string' &&
+    hop < UNRESOLVED_REQUEST_CHAIN_LIMIT;
+    hop += 1
+  ) {
+    const rootPrompt = await findFastAgentTurnPrompt(
+      conversationId,
+      prompt.metadata.resumesTurnId,
+    );
+    if (!rootPrompt) break;
+    turnId = prompt.metadata.resumesTurnId;
+    prompt = rootPrompt;
+  }
+  if (
+    !prompt ||
+    !prompt.text ||
+    prompt.metadata.turnSource !== 'human' ||
+    prompt.metadata.inputKind === FAST_AGENT_REACTION_INPUT_TYPE
+  ) {
+    return null;
+  }
+  return { turnId, text: prompt.text, reason };
+}
+
+/**
+ * Durable admission of human turns. The accepting process persists the turn
+ * as an inline-admitted parent event before running it, holds a claim lease
+ * while it works, and settles the row when it finishes. If the process dies
+ * first, the released or expired claim lets the parent-event queue re-run
+ * the turn, but only while replay is still safe.
+ */
+export const FAST_AGENT_DURABLE_TURN_CLAIM_MS = 15 * 60 * 1000;
+
+function pendingDurableTurnWhere(id: string) {
+  return and(
+    eq(fastAgentParentEvents.id, id),
+    isNull(fastAgentParentEvents.deliveredAt),
+    isNull(fastAgentParentEvents.discardedAt),
+  );
+}
+
+/** Extend the inline owner's claim; false once the row is no longer pending. */
+export async function renewFastAgentDurableTurnClaim(
+  id: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(fastAgentParentEvents)
+    .set({
+      claimedUntil: new Date(Date.now() + FAST_AGENT_DURABLE_TURN_CLAIM_MS),
+      updatedAt: new Date(),
+    })
+    .where(pendingDurableTurnWhere(id))
+    .returning({ id: fastAgentParentEvents.id });
+  return rows.length > 0;
+}
+
+/**
+ * Hand the turn to the queue: an interrupted owner clears its claim so the
+ * next drain or recovery sweep re-runs the turn immediately.
+ */
+export async function releaseFastAgentDurableTurnClaim(
+  id: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(fastAgentParentEvents)
+    .set({ claimedUntil: null, updatedAt: new Date() })
+    .where(pendingDurableTurnWhere(id))
+    .returning({ id: fastAgentParentEvents.id });
+  return rows.length > 0;
+}
+
+/**
+ * Permanently withdraw the turn from replay, recorded before the action
+ * that makes replay unsafe runs, so a crash after it can never re-run it.
+ */
+export async function revokeFastAgentDurableTurnReplay(
+  id: string,
+  reason: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(fastAgentParentEvents)
+    .set({
+      discardedAt: new Date(),
+      lastError: reason,
+      updatedAt: new Date(),
+    })
+    .where(pendingDurableTurnWhere(id))
+    .returning({ id: fastAgentParentEvents.id });
+  return rows.length > 0;
+}
+
+/** The turn produced its outcome; nothing is left to recover. */
+export async function markFastAgentDurableTurnDelivered(
+  id: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(fastAgentParentEvents)
+    .set({ deliveredAt: new Date(), lastError: null, updatedAt: new Date() })
+    .where(pendingDurableTurnWhere(id))
+    .returning({ id: fastAgentParentEvents.id });
+  return rows.length > 0;
+}
+
+/**
+ * Extend the responding lease with the fence in the statement itself: only a
+ * lease that is still live is extended, so a stale renewal from an owner that
+ * lost the conversation mid-write can never resurrect a lease a settlement
+ * or successor already cleared. No read precedes the write, which removes
+ * the check-then-write window entirely. Returns whether a lease was renewed.
+ */
+export async function renewFastSessionRespondingLease(
+  fastConversationId: string,
+): Promise<boolean> {
+  const renewed = await db
+    .update(sessions)
+    .set({
+      respondingUntil: new Date(Date.now() + FAST_RESPONDING_LEASE_MS),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(sessions.fastConversationId, fastConversationId),
+        isNotNull(sessions.respondingUntil),
+        gt(sessions.respondingUntil, new Date()),
+      ),
+    )
+    .returning({ id: sessions.id });
+  return renewed.length > 0;
 }
 
 export async function reconcileExpiredFastAgentInferenceRetryNotices(
@@ -179,7 +455,12 @@ export async function reconcileExpiredFastAgentInferenceRetryNotices(
     // The per-conversation lock and lease recheck prevent a renewed active
     // turn from being reconciled after the candidate scan races with it.
     reconciled += await db.transaction((tx) =>
-      reconcileInferenceRetryNotices(tx, candidate.conversationId, true),
+      reconcileInferenceRetryNotices(
+        tx,
+        candidate.conversationId,
+        true,
+        'expired_lease_reconcile',
+      ),
     );
   }
   return reconciled;

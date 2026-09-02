@@ -109,6 +109,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   brainSynthesis: 'brain_synthesis',
   chatAudioTranscription: 'chat_audio_transcription',
   chatVideoDescription: 'chat_video_description',
+  composerSuggestionGeneration: 'composer_suggestion_generation',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
   fastAgentQuestionAnswering: 'fast_agent',
   inferenceValidation: 'inference_validation',
@@ -216,12 +217,48 @@ export type NonTaskOpenCodeSession = {
   id?: string;
 };
 
+export type NonTaskOpenCodeMessageTokens = {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+};
+
 export type NonTaskOpenCodeCompletedMessage = {
   id: string | null;
   sessionId: string;
   createdAtMs: number | null;
   completedAtMs: number | null;
+  /** Provider usage OpenCode attached to the message, when reported. */
+  tokens?: NonTaskOpenCodeMessageTokens;
 };
+
+/**
+ * How long each step before the OpenCode prompt request took. Lets callers
+ * separate server spawn, session validation, and session creation from the
+ * model's own latency.
+ */
+export type NonTaskOpenCodePromptSetupTiming = {
+  serverLeaseMs: number;
+  sessionValidateMs?: number;
+  sessionCreateMs?: number;
+  eventSubscribeMs?: number;
+  totalMs: number;
+};
+
+function readNonTaskOpenCodeMessageTokens(
+  info: NonTaskOpenCodeMessageInfo,
+): NonTaskOpenCodeMessageTokens | undefined {
+  if (!info.tokens) return undefined;
+  return {
+    input: asFiniteNumber(info.tokens.input) ?? 0,
+    output: asFiniteNumber(info.tokens.output) ?? 0,
+    reasoning: asFiniteNumber(info.tokens.reasoning) ?? 0,
+    cacheRead: asFiniteNumber(info.tokens.cache?.read) ?? 0,
+    cacheWrite: asFiniteNumber(info.tokens.cache?.write) ?? 0,
+  };
+}
 
 export type NonTaskOpenCodeAssistantMessage = {
   id: string;
@@ -246,7 +283,10 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   onAssistantMessageStarted?: (
     message: NonTaskOpenCodeAssistantMessage,
   ) => Promise<void> | void;
-  onPromptStarted?: () => void;
+  onAssistantMessageCompleted?: (
+    message: NonTaskOpenCodeCompletedMessage,
+  ) => Promise<void> | void;
+  onPromptStarted?: (setup: NonTaskOpenCodePromptSetupTiming) => void;
   onNativeSteerReady?: (steer: NonTaskOpenCodeNativeSteer) => void;
   onNativeSteerClosed?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
@@ -811,7 +851,7 @@ async function runNonTaskSdkPrompt(
     directory?: string;
     ephemeral?: boolean;
     env?: Partial<Record<string, string>>;
-    onPromptStarted?: () => void;
+    onPromptStarted?: (setup: NonTaskOpenCodePromptSetupTiming) => void;
     onNativeSteerReady?: (steer: NonTaskOpenCodeNativeSteer) => void;
     onNativeSteerClosed?: () => void;
     onMessageCompleted?: (
@@ -819,6 +859,9 @@ async function runNonTaskSdkPrompt(
     ) => Promise<void> | void;
     onAssistantMessageStarted?: (
       message: NonTaskOpenCodeAssistantMessage,
+    ) => Promise<void> | void;
+    onAssistantMessageCompleted?: (
+      message: NonTaskOpenCodeCompletedMessage,
     ) => Promise<void> | void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
@@ -843,6 +886,11 @@ async function runNonTaskSdkPrompt(
     `OpenCode structured prompt failed (model ${model})`;
   const sessionDirectory =
     options.directory ?? resolveNonTaskSessionDirectory();
+  const setupStartedAtMs = Date.now();
+  const setupTiming: NonTaskOpenCodePromptSetupTiming = {
+    serverLeaseMs: 0,
+    totalMs: 0,
+  };
   const server = await leaseOpenCodeSdkServer({
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
@@ -854,6 +902,7 @@ async function runNonTaskSdkPrompt(
         : Math.min(timeoutMs, DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS),
     useConfiguredServer: options.useConfiguredServer,
   });
+  setupTiming.serverLeaseMs = Date.now() - setupStartedAtMs;
   const abortController = new AbortController();
   const timeout =
     timeoutMs === null
@@ -885,6 +934,7 @@ async function runNonTaskSdkPrompt(
     });
     let sessionId = options.session?.id;
     if (sessionId && options.validateSession) {
+      const validateStartedAtMs = Date.now();
       const validationResult = await client.session.messages(
         {
           sessionID: sessionId,
@@ -905,8 +955,10 @@ async function runNonTaskSdkPrompt(
       if (!validationResult.data || validationResult.data.length === 0) {
         throw new NonTaskOpenCodeSessionNotFoundError();
       }
+      setupTiming.sessionValidateMs = Date.now() - validateStartedAtMs;
     }
     if (!sessionId) {
+      const createStartedAtMs = Date.now();
       const sessionResult = await client.session.create(
         {
           directory: sessionDirectory,
@@ -926,6 +978,7 @@ async function runNonTaskSdkPrompt(
       if (options.session) {
         options.session.id = sessionId;
       }
+      setupTiming.sessionCreateMs = Date.now() - createStartedAtMs;
     }
     await options.onSessionReady?.(sessionId);
 
@@ -990,19 +1043,23 @@ async function runNonTaskSdkPrompt(
     });
     let eventMonitor: Promise<void> | undefined;
     const observedAssistantMessageIds = new Set<string>();
+    const completedAssistantMessageIds = new Set<string>();
     const needsEventMonitor = Boolean(
       params.onProviderRetry ||
       options.onAssistantMessageStarted ||
+      options.onAssistantMessageCompleted ||
       options.onSubagentSessionReady ||
       options.trackSessionTreeUsage,
     );
 
     if (needsEventMonitor) {
       try {
+        const subscribeStartedAtMs = Date.now();
         const subscription = await client.event.subscribe(
           { directory: sessionDirectory },
           { signal: eventAbortController.signal },
         );
+        setupTiming.eventSubscribeMs = Date.now() - subscribeStartedAtMs;
         eventMonitor = (async () => {
           try {
             for await (const event of subscription.stream) {
@@ -1042,6 +1099,28 @@ async function runNonTaskSdkPrompt(
                       sessionId,
                       parentId: asString(info.parentID) ?? null,
                       createdAtMs: asFiniteNumber(info.time.created) ?? null,
+                    });
+                  } catch (error) {
+                    rejectSessionError(error);
+                    return;
+                  }
+                }
+                if (
+                  info.sessionID === sessionId &&
+                  messageId &&
+                  info.time.completed !== undefined &&
+                  !completedAssistantMessageIds.has(messageId)
+                ) {
+                  completedAssistantMessageIds.add(messageId);
+                  try {
+                    const tokens = readNonTaskOpenCodeMessageTokens(info);
+                    await options.onAssistantMessageCompleted?.({
+                      id: messageId,
+                      sessionId,
+                      createdAtMs: asFiniteNumber(info.time.created) ?? null,
+                      completedAtMs:
+                        asFiniteNumber(info.time.completed) ?? null,
+                      ...(tokens ? { tokens } : {}),
                     });
                   } catch (error) {
                     rejectSessionError(error);
@@ -1137,7 +1216,8 @@ async function runNonTaskSdkPrompt(
 
     try {
       const turnStartedAtMs = Date.now();
-      options.onPromptStarted?.();
+      setupTiming.totalMs = turnStartedAtMs - setupStartedAtMs;
+      options.onPromptStarted?.(setupTiming);
       const promptRequest = client.session.prompt(
         {
           sessionID: sessionId,
@@ -1328,6 +1408,9 @@ async function runNonTaskSdkPrompt(
       }
 
       try {
+        const finalTokens = readNonTaskOpenCodeMessageTokens(
+          promptResult.data.info,
+        );
         await options.onMessageCompleted?.({
           id: asString(promptResult.data.info.id) ?? null,
           sessionId,
@@ -1335,6 +1418,7 @@ async function runNonTaskSdkPrompt(
             asFiniteNumber(promptResult.data.info.time?.created) ?? null,
           completedAtMs:
             asFiniteNumber(promptResult.data.info.time?.completed) ?? null,
+          ...(finalTokens ? { tokens: finalTokens } : {}),
         });
       } catch (error) {
         console.warn(
@@ -1476,6 +1560,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       onNativeSteerReady: options.onNativeSteerReady,
       onNativeSteerClosed: options.onNativeSteerClosed,
       onAssistantMessageStarted: options.onAssistantMessageStarted,
+      onAssistantMessageCompleted: options.onAssistantMessageCompleted,
       onMessageCompleted: options.onMessageCompleted,
       onSessionReady: options.onSessionReady,
       onSubagentSessionReady: options.onSubagentSessionReady,

@@ -208,6 +208,7 @@ vi.mock('./fast-automation-suggestions', () => ({
 import {
   deliverFastAgentParentEvent,
   deliverFastAgentParentEventWithLock,
+  FastAgentParentEventDeliveryError,
 } from './fast-agent-parent-event';
 
 const parent = {
@@ -822,6 +823,32 @@ describe('deliverFastAgentParentEvent', () => {
         replyTarget: { channelId: 'C123', threadId: '101.001' },
       },
     });
+  });
+
+  it('marks delivery complete when Slack posts before root binding fails', async () => {
+    const pendingParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'C123' },
+      },
+    };
+    mocks.bindConversation.mockRejectedValueOnce(new Error('database offline'));
+
+    const error = await deliverFastAgentParentEvent({
+      parent: pendingParent,
+      event,
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(FastAgentParentEventDeliveryError);
+    expect(error).toMatchObject({
+      message: 'database offline',
+      replyPosted: true,
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledOnce();
   });
 
   it('creates the first Slack message when a pending Fast automation settles', async () => {

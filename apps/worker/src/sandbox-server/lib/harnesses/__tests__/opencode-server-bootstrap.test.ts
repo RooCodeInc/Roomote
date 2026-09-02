@@ -529,7 +529,7 @@ describe('opencode-server bootstrap', () => {
     );
   });
 
-  it('skips the integration usage instructions file when attached MCP servers define none', async () => {
+  it('injects Linear mutation guidance for attached Linear MCP servers', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -559,10 +559,16 @@ describe('opencode-server bootstrap', () => {
       'roomote-opencode-integration-instructions.md',
     );
 
-    expect(config.instructions ?? []).not.toContain(
-      integrationInstructionsPath,
+    expect(config.instructions).toContain(integrationInstructionsPath);
+
+    const content = fs.readFileSync(integrationInstructionsPath, 'utf8');
+
+    expect(content).toContain('# Connected integration: Linear');
+    expect(content).toContain('dedicated comment-creation tool');
+    expect(content).toContain(
+      'do not pass comment text to an issue-update or status-update tool',
     );
-    expect(fs.existsSync(integrationInstructionsPath)).toBe(false);
+    expect(content).toContain('report the returned tool error verbatim');
   });
 
   it('writes only developer instructions and skips the legacy system prompt file', async () => {

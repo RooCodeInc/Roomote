@@ -117,12 +117,20 @@ vi.mock('./NestedTaskSidePanel', () => ({
   NestedTaskSidePanel: ({
     taskId,
     onClose,
+    onOpenArtifact,
   }: {
     taskId: string;
     onClose: () => void;
+    onOpenArtifact: (path: string, version?: number) => void;
   }) => (
     <div aria-label={`Full task ${taskId}`}>
       Nested panel {taskId}
+      <button
+        type="button"
+        onClick={() => onOpenArtifact('proof/nested.png', 3)}
+      >
+        Open nested artifact
+      </button>
       <button type="button" onClick={onClose}>
         Close panel
       </button>
@@ -245,7 +253,6 @@ function renderWorkspace({
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-
   const result = render(
     <QueryClientProvider client={queryClient}>
       <SandboxLayoutProvider>
@@ -443,7 +450,6 @@ describe('SessionWorkspace', () => {
         queryClient.getQueryState(['sessions', 'byId', session.id])?.status,
       ).toBe('success'),
     );
-
     act(() => {
       queryClient.setQueryData(['sessions', 'byId', session.id], {
         ...session,
@@ -1017,7 +1023,6 @@ describe('SessionWorkspace', () => {
         screen.getByRole('status', { name: 'Running task count' }),
       ).toHaveTextContent('2'),
     );
-
     act(() => {
       queryClient.setQueryData(
         ['fastSessions', 'tasks', session.id],
@@ -1035,6 +1040,31 @@ describe('SessionWorkspace', () => {
     );
   });
 
+  it('counts a follow-up turn when the run status remains idle', async () => {
+    renderWorkspace({
+      isMobile: false,
+      children: <RunningTaskCount />,
+      queriedTasks: [
+        {
+          ...singleTask,
+          latestRun: {
+            id: 1,
+            status: RunStatus.Idle,
+            taskPhase: 'running',
+            error: null,
+            result: null,
+          },
+        },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('status', { name: 'Running task count' }),
+      ).toHaveTextContent('1'),
+    );
+  });
+
   it('opens delegated tasks in the existing session side-panel slot', () => {
     renderWorkspace({ isMobile: false, children: <OpenNestedTask /> });
 
@@ -1042,6 +1072,41 @@ describe('SessionWorkspace', () => {
 
     expect(screen.getByText('Nested panel child-1')).toBeInTheDocument();
   });
+
+  it.each([false, true])(
+    'returns from a nested task artifact to the same nested task when isMobile=%s',
+    async (isMobile) => {
+      artifactQueryState.dataByPath['child-1:proof/nested.png'] = {
+        id: 'nested-artifact',
+        taskId: 'child-1',
+        path: 'proof/nested.png',
+        version: 3,
+        artifactType: 'visual-proof',
+        contentType: 'image/png',
+        size: 200,
+        createdAt: new Date('2026-01-02T00:00:00.000Z'),
+      };
+      renderWorkspace({ isMobile, children: <OpenNestedTask /> });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open child' }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Open nested artifact' }),
+      );
+
+      expect(
+        await screen.findByText('Artifact preview: proof/nested.png'),
+      ).toBeVisible();
+      expect(artifactQueryInputs).toContainEqual({
+        taskId: 'child-1',
+        path: 'proof/nested.png',
+        version: 3,
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Back to task' }));
+
+      expect(screen.getByText('Nested panel child-1')).toBeInTheDocument();
+    },
+  );
 
   it('collapses the right rail when the viewport changes from desktop to mobile', () => {
     const { resizeToMobile } = renderWorkspace({ isMobile: false });

@@ -1,5 +1,7 @@
 import {
+  ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
+  extractAcpMessageText,
   parsePrReviewActionOffer,
   type PrReviewActionOfferStatus,
   sanitizeEnvelopeFields,
@@ -26,6 +28,7 @@ import {
 import type { FastAgentMessage } from '@roomote/db';
 
 import type { UserAuthSuccess } from '@/types';
+import { COMPOSER_SUGGESTION_HISTORY_LIMIT } from './composer-suggestion-history';
 
 type FastSessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
 
@@ -378,6 +381,60 @@ export async function getFastSessionMessagesSince(
   });
 
   return { messages, cursor };
+}
+
+/**
+ * The newest persisted user/assistant conversation reduced to the minimal
+ * shape the composer-suggestion prompt is built from. Bounded in SQL so long
+ * sessions never load their full transcript; tool events never leave the DB.
+ */
+export async function getFastSessionSuggestableMessages(
+  sessionId: string,
+): Promise<
+  Array<{
+    id: string;
+    eventType: string;
+    role: string | null;
+    text: string | null;
+  }>
+> {
+  const rows = await db
+    .select({
+      id: fastAgentMessages.id,
+      eventType: fastAgentMessages.eventType,
+      role: fastAgentMessages.role,
+      contentBlocks: fastAgentMessages.contentBlocks,
+      payload: fastAgentMessages.payload,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, sessionId),
+        inArray(fastAgentMessages.eventType, [
+          ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        ]),
+        sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+      ),
+    )
+    .orderBy(
+      desc(fastAgentMessages.ts),
+      desc(fastAgentMessages.turnSeq),
+      desc(fastAgentMessages.createdAt),
+      desc(fastAgentMessages.id),
+    )
+    .limit(COMPOSER_SUGGESTION_HISTORY_LIMIT);
+
+  return rows.reverse().map((row) => ({
+    id: row.id,
+    eventType: row.eventType,
+    role: row.role,
+    text:
+      extractAcpMessageText(
+        row.contentBlocks,
+        (row.payload as Record<string, unknown> | null) ?? null,
+      ) ?? null,
+  }));
 }
 
 export async function getFastSessionById(

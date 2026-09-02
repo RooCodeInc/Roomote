@@ -46,6 +46,24 @@ vi.mock('@/trpc/client', () => ({
       updateModelSelection: { mutate: updateModelSelectionMutate },
     },
   }),
+  useTRPC: () => ({
+    fastSessions: {
+      composerSuggestion: {
+        queryOptions: (input: unknown, options?: Record<string, unknown>) => ({
+          ...options,
+          queryKey: ['fastSessions.composerSuggestion', input],
+          queryFn: async () => ({ suggestion: null, messageCount: 0 }),
+        }),
+      },
+    },
+  }),
+}));
+
+// The session composer's suggestion query needs no QueryClientProvider here;
+// these tests exercise the transcript, not suggestions.
+vi.mock('@tanstack/react-query', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@tanstack/react-query')>()),
+  useQuery: () => ({ data: undefined }),
 }));
 
 vi.mock('./SessionModelSwitcher', () => ({
@@ -1292,7 +1310,10 @@ describe('FastSessionTranscript', () => {
             eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
             role: 'assistant',
             contentBlocks: [
-              { type: 'text', text: 'I started the checkout fix.' },
+              {
+                type: 'text',
+                text: 'I started the checkout fix.\n\n[Open in Roomote](https://roomote.example/sessions/session-1?task=child-1)',
+              },
             ],
             metadata: { visibleInTranscript: true },
             payload: { purpose: 'progress', kickoff: true },
@@ -1309,6 +1330,9 @@ describe('FastSessionTranscript', () => {
       screen.getByRole('button', { name: /Started Coding Task Completed/ }),
     ).toBeInTheDocument();
     expect(screen.getByText('I started the checkout fix.')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Open in Roomote' }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows a reply composer for web sessions and sends replies optimistically', async () => {

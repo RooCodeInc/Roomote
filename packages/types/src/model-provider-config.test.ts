@@ -411,6 +411,44 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     }
   });
 
+  it('recommends Claude Fable 5.1 from every supported provider', () => {
+    const fable51ByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+      (provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'Claude Fable 5.1',
+        );
+
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      },
+    );
+
+    expect(fable51ByProvider).toEqual([
+      {
+        providerId: 'roomote',
+        modelId: 'roomote/anthropic/claude-fable-5.1',
+      },
+      {
+        providerId: 'openrouter',
+        modelId: 'openrouter/anthropic/claude-fable-5.1',
+      },
+      {
+        providerId: 'vercel',
+        modelId: 'vercel/anthropic/claude-fable-5.1',
+      },
+      { providerId: 'requesty', modelId: 'requesty/claude-fable-5-1' },
+      { providerId: 'anthropic', modelId: 'anthropic/claude-fable-5-1' },
+      { providerId: 'opencode', modelId: 'opencode/claude-fable-5-1' },
+      {
+        providerId: 'amazon-bedrock',
+        modelId: 'bedrock-mantle/anthropic.claude-fable-5-1',
+      },
+      {
+        providerId: 'github-copilot',
+        modelId: 'github-copilot/claude-fable-5.1',
+      },
+    ]);
+  });
+
   it('recommends Kimi K3 only from supported providers', () => {
     const kimiK3ByProvider = userSelectableProviders.flatMap((provider) => {
       const model = provider.suggestedTaskModels.find(
@@ -947,6 +985,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(
       requestyProvider?.suggestedTaskModels.map((model) => model.id),
     ).toEqual([
+      'requesty/claude-fable-5-1',
       'requesty/claude-fable-5',
       'requesty/claude-haiku-4-5',
       'requesty/claude-opus-5',

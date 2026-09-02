@@ -43,6 +43,7 @@ import {
   useOpenSessionTaskPanel,
   useOpenSessionTasksPanel,
   useSessionRunningTaskCount,
+  useSessionTaskStateRevision,
 } from './session-task-panel-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
@@ -67,6 +68,16 @@ type TranscriptMessage = Omit<FastSessionMessage, 'createdAt'> & {
 };
 
 type TranscriptOrder = Pick<TranscriptMessage, 'id' | 'ts' | 'turnSeq'>;
+
+const ROOMOTE_KICKOFF_LINK = /\r?\n\r?\n\[Open in Roomote\]\([^\r\n]+\)\s*$/;
+
+function getTranscriptMessageText(message: TranscriptMessage) {
+  const text = getTextFromContentBlocks(message.contentBlocks) ?? undefined;
+  const payload = message.payload as { kickoff?: unknown } | null;
+  return payload?.kickoff === true
+    ? text?.replace(ROOMOTE_KICKOFF_LINK, '')
+    : text;
+}
 
 type PendingResponseState = {
   pendingAfter: TranscriptOrder | null;
@@ -272,6 +283,7 @@ export function FastSessionTranscript({
   const openTaskPanel = useOpenSessionTaskPanel();
   const openTasksPanel = useOpenSessionTasksPanel();
   const runningTaskCount = useSessionRunningTaskCount();
+  const taskStateRevision = useSessionTaskStateRevision();
   const { enabled: narrationModeEnabled } = useNarrationMode();
   const displayMode = narrationModeEnabled ? 'narration' : 'default';
   const [serverMessages, setServerMessages] = useState<
@@ -406,6 +418,29 @@ export function FastSessionTranscript({
     );
   }, [serverMessages, optimisticMessages]);
 
+  // Persisted user/assistant history only, matching the server's suggestion
+  // cache: optimistic sends must not advance the suggestion query key, and
+  // only a completed agent turn (a new assistant message) regenerates.
+  const suggestionHistory = useMemo(() => {
+    let messageCount = 0;
+    let assistantCount = 0;
+    for (const message of serverMessages.values()) {
+      const isAssistant =
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage;
+      if (
+        (isAssistant ||
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt) &&
+        getTextFromContentBlocks(message.contentBlocks)?.trim()
+      ) {
+        messageCount += 1;
+        if (isAssistant) {
+          assistantCount += 1;
+        }
+      }
+    }
+    return { messageCount, assistantCount };
+  }, [serverMessages]);
+
   const uiMessages = useMemo(
     () =>
       messages
@@ -425,7 +460,7 @@ export function FastSessionTranscript({
             contentBlocks: message.contentBlocks,
             metadata: message.metadata,
             payload: message.payload,
-            text: getTextFromContentBlocks(message.contentBlocks) ?? undefined,
+            text: getTranscriptMessageText(message),
           }),
         ),
     [messages],
@@ -629,6 +664,14 @@ export function FastSessionTranscript({
             sessionId={sessionId}
             isBusy={isSending}
             onSend={sendReply}
+            historyMessageCount={suggestionHistory.messageCount}
+            assistantMessageCount={suggestionHistory.assistantCount}
+            taskStateRevision={taskStateRevision}
+            agentWorking={
+              isSending ||
+              conversationResponding === true ||
+              pendingResponseState.pendingAfter !== null
+            }
             initialModel={sessionModel}
             initialReasoningEffort={sessionReasoningEffort}
             defaultModelId={defaultModelId}

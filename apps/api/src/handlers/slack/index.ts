@@ -160,7 +160,11 @@ slack.post('/', async (c) => {
 
     const context = createSlackWebhookContext({
       slackInstallation,
-      slack: new SlackNotifier(slackInstallation.botAccessToken),
+      slack: new SlackNotifier(slackInstallation.botAccessToken, {
+        botUserId: slackInstallation.botUserId,
+        botName: slackInstallation.botName,
+        appName: slackInstallation.appName,
+      }),
       teamId,
     });
     const eventLogDetails = getSlackWebhookEventLogDetails(event);

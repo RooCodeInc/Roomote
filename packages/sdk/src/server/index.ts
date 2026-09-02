@@ -211,10 +211,13 @@ export {
   FastAgentParentBusyError,
   FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
   recoverPendingFastAgentParentEvents,
+  wakeFastAgentParentEventNow,
   type FastAgentParentEventQueueRequest,
 } from './lib/fast-agent-parent-event-queue';
 export {
   admitFastAgentHumanFollowUp,
+  persistFastAgentInlineHumanTurn,
+  type FastAgentDurableTurn,
   type FastAgentHumanFollowUpAdmission,
 } from './lib/fast-agent-human-follow-up';
 
@@ -332,6 +335,10 @@ export {
 } from './lib/slack-conversation-log';
 
 export { updateTaskPrStatus } from './lib/pull-requests/update-task-pr-status';
+export {
+  markRoomotePullRequestReadyAfterCleanReview,
+  type MarkRoomotePullRequestReadyResult,
+} from './lib/pull-requests/mark-roomote-pull-request-ready';
 export {
   manageSourceControlIssueForTaskRun,
   sourceControlIssueInputSchema,

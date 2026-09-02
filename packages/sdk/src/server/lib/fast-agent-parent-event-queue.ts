@@ -10,11 +10,18 @@ import {
   eq,
   fastAgentParentEvents,
   isNull,
+  lt,
+  or,
+  recordCustomAutomationRunOutcome,
   sql,
   taskRuns,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
-import type { FastAgentParent } from '@roomote/types';
+import {
+  RunStatus,
+  exitedRunStatuses,
+  type FastAgentParent,
+} from '@roomote/types';
 
 import {
   buildEventClientMessageSeed,
@@ -30,6 +37,10 @@ export type FastAgentParentEventQueueRequest = {
   conversationId: string;
   eventKey: string;
 };
+type FastAgentPullRequestOpenedEvent = Extract<
+  FastAgentParentEvent,
+  { type: 'pull_request_opened' }
+>;
 
 export class FastAgentParentBusyError extends Error {
   constructor() {
@@ -40,6 +51,7 @@ export class FastAgentParentBusyError extends Error {
 
 let fastAgentParentEventQueue: Queue<FastAgentParentEventQueueRequest> | null =
   null;
+const EXITED_RUN_STATUSES = new Set<RunStatus>(exitedRunStatuses);
 
 function getFastAgentParentEventQueue() {
   fastAgentParentEventQueue ??= new Queue<FastAgentParentEventQueueRequest>(
@@ -63,16 +75,43 @@ export function buildFastAgentParentEventKey(params: {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
 }): string {
-  return createHash('sha256')
+  const hash = createHash('sha256')
     .update(params.parent.sessionId)
     .update('\0')
-    .update(buildEventClientMessageSeed(params.event))
-    .digest('hex');
+    .update(buildEventClientMessageSeed(params.event));
+  if (
+    params.event.type === 'automation_triggered' &&
+    params.event.launchClaimedAt
+  ) {
+    hash.update('\0').update(params.event.launchClaimedAt);
+  }
+  return hash.digest('hex');
 }
 
 async function addWakeupJob(request: FastAgentParentEventQueueRequest) {
   await getFastAgentParentEventQueue().add('deliver', request, {
     jobId: request.eventKey,
+  });
+}
+
+/**
+ * Wake the queue for a persisted row right away, for an interrupted inline
+ * owner handing its turn back. Failure is not fatal: the recovery sweep
+ * recreates the wakeup within its interval.
+ */
+export async function wakeFastAgentParentEventNow(
+  request: FastAgentParentEventQueueRequest,
+): Promise<void> {
+  await addWakeupJob(request);
+}
+
+function wakeFastAgentParentEvent(request: FastAgentParentEventQueueRequest) {
+  void addWakeupJob(request).catch((error) => {
+    // Admission is already durable. BullMQ startup and its periodic recovery
+    // sweep recreate the wakeup without making the child task wait or retry.
+    console.error(
+      `[FastAgentParentEventQueue] Persisted ${request.eventKey}, but its immediate wakeup failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
   });
 }
 
@@ -94,20 +133,51 @@ export async function enqueueFastAgentParentEvent(params: {
     })
     .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
 
-  try {
-    await addWakeupJob({
+  wakeFastAgentParentEvent({
+    conversationId: params.parent.sessionId,
+    eventKey,
+  });
+
+  return { eventKey, queued: true };
+}
+
+/** Serialize PR-open admission with terminal run updates on the same row. */
+export async function enqueueFastAgentParentEventForRun(params: {
+  parent: FastAgentParent;
+  event: FastAgentPullRequestOpenedEvent;
+  runId: number;
+}): Promise<{ eventKey: string; queued: boolean }> {
+  const eventKey = buildFastAgentParentEventKey(params);
+  const queued = await db.transaction(async (tx) => {
+    const [run] = await tx
+      .select({ status: taskRuns.status })
+      .from(taskRuns)
+      .where(eq(taskRuns.id, params.runId))
+      .limit(1)
+      .for('update');
+    if (!run || EXITED_RUN_STATUSES.has(run.status)) {
+      return false;
+    }
+
+    await tx
+      .insert(fastAgentParentEvents)
+      .values({
+        conversationId: params.parent.sessionId,
+        eventKey,
+        parent: params.parent,
+        event: params.event,
+      })
+      .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
+    return true;
+  });
+
+  if (queued) {
+    wakeFastAgentParentEvent({
       conversationId: params.parent.sessionId,
       eventKey,
     });
-  } catch (error) {
-    // Admission is already durable. BullMQ startup and its periodic recovery
-    // sweep recreate the wakeup without making the child task wait or retry.
-    console.error(
-      `[FastAgentParentEventQueue] Persisted ${eventKey}, but its immediate wakeup failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
   }
-
-  return { eventKey, queued: true };
+  return { eventKey, queued };
 }
 
 function pendingPredicate(conversationId?: string) {
@@ -117,6 +187,13 @@ function pendingPredicate(conversationId?: string) {
       : []),
     isNull(fastAgentParentEvents.deliveredAt),
     isNull(fastAgentParentEvents.discardedAt),
+    // An inline-admitted turn stays with its live owner while the owner's
+    // claim is current; the queue takes over once the claim is released or
+    // expires.
+    or(
+      isNull(fastAgentParentEvents.claimedUntil),
+      lt(fastAgentParentEvents.claimedUntil, new Date()),
+    ),
   );
 }
 
@@ -150,6 +227,14 @@ async function buildRetryTaskStart(
   return run ? () => retryFastAgentStartup(run, parent) : undefined;
 }
 
+async function isStillPending(id: string): Promise<boolean> {
+  const row = await db.query.fastAgentParentEvents.findFirst({
+    where: eq(fastAgentParentEvents.id, id),
+    columns: { deliveredAt: true, discardedAt: true },
+  });
+  return Boolean(row) && !row!.deliveredAt && !row!.discardedAt;
+}
+
 async function markDelivered(id: string) {
   await db
     .update(fastAgentParentEvents)
@@ -166,6 +251,37 @@ async function markDiscarded(id: string, error: unknown) {
       updatedAt: new Date(),
     })
     .where(eq(fastAgentParentEvents.id, id));
+}
+
+function getAutomationLaunchClaim(event: FastAgentParentEvent) {
+  if (event.type !== 'automation_triggered') return null;
+
+  const prefix = `${event.automationId}:`;
+  if (!event.eventId.startsWith(prefix)) return null;
+
+  const launchClaimedAt = new Date(
+    event.launchClaimedAt ?? event.eventId.slice(prefix.length),
+  );
+  if (Number.isNaN(launchClaimedAt.getTime())) return null;
+
+  return { id: event.automationId, launchClaimedAt };
+}
+
+async function finalizeAutomationLaunch(
+  event: FastAgentParentEvent,
+  status: 'succeeded' | 'failed',
+  error?: unknown,
+) {
+  const claim = getAutomationLaunchClaim(event);
+  if (!claim) return;
+
+  await recordCustomAutomationRunOutcome(db, {
+    ...claim,
+    status,
+    ...(status === 'failed'
+      ? { error: error instanceof Error ? error.message : String(error) }
+      : {}),
+  });
 }
 
 /** Drain one parent's durable inbox in creation order under one turn lock. */
@@ -223,18 +339,42 @@ export async function drainFastAgentParentEvents(
             parent: row.parent,
             event: row.event,
             ...(retryTaskStart ? { retryTaskStart } : {}),
+            // An inline-admitted row only reaches the queue after its owner
+            // was interrupted, so this delivery is a resumption.
+            ...(row.admission === 'inline'
+              ? {
+                  resumedAfterInterruption: true,
+                  // The resumed run owns the same row: it revokes replay
+                  // before any non-replayable action, so a worker death
+                  // after such an action cannot drain the row again.
+                  durableAdmission: { eventId: row.id },
+                }
+              : {}),
           },
           turnLock,
         );
+        if (row.admission === 'inline' && (await isStillPending(row.id))) {
+          // The resumed run settles its own row. If it is still pending, the
+          // run deferred itself (its terminal revocation did not land) and
+          // released the claim; leave it for the next recovery sweep rather
+          // than settling it here or re-running it in a tight loop.
+          console.warn(
+            `[FastAgentParentEventQueue] Resumed Fast turn ${row.id} deferred itself; leaving it for the next recovery sweep.`,
+          );
+          return;
+        }
+        await finalizeAutomationLaunch(row.event, 'succeeded');
         await markDelivered(row.id);
       } catch (error) {
         const deliveryError =
           error instanceof FastAgentParentEventDeliveryError ? error : null;
         if (deliveryError?.replyPosted) {
+          await finalizeAutomationLaunch(row.event, 'succeeded');
           await markDelivered(row.id);
           continue;
         }
         if (deliveryError?.permanent) {
+          await finalizeAutomationLaunch(row.event, 'failed', deliveryError);
           await markDiscarded(row.id, deliveryError);
           continue;
         }

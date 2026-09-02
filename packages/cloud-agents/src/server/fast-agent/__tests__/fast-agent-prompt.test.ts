@@ -60,6 +60,37 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(nonAdminPrompt).toContain('provide a copy-pasteable draft');
   });
 
+  it('tells human turns how to handle an unresolved earlier request', () => {
+    const humanPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+    const eventPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+    });
+
+    expect(humanPrompt).toContain('`<unresolved_request>` envelope');
+    expect(humanPrompt).toContain('resume that request now');
+    expect(humanPrompt).toContain('Never drop the earlier request silently');
+    expect(eventPrompt).not.toContain('<unresolved_request>');
+  });
+
+  it('tells resumed human turns not to acknowledge again', () => {
+    const humanPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+    const eventPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+    });
+
+    expect(humanPrompt).toContain('`<resumed_turn>` marker');
+    expect(humanPrompt).toContain('Do not acknowledge the request again');
+    expect(eventPrompt).not.toContain('<resumed_turn>');
+  });
+
   it('omits the release identifier when no version is resolved', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
@@ -116,10 +147,13 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'the first model-selected action must communicate with the user before substantive model-invoked work',
     );
-    expect(prompt).toContain('`send_chat_reaction` with purpose `ack`');
     expect(prompt).toContain(
-      'A reaction counts as communication only when the current message is reactable',
+      'use `send_chat_reply` with purpose `ack`, or use `launch_task` so its kickoff is posted first',
     );
+    expect(prompt).toContain(
+      'A reaction never satisfies this startup requirement, including an "eyes" reaction',
+    );
+    expect(prompt).not.toContain('`send_chat_reaction` with purpose `ack`');
     expect(prompt).toContain(
       'A direct closeout or clarification that fully handles the turn is already the first communication',
     );
@@ -140,6 +174,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Existing active tasks do not block');
     expect(prompt).toContain('send_chat_reply');
     expect(prompt).toContain('send_chat_reaction');
+    expect(prompt).toContain(
+      'Use `send_chat_reaction` only for an optional reaction or an emoji-only terminal answer',
+    );
+    expect(prompt).toContain(
+      'It does not satisfy the turn-start acknowledgement required before continuing work',
+    );
     expect(prompt).toContain('`advisor` and `judge` subagents');
     expect(prompt).toContain('opaque conversation-owned handle');
     expect(prompt).toContain('no generic filesystem');
@@ -248,6 +288,34 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain(
       'current-channel chat context tools are the only direct external capabilities',
     );
+  });
+
+  it('lists on-demand servers by name with their tool names instead of mounting them', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      availableIntegrations: [
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Deployment access',
+          tools: [{ name: 'manage_tasks' }],
+        },
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Repository access',
+          tools: [{ name: 'search_code' }, { name: 'list_issues' }],
+        },
+      ],
+    });
+
+    expect(prompt).toContain('Roomote [tool prefix: roomote_]');
+    expect(prompt).toContain('### On-demand servers');
+    expect(prompt).toContain('#### GitHub [id: github]');
+    expect(prompt).toContain('Tools: search_code, list_issues');
+    expect(prompt).not.toContain('GitHub [tool prefix: github_]');
+    expect(prompt).toContain('`find_integration_tools`');
+    expect(prompt).toContain('`call_integration_tool`');
   });
 
   it('includes shared memory guidance when a memory MCP is available', () => {
@@ -581,6 +649,12 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       'Do not describe a closed pull request as merged or a merged pull request as merely closed',
+    );
+    expect(prompt).toContain(
+      'A newer authoritative merged or closed pull-request event always takes precedence over an older child-authored report',
+    );
+    expect(prompt).toContain(
+      'Keep useful child findings visible without repeating or endorsing stale claims that the pull request remains open, draft, or unpublished',
     );
     expect(prompt).toContain(
       'When `targetBranch` is absent from the pull request metadata, do not infer or name a destination branch',

@@ -173,4 +173,10 @@ export type FastAgentTurnAdapter = {
   resolveUserInputPreset?: (
     preset: FastAgentInputPreset,
   ) => Promise<FastAgentInputRequest['questions']>;
+  /**
+   * Called when an interrupted turn is still safe to replay and has handed
+   * itself back to the durable queue; wakes the queue so recovery does not
+   * wait for the next sweep. Best effort.
+   */
+  requestDurableResume?: () => Promise<void>;
 };

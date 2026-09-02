@@ -105,12 +105,11 @@ interface DemoSeedSummary {
  * Inserts a small, stable set of demo data (a demo user, GitHub installation,
  * repositories, an environment, and a few tasks with task runs) so task
  * sandboxes and preview deployments do not start from an empty dashboard. It
- * also marks setup as complete when the deployment settings row is missing so
- * a freshly seeded app is not gated behind /setup.
+ * also marks setup as complete so a seeded app is not gated behind /setup.
  *
  * Every entity is keyed by a stable identifier and only inserted when missing,
  * so the seed is safe to re-run on every sandbox boot or preview deploy.
- * Existing rows are never updated or deleted.
+ * Existing demo rows are never updated or deleted.
  */
 export async function seedDemoData(): Promise<DemoSeedSummary> {
   const summary: DemoSeedSummary = { created: [], skipped: [] };
@@ -122,20 +121,26 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
   const now = new Date();
 
   // Deployment settings. The web app gates everything behind /setup until the
-  // singleton settings row has `setupCompletedAt`, so a freshly seeded
-  // database also gets setup marked complete. An existing row is never
-  // touched so real setup state is preserved.
+  // singleton settings row has `setupCompletedAt`, so a seeded sandbox gets
+  // setup marked complete. Repair an incomplete singleton left by an earlier
+  // sandbox boot while preserving every other setting.
   const existingSettings = await db.query.deploymentSettings.findFirst({
     where: eq(deploymentSettings.id, 'default'),
   });
+  const setupIncomplete = existingSettings?.setupCompletedAt == null;
 
   if (!existingSettings) {
     await db
       .insert(deploymentSettings)
       .values({ id: 'default', setupCompletedAt: now });
+  } else if (setupIncomplete) {
+    await db
+      .update(deploymentSettings)
+      .set({ setupCompletedAt: now })
+      .where(eq(deploymentSettings.id, 'default'));
   }
 
-  record('deployment settings default', !existingSettings);
+  record('deployment settings default', !existingSettings || setupIncomplete);
 
   // Demo user.
   const demoUser: CreateUser = {
