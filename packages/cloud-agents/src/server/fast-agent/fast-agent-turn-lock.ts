@@ -40,6 +40,9 @@ export type FastAgentTurnLockHandle = (() => Promise<void>) & {
    * reaches its own abort handling (for example during setup).
    */
   durableRowId?: string;
+  /** Wakes the queue for the bound row after a shutdown release so recovery
+   * does not wait for the periodic sweep. Best effort. */
+  durableResume?: () => Promise<void>;
 };
 
 /** Mark the user-visible shutdown closeout as posted and persisted (or as
@@ -76,13 +79,23 @@ export async function abortActiveFastAgentTurns(
   await Promise.allSettled(
     activeLocks
       .filter((lock) => lock.durableRowId)
-      .map((lock) =>
-        releaseFastAgentDurableTurnClaim(lock.durableRowId!).catch((error) => {
+      .map(async (lock) => {
+        const released = await releaseFastAgentDurableTurnClaim(
+          lock.durableRowId!,
+        ).catch((error) => {
           console.warn(
             `[Fast Agent] Failed to release durable turn claim during shutdown: ${error instanceof Error ? error.message : String(error)}`,
           );
-        }),
-      ),
+          return false;
+        });
+        if (released) {
+          await lock.durableResume?.().catch((error) => {
+            console.warn(
+              `[Fast Agent] Failed to wake durable turn resume during shutdown: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+        }
+      }),
   );
   return activeLocks.length;
 }

@@ -251,7 +251,14 @@ async function runWebFastAgentTurn({
             return null;
           })
         : null;
-    if (durableTurn) release.durableRowId = durableTurn.id;
+    if (durableTurn && durableSessionId) {
+      release.durableRowId = durableTurn.id;
+      release.durableResume = () =>
+        wakeFastAgentParentEventNow({
+          conversationId: durableSessionId,
+          eventKey: durableTurn.eventKey,
+        });
+    }
     await answerFastAgentQuestion({
       question,
       images,

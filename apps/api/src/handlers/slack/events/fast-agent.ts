@@ -265,7 +265,14 @@ export async function processFastAgentMessage(params: {
       );
       return null;
     });
-    if (durableTurn) activeTurnLock.durableRowId = durableTurn.id;
+    if (durableTurn) {
+      activeTurnLock.durableRowId = durableTurn.id;
+      activeTurnLock.durableResume = () =>
+        wakeFastAgentParentEventNow({
+          conversationId: session.id,
+          eventKey: durableTurn.eventKey,
+        });
+    }
     params.onAccepted?.(() =>
       activeTurnLock.abort(
         new Error('Fast suggestion launch settlement failed.'),

@@ -224,6 +224,11 @@ export async function processDiscordFastAgentMessage(
     const durableTurnForResume = durableTurn;
     if (durableTurnForResume) {
       activeTurnLock.durableRowId = durableTurnForResume.id;
+      activeTurnLock.durableResume = () =>
+        wakeFastAgentParentEventNow({
+          conversationId: session.id,
+          eventKey: durableTurnForResume.eventKey,
+        });
     }
     const footerContext = await resolveFastSessionReplyFooterContext({
       sessionId: session.id,

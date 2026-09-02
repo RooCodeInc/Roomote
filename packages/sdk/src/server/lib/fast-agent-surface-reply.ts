@@ -605,7 +605,14 @@ async function runFastAgentSurfaceReply(
           );
           return null;
         })));
-    if (durableTurn) release.durableRowId = durableTurn.id;
+    if (durableTurn) {
+      release.durableRowId = durableTurn.id;
+      release.durableResume = () =>
+        wakeFastAgentParentEventNow({
+          conversationId: params.sessionId,
+          eventKey: durableTurn.eventKey,
+        });
+    }
     await answerFastAgentQuestion({
       question: params.question,
       images: params.images,
