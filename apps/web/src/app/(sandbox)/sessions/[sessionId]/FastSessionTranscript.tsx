@@ -55,6 +55,10 @@ import {
   SessionUserInputCard,
 } from './SessionUserInputCard';
 import { SetupStarterTasksCard } from './setup/SetupStarterTasksCard';
+import {
+  SESSION_HEADER_CONTENT_CLASS_NAME,
+  SESSION_HEADER_TITLE_CLASS_NAME,
+} from './session-header-layout';
 
 import {
   AcpTranscriptBlockList,
@@ -733,9 +737,9 @@ export function FastSessionTranscript({
     >
       <WorkspaceHeader
         className="py-4.25"
-        contentClassName="items-stretch gap-2 pr-12 @[600px]:items-center @[600px]:gap-3 @[600px]:pr-4"
+        contentClassName={SESSION_HEADER_CONTENT_CLASS_NAME}
       >
-        <h1 className="ph-no-capture min-w-0 flex-1 break-words text-sm font-medium @[600px]:flex-[0_1_auto] @[600px]:truncate">
+        <h1 className={`ph-no-capture ${SESSION_HEADER_TITLE_CLASS_NAME}`}>
           {title ?? fallbackTitle}
         </h1>
         {headerExtras}

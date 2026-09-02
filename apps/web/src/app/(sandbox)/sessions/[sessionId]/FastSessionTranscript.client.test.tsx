@@ -1769,6 +1769,30 @@ describe('FastSessionTranscript', () => {
     );
   });
 
+  it('uses content-driven wrapping for header extras', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        initialTitle="Short session title"
+        headerExtras={
+          <a href="https://github.com/acme/widgets/pull/42">widgets#42</a>
+        }
+      />,
+    );
+
+    const heading = screen.getByRole('heading', {
+      name: 'Short session title',
+    });
+    expect(heading).toHaveClass('max-w-full', 'flex-[0_1_auto]');
+    expect(heading.parentElement).toHaveClass(
+      'flex-row',
+      'flex-wrap',
+      'items-center',
+    );
+    expect(heading.parentElement?.className).not.toContain('@[480px]');
+  });
+
   it('hides the reply composer for non-web sessions', () => {
     render(
       <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,

@@ -51,8 +51,19 @@ vi.mock('../../use-sandbox-layout', () => ({
   }),
 }));
 vi.mock('@/components/layout', () => ({
-  WorkspaceHeader: ({ children }: { children: ReactNode }) => (
-    <header data-testid="workspace-header">{children}</header>
+  WorkspaceHeader: ({
+    children,
+    contentClassName,
+  }: {
+    children: ReactNode;
+    contentClassName?: string;
+  }) => (
+    <header
+      data-testid="workspace-header"
+      data-content-class-name={contentClassName}
+    >
+      {children}
+    </header>
   ),
   WorkspaceSurface: ({ children }: { children: ReactNode }) => (
     <main data-testid="workspace-surface">{children}</main>
@@ -371,7 +382,10 @@ describe('Session detail page', () => {
       'Task-only session with a title that wraps on narrow screens',
     );
     expect(html).toContain(
-      'class="min-w-0 flex-1 break-words text-sm font-medium @[600px]:flex-[0_1_auto] @[600px]:truncate"',
+      'data-content-class-name="flex-row flex-wrap items-center gap-2 pr-12 @[600px]:gap-3 @[600px]:pr-4"',
+    );
+    expect(html).toContain(
+      'class="min-w-0 max-w-full flex-[0_1_auto] break-words text-sm font-medium @[600px]:truncate"',
     );
     expect(html).toContain('session-header-pull-requests');
     expect(html).toContain('session-task-timeline');
