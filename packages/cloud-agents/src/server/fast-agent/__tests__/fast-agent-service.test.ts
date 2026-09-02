@@ -222,6 +222,23 @@ vi.mock('../fast-agent-title', () => ({
   refreshFastAgentSessionTitle: mocks.refreshTitle,
 }));
 
+vi.mock('../fast-agent-surface-reply-stream', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../fast-agent-surface-reply-stream')>();
+  return {
+    ...actual,
+    // Tests drive the stream synchronously; no start delay or pacing.
+    createFastAgentSurfaceReplyStreamer: (
+      options: Parameters<typeof actual.createFastAgentSurfaceReplyStreamer>[0],
+    ) =>
+      actual.createFastAgentSurfaceReplyStreamer({
+        ...options,
+        startDelayMs: 0,
+        intervalMs: 0,
+      }),
+  };
+});
+
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({ publish: mocks.publishReplyStream }),
 }));
@@ -7878,6 +7895,95 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       const streamed = streamedReplies();
       expect(streamed).toEqual([[expect.any(String), 'Scratch that.']]);
       expect(persistedAssistantRows().at(-1)?.eventId).toBe(streamed[0]![0]);
+    });
+
+    it('streams a long reply into the surface and delivers through the stream', async () => {
+      const streamCalls: string[] = [];
+      const createReplyStream = vi.fn(() => ({
+        append: vi.fn(async (text: string) => {
+          streamCalls.push(`append:${text}`);
+        }),
+        finish: vi.fn(async (reply: { message: string }) => {
+          streamCalls.push(`finish:${reply.message}`);
+          return { messageId: 'slack-ts-1' };
+        }),
+        abort: vi.fn(async () => {
+          streamCalls.push('abort');
+        }),
+      }));
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'posted' });
+      const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'Looking at',
+            completed: false,
+          });
+          await tick();
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'Looking at the deploy history.',
+            completed: true,
+          });
+          await tick();
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+          });
+          return 'Looking at the deploy history.';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply, createReplyStream }),
+      });
+
+      expect(createReplyStream).toHaveBeenCalledTimes(1);
+      expect(streamCalls).toEqual([
+        'append:Looking at',
+        'append: the deploy history.',
+        'finish:Looking at the deploy history.',
+      ]);
+      expect(postReply).not.toHaveBeenCalled();
+      expect(persistedAssistantRows().at(-1)?.metadata).toMatchObject({
+        platformMessageId: 'slack-ts-1',
+      });
+    });
+
+    it('posts a reply that finished writing before the stream opened', async () => {
+      const createReplyStream = vi.fn();
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'posted' });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'Done.',
+            completed: true,
+          });
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+          });
+          return 'Done.';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply, createReplyStream }),
+      });
+
+      expect(createReplyStream).not.toHaveBeenCalled();
+      expect(postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: 'Done.',
+      });
     });
 
     it('stops streaming text that follows a closeout', async () => {

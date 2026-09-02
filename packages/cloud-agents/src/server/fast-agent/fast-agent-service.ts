@@ -103,6 +103,7 @@ import {
   createFastAgentReplyStreamPublisher,
   createFastAgentReplyTextTracker,
 } from './fast-agent-reply-stream';
+import { createFastAgentSurfaceReplyStreamer } from './fast-agent-surface-reply-stream';
 import { RemoteFastAgentSettingsSkillSource } from './fast-agent-settings-skill-source';
 import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill-invocation';
 import {
@@ -1584,6 +1585,14 @@ export async function answerFastAgentQuestion({
   let streamedReply:
     | { eventId: string; turnSeq: number; sentText: string }
     | undefined;
+  // A chat surface with a streaming API renders the same undelivered text
+  // as it is written; the reply that delivers it takes over that message.
+  // Platform events (automation reports, task settlements) post whole.
+  const surfaceReplyStream = createFastAgentSurfaceReplyStreamer({
+    ...(adapter.createReplyStream && !platformEvent
+      ? { createStream: adapter.createReplyStream }
+      : {}),
+  });
   const onAssistantTextUpdated = (update: NonTaskOpenCodeAssistantText) => {
     replyTextTracker.apply(update);
     // Text after a closeout belongs to the trailing model request that the
@@ -1591,6 +1600,7 @@ export async function answerFastAgentQuestion({
     if (isInstructionClosed(getInstructionVersion(update.messageId))) return;
     const text = replyTextTracker.unconsumedText();
     if (!text.trim()) return;
+    surfaceReplyStream.update(text, replyTextTracker.hasIncompleteUnconsumed());
     streamedReply ??= {
       ...allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
       sentText: '',
@@ -2542,7 +2552,9 @@ export async function answerFastAgentQuestion({
         diagnostics.recordVisibleReply(),
       );
       if (!replacedRetry) {
-        const posted = await adapter.postReply(reply);
+        const posted =
+          (await surfaceReplyStream.deliver(reply)) ??
+          (await adapter.postReply(reply));
         diagnostics.recordVisibleReply();
         turnVisibleMessages.push(buildAssistantTextMessage(reply.message));
         await persistAssistantReply({
@@ -2698,7 +2710,12 @@ export async function answerFastAgentQuestion({
       // Deliberately not the postReply closure: a system retry notice must
       // not satisfy the model's acknowledgement gate or close the turn.
       if (!(await replaceInferenceRetryReply(reply))) {
-        inferenceRetryReply = (await adapter.postReply(reply)) || undefined;
+        // A reply already streaming becomes the notice carrier rather than
+        // leaving a cut-off draft above it.
+        inferenceRetryReply =
+          (await surfaceReplyStream.deliver(reply)) ??
+          (await adapter.postReply(reply)) ??
+          undefined;
         inferenceRetryMessageIndex = turnVisibleMessages.length;
         turnVisibleMessages.push(buildAssistantTextMessage(message));
         await persistAssistantReply({
@@ -3140,6 +3157,7 @@ export async function answerFastAgentQuestion({
             if (completedChatReplySignatures.has(signature)) {
               replyTextTracker.consumeUnconsumed();
               dropStreamedReply();
+              await surfaceReplyStream.abort();
               return {
                 success: true,
                 delivered: true,
@@ -4283,7 +4301,9 @@ export async function answerFastAgentQuestion({
             message: RESTARTED_ACTIVE_TURN_MESSAGE,
           };
           try {
-            const posted = await adapter.postReply(reply);
+            const posted =
+              (await surfaceReplyStream.deliver(reply)) ??
+              (await adapter.postReply(reply));
             diagnostics.recordVisibleReply();
             const retryEvent = inferenceRetryCanonicalEvent;
             await persistAssistantReply({
@@ -4358,7 +4378,9 @@ export async function answerFastAgentQuestion({
             diagnostics.recordVisibleReply(),
           ))
         ) {
-          const posted = await adapter.postReply(reply);
+          const posted =
+            (await surfaceReplyStream.deliver(reply)) ??
+            (await adapter.postReply(reply));
           diagnostics.recordVisibleReply();
           turnVisibleMessages.push(buildAssistantTextMessage(message));
           await persistAssistantReply({
@@ -4432,6 +4454,9 @@ export async function answerFastAgentQuestion({
       }
     }
     dropStreamedReply();
+    // A stream no reply finished (a cancelled or parked turn) is closed so
+    // Slack stops showing it as still writing; its text stays.
+    await surfaceReplyStream.abort();
     await replyStream.dispose();
     await adapter.activity?.settle().catch((error) => {
       console.warn(
