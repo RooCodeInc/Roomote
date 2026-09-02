@@ -1,5 +1,6 @@
 const mocks = vi.hoisted(() => ({
   appendVisibleMessages: vi.fn(),
+  publishReplyStream: vi.fn(),
   getActiveTasks: vi.fn(),
   getSession: vi.fn(),
   getNativeRuntime: vi.fn(),
@@ -219,6 +220,10 @@ vi.mock('../fast-agent-user-identity', () => ({
 
 vi.mock('../fast-agent-title', () => ({
   refreshFastAgentSessionTitle: mocks.refreshTitle,
+}));
+
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => ({ publish: mocks.publishReplyStream }),
 }));
 
 vi.mock('../fast-agent-turn-lock', () => ({
@@ -7657,5 +7662,250 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ).rejects.toThrow('OpenCode unavailable');
     expect(activity.start).toHaveBeenCalledOnce();
     expect(activity.settle).toHaveBeenCalledOnce();
+  });
+
+  describe('answerFastAgentQuestion streamed reply text', () => {
+    beforeEach(() => {
+      mocks.publishReplyStream.mockResolvedValue(1);
+    });
+
+    /** Published chunks as `id=text`, concatenated per reply in order. */
+    const streamedReplies = () => {
+      const byId = new Map<string, string>();
+      for (const [channel, payload] of mocks.publishReplyStream.mock.calls as [
+        string,
+        string,
+      ][]) {
+        expect(channel).toBe('fast-agent:reply-stream:conversation-1');
+        const event = JSON.parse(payload) as {
+          id: string;
+          eventType: string;
+          role: string;
+          metadata: Record<string, unknown>;
+          text: string;
+        };
+        expect(event.eventType).toBe(
+          ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk,
+        );
+        expect(event.role).toBe('assistant');
+        expect(event.metadata).toMatchObject({
+          sessionId: 'opencode-session-1',
+          turnId: 'assistant-message-1',
+        });
+        byId.set(event.id, (byId.get(event.id) ?? '') + event.text);
+      }
+      return [...byId.entries()];
+    };
+    const persistedAssistantRows = () =>
+      mocks.upsertMessage.mock.calls
+        .map(([{ message }]) => message)
+        .filter((message) => message.role === 'assistant');
+
+    it('delivers the text written before a reply call and finalizes the streamed chunks', async () => {
+      const postReply = vi.fn().mockResolvedValue(undefined);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'Looking at',
+            delta: 'Looking at',
+            completed: false,
+          });
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'Looking at the deploy history now.',
+            completed: true,
+          });
+          const result = await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'progress',
+          });
+          expect(result).toMatchObject({ success: true, delivered: true });
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-2',
+            text: 'Done.',
+            completed: true,
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+          });
+          return 'Looking at the deploy history now.Done.';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+      });
+
+      expect(postReply).toHaveBeenCalledTimes(2);
+      expect(postReply).toHaveBeenNthCalledWith(1, {
+        purpose: 'progress',
+        message: 'Looking at the deploy history now.',
+      });
+      expect(postReply).toHaveBeenNthCalledWith(2, {
+        purpose: 'closeout',
+        message: 'Done.',
+      });
+
+      const streamed = streamedReplies();
+      expect(streamed.map(([, text]) => text)).toEqual([
+        'Looking at the deploy history now.',
+        'Done.',
+      ]);
+
+      const rows = persistedAssistantRows();
+      expect(rows.map((row) => row.contentBlocks)).toEqual([
+        [{ type: 'text', text: 'Looking at the deploy history now.' }],
+        [{ type: 'text', text: 'Done.' }],
+      ]);
+      // Each persisted row lands under the event its chunks streamed as.
+      expect(rows.map((row) => row.eventId)).toEqual(
+        streamed.map(([eventId]) => eventId),
+      );
+    });
+
+    it('rejects a reply call with nothing written and no message', async () => {
+      let result: unknown;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          result = await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Done.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(result).toEqual({
+        success: false,
+        error: expect.stringContaining('Write the reply as assistant text'),
+      });
+    });
+
+    it('posts only the undelivered remainder as the terminal closeout', async () => {
+      const postReply = vi.fn().mockResolvedValue(undefined);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'On it.',
+            completed: true,
+          });
+          await invokeTool(nativeToolNames.sendChatReply, { purpose: 'ack' });
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-2',
+            text: 'The answer is 42.',
+            completed: true,
+          });
+          await options.onMessageCompleted?.({
+            id: 'assistant-message-1',
+            sessionId: 'opencode-session-1',
+            createdAtMs: 100,
+            completedAtMs: 200,
+          });
+          return 'On it.The answer is 42.';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+      });
+
+      expect(postReply).toHaveBeenCalledTimes(2);
+      expect(postReply).toHaveBeenNthCalledWith(1, {
+        purpose: 'ack',
+        message: 'On it.',
+      });
+      expect(postReply).toHaveBeenNthCalledWith(2, {
+        purpose: 'closeout',
+        message: 'The answer is 42.',
+      });
+      const streamed = streamedReplies();
+      expect(streamed.map(([, text]) => text)).toEqual([
+        'On it.',
+        'The answer is 42.',
+      ]);
+      expect(persistedAssistantRows().at(-1)?.eventId).toBe(
+        streamed.at(-1)?.[0],
+      );
+    });
+
+    it('keeps a restated reply under the event its draft streamed as', async () => {
+      const postReply = vi.fn().mockResolvedValue(undefined);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'Scratch that.',
+            completed: true,
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Final answer.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+      });
+
+      expect(postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: 'Final answer.',
+      });
+      const streamed = streamedReplies();
+      expect(streamed).toEqual([[expect.any(String), 'Scratch that.']]);
+      expect(persistedAssistantRows().at(-1)?.eventId).toBe(streamed[0]![0]);
+    });
+
+    it('stops streaming text that follows a closeout', async () => {
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await options.onAssistantMessageStarted?.({
+            id: 'assistant-message-1',
+            sessionId: 'opencode-session-1',
+            parentId: null,
+            createdAtMs: 100,
+          });
+          await invokeTool(
+            nativeToolNames.sendChatReply,
+            { purpose: 'closeout', message: 'Done.' },
+            undefined,
+            'assistant-message-1',
+          );
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'Trailing narration',
+            completed: true,
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(mocks.publishReplyStream).not.toHaveBeenCalled();
+    });
   });
 });

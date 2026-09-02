@@ -392,6 +392,68 @@ describe('resolveOpenCodeSmallModel', () => {
           },
         };
         yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'text-part-1',
+              messageID: 'assistant-message-1',
+              sessionID: 'session-1',
+              type: 'text' as const,
+              text: 'Look',
+              time: { start: 160 },
+            },
+            delta: 'Look',
+          },
+        };
+        yield {
+          type: 'message.part.delta',
+          properties: {
+            sessionID: 'session-1',
+            messageID: 'assistant-message-1',
+            partID: 'text-part-1',
+            field: 'text',
+            delta: 'ing',
+          },
+        };
+        // The user prompt's own text part is not assistant reply text.
+        yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'user-text-part-1',
+              messageID: 'user-message-1',
+              sessionID: 'session-1',
+              type: 'text' as const,
+              text: '[USER] Use the native tools.',
+              time: { start: 100, end: 100 },
+            },
+          },
+        };
+        // Other sessions and non-text fields are not assistant reply text.
+        yield {
+          type: 'message.part.delta',
+          properties: {
+            sessionID: 'subagent-session-1',
+            messageID: 'other',
+            partID: 'other',
+            field: 'text',
+            delta: 'ignored',
+          },
+        };
+        yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'text-part-1',
+              messageID: 'assistant-message-1',
+              sessionID: 'session-1',
+              type: 'text' as const,
+              text: 'Looking',
+              time: { start: 160, end: 170 },
+            },
+          },
+        };
+        yield {
           type: 'session.created',
           properties: {
             sessionID: 'subagent-session-1',
@@ -430,6 +492,7 @@ describe('resolveOpenCodeSmallModel', () => {
     const onAssistantMessageCompleted = vi.fn();
     const onSubagentSessionReady = vi.fn(() => markSubagentReady());
     const onParentTaskPartUpdated = vi.fn();
+    const onAssistantTextUpdated = vi.fn();
     const session: { id?: string } = {};
 
     await expect(
@@ -458,11 +521,34 @@ describe('resolveOpenCodeSmallModel', () => {
           onSessionReady,
           onSubagentSessionReady,
           onParentTaskPartUpdated,
+          onAssistantTextUpdated,
           permission: FAST_AGENT_SESSION_PERMISSIONS,
           promptOnlySubagents: true,
         },
       ),
     ).resolves.toBe('native tool turn complete');
+
+    expect(onAssistantTextUpdated.mock.calls.map(([text]) => text)).toEqual([
+      {
+        messageId: 'assistant-message-1',
+        partId: 'text-part-1',
+        text: 'Look',
+        delta: 'Look',
+        completed: false,
+      },
+      {
+        messageId: 'assistant-message-1',
+        partId: 'text-part-1',
+        delta: 'ing',
+        completed: false,
+      },
+      {
+        messageId: 'assistant-message-1',
+        partId: 'text-part-1',
+        text: 'Looking',
+        completed: true,
+      },
+    ]);
 
     expect(session.id).toBe('session-1');
     expect(onModelResolved).toHaveBeenCalledWith('openrouter/openai/gpt-5.4');

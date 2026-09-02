@@ -287,6 +287,17 @@ export type NonTaskOpenCodeTaskPart = {
   agentType?: string;
 };
 
+/** A streamed assistant text part from the parent OpenCode session. */
+export type NonTaskOpenCodeAssistantText = {
+  messageId: string;
+  partId: string;
+  /** Full text of the part so far, when the event carries it. */
+  text?: string;
+  /** Text appended since the previous update, when only a delta is known. */
+  delta?: string;
+  completed: boolean;
+};
+
 export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
   env?: Partial<Record<string, string>>;
@@ -308,6 +319,8 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   onParentTaskPartUpdated?: (
     part: NonTaskOpenCodeTaskPart,
   ) => Promise<void> | void;
+  /** Live assistant text from the parent session, part by part. */
+  onAssistantTextUpdated?: (text: NonTaskOpenCodeAssistantText) => void;
   permission?: PermissionRuleset;
   promptOnlySubagents?: boolean;
   signal?: AbortSignal;
@@ -393,6 +406,57 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+function normalizeParentOpenCodeTextPart(
+  value: unknown,
+  parentSessionId: string,
+  delta: string | undefined,
+): NonTaskOpenCodeAssistantText | undefined {
+  const part = asRecord(value);
+  if (part?.type !== 'text' || part.sessionID !== parentSessionId) {
+    return undefined;
+  }
+  const partId = asString(part.id);
+  const messageId = asString(part.messageID);
+  if (!partId || !messageId) return undefined;
+  const time = asRecord(part.time);
+  return {
+    messageId,
+    partId,
+    text: asString(part.text) ?? '',
+    ...(delta !== undefined ? { delta } : {}),
+    completed: asFiniteNumber(time?.end) !== undefined,
+  };
+}
+
+/**
+ * Newer OpenCode servers stream text through a dedicated
+ * `message.part.delta` event that the pinned SDK does not type yet; the
+ * matching `message.part.updated` still carries the full text on completion.
+ */
+function isOpenCodeTextPartDeltaEvent(
+  event: { type: string; properties?: unknown },
+  parentSessionId: string,
+): event is {
+  type: 'message.part.delta';
+  properties: {
+    sessionID: string;
+    messageID: string;
+    partID: string;
+    field: string;
+    delta: string;
+  };
+} {
+  if (event.type !== 'message.part.delta') return false;
+  const properties = asRecord(event.properties);
+  return (
+    properties?.sessionID === parentSessionId &&
+    properties.field === 'text' &&
+    typeof properties.messageID === 'string' &&
+    typeof properties.partID === 'string' &&
+    typeof properties.delta === 'string'
+  );
 }
 
 function normalizeParentOpenCodeTaskPart(
@@ -937,6 +1001,7 @@ async function runNonTaskSdkPrompt(
     onParentTaskPartUpdated?: (
       part: NonTaskOpenCodeTaskPart,
     ) => Promise<void> | void;
+    onAssistantTextUpdated?: (text: NonTaskOpenCodeAssistantText) => void;
     permission?: PermissionRuleset;
     preserveReasoning?: boolean;
     promptOnlySubagents?: boolean;
@@ -1122,6 +1187,7 @@ async function runNonTaskSdkPrompt(
       options.onAssistantMessageCompleted ||
       options.onSubagentSessionReady ||
       options.onParentTaskPartUpdated ||
+      options.onAssistantTextUpdated ||
       options.trackSessionTreeUsage,
     );
 
@@ -1166,6 +1232,30 @@ async function runNonTaskSdkPrompt(
                     return;
                   }
                 }
+                const assistantText = normalizeParentOpenCodeTextPart(
+                  event.properties.part,
+                  sessionId,
+                  // Older servers attach the streamed delta to this event.
+                  asString(asRecord(event.properties)?.delta),
+                );
+                // Parts carry no role; the user prompt's own text part must
+                // never read as reply text.
+                if (
+                  assistantText &&
+                  observedAssistantMessageIds.has(assistantText.messageId)
+                ) {
+                  options.onAssistantTextUpdated?.(assistantText);
+                }
+              } else if (
+                isOpenCodeTextPartDeltaEvent(event, sessionId) &&
+                observedAssistantMessageIds.has(event.properties.messageID)
+              ) {
+                options.onAssistantTextUpdated?.({
+                  messageId: event.properties.messageID,
+                  partId: event.properties.partID,
+                  delta: event.properties.delta,
+                  completed: false,
+                });
               } else if (
                 event.type === 'message.updated' &&
                 event.properties.info.role === 'assistant' &&
@@ -1651,6 +1741,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       onSessionReady: options.onSessionReady,
       onSubagentSessionReady: options.onSubagentSessionReady,
       onParentTaskPartUpdated: options.onParentTaskPartUpdated,
+      onAssistantTextUpdated: options.onAssistantTextUpdated,
       permission: options.permission,
       preserveReasoning: true,
       promptOnlySubagents: options.promptOnlySubagents,
