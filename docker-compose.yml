@@ -22,7 +22,7 @@ services:
       interval: 5s
       timeout: 30s
       retries: 5
-      start_period: 120s
+      start_period: 30s
 
   redis:
     container_name: roomote-redis

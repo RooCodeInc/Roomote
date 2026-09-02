@@ -24,7 +24,7 @@ services:
     ports:
       - '127.0.0.1:${DEPLOYMENT_CI_POSTGRES_PORT:-55432}:5432'
     healthcheck:
-      start_period: 120s
+      start_period: 300s
 
   redis:
     ports:
