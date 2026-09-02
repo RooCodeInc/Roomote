@@ -199,20 +199,15 @@ export async function processFastAgentMessage(params: {
       eventFiles: event.files,
       messages: threadContext,
     });
-    const [attachments, resolvedActiveTasks, footerContext] = await Promise.all(
-      [
-        processSlackAttachments({
-          slack,
-          files: currentMessageFiles,
-          userId,
-          userTextContext: baseQuestion,
-        }),
-        resolveActiveTasks
-          ? resolveActiveTasks()
-          : Promise.resolve(activeTasks),
-        resolveFastSessionReplyFooterContext({ sessionId: session.id }),
-      ],
-    );
+    const [attachments, footerContext] = await Promise.all([
+      processSlackAttachments({
+        slack,
+        files: currentMessageFiles,
+        userId,
+        userTextContext: baseQuestion,
+      }),
+      resolveFastSessionReplyFooterContext({ sessionId: session.id }),
+    ]);
     if (processingReactionPromise) {
       didAddProcessingReaction = await processingReactionPromise;
       processingReactionSettled = true;
@@ -280,6 +275,12 @@ export async function processFastAgentMessage(params: {
         new Error('Fast suggestion launch settlement failed.'),
       ),
     );
+    // Resolving reply tasks claims pending PR-review actions for this turn,
+    // so it must wait until the turn is actually admitted: a steered or
+    // queued follow-up must not consume actions it will never carry.
+    const resolvedActiveTasks = resolveActiveTasks
+      ? await resolveActiveTasks()
+      : activeTasks;
     const responseText = await answerFastAgentQuestion({
       question,
       images: attachments.images,

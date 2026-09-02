@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   postThreadMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
   admitHumanFollowUp: vi.fn(),
+  resolveFooterContext: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -69,10 +70,7 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('@roomote/communication', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/communication')>()),
-  resolveFastSessionReplyFooterContext: vi.fn(async () => ({
-    linkedPrs: [],
-    livePreviewUrl: null,
-  })),
+  resolveFastSessionReplyFooterContext: mocks.resolveFooterContext,
 }));
 
 vi.mock('../helpers/thread-posting.js', () => ({
@@ -118,6 +116,10 @@ describe('processFastAgentMessage', () => {
       messageId: '101.001',
     });
     mocks.recordProviderMessage.mockResolvedValue(undefined);
+    mocks.resolveFooterContext.mockResolvedValue({
+      linkedPrs: [],
+      livePreviewUrl: null,
+    });
     mocks.admitHumanFollowUp.mockResolvedValue({
       kind: 'turn',
       turnLock: mocks.releaseLock,
@@ -558,9 +560,9 @@ describe('processFastAgentMessage', () => {
       normalizeIncomingText: vi.fn(async (text: string) => text),
       fetchThreadMessages: vi.fn(async () => []),
     };
-    const resolveActiveTasks = vi.fn(async () => {
+    mocks.resolveFooterContext.mockImplementationOnce(async () => {
       reaction.resolve(true);
-      throw new Error('tasks unavailable');
+      throw new Error('footer context unavailable');
     });
 
     await expect(
@@ -575,9 +577,8 @@ describe('processFastAgentMessage', () => {
         slack: slack as never,
         userId: 'user-1',
         teamId: 'T123',
-        resolveActiveTasks,
       }),
-    ).rejects.toThrow('tasks unavailable');
+    ).rejects.toThrow('footer context unavailable');
 
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
     expect(slack.removeReaction).toHaveBeenCalledWith(
