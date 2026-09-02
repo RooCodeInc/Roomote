@@ -359,6 +359,7 @@ export {
   resolveSourceControlProviderForRepositoryFromPayload,
 } from './lib/pull-requests/source-control-pull-request-shared';
 export {
+  listOpenSourceControlPullRequestsForRepository,
   readSourceControlPullRequestForTaskRun,
   sourceControlPullRequestReadInputSchema,
   SourceControlReadError,

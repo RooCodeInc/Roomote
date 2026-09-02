@@ -394,7 +394,8 @@ function StarterTasksStepContent({
     <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
       <StepTitle text={STARTER_TASKS_TITLE} />
       <p className="mb-4">
-        These are a few good starter tasks to get you going, zero effort:
+        Pick a few areas for Roomote to dig into. It will explore your
+        repositories and start the most valuable work it finds:
       </p>
       <ComputeProvisioningNotice
         computeProvisioning={computeProvisioning}

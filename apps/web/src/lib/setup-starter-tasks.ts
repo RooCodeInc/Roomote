@@ -32,7 +32,7 @@ export const SETUP_STARTER_TASKS: readonly SetupStarterTask[] = [
       'Find the slowest parts of your CI pipeline and make them faster.',
     prompt: `Speed up our continuous integration.
 
-Review the CI configuration in the most impactful repository in this workspace: workflows, caching, test parallelism, and dependency installation. Identify the biggest sources of wasted time, then implement the safest high-impact improvements (for example caching dependencies, splitting or parallelizing slow jobs, or removing redundant steps) and open a pull request. Summarize the expected time savings and call out any riskier optimizations you deliberately left for follow-up.`,
+Review the CI configuration in the most impactful repository in this workspace: workflows, caching, test parallelism, and dependency installation. Identify the biggest sources of wasted time, then implement the safest high-impact improvements (for example caching dependencies, splitting or parallelizing slow jobs, or removing redundant steps) and open a pull request. Favor an early win: once you have identified the single smallest safe high-impact improvement, open its pull request right away rather than waiting to bundle it with the rest of the work. Summarize the expected time savings and call out any riskier optimizations you deliberately left for follow-up.`,
   },
   {
     id: 'security-scan',
