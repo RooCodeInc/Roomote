@@ -254,10 +254,9 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                   recipientUserId: senderSubject.subjectSlackUserId,
                   sessionId: session.id,
                   footerContext,
-                  takeQuote: () => {
-                    const quote = pendingQuote;
+                  getQuote: () => pendingQuote,
+                  onDelivered: () => {
                     pendingQuote = null;
-                    return quote;
                   },
                 }),
             }
