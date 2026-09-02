@@ -730,6 +730,23 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
+  it('omits web-only structured input from non-web runtimes', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'non-web-native-tools',
+      [],
+      { surface: 'slack' },
+    );
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    ) as {
+      agent: { build: { tools: Record<string, boolean> } };
+    };
+
+    expect(
+      config.agent.build.tools[FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput],
+    ).toBe(false);
+  });
+
   it('registers only native servers with OpenCode and keeps on-demand servers off the request', async () => {
     const runtime = await getFastAgentNativeToolRuntime('lazy-mcp', [
       {

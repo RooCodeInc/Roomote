@@ -2943,6 +2943,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ id: 'github' }),
         expect.objectContaining({ id: 'roomote' }),
       ]),
+      { surface: 'slack' },
     );
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.any(Object),
