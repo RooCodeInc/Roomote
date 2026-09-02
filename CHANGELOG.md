@@ -2,6 +2,21 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.2.1 (2026-09-02)
+
+Roomote 1.2.1 restores Fast turns on OpenAI models and keeps Slack replies and usage alerts accurate.
+
+### Highlights
+
+- Run Fast turns on OpenAI models without immediate inference-provider errors.
+- Keep streamed Fast replies in Slack complete and deduplicated when finalization fails.
+
+### Patch changes
+
+- Restore Fast turns on OpenAI models by sending a valid schema for user-input requests instead of failing immediately with an inference-provider error.
+- Keep streamed Fast replies in Slack complete and deduplicated when finalizing the stream fails.
+- Show concise inference-provider usage alerts in Slack without repeating synthetic percentage details.
+
 ## 1.2.0 (2026-09-02)
 
 Roomote 1.2 enables contextual Message Suggestions by default, streams Fast replies across web and Slack, guides first administrators in one resumable setup Session, and recommends Gemini 3.8 Flash.
