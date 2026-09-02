@@ -50,9 +50,12 @@ describe('Capture visual proof skill', () => {
   });
 
   it('snapshots the diff before capture so the judge can detect undisclosed drift', () => {
+    // The snapshot must cover committed work too: fix-pr commits and pushes
+    // before this step, so `git diff HEAD` alone would be empty there.
     expect(skillContent).toContain(
-      'git diff HEAD > /tmp/capture-visual-proof/diff-at-start.patch',
+      'git diff "$(git merge-base HEAD origin/HEAD 2>/dev/null || echo HEAD~1)" > /tmp/capture-visual-proof/diff-at-start.patch',
     );
+    expect(skillContent).toContain('Do not snapshot only `git diff HEAD`');
     expect(skillContent).toContain(
       'Any source change you make after the snapshot, whether for simulation or for a fix, must be listed in the `Simulation disclosure` section or reverted before this skill returns.',
     );
