@@ -11,7 +11,8 @@ Roomote 1.2 makes Fast work durable across interruptions, turns Sessions into a 
 - Keep replay-safe Fast turns moving through process interruptions and provider retry waits without duplicate acknowledgements or repeated side effects.
 - Reply to and manage live nested tasks inside Sessions while retaining complete delegated activity, pull-request links, and readable transcripts.
 - Give automations per-suggestion workspace targets, model-specific reasoning effort, durable admission, and repository-configured dependency reviewers.
-- Guide first administrators through setup in one persistent Session and choose Gemini 3.8 Flash across supported inference providers.
+- Guide first administrators through setup in one persistent, resumable Session.
+- Recommend Gemini 3.8 Flash across Google Gemini, OpenRouter, Vercel AI Gateway, Requesty, and OpenCode Zen.
 
 ### Minor changes
 
