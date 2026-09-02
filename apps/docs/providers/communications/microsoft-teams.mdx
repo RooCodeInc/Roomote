@@ -42,9 +42,9 @@ has a different bot app ID from the Entra app ID, choose **Show advanced config*
 after the Directory (Tenant) ID field during setup and enter the bot-specific
 values there.
 
-After Microsoft sign-in, **Settings > Linked Accounts** shows the Microsoft
-Teams account. Users who signed in with another provider can link Microsoft
-from that settings page.
+After Microsoft sign-in, **Settings > Personal > Linked Accounts** shows the
+Microsoft Teams account. Users who signed in with another provider can link
+Microsoft from that settings page.
 
 ## Teams bot registration
 
@@ -104,8 +104,11 @@ readiness, and enables all three messaging scopes:
 - **Group chat** - group-chat messages that mention the bot start tasks
 
 If you prefer to build the app package yourself in the Developer Portal, add a
-bot capability that uses the same Microsoft App ID as `R_TEAMS_BOT_APP_ID` and
-include the bot entry in the manifest:
+bot capability that uses the same Microsoft App ID as `R_TEAMS_BOT_APP_ID`.
+The relevant manifest sections are shown below; a complete uploadable manifest
+also requires the app ID, version, developer, name, description, icons, and web
+application metadata that the Developer Portal collects, plus the `identity`
+and `messageTeamMembers` permissions used by Roomote:
 
 ```json
 {
