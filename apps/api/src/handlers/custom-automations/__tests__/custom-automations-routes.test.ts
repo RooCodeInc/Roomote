@@ -250,6 +250,7 @@ describe('custom-automations MCP routes', () => {
             schedule: 'daily',
             model: null,
             environmentId: ENVIRONMENT_ID,
+            lastError: 'previous failure',
           },
         ],
       });

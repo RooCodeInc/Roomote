@@ -75,6 +75,34 @@ describe('manage custom automations tool contract', () => {
           targetProvider: 'slack',
           targetMode: 'channel',
           targetChannelId: 'channel-1',
+          lastError: 'previous failure',
+        },
+      ],
+    });
+  });
+
+  it('bounds persisted errors in list results', () => {
+    const lastError = 'x'.repeat(1_000);
+    const result = compactManageCustomAutomationsResult('list', {
+      automations: [
+        {
+          id: 'automation-1',
+          name: 'Daily report',
+          enabled: true,
+          scheduleMode: 'daily',
+          lastError,
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      automations: [
+        {
+          id: 'automation-1',
+          name: 'Daily report',
+          enabled: true,
+          schedule: 'daily',
+          lastError: `${'x'.repeat(497)}...`,
         },
       ],
     });

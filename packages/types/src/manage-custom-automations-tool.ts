@@ -101,7 +101,12 @@ function pickDefined(
   );
 }
 
-function compactAutomation(value: unknown): Record<string, unknown> {
+const COMPACT_AUTOMATION_ERROR_MAX_LENGTH = 500;
+
+function compactAutomation(
+  value: unknown,
+  options: { includeLastError?: boolean } = {},
+): Record<string, unknown> {
   const automation = asRecord(value);
   if (!automation) return {};
 
@@ -112,6 +117,12 @@ function compactAutomation(value: unknown): Record<string, unknown> {
     'model',
     'environmentId',
   ]);
+  if (options.includeLastError && typeof automation.lastError === 'string') {
+    result.lastError =
+      automation.lastError.length <= COMPACT_AUTOMATION_ERROR_MAX_LENGTH
+        ? automation.lastError
+        : `${automation.lastError.slice(0, COMPACT_AUTOMATION_ERROR_MAX_LENGTH - 3)}...`;
+  }
   const schedule =
     automation.scheduleMode === 'cron'
       ? automation.cronExpression
@@ -177,7 +188,9 @@ export function compactManageCustomAutomationsResult(
     case 'list':
       return {
         automations: Array.isArray(result.automations)
-          ? result.automations.map(compactAutomation)
+          ? result.automations.map((automation) =>
+              compactAutomation(automation, { includeLastError: true }),
+            )
           : [],
       };
     case 'list_models':

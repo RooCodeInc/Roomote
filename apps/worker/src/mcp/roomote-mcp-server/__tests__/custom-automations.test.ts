@@ -71,6 +71,7 @@ describe('handleManageCustomAutomations', () => {
           schedule: 'daily',
           model: null,
           environmentId: 'environment-1',
+          lastError: 'previous failure',
         },
       ],
     });
