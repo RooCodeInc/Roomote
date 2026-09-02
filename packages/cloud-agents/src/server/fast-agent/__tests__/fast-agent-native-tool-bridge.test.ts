@@ -130,6 +130,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain('export default {');
     expect(replySource).toContain('invoke("send_chat_reply"');
     expect(replySource).toContain('suggestions: z.array');
+    expect(replySource).toContain('environmentId: z.string().min(1)');
+    expect(replySource).toContain('__all_repositories__');
+    expect(replySource).toContain('__fast__');
     expect(replySource).toContain('Launchable follow-ups');
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(launchTaskSource).toContain('deployment-enabled model ID');

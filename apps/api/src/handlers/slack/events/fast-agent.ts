@@ -25,6 +25,7 @@ import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   admitFastAgentHumanFollowUp,
   persistFastAgentInlineHumanTurn,
+  wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
   type FastAgentDurableTurn,
   recordFastAgentConversationMessageBestEffort,
@@ -338,6 +339,14 @@ export async function processFastAgentMessage(params: {
                   conversationId: session.id,
                   eventKey: durableTurn.eventKey,
                 }),
+              requestDurableRetry: (retryAt: Date) =>
+                wakeFastAgentParentEventAt(
+                  {
+                    conversationId: session.id,
+                    eventKey: durableTurn.eventKey,
+                  },
+                  retryAt,
+                ),
             }
           : {}),
         activity: createFastAgentSlackSessionActivity({

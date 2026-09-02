@@ -211,6 +211,7 @@ export {
   FastAgentParentBusyError,
   FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
   recoverPendingFastAgentParentEvents,
+  wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
   type FastAgentParentEventQueueRequest,
 } from './lib/fast-agent-parent-event-queue';

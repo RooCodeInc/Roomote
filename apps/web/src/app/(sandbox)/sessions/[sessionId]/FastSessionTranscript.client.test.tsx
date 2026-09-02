@@ -204,6 +204,9 @@ describe('FastSessionTranscript', () => {
     turnSeq = role === 'user' ? 0 : 1,
     inputKind,
     userId,
+    userName = null,
+    userEmail = null,
+    userImageUrl = null,
   }: {
     id: string;
     role: 'user' | 'assistant';
@@ -213,6 +216,9 @@ describe('FastSessionTranscript', () => {
     turnSeq?: number;
     inputKind?: string;
     userId?: string;
+    userName?: string | null;
+    userEmail?: string | null;
+    userImageUrl?: string | null;
   }) => ({
     id,
     eventId: `${id}:event`,
@@ -234,6 +240,9 @@ describe('FastSessionTranscript', () => {
     source: 'web',
     nativeSessionId: role === 'assistant' ? 'opencode-1' : null,
     nativeMessageId: null,
+    userName,
+    userEmail,
+    userImageUrl,
     createdAt: new Date(ts),
   });
 
@@ -1130,6 +1139,9 @@ describe('FastSessionTranscript', () => {
             source: 'slack',
             nativeSessionId: null,
             nativeMessageId: null,
+            userName: 'Slack Sender',
+            userEmail: 'sender@example.com',
+            userImageUrl: null,
             createdAt: new Date('2026-01-01T00:00:00.000Z'),
           },
           {
@@ -1155,6 +1167,7 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByRole('log')).toBeInTheDocument();
     expect(screen.getByText('What changed?')).toBeInTheDocument();
     expect(screen.getByText('Two files')).toBeInTheDocument();
+    expect(screen.getByLabelText('Slack Sender')).toHaveTextContent('SS');
   });
 
   it('updates one canonical tool row from in-progress to completed via the stream', () => {

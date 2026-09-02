@@ -60,7 +60,11 @@ export function resolveSuggestedTaskLaunchMode(input: {
   fastEligible: boolean;
   userDefaultEnabled: boolean;
   fastAvailable: boolean;
+  requiredMode?: SuggestedTaskLaunchMode;
 }): SuggestedTaskLaunchMode {
+  if (input.requiredMode) {
+    return input.requiredMode;
+  }
   if (!input.fastEligible) {
     return 'coding';
   }
@@ -80,6 +84,7 @@ export async function launchClaimedSuggestedTask(input: {
     fastEligible: boolean;
     userDefaultEnabled: boolean;
     fastAvailable: boolean;
+    requiredMode?: SuggestedTaskLaunchMode;
   };
   launch: (
     mode: SuggestedTaskLaunchMode,

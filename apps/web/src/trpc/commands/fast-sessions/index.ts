@@ -7,6 +7,7 @@ import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   createFastAgentWebTaskLauncher,
+  FastAgentDurableRetryScheduledError,
   getOrCreateFastAgentSession,
   resolveApiBaseUrl,
   type FastAgentPlatformEventKind,
@@ -18,6 +19,7 @@ import {
   buildFastAgentSurfaceReplyDelivery,
   persistFastAgentInlineHumanTurn,
   resolveUserMcpServerConfigs,
+  wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
   type FastAgentSurfaceReplyDelivery,
 } from '@roomote/sdk/server';
@@ -353,6 +355,14 @@ async function runWebFastAgentTurn({
                   conversationId: durableSessionId,
                   eventKey: durableTurn.eventKey,
                 }),
+              requestDurableRetry: (retryAt: Date) =>
+                wakeFastAgentParentEventAt(
+                  {
+                    conversationId: durableSessionId,
+                    eventKey: durableTurn.eventKey,
+                  },
+                  retryAt,
+                ),
             }
           : {}),
         ...delivery.adapter,
@@ -360,6 +370,13 @@ async function runWebFastAgentTurn({
       },
     });
   } catch (error) {
+    if (error instanceof FastAgentDurableRetryScheduledError) {
+      // Not a failure: the queue re-runs this turn at the scheduled time.
+      console.info(
+        `[Fast Web] Turn parked for a durable retry for ${conversation.conversationId}: ${error.message}`,
+      );
+      return;
+    }
     console.error(
       `[Fast Web] Turn failed for ${conversation.conversationId}: ${formatErrorForLog(error)}`,
     );

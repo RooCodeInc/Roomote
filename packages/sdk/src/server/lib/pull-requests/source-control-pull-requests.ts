@@ -259,6 +259,14 @@ async function resolveExplicitPrAttribution({
             ),
     })),
   );
+  // Automation-started tasks with no human participants, acting user, or
+  // durable owner have nobody to attribute to. Rejecting every selector there
+  // leaves the agent no way forward (the error can't even list choices), so
+  // fall back to the default attribution instead of blocking PR delivery.
+  if (candidates.length === 0) {
+    return liveAttribution;
+  }
+
   const normalizedSelector = normalizeAttributionSelector(selector);
   const loginMatches = candidates.filter(({ attribution }) =>
     [attribution.publicDisplayName, attribution.githubLogin]

@@ -58,6 +58,7 @@ import {
 
 import {
   buildFastAgentSurfaceReplyDelivery,
+  continueFastAgentSurfaceReply,
   queueFastAgentSurfaceReply,
 } from './fast-agent-surface-reply';
 
@@ -442,5 +443,60 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         text: expect.not.stringContaining('external_input'),
       }),
     );
+  });
+});
+
+describe('continueFastAgentSurfaceReply admission hooks', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reports admission with the queued follow-up’s abort before the turn runs', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'web',
+    });
+    const abort = vi.fn();
+    mocks.admitHumanFollowUp.mockResolvedValue({ kind: 'queued', abort });
+    const onAccepted = vi.fn();
+    const onRejected = vi.fn();
+
+    await expect(
+      continueFastAgentSurfaceReply({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Matt',
+        question: 'Follow up',
+        currentMessageId: 'message-1',
+        onAccepted,
+        onRejected,
+      }),
+    ).resolves.toBe(true);
+
+    expect(onAccepted).toHaveBeenCalledWith(abort);
+    expect(onRejected).not.toHaveBeenCalled();
+  });
+
+  it('reports rejection when the session has no delivery route', async () => {
+    const user = await userFactory.create();
+    const onAccepted = vi.fn();
+    const onRejected = vi.fn();
+
+    await expect(
+      continueFastAgentSurfaceReply({
+        sessionId: '00000000-0000-4000-8000-000000000000',
+        userId: user.id,
+        senderDisplayName: null,
+        question: 'Follow up',
+        currentMessageId: 'message-1',
+        onAccepted,
+        onRejected,
+      }),
+    ).resolves.toBe(false);
+
+    expect(onRejected).toHaveBeenCalledTimes(1);
+    expect(onAccepted).not.toHaveBeenCalled();
+    expect(mocks.admitHumanFollowUp).not.toHaveBeenCalled();
   });
 });

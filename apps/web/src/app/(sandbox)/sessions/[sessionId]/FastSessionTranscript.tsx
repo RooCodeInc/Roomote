@@ -470,6 +470,9 @@ export function FastSessionTranscript({
             metadata: message.metadata,
             payload: message.payload,
             text: getTranscriptMessageText(message),
+            userName: message.userName,
+            userEmail: message.userEmail,
+            userImageUrl: message.userImageUrl,
           });
 
           if (
@@ -570,6 +573,9 @@ export function FastSessionTranscript({
           source: 'web',
           nativeSessionId: null,
           nativeMessageId: null,
+          userName: null,
+          userEmail: null,
+          userImageUrl: null,
           createdAt: new Date(),
         };
         setOptimisticMessages((previous) => [...previous, optimistic]);

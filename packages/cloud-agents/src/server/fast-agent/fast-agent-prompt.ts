@@ -1,5 +1,6 @@
 import {
   ALL_REPOSITORIES,
+  FAST_EXECUTION,
   PRODUCT_NAME,
   type TaskModelOption,
 } from '@roomote/types';
@@ -183,7 +184,7 @@ export function buildFastAgentSystemPrompt({
     : '- When the current input includes an `<unresolved_request>` envelope, the previous human request in this conversation was interrupted before you delivered an answer (`reason` says why), and the user is still owed that answer. If the current message is a nudge, greeting, or check-in (for example "hey", "still there?", "any update?"), resume that request now and say in one short sentence that you are picking it back up; do not treat the message as the start of a new conversation. If the current message clearly asks for something else, handle it and mention in one short sentence that the earlier request was not completed so the user can re-ask. Never drop the earlier request silently.\n';
   const resumedTurnGuidance = platformEvent
     ? ''
-    : '- When the current input includes a `<resumed_turn>` marker, a service restart interrupted your previous attempt at this same request before it finished, and any acknowledgement or progress note you already posted is still visible to the user. Do not acknowledge the request again. Continue the work from the visible history and deliver the answer.\n';
+    : '- When the current input includes a `<resumed_turn>` marker, your previous attempt at this same request did not finish (a service restart interrupted it, or a temporary inference provider failure is being retried automatically), and any acknowledgement or progress note you already posted is still visible to the user. Do not acknowledge the request again. Continue the work from the visible history and deliver the answer.\n';
   const releaseIdentifier = releaseVersion
     ? `Roomote release ${releaseVersion}\n\n`
     : '';
@@ -365,6 +366,7 @@ ${
   platformEventKind === 'automation'
     ? `- Execute the automation prompt now. Use integrations directly when sufficient, and launch a task only when repository or workspace execution is actually required. The configured model is a delegated-task default, not the Fast inference model.
 - When the automation asks for launchable suggested tasks and this is a Slack, Discord, Teams, or Telegram report, put each concrete follow-up in the closeout's \`suggestions\` array. Keep the report summary in \`message\`; do not render suggestion cards or launch instructions as inline prose because the delivery layer adds them.
+- Each suggestion may independently set \`environmentId\` to an exact environment ID listed under All Environments, \`${ALL_REPOSITORIES}\` for all repositories, or \`${FAST_EXECUTION}\` for Fast mode. This target is independent of the automation's own execution environment. Omit \`environmentId\` only when normal workspace routing should choose at launch time; never invent an ID.
 - If launchable suggestions are unavailable on the current surface, keep follow-ups as ordinary report text and do not promise reaction-triggered launching.
 `
     : ''
