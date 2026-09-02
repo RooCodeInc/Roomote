@@ -1,4 +1,6 @@
 export const ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME = 'proof-runner';
+export const VISUAL_PROOF_ATTEMPT_STATE_PATH =
+  '/tmp/roomote-visual-proof-attempt.json';
 
 /**
  * Builds the hidden proof-runner subagent prompt. The browser target is baked
@@ -25,7 +27,7 @@ export function createProofRunnerAgentPrompt(
     '',
     '1. Decide the smallest concrete capture plan that proves the claim for the requested package, covering every checklist item from the brief.',
     '2. Reach the required product state, including authentication when needed.',
-    '3. Capture the final screenshots and screencasts under `/tmp/capture-visual-proof/`.',
+    `3. Read the proof-attempt state from \`${VISUAL_PROOF_ATTEMPT_STATE_PATH}\` before capture. Capture the final screenshots and screencasts under \`/tmp/capture-visual-proof/<attemptId>/\`, using the exact \`attemptId\` from that state. If the state file is missing or invalid, report blocked with blocker type \`proof runtime unavailable\` instead of uploading artifacts without attempt provenance.`,
     '4. Self-review each captured screenshot and screencast keyframe before upload. Verify both the specific proof sentence and the full captured frame for obvious visual regressions, including inconsistent light/dark theme treatment, unreadable contrast, clipping or overflow, broken layout, unintended loading or error states, and styling that conflicts with the surrounding UI. If your model cannot inspect images directly, say so explicitly in the final report so the parent can validate the captures with the visual subagent instead.',
     '5. Upload each approved screenshot, screencast, and keyframe with the `manage_artifacts` MCP tool using the `upload` action and `type` set to `visual-proof`. Treat the `artifactId`, `viewUrl`, and `rawUrl` values returned by each upload tool result as the only canonical artifact references. Never invent, guess, or reconstruct artifact IDs or URLs.',
     '6. Return one final report containing the uploaded artifact IDs and URLs from those tool results.',
@@ -65,7 +67,7 @@ export function createProofRunnerAgentPrompt(
     '- Prefer the smallest focused screenshot set that proves the claim.',
     '- Do not silently downscope the claim to the first easy visible example. When the claim spans multiple materially distinct visible treatments, placements, or states, the final proof must cover each one directly or via an artifact that clearly proves several together.',
     '- Use screencasts only when the requested package includes them.',
-    '- For screencasts, start recording before the interaction that matters, stop as soon as the proof is visible, validate the clip with `ffprobe`, and extract 3 to 5 keyframes under `/tmp/capture-visual-proof/`.',
+    '- For screencasts, start recording before the interaction that matters, stop as soon as the proof is visible, validate the clip with `ffprobe`, and extract 3 to 5 keyframes under `/tmp/capture-visual-proof/<attemptId>/`.',
     '- Retry a screenshot or screencast once when the first honest capture is obviously blank, clipped, or misses the required visible state.',
     '- If you capture only partial supporting evidence and the remaining checklist items cannot be shown honestly, return the run as blocked instead of reporting a narrowed success.',
     '- Do not approve or upload an artifact just because its focal element satisfies the proof sentence. Treat an obvious visual defect anywhere in the captured frame as a failed self-review.',

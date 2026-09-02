@@ -1,4 +1,6 @@
 import EventEmitter from 'node:events';
+import { randomUUID } from 'node:crypto';
+import { rmSync, writeFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -48,6 +50,7 @@ import type {
   StartNewTaskCommand,
   TaskCommand,
 } from '../../harness';
+import { VISUAL_PROOF_ATTEMPT_STATE_PATH } from '../../../../run-task/proof-runner-prompt';
 import { buildTaskGoalContext } from '../../../../run-task/task-goal';
 import {
   hasTerminalChatReplyDeliveryFailure,
@@ -334,8 +337,8 @@ const FALLBACK_OPENCODE_STOP_HOOK_REMINDER =
   'Before finalizing, post a terminal chat-visible reply for the current turn.';
 const ROOMOTE_OPENCODE_VISUAL_AGENT_NAME = 'visual';
 const CAPTURE_VISUAL_PROOF_SKILL = 'capture-visual-proof';
-const VISUAL_PROOF_TIMEOUT_RECOVERY_PROMPT =
-  "The visual proof step exceeded its shared five-minute deadline. Do not retry capture or run further proof recovery. Before reporting the outcome, list this task's `visual-proof` artifacts once and reconcile them with upload results from the latest proof-runner attempt. Current-attempt artifacts that finished uploading remain authoritative even when deadline handling interrupted the parent; carry them into delivery instead of reporting a timeout. If no current-attempt uploads can be verified, return a blocked proof handoff with blocker type `proof capture timed out`, then continue the active parent workflow without visual proof. Never reuse artifacts from an earlier proof cycle.";
+const formatVisualProofTimeoutRecoveryPrompt = (attemptId: string | null) =>
+  `The visual proof step exceeded its shared five-minute deadline. Do not retry capture or run further proof recovery. Before reporting the outcome, list this task's \`visual-proof\` artifacts once. The interrupted proof attempt ID is ${attemptId ?? 'unavailable'}; only artifacts whose path starts with \`tmp/capture-visual-proof/${attemptId ?? '<attemptId>'}/\` belong to this attempt. Carry matching artifacts into delivery instead of reporting a timeout. If the attempt ID is unavailable or no matching uploads exist, return a blocked proof handoff with blocker type \`proof capture timed out\`, then continue the active parent workflow without visual proof. Never reuse artifacts from another proof attempt.`;
 // OpenCode's built-in tool for loading skills into the session.
 const OPENCODE_SKILL_TOOL = 'skill';
 // Hidden continuation submitted automatically after a turn that exited plan
@@ -1690,6 +1693,7 @@ export class OpenCodeServerHarness
   // turns can run on the built-in read-only `plan` agent.
   private activeWorkflowSkill: string | null = null;
   private visualProofTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private visualProofAttemptId: string | null = null;
   private commandEnv: Record<string, string> | undefined;
   private stopHookReminderCount = 0;
   private terminalChatReplyDeliveryFailed = false;
@@ -1958,6 +1962,8 @@ export class OpenCodeServerHarness
     this.clearQueuedPromptRetryTimer();
     this.clearProviderErrorRecoveryState();
     this.clearVisualProofTimeout();
+    this.visualProofAttemptId = null;
+    rmSync(VISUAL_PROOF_ATTEMPT_STATE_PATH, { force: true });
     this.clearAllExecuteToolProgress();
     void this.cleanupVisualAttachmentDirectories();
     this.rejectEventStreamReady?.(
@@ -3712,6 +3718,25 @@ export class OpenCodeServerHarness
       return;
     }
 
+    this.visualProofAttemptId = randomUUID();
+    try {
+      writeFileSync(
+        VISUAL_PROOF_ATTEMPT_STATE_PATH,
+        `${JSON.stringify({
+          attemptId: this.visualProofAttemptId,
+          startedAt: new Date().toISOString(),
+        })}\n`,
+        { encoding: 'utf8', mode: 0o600 },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to persist visual proof attempt state: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      this.visualProofAttemptId = null;
+    }
+
     const timer = setTimeout(() => {
       this.visualProofTimeoutTimer = null;
       void this.recoverVisualProofTimeout();
@@ -3744,7 +3769,7 @@ export class OpenCodeServerHarness
     // The replay is a parent-workflow continuation, not a new proof attempt.
     this.activeWorkflowSkill = null;
     const queuedId = this.prompts.enqueue({
-      text: VISUAL_PROOF_TIMEOUT_RECOVERY_PROMPT,
+      text: formatVisualProofTimeoutRecoveryPrompt(this.visualProofAttemptId),
       visibleInTranscript: false,
     });
     this.prompts.prioritize(queuedId);

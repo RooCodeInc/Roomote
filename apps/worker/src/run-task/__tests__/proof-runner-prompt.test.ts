@@ -1,4 +1,7 @@
-import { createProofRunnerAgentPrompt } from '../proof-runner-prompt';
+import {
+  createProofRunnerAgentPrompt,
+  VISUAL_PROOF_ATTEMPT_STATE_PATH,
+} from '../proof-runner-prompt';
 
 describe('createProofRunnerAgentPrompt', () => {
   it('requires a full-frame visual quality check before upload', () => {
@@ -80,6 +83,16 @@ describe('createProofRunnerAgentPrompt', () => {
     );
     expect(prompt).toContain(
       'Omit the section entirely when no artifacts were uploaded.',
+    );
+  });
+
+  it('requires attempt-scoped artifact paths', () => {
+    const prompt = createProofRunnerAgentPrompt('http://127.0.0.1:3000');
+
+    expect(prompt).toContain(VISUAL_PROOF_ATTEMPT_STATE_PATH);
+    expect(prompt).toContain('/tmp/capture-visual-proof/<attemptId>/');
+    expect(prompt).toContain(
+      'instead of uploading artifacts without attempt provenance',
     );
   });
 

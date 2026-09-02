@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   TaskEventName,
@@ -7,6 +9,7 @@ import {
 
 import type { OpenCodeServerClient } from '../opencode-server/client';
 import { OpenCodeServerHarness } from '../opencode-server/harness';
+import { VISUAL_PROOF_ATTEMPT_STATE_PATH } from '../../../../run-task/proof-runner-prompt';
 import { TaskCommandName } from '../../harness';
 import type {
   OpenCodeGlobalEvent,
@@ -979,14 +982,17 @@ describe('OpenCode visual proof deadline', () => {
                 "list this task's `visual-proof` artifacts once",
               ),
             }),
-            expect.objectContaining({
-              text: expect.stringContaining(
-                'Current-attempt artifacts that finished uploading remain authoritative',
-              ),
-            }),
           ]),
         },
       });
+      const attemptState = JSON.parse(
+        await fs.readFile(VISUAL_PROOF_ATTEMPT_STATE_PATH, 'utf8'),
+      ) as { attemptId: string; startedAt: string };
+      expect(attemptState.attemptId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(attemptState.startedAt).toBeTruthy();
+      expect(JSON.stringify(client.promptAsync.mock.calls[1]?.[0])).toContain(
+        `tmp/capture-visual-proof/${attemptState.attemptId}/`,
+      );
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('shared 5000ms deadline'),
       );

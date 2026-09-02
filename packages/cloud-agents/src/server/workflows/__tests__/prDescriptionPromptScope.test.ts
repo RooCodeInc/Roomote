@@ -189,13 +189,13 @@ describe('PR description prompt scope', () => {
       fixPrSkill,
     ]) {
       expect(skillContent).toContain(
-        '`mcp__roomote__manage_artifacts` with `action: "list"` and `artifactType: "visual-proof"`',
+        'read `/tmp/roomote-visual-proof-attempt.json`, then call the Roomote MCP tool `mcp__roomote__manage_artifacts` with `action: "list"` and `artifactType: "visual-proof"`',
       );
       expect(skillContent).toContain(
-        'When a timeout summary conflicts with verified uploads from that same latest attempt, include the verified current-attempt artifacts and do not claim proof timed out.',
+        'only listed artifacts whose path starts with `tmp/capture-visual-proof/&lt;attemptId&gt;/` belong to that attempt',
       );
       expect(skillContent).toContain(
-        'Never infer that an older listed artifact belongs to the current proof cycle',
+        'use those records to recover uploads after a lost child result and refresh their signed URLs',
       );
     }
 
