@@ -127,6 +127,35 @@ describe('on-demand integration tools', () => {
     expect(result.unavailableIntegrations).toEqual(['linear']);
   });
 
+  it('lists every scoped server at once so one slow server does not serialize the lookup', async () => {
+    let releaseSlow!: () => void;
+    const slowListing = new Promise<never[]>((resolve) => {
+      releaseSlow = () => resolve([]);
+    });
+    const concurrent = vi.fn((server: { name: string }) =>
+      server.name === 'github' ? slowListing : listTools(server),
+    );
+    const lookup = findOnDemandIntegrationTools(
+      catalog,
+      { query: 'issues' },
+      concurrent,
+    );
+    await vi.waitFor(() => expect(concurrent).toHaveBeenCalledTimes(2));
+    // Both servers were asked before the slow one answered.
+    expect(concurrent.mock.calls.map(([server]) => server.name)).toEqual([
+      'github',
+      'linear',
+    ]);
+    releaseSlow();
+    const result = parse(await lookup);
+    expect(result.tools).toEqual([
+      expect.objectContaining({
+        integrationId: 'linear',
+        name: 'search_issues',
+      }),
+    ]);
+  });
+
   it('routes calls to the named server with its resolved credentials', async () => {
     const callTool = vi.fn(async () => ({
       content: [{ type: 'text' as const, text: '{"matches":[]}' }],

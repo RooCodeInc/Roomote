@@ -2,6 +2,11 @@ import { readFileSync } from 'node:fs';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {
+  INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
+  INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
+  matchIntegrationTools,
+} from '@roomote/types';
 import { z } from 'zod';
 
 import { errorResult, jsonResult } from './tool-result.js';
@@ -56,7 +61,12 @@ export const findIntegrationToolsInputSchema = {
     .min(1)
     .optional()
     .describe('Keywords matched against tool names and descriptions'),
-  limit: z.number().int().positive().max(25).optional(),
+  limit: z
+    .number()
+    .int()
+    .positive()
+    .max(INTEGRATION_TOOL_LOOKUP_MAX_LIMIT)
+    .optional(),
 };
 
 export const callIntegrationToolInputSchema = {
@@ -71,8 +81,11 @@ export const callIntegrationToolInputSchema = {
     .describe("Tool arguments matching the tool's input schema"),
 };
 
-const FIND_INTEGRATION_TOOLS_DEFAULT_LIMIT = 10;
-const ON_DEMAND_MCP_REQUEST_TIMEOUT_MS = 120_000;
+// A tool call may legitimately run long; discovery must not. Lookups fan out
+// across the catalog, so the slowest server bounds the whole lookup and has
+// to stay well inside the member server's own request timeout.
+const ON_DEMAND_MCP_LIST_TIMEOUT_MS = 30_000;
+const ON_DEMAND_MCP_CALL_TIMEOUT_MS = 120_000;
 
 export function shouldRegisterOnDemandIntegrationTools(
   env: NodeJS.ProcessEnv = process.env,
@@ -113,7 +126,7 @@ function listOnDemandMcpTools(
   if (cached) return cached;
   const listing = withMcpClient(server, async (client) => {
     const result = await client.listTools(undefined, {
-      timeout: ON_DEMAND_MCP_REQUEST_TIMEOUT_MS,
+      timeout: ON_DEMAND_MCP_LIST_TIMEOUT_MS,
     });
     return result.tools.map((tool) => ({
       name: tool.name,
@@ -129,8 +142,9 @@ function listOnDemandMcpTools(
 }
 
 /**
- * Resolve matching tools across the catalog. Exact server and tool names win;
- * otherwise every query term must appear in the tool's name or description.
+ * Resolve matching tools across the catalog. Every scoped server is listed at
+ * once, so an unreachable server costs the lookup one discovery timeout in
+ * total, not one per server; matching and ranking are shared with Fast.
  */
 export async function findOnDemandIntegrationTools(
   catalog: OnDemandMcpCatalog,
@@ -144,7 +158,6 @@ export async function findOnDemandIntegrationTools(
     server: OnDemandMcpServer,
   ) => Promise<OnDemandMcpTool[]> = listOnDemandMcpTools,
 ): Promise<ToolResult> {
-  const limit = params.limit ?? FIND_INTEGRATION_TOOLS_DEFAULT_LIMIT;
   const scoped = params.integrationId
     ? catalog.servers.filter((server) => server.name === params.integrationId)
     : catalog.servers;
@@ -154,46 +167,27 @@ export async function findOnDemandIntegrationTools(
       { availableIntegrations: catalog.servers.map((server) => server.name) },
     );
   }
-  const terms = (params.query ?? '')
-    .toLowerCase()
-    .split(/\s+/u)
-    .filter((term) => term.length > 0);
-  const matches: Array<
-    OnDemandMcpTool & { integrationId: string; exact: boolean }
-  > = [];
+  const listings = await Promise.allSettled(
+    scoped.map((server) => listTools(server)),
+  );
   const unavailable: string[] = [];
-  for (const server of scoped) {
-    let tools: OnDemandMcpTool[];
-    try {
-      tools = await listTools(server);
-    } catch {
+  const candidates = listings.flatMap((listing, index) => {
+    const server = scoped[index]!;
+    if (listing.status === 'rejected') {
       unavailable.push(server.name);
-      continue;
+      return [];
     }
-    for (const tool of tools) {
-      if (params.toolName && tool.name !== params.toolName) continue;
-      const haystack = `${tool.name} ${tool.description ?? ''}`.toLowerCase();
-      if (terms.length > 0 && !terms.every((term) => haystack.includes(term))) {
-        continue;
-      }
-      matches.push({
-        ...tool,
-        integrationId: server.name,
-        exact:
-          Boolean(params.toolName) ||
-          terms.some((term) => tool.name.toLowerCase() === term),
-      });
-    }
-  }
-  matches.sort((left, right) => Number(right.exact) - Number(left.exact));
+    return listing.value.map((tool) => ({
+      integrationId: server.name,
+      ...tool,
+    }));
+  });
+  const { tools, truncated } = matchIntegrationTools(candidates, params);
   return jsonResult({
     success: true,
-    tools: matches.slice(0, limit).map(({ exact: _exact, ...tool }) => tool),
-    ...(matches.length > limit
-      ? {
-          guidance:
-            'More tools matched than were returned. Narrow the query or pass integrationId or toolName.',
-        }
+    tools,
+    ...(truncated
+      ? { guidance: INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE }
       : {}),
     ...(unavailable.length > 0 ? { unavailableIntegrations: unavailable } : {}),
   });
@@ -239,7 +233,7 @@ async function callOnDemandMcpTool(
     const result = await client.callTool(
       { name: toolName, arguments: args },
       undefined,
-      { timeout: ON_DEMAND_MCP_REQUEST_TIMEOUT_MS },
+      { timeout: ON_DEMAND_MCP_CALL_TIMEOUT_MS },
     );
     // Pass the upstream content through unchanged; OpenCode renders it the
     // same way it would a natively mounted MCP result.
