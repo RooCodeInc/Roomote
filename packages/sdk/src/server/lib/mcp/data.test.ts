@@ -1,8 +1,11 @@
-const { findFirstMock, updateMock, updateWhereMock } = vi.hoisted(() => ({
-  findFirstMock: vi.fn(),
-  updateMock: vi.fn(),
-  updateWhereMock: vi.fn(),
-}));
+const { findFirstMock, setMock, updateMock, updateWhereMock } = vi.hoisted(
+  () => ({
+    findFirstMock: vi.fn(),
+    setMock: vi.fn(),
+    updateMock: vi.fn(),
+    updateWhereMock: vi.fn(),
+  }),
+);
 
 vi.mock('@roomote/db/server', () => ({
   db: {
@@ -23,15 +26,56 @@ vi.mock('@roomote/db/encryption', () => ({
   decryptText: vi.fn((value: string) => value),
 }));
 
-import { getClientInformation, getValidAccessToken } from './data';
+import { getClientInformation, getValidAccessToken, storeTokens } from './data';
+
+describe('storeTokens', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    updateWhereMock.mockResolvedValue(undefined);
+    setMock.mockReturnValue({ where: updateWhereMock });
+    updateMock.mockReturnValue({ set: setMock });
+  });
+
+  it('preserves the stored refresh token when refresh_token is omitted', async () => {
+    await storeTokens('conn-1', {
+      access_token: 'fresh-access-token',
+      token_type: 'Bearer',
+      expires_in: 3600,
+      scope: 'read write',
+    });
+
+    expect(setMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: 'fresh-access-token',
+        authStatus: 'authenticated',
+        enabled: true,
+        scopes: ['read', 'write'],
+      }),
+    );
+    expect(setMock.mock.calls[0]?.[0]).not.toHaveProperty('refreshToken');
+  });
+
+  it('stores a replacement refresh token when one is supplied', async () => {
+    await storeTokens('conn-1', {
+      access_token: 'fresh-access-token',
+      token_type: 'Bearer',
+      refresh_token: 'replacement-refresh-token',
+    });
+
+    expect(setMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        refreshToken: 'replacement-refresh-token',
+      }),
+    );
+  });
+});
 
 describe('getClientInformation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     updateWhereMock.mockResolvedValue(undefined);
-    updateMock.mockReturnValue({
-      set: vi.fn(() => ({ where: updateWhereMock })),
-    });
+    setMock.mockReturnValue({ where: updateWhereMock });
+    updateMock.mockReturnValue({ set: setMock });
   });
 
   afterEach(() => {

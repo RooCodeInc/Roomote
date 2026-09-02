@@ -88,7 +88,9 @@ async function storeLinearConnection(input: {
         ...(input.linearUserId ? { linearUserId: input.linearUserId } : {}),
       } as NonNullable<McpConnectionRecord>['authConfig'],
       accessToken: input.tokens.access_token,
-      refreshToken: input.tokens.refresh_token || null,
+      ...(input.tokens.refresh_token !== undefined
+        ? { refreshToken: input.tokens.refresh_token || null }
+        : {}),
       tokenExpiresAt,
       scopes: input.tokens.scope
         ? input.tokens.scope.split(/[\s,]+/).filter(Boolean)

@@ -167,7 +167,7 @@ describe('hydrateLinearMcpConnectionAfterOauth', () => {
     },
   );
 
-  it('stores Linear identity metadata and OAuth tokens in one update', async () => {
+  it('stores Linear identity metadata and a replacement refresh token in one update', async () => {
     await hydrateLinearMcpConnectionAfterOauth({
       connection: {
         id: 'connection-1',
@@ -198,6 +198,31 @@ describe('hydrateLinearMcpConnectionAfterOauth', () => {
           linearUserId: 'linear-user-1',
         }),
       }),
+    );
+  });
+
+  it('preserves the stored refresh token when refresh_token is omitted', async () => {
+    await hydrateLinearMcpConnectionAfterOauth({
+      connection: {
+        id: 'connection-1',
+        connectionRole: 'user',
+        userId: 'roomote-user-1',
+        refreshToken: 'stored-refresh-token',
+      } as never,
+      tokens: {
+        access_token: 'replacement-access-token',
+      },
+    });
+
+    expect(dbUpdateSetMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: 'replacement-access-token',
+        authStatus: 'authenticated',
+        enabled: true,
+      }),
+    );
+    expect(dbUpdateSetMock.mock.calls[0]?.[0]).not.toHaveProperty(
+      'refreshToken',
     );
   });
 

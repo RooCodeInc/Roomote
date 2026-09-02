@@ -194,7 +194,9 @@ export async function storeTokens(
     .update(mcpConnections)
     .set({
       accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token || null,
+      ...(tokens.refresh_token !== undefined
+        ? { refreshToken: tokens.refresh_token || null }
+        : {}),
       tokenExpiresAt,
       scopes: tokens.scope ? tokens.scope.split(/[\s,]+/).filter(Boolean) : [],
       authStatus: 'authenticated',
