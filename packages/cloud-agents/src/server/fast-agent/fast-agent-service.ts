@@ -1842,6 +1842,16 @@ export async function answerFastAgentQuestion({
       implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
       releaseVersion,
     });
+    diagnostics.recordPromptContext({
+      systemPromptChars: system.length,
+      environmentCount: availableEnvironments.length,
+      integrationCount: availableIntegrations.length,
+      integrationToolCount: availableIntegrations.reduce(
+        (count, integration) => count + integration.tools.length,
+        0,
+      ),
+      activeTaskCount: resolvedActiveTasks.length,
+    });
     let visibleUpdatePosted = false;
     let substantiveWorkAcknowledged = false;
     let nativeToolInvoked = false;
@@ -2926,6 +2936,7 @@ export async function answerFastAgentQuestion({
                         diagnostics.recordModelResolved(model);
                       },
                       onMessageCompleted: (message) => {
+                        diagnostics.recordAssistantMessageCompleted(message);
                         completedOpenCodeMessage = message;
                         completedOpenCodeInstructionVersion =
                           getInstructionVersion(message.id ?? undefined);
@@ -2938,16 +2949,20 @@ export async function answerFastAgentQuestion({
                       onAssistantMessageStarted: (
                         message: NonTaskOpenCodeAssistantMessage,
                       ) => {
+                        diagnostics.recordAssistantMessageStarted();
                         assistantInstructionVersions.set(
                           message.id,
                           currentInstructionVersion,
                         );
                       },
-                      onAssistantMessageCompleted: () =>
-                        schedulePendingHumanSteerDrain(),
-                      onPromptStarted: () => {
+                      onAssistantMessageCompleted: (message) => {
+                        diagnostics.recordAssistantMessageCompleted(message);
+                        return schedulePendingHumanSteerDrain();
+                      },
+                      onPromptStarted: (setupTiming) => {
                         promptStarted = true;
                         diagnostics.markInferenceStarted();
+                        diagnostics.recordInferenceSetupTiming(setupTiming);
                       },
                       onNativeSteerReady: (steer) => {
                         nativeSteer = steer;

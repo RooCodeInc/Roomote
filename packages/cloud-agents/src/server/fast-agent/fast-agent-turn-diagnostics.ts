@@ -7,6 +7,10 @@ import {
 
 import type { FastAgentNativeToolName } from './fast-agent-native-tool-bridge';
 import type {
+  NonTaskOpenCodeCompletedMessage,
+  NonTaskOpenCodePromptSetupTiming,
+} from '../non-task-provider-usage';
+import type {
   FastAgentConversation,
   FastAgentTurnSource,
 } from './fast-agent-conversation';
@@ -38,6 +42,23 @@ type NativeToolStats = {
   count: number;
   totalDurationMs: number;
   maxDurationMs: number;
+};
+
+/** Size of the model input this turn was built from; counts only, no content. */
+type FastAgentPromptContextStats = {
+  systemPromptChars: number;
+  environmentCount: number;
+  integrationCount: number;
+  integrationToolCount: number;
+  activeTaskCount: number;
+};
+
+type TokenTotals = {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
 };
 
 function formatTerminalError(error: unknown): string {
@@ -74,6 +95,14 @@ export class FastAgentTurnDiagnostics {
   private inferenceSetupStartedAt: number | undefined;
   private inferenceStartedAt: number | undefined;
   private inferenceFinishedAt: number | undefined;
+  private lastVisibleReplyAt: number | undefined;
+  private setupTiming: NonTaskOpenCodePromptSetupTiming | undefined;
+  private promptContext: FastAgentPromptContextStats | undefined;
+  private modelRequestCount = 0;
+  private readonly completedModelMessageIds = new Set<string>();
+  private firstModelResponseAt: number | undefined;
+  private tokenTotals: TokenTotals | undefined;
+  private maxContextTokens: number | undefined;
   private openCodeProviderRetryEventCount = 0;
   private firstOpenCodeProviderRetryElapsedMs: number | undefined;
   private lastOpenCodeProviderRetryElapsedMs: number | undefined;
@@ -113,8 +142,54 @@ export class FastAgentTurnDiagnostics {
   recordVisibleReply(options: { assistantResponse?: boolean } = {}): void {
     this.visibleReplyCount += 1;
     if (options.assistantResponse !== false) {
-      this.firstAssistantResponseAt ??= this.now();
+      const now = this.now();
+      this.firstAssistantResponseAt ??= now;
+      this.lastVisibleReplyAt = now;
     }
+  }
+
+  recordInferenceSetupTiming(timing: NonTaskOpenCodePromptSetupTiming): void {
+    // The first attempt's setup is the one that includes any server spawn
+    // or session rebuild; a retry attempt reuses both.
+    this.setupTiming ??= timing;
+  }
+
+  recordPromptContext(context: FastAgentPromptContextStats): void {
+    this.promptContext = context;
+  }
+
+  /** One model request per assistant message OpenCode starts in the turn. */
+  recordAssistantMessageStarted(): void {
+    this.modelRequestCount += 1;
+  }
+
+  /**
+   * Accepts the same message from the event stream and from the final prompt
+   * result; the id keeps a message from being counted twice.
+   */
+  recordAssistantMessageCompleted(
+    message: NonTaskOpenCodeCompletedMessage,
+  ): void {
+    if (message.id !== null) {
+      if (this.completedModelMessageIds.has(message.id)) return;
+      this.completedModelMessageIds.add(message.id);
+    }
+    this.firstModelResponseAt ??= this.now();
+    if (!message.tokens) return;
+    const totals = (this.tokenTotals ??= {
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
+    totals.input += message.tokens.input;
+    totals.output += message.tokens.output;
+    totals.reasoning += message.tokens.reasoning;
+    totals.cacheRead += message.tokens.cacheRead;
+    totals.cacheWrite += message.tokens.cacheWrite;
+    const contextTokens = message.tokens.input + message.tokens.cacheRead;
+    this.maxContextTokens = Math.max(this.maxContextTokens ?? 0, contextTokens);
   }
 
   recordModelResolved(model: string): void {
@@ -303,6 +378,18 @@ export class FastAgentTurnDiagnostics {
       this.inferenceFinishedAt === undefined
         ? undefined
         : turnFinishedAt - this.inferenceFinishedAt;
+    const firstModelResponseDurationMs =
+      this.inferenceStartedAt === undefined ||
+      this.firstModelResponseAt === undefined
+        ? undefined
+        : this.firstModelResponseAt - this.inferenceStartedAt;
+    // Inference that ran after the last user-visible reply: with a closeout
+    // posted, this is time the user never benefits from.
+    const postReplyInferenceDurationMs =
+      this.lastVisibleReplyAt === undefined ||
+      this.inferenceFinishedAt === undefined
+        ? undefined
+        : Math.max(0, this.inferenceFinishedAt - this.lastVisibleReplyAt);
 
     captureFastAgentTurnSettled({
       userId: this.context.userId,
@@ -320,6 +407,26 @@ export class FastAgentTurnDiagnostics {
       visibleReplyCount: this.visibleReplyCount,
       openCodeProviderRetryEventCount: this.openCodeProviderRetryEventCount,
       roomoteInferenceRetryCount: this.roomoteInferenceRetryCount,
+      modelRequestCount: this.modelRequestCount,
+      completedModelRequestCount: this.completedModelMessageIds.size,
+      firstModelResponseDurationMs,
+      postReplyInferenceDurationMs,
+      inputTokens: this.tokenTotals?.input,
+      cacheReadTokens: this.tokenTotals?.cacheRead,
+      cacheWriteTokens: this.tokenTotals?.cacheWrite,
+      outputTokens: this.tokenTotals?.output,
+      reasoningTokens: this.tokenTotals?.reasoning,
+      maxContextTokens: this.maxContextTokens,
+      systemPromptChars: this.promptContext?.systemPromptChars,
+      environmentCount: this.promptContext?.environmentCount,
+      integrationCount: this.promptContext?.integrationCount,
+      integrationToolCount: this.promptContext?.integrationToolCount,
+      activeTaskCount: this.promptContext?.activeTaskCount,
+      openCodeServerLeaseMs: this.setupTiming?.serverLeaseMs,
+      openCodeSessionValidateMs: this.setupTiming?.sessionValidateMs,
+      openCodeSessionCreateMs: this.setupTiming?.sessionCreateMs,
+      openCodeEventSubscribeMs: this.setupTiming?.eventSubscribeMs,
+      openCodeSetupMs: this.setupTiming?.totalMs,
     });
 
     const logMessage = formatSingleLineLog('[Fast Agent] Turn finished.', {
@@ -354,6 +461,26 @@ export class FastAgentTurnDiagnostics {
           : undefined,
       inferenceDurationMs,
       postInferenceDurationMs,
+      openCodeServerLeaseMs: this.setupTiming?.serverLeaseMs,
+      openCodeSessionValidateMs: this.setupTiming?.sessionValidateMs,
+      openCodeSessionCreateMs: this.setupTiming?.sessionCreateMs,
+      openCodeEventSubscribeMs: this.setupTiming?.eventSubscribeMs,
+      openCodeSetupMs: this.setupTiming?.totalMs,
+      modelRequestCount: this.modelRequestCount,
+      completedModelRequestCount: this.completedModelMessageIds.size,
+      firstModelResponseDurationMs,
+      postReplyInferenceDurationMs,
+      inputTokens: this.tokenTotals?.input,
+      cacheReadTokens: this.tokenTotals?.cacheRead,
+      cacheWriteTokens: this.tokenTotals?.cacheWrite,
+      outputTokens: this.tokenTotals?.output,
+      reasoningTokens: this.tokenTotals?.reasoning,
+      maxContextTokens: this.maxContextTokens,
+      systemPromptChars: this.promptContext?.systemPromptChars,
+      environmentCount: this.promptContext?.environmentCount,
+      integrationCount: this.promptContext?.integrationCount,
+      integrationToolCount: this.promptContext?.integrationToolCount,
+      activeTaskCount: this.promptContext?.activeTaskCount,
       processConcurrentTurnCountAtStart: this.processConcurrentTurnCountAtStart,
       openCodeProviderRetryEventCount: this.openCodeProviderRetryEventCount,
       firstOpenCodeProviderRetryElapsedMs:
