@@ -431,6 +431,9 @@ export async function completeSetupCommand(
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext('setup-complete'))`,
     );
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('setup-recommendation-dispatch'))`,
+    );
 
     // Persist the StepInvoke anonymous-analytics choice alongside setup
     // completion when the wizard provided one (opt-out: default stays

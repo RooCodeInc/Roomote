@@ -810,6 +810,9 @@ async function persistSetupPresetResponse(input: {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${SETUP_SESSION_ADVISORY_LOCK}))`,
     );
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('setup-recommendation-dispatch'))`,
+    );
     const [settings] = await tx
       .select({ setupNewState: deploymentSettings.setupNewState })
       .from(deploymentSettings)
