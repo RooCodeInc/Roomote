@@ -32,6 +32,7 @@ import { captureEvent } from '@roomote/telemetry/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { SETUP_STARTER_TASKS } from '@/lib/setup-starter-tasks';
+import { recordSetupFunnelMilestones } from '@/lib/server/setup-funnel-telemetry';
 import { assertAdmin } from './shared';
 import { completeSetupCommand } from './index';
 import { getSetupNewStatusCommand } from '../setup-new';
@@ -575,6 +576,36 @@ export async function reconcileSetupPlatformEvents(
       },
     });
   }
+
+  await recordSetupFunnelMilestones([
+    ...(state.sourceControlProvider
+      ? [
+          {
+            milestone: 'source_control_configured' as const,
+            provider: state.sourceControlProvider,
+            preexisting: false,
+          },
+        ]
+      : []),
+    ...(synchronized.length > 0 && status.sourceControlSetup.setupSatisfied
+      ? [
+          {
+            milestone: 'source_control_authed' as const,
+            provider: state.sourceControlProvider ?? undefined,
+            preexisting: false,
+          },
+        ]
+      : []),
+    ...(status.computeSetup.setupSatisfied && state.computeProvider
+      ? [
+          {
+            milestone: 'sandbox_configured' as const,
+            provider: state.computeProvider,
+            preexisting: false,
+          },
+        ]
+      : []),
+  ]);
 
   for (const event of events) {
     const turn = await buildSetupPlatformEventTurn(auth, event, {
