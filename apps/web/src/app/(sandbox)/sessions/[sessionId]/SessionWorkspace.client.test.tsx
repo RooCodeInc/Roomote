@@ -958,6 +958,60 @@ describe('SessionWorkspace', () => {
     expect(routerReplaceMock).not.toHaveBeenCalled();
   });
 
+  it('automatically opens the Tasks panel when a second task starts on desktop', async () => {
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      sessionOverride: { taskSource: 'fast', taskCards: [] },
+      queriedFastTasks: [
+        {
+          taskId: 'task-2',
+          title: 'First running task',
+          latestRun: {
+            status: RunStatus.Running,
+            taskPhase: 'running',
+          },
+          artifacts: [],
+        },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Tasks' })).toBeEnabled(),
+    );
+
+    act(() => {
+      queryClient.setQueryData(
+        ['fastSessions', 'tasks', session.id],
+        [
+          {
+            taskId: 'task-2',
+            title: 'First running task',
+            latestRun: {
+              status: RunStatus.Running,
+              taskPhase: 'running',
+            },
+            artifacts: [],
+          },
+          {
+            taskId: 'task-3',
+            title: 'Second running task',
+            latestRun: {
+              status: RunStatus.Pending,
+              taskPhase: null,
+            },
+            artifacts: [],
+          },
+        ],
+      );
+    });
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'View coding task: Second running task',
+      }),
+    ).toBeVisible();
+  });
+
   it('populates the Artifacts panel from refreshed Fast-session tasks', async () => {
     renderWorkspace({
       isMobile: false,

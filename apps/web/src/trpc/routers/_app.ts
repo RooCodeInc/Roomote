@@ -32,11 +32,13 @@ import {
 } from '@roomote/types';
 
 import {
+  getFastSessionMessagesCommand,
   getFastSessionComposerSuggestionCommand,
   getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
   replyToFastSessionCommand,
   startFastSessionCommand,
+  submitFastSessionUserInputCommand,
   updateFastSessionModelSelectionCommand,
 } from '../commands/fast-sessions';
 import {
@@ -303,6 +305,14 @@ import {
   getSetupStatusCommand,
 } from '../commands/setup';
 import { completeSetupWithStarterTasksCommand } from '../commands/setup/starter-tasks';
+import {
+  getOrCreateSetupSessionCommand,
+  getSetupSessionStatusCommand,
+  notifySetupSourceControlSynchronized,
+  persistSetupRecommendationApplicationReceipt,
+  reconcileSetupPlatformEvents,
+  submitSetupSessionUserInputCommand,
+} from '../commands/setup/setup-session';
 import { SETUP_STARTER_TASK_IDS } from '@/lib/setup-starter-tasks';
 import {
   getSetupNewStatusCommand,
@@ -550,11 +560,23 @@ const automationsRouter = createRouter({
     .mutation(({ ctx: { auth }, input }) =>
       setSetupRecommendationEnabledCommand(auth, input),
     ),
-  applyRecommendations: protectedProcedure.mutation(({ ctx: { auth } }) =>
-    applySetupRecommendationsCommand(auth),
+  applyRecommendations: protectedProcedure.mutation(
+    async ({ ctx: { auth } }) => {
+      const batch = await applySetupRecommendationsCommand(auth);
+      await persistSetupRecommendationApplicationReceipt(auth, batch, 'saved');
+      return batch;
+    },
   ),
-  skipRecommendations: protectedProcedure.mutation(({ ctx: { auth } }) =>
-    skipSetupRecommendationsCommand(auth),
+  skipRecommendations: protectedProcedure.mutation(
+    async ({ ctx: { auth } }) => {
+      const batch = await skipSetupRecommendationsCommand(auth);
+      await persistSetupRecommendationApplicationReceipt(
+        auth,
+        batch,
+        'skipped',
+      );
+      return batch;
+    },
   ),
   runRecommendationNow: protectedProcedure
     .input(z.object({ id: z.string().min(1) }))
@@ -1216,12 +1238,18 @@ export const appRouter = createRouter({
 
     syncInstallation: protectedProcedure
       .input(z.object({ installationId: z.number().int().positive() }))
-      .mutation(({ ctx: { auth }, input }) =>
-        syncGitHubInstallationCommand(auth, input),
-      ),
+      .mutation(async ({ ctx: { auth }, input }) => {
+        const result = await syncGitHubInstallationCommand(auth, input);
+        await notifySetupSourceControlSynchronized(auth);
+        return result;
+      }),
 
-    syncInstallations: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      syncGitHubInstallationsCommand(auth),
+    syncInstallations: protectedProcedure.mutation(
+      async ({ ctx: { auth } }) => {
+        const result = await syncGitHubInstallationsCommand(auth);
+        await notifySetupSourceControlSynchronized(auth);
+        return result;
+      },
     ),
 
     disableApp: protectedProcedure.mutation(({ ctx: { auth } }) =>
@@ -1301,9 +1329,11 @@ export const appRouter = createRouter({
           provider: sourceControlTokenBackedProviderSchema,
         }),
       )
-      .mutation(({ ctx: { auth }, input }) =>
-        syncRepositoriesCommand(auth, input),
-      ),
+      .mutation(async ({ ctx: { auth }, input }) => {
+        const result = await syncRepositoriesCommand(auth, input);
+        if (result.success) await notifySetupSourceControlSynchronized(auth);
+        return result;
+      }),
 
     saveConfig: protectedProcedure
       .input(
@@ -2577,6 +2607,26 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         completeSetupWithStarterTasksCommand(auth, input),
       ),
+
+    getOrCreateSession: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      getOrCreateSetupSessionCommand(auth),
+    ),
+
+    sessionStatus: protectedProcedure.query(({ ctx: { auth } }) =>
+      getSetupSessionStatusCommand(auth),
+    ),
+
+    submitSessionUserInput: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          requestId: z.string().min(1),
+          answers: z.record(z.object({ answers: z.array(z.string()).max(50) })),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        submitSetupSessionUserInputCommand(auth, input),
+      ),
   }),
 
   setupNew: createRouter({
@@ -2649,9 +2699,14 @@ export const appRouter = createRouter({
           provider: z.enum(computeProviders),
         }),
       )
-      .mutation(({ ctx: { auth }, input }) =>
-        saveSetupNewComputeProviderChoiceCommand(auth, input),
-      ),
+      .mutation(async ({ ctx: { auth }, input }) => {
+        const result = await saveSetupNewComputeProviderChoiceCommand(
+          auth,
+          input,
+        );
+        await reconcileSetupPlatformEvents(auth);
+        return result;
+      }),
 
     saveComputeConfig: protectedProcedure
       .input(
@@ -2660,9 +2715,11 @@ export const appRouter = createRouter({
           values: z.record(z.string().trim()).optional(),
         }),
       )
-      .mutation(({ ctx: { auth }, input }) =>
-        saveSetupNewComputeConfigCommand(auth, input),
-      ),
+      .mutation(async ({ ctx: { auth }, input }) => {
+        const result = await saveSetupNewComputeConfigCommand(auth, input);
+        await reconcileSetupPlatformEvents(auth);
+        return result;
+      }),
 
     saveSourceControlProviderChoice: protectedProcedure
       .input(
@@ -2670,9 +2727,14 @@ export const appRouter = createRouter({
           provider: sourceControlProviderSchema,
         }),
       )
-      .mutation(({ ctx: { auth }, input }) =>
-        saveSetupNewSourceControlProviderChoiceCommand(auth, input),
-      ),
+      .mutation(async ({ ctx: { auth }, input }) => {
+        const result = await saveSetupNewSourceControlProviderChoiceCommand(
+          auth,
+          input,
+        );
+        await reconcileSetupPlatformEvents(auth);
+        return result;
+      }),
 
     saveSourceControlConfig: protectedProcedure
       .input(
@@ -2873,6 +2935,23 @@ export const appRouter = createRouter({
       .input(z.object({ sessionId: z.string().uuid() }))
       .query(({ ctx: { auth }, input }) =>
         getFastSessionTasksCommand(auth, input.sessionId),
+      ),
+    messages: protectedProcedure
+      .input(z.object({ sessionId: z.string().uuid() }))
+      .query(({ ctx: { auth }, input }) =>
+        getFastSessionMessagesCommand(auth, input.sessionId),
+      ),
+    submitUserInput: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          requestId: z.string().min(1),
+          answers: z.record(z.object({ answers: z.array(z.string()).max(50) })),
+          resolution: z.enum(['submitted', 'cancelled']).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        submitFastSessionUserInputCommand(auth, input),
       ),
     composerSuggestion: protectedProcedure
       .input(

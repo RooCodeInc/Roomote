@@ -399,6 +399,7 @@ describe('unified Session queries', () => {
       directInferenceCostMicroUsd: 1_100_000,
       inferenceCostMicroUsd: 2_100_000,
     });
+    expect(detail?.tasks).toHaveLength(3);
     expect(detail?.tasks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -976,20 +977,23 @@ describe('unified Session queries', () => {
       session.id,
     );
 
-    expect(detail?.tasks).toEqual([
-      expect.objectContaining({
-        taskId: firstTask.id,
-        artifacts: [
-          expect.objectContaining({ path: 'reports/result.md', version: 2 }),
-        ],
-      }),
-      expect.objectContaining({
-        taskId: secondTask.id,
-        artifacts: [
-          expect.objectContaining({ path: 'reports/result.md', version: 1 }),
-        ],
-      }),
-    ]);
+    expect(detail?.tasks).toHaveLength(2);
+    expect(detail?.tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskId: firstTask.id,
+          artifacts: [
+            expect.objectContaining({ path: 'reports/result.md', version: 2 }),
+          ],
+        }),
+        expect.objectContaining({
+          taskId: secondTask.id,
+          artifacts: [
+            expect.objectContaining({ path: 'reports/result.md', version: 1 }),
+          ],
+        }),
+      ]),
+    );
   });
 
   it('resolves the latest external event from visible messages only', async () => {

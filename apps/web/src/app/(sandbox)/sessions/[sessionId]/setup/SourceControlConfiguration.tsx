@@ -19,22 +19,21 @@ import {
   Spinner,
 } from '@/components/system';
 
-import { StepTitle } from './StepTitle';
-import { SetupFooter } from './SetupFooter';
-import { NumberedStep } from './NumberedStep';
+import { NumberedStep } from '../../../../(onboarding)/setup/NumberedStep';
 import {
   AdoSourceControlConfig,
   AdoSourceControlInstructions,
   DEFAULT_ADO_AUTH_MODE,
-} from './AdoSourceControlConfig';
-import { GitHubSourceControlConfig } from './GitHubSourceControlConfig';
-import { GiteaSourceControlInstructions } from './GiteaSourceControlConfig';
-import { GitLabSourceControlInstructions } from './GitLabSourceControlConfig';
+} from '../../../../(onboarding)/setup/AdoSourceControlConfig';
+import { GitHubSourceControlConfig } from '../../../../(onboarding)/setup/GitHubSourceControlConfig';
+import { GiteaSourceControlInstructions } from '../../../../(onboarding)/setup/GiteaSourceControlConfig';
+import { GitLabSourceControlInstructions } from '../../../../(onboarding)/setup/GitLabSourceControlConfig';
 import {
   BitbucketSourceControlCreation,
   BitbucketSourceControlInstructions,
-} from './BitbucketSourceControlConfig';
-import { getSourceControlSetupCopy } from './sourceControlSetupCopy';
+} from '../../../../(onboarding)/setup/BitbucketSourceControlConfig';
+import { getSourceControlSetupCopy } from '../../../../(onboarding)/setup/sourceControlSetupCopy';
+import { SetupSessionActionCardActions } from './SetupSessionActionCard';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 const DEFAULT_GITLAB_BASE_URL = 'https://gitlab.com';
@@ -106,16 +105,16 @@ function normalizeGitLabSetupUrl(value: string): string {
   }
 }
 
-export function StepSourceControlConfig({
+export function SourceControlConfiguration({
   sourceControlSetup,
   selectedProviderId,
   onContinue,
-  onBack,
+  returnPath,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
   selectedProviderId?: SourceControlProvider | null;
   onContinue: () => void;
-  onBack?: () => void;
+  returnPath?: string;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -327,7 +326,7 @@ export function StepSourceControlConfig({
       selectedProvider.provider === 'bitbucket'
     ) {
       window.location.assign(
-        `/api/source-control/${selectedProvider.provider}/oauth/authorize`,
+        `/api/source-control/${selectedProvider.provider}/oauth/authorize${returnPath ? `?redirectTo=${encodeURIComponent(returnPath)}` : ''}`,
       );
     }
   };
@@ -353,18 +352,11 @@ export function StepSourceControlConfig({
       : providerSetupCopy?.creationHref;
 
   if (selectedProvider?.provider === 'github') {
-    return (
-      <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
-        <StepTitle text="Create GitHub App" />
-        <GitHubSourceControlConfig onBack={onBack} />
-      </div>
-    );
+    return <GitHubSourceControlConfig returnPath={returnPath} />;
   }
 
   return (
-    <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
-      <StepTitle text={`Configure ${providerSetupLabel}`} />
-
+    <div className="w-full space-y-4">
       {!isAdo ? (
         <NumberedStep number={1} className="mt-6">
           {selectedProvider?.provider === 'bitbucket' ? (
@@ -569,13 +561,10 @@ export function StepSourceControlConfig({
         </div>
       </NumberedStep>
 
-      <SetupFooter
-        onBack={onBack}
-        backDisabled={saveSourceControlConfig.isPending}
-        className="mt-8"
-      >
+      <SetupSessionActionCardActions>
         <Button
           type="button"
+          size="sm"
           onClick={() => void handleContinue()}
           disabled={isActionDisabled}
         >
@@ -586,7 +575,7 @@ export function StepSourceControlConfig({
               : 'Save and continue'}
           {saveSourceControlConfig.isPending ? <Spinner /> : <ArrowRight />}
         </Button>
-      </SetupFooter>
+      </SetupSessionActionCardActions>
     </div>
   );
 }

@@ -20,11 +20,7 @@ vi.mock('@/components/system', () => ({
   ),
 }));
 
-vi.mock('./StepTitle', () => ({
-  StepTitle: ({ text }: { text: string }) => <h1>{text}</h1>,
-}));
-
-import { StepComputeProvider } from './StepComputeProvider';
+import { SandboxProviderPicker } from './SandboxProviderPicker';
 
 function buildProvider({
   provider,
@@ -71,7 +67,7 @@ function buildProvider({
   };
 }
 
-describe('StepComputeProvider', () => {
+describe('SandboxProviderPicker', () => {
   it('shows hosted providers even when their infrastructure is not configured yet', () => {
     const computeSetup: SetupComputeStatus = {
       selectedProvider: null,
@@ -122,7 +118,10 @@ describe('StepComputeProvider', () => {
     };
 
     render(
-      <StepComputeProvider computeSetup={computeSetup} onContinue={vi.fn()} />,
+      <SandboxProviderPicker
+        computeSetup={computeSetup}
+        onContinue={vi.fn()}
+      />,
     );
 
     expect(screen.getByRole('button', { name: /modal/i })).toBeTruthy();
@@ -164,7 +163,10 @@ describe('StepComputeProvider', () => {
     };
 
     render(
-      <StepComputeProvider computeSetup={computeSetup} onContinue={vi.fn()} />,
+      <SandboxProviderPicker
+        computeSetup={computeSetup}
+        onContinue={vi.fn()}
+      />,
     );
 
     expect(screen.getByRole('button', { name: /modal/i })).toBeTruthy();
@@ -208,7 +210,7 @@ describe('StepComputeProvider', () => {
     });
 
     const unsatisfied = render(
-      <StepComputeProvider
+      <SandboxProviderPicker
         computeSetup={buildSetup(false)}
         onContinue={vi.fn()}
       />,
@@ -219,7 +221,7 @@ describe('StepComputeProvider', () => {
     unsatisfied.unmount();
 
     render(
-      <StepComputeProvider
+      <SandboxProviderPicker
         computeSetup={buildSetup(true)}
         onContinue={vi.fn()}
       />,

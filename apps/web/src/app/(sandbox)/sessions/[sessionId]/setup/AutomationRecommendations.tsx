@@ -10,19 +10,13 @@ import {
   Alert,
   AlertDescription,
   AlertTriangle,
-  ArrowRight,
-  Switch,
   Button,
+  Checkbox,
   Label,
   Spinner,
-  Zap,
 } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
-import { SetupFooter } from './SetupFooter';
-import { StepTitle } from './StepTitle';
-import { getSetupStepDefinition } from './types';
-
-const STEP = getSetupStepDefinition('automation-recommendations');
+import { SetupSessionActionCardActions } from './SetupSessionActionCard';
 
 function candidateTitle(candidateId: string) {
   return (
@@ -32,12 +26,49 @@ function candidateTitle(candidateId: string) {
   );
 }
 
-export function StepAutomationRecommendations({
+export function AutomationRecommendationChoices({
+  batch,
+  onEnabledChange,
+  disabled = false,
+}: {
+  batch: AutomationRecommendationBatch;
+  onEnabledChange: (id: string, enabled: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="space-y-3">
+      {batch.recommendations.map((recommendation) => (
+        <div key={recommendation.id} className="flex items-start gap-2">
+          <Checkbox
+            id={`automation-recommendation-${recommendation.id}`}
+            className="mt-0.5"
+            checked={recommendation.enabled}
+            disabled={disabled}
+            onCheckedChange={(enabled) =>
+              onEnabledChange(recommendation.id, enabled === true)
+            }
+          />
+          <Label
+            htmlFor={`automation-recommendation-${recommendation.id}`}
+            className="min-w-0 flex-1 flex-col items-start gap-1"
+          >
+            <span className="text-sm font-semibold">
+              {candidateTitle(recommendation.candidateId)}
+            </span>
+            <span className="text-sm font-normal text-muted-foreground">
+              {recommendation.explanation}
+            </span>
+          </Label>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function AutomationRecommendations({
   onContinue,
-  onBack,
 }: {
   onContinue: (batch: AutomationRecommendationBatch | null) => void;
-  onBack?: () => void;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -94,7 +125,7 @@ export function StepAutomationRecommendations({
       },
       onError: (error) => {
         console.error(
-          '[StepAutomationRecommendations] Failed to start recommendation scoring:',
+          '[AutomationRecommendations] Failed to start recommendation scoring:',
           error,
         );
       },
@@ -124,15 +155,18 @@ export function StepAutomationRecommendations({
   const failed = batch?.status === 'failed';
   const handleContinue = () => {
     if (batch?.status === 'ready') {
-      applyRecommendations.mutate();
-      return;
+      if (
+        batch.recommendations.some((recommendation) => recommendation.enabled)
+      ) {
+        applyRecommendations.mutate();
+      } else {
+        skipRecommendations.mutate();
+      }
     }
-    if (pending || failed) {
-      skipRecommendations.mutate();
-      return;
-    }
-    onContinue(batch);
   };
+  const hasSelection =
+    batch?.status === 'ready' &&
+    batch.recommendations.some((recommendation) => recommendation.enabled);
 
   useEffect(() => {
     if (!pending) {
@@ -142,7 +176,7 @@ export function StepAutomationRecommendations({
 
     const timeout = window.setTimeout(() => {
       console.warn(
-        '[StepAutomationRecommendations] Recommendation scoring is taking longer than expected',
+        '[AutomationRecommendations] Recommendation scoring is taking longer than expected',
       );
       setPendingTooLong(true);
     }, 30_000);
@@ -150,10 +184,7 @@ export function StepAutomationRecommendations({
   }, [pending]);
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
-      <StepTitle
-        text={pending ? 'Looking for stuff to automate...' : STEP.title}
-      />
+    <div className="flex w-full flex-col gap-4">
       {pending ? (
         <div
           className="flex items-start gap-3 text-muted-foreground"
@@ -171,48 +202,15 @@ export function StepAutomationRecommendations({
           <AlertTriangle className="size-4" />
           <AlertDescription>
             Recommendation review failed before it could be shown. Retry to try
-            again, or continue without reviewing automations.
+            again.
           </AlertDescription>
         </Alert>
       ) : (
-        <div className="space-y-4">
-          <p className="text-muted-foreground">
-            After analyzing your connected repos, Roomote found some automations
-            to make your life easier:
-          </p>
-          <div className="divide-y-2 divide-accent-bright-foreground bg-card rounded-xl">
-            {batch.recommendations.map((recommendation) => (
-              <div
-                key={recommendation.id}
-                className="flex flex-col gap-4 py-3 px-4 sm:flex-row sm:items-center"
-              >
-                <Switch
-                  id={`automation-recommendation-${recommendation.id}`}
-                  checked={recommendation.enabled}
-                  onCheckedChange={(enabled) =>
-                    setEnabled.mutate({ id: recommendation.id, enabled })
-                  }
-                />
-                <Label
-                  htmlFor={`automation-recommendation-${recommendation.id}`}
-                  className="min-w-0 flex-1 flex-col items-start gap-1"
-                >
-                  <span className="text-sm font-semibold">
-                    {candidateTitle(recommendation.candidateId)}
-                  </span>
-                  <span className="text-sm font-normal text-muted-foreground">
-                    {recommendation.explanation}
-                  </span>
-                </Label>
-              </div>
-            ))}
-          </div>
-          <p>
-            You can manage these (and dozens of others) and create your own in
-            the <Zap className="inline size-4 ml-0.5 -mt-0.5" /> Automations
-            page.
-          </p>
-        </div>
+        <AutomationRecommendationChoices
+          batch={batch}
+          onEnabledChange={(id, enabled) => setEnabled.mutate({ id, enabled })}
+          disabled={setEnabled.isPending}
+        />
       )}
       {startRecommendations.error ? (
         <Alert variant="destructive">
@@ -236,7 +234,7 @@ export function StepAutomationRecommendations({
         <Alert variant="destructive">
           <AlertTriangle className="size-4" />
           <AlertDescription>
-            Could not skip the recommendation review:{' '}
+            Could not skip the automation recommendations:{' '}
             {skipRecommendations.error.message}
           </AlertDescription>
         </Alert>
@@ -245,15 +243,16 @@ export function StepAutomationRecommendations({
           <AlertTriangle className="size-4" />
           <AlertDescription>
             Recommendation review is taking longer than expected. You can keep
-            waiting, retry it, or continue without reviewing automations.
+            waiting or retry it.
           </AlertDescription>
         </Alert>
       ) : null}
-      <SetupFooter onBack={onBack}>
+      <SetupSessionActionCardActions>
         {(pending || failed) &&
         (startRecommendations.error || pendingTooLong || failed) ? (
           <Button
             type="button"
+            size="sm"
             variant="outline"
             onClick={() => {
               setPendingTooLong(false);
@@ -266,21 +265,24 @@ export function StepAutomationRecommendations({
         ) : null}
         <Button
           type="button"
+          size="sm"
           onClick={handleContinue}
           disabled={
             setEnabled.isPending ||
             applyRecommendations.isPending ||
-            skipRecommendations.isPending
+            skipRecommendations.isPending ||
+            batch?.status !== 'ready'
           }
         >
           {applyRecommendations.isPending
-            ? 'Applying...'
-            : pending
-              ? 'Skip'
-              : 'Continue'}
-          <ArrowRight />
+            ? 'Enabling...'
+            : skipRecommendations.isPending
+              ? 'Skipping...'
+              : hasSelection
+                ? 'Enable'
+                : 'Skip'}
         </Button>
-      </SetupFooter>
+      </SetupSessionActionCardActions>
     </div>
   );
 }

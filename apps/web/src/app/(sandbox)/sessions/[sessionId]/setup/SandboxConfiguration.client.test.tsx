@@ -71,11 +71,13 @@ vi.mock('@/components/system', () => ({
   Spinner: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
 }));
 
-vi.mock('./StepTitle', () => ({
-  StepTitle: ({ text }: { text: string }) => <h1>{text}</h1>,
+vi.mock('./SetupSessionActionCard', () => ({
+  SetupSessionActionCardActions: ({ children }: { children?: ReactNode }) => (
+    <div>{children}</div>
+  ),
 }));
 
-import { StepComputeConfig } from './StepComputeConfig';
+import { SandboxConfiguration } from './SandboxConfiguration';
 
 function buildHostedProvider(
   provider: ComputeProvider = 'modal',
@@ -157,14 +159,14 @@ function buildComputeSetup(
   };
 }
 
-describe('StepComputeConfig', () => {
+describe('SandboxConfiguration', () => {
   beforeEach(() => {
     mockSetupStatus.current = null;
   });
 
   it('lets hosted provider advanced overrides be opened when the worker image is editable', () => {
     render(
-      <StepComputeConfig
+      <SandboxConfiguration
         computeSetup={buildComputeSetup()}
         selectedProviderId="modal"
         onContinue={vi.fn()}
@@ -183,7 +185,7 @@ describe('StepComputeConfig', () => {
 
   it('does not show a misleading advanced toggle when the worker image is missing', () => {
     render(
-      <StepComputeConfig
+      <SandboxConfiguration
         computeSetup={buildComputeSetup({
           workerImage: {
             envVarName: 'DOCKER_WORKER_IMAGE',
@@ -209,7 +211,7 @@ describe('StepComputeConfig', () => {
 
   it('disables continue when only a local worker image is configured', () => {
     render(
-      <StepComputeConfig
+      <SandboxConfiguration
         computeSetup={buildComputeSetup({
           workerImage: {
             envVarName: 'DOCKER_WORKER_IMAGE',
@@ -289,7 +291,7 @@ describe('StepComputeConfig', () => {
     };
 
     render(
-      <StepComputeConfig
+      <SandboxConfiguration
         computeSetup={buildComputeSetup({
           workerImage: {
             envVarName: 'DOCKER_WORKER_IMAGE',
@@ -365,7 +367,7 @@ describe('StepComputeConfig', () => {
     const onContinue = vi.fn();
 
     render(
-      <StepComputeConfig
+      <SandboxConfiguration
         computeSetup={buildComputeSetup({ providers: [blaxel] })}
         selectedProviderId="blaxel"
         onContinue={onContinue}

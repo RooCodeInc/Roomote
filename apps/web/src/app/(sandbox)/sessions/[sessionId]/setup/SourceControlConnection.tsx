@@ -26,13 +26,7 @@ import {
 } from '@/hooks/linked-accounts';
 import { useSyncRepositories } from '@/hooks/source-control/useSyncRepositories';
 
-import { StepTitle } from './StepTitle';
-import { SetupFooter } from './SetupFooter';
-import { getSetupStepDefinition } from './types';
-
-const SOURCE_CONTROL_CONNECT_STEP = getSetupStepDefinition(
-  'source-control-connect',
-);
+import { SetupSessionActionCardActions } from './SetupSessionActionCard';
 
 function getTokenBackedWebhookResource(
   provider: SourceControlProvider,
@@ -67,16 +61,18 @@ function getTokenBackedConnectCopy({
   }
 }
 
-export function StepSourceControlConnect({
+export function SourceControlConnection({
   sourceControlSetup,
   onContinue,
   onRemoveSyncMarker,
   onBack,
+  returnPath,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
   onContinue: () => void;
   onRemoveSyncMarker?: () => void;
   onBack?: () => void;
+  returnPath?: string;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -95,7 +91,6 @@ export function StepSourceControlConnect({
       onError: (error) => toast.error(error.message),
     }),
   );
-
   const createInstallation = useCreateGitHubInstallation({
     onSuccess: (result) => {
       if (result.success) {
@@ -116,6 +111,9 @@ export function StepSourceControlConnect({
         });
         await queryClient.invalidateQueries({
           queryKey: trpc.sourceControl.repositories.queryKey(),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: trpc.setup.sessionStatus.queryKey(),
         });
 
         if ('success' in data && data.success === false) {
@@ -372,9 +370,7 @@ export function StepSourceControlConnect({
   ]);
 
   return (
-    <div className="relative w-full max-w-lg space-y-6 py-2 md:py-0">
-      <StepTitle text={SOURCE_CONTROL_CONNECT_STEP.title} />
-
+    <div className="max-w-xl space-y-4">
       {alreadyConnected && !needsAdoMicrosoftConnection ? (
         <div className="space-y-4">
           <p>
@@ -385,9 +381,11 @@ export function StepSourceControlConnect({
               : 'repositories'}
             .
           </p>
-          <SetupFooter onBack={onBack}>
-            <Button onClick={onContinue}>Continue</Button>
-          </SetupFooter>
+          <SetupSessionActionCardActions onBack={onBack}>
+            <Button size="sm" onClick={onContinue}>
+              Continue
+            </Button>
+          </SetupSessionActionCardActions>
         </div>
       ) : needsAdoMicrosoftConnection ? (
         <div className="space-y-4">
@@ -395,7 +393,7 @@ export function StepSourceControlConnect({
             Connect your Azure DevOps account with Microsoft before syncing
             repositories.
           </p>
-          <SetupFooter onBack={onBack}>
+          <SetupSessionActionCardActions onBack={onBack}>
             {adoLinkedAccount.isPending ? (
               <Spinner />
             ) : adoLinkedAccount.data?.configured === false ? (
@@ -405,9 +403,11 @@ export function StepSourceControlConnect({
               </p>
             ) : (
               <Button
+                size="sm"
                 onClick={() =>
                   authenticateAdoAccount.mutate(
-                    `${window.location.pathname}?step=source-control-connect`,
+                    returnPath ??
+                      `${window.location.pathname}?step=source-control-connect`,
                   )
                 }
                 disabled={authenticateAdoAccount.isPending}
@@ -420,23 +420,25 @@ export function StepSourceControlConnect({
                 Connect with your Microsoft account
               </Button>
             )}
-          </SetupFooter>
+          </SetupSessionActionCardActions>
         </div>
       ) : provider === 'github' && showGitHubInstallPending ? (
         <div className="space-y-4">
           <GitHubInstallRequestPending
             onApproved={handleGitHubInstallApproved}
           />
-          <SetupFooter onBack={onBack} />
+          <SetupSessionActionCardActions onBack={onBack} />
         </div>
       ) : provider === 'github' ? (
         <div className="space-y-4">
           <p>{githubCopy}</p>
-          <SetupFooter onBack={onBack}>
+          <SetupSessionActionCardActions onBack={onBack}>
             <Button
+              size="sm"
               onClick={() =>
                 createInstallation.mutate(
-                  `${window.location.pathname}?step=source-control-connect`,
+                  returnPath ??
+                    `${window.location.pathname}?step=source-control-connect`,
                 )
               }
               disabled={createInstallation.isPending}
@@ -444,7 +446,7 @@ export function StepSourceControlConnect({
               {createInstallation.isPending ? <Spinner /> : <Github />}
               Connect to GitHub
             </Button>
-          </SetupFooter>
+          </SetupSessionActionCardActions>
         </div>
       ) : (
         <div className="space-y-4">
@@ -455,8 +457,9 @@ export function StepSourceControlConnect({
               URL, then try again.
             </p>
           ) : null}
-          <SetupFooter onBack={onBack}>
+          <SetupSessionActionCardActions onBack={onBack}>
             <Button
+              size="sm"
               onClick={() => void handleSyncRepositories()}
               disabled={
                 syncRepositories.isPending || saveAdoLinkedAccount.isPending
@@ -469,7 +472,7 @@ export function StepSourceControlConnect({
               )}
               Sync repositories
             </Button>
-          </SetupFooter>
+          </SetupSessionActionCardActions>
         </div>
       )}
     </div>

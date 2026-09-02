@@ -75,6 +75,7 @@ const nativeToolNames = vi.hoisted(
       sendChatReaction: 'send_chat_reaction',
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
+      requestUserInput: 'request_user_input',
       listSkills: 'list_skills',
       loadSkill: 'load_skill',
       showWidget: 'show_widget',
@@ -685,6 +686,117 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       sessionId: 'conversation-1',
       openCodeSessionId: 'opencode-session-1',
     });
+  });
+
+  it('rejects request_user_input calls that mix questions with a trusted preset', async () => {
+    let toolResult: unknown;
+    const requestUserInput = vi.fn();
+    const resolveUserInputPreset = vi.fn();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        toolResult = await invokeTool(nativeToolNames.requestUserInput, {
+          preset: 'setup_starter_tasks',
+          questions: [
+            {
+              id: 'starter-work',
+              header: 'First work',
+              question: 'What should I work on first?',
+            },
+          ],
+        });
+        return 'Please choose your first task.';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'setup-session-1',
+      },
+      setupSession: true,
+      adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+    });
+
+    expect(toolResult).toMatchObject({ success: false });
+    expect(requestUserInput).not.toHaveBeenCalled();
+    expect(resolveUserInputPreset).not.toHaveBeenCalled();
+  });
+
+  it('lets a required setup platform event end with trusted structured input', async () => {
+    const questions = [
+      {
+        id: 'setup-starter-tasks',
+        header: 'First work',
+        question: 'What should Roomote work on first?',
+        isOther: false,
+        isSecret: false,
+        multiple: true,
+        options: [
+          {
+            label: 'fix-flaky-tests',
+            description: 'Find and fix flaky tests.',
+          },
+        ],
+      },
+    ];
+    const requestUserInput = vi.fn();
+    const resolveUserInputPreset = vi.fn(async () => questions);
+    let toolResult: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        toolResult = await invokeTool(nativeToolNames.requestUserInput, {
+          preset: 'setup_starter_tasks',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks({
+      requestUserInput,
+      resolveUserInputPreset,
+    });
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'setup-session-1',
+      },
+      turnSource: 'platform_event',
+      platformEventKind: 'setup',
+      platformEventVisibility: 'required',
+      setupSession: true,
+      adapter,
+    });
+
+    expect(toolResult).toEqual({
+      success: true,
+      requestId: expect.any(String),
+      closed: true,
+    });
+    expect(resolveUserInputPreset).toHaveBeenCalledWith('setup_starter_tasks');
+    expect(requestUserInput).toHaveBeenCalledWith({
+      requestId: expect.any(String),
+      preset: 'setup_starter_tasks',
+      questions,
+    });
+    expect(adapter.postReply).not.toHaveBeenCalled();
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventType: 'roomote_runtime.request_user_input',
+          payload: expect.objectContaining({
+            preset: 'setup_starter_tasks',
+            status: 'pending',
+          }),
+        }),
+      }),
+    );
   });
 
   it('injects durable human follow-ups with native steering between tool calls', async () => {
@@ -2840,6 +2952,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ id: 'github' }),
         expect.objectContaining({ id: 'roomote' }),
       ]),
+      { surface: 'slack' },
     );
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.any(Object),
@@ -5858,6 +5971,34 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'anthropic/claude-sonnet-5' }),
     );
+  });
+
+  it('honors a surface launch gate before creating a task', async () => {
+    const assertTaskLaunch = vi.fn(async () => {
+      throw new Error('Connect source control before starting work.');
+    });
+    const launchTask = vi.fn<LaunchFastAgentTask>();
+    const adapter = callbacks({ assertTaskLaunch, launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix checkout.',
+            kickoffMessage: 'I’m starting on the checkout fix.',
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: 'Connect source control before starting work.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(assertTaskLaunch).toHaveBeenCalledOnce();
+    expect(launchTask).not.toHaveBeenCalled();
   });
 
   it('delivers the kickoff when a surface launcher does not invoke the gate callback', async () => {
