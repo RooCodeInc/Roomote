@@ -19,7 +19,7 @@ export const LATEST_MIGRATION_TAG =
 export type MigrationReadiness =
   | { state: 'ready'; appliedMillis: number }
   | { state: 'pending'; appliedMillis: number | null }
-  /** No drizzle bookkeeping at all: the schema is pushed directly (dev, tests). */
+  /** Tables exist but no drizzle bookkeeping: the schema is pushed directly (dev, tests). */
   | { state: 'unmanaged' };
 
 const MISSING_RELATION_CODES = new Set(['42P01', '3F000']);
@@ -34,21 +34,34 @@ function isMissingRelationError(error: unknown): boolean {
 export async function checkMigrationReadiness(
   database: DatabaseOrTransaction,
 ): Promise<MigrationReadiness> {
-  let rows: Array<{ applied: unknown }>;
+  let appliedMillis: number | null = null;
   try {
-    rows = (await database.execute(
+    const rows = (await database.execute(
       sql`select max(created_at) as applied from drizzle.__drizzle_migrations`,
     )) as unknown as Array<{ applied: unknown }>;
+    const raw = rows[0]?.applied;
+    appliedMillis = raw === null || raw === undefined ? null : Number(raw);
   } catch (error) {
-    if (isMissingRelationError(error)) return { state: 'unmanaged' };
-    throw error;
+    if (!isMissingRelationError(error)) throw error;
   }
-  const raw = rows[0]?.applied;
-  const appliedMillis = raw === null || raw === undefined ? null : Number(raw);
-  if (appliedMillis !== null && appliedMillis >= LATEST_MIGRATION_MILLIS) {
-    return { state: 'ready', appliedMillis };
+  if (appliedMillis !== null) {
+    return appliedMillis >= LATEST_MIGRATION_MILLIS
+      ? { state: 'ready', appliedMillis }
+      : { state: 'pending', appliedMillis };
   }
-  return { state: 'pending', appliedMillis };
+  // No applied migration on record (no bookkeeping, or an empty table). A
+  // brand-new database looks exactly like this until its first migration
+  // lands, so only an already-populated schema counts as managed some other
+  // way (drizzle push in dev and tests); an empty one is a migration that
+  // has not started yet. The migrator applies each migration and its
+  // bookkeeping row in one transaction, so a populated schema with an empty
+  // table is never a migration in flight.
+  const tables = (await database.execute(
+    sql`select count(*)::int as count from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE'`,
+  )) as unknown as Array<{ count: unknown }>;
+  return Number(tables[0]?.count ?? 0) > 0
+    ? { state: 'unmanaged' }
+    : { state: 'pending', appliedMillis: null };
 }
 
 export class MigrationsNotReadyError extends Error {
@@ -71,8 +84,9 @@ export class MigrationsNotReadyError extends Error {
  * the api service, so a worker that reads a column the pending migration
  * adds would otherwise crash at boot, exhaust the platform's restart budget
  * within seconds, and stay down after the migration lands. Waiting here
- * turns that into a delayed start. A database without drizzle bookkeeping
- * is treated as ready; its schema is managed some other way.
+ * turns that into a delayed start. A populated database without drizzle
+ * bookkeeping is treated as ready (its schema is managed some other way);
+ * an empty one waits for its first migration like any other.
  */
 export async function waitForMigrations(options: {
   database: DatabaseOrTransaction;

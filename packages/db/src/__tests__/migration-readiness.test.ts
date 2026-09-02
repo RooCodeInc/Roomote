@@ -15,15 +15,23 @@ const journalPath = path.resolve(
   '../../drizzle/meta/_journal.json',
 );
 
-function databaseReturning(applied: unknown) {
+function databaseReturning(applied: unknown, publicTables = 0) {
   return {
-    execute: vi.fn(async () => [{ applied }]),
+    execute: vi.fn(async (query: unknown) =>
+      JSON.stringify(query).includes('information_schema')
+        ? [{ count: publicTables }]
+        : [{ applied }],
+    ),
   } as unknown as Parameters<typeof checkMigrationReadiness>[0];
 }
 
-function databaseThrowing(code: string) {
+function databaseThrowing(code: string, publicTables = 0) {
   return {
-    execute: vi.fn(async () => {
+    execute: vi.fn(async (query: { queryChunks?: unknown[] }) => {
+      // The bookkeeping read fails; the fallback table count answers.
+      if (JSON.stringify(query).includes('information_schema')) {
+        return [{ count: publicTables }];
+      }
       throw Object.assign(new Error('relation missing'), { code });
     }),
   } as unknown as Parameters<typeof checkMigrationReadiness>[0];
@@ -53,7 +61,7 @@ describe('migration readiness', () => {
     ).resolves.toMatchObject({ state: 'ready' });
   });
 
-  it('reports pending behind the expected migration or with no rows', async () => {
+  it('reports pending behind the expected migration or with no rows on an empty schema', async () => {
     await expect(
       checkMigrationReadiness(databaseReturning(LATEST_MIGRATION_MILLIS - 1)),
     ).resolves.toEqual({
@@ -61,20 +69,42 @@ describe('migration readiness', () => {
       appliedMillis: LATEST_MIGRATION_MILLIS - 1,
     });
     await expect(
-      checkMigrationReadiness(databaseReturning(null)),
+      checkMigrationReadiness(databaseReturning(null, 0)),
     ).resolves.toEqual({ state: 'pending', appliedMillis: null });
   });
 
-  it('treats a database without drizzle bookkeeping as unmanaged and rethrows other errors', async () => {
+  it('treats an empty bookkeeping table over a populated schema as unmanaged', async () => {
+    // drizzle-kit push leaves the table behind with no rows in dev and tests.
     await expect(
-      checkMigrationReadiness(databaseThrowing('42P01')),
+      checkMigrationReadiness(databaseReturning(null, 92)),
+    ).resolves.toEqual({ state: 'unmanaged' });
+  });
+
+  it('treats a populated database without drizzle bookkeeping as unmanaged and rethrows other errors', async () => {
+    await expect(
+      checkMigrationReadiness(databaseThrowing('42P01', 12)),
     ).resolves.toEqual({ state: 'unmanaged' });
     await expect(
-      checkMigrationReadiness(databaseThrowing('3F000')),
+      checkMigrationReadiness(databaseThrowing('3F000', 12)),
     ).resolves.toEqual({ state: 'unmanaged' });
     await expect(
       checkMigrationReadiness(databaseThrowing('57P01')),
     ).rejects.toThrow('relation missing');
+  });
+
+  it('waits on a brand-new database whose first migration has not run', async () => {
+    // Fresh Railway/Render databases have neither the drizzle schema nor
+    // any application table until the api pre-deploy migration starts.
+    await expect(
+      checkMigrationReadiness(databaseThrowing('3F000', 0)),
+    ).resolves.toEqual({ state: 'pending', appliedMillis: null });
+    await expect(
+      waitForMigrations({
+        database: databaseThrowing('42P01', 0),
+        intervalMs: 1,
+        timeoutMs: 5,
+      }),
+    ).rejects.toBeInstanceOf(MigrationsNotReadyError);
   });
 
   it('waits until the migration lands, logging while it does', async () => {
