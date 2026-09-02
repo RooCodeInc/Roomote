@@ -4955,14 +4955,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(results[2]).toMatchObject({ success: true });
     });
 
-    it('allows an emoji-only terminal reaction without a text acknowledgement', async () => {
+    it('records an emoji-only terminal reaction as Slack emoji markup', async () => {
       let reactionResult: unknown;
       const adapter = callbacks();
       mocks.generateText.mockImplementation(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
           reactionResult = await invokeTool(nativeToolNames.sendChatReaction, {
-            name: 'white_check_mark',
+            name: '+1',
             purpose: 'closeout',
           });
           return '';
@@ -4973,6 +4973,20 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       expect(reactionResult).toMatchObject({ success: true, closed: true });
       expect(adapter.postReply).not.toHaveBeenCalled();
+      expect(mocks.upsertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({
+            contentBlocks: [{ type: 'text', text: ':+1:' }],
+            payload: { reaction: '+1', purpose: 'closeout' },
+          }),
+        }),
+      );
+      expect(mocks.appendVisibleMessages).toHaveBeenCalledWith({
+        sessionId: 'conversation-1',
+        messages: expect.arrayContaining([
+          { role: 'assistant', content: [{ type: 'text', text: ':+1:' }] },
+        ]),
+      });
     });
 
     it('does not gate platform-event turns', async () => {

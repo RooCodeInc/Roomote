@@ -2586,9 +2586,8 @@ export async function answerFastAgentQuestion({
         };
       }
       completedChatReactionSignatures.add(signature);
-      turnVisibleMessages.push(
-        buildAssistantTextMessage(`[Reacted with :${name}:]`),
-      );
+      const reactionText = `:${name}:`;
+      turnVisibleMessages.push(buildAssistantTextMessage(reactionText));
       await persistCanonicalMessage(
         {
           ...allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
@@ -2596,7 +2595,7 @@ export async function answerFastAgentQuestion({
           ts: Date.now(),
           eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
           role: 'assistant',
-          contentBlocks: [{ type: 'text', text: `[Reacted with :${name}:]` }],
+          contentBlocks: [{ type: 'text', text: reactionText }],
           metadata: { visibleInTranscript: true },
           payload: { reaction: name, purpose },
           source: conversation.surface,
