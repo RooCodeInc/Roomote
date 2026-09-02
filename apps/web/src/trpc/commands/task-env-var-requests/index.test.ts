@@ -20,7 +20,6 @@ function buildAdminAuth(userId: string): UserAuthSuccess {
     name: 'Admin',
     primaryEmail: 'admin@example.com',
     isAdmin: true,
-    featureFlags: {},
     anonymousAnalyticsEnabled: false,
     cloudEnabled: false,
     cookieConsentedAt: null,

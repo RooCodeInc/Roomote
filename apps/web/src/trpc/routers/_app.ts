@@ -3,7 +3,6 @@ import {
   publicAuthTokenTimeoutMsSchema,
   runTokenTimeoutMsSchema,
 } from '@roomote/auth';
-import { FeatureFlag } from '@roomote/feature-flags';
 
 import {
   ALL_REPOSITORIES,
@@ -463,10 +462,6 @@ import {
   getAnalyticsOverviewCommand,
   getPullRequestAnalyticsOverviewCommand,
 } from '../commands/analytics';
-import {
-  getExperimentalFlagsCommand,
-  updateExperimentalFlagCommand,
-} from '../commands/feature-flags';
 import {
   getMiscSettingsCommand,
   setDeploymentTimeZoneCommand,
@@ -3191,23 +3186,6 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         removeCustomSkillCommand(auth, input),
-      ),
-  }),
-
-  featureFlags: createRouter({
-    getExperimental: protectedProcedure.query(({ ctx: { auth } }) =>
-      getExperimentalFlagsCommand(auth),
-    ),
-
-    setExperimental: protectedProcedure
-      .input(
-        z.object({
-          flag: z.nativeEnum(FeatureFlag),
-          value: z.boolean(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        updateExperimentalFlagCommand(auth, input),
       ),
   }),
 
