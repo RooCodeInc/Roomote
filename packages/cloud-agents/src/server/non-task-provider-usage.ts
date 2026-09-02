@@ -421,10 +421,12 @@ function normalizeParentOpenCodeTextPart(
   const messageId = asString(part.messageID);
   if (!partId || !messageId) return undefined;
   const time = asRecord(part.time);
+  // Verbatim, never trimmed: a boundary space belongs to the reply text and
+  // the next delta is appended directly after it.
   return {
     messageId,
     partId,
-    text: asString(part.text) ?? '',
+    text: typeof part.text === 'string' ? part.text : '',
     ...(delta !== undefined ? { delta } : {}),
     completed: asFiniteNumber(time?.end) !== undefined,
   };
@@ -1235,11 +1237,12 @@ async function runNonTaskSdkPrompt(
                     return;
                   }
                 }
+                const streamedDelta = asRecord(event.properties)?.delta;
                 const assistantText = normalizeParentOpenCodeTextPart(
                   event.properties.part,
                   sessionId,
                   // Older servers attach the streamed delta to this event.
-                  asString(asRecord(event.properties)?.delta),
+                  typeof streamedDelta === 'string' ? streamedDelta : undefined,
                 );
                 // Parts carry no role; the user prompt's own text part must
                 // never read as reply text.

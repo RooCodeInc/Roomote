@@ -399,10 +399,10 @@ describe('resolveOpenCodeSmallModel', () => {
               messageID: 'assistant-message-1',
               sessionID: 'session-1',
               type: 'text' as const,
-              text: 'Look',
+              text: 'Look ',
               time: { start: 160 },
             },
-            delta: 'Look',
+            delta: 'Look ',
           },
         };
         yield {
@@ -412,7 +412,7 @@ describe('resolveOpenCodeSmallModel', () => {
             messageID: 'assistant-message-1',
             partID: 'text-part-1',
             field: 'text',
-            delta: 'ing',
+            delta: 'here ',
           },
         };
         // A reasoning part streams deltas under the same field name; it was
@@ -460,7 +460,7 @@ describe('resolveOpenCodeSmallModel', () => {
               messageID: 'assistant-message-1',
               sessionID: 'session-1',
               type: 'text' as const,
-              text: 'Looking',
+              text: 'Look here ',
               time: { start: 160, end: 170 },
             },
           },
@@ -540,24 +540,26 @@ describe('resolveOpenCodeSmallModel', () => {
       ),
     ).resolves.toBe('native tool turn complete');
 
+    // Boundary whitespace is preserved verbatim: deltas are appended to
+    // the previous text without any trimming.
     expect(onAssistantTextUpdated.mock.calls.map(([text]) => text)).toEqual([
       {
         messageId: 'assistant-message-1',
         partId: 'text-part-1',
-        text: 'Look',
-        delta: 'Look',
+        text: 'Look ',
+        delta: 'Look ',
         completed: false,
       },
       {
         messageId: 'assistant-message-1',
         partId: 'text-part-1',
-        delta: 'ing',
+        delta: 'here ',
         completed: false,
       },
       {
         messageId: 'assistant-message-1',
         partId: 'text-part-1',
-        text: 'Looking',
+        text: 'Look here ',
         completed: true,
       },
     ]);
