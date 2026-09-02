@@ -10,6 +10,7 @@ import {
   db,
   taskRuns,
   eq,
+  sql,
 } from '@roomote/db/server';
 import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
@@ -39,6 +40,73 @@ import {
 
 const MODAL_LAUNCH_OUTPUT_TEXT_LIMIT = 500;
 const LAUNCH_DIAGNOSTIC_PROBE_TIMEOUT_MS = 15_000;
+const ROOMOTE_COMPUTE_LOG_LIMIT = 256 * 1024;
+const ROOMOTE_COMPUTE_LOG_FLUSH_INTERVAL_MS = 500;
+const ROOMOTE_COMPUTE_LOG_FLUSH_SIZE = 16 * 1024;
+
+function createRoomoteComputeLogRecorder(runId: number) {
+  let writes = Promise.resolve();
+  let buffer = '';
+  let flushTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const flush = (): Promise<void> => {
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = undefined;
+    }
+
+    if (!buffer) return writes;
+
+    const entries = buffer;
+    buffer = '';
+    writes = writes
+      .then(async () => {
+        await db
+          .update(taskRuns)
+          .set({
+            log: sql<string>`right(coalesce(${taskRuns.log}, '') || ${entries}, ${ROOMOTE_COMPUTE_LOG_LIMIT})`,
+          })
+          .where(eq(taskRuns.id, runId));
+      })
+      .catch((error: unknown) => {
+        console.warn(
+          `[spawnModalWorker] Failed to retain compute output for task run #${runId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+
+    return writes;
+  };
+
+  const append = (
+    stream: 'command' | 'stdout' | 'stderr',
+    data: string,
+    timestamp = new Date(),
+  ): Promise<void> => {
+    const prefix = `[${timestamp.toISOString()}] [${stream}] `;
+    const sanitized = data.replaceAll('\0', '');
+    const suffix = sanitized.endsWith('\n') ? '' : '\n';
+    const available = ROOMOTE_COMPUTE_LOG_LIMIT - prefix.length - suffix.length;
+    const retained =
+      sanitized.length > available ? sanitized.slice(-available) : sanitized;
+    buffer += `${prefix}${retained}${suffix}`;
+
+    if (
+      stream === 'command' ||
+      buffer.length >= ROOMOTE_COMPUTE_LOG_FLUSH_SIZE
+    ) {
+      return flush();
+    }
+
+    flushTimer ??= setTimeout(
+      () => void flush(),
+      ROOMOTE_COMPUTE_LOG_FLUSH_INTERVAL_MS,
+    );
+    flushTimer.unref?.();
+    return writes;
+  };
+
+  return { append, flush };
+}
 
 class DetachedWorkerLaunchError extends Error {
   public readonly details: Record<string, unknown>;
@@ -345,6 +413,10 @@ export async function spawnModalWorker(
     },
     { logPrefix: 'spawnModalWorker', logger: console },
   );
+  const computeLog =
+    vendor === 'roomote'
+      ? createRoomoteComputeLogRecorder(taskRun.id)
+      : undefined;
 
   const configuredResources = resolveConfiguredComputeProviderResources({
     provider: 'modal',
@@ -414,27 +486,37 @@ export async function spawnModalWorker(
     );
   });
 
-  const machine = await createModalMachine({
-    modalTokenId,
-    modalTokenSecret,
-    modalEndpoint,
-    modalEnvironment,
-    modalAppName,
-    modalBaseImageRef,
-    modalRegistryUsername,
-    modalRegistryPassword,
-    modalEcrOidcRoleArn,
-    modalEcrRegion,
-    namedPorts,
-    tags: modalTags,
-    timeoutMs: modalTimeoutMs,
-    localTarballPath,
-    createInstanceTimeoutMs: COMPUTE_CREATE_INSTANCE_TIMEOUT_MS,
-    bootstrapTimeoutMs: COMPUTE_BOOTSTRAP_TIMEOUT_MS,
-    computeClient,
-    onMutation: recordMutation,
-    ...launchOptions,
-  });
+  await computeLog?.append('command', 'sandbox provisioning started');
+  let machine: Awaited<ReturnType<typeof createModalMachine>>;
+  try {
+    machine = await createModalMachine({
+      modalTokenId,
+      modalTokenSecret,
+      modalEndpoint,
+      modalEnvironment,
+      modalAppName,
+      modalBaseImageRef,
+      modalRegistryUsername,
+      modalRegistryPassword,
+      modalEcrOidcRoleArn,
+      modalEcrRegion,
+      namedPorts,
+      tags: modalTags,
+      timeoutMs: modalTimeoutMs,
+      localTarballPath,
+      createInstanceTimeoutMs: COMPUTE_CREATE_INSTANCE_TIMEOUT_MS,
+      bootstrapTimeoutMs: COMPUTE_BOOTSTRAP_TIMEOUT_MS,
+      computeClient,
+      onMutation: recordMutation,
+      ...launchOptions,
+    });
+  } catch (error) {
+    await computeLog?.append(
+      'command',
+      `sandbox provisioning failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    throw error;
+  }
 
   const command = getWorkerLaunchCommand(taskRun);
   const args = getWorkerLaunchArgs(taskRun, machine.machineId);
@@ -504,6 +586,10 @@ export async function spawnModalWorker(
         phase: 'launch_worker',
       }),
     });
+    await computeLog?.append(
+      'command',
+      `worker ${args.join(' ')} started on ${machine.machineId}`,
+    );
 
     const result = await computeClient.runCommand({
       instanceId: machine.machineId,
@@ -521,9 +607,28 @@ export async function spawnModalWorker(
       }),
       detached: true,
       signal: AbortSignal.timeout(60_000),
-      ...(onWorkerExit
+      ...(computeLog
+        ? {
+            onOutput: (event: {
+              stream: 'stdout' | 'stderr';
+              data: string;
+            }) => {
+              void computeLog.append(event.stream, event.data);
+            },
+          }
+        : {}),
+      ...(onWorkerExit || computeLog
         ? {
             onExit: async ({ exitCode }: { exitCode: number }) => {
+              await computeLog?.append(
+                'command',
+                `worker exited with code ${exitCode}`,
+              );
+
+              if (!onWorkerExit) {
+                return;
+              }
+
               const disposition = await onWorkerExit({ exitCode });
 
               if (disposition === 'ignore') {
@@ -554,11 +659,16 @@ export async function spawnModalWorker(
           }
         : {}),
     });
+    await computeLog?.flush();
 
     // A detached worker must remain alive long enough to claim the run. Route
     // grace-period exits through the same classifier as later exits so the
     // first bootstrap failure gets its one durable replacement.
     if (result.exitCode !== null) {
+      await computeLog?.append(
+        'command',
+        `worker exited with code ${result.exitCode}`,
+      );
       // Without any captured output the exit is undiagnosable from logs, so
       // probe the still-alive sandbox before classification/cleanup.
       const probeDiagnostics =
@@ -617,6 +727,12 @@ export async function spawnModalWorker(
         exitCode: result.exitCode,
       }),
     });
+    await computeLog?.append(
+      'command',
+      result.commandId
+        ? `worker is running as command ${result.commandId}`
+        : 'worker is running',
+    );
 
     if (result.commandId) {
       await db
@@ -630,6 +746,10 @@ export async function spawnModalWorker(
       ...(result.commandId ? { sandboxCmdId: result.commandId } : {}),
     };
   } catch (error) {
+    await computeLog?.append(
+      'command',
+      `worker launch failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
     await recordMutation({
       provider: vendor,
       operation: 'run_command',

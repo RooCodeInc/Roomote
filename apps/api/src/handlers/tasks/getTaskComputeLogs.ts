@@ -26,6 +26,7 @@ interface TaskRunLogRow {
   vendor: string | null;
   machineId: string | null;
   sandboxCmdId: string | null;
+  log: string | null;
 }
 
 interface ResolvedTaskRunProvider {
@@ -110,6 +111,7 @@ export async function getTaskComputeLogs(
         vendor: true,
         machineId: true,
         sandboxCmdId: true,
+        log: true,
       },
       orderBy: [asc(taskRuns.createdAt), asc(taskRuns.id)],
     });
@@ -126,6 +128,32 @@ export async function getTaskComputeLogs(
         const skippedReason = getSkippedReason(job, providerInfo);
         const provider = providerInfo.provider;
         const responseVendor = providerInfo.responseVendor;
+
+        if (provider === 'roomote') {
+          if (job.log?.trim()) {
+            return {
+              id: job.id,
+              status: job.status,
+              vendor: responseVendor,
+              machineId: job.machineId,
+              sandboxCmdId: job.sandboxCmdId,
+              output: job.log,
+              skippedReason: null,
+              error: null,
+            };
+          }
+
+          return {
+            id: job.id,
+            status: job.status,
+            vendor: responseVendor,
+            machineId: job.machineId,
+            sandboxCmdId: job.sandboxCmdId,
+            output: null,
+            skippedReason: 'no_retained_output:roomote',
+            error: null,
+          };
+        }
 
         if (skippedReason) {
           return {
