@@ -23,6 +23,10 @@ import {
   type ReasoningEffort,
   type RunStatus,
   type TaskMessageContentBlock,
+  INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
+  INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
+  matchIntegrationTools,
+  type IntegrationToolCandidate,
 } from '@roomote/types';
 import {
   and,
@@ -387,78 +391,48 @@ const findIntegrationToolsArgsSchema = z.object({
   integrationId: z.string().trim().min(1).optional(),
   toolName: z.string().trim().min(1).optional(),
   query: z.string().trim().min(1).optional(),
-  limit: z.number().int().positive().max(25).optional(),
+  limit: z
+    .number()
+    .int()
+    .positive()
+    .max(INTEGRATION_TOOL_LOOKUP_MAX_LIMIT)
+    .optional(),
 });
 const callIntegrationToolArgsSchema = z.object({
   integrationId: z.string().trim().min(1),
   toolName: z.string().trim().min(1),
   args: z.record(z.unknown()).optional(),
 });
-const FIND_INTEGRATION_TOOLS_DEFAULT_LIMIT = 10;
-
 /**
- * Resolve on-demand integration tools for `find_integration_tools`. Exact
- * server and tool names win; otherwise every query term must appear in the
- * tool's name or description. Results carry the input schema the model needs
- * to call the tool, bounded so a broad query cannot inline a whole catalog.
+ * Resolve on-demand integration tools for `find_integration_tools` from the
+ * in-memory catalog; matching and ranking are shared with task sandboxes.
  */
 function findFastAgentIntegrationTools(
   integrations: FastAgentIntegration[],
   args: z.infer<typeof findIntegrationToolsArgsSchema>,
 ): {
-  tools: Array<{
-    integrationId: string;
-    name: string;
-    description?: string;
-    inputSchema?: unknown;
-  }>;
+  tools: IntegrationToolCandidate[];
   truncated: boolean;
   unknownIntegration: boolean;
 } {
-  const limit = args.limit ?? FIND_INTEGRATION_TOOLS_DEFAULT_LIMIT;
-  const scoped = args.integrationId
-    ? integrations.filter(
-        (integration) => integration.id === args.integrationId,
-      )
-    : integrations;
-  if (args.integrationId && scoped.length === 0) {
+  if (
+    args.integrationId &&
+    !integrations.some((integration) => integration.id === args.integrationId)
+  ) {
     return { tools: [], truncated: false, unknownIntegration: true };
   }
-  const terms = (args.query ?? '')
-    .toLowerCase()
-    .split(/\s+/u)
-    .filter((term) => term.length > 0);
-  const matches: Array<{
-    integrationId: string;
-    name: string;
-    description?: string;
-    inputSchema?: unknown;
-    exact: boolean;
-  }> = [];
-  for (const integration of scoped) {
-    for (const tool of integration.tools) {
-      if (args.toolName && tool.name !== args.toolName) continue;
-      const haystack = `${tool.name} ${tool.description ?? ''}`.toLowerCase();
-      if (terms.length > 0 && !terms.every((term) => haystack.includes(term))) {
-        continue;
-      }
-      matches.push({
-        integrationId: integration.id,
-        name: tool.name,
-        ...(tool.description ? { description: tool.description } : {}),
-        ...(tool.inputSchema !== undefined
-          ? { inputSchema: tool.inputSchema }
-          : {}),
-        exact:
-          Boolean(args.toolName) ||
-          terms.some((term) => tool.name.toLowerCase() === term),
-      });
-    }
-  }
-  matches.sort((left, right) => Number(right.exact) - Number(left.exact));
+  const candidates = integrations.flatMap((integration) =>
+    integration.tools.map((tool) => ({
+      integrationId: integration.id,
+      name: tool.name,
+      ...(tool.description ? { description: tool.description } : {}),
+      ...(tool.inputSchema !== undefined
+        ? { inputSchema: tool.inputSchema }
+        : {}),
+    })),
+  );
   return {
-    tools: matches.slice(0, limit).map(({ exact: _exact, ...tool }) => tool),
-    truncated: matches.length > limit,
+    ...matchIntegrationTools(candidates, args),
     unknownIntegration: false,
   };
 }
@@ -2405,10 +2379,7 @@ export async function answerFastAgentQuestion({
         success: true as const,
         tools: found.tools,
         ...(found.truncated
-          ? {
-              guidance:
-                'More tools matched than were returned. Narrow the query or pass integrationId or toolName.',
-            }
+          ? { guidance: INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE }
           : {}),
       };
     };
