@@ -17,6 +17,7 @@ import {
   getTextFromContentBlocks,
   inferAcpMessageKind,
   parsePrReviewActionOffer,
+  type AcpMessage,
   type PrReviewActionChoice,
   type AcpEventType,
   type ReasoningEffort,
@@ -59,7 +60,11 @@ import {
   AcpTranscriptBlockList,
   useAcpTranscriptBlocks,
 } from '../../task/[taskId]/messages/acp';
-import { toAcpUiMessage } from '../../task/[taskId]/hooks/services/acp-protocol-service';
+import {
+  AcpProtocolService,
+  toAcpUiMessage,
+} from '../../task/[taskId]/hooks/services/acp-protocol-service';
+import type { AcpUiMessage } from '../../task/[taskId]/types';
 
 /** Rows arriving over the SSE stream have `createdAt` serialized to a string;
  * the transcript only sorts on ts/turnSeq/id, so both shapes are accepted. */
@@ -325,12 +330,31 @@ export function FastSessionTranscript({
     boolean | null
   >(null);
   usePageTitle(truncatePageTitle(title ?? fallbackTitle));
+  const streamServiceRef = useRef<AcpProtocolService | null>(null);
+  const getStreamService = useCallback(
+    () => (streamServiceRef.current ??= new AcpProtocolService()),
+    [],
+  );
+  const [streamMessages, setStreamMessages] = useState<AcpUiMessage[]>([]);
+  const streamMessagesRef = useRef(streamMessages);
+  const replaceStreamMessages = useCallback((next: AcpUiMessage[]) => {
+    streamMessagesRef.current = next;
+    setStreamMessages(next);
+  }, []);
+  const clearStreamMessages = useCallback(() => {
+    if (streamMessagesRef.current.length === 0) return;
+    getStreamService().reset();
+    replaceStreamMessages([]);
+  }, [getStreamService, replaceStreamMessages]);
 
   useEffect(() => {
     hasReceivedInitialSessionStateRef.current = false;
     const source = new EventSource(`/api/sessions/${sessionId}/stream`);
     const onOpen = () => {
       hasReceivedInitialSessionStateRef.current = false;
+      // Chunks missed while disconnected cannot be recovered; the persisted
+      // row fills the gap.
+      clearStreamMessages();
     };
     const onMessages = (event: MessageEvent) => {
       try {
@@ -362,6 +386,24 @@ export function FastSessionTranscript({
         }
         serverMessagesRef.current = next;
         setServerMessages(next);
+        // A persisted reply row supersedes the live text streamed for it.
+        const persistedStreamIds = new Set(
+          messages
+            .filter((message) => message.role === 'assistant')
+            .map((message) => `assistant:${message.eventId}`),
+        );
+        const streamed = streamMessagesRef.current;
+        if (streamed.some((message) => persistedStreamIds.has(message.id))) {
+          const remaining = streamed.filter(
+            (message) => !persistedStreamIds.has(message.id),
+          );
+          if (remaining.length === 0) {
+            getStreamService().reset();
+          } else {
+            getStreamService().rebindMessages(remaining);
+          }
+          replaceStreamMessages(remaining);
+        }
         dispatchPendingResponse({
           type: 'messages',
           messages,
@@ -406,20 +448,61 @@ export function FastSessionTranscript({
         ) {
           setConversationResponding(update.conversationResponding);
         }
+        if (update.conversationResponding === false) {
+          // The turn is over: any text no reply delivered is withdrawn.
+          clearStreamMessages();
+        }
       } catch {
         // Ignore malformed frames.
+      }
+    };
+    // Live reply text arrives as the same `assistant_message_chunk` events
+    // the task runtime streams, reassembled by the same protocol service.
+    const onChunk = (event: MessageEvent) => {
+      try {
+        const { event: chunk } = JSON.parse(event.data) as {
+          event: AcpMessage;
+        };
+        if (
+          chunk?.eventType !== ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk
+        ) {
+          return;
+        }
+        const service = getStreamService();
+        let current = streamMessagesRef.current;
+        if (
+          !current.some((message) => message.id === `assistant:${chunk.id}`)
+        ) {
+          // A new reply begins: the previous one is complete and only waits
+          // for its persisted row.
+          const sessionId = chunk.metadata?.sessionId;
+          const finalized = service.finalizeActiveStreams(
+            current,
+            typeof sessionId === 'string' ? sessionId : undefined,
+          );
+          if (finalized !== current) {
+            current = finalized;
+            service.rebindMessages(current);
+          }
+        }
+        const result = service.applyOutputEvent(current, chunk);
+        if (result) replaceStreamMessages(result.acpMessages);
+      } catch {
+        // Ignore malformed frames; the persisted row still arrives.
       }
     };
     source.addEventListener('open', onOpen);
     source.addEventListener('messages', onMessages);
     source.addEventListener('session', onSession);
+    source.addEventListener('chunk', onChunk);
     return () => {
       source.removeEventListener('open', onOpen);
       source.removeEventListener('messages', onMessages);
       source.removeEventListener('session', onSession);
+      source.removeEventListener('chunk', onChunk);
       source.close();
     };
-  }, [sessionId]);
+  }, [sessionId, clearStreamMessages, getStreamService, replaceStreamMessages]);
 
   const messages = useMemo(() => {
     return [...serverMessages.values(), ...optimisticMessages].sort(
@@ -450,7 +533,7 @@ export function FastSessionTranscript({
     return { messageCount, assistantCount };
   }, [serverMessages]);
 
-  const uiMessages = useMemo(
+  const persistedUiMessages = useMemo(
     () =>
       messages
         .filter(
@@ -461,7 +544,13 @@ export function FastSessionTranscript({
         )
         .map((message) => {
           const uiMessage = toAcpUiMessage({
-            id: message.id,
+            // A reply keeps the id its streamed chunks rendered under, so the
+            // persisted row reconciles in place instead of remounting.
+            id:
+              message.role === 'assistant' &&
+              message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage
+                ? `assistant:${message.eventId}`
+                : message.id,
             ts: message.ts,
             eventType: message.eventType as AcpEventType,
             role: message.role,
@@ -513,6 +602,13 @@ export function FastSessionTranscript({
         return offer ? [offer] : [];
       }),
     [messages],
+  );
+  const uiMessages = useMemo(
+    () =>
+      streamMessages.length === 0
+        ? persistedUiMessages
+        : [...persistedUiMessages, ...streamMessages],
+    [persistedUiMessages, streamMessages],
   );
   const { renderBlocks, suppressMessage } = useAcpTranscriptBlocks({
     messages: uiMessages,
@@ -658,7 +754,8 @@ export function FastSessionTranscript({
             onOpenDelegatedTask={openTaskPanel ?? undefined}
           />
           {hasVisibleAssistantMessage ? timelineExtras : null}
-          {pendingResponseState.pendingAfter !== null ? (
+          {pendingResponseState.pendingAfter !== null &&
+          streamMessages.length === 0 ? (
             <ThinkingMessage />
           ) : !isSending &&
             conversationResponding !== true &&

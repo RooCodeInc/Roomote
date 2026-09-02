@@ -94,10 +94,15 @@ import {
   type NonTaskProviderRetryEvent,
   type NonTaskOpenCodeCompletedMessage,
   type NonTaskOpenCodeAssistantMessage,
+  type NonTaskOpenCodeAssistantText,
   type NonTaskOpenCodeNativeSteer,
   type NonTaskOpenCodeTaskPart,
 } from '../non-task-provider-usage';
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
+import {
+  createFastAgentReplyStreamPublisher,
+  createFastAgentReplyTextTracker,
+} from './fast-agent-reply-stream';
 import { RemoteFastAgentSettingsSkillSource } from './fast-agent-settings-skill-source';
 import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill-invocation';
 import {
@@ -202,7 +207,8 @@ function selectFastRoomoteChannelTools(options: {
 export type FastAgentThreadMessage = SlackThreadPromptMessage;
 
 const chatReplyArgsSchema = z.object({
-  message: z.string().trim().min(1),
+  /** Omitted when the reply is the assistant text written before the call. */
+  message: z.string().trim().min(1).optional(),
   purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
   imageArtifactIds: z.array(z.string()).optional(),
   suggestions: z
@@ -228,6 +234,13 @@ const showWidgetArgsSchema = z.object({
   textFallback: z.string().optional(),
 });
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+// A reply tool call without a message reads the text the model wrote before
+// it. That text arrives on the OpenCode event stream, which may trail the
+// tool bridge request by a few milliseconds; bound how long to wait for it.
+const FAST_AGENT_REPLY_TEXT_SETTLE_TIMEOUT_MS = 750;
+const FAST_AGENT_REPLY_TEXT_SETTLE_POLL_MS = 25;
+const FAST_AGENT_EMPTY_REPLY_ERROR =
+  'Write the reply as assistant text before calling send_chat_reply, or pass it as "message".';
 const FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS = 50_000;
 const FAST_AGENT_HUMAN_STEER_MAX_MESSAGES = 16;
 const FAST_AGENT_HUMAN_STEER_QUERY_LIMIT =
@@ -1559,6 +1572,87 @@ export async function answerFastAgentQuestion({
     eventId: `${turnId}:${slot}`,
     turnSeq: nextTurnSeq++,
   });
+  // The model's assistant text is the reply. Its not-yet-delivered text
+  // streams to the web transcript as assistant message chunks under a
+  // reserved event; the reply that delivers it (a reply tool call or the
+  // terminal closeout) persists under that same event, so the live text is
+  // replaced in place.
+  const replyTextTracker = createFastAgentReplyTextTracker();
+  const replyStream = createFastAgentReplyStreamPublisher({
+    getConversationId: () => canonicalConversationId,
+  });
+  let streamedReply:
+    | { eventId: string; turnSeq: number; sentText: string }
+    | undefined;
+  const onAssistantTextUpdated = (update: NonTaskOpenCodeAssistantText) => {
+    replyTextTracker.apply(update);
+    // Text after a closeout belongs to the trailing model request that the
+    // turn is already cutting off; never show it.
+    if (isInstructionClosed(getInstructionVersion(update.messageId))) return;
+    const text = replyTextTracker.unconsumedText();
+    if (!text.trim()) return;
+    streamedReply ??= {
+      ...allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
+      sentText: '',
+    };
+    // Only appends stream. A rewrite of earlier text (rare: a completing
+    // part correcting drift) is left to the persisted row.
+    if (!text.startsWith(streamedReply.sentText)) return;
+    const delta = text.slice(streamedReply.sentText.length);
+    if (!delta) return;
+    streamedReply.sentText = text;
+    replyStream.publishChunk({
+      eventId: streamedReply.eventId,
+      sessionId: activeOpenCodeSessionId,
+      turnId: update.messageId,
+      ts: Date.now(),
+      text: delta,
+    });
+  };
+  /** Hands the streamed text's event to the reply that finalizes it. */
+  const takeStreamedReplyEvent = async () => {
+    const streamed = streamedReply;
+    streamedReply = undefined;
+    if (!streamed) return undefined;
+    await replyStream.flush();
+    return { eventId: streamed.eventId, turnSeq: streamed.turnSeq };
+  };
+  /** Forgets streamed text no reply will deliver; the transcript drops it
+   * when the turn settles. */
+  const dropStreamedReply = () => {
+    streamedReply = undefined;
+  };
+  const waitForSettledReplyText = async () => {
+    const deadline = Date.now() + FAST_AGENT_REPLY_TEXT_SETTLE_TIMEOUT_MS;
+    while (
+      !signal?.aborted &&
+      (!replyTextTracker.unconsumedText().trim() ||
+        replyTextTracker.hasIncompleteUnconsumed()) &&
+      Date.now() < deadline
+    ) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, FAST_AGENT_REPLY_TEXT_SETTLE_POLL_MS),
+      );
+    }
+  };
+  /**
+   * The closeout owed when the model ends its turn with undelivered text.
+   * The prompt result is the final assistant message's full text; strip
+   * what an earlier reply already delivered from that same message.
+   */
+  const resolveTerminalReplyText = (promptText: string) => {
+    if (!replyTextTracker.sawText()) return promptText;
+    const delivered = completedOpenCodeMessage?.id
+      ? replyTextTracker.consumedText(completedOpenCodeMessage.id)
+      : '';
+    const remainder = !delivered
+      ? promptText
+      : promptText.startsWith(delivered)
+        ? promptText.slice(delivered.length)
+        : replyTextTracker.unconsumedText();
+    replyTextTracker.consumeUnconsumed();
+    return remainder;
+  };
   const persistCanonicalMessage = async (
     message: Parameters<typeof upsertFastAgentMessage>[0]['message'],
     bestEffort = false,
@@ -2441,6 +2535,8 @@ export async function answerFastAgentQuestion({
       mirrorImmediately = false,
       nativeMessage?: NonTaskOpenCodeCompletedMessage | null,
       instructionVersion = currentInstructionVersion,
+      /** The streamed partial this reply finalizes, if one was shown. */
+      streamedEvent?: { eventId: string; turnSeq: number },
     ) => {
       const replacedRetry = await replaceInferenceRetryReply(reply, true, () =>
         diagnostics.recordVisibleReply(),
@@ -2451,7 +2547,9 @@ export async function answerFastAgentQuestion({
         turnVisibleMessages.push(buildAssistantTextMessage(reply.message));
         await persistAssistantReply({
           reply,
-          event: allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
+          event:
+            streamedEvent ??
+            allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
           platformMessageId: posted?.messageId,
           nativeMessage,
         });
@@ -2967,6 +3065,13 @@ export async function answerFastAgentQuestion({
         switch (call.name) {
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
             const args = chatReplyArgsSchema.parse(call.args);
+            if (args.message === undefined) await waitForSettledReplyText();
+            const message = (
+              args.message ?? replyTextTracker.unconsumedText()
+            ).trim();
+            if (!message) {
+              return { success: false, error: FAST_AGENT_EMPTY_REPLY_ERROR };
+            }
             if (
               args.suggestions?.length &&
               (args.purpose !== 'closeout' ||
@@ -3028,11 +3133,13 @@ export async function answerFastAgentQuestion({
             }
             const signature = JSON.stringify([
               args.purpose,
-              args.message,
+              message,
               args.imageArtifactIds ?? [],
               args.suggestions ?? [],
             ]);
             if (completedChatReplySignatures.has(signature)) {
+              replyTextTracker.consumeUnconsumed();
+              dropStreamedReply();
               return {
                 success: true,
                 delivered: true,
@@ -3041,10 +3148,14 @@ export async function answerFastAgentQuestion({
               };
             }
             throwIfTurnCancelled();
+            // Whatever the model wrote before this call is delivered by it,
+            // whether the call restates that text or leaves it implicit.
+            replyTextTracker.consumeUnconsumed();
+            const streamedEvent = await takeStreamedReplyEvent();
             await postReply(
               {
                 purpose: args.purpose,
-                message: args.message,
+                message,
                 ...(args.imageArtifactIds?.length
                   ? { imageArtifactIds: args.imageArtifactIds }
                   : {}),
@@ -3055,6 +3166,7 @@ export async function answerFastAgentQuestion({
               false,
               undefined,
               instructionVersion,
+              streamedEvent,
             );
             completedChatReplySignatures.add(signature);
             return {
@@ -3851,6 +3963,7 @@ export async function answerFastAgentQuestion({
                         );
                       },
                       onParentTaskPartUpdated: persistOpenCodeTaskPart,
+                      onAssistantTextUpdated,
                     },
                   );
                 const result = await resultPromise;
@@ -4023,7 +4136,7 @@ export async function answerFastAgentQuestion({
       terminalInstructionVersion === currentInstructionVersion &&
       !isInstructionClosed(terminalInstructionVersion)
     ) {
-      const message = promptText.trim();
+      const message = resolveTerminalReplyText(promptText).trim();
       // A terminal closeout is itself a side effect a replay would repeat:
       // withdraw the turn from recovery before posting it.
       const terminalReplayRevoked =
@@ -4034,11 +4147,13 @@ export async function answerFastAgentQuestion({
           '[Fast Agent] Skipping the terminal closeout because the turn could not be withdrawn from replay.',
         );
       } else if (message) {
+        const streamedEvent = await takeStreamedReplyEvent();
         await postReply(
           { purpose: 'closeout', message },
           false,
           completedOpenCodeMessage,
           terminalInstructionVersion,
+          streamedEvent,
         );
       } else if (!visibleUpdatePosted) {
         // A delivered update is already a complete visible response. Stay
@@ -4316,6 +4431,8 @@ export async function answerFastAgentQuestion({
         });
       }
     }
+    dropStreamedReply();
+    await replyStream.dispose();
     await adapter.activity?.settle().catch((error) => {
       console.warn(
         `[Fast Agent] Failed to settle surface activity: ${formatErrorForLog(error)}`,
