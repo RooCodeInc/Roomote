@@ -2905,6 +2905,7 @@ export const appRouter = createRouter({
     timeline: protectedProcedure
       .input(
         sessionIdInputSchema.extend({
+          since: z.number().optional(),
           cursor: z
             .object({
               at: z.number().nonnegative(),
@@ -2914,7 +2915,7 @@ export const appRouter = createRouter({
         }),
       )
       .query(({ ctx: { auth }, input }) =>
-        getSessionTimeline(auth, input.sessionId, input.cursor),
+        getSessionTimeline(auth, input.sessionId, input.cursor ?? input.since),
       ),
     forTask: protectedProcedure
       .input(z.object({ taskId: z.string().min(1) }))

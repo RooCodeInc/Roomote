@@ -947,11 +947,15 @@ export async function getSessionById(auth: SessionAuth, sessionId: string) {
 export async function getSessionTimeline(
   auth: SessionAuth,
   sessionId: string,
-  cursor?: { at: number; seenIdsAtTimestamp: string[] },
+  cursor?: number | { at: number; seenIdsAtTimestamp: string[] },
 ) {
   const session = await findAccessibleSession(auth, sessionId);
   if (!session) return null;
-  const after = cursor ?? { at: 0, seenIdsAtTimestamp: [] };
+  const legacySince = typeof cursor === 'number' ? cursor : null;
+  const after =
+    typeof cursor === 'number'
+      ? { at: cursor, seenIdsAtTimestamp: [] }
+      : (cursor ?? { at: 0, seenIdsAtTimestamp: [] });
   const seenIdsAtTimestamp = new Set(after.seenIdsAtTimestamp);
   const taskRows = await getSessionTasks(sessionId);
   const fast = session.fastConversationId
@@ -996,7 +1000,9 @@ export async function getSessionTimeline(
     .filter(
       (event) =>
         event.at > after.at ||
-        (event.at === after.at && !seenIdsAtTimestamp.has(event.id)),
+        (legacySince === null &&
+          event.at === after.at &&
+          !seenIdsAtTimestamp.has(event.id)),
     )
     .sort(
       (left, right) => left.at - right.at || left.id.localeCompare(right.id),

@@ -1000,6 +1000,61 @@ describe('unified Session queries', () => {
     });
   });
 
+  it('preserves timestamp-only pagination for deployed clients', async () => {
+    const owner = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      fastConversationId: conversation!.id,
+    });
+
+    await db.insert(fastAgentMessages).values([
+      {
+        conversationId: conversation!.id,
+        eventId: 'at-cursor',
+        turnId: 'turn-1',
+        turnSeq: 0,
+        ts: 100,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'At cursor' }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+      },
+      {
+        conversationId: conversation!.id,
+        eventId: 'after-cursor',
+        turnId: 'turn-1',
+        turnSeq: 1,
+        ts: 101,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'After cursor' }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+      },
+    ]);
+
+    const timeline = await getSessionTimeline(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+      100,
+    );
+
+    expect(timeline?.events.map((event) => event.id)).toEqual([
+      'fast:after-cursor',
+    ]);
+  });
+
   it('hydrates uploaded artifacts for every associated task without collapsing shared paths', async () => {
     const owner = await userFactory.create();
     const session = await sessionFactory.create({
