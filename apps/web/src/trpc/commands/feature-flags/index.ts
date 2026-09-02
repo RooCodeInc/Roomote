@@ -23,7 +23,7 @@ function getConfiguredFlag(flag: FeatureFlag): FeatureFlagConfig {
   return config;
 }
 
-export type ExperimentalFlag = {
+type ExperimentalFlag = {
   id: FeatureFlag;
   metadataKey: string;
   label: string | null;
