@@ -93,6 +93,7 @@ export function SessionPromptInput({
   const trpc = useTRPC();
   const trpcClient = useTRPCClient();
   const [prompt, setPrompt] = useState('');
+  const [isTextareaFocused, setIsTextareaFocused] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const [model, setModel] = useState(initialModel ?? '');
   const [reasoningEffort, setReasoningEffort] =
@@ -224,6 +225,8 @@ export function SessionPromptInput({
             <PromptInputTextarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
+              onFocus={() => setIsTextareaFocused(true)}
+              onBlur={() => setIsTextareaFocused(false)}
               onKeyDown={(event) => {
                 handleSuggestionKeyDown(event);
               }}
@@ -237,14 +240,17 @@ export function SessionPromptInput({
                   Suggested message: {ghostSuggestion}. Press Tab to accept or
                   Escape to dismiss.
                 </span>
-                <button
-                  type="button"
-                  aria-label="Insert suggested message"
-                  onClick={acceptGhostSuggestion}
-                  className="absolute right-4 top-4 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
-                >
-                  Tab
-                </button>
+                {isTextareaFocused && (
+                  <button
+                    type="button"
+                    aria-label="Insert suggested message"
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={acceptGhostSuggestion}
+                    className="absolute right-4 top-4 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
+                  >
+                    Tab to accept
+                  </button>
+                )}
               </>
             )}
           </div>
