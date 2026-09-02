@@ -3826,6 +3826,234 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 
+    it('inherits the acknowledgement gate from a journaled reply on resume', async () => {
+      mocks.appendMemory.mockResolvedValue({ saved: true });
+      mocks.listTurnEffects.mockResolvedValueOnce([
+        {
+          id: 'effect-ack',
+          kind: 'chat_reply',
+          signature: JSON.stringify(['ack', 'ok', []]),
+          status: 'completed',
+          result: { purpose: 'ack', message: 'ok' },
+        },
+      ]);
+      let memoryResult: unknown;
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          // No new acknowledgement: the predecessor's is still in the thread.
+          memoryResult = await invokeTool(nativeToolNames.saveMemory, {
+            memory: 'The smoke word is pong.',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'pong',
+          });
+          return '';
+        },
+      );
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      expect(memoryResult).toMatchObject({ success: true, saved: true });
+      expect(postReply).toHaveBeenCalledTimes(1);
+      expect(postReply).toHaveBeenCalledWith(
+        expect.objectContaining({ purpose: 'closeout', message: 'pong' }),
+      );
+    });
+
+    it('retires the retry notice when a real progress reply replaces it', async () => {
+      mocks.findActiveRetryNotice.mockResolvedValueOnce({
+        eventId: '100.2:retry-notice:0',
+        ts: Date.now() - 60_000,
+        text: 'The inference provider is rate limiting requests. Retrying automatically…',
+        platformMessageId: 'notice-1',
+      });
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'progress',
+            message: 'Still working on it.',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Done.',
+          });
+          return '';
+        },
+      );
+      const replaceReply = vi.fn().mockResolvedValue({ messageId: 'notice-1' });
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ replaceReply }),
+        durableAdmission: { eventId: 'durable-row-1', inferenceRetries: 1 },
+        resumedAfterInferenceRetry: true,
+      });
+
+      // The progress reply took over the notice slot; the row must not stay
+      // marked as an active retry, or the settle reconciler would rewrite
+      // the transcript as an interruption after the turn answered.
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      const progressWrite = retryWrites.find(
+        (message) => message.contentBlocks[0]?.text === 'Still working on it.',
+      );
+      expect(progressWrite?.metadata).toMatchObject({
+        inferenceRetryNotice: true,
+        inferenceRetryActive: false,
+      });
+    });
+
+    it('treats an already-journaled effect as done instead of running it again', async () => {
+      // Two identical requests racing past the in-memory guard: the journal
+      // insert conflicts for the second, which then must not act.
+      mocks.beginTurnEffect
+        .mockImplementationOnce(async ({ kind, signature }) => ({
+          effect: {
+            id: 'effect-1',
+            kind,
+            signature,
+            status: 'started',
+            result: null,
+          },
+          existing: false,
+        }))
+        .mockImplementationOnce(async ({ kind, signature }) => ({
+          effect: {
+            id: 'effect-1',
+            kind,
+            signature,
+            status: 'completed',
+            result: { taskId: 'task-1' },
+          },
+          existing: true,
+        }));
+      const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+        success: true,
+        taskId: 'task-1',
+      }));
+      const results: unknown[] = [];
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          const args = {
+            prompt: 'Fix the bug',
+            environmentId: 'env-1',
+            kickoffMessage: 'Starting.',
+          };
+          results.push(await invokeTool(nativeToolNames.launchTask, args));
+          // Bypass the in-memory guard the way a concurrent call would.
+          results.push(
+            await invokeTool(nativeToolNames.launchTask, {
+              ...args,
+              prompt: 'Fix the bug ',
+            }),
+          );
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Launched.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ launchTask }),
+        durableAdmission,
+      });
+
+      expect(launchTask).toHaveBeenCalledTimes(1);
+      expect(results[0]).toMatchObject({ success: true, taskId: 'task-1' });
+      expect(results[1]).toMatchObject({
+        success: false,
+        error: expect.stringContaining('already launched'),
+      });
+    });
+
+    it('journals a reaction before posting it', async () => {
+      const order: string[] = [];
+      mocks.beginTurnEffect.mockImplementation(async ({ kind, signature }) => {
+        order.push(`journal:${kind}`);
+        return {
+          effect: {
+            id: 'effect-react',
+            kind,
+            signature,
+            status: 'started',
+            result: null,
+          },
+          existing: false,
+        };
+      });
+      const postReaction = vi.fn(async () => {
+        order.push('react');
+      });
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReaction, {
+            name: 'eyes',
+            purpose: 'ack',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Done.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReaction }),
+        durableAdmission,
+      });
+
+      expect(order.slice(0, 2)).toEqual(['journal:chat_reaction', 'react']);
+      expect(mocks.completeTurnEffect).toHaveBeenCalledWith('effect-react', {
+        name: 'eyes',
+        purpose: 'ack',
+        messageId: '100.2',
+      });
+    });
+
+    it('journals nothing for an empty terminal output after a visible update', async () => {
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'progress',
+            message: 'Working on it.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        durableAdmission,
+      });
+
+      // Only the progress reply was journaled; the silent terminal branch
+      // must not leave a started closeout row behind.
+      expect(
+        mocks.beginTurnEffect.mock.calls.map(([input]) => input.kind),
+      ).toEqual(['chat_reply']);
+      expect(mocks.completeTurnEffect).toHaveBeenCalledTimes(1);
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
     it('settles a resumed run whose predecessor already delivered the closeout', async () => {
       mocks.listTurnEffects.mockResolvedValueOnce([
         {

@@ -1557,20 +1557,42 @@ export async function answerFastAgentQuestion({
   const completedMemorySignatures = new Set<string>();
   const priorEffectSummaries: string[] = [];
   let priorLaunchedTaskId: string | null = null;
+  // A predecessor's acknowledgement satisfies the work-start gate for the
+  // resumed run too; it is still visible to the user.
+  let priorAcknowledged = false;
   let priorDeliveredCloseout: string | null = null;
   let priorAmbiguousEffect: string | null = null;
   type EffectHandle = { id: string | null };
   const beginEffect = async (
     kind: FastAgentTurnEffectKind,
     signature: string,
-  ): Promise<EffectHandle | { refused: { success: false; error: string } }> => {
+  ): Promise<
+    | EffectHandle
+    | { refused: { success: false; error: string } }
+    | { duplicate: Record<string, unknown> | null }
+  > => {
     if (!durableAdmission || !durableTurnReplayable) return { id: null };
     try {
-      const { effect } = await beginFastAgentTurnEffect({
+      const { effect, existing } = await beginFastAgentTurnEffect({
         parentEventId: durableAdmission.eventId,
         kind,
         signature,
       });
+      if (existing) {
+        // The journal is the arbiter, not the in-memory guard: two identical
+        // requests racing past the set both reach here, and only the first
+        // insert wins. A completed entry means "already done"; a started
+        // entry means another execution owns it right now (or died mid-way),
+        // which is not a license to do it again.
+        if (effect.status === 'completed') return { duplicate: effect.result };
+        return {
+          refused: {
+            success: false,
+            error:
+              'The same action is already in progress for this request. Do not repeat it.',
+          },
+        };
+      }
       return { id: effect.id };
     } catch (error) {
       console.warn(
@@ -1891,6 +1913,7 @@ export async function answerFastAgentQuestion({
     visibleInTranscript = true,
     interruptionReason,
     ts,
+    inferenceRetryActive,
   }: {
     reply: FastAgentReply;
     event: { eventId: string; turnSeq: number };
@@ -1901,6 +1924,9 @@ export async function answerFastAgentQuestion({
     interruptionReason?: FastAgentInterruptionReason;
     /** Explicit event time; retry notices pin it to the episode start. */
     ts?: number;
+    /** Whether the notice slot still awaits recovery; defaults to "yes"
+     * for progress notices, "no" for anything terminal. */
+    inferenceRetryActive?: boolean;
   }) =>
     persistCanonicalMessage(
       {
@@ -1919,7 +1945,8 @@ export async function answerFastAgentQuestion({
           ...(inferenceRetryNotice
             ? {
                 inferenceRetryNotice: true,
-                inferenceRetryActive: reply.purpose === 'progress',
+                inferenceRetryActive:
+                  inferenceRetryActive ?? reply.purpose === 'progress',
               }
             : {}),
           ...(interruptionReason ? { interruptionReason } : {}),
@@ -2050,6 +2077,10 @@ export async function answerFastAgentQuestion({
     bestEffort = false,
     onDelivered?: () => void,
     interruptionReason?: FastAgentInterruptionReason,
+    /** True only when the replacement is itself a retry notice: any real
+     * reply (progress or terminal) retires the recovery slot, so the
+     * reconciler never stamps a turn that went on to answer. */
+    retryNoticeStillActive = false,
   ): Promise<boolean> => {
     if (!inferenceRetryCanonicalEvent) {
       return false;
@@ -2057,12 +2088,11 @@ export async function answerFastAgentQuestion({
 
     const retryEvent = inferenceRetryCanonicalEvent;
     const retryMessageIndex = inferenceRetryMessageIndex;
-    // A progress notice keeps the episode's start time; a terminal
-    // replacement takes the clock like any other reply.
-    const noticeTs =
-      reply.purpose === 'progress'
-        ? inferenceRecoveryEpisodeStartedAt
-        : undefined;
+    // A retry notice keeps the episode's start time; a real reply takes the
+    // clock like any other.
+    const noticeTs = retryNoticeStillActive
+      ? inferenceRecoveryEpisodeStartedAt
+      : undefined;
     if (!inferenceRetryReply || !adapter.replaceReply) {
       if (
         retryMessageIndex !== undefined &&
@@ -2077,6 +2107,7 @@ export async function answerFastAgentQuestion({
         visibleInTranscript: false,
         interruptionReason,
         ts: noticeTs,
+        inferenceRetryActive: retryNoticeStillActive,
       });
       return false;
     }
@@ -2093,6 +2124,7 @@ export async function answerFastAgentQuestion({
           inferenceRetryNotice: true,
           interruptionReason,
           ts: noticeTs,
+          inferenceRetryActive: retryNoticeStillActive,
         });
         throw error;
       }
@@ -2112,6 +2144,7 @@ export async function answerFastAgentQuestion({
         visibleInTranscript: false,
         interruptionReason,
         ts: noticeTs,
+        inferenceRetryActive: retryNoticeStillActive,
       });
       return false;
     }
@@ -2128,6 +2161,7 @@ export async function answerFastAgentQuestion({
         inferenceRetryNotice: true,
         interruptionReason,
         ts: noticeTs,
+        inferenceRetryActive: retryNoticeStillActive,
       });
     }
     return true;
@@ -2268,6 +2302,7 @@ export async function answerFastAgentQuestion({
             if (purpose === 'closeout' || purpose === 'clarification') {
               priorDeliveredCloseout ??= message;
             } else if (message) {
+              priorAcknowledged = true;
               priorEffectSummaries.push(
                 `Posted a reply: "${message.slice(0, 200)}"`,
               );
@@ -2482,8 +2517,8 @@ export async function answerFastAgentQuestion({
       ),
       activeTaskCount: resolvedActiveTasks.length,
     });
-    let visibleUpdatePosted = false;
-    let substantiveWorkAcknowledged = false;
+    let visibleUpdatePosted = priorAcknowledged;
+    let substantiveWorkAcknowledged = priorAcknowledged;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
 
@@ -2555,12 +2590,6 @@ export async function answerFastAgentQuestion({
           closed: isInstructionClosed(instructionVersion),
         };
       }
-      // The reaction itself was already posted by the caller; record it as
-      // completed so a resumed run does not react twice.
-      const reactionEffect = await beginEffect('chat_reaction', signature);
-      if (!('refused' in reactionEffect)) {
-        await completeEffect(reactionEffect, { name, purpose, messageId });
-      }
       completedChatReactionSignatures.add(signature);
       turnVisibleMessages.push(
         buildAssistantTextMessage(`[Reacted with :${name}:]`),
@@ -2618,7 +2647,27 @@ export async function answerFastAgentQuestion({
         return recordChatReaction(name, purpose, messageId, instructionVersion);
       }
       throwIfTurnCancelled();
-      await adapter.postReaction({ name, purpose, messageId });
+      // Reserve the journal row before the provider call so a crash in
+      // between leaves a started entry (fail closed on resume) rather than
+      // no trace of a reaction that may have landed.
+      const reactionEffect = await beginEffect('chat_reaction', signature);
+      if ('refused' in reactionEffect) return reactionEffect.refused;
+      if ('duplicate' in reactionEffect) {
+        completedChatReactionSignatures.add(signature);
+        return {
+          success: true as const,
+          delivered: true,
+          duplicate: true,
+          closed: isInstructionClosed(instructionVersion),
+        };
+      }
+      try {
+        await adapter.postReaction({ name, purpose, messageId });
+      } catch (error) {
+        await withdrawEffect(reactionEffect);
+        throw error;
+      }
+      await completeEffect(reactionEffect, { name, purpose, messageId });
       return recordChatReaction(name, purpose, messageId, instructionVersion);
     };
 
@@ -2673,7 +2722,15 @@ export async function answerFastAgentQuestion({
       reportedInferenceNotices.add(message);
       // Deliberately not the postReply closure: a system retry notice must
       // not satisfy the model's acknowledgement gate or close the turn.
-      if (!(await replaceInferenceRetryReply(reply))) {
+      if (
+        !(await replaceInferenceRetryReply(
+          reply,
+          false,
+          undefined,
+          undefined,
+          true,
+        ))
+      ) {
         inferenceRetryReply = (await adapter.postReply(reply)) || undefined;
         inferenceRetryMessageIndex = turnVisibleMessages.length;
         turnVisibleMessages.push(buildAssistantTextMessage(message));
@@ -3089,6 +3146,10 @@ export async function answerFastAgentQuestion({
               args.imageArtifactIds ?? [],
             ]);
             if (completedChatReplySignatures.has(signature)) {
+              // The reply is already in the thread, so it counts as the
+              // acknowledgement the work-start gate wants.
+              visibleUpdatePosted = true;
+              substantiveWorkAcknowledged = true;
               return {
                 success: true,
                 delivered: true,
@@ -3099,6 +3160,17 @@ export async function answerFastAgentQuestion({
             throwIfTurnCancelled();
             const replyEffect = await beginEffect('chat_reply', signature);
             if ('refused' in replyEffect) return replyEffect.refused;
+            if ('duplicate' in replyEffect) {
+              completedChatReplySignatures.add(signature);
+              visibleUpdatePosted = true;
+              substantiveWorkAcknowledged = true;
+              return {
+                success: true,
+                delivered: true,
+                duplicate: true,
+                closed: isInstructionClosed(instructionVersion),
+              };
+            }
             try {
               await postReply(
                 {
@@ -3232,6 +3304,13 @@ export async function answerFastAgentQuestion({
             }
             const launchEffect = await beginEffect('task_action', signature);
             if ('refused' in launchEffect) return launchEffect.refused;
+            if ('duplicate' in launchEffect) {
+              completedTaskActions.add(signature);
+              return {
+                success: false,
+                error: 'The same task was already launched in this turn.',
+              };
+            }
             completedTaskActions.add(signature);
             let kickoffDelivered = false;
             const deliverKickoff = async (task: {
@@ -3340,6 +3419,13 @@ export async function answerFastAgentQuestion({
             }
             const messageEffect = await beginEffect('task_action', signature);
             if ('refused' in messageEffect) return messageEffect.refused;
+            if ('duplicate' in messageEffect) {
+              completedTaskActions.add(signature);
+              return {
+                success: false,
+                error: 'A message was already sent to that task this turn.',
+              };
+            }
             completedTaskActions.add(signature);
             throwIfTurnCancelled();
             const message = args.includeAttachments
@@ -3391,6 +3477,13 @@ export async function answerFastAgentQuestion({
             }
             const cancelEffect = await beginEffect('task_action', signature);
             if ('refused' in cancelEffect) return cancelEffect.refused;
+            if ('duplicate' in cancelEffect) {
+              completedTaskActions.add(signature);
+              return {
+                success: false,
+                error: 'That task was already canceled.',
+              };
+            }
             completedTaskActions.add(signature);
             throwIfTurnCancelled();
             const result = await cancelFastAgentTask(
@@ -3446,6 +3539,15 @@ export async function answerFastAgentQuestion({
               memorySignature,
             );
             if ('refused' in memoryEffect) return memoryEffect.refused;
+            if ('duplicate' in memoryEffect) {
+              completedMemorySignatures.add(memorySignature);
+              return {
+                success: true,
+                saved: true,
+                duplicate: true,
+                note: 'This memory was already saved for this request.',
+              };
+            }
             const result = await appendFastAgentMemory(
               db,
               session.id,
@@ -4090,54 +4192,50 @@ export async function answerFastAgentQuestion({
       // journal it before posting so a resumed run knows the answer went
       // out. Only when it cannot be journaled (and the fallback withdrawal
       // does not land either) is the closeout skipped for recovery.
-      const terminalEffect = await beginEffect(
-        'chat_reply',
-        JSON.stringify(['closeout', message, []]),
-      );
-      if ('refused' in terminalEffect) {
-        terminalRevocationFailed = true;
-        console.warn(
-          '[Fast Agent] Skipping the terminal closeout because the turn could not be withdrawn from replay.',
+      // Resolve the reply that will actually be posted first, so only that
+      // one is journaled and every branch completes or withdraws it.
+      const terminalMessage = message
+        ? message
+        : !visibleUpdatePosted
+          ? // A delivered update is already a complete visible response.
+            // Without one, say so rather than end in silence.
+            'I could not complete that request within the available turn.'
+          : platformEvent && platformEventVisibility === 'required'
+            ? // A visibility-required platform event promises a closeout even
+              // when an intro ack or launch kickoff already posted a visible
+              // update (e.g. the setup kickoff ending on an empty response).
+              'I will post updates here as this progresses.'
+            : null;
+      if (terminalMessage) {
+        const terminalEffect = await beginEffect(
+          'chat_reply',
+          JSON.stringify(['closeout', terminalMessage, []]),
         );
-      } else if (message) {
-        try {
-          await postReply(
-            { purpose: 'closeout', message },
-            false,
-            completedOpenCodeMessage,
-            terminalInstructionVersion,
+        if ('refused' in terminalEffect) {
+          terminalRevocationFailed = true;
+          console.warn(
+            '[Fast Agent] Skipping the terminal closeout because the turn could not be withdrawn from replay.',
           );
-        } catch (error) {
-          await withdrawEffect(terminalEffect);
-          throw error;
+        } else if ('duplicate' in terminalEffect) {
+          // Already delivered by a previous execution of this turn.
+          lastVisibleMessage = terminalMessage;
+        } else {
+          try {
+            await postReply(
+              { purpose: 'closeout', message: terminalMessage },
+              false,
+              message ? completedOpenCodeMessage : undefined,
+              terminalInstructionVersion,
+            );
+          } catch (error) {
+            await withdrawEffect(terminalEffect);
+            throw error;
+          }
+          await completeEffect(terminalEffect, {
+            purpose: 'closeout',
+            message: terminalMessage,
+          });
         }
-        await completeEffect(terminalEffect, { purpose: 'closeout', message });
-      } else if (!visibleUpdatePosted) {
-        // A delivered update is already a complete visible response. Stay
-        // silent rather than append a generic closeout that contradicts it.
-        await postReply(
-          {
-            purpose: 'closeout',
-            message:
-              'I could not complete that request within the available turn.',
-          },
-          false,
-          undefined,
-          terminalInstructionVersion,
-        );
-      } else if (platformEvent && platformEventVisibility === 'required') {
-        // A visibility-required platform event promises a closeout even when
-        // an intro ack or launch kickoff already posted a visible update
-        // (e.g. the setup kickoff ending on an empty terminal response).
-        await postReply(
-          {
-            purpose: 'closeout',
-            message: 'I will post updates here as this progresses.',
-          },
-          false,
-          undefined,
-          terminalInstructionVersion,
-        );
       }
     }
     await settleDurableTurn();
@@ -4305,13 +4403,16 @@ export async function answerFastAgentQuestion({
           'chat_reply',
           JSON.stringify(['closeout', message, []]),
         );
-    const errorReplayRevoked =
-      errorEffect !== null && !('refused' in errorEffect);
-    if (!isInstructionClosed() && !errorReplayRevoked) {
+    const errorReplayRevoked = errorEffect !== null && 'id' in errorEffect;
+    if (errorEffect && 'refused' in errorEffect) {
       terminalRevocationFailed = true;
       console.warn(
         '[Fast Agent] Skipping the error closeout because the turn could not be withdrawn from replay.',
       );
+    }
+    if (errorEffect && 'duplicate' in errorEffect) {
+      // A previous execution already posted this closeout.
+      lastVisibleMessage = message;
     }
     if (errorReplayRevoked) {
       try {
@@ -4336,11 +4437,11 @@ export async function answerFastAgentQuestion({
         inferenceRetryMessageIndex = undefined;
         inferenceRetryCanonicalEvent = undefined;
         lastVisibleMessage = message;
-        if (errorEffect && !('refused' in errorEffect)) {
+        if (errorEffect && 'id' in errorEffect) {
           await completeEffect(errorEffect, { purpose: 'closeout', message });
         }
       } catch (postError) {
-        if (errorEffect && !('refused' in errorEffect)) {
+        if (errorEffect && 'id' in errorEffect) {
           await withdrawEffect(errorEffect);
         }
         console.error(
