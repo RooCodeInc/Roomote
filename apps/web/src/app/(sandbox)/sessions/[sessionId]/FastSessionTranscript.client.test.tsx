@@ -21,6 +21,7 @@ const {
   openTaskPanel,
   openTasksPanel,
   narrationState,
+  composerSuggestionState,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
   reviewActionMutate: vi.fn(),
@@ -29,6 +30,9 @@ const {
   openTaskPanel: vi.fn(),
   openTasksPanel: vi.fn(),
   narrationState: { enabled: false },
+  composerSuggestionState: {
+    data: undefined as { suggestion: string; messageCount: number } | undefined,
+  },
 }));
 
 vi.mock('@/hooks/useNarrationMode', () => ({
@@ -60,7 +64,7 @@ vi.mock('@/trpc/client', () => ({
 // these tests exercise the transcript, not suggestions.
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
-  useQuery: () => ({ data: undefined }),
+  useQuery: () => ({ data: composerSuggestionState.data }),
 }));
 
 vi.mock('./SessionModelSwitcher', () => ({
@@ -172,6 +176,7 @@ beforeEach(() => {
     Promise.resolve({ text }),
   );
   narrationState.enabled = false;
+  composerSuggestionState.data = undefined;
   openTaskPanel.mockReset();
   openTasksPanel.mockReset();
   vi.stubGlobal('EventSource', FakeEventSource);
@@ -1282,6 +1287,65 @@ describe('FastSessionTranscript', () => {
       model: null,
       reasoningEffort: null,
     });
+  });
+
+  it('keeps a later suggestion hint hidden after a successful send remounts the composer', async () => {
+    composerSuggestionState.data = {
+      suggestion: 'Accept the first suggestion',
+      messageCount: 2,
+    };
+    replyMutate.mockResolvedValue({ success: true });
+    const initialMessages = [
+      textMessage({ id: 'user-1', role: 'user', text: 'Question', ts: 1 }),
+      textMessage({
+        id: 'assistant-1',
+        role: 'assistant',
+        text: 'Answer',
+        ts: 2,
+      }),
+    ];
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={initialMessages}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Accept the first suggestion');
+    fireEvent.focus(input);
+    expect(
+      screen.getByRole('button', { name: 'Insert suggested message' }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'My own reply' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+    await waitFor(() => expect(replyMutate).toHaveBeenCalled());
+    await screen.findByPlaceholderText('Message agent');
+
+    composerSuggestionState.data = {
+      suggestion: 'Accept the next suggestion',
+      messageCount: 3,
+    };
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'assistant-2',
+            role: 'assistant',
+            text: 'Next answer',
+            ts: Date.now() + 1,
+          }),
+        ],
+      });
+    });
+
+    expect(
+      screen.getByPlaceholderText('Accept the next suggestion'),
+    ).not.toHaveFocus();
+    expect(
+      screen.queryByRole('button', { name: 'Insert suggested message' }),
+    ).not.toBeInTheDocument();
   });
 
   it('persists model selections immediately and uses them for the next reply', async () => {
