@@ -355,6 +355,8 @@ describe('Fast parent event durable queue', () => {
     mocks.findPending
       .mockResolvedValueOnce(inlineRow)
       .mockResolvedValueOnce(inlineRow)
+      // The resumed run settled its own row.
+      .mockResolvedValueOnce({ deliveredAt: new Date(), discardedAt: null })
       .mockResolvedValueOnce(undefined);
     mocks.acquireLock.mockResolvedValueOnce(mocks.releaseLock);
     mocks.deliver.mockResolvedValueOnce('delivered');
@@ -372,6 +374,49 @@ describe('Fast parent event durable queue', () => {
       }),
       mocks.releaseLock,
     );
+    expect(
+      mocks.updateSet.mock.calls.some(
+        ([value]) =>
+          value && typeof value === 'object' && 'deliveredAt' in value,
+      ),
+    ).toBe(true);
+  });
+
+  it('leaves a resumed inline turn pending when the run deferred itself', async () => {
+    const inlineRow = {
+      ...pendingRow('inline-2', {
+        type: 'human_follow_up' as const,
+        eventId: '100.3',
+        currentMessageId: '100.3',
+        userId: 'user-1',
+        question: 'Still there?',
+      }),
+      admission: 'inline' as const,
+      claimedUntil: null,
+    };
+    mocks.findPending
+      .mockResolvedValueOnce(inlineRow)
+      .mockResolvedValueOnce(inlineRow)
+      // The run released its claim without settling: its terminal
+      // revocation did not land, so recovery still owns the outcome.
+      .mockResolvedValueOnce({ deliveredAt: null, discardedAt: null });
+    mocks.acquireLock.mockResolvedValueOnce(mocks.releaseLock);
+    mocks.deliver.mockResolvedValueOnce('delivered');
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: inlineRow.eventKey,
+    });
+
+    expect(mocks.deliver).toHaveBeenCalledTimes(1);
+    // Not settled here and not re-run in a loop; the sweep retries later.
+    expect(
+      mocks.updateSet.mock.calls.some(
+        ([value]) =>
+          value && typeof value === 'object' && 'deliveredAt' in value,
+      ),
+    ).toBe(false);
+    expect(mocks.releaseLock).toHaveBeenCalled();
   });
 
   it('returns a retryable busy signal without occupying a worker slot', async () => {

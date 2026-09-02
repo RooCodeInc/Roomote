@@ -220,6 +220,14 @@ async function buildRetryTaskStart(
   return run ? () => retryFastAgentStartup(run, parent) : undefined;
 }
 
+async function isStillPending(id: string): Promise<boolean> {
+  const row = await db.query.fastAgentParentEvents.findFirst({
+    where: eq(fastAgentParentEvents.id, id),
+    columns: { deliveredAt: true, discardedAt: true },
+  });
+  return Boolean(row) && !row!.deliveredAt && !row!.discardedAt;
+}
+
 async function markDelivered(id: string) {
   await db
     .update(fastAgentParentEvents)
@@ -307,6 +315,16 @@ export async function drainFastAgentParentEvents(
           },
           turnLock,
         );
+        if (row.admission === 'inline' && (await isStillPending(row.id))) {
+          // The resumed run settles its own row. If it is still pending, the
+          // run deferred itself (its terminal revocation did not land) and
+          // released the claim; leave it for the next recovery sweep rather
+          // than settling it here or re-running it in a tight loop.
+          console.warn(
+            `[FastAgentParentEventQueue] Resumed Fast turn ${row.id} deferred itself; leaving it for the next recovery sweep.`,
+          );
+          return;
+        }
         await markDelivered(row.id);
       } catch (error) {
         const deliveryError =
