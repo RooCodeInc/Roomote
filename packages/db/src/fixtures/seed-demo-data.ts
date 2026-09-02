@@ -263,6 +263,9 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
         taskId: task.id,
         actingUserId: demoSeedUserId,
         status: task.taskRunStatus,
+        startedAt: now,
+        completedAt:
+          task.taskRunStatus === RunStatus.Completed ? now : undefined,
         payload: {
           repo: task.repositoryFullName,
           description: task.title,

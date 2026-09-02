@@ -1,6 +1,6 @@
 import { and, eq, inArray } from 'drizzle-orm';
 
-import { createEmptySetupNewState } from '@roomote/types';
+import { createEmptySetupNewState, RunStatus } from '@roomote/types';
 
 import {
   taskRuns,
@@ -143,6 +143,12 @@ describe('seedDemoData', () => {
       });
       expect(taskRun).toBeDefined();
       expect(taskRun?.status).toBe(seedTask.taskRunStatus);
+      expect(taskRun?.startedAt).toBeInstanceOf(Date);
+      expect(taskRun?.completedAt).toEqual(
+        seedTask.taskRunStatus === RunStatus.Completed
+          ? expect.any(Date)
+          : null,
+      );
     }
 
     const seededPullRequests = await db.query.taskPullRequests.findMany({
