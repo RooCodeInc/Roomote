@@ -517,9 +517,9 @@ services:
   # COMPOSE_PROFILES=brain (local-postgres precedent); deployments
   # that never enable the profile see no infrastructure change. Internal-only:
   # no published ports and no Caddy route; the API fronts it at
-  # /api/mcp/gbrain. Set GBRAIN_IMAGE to the pinned published image once the
-  # publish workflow ships it; until then the installer builds from
-  # .docker/gbrain. Wire R_GBRAIN_URL plus static tokens into api/bullmq
+  # /api/mcp/gbrain. By default it uses the same registry, namespace, and
+  # release tag as the app image; GBRAIN_IMAGE can override the complete ref.
+  # Wire R_GBRAIN_URL plus static tokens into api/bullmq
   # (operator-pinned), or the normal path: set GBRAIN_ADMIN_BOOTSTRAP_TOKEN
   # (>= 32 chars of [A-Za-z0-9_-]) and paste http://gbrain:8931 plus that
   # same token into Settings > Integrations > Brain; Roomote then
@@ -528,7 +528,7 @@ services:
   gbrain:
     profiles:
       - brain
-    image: ${GBRAIN_IMAGE:-roomote-gbrain:local}
+    image: ${GBRAIN_IMAGE:-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-gbrain:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}}
     restart: unless-stopped
     networks: [default]
     environment:
@@ -551,6 +551,17 @@ services:
       - gbrain_data:/data
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      # The image is bun-based and ships no curl or wget.
+      test:
+        [
+          'CMD-SHELL',
+          'bun -e "const r = await fetch(\"http://127.0.0.1:8931/health\"); process.exit(r.ok ? 0 : 1)"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
 
   # Self-run embedding model for the Brain (opt-in, CPU).
   # Enable with the `local-inference` compose profile. The upstream URLs are

@@ -121,7 +121,7 @@ APP_ENV=production
 ARTIFACT_SIGNING_KEY=$artifact_signing_key
 CADDY_HTTP_PORT=19080
 CADDY_HTTPS_PORT=19443
-COMPOSE_PROFILES=local-postgres
+COMPOSE_PROFILES=local-postgres,brain
 DASHBOARD_PASSWORD=$dashboard_password
 DATABASE_URL=postgres://postgres:roomote-postgres-password@postgres:5432/roomote
 DEFAULT_COMPUTE_PROVIDER=docker
@@ -486,7 +486,7 @@ compose up \
   --detach \
   --wait \
   --wait-timeout 600 \
-  postgres redis minio minio-init db-migrate api web controller bullmq preview-proxy
+  postgres redis minio minio-init db-migrate api web controller bullmq gbrain preview-proxy
 
 migration_container="$(compose ps --all --quiet db-migrate)"
 [ -n "$migration_container" ] || {
