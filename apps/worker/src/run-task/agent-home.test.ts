@@ -868,6 +868,59 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('runs the judge on the vision model when one is configured', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        R_VISION_MODEL: 'openrouter/google/gemini-3.6-flash',
+        R_VISION_MODEL_REASONING_EFFORT: 'low',
+        R_CODE_REVIEW_MODEL: 'openrouter/anthropic/claude-sonnet-5',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      agent: Record<
+        string,
+        { model?: string; options?: Record<string, unknown> }
+      >;
+    };
+
+    // The judge opens proof screenshots itself, so the vision model wins
+    // over the code-review model.
+    expect(config.agent.judge?.model).toBe(
+      'openrouter/google/gemini-3.6-flash',
+    );
+    expect(config.agent.judge?.options).toBeDefined();
+    expect(
+      readFileSync(
+        join(
+          result.openCodeConfigDir,
+          'roomote-opencode-judge-model-instructions.md',
+        ),
+        'utf8',
+      ),
+    ).toContain(
+      'When `R_VISION_MODEL` is configured, the judge runs on that vision model so it can open proof screenshots directly.',
+    );
+  });
+
+  it('falls back to the coding model for the judge when no vision model is configured', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        R_CODE_REVIEW_MODEL: 'openrouter/anthropic/claude-sonnet-5',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      agent: Record<string, { model?: string }>;
+    };
+
+    expect(config.agent.judge?.model).toBe('openrouter/openai/gpt-5.6-terra');
+  });
+
   it('isolates visual and proof agents from unrelated MCP tool schemas', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

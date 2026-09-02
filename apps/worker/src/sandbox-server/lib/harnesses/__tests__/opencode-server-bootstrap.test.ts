@@ -683,7 +683,7 @@ describe('opencode-server bootstrap', () => {
     expect(runtimeEnv).not.toHaveProperty('R_VISION_MODEL');
   });
 
-  it('configures a hidden judge subagent when the code review model is configured', async () => {
+  it('configures a hidden judge subagent on the vision model when one is configured', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -692,8 +692,10 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
+        R_VISION_MODEL: 'test-provider/vision-model',
+        R_VISION_MODEL_REASONING_EFFORT: 'high',
         R_CODE_REVIEW_MODEL: 'test-provider/review-model',
-        R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
+        R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'low',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
@@ -715,13 +717,17 @@ describe('opencode-server bootstrap', () => {
       openCodeConfigDir,
       'roomote-opencode-advisor-model-instructions.md',
     );
+    const visualModelInstructionsPath = path.join(
+      openCodeConfigDir,
+      'roomote-opencode-visual-model-instructions.md',
+    );
 
     expect(baseConfig.agent?.judge).toEqual({
       description:
-        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, including visual-proof verification when evidence is available, and returns concise review findings.',
+        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, opens captured proof images to verify them, and returns concise review findings.',
       mode: 'subagent',
       hidden: true,
-      model: 'test-provider/review-model',
+      model: 'test-provider/vision-model',
       options: { reasoningEffort: 'high' },
       prompt: expect.stringContaining('implementation review support'),
       permission: {
@@ -753,9 +759,13 @@ describe('opencode-server bootstrap', () => {
     });
     expect(config.agent).toEqual(baseConfig.agent);
     expect(config.instructions).toEqual([
+      visualModelInstructionsPath,
       judgeModelInstructionsPath,
       advisorModelInstructionsPath,
     ]);
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
+      'the judge runs on that vision model so it can open proof screenshots directly',
+    );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
       'judge',
     );
@@ -763,16 +773,19 @@ describe('opencode-server bootstrap', () => {
       'Keep judge tool use minimal and targeted.',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'do not run the judge pass until that handoff has returned',
+      'do not run the judge pass until that step has returned a capture result, honest no-op, not-applicable, unnecessary, or blocked outcome',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'verify kept screenshot and screencast evidence',
+      'open the kept screenshot and keyframe images and verify them against the plan and shipped change',
+    );
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
+      'the path `/tmp/capture-visual-proof/diff-at-start.patch` when it exists',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
       'If judge-driven fixes change repository files and this run requires a pre-delivery',
     );
-    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'background visual proof is configured to run after delivery, do not re-run a pre-delivery proof handoff',
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).not.toContain(
+      'background visual proof',
     );
     expect(runtimeEnv).not.toHaveProperty('R_CODE_REVIEW_MODEL');
     expect(runtimeEnv).not.toHaveProperty(
@@ -780,7 +793,7 @@ describe('opencode-server bootstrap', () => {
     );
   });
 
-  it('configures a hidden judge subagent with the coding model when no code review model is configured', async () => {
+  it('configures a hidden judge subagent with the coding model when no vision model is configured', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -814,7 +827,7 @@ describe('opencode-server bootstrap', () => {
 
     expect(baseConfig.agent?.judge).toEqual({
       description:
-        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, including visual-proof verification when evidence is available, and returns concise review findings.',
+        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, opens captured proof images to verify them, and returns concise review findings.',
       mode: 'subagent',
       hidden: true,
       model: 'test-provider/main-model',
