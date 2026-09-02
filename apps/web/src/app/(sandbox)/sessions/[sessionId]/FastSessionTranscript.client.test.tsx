@@ -720,6 +720,85 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByText('Follow-up answer')).toBeInTheDocument();
   });
 
+  it('keeps a working indicator up after a tool call until the turn ends', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(2);
+    replyMutate.mockResolvedValue({ success: true });
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({ id: 'user-1', role: 'user', text: 'Question', ts: 1 }),
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Answer',
+            ts: 2,
+          }),
+        ]}
+        canReply
+      />,
+    );
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Look it up' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+    expect(await screen.findByText('Thinking')).toBeInTheDocument();
+
+    // The model's first action is a tool call. That is visible output, so
+    // "Thinking" ends, but the turn is still running.
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        conversationResponding: true,
+        messages: [
+          {
+            ...textMessage({
+              id: 'tool-1',
+              role: 'assistant',
+              text: '',
+              ts: Date.now() + 1,
+            }),
+            role: 'tool' as const,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+            contentBlocks: [],
+            payload: {
+              toolCallId: 'tool-1',
+              title: 'search_code',
+              kind: 'mcp',
+              status: 'completed',
+              isExecute: false,
+              isRead: false,
+              isMcp: true,
+              isRoomoteNativeTool: false,
+              mcpServerName: 'github',
+              mcpToolName: 'search_code',
+              serverName: 'github',
+              toolName: 'search_code',
+              command: null,
+              rawInput: { arguments: { query: 'fast' } },
+            },
+          },
+        ],
+      });
+    });
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        conversationResponding: false,
+        messages: [
+          textMessage({
+            id: 'assistant-2',
+            role: 'assistant',
+            text: 'Found it',
+            ts: Date.now() + 2,
+          }),
+        ],
+      });
+    });
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
+    expect(screen.getByText('Found it')).toBeInTheDocument();
+  });
+
   it('clears Thinking when a follow-up send fails', async () => {
     replyMutate.mockRejectedValue(new Error('turn is busy'));
     render(
