@@ -1314,7 +1314,7 @@ describe('runCustomAutomationNow', () => {
 
     const result = await runCustomAutomationNow(automation.id);
 
-    expect(result).toEqual({ outcome: 'completed' });
+    expect(result).toEqual({ outcome: 'queued' });
     expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
@@ -1391,7 +1391,7 @@ describe('runCustomAutomationNow', () => {
 
     const result = await runCustomAutomationNow(automation.id);
 
-    expect(result).toEqual({ outcome: 'completed' });
+    expect(result).toEqual({ outcome: 'queued' });
     expect(fastMocks.getSession).toHaveBeenCalledWith({
       userId: 'user-1',
       conversation: {
@@ -1420,7 +1420,7 @@ describe('runCustomAutomationNow', () => {
 
     const result = await runCustomAutomationNow(automation.id);
 
-    expect(result).toEqual({ outcome: 'completed' });
+    expect(result).toEqual({ outcome: 'queued' });
     expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({

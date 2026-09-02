@@ -37,6 +37,7 @@ export function emptyJobResult(): AutomationJobResult {
  */
 export type AutomationRunNowResult =
   | { outcome: 'launched'; taskId: string }
+  | { outcome: 'queued' }
   | { outcome: 'completed' }
   | { outcome: 'skipped'; reason: string }
   | { outcome: 'failed'; error: string };

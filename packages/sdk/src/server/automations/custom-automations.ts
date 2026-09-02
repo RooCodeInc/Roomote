@@ -939,7 +939,9 @@ export async function runCustomAutomationNow(
     }
 
     if (result.completed) {
-      return { outcome: 'completed' };
+      return automation.executionMode === 'fast'
+        ? { outcome: 'queued' }
+        : { outcome: 'completed' };
     }
 
     return { outcome: 'skipped', reason: 'Nothing to do.' };

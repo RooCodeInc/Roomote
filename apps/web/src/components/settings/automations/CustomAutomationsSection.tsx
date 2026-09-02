@@ -148,6 +148,9 @@ function CustomAutomationRunButton({
               },
             });
             break;
+          case 'queued':
+            toast.success(`${automation.name} was queued to run.`);
+            break;
           case 'completed':
             toast.success(`${automation.name} ran successfully.`);
             break;

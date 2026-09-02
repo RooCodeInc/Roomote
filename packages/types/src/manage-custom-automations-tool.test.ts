@@ -25,6 +25,9 @@ describe('manage custom automations tool contract', () => {
     expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
       'run the automation in Fast mode',
     );
+    expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
+      'report it as queued or started, never completed',
+    );
     expect(
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.environmentId.description,
     ).toContain('Fast mode without an initial sandbox task');

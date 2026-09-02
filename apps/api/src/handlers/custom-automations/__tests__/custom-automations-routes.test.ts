@@ -252,6 +252,29 @@ describe('custom-automations MCP routes', () => {
       });
     });
 
+    it('returns a non-terminal queued result for a Fast run', async () => {
+      const authContext: AuthTokenContext = {
+        userId: 'admin-1',
+        tokenType: 'auth',
+        version: 1,
+      };
+      const { handler } = registerApiHostedTool({
+        userId: 'admin-1',
+        authContext,
+      });
+      mockRunCustomAutomationNow.mockResolvedValue({ outcome: 'queued' });
+
+      const result = await handler({
+        action: 'run_now',
+        automationId: 'automation-1',
+      });
+
+      expect(mockRunCustomAutomationNow).toHaveBeenCalledWith('automation-1');
+      expect(result).toMatchObject({
+        structuredContent: { outcome: 'queued' },
+      });
+    });
+
     it('returns an MCP tool error when the router rejects a non-admin user', async () => {
       const authContext: AuthTokenContext = {
         userId: 'member-1',
