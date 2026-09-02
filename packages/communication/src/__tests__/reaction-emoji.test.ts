@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  formatReactionEmojiForDisplay,
   normalizeReactionEmoji,
   reactionEmojiMatches,
 } from '../reaction-emoji';
@@ -24,5 +25,11 @@ describe('reaction emoji matching', () => {
   it('matches custom emoji names case-insensitively', () => {
     expect(reactionEmojiMatches(':Ship_It:', 'ship_it')).toBe(true);
     expect(reactionEmojiMatches(':ship_it:', 'eyes')).toBe(false);
+  });
+
+  it('formats known aliases as Unicode and custom names as Slack markup', () => {
+    expect(formatReactionEmojiForDisplay('exploding_head')).toBe('🤯');
+    expect(formatReactionEmojiForDisplay(':+1:')).toBe('👍');
+    expect(formatReactionEmojiForDisplay('Ship_It')).toBe(':ship_it:');
   });
 });

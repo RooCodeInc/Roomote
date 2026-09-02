@@ -1989,7 +1989,8 @@ export async function answerFastAgentQuestion({
     const toolCallId = `${turnId}:tool:${ordinal}`;
     const isMcp = Boolean(mcpServerName && mcpToolName);
     const visibleInTranscript =
-      title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply;
+      title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply &&
+      title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction;
     const canonicalEvent = allocateCanonicalEvent(`tool:${ordinal}`);
     await persistCanonicalMessage(
       {

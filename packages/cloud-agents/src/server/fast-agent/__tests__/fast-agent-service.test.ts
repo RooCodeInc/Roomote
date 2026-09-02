@@ -4973,10 +4973,31 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       expect(reactionResult).toMatchObject({ success: true, closed: true });
       expect(adapter.postReply).not.toHaveBeenCalled();
+      const reactionToolWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter(
+          (message) => message.payload?.toolName === 'send_chat_reaction',
+        );
+      expect(
+        reactionToolWrites.map((message) => ({
+          eventType: message.eventType,
+          visibleInTranscript: message.metadata?.visibleInTranscript,
+        })),
+      ).toEqual([
+        {
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+          visibleInTranscript: false,
+        },
+        {
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+          visibleInTranscript: false,
+        },
+      ]);
       expect(mocks.upsertMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           message: expect.objectContaining({
             contentBlocks: [{ type: 'text', text: ':+1:' }],
+            metadata: { visibleInTranscript: true },
             payload: { reaction: '+1', purpose: 'closeout' },
           }),
         }),

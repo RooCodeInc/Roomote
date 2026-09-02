@@ -32,6 +32,7 @@ const REACTION_EMOJI_BY_NAME: Record<string, string> = {
   handshake: '🤝',
   saluting_face: '🫡',
   rocket: '🚀',
+  exploding_head: '🤯',
 };
 
 export function normalizeReactionEmoji(value: string): string {
@@ -42,6 +43,11 @@ export function normalizeReactionEmoji(value: string): string {
   while (end > start && trimmed.charCodeAt(end - 1) === 58) end -= 1;
   const normalized = trimmed.slice(start, end).toLowerCase();
   return REACTION_EMOJI_BY_NAME[normalized] ?? normalized;
+}
+
+export function formatReactionEmojiForDisplay(value: string): string {
+  const normalized = normalizeReactionEmoji(value);
+  return /^[a-z0-9_+-]+$/u.test(normalized) ? `:${normalized}:` : normalized;
 }
 
 export function reactionEmojiMatches(

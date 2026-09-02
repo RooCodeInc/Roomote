@@ -8,6 +8,7 @@ import {
   parsePrReviewActionOffer,
   stripLlmCitationArtifacts,
 } from '@roomote/types';
+import { formatReactionEmojiForDisplay } from '@roomote/communication/reaction-emoji';
 
 import { cn } from '@/lib/utils';
 import { useTRPCClient } from '@/trpc/client';
@@ -119,6 +120,16 @@ function getUserTooltipContent(msg: AcpUiMessage): string {
   return msg.userEmail ? `${userName} (${msg.userEmail})` : userName;
 }
 
+function getReactionReceiptContent(msg: AcpUiMessage): string | null {
+  if (msg.role !== 'assistant' || msg.kind !== 'text') {
+    return null;
+  }
+  const reaction = msg.data.reaction;
+  if (typeof reaction !== 'string') return null;
+
+  return formatReactionEmojiForDisplay(reaction) || null;
+}
+
 function formatLinkedReviewResultTitle(
   reviewKind: 'initial' | 'sync' | null,
   outcome: string | null,
@@ -184,9 +195,9 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
   const showPersistentTimestamp = useInternalTranscriptRowsVisible();
   const { hidePrReviewActions } = useMessageUiOptions();
   const isUser = msg.role === 'user';
-  const baseContent = isUser
-    ? (msg.text ?? '')
-    : stripLlmCitationArtifacts(msg.text ?? '');
+  const baseContent =
+    getReactionReceiptContent(msg) ??
+    (isUser ? (msg.text ?? '') : stripLlmCitationArtifacts(msg.text ?? ''));
   const anchorId = messageAnchorId(msg.ts);
   const taskTool = isUser ? getTaskToolByInvocation(baseContent) : undefined;
   const linkedReviewResult = isUser
