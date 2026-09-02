@@ -90,6 +90,10 @@ import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.j
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import { findCurrentThreadSuggestionIdByMessage } from '../tasks/current-thread-suggestion-reaction.js';
 import {
+  resolveSuggestedTaskLaunchTarget,
+  type SuggestedTaskLaunchTarget,
+} from '../tasks/suggestion-launch-target.js';
+import {
   attachOutOfBandContextToCommunicationMessage,
   releaseCommunicationOutOfBandClaim,
 } from '@roomote/sdk/server/communication';
@@ -108,6 +112,61 @@ import {
 import { shouldRouteUnmentionedTeamsThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
 const TEAMS_ACTIVITY_DEDUP_PREFIX = 'teams:activity:';
+
+async function resolveTeamsSuggestionWorkspace(
+  suggestion: ClaimedTeamsSuggestion,
+  target: SuggestedTaskLaunchTarget,
+) {
+  if (target.kind === 'all_repositories') {
+    return {
+      repoForPayload: ALL_REPOSITORIES,
+      workspaceDisplayName: 'all repos',
+    };
+  }
+  if (!suggestion.targetEnvironmentId) return undefined;
+  return resolveTeamsWorkspace({
+    type: 'environment',
+    id: suggestion.targetEnvironmentId,
+    name: suggestion.targetEnvironmentId,
+  });
+}
+
+async function startTeamsFastSuggestion(params: {
+  activity: TeamsActivity;
+  metadata: TeamsActivityCommunicationMetadata;
+  mappedUserId: string;
+  prompt: string;
+  currentMessageId: string;
+}): Promise<boolean> {
+  const tenantId = params.metadata.teamsTenantId;
+  if (!tenantId) return false;
+  const fastChannelId = getTeamsBaseConversationId(
+    params.metadata.communicationChannelId,
+  );
+  const providerConversationId =
+    params.metadata.communicationThreadId ?? params.currentMessageId;
+  const session = await getOrCreateFastAgentSession({
+    userId: params.mappedUserId,
+    conversation: {
+      surface: 'teams',
+      workspaceId: tenantId,
+      conversationId: `${providerConversationId}:user:${params.mappedUserId}`,
+      replyTarget: {
+        channelId: fastChannelId,
+        ...(params.metadata.communicationThreadId
+          ? { threadId: params.metadata.communicationThreadId }
+          : {}),
+      },
+    },
+  });
+  return continueFastAgentSurfaceReply({
+    sessionId: session.id,
+    userId: params.mappedUserId,
+    senderDisplayName: params.activity.from?.name?.trim() || null,
+    question: params.prompt,
+    currentMessageId: params.currentMessageId,
+  });
+}
 const TEAMS_ACTIVITY_DEDUP_TTL_SECONDS = 5 * 60;
 const TEAMS_AUTH_TOKEN_PREFIX = 'teams:auth:';
 const TEAMS_AUTH_TOKEN_TTL_SECONDS = 15 * 60;
@@ -1998,14 +2057,14 @@ teams.post('/', async (c) => {
 
   const metadata = getTeamsActivityCommunicationMetadata(activity);
   if (claimedSuggestionReaction) {
-    const workspaceOverride = claimedSuggestionReaction.targetEnvironmentId
-      ? await resolveTeamsWorkspace({
-          type: 'environment',
-          id: claimedSuggestionReaction.targetEnvironmentId,
-          name: claimedSuggestionReaction.targetEnvironmentId,
-        })
-      : undefined;
-    if (claimedSuggestionReaction.targetEnvironmentId && !workspaceOverride) {
+    const suggestionTarget = resolveSuggestedTaskLaunchTarget(
+      claimedSuggestionReaction,
+    );
+    const workspaceOverride = await resolveTeamsSuggestionWorkspace(
+      claimedSuggestionReaction,
+      suggestionTarget,
+    );
+    if (suggestionTarget.kind === 'environment' && !workspaceOverride) {
       await releaseWorkItemClaim(db, {
         id: claimedSuggestionReaction.id,
         claimedAt: claimedSuggestionReaction.launchClaimedAt,
@@ -2034,6 +2093,14 @@ teams.post('/', async (c) => {
           } as QueuedTeamsCommunicationMessage,
           metadata,
           ...(workspaceOverride ? { workspaceOverride } : {}),
+        }),
+      launchFast: (promptText) =>
+        startTeamsFastSuggestion({
+          activity,
+          metadata,
+          mappedUserId: mappedUserId!,
+          prompt: promptText,
+          currentMessageId: queuedMessage!.ts,
         }),
       postMessage: (text) =>
         postTeamsMessageBestEffort({
@@ -2242,14 +2309,14 @@ teams.post('/', async (c) => {
       }
 
       if (resolution.outcome === 'claimed') {
-        const workspaceOverride = resolution.suggestion.targetEnvironmentId
-          ? await resolveTeamsWorkspace({
-              type: 'environment',
-              id: resolution.suggestion.targetEnvironmentId,
-              name: resolution.suggestion.targetEnvironmentId,
-            })
-          : undefined;
-        if (resolution.suggestion.targetEnvironmentId && !workspaceOverride) {
+        const suggestionTarget = resolveSuggestedTaskLaunchTarget(
+          resolution.suggestion,
+        );
+        const workspaceOverride = await resolveTeamsSuggestionWorkspace(
+          resolution.suggestion,
+          suggestionTarget,
+        );
+        if (suggestionTarget.kind === 'environment' && !workspaceOverride) {
           await releaseWorkItemClaim(db, {
             id: resolution.suggestion.id,
             claimedAt: resolution.suggestion.launchClaimedAt,
@@ -2275,6 +2342,14 @@ teams.post('/', async (c) => {
               queuedMessage: { ...queuedMessage!, text: promptText },
               metadata,
               ...(workspaceOverride ? { workspaceOverride } : {}),
+            }),
+          launchFast: (promptText) =>
+            startTeamsFastSuggestion({
+              activity,
+              metadata,
+              mappedUserId,
+              prompt: promptText,
+              currentMessageId: queuedMessage!.ts,
             }),
           postMessage: (text) =>
             postTeamsMessageBestEffort({

@@ -152,6 +152,7 @@ describe('launchClaimedTeamsSuggestion', () => {
     expect(outcome).toEqual({ result: 'started', runId: 7 });
     expect(launchTask).toHaveBeenCalledWith(
       'Fix the flaky test\n\nThe retry loop never terminates.\n\nTarget repository: acme/app',
+      { kind: 'legacy_pinned' },
     );
     expect(finalizeWorkItemLaunchedMock).toHaveBeenCalledTimes(1);
     expect(finalizeWorkItemLaunchedMock).toHaveBeenCalledWith(
@@ -297,5 +298,65 @@ describe('launchClaimedTeamsSuggestion', () => {
     expect(postMessage).toHaveBeenCalledWith(
       'New tasks are paused due to a billing issue. Please check billing.',
     );
+  });
+
+  it.each([
+    {
+      label: 'concrete environment',
+      suggestion: {
+        launchTarget: 'env-1',
+        targetEnvironmentId: 'env-1',
+        targetRepositoryFullName: null,
+      },
+      expectedTarget: { kind: 'environment', environmentId: 'env-1' },
+    },
+    {
+      label: 'all repositories',
+      suggestion: {
+        launchTarget: '__all_repositories__',
+        targetRepositoryFullName: '__all_repositories__',
+      },
+      expectedTarget: { kind: 'all_repositories' },
+    },
+  ])(
+    'passes an explicit $label target to coding launch',
+    async ({ suggestion, expectedTarget }) => {
+      const launchTask = vi.fn().mockResolvedValue({
+        status: 'started',
+        launchResult: { id: 7, taskId: 'task-1' },
+      });
+
+      await launchClaimedTeamsSuggestion({
+        suggestion: { ...buildClaimedSuggestion(), ...suggestion },
+        launchTask,
+        launchFast: vi.fn(),
+        postMessage: vi.fn(),
+      });
+
+      expect(launchTask).toHaveBeenCalledWith(
+        expect.any(String),
+        expectedTarget,
+      );
+    },
+  );
+
+  it('starts a Fast-targeted suggestion without launching a coding task', async () => {
+    const launchTask = vi.fn();
+    const launchFast = vi.fn().mockResolvedValue(true);
+
+    await expect(
+      launchClaimedTeamsSuggestion({
+        suggestion: {
+          ...buildClaimedSuggestion(),
+          launchTarget: '__fast__',
+          targetRepositoryFullName: '__fast__',
+        },
+        launchTask,
+        launchFast,
+        postMessage: vi.fn(),
+      }),
+    ).resolves.toEqual({ result: 'started', runId: null });
+    expect(launchFast).toHaveBeenCalledWith(expect.any(String));
+    expect(launchTask).not.toHaveBeenCalled();
   });
 });

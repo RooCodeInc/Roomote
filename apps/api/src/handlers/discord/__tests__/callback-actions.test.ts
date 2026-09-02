@@ -1,3 +1,5 @@
+import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
+
 const mocks = vi.hoisted(() => ({
   findRun: vi.fn(),
   stopTaskRun: vi.fn(),
@@ -284,6 +286,123 @@ describe('Discord component callbacks', () => {
       taskId: 'task-1',
       claimedAt,
     });
+  });
+
+  it.each([
+    {
+      label: 'concrete environment',
+      launchTarget: 'env-1',
+      targetEnvironmentId: 'env-1',
+      targetRepositoryFullName: null,
+      expectedWorkspace: expect.objectContaining({ environmentId: 'env-1' }),
+    },
+    {
+      label: 'all repositories',
+      launchTarget: ALL_REPOSITORIES,
+      targetEnvironmentId: null,
+      targetRepositoryFullName: ALL_REPOSITORIES,
+      expectedWorkspace: expect.objectContaining({
+        repoForPayload: ALL_REPOSITORIES,
+      }),
+    },
+  ])('honors an explicit $label coding target', async (target) => {
+    mocks.claimSuggestionByMessage.mockResolvedValue({
+      outcome: 'claimed',
+      suggestion: {
+        id: 'suggestion-1',
+        title: 'Fix tests',
+        brief: 'Repair the flaky suite.',
+        investigationContext: null,
+        launchTarget: target.launchTarget,
+        targetRepositoryFullName: target.targetRepositoryFullName,
+        targetEnvironmentId: target.targetEnvironmentId,
+        usesRouterLaunch: false,
+        launchClaimedAt: new Date('2026-08-28T00:00:00.000Z'),
+      },
+    });
+    mocks.resolveChannel.mockResolvedValue({
+      channelId: 'channel-1',
+      channelName: 'general',
+      channelType: 0,
+      guildId: 'guild-1',
+      isDirectMessage: false,
+      isThread: false,
+    });
+    mocks.startNewTask.mockResolvedValue({
+      status: 'started',
+      launchResult: { id: 42, taskId: 'task-1' },
+    });
+    mocks.finalizeWorkItem.mockResolvedValue(true);
+
+    await handleDiscordSuggestionReaction({
+      provider: { postMessage: vi.fn() } as never,
+      applicationId: 'app-1',
+      channel: {
+        channelId: 'thread-1',
+        channelName: 'Suggested tasks',
+        channelType: 11,
+        guildId: 'guild-1',
+        parentChannelId: 'channel-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+      channelId: 'thread-1',
+      messageId: 'suggestion-message-1',
+      eventId: 'reaction-1',
+      sender: { id: 'discord-user-1', username: 'matt' },
+    });
+
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceOverride: target.expectedWorkspace }),
+    );
+    expect(mocks.processFastAgentMessage).not.toHaveBeenCalled();
+  });
+
+  it('honors an explicit Fast target', async () => {
+    mocks.claimSuggestionByMessage.mockResolvedValue({
+      outcome: 'claimed',
+      suggestion: {
+        id: 'suggestion-1',
+        title: 'Fix tests',
+        brief: 'Repair the flaky suite.',
+        investigationContext: null,
+        launchTarget: FAST_EXECUTION,
+        targetRepositoryFullName: FAST_EXECUTION,
+        targetEnvironmentId: null,
+        usesRouterLaunch: false,
+        launchClaimedAt: new Date('2026-08-28T00:00:00.000Z'),
+      },
+    });
+    mocks.resolveChannel.mockResolvedValue({
+      channelId: 'channel-1',
+      channelName: 'general',
+      channelType: 0,
+      guildId: 'guild-1',
+      isDirectMessage: false,
+      isThread: false,
+    });
+    mocks.finalizeWorkItem.mockResolvedValue(true);
+
+    await handleDiscordSuggestionReaction({
+      provider: { postMessage: vi.fn() } as never,
+      applicationId: 'app-1',
+      channel: {
+        channelId: 'thread-1',
+        channelName: 'Suggested tasks',
+        channelType: 11,
+        guildId: 'guild-1',
+        parentChannelId: 'channel-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+      channelId: 'thread-1',
+      messageId: 'suggestion-message-1',
+      eventId: 'reaction-1',
+      sender: { id: 'discord-user-1', username: 'matt' },
+    });
+
+    expect(mocks.processFastAgentMessage).toHaveBeenCalled();
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('releases the suggestion when the Fast session is busy', async () => {

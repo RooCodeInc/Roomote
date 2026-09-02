@@ -15,6 +15,7 @@ type SuggestionCardRegistration = {
   suggestionKey: string;
   suggestionGroupKey?: string;
   launchRouting?: 'router';
+  launchTarget?: string;
 };
 
 export async function registerTrackedSuggestionCards(
@@ -43,6 +44,9 @@ export async function registerTrackedSuggestionCards(
             : {}),
           ...(registration.launchRouting
             ? { launchRouting: registration.launchRouting }
+            : {}),
+          ...(registration.launchTarget
+            ? { launchTarget: registration.launchTarget }
             : {}),
         },
       })),

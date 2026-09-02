@@ -26,6 +26,7 @@ import {
   FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS,
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
+  FAST_EXECUTION,
 } from '@roomote/types';
 import { z } from 'zod';
 
@@ -270,6 +271,7 @@ export default {
     suggestions: z.array(z.object({
       title: z.string().min(1).max(140),
       brief: z.string().min(1).max(2000),
+      environmentId: z.string().min(1).optional().describe(${JSON.stringify(`Exact environment ID from the system prompt, "${ALL_REPOSITORIES}" for all repositories, or "${FAST_EXECUTION}" for Fast mode. Omit to use normal workspace routing.`)}),
     })).max(10).optional().describe("Launchable follow-ups for a Slack or Discord automation report only"),
   },
   execute: (args, context) => invoke("send_chat_reply", args, context),

@@ -5057,6 +5057,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         {
           title: 'Investigate checkout latency',
           brief: 'Trace the slow payment-provider requests.',
+          environmentId: ALL_REPOSITORIES,
         },
       ];
       mocks.generateText.mockImplementation(
@@ -5089,6 +5090,44 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
     },
   );
+
+  it('rejects a suggestion target outside the authorized environment catalog', async () => {
+    const adapter = callbacks();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Found a follow-up.',
+            suggestions: [
+              {
+                title: 'Inspect the issue',
+                brief: 'Trace the failing path.',
+                environmentId: 'invented-environment',
+              },
+            ],
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: 'A suggested task selected an environment that was not found.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+      platformEventVisibility: 'required',
+    });
+
+    expect(adapter.postReply).not.toHaveBeenCalledWith(
+      expect.objectContaining({ suggestions: expect.any(Array) }),
+    );
+  });
 
   it('rejects structured suggestions outside automation reports', async () => {
     mocks.generateText.mockImplementation(

@@ -1,4 +1,6 @@
 import {
+  ALL_REPOSITORIES,
+  FAST_EXECUTION,
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   activeRunStatuses,
   isDeploymentReadOnlyError,
@@ -25,6 +27,7 @@ import { parsePrReviewActionCallbackData } from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
 import { launchClaimedSuggestedTask } from '../tasks/suggestion-launch.js';
+import { resolveSuggestedTaskLaunchTarget } from '../tasks/suggestion-launch-target.js';
 import {
   claimCurrentThreadSuggestionByMessage,
   findCurrentThreadSuggestionIdByMessage,
@@ -318,7 +321,9 @@ async function launchClaimedDiscordSuggestion(input: {
     const promptText = [
       suggestion.title,
       ...(suggestion.brief ? ['', suggestion.brief] : []),
-      ...(suggestion.targetRepositoryFullName
+      ...(suggestion.targetRepositoryFullName &&
+      suggestion.targetRepositoryFullName !== ALL_REPOSITORIES &&
+      suggestion.targetRepositoryFullName !== FAST_EXECUTION
         ? ['', `Target repository: ${suggestion.targetRepositoryFullName}`]
         : []),
       ...(suggestion.targetEnvironmentId
@@ -329,13 +334,20 @@ async function launchClaimedDiscordSuggestion(input: {
         : []),
     ].join('\n');
     const usesRouterLaunch = suggestion.usesRouterLaunch === true;
+    const launchTarget = resolveSuggestedTaskLaunchTarget(suggestion);
     let taskUrl: string | undefined;
     const launchResult = await launchClaimedSuggestedTask({
       suggestion: { id: suggestion.id, launchClaimedAt: claimedAt },
       policy: {
         fastEligible: usesRouterLaunch,
-        userDefaultEnabled: usesRouterLaunch,
+        userDefaultEnabled: launchTarget.kind === 'fast' || usesRouterLaunch,
         fastAvailable: true,
+        ...(launchTarget.kind === 'fast'
+          ? { requiredMode: 'fast' as const }
+          : launchTarget.kind === 'environment' ||
+              launchTarget.kind === 'all_repositories'
+            ? { requiredMode: 'coding' as const }
+            : {}),
       },
       launch: async (launchMode) => {
         if (launchMode === 'fast') {
@@ -379,14 +391,20 @@ async function launchClaimedDiscordSuggestion(input: {
           channel: launchChannel.channelId,
           turnPolicy: { reactionsAllowed: true },
         };
-        const workspaceOverride = suggestion.targetEnvironmentId
-          ? await resolveDiscordWorkspace({
-              type: 'environment',
-              id: suggestion.targetEnvironmentId,
-              name: suggestion.targetEnvironmentId,
-            })
-          : undefined;
-        if (suggestion.targetEnvironmentId && !workspaceOverride) {
+        const workspaceOverride =
+          launchTarget.kind === 'all_repositories'
+            ? {
+                repoForPayload: ALL_REPOSITORIES,
+                workspaceDisplayName: 'all repos',
+              }
+            : suggestion.targetEnvironmentId
+              ? await resolveDiscordWorkspace({
+                  type: 'environment',
+                  id: suggestion.targetEnvironmentId,
+                  name: suggestion.targetEnvironmentId,
+                })
+              : undefined;
+        if (launchTarget.kind === 'environment' && !workspaceOverride) {
           throw new Error('The suggestion target environment is unavailable.');
         }
         const started = await startNewDiscordTask({

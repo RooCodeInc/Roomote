@@ -60,6 +60,9 @@ export function buildFastAgentReactionExternalInputQuestion(
 export type FastAgentSuggestedTask = {
   title: string;
   brief: string;
+  /** Exact environment ID or a platform workspace sentinel. Omission keeps
+   * the existing router-selected launch behavior. */
+  environmentId?: string;
 };
 
 export type FastAgentReply = {
