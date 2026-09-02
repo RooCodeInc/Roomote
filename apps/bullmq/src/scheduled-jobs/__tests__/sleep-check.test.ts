@@ -1079,6 +1079,40 @@ describe('sleepCheckJob', () => {
     );
   });
 
+  it('finalizes a missing Modal sandbox once and does not select it on the next tick', async () => {
+    const mockJob = {
+      id: 102,
+      machineId: 'modal-missing',
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'modal',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+      sleepAt: new Date(Date.now() + 30 * 60 * 1_000),
+    };
+
+    mockJobQueries({ hardLimitJobs: [mockJob] });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
+
+    await sleepCheckJob();
+
+    // A finalized run is absent from every candidate query on the next tick.
+    mockJobQueries({});
+    await sleepCheckJob();
+
+    expect(mockGetInstanceStatus).toHaveBeenCalledTimes(1);
+    expect(mockFinishRun).toHaveBeenCalledTimes(1);
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 102,
+      status: RunStatus.Failed,
+      error: expect.stringContaining('in status stopped'),
+    });
+    expect(mockCreateSnapshot).not.toHaveBeenCalled();
+    expect(mockDestroyInstance).not.toHaveBeenCalled();
+  });
+
   it('finalizes a run whose azure instance no longer exists instead of retrying forever', async () => {
     const mockJob = {
       id: 100,
@@ -1150,29 +1184,29 @@ describe('sleepCheckJob', () => {
     expect(mockEnterStandby).not.toHaveBeenCalled();
   });
 
-  it('keeps retrying on transient provider errors instead of finalizing', async () => {
+  it('retries transient Modal probe errors on the next tick instead of finalizing', async () => {
     const mockJob = {
       id: 101,
       machineId: 'sb-flaky',
       payloadKind: TaskPayloadKind.StandardTask,
       status: RunStatus.Running,
       taskPhase: 'waiting_for_prompt',
-      vendor: 'azure',
+      vendor: 'modal',
       snapshotId: null,
       sleepRequestedAt: null,
       snapshotRequestedAt: null,
       sleepAt: new Date(Date.now() + 30 * 60 * 1_000),
     };
 
-    mockJobQueries({ hardLimitJobs: [mockJob] });
-    const { AzureDataPlaneError } = await import('@roomote/compute-providers');
-    mockGetInstanceStatus.mockRejectedValue(
-      new AzureDataPlaneError('Upstream timeout.', 502),
-    );
+    mockGetInstanceStatus.mockRejectedValue(new Error('Upstream timeout.'));
 
+    mockJobQueries({ hardLimitJobs: [mockJob] });
+    await sleepCheckJob();
+    mockJobQueries({ hardLimitJobs: [mockJob] });
     await sleepCheckJob();
 
     // Transient error: generic catch clears claims so the next tick retries.
+    expect(mockGetInstanceStatus).toHaveBeenCalledTimes(2);
     expect(mockFinishRun).not.toHaveBeenCalled();
     expect(setFn).toHaveBeenLastCalledWith({
       sleepRequestedAt: null,
