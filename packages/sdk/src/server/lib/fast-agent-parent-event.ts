@@ -54,6 +54,7 @@ import {
   type FastAgentHumanFollowUpEvent,
   type FastAgentParent,
   type PullRequestStatus,
+  type ReasoningEffort,
   type RunStatus,
   type TaskRunErrorCode,
   type SourceControlProvider,
@@ -141,6 +142,7 @@ export type FastAgentParentEvent =
       prompt: string;
       trigger: 'schedule' | 'manual';
       defaultTaskModel?: string;
+      defaultTaskReasoningEffort?: ReasoningEffort;
       rootMessageId?: string;
     }
   | {
@@ -410,7 +412,13 @@ function createFastAgentAutomationTaskLauncher(params: {
           ),
         );
     },
-    buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
+    buildTask: ({
+      prompt,
+      environmentId,
+      model,
+      reasoningEffort,
+      parentSessionId,
+    }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
         repo: ALL_REPOSITORIES,
@@ -426,6 +434,7 @@ function createFastAgentAutomationTaskLauncher(params: {
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
       },
     }),
   });
@@ -899,7 +908,13 @@ export function createFastAgentDiscordTaskLauncher(params: {
     userId: params.userId,
     surface: 'discord',
     taskUrlCampaign: 'fast-delegation',
-    buildTask: async ({ prompt, environmentId, model, parentSessionId }) => {
+    buildTask: async ({
+      prompt,
+      environmentId,
+      model,
+      reasoningEffort,
+      parentSessionId,
+    }) => {
       const isDirectMessage = params.conversation.workspaceId === 'dm';
       const thread = isDirectMessage
         ? null
@@ -944,6 +959,7 @@ export function createFastAgentDiscordTaskLauncher(params: {
           ...(model
             ? { harnessModelOverrides: { 'opencode-server': model } }
             : {}),
+          ...(reasoningEffort ? { reasoningEffort } : {}),
         },
       } satisfies StandardTask;
     },
@@ -962,7 +978,13 @@ export function createFastAgentCommunicationTaskLauncher(params: {
     userId: params.userId,
     surface: params.conversation.surface,
     taskUrlCampaign: 'fast-delegation',
-    buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
+    buildTask: ({
+      prompt,
+      environmentId,
+      model,
+      reasoningEffort,
+      parentSessionId,
+    }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
         repo: ALL_REPOSITORIES,
@@ -988,6 +1010,7 @@ export function createFastAgentCommunicationTaskLauncher(params: {
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
       },
     }),
   });
@@ -1614,13 +1637,20 @@ export async function deliverFastAgentParentEventWithLock(
       params.event.type === 'automation_triggered'
         ? params.event.defaultTaskModel
         : undefined;
-    const launchTask = defaultTaskModel
-      ? (input: Parameters<LaunchFastAgentTask>[0]) =>
-          parentTurn.adapter.launchTask({
-            ...input,
-            model: input.model ?? defaultTaskModel,
-          })
-      : parentTurn.adapter.launchTask;
+    const defaultTaskReasoningEffort =
+      params.event.type === 'automation_triggered'
+        ? params.event.defaultTaskReasoningEffort
+        : undefined;
+    const launchTask =
+      defaultTaskModel || defaultTaskReasoningEffort
+        ? (input: Parameters<LaunchFastAgentTask>[0]) =>
+            parentTurn.adapter.launchTask({
+              ...input,
+              model: input.model ?? defaultTaskModel,
+              reasoningEffort:
+                input.reasoningEffort ?? defaultTaskReasoningEffort,
+            })
+        : parentTurn.adapter.launchTask;
     // The same base URL must reach both the config resolver and the broker:
     // the broker only injects its auth header on deployment-proxy URLs whose
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops

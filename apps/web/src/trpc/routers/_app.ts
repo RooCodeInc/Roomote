@@ -852,6 +852,7 @@ const automationsRouter = createRouter({
           .regex(/^[^/\s]+\/.+$/u, 'Model must use provider/model format.')
           .nullable()
           .optional(),
+        reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),
@@ -892,6 +893,7 @@ const automationsRouter = createRouter({
           .regex(/^[^/\s]+\/.+$/u, 'Model must use provider/model format.')
           .nullable()
           .optional(),
+        reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),

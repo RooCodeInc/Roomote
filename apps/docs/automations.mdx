@@ -118,6 +118,8 @@ Create arbitrary scheduled agent runs with:
 - one required **execution target**: **Fast**, a named environment, or **All repositories**
 - an optional **model** override for the runs; the default follows the
   deployment task model
+- an optional **effort** override (`low`, `medium`, `high`, `extra high`, or
+  `max`) when the selected model supports configurable reasoning
 - an optional **report destination**: a direct message to the automation owner,
   or a channel, through Slack, Discord, Teams, or Telegram
 
@@ -214,7 +216,9 @@ same ones delegated tasks use. Use the tool's model-list action to
 see the deployment's enabled model IDs and default before setting an override.
 Model IDs preserve the configured inference route: `openrouter/...` targets
 OpenRouter, while `openai/...` uses the deployment's OpenAI route, including a
-connected ChatGPT subscription when configured.
+connected ChatGPT subscription when configured. A model-specific reasoning
+effort can be set alongside the model; Roomote maps the selected level to the
+provider's supported reasoning or thinking-budget format.
 
 ## Call Roomote via emoji
 

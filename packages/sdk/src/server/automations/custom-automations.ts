@@ -453,6 +453,11 @@ async function runFastCustomAutomation(params: {
       ...(params.automation.model
         ? { defaultTaskModel: params.automation.model }
         : {}),
+      ...(params.automation.reasoningEffort
+        ? {
+            defaultTaskReasoningEffort: params.automation.reasoningEffort,
+          }
+        : {}),
       ...(rootMessageId ? { rootMessageId } : {}),
     };
     await enqueueFastAgentParentEvent({
@@ -788,6 +793,9 @@ async function launchCustomAutomationRow(
             : {}),
           ...(modelOverride?.harnessModelOverrides
             ? { harnessModelOverrides: modelOverride.harnessModelOverrides }
+            : {}),
+          ...(automation.reasoningEffort
+            ? { reasoningEffort: automation.reasoningEffort }
             : {}),
         },
       },

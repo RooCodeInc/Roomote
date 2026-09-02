@@ -1,4 +1,4 @@
-import type { FastAgentConversation } from '@roomote/types';
+import type { FastAgentConversation, ReasoningEffort } from '@roomote/types';
 
 export {
   isFastAgentCommunicationConversation,
@@ -97,6 +97,7 @@ export type LaunchFastAgentTask = (params: {
    * payload; a partial unique index makes concurrent retries converge. */
   launchIdempotencyKey?: string;
   model?: string | null;
+  reasoningEffort?: ReasoningEffort | null;
   parentSessionId: string;
   postKickoff: (task: {
     taskId: string;

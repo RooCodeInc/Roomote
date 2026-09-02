@@ -58,7 +58,7 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres -d roomote']
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U postgres -d roomote']
       interval: 1s
       timeout: 5s
       retries: 30
