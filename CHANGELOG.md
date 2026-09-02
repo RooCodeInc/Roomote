@@ -4,7 +4,7 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 1.2.0 (2026-09-02)
 
-Roomote 1.2 makes Fast work durable across interruptions, turns Sessions into a fuller workspace, expands automation controls, and adds guided setup and Gemini 3.8 Flash.
+Roomote 1.2 makes Fast work durable and responsive, expands Session and automation workflows, enables Notion database administration and Message Suggestions by default, and adds guided setup and Gemini 3.8 Flash.
 
 ### Highlights
 
@@ -23,12 +23,14 @@ Roomote 1.2 makes Fast work durable across interruptions, turns Sessions into a 
 - Let users reply to and manage live nested tasks directly inside Sessions, including attachments, commands, pending input, cancellation, and sleeping-task wakeup.
 - Let each launchable Fast automation suggestion select its own named environment, all-repositories, or Fast target across Slack, Discord, Microsoft Teams, and Telegram.
 - Let visual-proof runs use transparently disclosed simulated state when genuine setup is impractical, while clearly limiting the evidence to rendered appearance, layout, and interaction.
+- Enable contextual Message Suggestions by default for task and Session composers without requiring an experimental feature flag.
+- Let Roomote agents create and update Notion data sources, including properties, options, and relation targets, while keeping destructive schema operations unavailable.
 
 ### Patch changes
 
 - Queue Fast automation runs durably before acknowledging them and report admitted work as queued, preventing long starts from timing out, duplicating launches, or appearing complete prematurely.
 - Apply matching Dependabot or Renovate reviewers and assignees to dependency-remediation pull requests, while allowing automation-started PR delivery to fall back safely when no human attribution candidate exists.
-- Keep task and Session views complete and readable by retaining linked and general subagent activity, restoring accumulated pull-request links, showing consequential outbound communication, and hiding internal discovery and duplicate reply-tool entries.
+- Keep task and Session views complete and readable by retaining linked and general subagent activity, restoring accumulated pull-request links without unnecessary wrapping, showing consequential outbound communication, and hiding internal discovery and duplicate reply-tool entries.
 - Show a clearer "Tab to accept" hint for composer suggestions only while the task or Session reply box is focused.
 - Make Review Code rely on current-commit CI results instead of rerunning repository validation suites, reducing duplicate validation time and compute.
 - Expand privacy-safe Fast diagnostics with setup timing, model-request counts, aggregate token usage, and context-size signals without logging prompt, reply, or tool content.
@@ -40,6 +42,7 @@ Roomote 1.2 makes Fast work durable across interruptions, turns Sessions into a 
 - Expose timestamped provisioning and command output for new Roomote Cloud sandbox runs through compute-log lookups, including stdout, stderr, and failure diagnostics.
 - Start self-hosted Memory from the published gbrain image matching the Roomote release by default while preserving custom image overrides.
 - Recover Sessions whose terminal subagent remains unsettled after a provider timeout instead of leaving the parent Session running indefinitely.
+- Stream Fast replies into web Session transcripts and Slack threads while the model writes them, then settle each stream into the finished reply with its usual content and links.
 
 ## 1.1.0 (2026-09-02)
 
@@ -56,7 +59,7 @@ Roomote 1.1 adds contextual message suggestions, clean-review handoff across sou
 
 - Add Claude Fable 5.1 to Roomote's curated recommended-model catalog across supported inference providers.
 - Let admins opt in to marking clean Roomote-created draft pull requests and merge requests ready for human review across GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket Cloud without approving or merging them.
-- Add helper-model-generated Message Suggestions to task and Session composers, with Tab acceptance, Escape dismissal, and bounded conversation context.
+- Add optional helper-model-generated Message Suggestions to task and Session composers, with Tab acceptance, Escape dismissal, bounded conversation context, and an experimental admin setting.
 
 ### Patch changes
 

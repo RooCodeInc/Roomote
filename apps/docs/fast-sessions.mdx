@@ -115,16 +115,14 @@ visible retry notice that the eventual answer replaces.
 
 ### Message Suggestions
 
-Admins can enable **Message Suggestions** under **Settings > Experimental**.
-When enabled, an empty task or Session composer can show one contextual
-follow-up after an agent turn completes. Press **Tab** or select the suggestion
-to insert it, press **Escape** to dismiss it, or start typing to replace it with
-your own message.
+An empty task or Session composer can show one contextual follow-up after an
+agent turn completes. Press **Tab** or select the suggestion to insert it, press
+**Escape** to dismiss it, or start typing to replace it with your own message.
 
 Roomote generates each suggestion with the deployment's helper model using a
 bounded view of visible conversation history. This adds one small inference
 call per completed turn for each task or Session where the suggestion is
-requested. The setting is off by default.
+requested.
 
 In shared Slack and Discord conversations, Fast can stay silent when linked
 participants are talking to each other. A direct reply to Roomote, a mention,
