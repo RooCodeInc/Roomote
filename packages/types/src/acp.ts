@@ -1137,10 +1137,51 @@ export function normalizePlanPayload(
   return { entries };
 }
 
+// Name of the on-demand integration call tool (FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool;
+// the catalog module imports this one, so the literal lives here).
+const ON_DEMAND_INTEGRATION_CALL_TOOL_NAME = 'call_integration_tool';
+
+/**
+ * `call_integration_tool` is transport, not what the agent did. When a tool
+ * call is that wrapper, present the integration and tool it invoked, exactly
+ * as a directly mounted MCP call would have been shown.
+ */
+function unwrapOnDemandIntegrationCall(
+  update: Record<string, unknown>,
+): AcpMcpInvocation | null {
+  const candidates = [
+    asStringOrNull(update.mcpToolName),
+    asStringOrNull(update.toolName),
+    asStringOrNull(update.title),
+  ];
+  const isWrapper = candidates.some(
+    (name) =>
+      name === ON_DEMAND_INTEGRATION_CALL_TOOL_NAME ||
+      name?.endsWith(`_${ON_DEMAND_INTEGRATION_CALL_TOOL_NAME}`),
+  );
+  if (!isWrapper) {
+    return null;
+  }
+  const rawInput = asRecordOrNull(update.rawInput);
+  // Fast records native tool arguments under `arguments`; sandbox ACP events
+  // carry the tool input directly.
+  const args = asRecordOrNull(rawInput?.arguments) ?? rawInput;
+  const integrationId = asStringOrNull(args?.integrationId);
+  const toolName = asStringOrNull(args?.toolName);
+  if (!integrationId || !toolName) {
+    return null;
+  }
+  return { mcpServerName: integrationId, mcpToolName: toolName };
+}
+
 export function extractAcpMcpInvocation(
   update: Record<string, unknown>,
   options: ExtractAcpMcpInvocationOptions = {},
 ): AcpMcpInvocation | null {
+  const unwrapped = unwrapOnDemandIntegrationCall(update);
+  if (unwrapped) {
+    return unwrapped;
+  }
   const kind = asStringOrNull(update.kind);
   const mcpServerName = asStringOrNull(update.mcpServerName);
   const mcpToolName = asStringOrNull(update.mcpToolName);

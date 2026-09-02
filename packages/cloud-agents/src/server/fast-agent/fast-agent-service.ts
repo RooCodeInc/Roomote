@@ -2845,6 +2845,12 @@ export async function answerFastAgentQuestion({
     ): Promise<unknown> => {
       activeToolExecutions += 1;
       try {
+        // The on-demand call is transport: the MCP executor it delegates to
+        // records the integration tool event, which is what the transcript
+        // should show, so no wrapper event is written for it.
+        if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool) {
+          return await executeNativeToolInner(call);
+        }
         const canonicalToolEvent = await beginCanonicalToolEvent({
           title: call.name,
           args: call.args,

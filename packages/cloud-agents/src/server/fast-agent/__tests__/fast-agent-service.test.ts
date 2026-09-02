@@ -3604,6 +3604,28 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         args: { query: 'fast agent' },
       },
     );
+    // The transcript sees the integration tool events, never a wrapper
+    // event for the call tool itself.
+    const toolCallTitles = mocks.upsertMessage.mock.calls
+      .map(
+        ([input]) =>
+          (
+            input as {
+              message: {
+                payload: { title?: string; eventType?: string };
+                eventType?: string;
+              };
+            }
+          ).message,
+      )
+      .filter((message) => message.eventType === 'roomote_runtime.tool_call')
+      .map((message) => message.payload.title);
+    expect(toolCallTitles).not.toContain('call_integration_tool');
+    // One integration tool event: the pre-acknowledgement call was refused
+    // before anything was recorded.
+    expect(
+      toolCallTitles.filter((title) => title === 'search_code'),
+    ).toHaveLength(1);
   });
 
   it.each(['github', 'gbrain'])(
