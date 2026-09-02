@@ -66,6 +66,9 @@ vi.mock('./SessionTaskTimeline', () => ({
 }));
 vi.mock('./SessionWorkspace', () => ({
   SessionWorkspace: sessionWorkspaceMock,
+  SessionHeaderPullRequests: () => (
+    <div data-testid="session-header-pull-requests" />
+  ),
 }));
 vi.mock('./SessionReadTracker', () => ({
   SessionReadTracker: () => null,
@@ -324,9 +327,7 @@ describe('Session detail page', () => {
     expect(transcriptMock.mock.calls[0]?.[0]).not.toHaveProperty(
       'timelineExtras',
     );
-    expect(transcriptMock.mock.calls[0]?.[0]).not.toHaveProperty(
-      'headerExtras',
-    );
+    expect(transcriptMock.mock.calls[0]?.[0]).toHaveProperty('headerExtras');
   });
 
   it('renders a task-only workspace for unified sessions without a Fast conversation', async () => {
@@ -370,8 +371,9 @@ describe('Session detail page', () => {
       'Task-only session with a title that wraps on narrow screens',
     );
     expect(html).toContain(
-      'class="min-w-0 flex-1 break-words text-sm font-medium @[600px]:truncate"',
+      'class="min-w-0 flex-1 break-words text-sm font-medium @[600px]:flex-[0_1_auto] @[600px]:truncate"',
     );
+    expect(html).toContain('session-header-pull-requests');
     expect(html).toContain('session-task-timeline');
     expect(html).not.toContain('completed');
     expect(sessionTaskTimelineMock).toHaveBeenCalledWith(
