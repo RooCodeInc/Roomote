@@ -66,6 +66,12 @@ describe('setup prompt guidance and snapshot injection', () => {
     expect(prompt).toContain(
       "I'm looking for flaky tests and fixing the ones causing the most trouble.",
     );
+    expect(prompt).toContain(
+      'the administrator is free to start something new or explore the app while I work',
+    );
+    expect(prompt).toContain(
+      'do not imply that they need to wait in or remain on the setup session',
+    );
     expect(prompt).toContain('<setup_snapshot>');
     expect(prompt).toContain('request_user_input');
     expect(prompt).toContain('setup_starter_tasks');
@@ -127,6 +133,9 @@ describe('setup prompt guidance and snapshot injection', () => {
     expect(setupEvent).toContain('Reconcile them against the setup snapshot');
     expect(setupEvent).toContain(
       'For a starter-request event, call `request_user_input` exactly once',
+    );
+    expect(setupEvent).toContain(
+      'If any selected task started, say that the started work will continue while the user starts something new or explores the app',
     );
 
     const inputResponseEvent = buildFastAgentSystemPrompt({
