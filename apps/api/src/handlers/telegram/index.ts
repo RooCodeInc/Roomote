@@ -104,7 +104,21 @@ import { appendAccountLinkHelpText } from '../account-link-help.js';
 // https://t.me/<bot>?start=link opens the bot's DM with "/start link".
 const TELEGRAM_LINK_START_PAYLOAD = 'link';
 
-export const telegram = new Hono();
+type TelegramWebhookVariables = {
+  claimedUpdateId: number | undefined;
+};
+
+export const telegram = new Hono<{
+  Variables: TelegramWebhookVariables;
+}>();
+
+telegram.onError(async (error, c) => {
+  const claimedUpdateId = c.get('claimedUpdateId');
+  if (claimedUpdateId !== undefined) {
+    await releaseTelegramUpdateClaim(claimedUpdateId).catch(() => {});
+  }
+  throw error;
+});
 
 telegram.post('/', async (c) => {
   const verificationError = await verifyTelegramWebhookSecret(
@@ -147,6 +161,7 @@ telegram.post('/', async (c) => {
     if (!claimedReaction) {
       return c.json({ ok: true, duplicate: true });
     }
+    c.set('claimedUpdateId', update.update_id);
     const addedReactions = getNewTelegramMessageReactions(messageReaction);
     if (addedReactions.length === 0) {
       return c.json({ ok: true, ignored: 'reaction_removed_or_unchanged' });
@@ -250,6 +265,7 @@ telegram.post('/', async (c) => {
     if (!claimedCallback) {
       return c.json({ ok: true, duplicate: true });
     }
+    c.set('claimedUpdateId', update.update_id);
 
     await handleTelegramCallbackQuery(callbackQuery);
 
@@ -270,6 +286,7 @@ telegram.post('/', async (c) => {
     );
     return c.json({ ok: true, duplicate: true });
   }
+  c.set('claimedUpdateId', update.update_id);
 
   if (isTelegramImplicitTopicCreatedMessage(message)) {
     const implicitThreadId = message.message_thread_id ?? message.message_id;
@@ -595,20 +612,14 @@ telegram.post('/', async (c) => {
         .trim() ||
       message.from?.username?.trim() ||
       null;
-    let continued: boolean;
-    try {
-      continued = await queueFastAgentSurfaceReply({
-        sessionId: fastSession.id,
-        userId: senderUserId,
-        senderDisplayName,
-        question,
-        currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
-        ...(fastMessage.images ? { images: fastMessage.images } : {}),
-      });
-    } catch (error) {
-      await releaseTelegramUpdateClaim(update.update_id).catch(() => {});
-      throw error;
-    }
+    const continued = await queueFastAgentSurfaceReply({
+      sessionId: fastSession.id,
+      userId: senderUserId,
+      senderDisplayName,
+      question,
+      currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
+      ...(fastMessage.images ? { images: fastMessage.images } : {}),
+    });
     if (!continued) {
       apiLogger.warn(
         `[telegram] Fast session ${fastSession.id} could not resolve an active delivery route`,

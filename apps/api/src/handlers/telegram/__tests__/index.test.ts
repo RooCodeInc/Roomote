@@ -769,6 +769,7 @@ describe('Telegram webhook handler', () => {
       workspaceId: '222',
       channelId: '222',
     });
+    expect(redisDelMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
@@ -1133,7 +1134,27 @@ describe('Telegram webhook handler', () => {
       runId: 77,
       userId: 'launch-owner-1',
     });
+    expect(redisDelMock).not.toHaveBeenCalled();
     expect(getFastSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the update claim when active-run queueing fails', async () => {
+    mockTelegramLinkedSender();
+    taskRunsFindFirstMock.mockResolvedValueOnce({
+      id: 77,
+      status: 'running',
+      machineId: 'machine-1',
+      taskId: 'task-1',
+      payload: {},
+    });
+    queueCommunicationMessageMock.mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+
+    const response = await postTelegramUpdate(createTelegramUpdate());
+
+    expect(response.status).toBe(500);
+    expect(redisDelMock).toHaveBeenCalledWith('telegram:update:123');
   });
 
   it('queues a captioned photo as an active-run follow-up', async () => {

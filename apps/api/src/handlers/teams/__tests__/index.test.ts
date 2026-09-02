@@ -823,6 +823,28 @@ describe('Teams webhook handler', () => {
       runId: 77,
       userId: 'mapped-user-1',
     });
+    expect(redisDelMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the activity claim when active-run queueing fails', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    queueCommunicationMessageMock.mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(createTeamsActivity()),
+    });
+
+    expect(response.status).toBe(500);
+    expect(redisDelMock).toHaveBeenCalledWith('teams:activity:activity-2');
   });
 
   it('continues the bound Fast session before ordinary Teams task routing', async () => {
@@ -983,6 +1005,7 @@ describe('Teams webhook handler', () => {
       queued: false,
       reason: 'fast_session_installation_unavailable',
     });
+    expect(redisDelMock).not.toHaveBeenCalled();
     expect(continueFastReplyMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
   });
