@@ -64,13 +64,26 @@ function expectBoundedSpillDescriptor(output: string): void {
 }
 
 describe('Fast native OpenCode tool bridge', () => {
-  it('installs Fast tools in an isolated OpenCode session directory', async () => {
+  it('serves Fast tools from one shared config directory per host', async () => {
     const runtime = await getFastAgentNativeToolRuntime('native-files', []);
     const otherRuntime = await getFastAgentNativeToolRuntime(
       'native-files-other',
       [],
     );
-    const toolsDirectory = join(runtime.directory, '.opencode', 'tools');
+    const sharedToolsDirectory = runtime.env.OPENCODE_CONFIG_DIR;
+    expect(sharedToolsDirectory).toMatch(
+      /roomote-fast-opencode\/shared-tools-[a-f0-9]{32}$/u,
+    );
+    expect(otherRuntime.env.OPENCODE_CONFIG_DIR).toBe(sharedToolsDirectory);
+    expect(buildOpenCodeCliEnv(runtime.env).OPENCODE_CONFIG_DIR).toBe(
+      sharedToolsDirectory,
+    );
+    // The conversation directory itself carries only the session config, so
+    // OpenCode's per-directory boot never runs a dependency install for it.
+    expect((await readdir(runtime.directory)).sort()).toEqual([
+      'opencode.json',
+    ]);
+    const toolsDirectory = join(sharedToolsDirectory!, 'tools');
     const installedToolFiles = await readdir(toolsDirectory);
     const replySource = await readFile(
       join(toolsDirectory, 'send_chat_reply.js'),
@@ -89,7 +102,7 @@ describe('Fast native OpenCode tool bridge', () => {
       'utf8',
     );
     const bridgeSource = await readFile(
-      join(runtime.directory, '.opencode', 'roomote-fast-tool-bridge.js'),
+      join(sharedToolsDirectory!, 'roomote-fast-tool-bridge.js'),
       'utf8',
     );
     const spillReadSource = await readFile(
