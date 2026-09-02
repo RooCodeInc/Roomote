@@ -306,6 +306,7 @@ export {
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
   getTaskPrReviewOfferStatus,
+  updateFastAgentPrReviewOfferStatus,
   updateTaskPrReviewOfferStatus,
   triagePrReviewActivity,
   type PreparedPrReviewNotification,

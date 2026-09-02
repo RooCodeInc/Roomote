@@ -31,6 +31,7 @@ const {
   mockIsDurable,
   mockMigrateLegacy,
   mockRenewLease,
+  mockUpdateFastAgentPrReviewOfferStatus,
   mockUpdateTaskPrReviewOfferStatus,
   mockEq,
   MockPrReviewNotificationRateLimitError,
@@ -65,6 +66,7 @@ const {
   mockIsDurable: vi.fn(),
   mockMigrateLegacy: vi.fn(),
   mockRenewLease: vi.fn(),
+  mockUpdateFastAgentPrReviewOfferStatus: vi.fn(),
   mockUpdateTaskPrReviewOfferStatus: vi.fn(),
   mockEq: vi.fn((...args: unknown[]) => ({ eq: args })),
   MockPrReviewNotificationRateLimitError: class extends Error {
@@ -211,6 +213,7 @@ vi.mock('@roomote/sdk/server', () => ({
   migrateLegacyPrReviewNotificationRequest: mockMigrateLegacy,
   attachPendingPrReviewActionMessageWithRetirement:
     mockAttachPendingPrReviewActionMessage,
+  updateFastAgentPrReviewOfferStatus: mockUpdateFastAgentPrReviewOfferStatus,
   updateTaskPrReviewOfferStatus: mockUpdateTaskPrReviewOfferStatus,
 }));
 
@@ -289,6 +292,7 @@ describe('prReviewNotificationJob', () => {
       superseded: [],
     });
     mockRetirePrReviewActionMessages.mockResolvedValue(undefined);
+    mockUpdateFastAgentPrReviewOfferStatus.mockResolvedValue(undefined);
     mockUpdateTaskPrReviewOfferStatus.mockResolvedValue(undefined);
     mockFindAutoHandlePrReviewFeedbackPreference.mockResolvedValue(null);
     mockStickyFooterPost.mockResolvedValue('999.888');
@@ -1788,6 +1792,59 @@ describe('prReviewNotificationJob', () => {
       { leaseToken },
     );
     expect(mockFinalize).not.toHaveBeenCalled();
+  });
+
+  it('dismisses a persisted Fast-session offer that loses its publish fence', async () => {
+    const deliveryId = '77777777-7777-4777-8777-777777777777';
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      taskId: 'task-1',
+      payload: {
+        fastAgentParent: {
+          sessionId: '99999999-9999-4999-8999-999999999999',
+          conversation: {
+            surface: 'web',
+            workspaceId: 'user-1',
+            conversationId: 'session-1',
+          },
+        },
+      },
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      workerHeartbeatAt: new Date(),
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: null,
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockNotifyFastAgentParent.mockResolvedValue(true);
+    mockAttachPendingPrReviewActionMessage.mockResolvedValue({
+      attached: false,
+      superseded: [],
+    });
+
+    await expect(
+      prReviewNotificationJob(
+        makeJob({
+          ownershipVersion: 'canonical',
+          deliveryId,
+          notificationUnitId: '88888888-8888-4888-8888-888888888888',
+          deliveryState: 'claimed',
+          destinationKey: '["web","user-1","session-1"]',
+          dispatchKey: `pr-review-delivery:${deliveryId}`,
+          deliveryIds: [deliveryId],
+          leaseToken: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          events,
+        }) as never,
+      ),
+    ).rejects.toThrow('Canonical Fast web review offer lost its publish fence');
+    expect(mockUpdateFastAgentPrReviewOfferStatus).toHaveBeenCalledWith({
+      deliveryIds: [deliveryId],
+      status: 'dismissed',
+    });
   });
 
   it('auto-dispatches opted-in feedback for a web Fast parent', async () => {

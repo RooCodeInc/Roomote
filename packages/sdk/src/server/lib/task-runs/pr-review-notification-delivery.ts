@@ -15,6 +15,7 @@ import {
   and,
   db,
   eq,
+  fastAgentMessages,
   inArray,
   sql,
   taskMessages,
@@ -1568,6 +1569,26 @@ export async function updateTaskPrReviewOfferStatus(input: {
           sql<string>`${taskMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
           input.deliveryIds,
         ),
+      ),
+    );
+}
+
+export async function updateFastAgentPrReviewOfferStatus(input: {
+  deliveryIds: string[];
+  status: PrReviewActionOfferStatus;
+}): Promise<void> {
+  if (input.deliveryIds.length === 0) return;
+
+  await db
+    .update(fastAgentMessages)
+    .set({
+      payload: sql`jsonb_set(coalesce(${fastAgentMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb(${input.status}::text), true)`,
+      updatedAt: new Date(),
+    })
+    .where(
+      inArray(
+        sql<string>`${fastAgentMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
+        input.deliveryIds,
       ),
     );
 }

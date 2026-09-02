@@ -43,6 +43,7 @@ import {
   requeuePendingPrReviewActivity,
   schedulePrReviewNotificationJob,
   setPendingPrReviewAction,
+  updateFastAgentPrReviewOfferStatus,
   updateTaskPrReviewOfferStatus,
 } from '@roomote/sdk/server';
 import {
@@ -777,6 +778,10 @@ export const prReviewNotificationJob = async (
           { leaseToken: data.leaseToken },
         );
       if (!attached) {
+        await updateFastAgentPrReviewOfferStatus({
+          deliveryIds: [webReviewActionDeliveryId],
+          status: 'dismissed',
+        });
         throw new Error(
           'Canonical Fast web review offer lost its publish fence',
         );
