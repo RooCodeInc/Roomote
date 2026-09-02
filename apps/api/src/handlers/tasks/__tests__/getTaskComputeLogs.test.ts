@@ -9,7 +9,6 @@ const {
   mockSelect,
   mockFindMany,
   mockCreateComputeProviderClient,
-  mockGetComputeProviderCapabilities,
   mockGetCommandOutput,
   mockLogHandlerError,
   visibleTaskHistoryCondition,
@@ -23,7 +22,6 @@ const {
   mockSelect: vi.fn(),
   mockFindMany: vi.fn(),
   mockCreateComputeProviderClient: vi.fn(),
-  mockGetComputeProviderCapabilities: vi.fn(),
   mockGetCommandOutput: vi.fn(),
   mockLogHandlerError: vi.fn(),
   visibleTaskHistoryCondition: { type: 'visibleTaskHistoryCondition' },
@@ -45,7 +43,6 @@ vi.mock('../../utils', () => ({
 
 vi.mock('@roomote/compute-providers', () => ({
   createComputeProviderClient: mockCreateComputeProviderClient,
-  getComputeProviderCapabilities: mockGetComputeProviderCapabilities,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -106,35 +103,6 @@ describe('getTaskComputeLogs', () => {
     mockSelect.mockReturnValue({
       from: selectFromMock,
     });
-    mockGetComputeProviderCapabilities.mockImplementation((provider) => {
-      switch (provider) {
-        case 'modal':
-        case 'roomote':
-          return {
-            supportsCreateInstance: true,
-            supportsDestroyInstance: true,
-            supportsCommandExecution: true,
-            supportsCommandOutputStreaming: false,
-            supportsCommandOutputLookup: false,
-            supportsSnapshots: true,
-            supportsResume: true,
-            supportsFileWrite: true,
-          };
-        case 'daytona':
-          return {
-            supportsCreateInstance: true,
-            supportsDestroyInstance: true,
-            supportsCommandExecution: true,
-            supportsCommandOutputStreaming: true,
-            supportsCommandOutputLookup: true,
-            supportsSnapshots: true,
-            supportsResume: true,
-            supportsFileWrite: true,
-          };
-        default:
-          throw new Error(`Unexpected provider: ${String(provider)}`);
-      }
-    });
     mockCreateComputeProviderClient.mockReturnValue({
       getCommandOutput: mockGetCommandOutput,
     });
@@ -174,7 +142,7 @@ describe('getTaskComputeLogs', () => {
         vendor: 'modal',
         machineId: 'modal-1',
         sandboxCmdId: 'cmd-4',
-        log: null,
+        log: 'stale central output',
       },
       {
         id: 105,

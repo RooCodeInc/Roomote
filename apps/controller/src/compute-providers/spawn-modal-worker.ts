@@ -3,6 +3,7 @@ import {
   NonRetryableSpawnError,
   resolveConfiguredComputeProviderResources,
   getPrimaryPortFromConfig,
+  getComputeProviderCommandOutputSource,
 } from '@roomote/types';
 import {
   type TaskRun,
@@ -15,6 +16,7 @@ import {
 import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
   type ComputeProviderClient,
+  createCommandOutputTranscriptRecorder,
   buildComputeProviderMutationDetails,
   buildModalWorkerEnv,
   cleanupModalInstance,
@@ -40,72 +42,22 @@ import {
 
 const MODAL_LAUNCH_OUTPUT_TEXT_LIMIT = 500;
 const LAUNCH_DIAGNOSTIC_PROBE_TIMEOUT_MS = 15_000;
-const ROOMOTE_COMPUTE_LOG_LIMIT = 256 * 1024;
-const ROOMOTE_COMPUTE_LOG_FLUSH_INTERVAL_MS = 500;
-const ROOMOTE_COMPUTE_LOG_FLUSH_SIZE = 16 * 1024;
-
-function createRoomoteComputeLogRecorder(runId: number) {
-  let writes = Promise.resolve();
-  let buffer = '';
-  let flushTimer: ReturnType<typeof setTimeout> | undefined;
-
-  const flush = (): Promise<void> => {
-    if (flushTimer) {
-      clearTimeout(flushTimer);
-      flushTimer = undefined;
-    }
-
-    if (!buffer) return writes;
-
-    const entries = buffer;
-    buffer = '';
-    writes = writes
-      .then(async () => {
-        await db
-          .update(taskRuns)
-          .set({
-            log: sql<string>`right(coalesce(${taskRuns.log}, '') || ${entries}, ${ROOMOTE_COMPUTE_LOG_LIMIT})`,
-          })
-          .where(eq(taskRuns.id, runId));
-      })
-      .catch((error: unknown) => {
-        console.warn(
-          `[spawnModalWorker] Failed to retain compute output for task run #${runId}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      });
-
-    return writes;
-  };
-
-  const append = (
-    stream: 'command' | 'stdout' | 'stderr',
-    data: string,
-    timestamp = new Date(),
-  ): Promise<void> => {
-    const prefix = `[${timestamp.toISOString()}] [${stream}] `;
-    const sanitized = data.replaceAll('\0', '');
-    const suffix = sanitized.endsWith('\n') ? '' : '\n';
-    const available = ROOMOTE_COMPUTE_LOG_LIMIT - prefix.length - suffix.length;
-    const retained =
-      sanitized.length > available ? sanitized.slice(-available) : sanitized;
-    buffer += `${prefix}${retained}${suffix}`;
-
-    if (
-      stream === 'command' ||
-      buffer.length >= ROOMOTE_COMPUTE_LOG_FLUSH_SIZE
-    ) {
-      return flush();
-    }
-
-    flushTimer ??= setTimeout(
-      () => void flush(),
-      ROOMOTE_COMPUTE_LOG_FLUSH_INTERVAL_MS,
-    );
-    flushTimer.unref?.();
-    return writes;
-  };
-
-  return { append, flush };
+function createCentralCommandOutputRecorder(runId: number) {
+  return createCommandOutputTranscriptRecorder({
+    write: async (entries, maxChars) => {
+      await db
+        .update(taskRuns)
+        .set({
+          log: sql<string>`right(coalesce(${taskRuns.log}, '') || ${entries}, ${maxChars})`,
+        })
+        .where(eq(taskRuns.id, runId));
+    },
+    onWriteError: (error) => {
+      console.warn(
+        `[spawnModalWorker] Failed to retain compute output for task run #${runId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    },
+  });
 }
 
 class DetachedWorkerLaunchError extends Error {
@@ -414,8 +366,8 @@ export async function spawnModalWorker(
     { logPrefix: 'spawnModalWorker', logger: console },
   );
   const computeLog =
-    vendor === 'roomote'
-      ? createRoomoteComputeLogRecorder(taskRun.id)
+    getComputeProviderCommandOutputSource(vendor) === 'central'
+      ? createCentralCommandOutputRecorder(taskRun.id)
       : undefined;
 
   const configuredResources = resolveConfiguredComputeProviderResources({

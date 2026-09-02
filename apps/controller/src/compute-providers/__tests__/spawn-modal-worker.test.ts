@@ -389,6 +389,9 @@ describe('spawnModalWorker', () => {
         Object.hasOwn(values, 'sandboxCmdId'),
       ),
     ).toBe(false);
+    expect(
+      mockUpdateSet.mock.calls.some(([values]) => Object.hasOwn(values, 'log')),
+    ).toBe(false);
   });
 
   it('retains timestamped stdout and stderr for Roomote-backed commands', async () => {

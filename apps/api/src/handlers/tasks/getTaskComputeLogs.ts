@@ -1,9 +1,6 @@
 import type { Context } from 'hono';
 
-import {
-  createComputeProviderClient,
-  getComputeProviderCapabilities,
-} from '@roomote/compute-providers';
+import { createComputeProviderClient } from '@roomote/compute-providers';
 import {
   and,
   asc,
@@ -13,7 +10,12 @@ import {
   taskRuns,
   tasks,
 } from '@roomote/db/server';
-import { isComputeProvider, type ComputeProvider } from '@roomote/types';
+import {
+  getComputeProviderCommandOutputSource,
+  isComputeProvider,
+  type ComputeProvider,
+  type ComputeProviderCommandOutputSource,
+} from '@roomote/types';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -49,15 +51,13 @@ function resolveTaskRunProvider(job: TaskRunLogRow): ResolvedTaskRunProvider {
 function getSkippedReason(
   job: TaskRunLogRow,
   providerInfo: ResolvedTaskRunProvider,
+  outputSource: ComputeProviderCommandOutputSource,
 ): string | null {
   if (!providerInfo.provider) {
     return `unsupported_provider:${providerInfo.responseVendor}`;
   }
 
-  const provider = providerInfo.provider;
-  const capabilities = getComputeProviderCapabilities(provider);
-
-  if (!capabilities.supportsCommandOutputLookup) {
+  if (outputSource === 'none') {
     return `unsupported_command_output_lookup:${providerInfo.responseVendor}`;
   }
 
@@ -76,12 +76,32 @@ function getSkippedReason(
   return null;
 }
 
+function buildTaskRunLogResult(
+  job: TaskRunLogRow,
+  vendor: string,
+  result: {
+    output?: string | null;
+    skippedReason?: string | null;
+    error?: string | null;
+  },
+) {
+  return {
+    id: job.id,
+    status: job.status,
+    vendor,
+    machineId: job.machineId,
+    sandboxCmdId: job.sandboxCmdId,
+    output: result.output ?? null,
+    skippedReason: result.skippedReason ?? null,
+    error: result.error ?? null,
+  };
+}
+
 /**
  * GET /api/mcp/tasks/:taskId/compute_logs
  *
- * Get the compute/runtime logs for every task run tied to a task and fetch
- * provider command output for jobs whose compute provider supports output
- * lookup and that have both a machine id and sandbox command id.
+ * Get compute/runtime logs from each provider's declared output source:
+ * centrally retained output or on-demand provider lookup.
  */
 export async function getTaskComputeLogs(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
@@ -125,47 +145,27 @@ export async function getTaskComputeLogs(
     const result = await Promise.all(
       jobs.map(async (job) => {
         const providerInfo = resolveTaskRunProvider(job);
-        const skippedReason = getSkippedReason(job, providerInfo);
         const provider = providerInfo.provider;
         const responseVendor = providerInfo.responseVendor;
+        const outputSource = provider
+          ? getComputeProviderCommandOutputSource(provider)
+          : 'none';
 
-        if (provider === 'roomote') {
+        if (outputSource === 'central') {
           if (job.log?.trim()) {
-            return {
-              id: job.id,
-              status: job.status,
-              vendor: responseVendor,
-              machineId: job.machineId,
-              sandboxCmdId: job.sandboxCmdId,
+            return buildTaskRunLogResult(job, responseVendor, {
               output: job.log,
-              skippedReason: null,
-              error: null,
-            };
+            });
           }
 
-          return {
-            id: job.id,
-            status: job.status,
-            vendor: responseVendor,
-            machineId: job.machineId,
-            sandboxCmdId: job.sandboxCmdId,
-            output: null,
-            skippedReason: 'no_retained_output:roomote',
-            error: null,
-          };
+          return buildTaskRunLogResult(job, responseVendor, {
+            skippedReason: `no_retained_output:${responseVendor}`,
+          });
         }
 
+        const skippedReason = getSkippedReason(job, providerInfo, outputSource);
         if (skippedReason) {
-          return {
-            id: job.id,
-            status: job.status,
-            vendor: responseVendor,
-            machineId: job.machineId,
-            sandboxCmdId: job.sandboxCmdId,
-            output: null,
-            skippedReason,
-            error: null,
-          };
+          return buildTaskRunLogResult(job, responseVendor, { skippedReason });
         }
 
         try {
@@ -204,27 +204,11 @@ export async function getTaskComputeLogs(
             signal: c.req.raw.signal,
           });
 
-          return {
-            id: job.id,
-            status: job.status,
-            vendor: responseVendor,
-            machineId: job.machineId,
-            sandboxCmdId: job.sandboxCmdId,
-            output,
-            skippedReason: null,
-            error: null,
-          };
+          return buildTaskRunLogResult(job, responseVendor, { output });
         } catch (error) {
-          return {
-            id: job.id,
-            status: job.status,
-            vendor: responseVendor,
-            machineId: job.machineId,
-            sandboxCmdId: job.sandboxCmdId,
-            output: null,
-            skippedReason: null,
+          return buildTaskRunLogResult(job, responseVendor, {
             error: error instanceof Error ? error.message : String(error),
-          };
+          });
         }
       }),
     );
