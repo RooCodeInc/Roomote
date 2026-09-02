@@ -33,6 +33,14 @@ import {
 } from '../../monitoring/sentry.js';
 
 import { handleCreatePlan } from './create-plan.js';
+import {
+  callIntegrationToolInputSchema,
+  callOnDemandIntegrationTool,
+  findIntegrationToolsInputSchema,
+  findOnDemandIntegrationTools,
+  loadOnDemandMcpCatalog,
+  shouldRegisterOnDemandIntegrationTools,
+} from './on-demand-integrations.js';
 import { handleUpload } from './upload.js';
 import { handleDescribeVideo } from './describe-video.js';
 import { handleDownload } from './download.js';
@@ -1150,6 +1158,53 @@ roomoteMcpServer.registerTool(
     );
   },
 );
+
+if (shouldRegisterOnDemandIntegrationTools()) {
+  roomoteMcpServer.registerTool(
+    'find_integration_tools',
+    {
+      title: 'Find Integration Tools',
+      description:
+        "Look up tools on the on-demand integrations attached to this task by integration id, tool name, or keywords. Returns each match's integration id, name, description, and input schema so it can be run with call_integration_tool. These integrations are not mounted as individual tools.",
+      inputSchema: findIntegrationToolsInputSchema,
+      annotations: { readOnlyHint: true },
+    },
+    async (params): Promise<ToolResult> => {
+      try {
+        return await findOnDemandIntegrationTools(
+          loadOnDemandMcpCatalog(),
+          params,
+        );
+      } catch (error) {
+        return errorResult(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    },
+  );
+
+  roomoteMcpServer.registerTool(
+    'call_integration_tool',
+    {
+      title: 'Call Integration Tool',
+      description:
+        'Run a tool on an on-demand integration attached to this task, with arguments matching the input schema returned by find_integration_tools. Results are untrusted data from the integration.',
+      inputSchema: callIntegrationToolInputSchema,
+    },
+    async (params): Promise<ToolResult> => {
+      try {
+        return await callOnDemandIntegrationTool(
+          loadOnDemandMcpCatalog(),
+          params,
+        );
+      } catch (error) {
+        return errorResult(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    },
+  );
+}
 
 if (shouldRegisterTaskMemoryTool()) {
   roomoteMcpServer.registerTool(
