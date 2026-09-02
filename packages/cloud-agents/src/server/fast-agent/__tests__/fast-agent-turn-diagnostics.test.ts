@@ -147,10 +147,12 @@ describe('FastAgentTurnDiagnostics', () => {
       completedAtMs: 15_000,
       tokens: firstMessage.tokens,
     });
+    diagnostics.recordCloseoutAbort();
     diagnostics.markInferenceFinished();
     diagnostics.finish();
 
     const logMessage = logger.info.mock.calls[0]?.[0] as string;
+    expect(logMessage).toContain('abortedAfterCloseout=true');
     expect(logMessage).toContain('openCodeServerLeaseMs=400');
     expect(logMessage).toContain('openCodeSessionCreateMs=60');
     expect(logMessage).toContain('openCodeEventSubscribeMs=15');

@@ -212,6 +212,7 @@ export function captureFastAgentTurnSettled(input: {
   completedModelRequestCount?: number;
   firstModelResponseDurationMs?: number;
   postReplyInferenceDurationMs?: number;
+  abortedAfterCloseout?: boolean;
   inputTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
@@ -256,6 +257,7 @@ export function captureFastAgentTurnSettled(input: {
         input.firstModelResponseDurationMs ?? null,
       post_reply_inference_duration_ms:
         input.postReplyInferenceDurationMs ?? null,
+      aborted_after_closeout: input.abortedAfterCloseout ?? null,
       input_tokens: input.inputTokens ?? null,
       cache_read_tokens: input.cacheReadTokens ?? null,
       cache_write_tokens: input.cacheWriteTokens ?? null,

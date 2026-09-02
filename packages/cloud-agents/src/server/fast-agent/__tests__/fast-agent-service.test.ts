@@ -472,6 +472,67 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('cuts the trailing model request once the closeout is delivered', async () => {
+    const adapter = callbacks();
+    const abortedAtSecondRequest = vi.fn();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        await options.onAssistantMessageStarted?.({
+          id: 'assistant-1',
+          sessionId: 'opencode-session-1',
+          parentId: 'user-1',
+          createdAtMs: 100,
+        });
+        await invokeTool(
+          nativeToolNames.sendChatReply,
+          { purpose: 'closeout', message: 'Done.' },
+          undefined,
+          'assistant-1',
+        );
+        const abortedBeforeNextRequest = options.signal?.aborted ?? false;
+        // OpenCode starts the next model request after the tool result.
+        await options.onAssistantMessageStarted?.({
+          id: 'assistant-2',
+          sessionId: 'opencode-session-1',
+          parentId: 'user-1',
+          createdAtMs: 200,
+        });
+        abortedAtSecondRequest(
+          abortedBeforeNextRequest,
+          options.signal?.aborted ?? false,
+        );
+        // The prompt runner surfaces the abort reason as the request error.
+        throw options.signal?.reason ?? new Error('not aborted');
+      },
+    );
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+    });
+
+    expect(result).toBe('Done.');
+    expect(abortedAtSecondRequest).toHaveBeenCalledWith(false, true);
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'Done.',
+    });
+    expect(mocks.classifyInferenceError).not.toHaveBeenCalled();
+    expect(mocks.captureInferenceAttemptOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'success', attemptNumber: 1 }),
+    );
+    expect(mocks.captureTurnSettled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'success',
+        abortedAfterCloseout: true,
+      }),
+    );
+  });
+
   it('posts an immediate answer through a native chat tool', async () => {
     const adapter = callbacks();
 
