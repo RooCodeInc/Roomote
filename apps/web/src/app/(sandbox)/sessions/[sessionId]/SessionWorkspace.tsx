@@ -5,12 +5,15 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
+import { useMediaQuery } from 'usehooks-ts';
 import {
   getReasoningEffortLabel,
   isTaskExecutingTurn,
@@ -656,7 +659,7 @@ function SessionInfoPanel({
 
 type BaseWorkspacePanel =
   | { kind: 'info' }
-  | { kind: 'tasks' }
+  | { kind: 'tasks'; autoOpened?: boolean }
   | { kind: 'artifacts' }
   | { kind: 'nested'; taskId: string };
 
@@ -726,6 +729,32 @@ export function SessionWorkspace({
   const selectedTaskId = searchParams.get('task');
   const selectedTask = taskCards.find((task) => task.taskId === selectedTaskId);
   const panelOpen = panel !== null || Boolean(selectedTask);
+  const isMdOrLarger = useMediaQuery('(min-width: 768px)', {
+    initializeWithValue: false,
+  });
+  const previousTaskStateRef = useRef<{
+    taskCount: number;
+    runningTaskCount: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const previousTaskState = previousTaskStateRef.current;
+    if (
+      isMdOrLarger &&
+      previousTaskState?.taskCount === 1 &&
+      previousTaskState.runningTaskCount > 0 &&
+      taskCards.length >= 2 &&
+      panel === null &&
+      !selectedTask
+    ) {
+      setPanel({ kind: 'tasks', autoOpened: true });
+    }
+
+    previousTaskStateRef.current = {
+      taskCount: taskCards.length,
+      runningTaskCount,
+    };
+  }, [isMdOrLarger, panel, runningTaskCount, selectedTask, taskCards.length]);
 
   const selectTask = useCallback(
     (taskId: string | null) => {
@@ -871,6 +900,12 @@ export function SessionWorkspace({
       >
         <ResponsiveWorkspacePanels
           isPanelOpen={panelOpen}
+          mainSize={
+            panel?.kind === 'tasks' && panel.autoOpened ? 66.6667 : undefined
+          }
+          panelSize={
+            panel?.kind === 'tasks' && panel.autoOpened ? 33.3333 : undefined
+          }
           main={
             <SessionPullRequestsContext.Provider value={sessionPullRequests}>
               <SessionRunningTaskCountContext.Provider value={runningTaskCount}>
