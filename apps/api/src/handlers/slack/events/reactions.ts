@@ -1,6 +1,7 @@
 import { acquireRedisLock } from '@roomote/redis';
 import {
   AGENT_DISPLAY_NAME,
+  ALL_REPOSITORIES,
   formatErrorForLog,
   normalizeSetupNewState,
 } from '@roomote/types';
@@ -36,6 +37,7 @@ import {
 import { apiLogger } from '../../../logging.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../../call-roomote-via-emoji.js';
 import { launchClaimedSuggestedTask } from '../../tasks/suggestion-launch.js';
+import { resolveSuggestedTaskLaunchTarget } from '../../tasks/suggestion-launch-target.js';
 import {
   SLACK_SETUP_SUGGESTION_LOCK_PREFIX,
   TASK_SUGGESTION_TYPES,
@@ -161,6 +163,8 @@ async function finalizeSuggestionLaunch(params: {
 
 const REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE =
   'I could not start this because your linked Roomote account was removed. Ask an admin to restore your access, then reconnect Slack.';
+const UNLINKED_SLACK_ACCOUNT_FAST_LAUNCH_FAILURE =
+  'This suggestion starts in Fast mode, which needs a linked Roomote account. Link your account, then react again.';
 
 async function launchTaskSuggestionTaskFromReaction({
   teamId,
@@ -298,6 +302,18 @@ async function launchTaskSuggestionTaskFromReaction({
   const usesRouterLaunch =
     suggestionType === 'suggested_tasks' &&
     suggestionCard.metadata?.launchRouting === 'router';
+  const explicitLaunchTarget =
+    suggestionType === 'suggested_tasks' &&
+    typeof suggestionCard.metadata?.launchTarget === 'string'
+      ? suggestionCard.metadata.launchTarget
+      : null;
+  const launchTarget = resolveSuggestedTaskLaunchTarget({
+    launchTarget: explicitLaunchTarget,
+    usesRouterLaunch,
+    targetEnvironmentId: workItem.targetEnvironmentId,
+    targetRepositoryFullName: workItem.targetRepositoryFullName,
+  });
+  const usesFastLaunchTarget = launchTarget.kind === 'fast';
 
   let suggestionWorkspace: SuggestionLaunchWorkspace | null = null;
   let launchFailureReason: string | null = null;
@@ -368,10 +384,20 @@ async function launchTaskSuggestionTaskFromReaction({
         workspaceDisplayName: matchingEnvironment.name,
       };
     }
-  } else if (suggestionType === 'suggested_tasks' && !usesRouterLaunch) {
+  } else if (
+    suggestionType === 'suggested_tasks' &&
+    !usesRouterLaunch &&
+    !usesFastLaunchTarget
+  ) {
     const resolved = await resolveSuggestionLaunchWorkspaceFromMetadata({
       targetRepositoryFullName: workItem.targetRepositoryFullName,
-      targetEnvironmentId: workItem.targetEnvironmentId,
+      // An explicit environment target survives the work item's column being
+      // cleared (environment deleted), so the resolver reports it unavailable
+      // instead of "no target repository".
+      targetEnvironmentId:
+        launchTarget.kind === 'environment'
+          ? launchTarget.environmentId
+          : workItem.targetEnvironmentId,
       readinessMessage: workItem.readinessMessage,
     });
     suggestionWorkspace = resolved.workspace;
@@ -401,6 +427,23 @@ async function launchTaskSuggestionTaskFromReaction({
     return true;
   }
 
+  // A Fast-targeted suggestion has no coding fallback and a Fast turn needs a
+  // linked user, so an unlinked reactor gets the link prompt before any claim
+  // (the other chat surfaces gate on account linking the same way).
+  if (usesFastLaunchTarget && !reactingUserMapping.activeMapping) {
+    await postSuggestionLaunchFailureMessage({
+      slack,
+      channelId,
+      title: `${buildSuggestionBadgePrefix({
+        category: workItem.category,
+        priority: workItem.priority,
+      })}${workItem.title}`,
+      brief: suggestionBrief,
+      reason: UNLINKED_SLACK_ACCOUNT_FAST_LAUNCH_FAILURE,
+    });
+    return true;
+  }
+
   const claimedWorkItem = await claimWorkItem(db, { id: workItemId });
 
   if (!claimedWorkItem) {
@@ -412,7 +455,7 @@ async function launchTaskSuggestionTaskFromReaction({
   // reclaimed cannot stomp the new claimant's state.
   const claimedAt = claimedWorkItem.launchClaimedAt;
 
-  if (!usesRouterLaunch && !suggestionWorkspace) {
+  if (!usesRouterLaunch && !usesFastLaunchTarget && !suggestionWorkspace) {
     await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
 
     apiLogger.warn(
@@ -458,7 +501,9 @@ async function launchTaskSuggestionTaskFromReaction({
     category: workItem.category,
     priority: workItem.priority,
     targetRepositoryFullName: !usesRouterLaunch
-      ? workItem.targetRepositoryFullName
+      ? launchTarget.kind === 'legacy_pinned'
+        ? workItem.targetRepositoryFullName
+        : null
       : null,
   });
 
@@ -501,8 +546,22 @@ async function launchTaskSuggestionTaskFromReaction({
         // Pinned scan suggestions still enter Fast; the pin only selects the
         // verified workspace if this launch falls back to coding.
         fastEligible: suggestionType === 'suggested_tasks',
-        userDefaultEnabled: Boolean(activeUserMapping),
+        userDefaultEnabled:
+          usesFastLaunchTarget ||
+          ((launchTarget.kind === 'router' ||
+            launchTarget.kind === 'legacy_pinned') &&
+            Boolean(activeUserMapping)),
         fastAvailable: Boolean(activeUserMapping),
+        ...(launchTarget.kind === 'fast' ||
+        launchTarget.kind === 'environment' ||
+        launchTarget.kind === 'all_repositories'
+          ? {
+              requiredMode:
+                launchTarget.kind === 'fast'
+                  ? ('fast' as const)
+                  : ('coding' as const),
+            }
+          : {}),
       },
       launch: async (launchMode) => {
         if (launchMode === 'fast') {
@@ -582,7 +641,10 @@ async function launchTaskSuggestionTaskFromReaction({
           agentPromptText: suggestionTaskPrompt,
           ts: launchThreadTs,
           threadTs: launchThreadTs,
-          repo: suggestionWorkspace.repoForPayload,
+          repo:
+            launchTarget.kind === 'all_repositories'
+              ? ALL_REPOSITORIES
+              : suggestionWorkspace.repoForPayload,
           environmentId: suggestionWorkspace.environmentId,
           readinessMessage: suggestionWorkspace.readinessMessage ?? undefined,
           webPath: suggestionType === 'setup_onboarding' ? '/setup' : undefined,

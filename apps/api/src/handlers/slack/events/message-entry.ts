@@ -6,6 +6,7 @@ import {
   syncAutoStartChannelCacheBestEffort,
 } from '@roomote/redis';
 import {
+  FastAgentDurableRetryScheduledError,
   hasFastAgentSession,
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS,
 } from '@roomote/cloud-agents/server';
@@ -959,6 +960,59 @@ export async function processSlackChannelAutoStartTask(params: {
         }
       }
 
+      // Bot-authored feed messages get the same first hop as a human post in
+      // this channel: a Fast turn under the automation launch identity, with
+      // the direct task launch below as the fallback. The launch gate above
+      // still decides whether the message warrants any response at all.
+      if (isBotAuthored) {
+        const fastStart = await startFastAgentResponse({
+          event: { ...event, user: launchIdentity.slackUserId },
+          slackInstallation,
+          slack,
+          userId: launchIdentity.launchUserId,
+          teamId,
+          continuation: true,
+          directedAtRoomote: mentionsSlackBot(
+            event,
+            slackInstallation.botUserId,
+          ),
+          delegatedTaskInitiator: {
+            kind: 'automation',
+            key: 'slack_channel_auto_start',
+            ...(typeof event.user === 'string'
+              ? { actor: { externalId: event.user } }
+              : {}),
+          },
+          processingReactionName: ackEmoji,
+          errorLogPrefix: `❌ Background fast-agent response failed for configured channel auto-start thread ${threadId}:`,
+        });
+
+        if (fastStart.accepted) {
+          if (channelAutoStartDebug) {
+            await postChannelAutoStartRoutingDebugBestEffort({
+              slack,
+              sourceChannelId: event.channel,
+              sourceChannelName,
+              threadId,
+              messageText: event.text,
+              launchMode: channelAutoStartLaunchMode,
+              llmDecision: channelAutoStartDebug.llmDecision,
+              llmReason: channelAutoStartDebug.reason,
+              taskOutcome: 'started',
+              taskOutcomeDetails: 'Routed to Fast.',
+            });
+          }
+          apiLogger.info(
+            `[SlackWebhook] Configured channel auto-start routed to Fast thread_id=${threadId} channel=${event.channel}`,
+          );
+          return;
+        }
+
+        apiLogger.warn(
+          `[SlackWebhook] Configured channel auto-start Fast entry not accepted (${fastStart.reason}); falling back to direct task launch for thread ${threadId}`,
+        );
+      }
+
       if (humanUserMapping && typeof event.user === 'string') {
         await recordInboundSlackConversationMessage({
           event: { ...event, user: event.user },
@@ -1479,6 +1533,56 @@ async function processAutomatedAppMentionTask(params: {
       return { handled: false };
     },
     onFresh: async () => {
+      // Same first hop as a human mention: give Fast the turn under the
+      // automation launch identity and let it delegate coding work itself.
+      // The direct task launch below stays as the fallback so an automated
+      // ticket is never dropped when the Fast turn cannot start.
+      const { ackEmoji } = await resolveSlackReactionNames();
+      const { activeMapping: launchUserMapping } =
+        launchIdentity.slackUserId === slackInstallation.botUserId
+          ? { activeMapping: null }
+          : await lookupSlackUserMapping({
+              slackUserId: launchIdentity.slackUserId,
+              teamId,
+            });
+      const fastStart = await startFastAgentResponse({
+        event: threadEvent,
+        slackInstallation,
+        ...(launchUserMapping ? { userMapping: launchUserMapping } : {}),
+        slack,
+        userId: launchIdentity.launchUserId,
+        teamId,
+        continuation: true,
+        directedAtRoomote: true,
+        delegatedTaskInitiator: {
+          kind: 'automation',
+          key: 'slack_channel_auto_start',
+          ...(typeof event.user === 'string'
+            ? { actor: { externalId: event.user } }
+            : {}),
+        },
+        resolveActiveTasks: () =>
+          resolveFastAgentReplyTasks({
+            slack,
+            slackTeamId: teamId,
+            channelId: event.channel,
+            threadTs: threadId,
+          }),
+        processingReactionName: ackEmoji,
+        errorLogPrefix: `❌ Background fast-agent response failed for automated mention thread ${threadId}:`,
+      });
+
+      if (fastStart.accepted) {
+        apiLogger.info(
+          `[SlackWebhook] Automated app_mention routed to Fast thread_id=${threadId} channel=${event.channel} app_id=${event.app_id}`,
+        );
+        return true;
+      }
+
+      apiLogger.warn(
+        `[SlackWebhook] Automated app_mention Fast entry not accepted (${fastStart.reason}); falling back to direct task launch for thread ${threadId}`,
+      );
+
       const { images, attachmentTexts, videoDescriptions } =
         await processSlackAttachments({
           slack,
@@ -1624,7 +1728,8 @@ async function startAutomatedAppMentionTaskWithLock(params: {
 export function startFastAgentResponse(params: {
   event: SlackEvent;
   slackInstallation: SlackInstallation;
-  userMapping: SlackUserMapping;
+  /** Absent only for automation-identity turns (no linked human author). */
+  userMapping?: SlackUserMapping;
   slack: SlackNotifier;
   userId: string;
   teamId: string;
@@ -1634,9 +1739,13 @@ export function startFastAgentResponse(params: {
   processingReactionName: string;
   isExistingConversation?: boolean;
   directedAtRoomote?: boolean;
+  /** Attribution for tasks Fast delegates from this turn; automation-identity
+   * turns pass their automation initiator so delegated work keeps automation
+   * provenance instead of appearing installer-initiated. */
+  delegatedTaskInitiator?: TaskInitiator;
   errorLogPrefix: string;
 }): Promise<FastAgentStartResult> {
-  const { errorLogPrefix, ...fastAgentParams } = params;
+  const { errorLogPrefix, delegatedTaskInitiator, ...fastAgentParams } = params;
   return startAcceptedFastAgentTurn({
     run: ({ onAccepted, onRejected }) =>
       processFastAgentMessage({
@@ -1647,6 +1756,9 @@ export function startFastAgentResponse(params: {
           slack: params.slack,
           userId: params.userId,
           teamId: params.teamId,
+          ...(delegatedTaskInitiator
+            ? { initiator: delegatedTaskInitiator }
+            : {}),
           ...(params.slackInstallation.teamDomain
             ? { teamDomain: params.slackInstallation.teamDomain }
             : {}),
@@ -1658,6 +1770,13 @@ export function startFastAgentResponse(params: {
         onRejected,
       }),
     onError: (error) => {
+      if (error instanceof FastAgentDurableRetryScheduledError) {
+        // Not a failure: the queue re-runs this turn at the scheduled time.
+        console.info(
+          `[SlackWebhook] Fast turn parked for a durable retry: ${error.message}`,
+        );
+        return;
+      }
       console.error(
         errorLogPrefix,
         error instanceof Error ? error.message : String(error),

@@ -26,6 +26,7 @@ import {
 } from '../opencode-server/harness';
 import type {
   OpenCodeGlobalEvent,
+  OpenCodeMessageInfo,
   OpenCodeSessionMessage,
 } from '../opencode-server/types';
 
@@ -491,12 +492,16 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('records inference usage for completed child-session (subagent) assistant messages', async () => {
+  it('persists linked child-session assistant messages and records their usage', async () => {
     const { client, harness } = createHarness();
     const inferenceUsageEvents: HarnessInferenceUsageEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
 
     harness.subscribeRuntimeInferenceUsage((event) =>
       inferenceUsageEvents.push(event),
+    );
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
     );
 
     try {
@@ -516,7 +521,30 @@ describe('OpenCodeServerHarness', () => {
         expect(client.promptAsync).toHaveBeenCalledTimes(1);
       });
 
-      const childAssistantInfo = {
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'prt_task_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            tool: 'task',
+            callID: 'call_task_1',
+            state: {
+              status: 'running',
+              input: {
+                description: 'Explore the code',
+                prompt: 'Inspect the implementation.',
+                subagent_type: 'explore',
+              },
+              metadata: { sessionId: 'ses_child_1' },
+            },
+          },
+        },
+      });
+
+      const childAssistantInfo: OpenCodeMessageInfo = {
         id: 'msg_child_1',
         sessionID: 'ses_child_1',
         role: 'assistant',
@@ -538,6 +566,18 @@ describe('OpenCodeServerHarness', () => {
           },
         },
       };
+      client.message.mockResolvedValue({
+        info: childAssistantInfo,
+        parts: [
+          {
+            id: 'prt_child_text_1',
+            sessionID: 'ses_child_1',
+            messageID: 'msg_child_1',
+            type: 'text',
+            text: 'Child investigation complete.',
+          },
+        ],
+      });
 
       // Incomplete child assistant messages are ignored.
       await client.emit({
@@ -581,8 +621,26 @@ describe('OpenCodeServerHarness', () => {
           messageCompletedAt: new Date(20),
         },
       ]);
-      // Child-session usage never reaches the main-session transcript fetch.
-      expect(client.message).not.toHaveBeenCalled();
+      expect(client.message).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'ses_child_1',
+          messageId: 'msg_child_1',
+        }),
+      );
+      expect(persistedEnvelopes).toContainEqual(
+        expect.objectContaining({
+          eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+          contentBlocks: [
+            { type: 'text', text: 'Child investigation complete.' },
+          ],
+          metadata: expect.objectContaining({
+            sessionId: 'ses_child_1',
+            parentSessionId: 'ses_1',
+            agentType: 'explore',
+            isSubagent: true,
+          }),
+        }),
+      );
     } finally {
       harness.dispose();
     }

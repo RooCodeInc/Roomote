@@ -17,6 +17,7 @@ const {
   sessionChildrenMock,
   sessionCreateMock,
   sessionMessagesMock,
+  sessionPromptAsyncMock,
   sessionPromptMock,
 } = vi.hoisted(() => ({
   createOpencodeClientMock: vi.fn(),
@@ -32,6 +33,7 @@ const {
   sessionChildrenMock: vi.fn(),
   sessionCreateMock: vi.fn(),
   sessionMessagesMock: vi.fn(),
+  sessionPromptAsyncMock: vi.fn(),
   sessionPromptMock: vi.fn(),
 }));
 
@@ -145,6 +147,7 @@ describe('resolveOpenCodeSmallModel', () => {
         children: sessionChildrenMock,
         create: sessionCreateMock,
         messages: sessionMessagesMock,
+        promptAsync: sessionPromptAsyncMock,
         prompt: sessionPromptMock,
       },
     });
@@ -155,6 +158,10 @@ describe('resolveOpenCodeSmallModel', () => {
     });
     sessionChildrenMock.mockResolvedValue({ data: [], error: undefined });
     sessionMessagesMock.mockResolvedValue({ data: [], error: undefined });
+    sessionPromptAsyncMock.mockResolvedValue({
+      data: undefined,
+      error: undefined,
+    });
     configProvidersMock.mockResolvedValue({
       data: { providers: [], default: {} },
       error: undefined,
@@ -286,6 +293,30 @@ describe('resolveOpenCodeSmallModel', () => {
     eventSubscribeMock.mockResolvedValue({
       stream: (async function* () {
         yield {
+          type: 'message.updated' as const,
+          properties: {
+            info: {
+              id: 'assistant-message-1',
+              sessionID: 'session-1',
+              parentID: 'user-message-1',
+              role: 'assistant' as const,
+              time: { created: 150 },
+            },
+          },
+        };
+        yield {
+          type: 'message.updated' as const,
+          properties: {
+            info: {
+              id: 'assistant-message-1',
+              sessionID: 'session-1',
+              parentID: 'user-message-1',
+              role: 'assistant' as const,
+              time: { created: 150, completed: 175 },
+            },
+          },
+        };
+        yield {
           type: 'session.created',
           properties: {
             sessionID: 'subagent-session-1',
@@ -320,6 +351,8 @@ describe('resolveOpenCodeSmallModel', () => {
     const onModelResolved = vi.fn();
     const onPromptStarted = vi.fn();
     const onMessageCompleted = vi.fn();
+    const onAssistantMessageStarted = vi.fn();
+    const onAssistantMessageCompleted = vi.fn();
     const onSubagentSessionReady = vi.fn(() => markSubagentReady());
     const session: { id?: string } = {};
 
@@ -342,6 +375,8 @@ describe('resolveOpenCodeSmallModel', () => {
             send_chat_reply: true,
           },
           onModelResolved,
+          onAssistantMessageStarted,
+          onAssistantMessageCompleted,
           onMessageCompleted,
           onPromptStarted,
           onSessionReady,
@@ -359,6 +394,18 @@ describe('resolveOpenCodeSmallModel', () => {
       sessionId: 'session-1',
       createdAtMs: 100,
       completedAtMs: 200,
+    });
+    expect(onAssistantMessageStarted).toHaveBeenCalledWith({
+      id: 'assistant-message-1',
+      sessionId: 'session-1',
+      parentId: 'user-message-1',
+      createdAtMs: 150,
+    });
+    expect(onAssistantMessageCompleted).toHaveBeenCalledWith({
+      id: 'assistant-message-1',
+      sessionId: 'session-1',
+      createdAtMs: 150,
+      completedAtMs: 175,
     });
     expect(onPromptStarted).toHaveBeenCalledOnce();
     expect(onSessionReady).toHaveBeenCalledWith('session-1');
@@ -916,6 +963,75 @@ describe('resolveOpenCodeSmallModel', () => {
       }),
       expect.any(Object),
     );
+  });
+
+  it('exposes native prompt_async steering only while the Fast prompt is active', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    let finishPrompt: ((value: unknown) => void) | undefined;
+    sessionPromptMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishPrompt = resolve;
+        }),
+    );
+    const onNativeSteerClosed = vi.fn();
+    let steer:
+      | ((input: {
+          messageId: string;
+          text: string;
+          files?: Array<{ mime: string; url: string }>;
+        }) => Promise<void>)
+      | undefined;
+    const { generateTrackedNonTaskTextInOpenCodeSession } =
+      await import('../non-task-provider-usage.js');
+
+    const result = generateTrackedNonTaskTextInOpenCodeSession(
+      { surface: 'fast_agent', prompt: 'Initial request.' },
+      {},
+      {
+        directory: '/tmp/roomote-fast-native-test',
+        tools: { '*': false, send_chat_reply: true },
+        onNativeSteerReady: (inject) => {
+          steer = inject;
+        },
+        onNativeSteerClosed,
+      },
+    );
+    await vi.waitFor(() => expect(steer).toBeTypeOf('function'));
+    await steer!({
+      messageId: 'msg_019cf00dbabe00000000000000',
+      text: 'Use the corrected requirement.',
+      files: [{ mime: 'image/png', url: 'data:image/png;base64,aGVsbG8=' }],
+    });
+
+    expect(sessionPromptAsyncMock).toHaveBeenCalledWith(
+      {
+        sessionID: 'session-1',
+        directory: '/tmp/roomote-fast-native-test',
+        messageID: 'msg_019cf00dbabe00000000000000',
+        parts: [
+          { type: 'text', text: 'Use the corrected requirement.' },
+          {
+            type: 'file',
+            mime: 'image/png',
+            url: 'data:image/png;base64,aGVsbG8=',
+          },
+        ],
+      },
+      expect.any(Object),
+    );
+
+    finishPrompt?.({
+      data: {
+        info: {},
+        parts: [{ type: 'text', text: 'updated answer' }],
+      },
+      error: undefined,
+    });
+    await expect(result).resolves.toBe('updated answer');
+    expect(onNativeSteerClosed).toHaveBeenCalledOnce();
   });
 
   it('classifies a missing held OpenCode session for cold bootstrap recovery', async () => {

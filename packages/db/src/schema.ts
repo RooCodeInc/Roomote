@@ -1421,7 +1421,8 @@ export const taskRuns = pgTable(
      * The launching or most recently acting human for this run; null for
      * automation runs. THE ONLY user column on runs. Set at enqueue, updated
      * by follow-up senders/resumers. Run tokens and MCP OAuth key off it,
-     * falling back to the deployment service principal when null.
+     * falling back to the task's durable human owner and then the deployment
+     * service principal when null.
      */
     actingUserId: text('acting_user_id').references(() => users.id),
     // Runtime payload dispatch key (renamed from `type`). No query outside
@@ -3121,10 +3122,10 @@ export const fastAgentConversations = pgTable(
 /**
  * fast_agent_parent_events
  *
- * Durable admission queue for lifecycle events returning from delegated tasks
- * to their Fast parent conversation. Producers persist and acknowledge these
- * rows without waiting for the parent turn lock; the BullMQ drainer later
- * processes each conversation in creation order under one active-turn lock.
+ * Durable admission queue for events entering a Fast conversation while its
+ * turn lock is busy. Human follow-ups may be injected into the lock owner's
+ * native OpenCode generation; ambient and recovery events are drained later
+ * in creation order under one active-turn lock.
  */
 export const fastAgentParentEvents = pgTable(
   'fast_agent_parent_events',
@@ -3144,6 +3145,31 @@ export const fastAgentParentEvents = pgTable(
     lastError: text('last_error'),
     deliveredAt: timestamp('delivered_at'),
     discardedAt: timestamp('discarded_at'),
+    /**
+     * 'inline' marks a human turn the accepting process persisted before
+     * running it itself (durable admission). Null rows were queued for the
+     * worker as before. Both drain through the same queue path.
+     */
+    admission: text('admission').$type<'inline'>(),
+    /**
+     * While set and in the future, a live inline owner is executing this
+     * row; the drain and recovery sweep leave it alone. The owner renews it
+     * as it works and clears it on interruption so recovery starts at once.
+     */
+    claimedUntil: timestamp('claimed_until'),
+    /**
+     * Durable retry scheduling for an inline-admitted turn: while set and
+     * in the future, the turn is waiting out an inference retry backoff
+     * with no live owner, and the drain and recovery sweep leave it alone
+     * until the time arrives. The previous release ignores this column and
+     * would re-run such a row immediately, which is safe (N-1 rollback).
+     */
+    retryAt: timestamp('retry_at'),
+    /**
+     * Automatic inference retries this turn has consumed across every
+     * owner, so the per-turn retry cap holds through restarts and handoffs.
+     */
+    inferenceRetries: integer('inference_retries').notNull().default(0),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },

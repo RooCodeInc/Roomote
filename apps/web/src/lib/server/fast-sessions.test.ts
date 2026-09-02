@@ -11,7 +11,7 @@ import {
   taskFactory,
   userFactory,
 } from '@roomote/db/server';
-import { RunStatus } from '@roomote/types';
+import { ACP_ENVELOPE_EVENT_TYPES, RunStatus } from '@roomote/types';
 
 import {
   findAccessibleFastSession,
@@ -20,6 +20,7 @@ import {
   getFastSessionTasks,
   getFastSessionMessagesSince,
   getFastSessionDisplayTitle,
+  getFastSessionSuggestableMessages,
   updateFastSessionPrReviewOfferStatus,
 } from './fast-sessions';
 
@@ -87,6 +88,71 @@ async function createFastMessage({
 }
 
 describe('Fast session queries', () => {
+  it('returns only the newest 60 visible conversational suggestion messages', async () => {
+    const owner = await userFactory.create();
+    const conversation = await createFastSession({
+      userId: owner.id,
+      conversationId: 'bounded-composer-suggestion-history',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+
+    await db.insert(fastAgentMessages).values([
+      ...Array.from({ length: 61 }, (_, index) => ({
+        conversationId: conversation.id,
+        eventId: `suggestion-message-${index}`,
+        turnId: `turn-${index}`,
+        turnSeq: 0,
+        ts: index + 1,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant' as const,
+        contentBlocks: [
+          { type: 'text' as const, text: `suggestion-message-${index}` },
+        ],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+        source: 'web',
+      })),
+      {
+        conversationId: conversation.id,
+        eventId: 'hidden-suggestion-message',
+        turnId: 'hidden-turn',
+        turnSeq: 0,
+        ts: 62,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user' as const,
+        contentBlocks: [{ type: 'text' as const, text: 'hidden prompt' }],
+        metadata: { visibleInTranscript: false },
+        payload: {},
+        source: 'web',
+      },
+      {
+        conversationId: conversation.id,
+        eventId: 'tool-suggestion-message',
+        turnId: 'tool-turn',
+        turnSeq: 0,
+        ts: 63,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+        role: 'tool' as const,
+        contentBlocks: [{ type: 'text' as const, text: 'tool payload' }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+        source: 'web',
+      },
+    ]);
+
+    const messages = await getFastSessionSuggestableMessages(conversation.id);
+
+    expect(messages).toHaveLength(60);
+    expect(messages[0]?.text).toBe('suggestion-message-1');
+    expect(messages.at(-1)?.text).toBe('suggestion-message-60');
+    expect(messages.map((message) => message.text)).not.toContain(
+      'hidden prompt',
+    );
+    expect(messages.map((message) => message.text)).not.toContain(
+      'tool payload',
+    );
+  });
+
   it('prefers the unified Session title for live Fast updates', async () => {
     const owner = await userFactory.create();
     const conversation = await createFastSession({
@@ -115,7 +181,7 @@ describe('Fast session queries', () => {
     ).resolves.toBe('Manual unified title');
   });
 
-  it('applies the caller scope to detail lookups', async () => {
+  it('shares detail lookups deployment-wide like tasks', async () => {
     const owner = await userFactory.create();
     const otherUser = await userFactory.create();
     const session = await createFastSession({
@@ -126,7 +192,7 @@ describe('Fast session queries', () => {
 
     await expect(
       getFastSessionById({ userId: otherUser.id, isAdmin: false }, session.id),
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({ id: session.id, userId: owner.id });
     await expect(
       getFastSessionById({ userId: otherUser.id, isAdmin: true }, session.id),
     ).resolves.toMatchObject({ id: session.id, userId: owner.id });
@@ -289,7 +355,11 @@ describe('Fast session queries', () => {
   });
 
   it('reads canonical messages in timestamp and turn sequence order', async () => {
-    const owner = await userFactory.create();
+    const owner = await userFactory.create({
+      name: 'Slack Sender',
+      email: 'sender@example.com',
+      imageUrl: 'https://example.com/sender.png',
+    });
     const session = await createFastSession({
       userId: owner.id,
       conversationId: 'ordered-session',
@@ -308,6 +378,7 @@ describe('Fast session queries', () => {
       ts: 100,
       role: 'user',
       eventType: 'roomote_runtime.user_prompt',
+      metadata: { visibleInTranscript: true, userId: owner.id },
     });
 
     const result = await getFastSessionById(
@@ -319,6 +390,11 @@ describe('Fast session queries', () => {
       'turn-1:user',
       'turn-1:assistant:0',
     ]);
+    expect(result?.messages[0]).toMatchObject({
+      userName: 'Slack Sender',
+      userEmail: 'sender@example.com',
+      userImageUrl: 'https://example.com/sender.png',
+    });
   });
 
   it('does not fall back to compatibility messages for existing sessions', async () => {
@@ -372,7 +448,7 @@ describe('Fast session queries', () => {
     });
   });
 
-  it('grants participants access to shared conversations they spoke in', async () => {
+  it('grants every deployment user access to shared conversations', async () => {
     const owner = await userFactory.create();
     const participant = await userFactory.create();
     const bystander = await userFactory.create();
@@ -397,7 +473,7 @@ describe('Fast session queries', () => {
 
     await expect(
       getFastSessionById({ userId: bystander.id, isAdmin: false }, session.id),
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({ id: session.id });
   });
 
   it('excludes transcript-hidden messages such as platform-event prompts', async () => {
@@ -500,7 +576,7 @@ describe('Fast session queries', () => {
   });
 
   it('streams only rows updated after the cursor and advances it', async () => {
-    const owner = await userFactory.create();
+    const owner = await userFactory.create({ name: 'Stream Sender' });
     const session = await createFastSession({
       userId: owner.id,
       conversationId: 'stream-session',
@@ -513,6 +589,11 @@ describe('Fast session queries', () => {
       ts: 1,
       role: 'user',
       eventType: 'roomote_runtime.user_prompt',
+      metadata: {
+        visibleInTranscript: true,
+        userId: owner.id,
+        userName: 'Slack Display Name',
+      },
     });
     await createFastMessage({
       conversationId: session.id,
@@ -528,6 +609,10 @@ describe('Fast session queries', () => {
     expect(first.messages.map((message) => message.eventId)).toEqual([
       'turn-1:user',
     ]);
+    expect(first.messages[0]).toMatchObject({
+      userName: 'Slack Display Name',
+      userEmail: expect.any(String),
+    });
     expect(first.cursor).toBeGreaterThan(0);
 
     const second = await getFastSessionMessagesSince(session.id, first.cursor);
@@ -586,7 +671,7 @@ describe('Fast session queries', () => {
     ).resolves.toBe('dismissed');
   });
 
-  it('finds sessions for owners and participants but not bystanders', async () => {
+  it('finds sessions for every deployment user', async () => {
     const owner = await userFactory.create();
     const participant = await userFactory.create();
     const bystander = await userFactory.create();
@@ -621,7 +706,7 @@ describe('Fast session queries', () => {
         { userId: bystander.id, isAdmin: false },
         session.id,
       ),
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({ id: session.id });
   });
 
   it('keeps a partial newest turn when a single turn overflows the window', async () => {

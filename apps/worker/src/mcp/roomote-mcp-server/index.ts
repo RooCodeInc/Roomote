@@ -7,6 +7,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
+  CALL_INTEGRATION_TOOL_TOOL,
+  FIND_INTEGRATION_TOOLS_TOOL,
   CHAT_CHANNELS_TOOL,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
@@ -33,6 +35,12 @@ import {
 } from '../../monitoring/sentry.js';
 
 import { handleCreatePlan } from './create-plan.js';
+import {
+  callOnDemandIntegrationTool,
+  findOnDemandIntegrationTools,
+  loadOnDemandMcpCatalog,
+  shouldRegisterOnDemandIntegrationTools,
+} from './on-demand-integrations.js';
 import { handleUpload } from './upload.js';
 import { handleDescribeVideo } from './describe-video.js';
 import { handleDownload } from './download.js';
@@ -70,7 +78,6 @@ import { handlePostToChannel } from './post-to-channel.js';
 import { handleGetChatChannelMessages } from './get-chat-channel-messages.js';
 import { handleListChatChannels } from './list-chat-channels.js';
 import { handleGetChatMessageContext } from './get-chat-message-context.js';
-import { handleAddReactionToSlackMessage } from './add-reaction-to-slack-message.js';
 import { handleSendChatReactionEmoji } from './send-chat-reaction-emoji.js';
 import { handleReportPlatformIssue } from './report-platform-issue.js';
 import { handleManageSourceControl } from './source-control.js';
@@ -810,7 +817,7 @@ roomoteMcpServer.registerTool(
       '"list_pull_request_comments" to read review threads, top-level reviews, and issue comments. ' +
       'Use "reply_to_pull_request_comment" to answer a review thread, "create_pull_request_comment" for a top-level comment, ' +
       '"create_pull_request_review_comment" for a new inline comment anchored to a file and line of the current diff, ' +
-      '"resolve_pull_request_thread" to resolve or reopen a thread, "submit_pull_request_review" to approve, request changes, or leave a review comment, and "dismiss_pull_request_review" to dismiss a GitHub review. ' +
+      '"resolve_pull_request_thread" to resolve or reopen a thread, "request_pull_request_reviewers" to request user or team reviewers after PR creation, "submit_pull_request_review" to approve, request changes, or leave a review comment, and "dismiss_pull_request_review" to dismiss a GitHub review. ' +
       'Provider gaps are reported as warnings with applied:false instead of errors. ' +
       'For the PR diff, use local git against the returned SHAs instead of a provider CLI. ' +
       'The platform resolves the current task source-control provider and keeps provider tokens server-side.',
@@ -825,6 +832,7 @@ roomoteMcpServer.registerTool(
           'create_pull_request_comment',
           'create_pull_request_review_comment',
           'resolve_pull_request_thread',
+          'request_pull_request_reviewers',
           'submit_pull_request_review',
           'dismiss_pull_request_review',
           'update_pull_request_comment',
@@ -833,7 +841,7 @@ roomoteMcpServer.registerTool(
           'create_issue_comment',
         ])
         .describe(
-          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads, top-level reviews, and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline review comment anchored to a file and line of the current diff (one finding per call); resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; dismiss_pull_request_review dismisses a GitHub review; update_pull_request_comment edits an existing comment in place.',
+          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads, top-level reviews, and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline comment anchored to a file and line of the current diff; resolve_pull_request_thread resolves or reopens a thread; request_pull_request_reviewers requests user or team reviewers after PR creation; submit_pull_request_review approves, requests changes, or leaves a review comment; dismiss_pull_request_review dismisses a GitHub review; update_pull_request_comment edits an existing comment in place.',
         ),
       repositoryFullName: z
         .string()
@@ -905,6 +913,18 @@ roomoteMcpServer.registerTool(
         .optional()
         .describe(
           'Required for submit_pull_request_review: the review outcome to submit.',
+        ),
+      reviewers: z
+        .array(z.string().trim().min(1))
+        .optional()
+        .describe(
+          'Usernames to request as reviewers with request_pull_request_reviewers.',
+        ),
+      teamReviewers: z
+        .array(z.string().trim().min(1))
+        .optional()
+        .describe(
+          'Team slugs to request as reviewers with request_pull_request_reviewers.',
         ),
       path: z
         .string()
@@ -1033,6 +1053,8 @@ roomoteMcpServer.registerTool(
         prAttribution: params.prAttribution,
         labels: params.labels,
         assignees: params.assignees,
+        reviewers: params.reviewers,
+        teamReviewers: params.teamReviewers,
         sourceControlProvider: params.sourceControlProvider,
       },
       config,
@@ -1151,6 +1173,52 @@ roomoteMcpServer.registerTool(
     );
   },
 );
+
+if (shouldRegisterOnDemandIntegrationTools()) {
+  roomoteMcpServer.registerTool(
+    FIND_INTEGRATION_TOOLS_TOOL.name,
+    {
+      title: FIND_INTEGRATION_TOOLS_TOOL.title,
+      description: FIND_INTEGRATION_TOOLS_TOOL.description,
+      inputSchema: FIND_INTEGRATION_TOOLS_TOOL.inputSchema,
+      annotations: FIND_INTEGRATION_TOOLS_TOOL.annotations,
+    },
+    async (params): Promise<ToolResult> => {
+      try {
+        return await findOnDemandIntegrationTools(
+          loadOnDemandMcpCatalog(),
+          params,
+        );
+      } catch (error) {
+        return errorResult(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    },
+  );
+
+  roomoteMcpServer.registerTool(
+    CALL_INTEGRATION_TOOL_TOOL.name,
+    {
+      title: CALL_INTEGRATION_TOOL_TOOL.title,
+      description: CALL_INTEGRATION_TOOL_TOOL.description,
+      inputSchema: CALL_INTEGRATION_TOOL_TOOL.inputSchema,
+      annotations: CALL_INTEGRATION_TOOL_TOOL.annotations,
+    },
+    async (params): Promise<ToolResult> => {
+      try {
+        return await callOnDemandIntegrationTool(
+          loadOnDemandMcpCatalog(),
+          params,
+        );
+      } catch (error) {
+        return errorResult(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    },
+  );
+}
 
 if (shouldRegisterTaskMemoryTool()) {
   roomoteMcpServer.registerTool(
@@ -1553,10 +1621,7 @@ if (shouldRegisterSlackThreadReplyTool() || isFastAgentChild()) {
 
 function recordSuccessfulSlackTurnSatisfactionResult(
   result: ToolResult,
-  tool:
-    | 'send_chat_reply'
-    | 'send_chat_reaction_emoji'
-    | 'add_reaction_to_slack_message',
+  tool: 'send_chat_reply' | 'send_chat_reaction_emoji',
   options: {
     replyPurpose?: ChatReplyPurpose;
     sessionId?: string;
@@ -1824,60 +1889,6 @@ if (shouldRegisterChannelPostTool()) {
       },
     );
   }
-
-  roomoteMcpServer.registerTool(
-    'add_reaction_to_slack_message',
-    {
-      title: 'Add Reaction To Slack Message',
-      description:
-        'Slack-visible: adds an emoji reaction to a specific Slack message. ' +
-        'Use this when the user explicitly wants a reaction added to a known Slack message and you already have the channel and message timestamp. ' +
-        'The channel can be a channel ID, channel name, or Slack channel mention like C123ABC456, #eng, eng, or <#C123ABC456>.',
-      inputSchema: {
-        channel: z
-          .string()
-          .describe(
-            'Slack channel ID, channel name, or Slack channel mention that contains the target message',
-          ),
-        messageTs: nonEmptyStringSchema.describe(
-          'Non-empty Slack message timestamp for the message to react to',
-        ),
-        name: nonEmptyStringSchema.describe(
-          'Non-empty Slack emoji name without surrounding colons, for example eyes or white_check_mark',
-        ),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: false,
-      },
-    },
-    async (params, extra): Promise<ToolResult> => {
-      const roomoteConfig = getRoomoteConfig();
-      if (!roomoteConfig) {
-        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-      }
-
-      const result = await handleAddReactionToSlackMessage(
-        {
-          channel: params.channel,
-          messageTs: params.messageTs,
-          name: params.name,
-        },
-        roomoteConfig,
-      );
-
-      recordSuccessfulSlackTurnSatisfactionResult(
-        result,
-        'add_reaction_to_slack_message',
-        {
-          sessionId: extra.sessionId,
-        },
-      );
-      return result;
-    },
-  );
 }
 
 async function main() {

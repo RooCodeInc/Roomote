@@ -121,7 +121,7 @@ APP_ENV=production
 ARTIFACT_SIGNING_KEY=$artifact_signing_key
 CADDY_HTTP_PORT=19080
 CADDY_HTTPS_PORT=19443
-COMPOSE_PROFILES=local-postgres
+COMPOSE_PROFILES=local-postgres,brain
 DASHBOARD_PASSWORD=$dashboard_password
 DATABASE_URL=postgres://postgres:roomote-postgres-password@postgres:5432/roomote
 DEFAULT_COMPUTE_PROVIDER=docker
@@ -159,10 +159,24 @@ TRPC_URL=http://api:3001
 EOF
 
 verify_endpoints() {
+  printf 'Probing API liveness endpoint\n'
   compose exec -T api curl -fsS --max-time 5 http://127.0.0.1:3001/health/liveness >/dev/null
+
+  printf 'Probing web health endpoint\n'
   compose exec -T web curl -fsS --max-time 5 http://127.0.0.1:3000/health >/dev/null
-  compose exec -T web curl -fsS --max-time 10 "http://127.0.0.1:3000/setup?token=$setup_token" >/dev/null
+
+  printf 'Probing web setup endpoint with generated token\n'
+  compose exec -T web curl -fsS \
+    --max-time 30 \
+    --retry 2 \
+    --retry-delay 1 \
+    --retry-all-errors \
+    "http://127.0.0.1:3000/setup?token=$setup_token" >/dev/null
+
+  printf 'Probing controller health endpoint\n'
   compose exec -T controller curl -fsS --max-time 5 http://api:3001/health/controller >/dev/null
+
+  printf 'Probing BullMQ health endpoint\n'
   compose exec -T bullmq curl -fsS --max-time 5 http://127.0.0.1:3002/admin/health >/dev/null
 }
 
@@ -486,7 +500,7 @@ compose up \
   --detach \
   --wait \
   --wait-timeout 600 \
-  postgres redis minio minio-init db-migrate api web controller bullmq preview-proxy
+  postgres redis minio minio-init db-migrate api web controller bullmq gbrain preview-proxy
 
 migration_container="$(compose ps --all --quiet db-migrate)"
 [ -n "$migration_container" ] || {

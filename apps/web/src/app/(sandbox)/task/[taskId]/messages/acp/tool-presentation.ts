@@ -95,7 +95,6 @@ const COMMUNICATION_TOOL_NAMES = new Set([
   'send_chat_reply',
   'send_chat_reaction',
   'send_chat_reaction_emoji',
-  'add_reaction_to_slack_message',
   'post_to_channel',
   'ignore_event',
 ]);
@@ -307,6 +306,11 @@ function resolveReceiptLanguage(
     return {
       verb: byPhase('Saving', 'Saved', 'Failed to Save'),
       object: 'Memory',
+    };
+  if (toolName === 'find_integration_tools')
+    return {
+      verb: byPhase('Searching', 'Searched', 'Failed to Search'),
+      object: 'Integration Tools',
     };
   return null;
 }

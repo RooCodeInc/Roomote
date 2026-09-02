@@ -62,6 +62,7 @@ type IntegrationAuditContext = BrokerContext & {
 
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS = 30_000;
+const FAST_AGENT_INTEGRATION_TOOL_CACHE_MAX_ENTRIES = 1_000;
 const FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS = 10_000;
 const FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS = 60_000;
 
@@ -108,6 +109,9 @@ async function listCachedIntegrationTools(options: {
   const { cacheKey, ...clientOptions } = options;
   const cached = integrationToolCache.get(cacheKey);
   if (cached) {
+    // Re-insert so eviction below is least-recently-used rather than oldest.
+    integrationToolCache.delete(cacheKey);
+    integrationToolCache.set(cacheKey, cached);
     if (cached.expiresAt <= Date.now()) {
       // Keep serving the last known-good catalog while refreshing. Fast turns
       // must never wait behind a deployment MCP server that stopped answering
@@ -144,7 +148,7 @@ async function listCachedIntegrationTools(options: {
     FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS,
     'Fast integration tool discovery',
   );
-  pruneExpiredIntegrationToolCacheEntries();
+  pruneIntegrationToolCacheEntries();
   integrationToolCache.set(cacheKey, {
     expiresAt: Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS,
     tools,
@@ -162,13 +166,16 @@ async function listCachedIntegrationTools(options: {
 
 // The cache is keyed per user, so on deployments with many Fast users
 // abandoned entries would otherwise accumulate for the process lifetime.
-// Entries still inside the stale-while-refresh window are kept.
-function pruneExpiredIntegrationToolCacheEntries(): void {
-  const cutoff = Date.now() - FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS;
-  for (const [key, entry] of integrationToolCache) {
-    if (entry.expiresAt <= cutoff) {
-      integrationToolCache.delete(key);
-    }
+// Eviction is by count rather than age: a stale catalog is still served
+// instantly while it refreshes in the background, so keeping it around means
+// the first message after an idle stretch never blocks on tool discovery.
+function pruneIntegrationToolCacheEntries(): void {
+  while (
+    integrationToolCache.size >= FAST_AGENT_INTEGRATION_TOOL_CACHE_MAX_ENTRIES
+  ) {
+    const oldestKey = integrationToolCache.keys().next().value;
+    if (oldestKey === undefined) return;
+    integrationToolCache.delete(oldestKey);
   }
 }
 

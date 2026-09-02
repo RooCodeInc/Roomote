@@ -51,13 +51,36 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
     shouldCheckSetup && !isSetupError && setupStatus != null
       ? getSetupRedirectPath(setupStatus)
       : null;
+  const { data: setupSessionStatus, isLoading: isSetupSessionLoading } =
+    useQuery(
+      trpc.setup.sessionStatus.queryOptions(undefined, {
+        enabled: shouldCheckSetup && setupStatus?.setupCompletedAt == null,
+        staleTime: 10_000,
+      }),
+    );
+  const setupSessionPath = setupSessionStatus?.sessionId
+    ? `/sessions/${setupSessionStatus.sessionId}`
+    : null;
+  const isOnKnownSetupSession =
+    setupSessionPath !== null &&
+    (pathname === setupSessionPath ||
+      pathname.startsWith(`${setupSessionPath}/`));
+  // An incomplete administrator must not briefly see another authenticated
+  // page while we look up their setup Session. A known setup Session remains
+  // accessible during a background refresh.
+  const isSetupSessionLookupPending =
+    setupRedirectPath !== null &&
+    isSetupSessionLoading &&
+    !isOnKnownSetupSession;
+  const effectiveSetupRedirectPath = setupSessionPath ?? setupRedirectPath;
 
   // Treat the redirect target itself and any page beneath it as allowed so
   // setup can keep ownership of any remaining required bootstrap screens.
   const isRedirectingForSetup =
-    setupRedirectPath !== null &&
-    pathname !== setupRedirectPath &&
-    !pathname.startsWith(`${setupRedirectPath}/`);
+    !isSetupSessionLookupPending &&
+    effectiveSetupRedirectPath !== null &&
+    pathname !== effectiveSetupRedirectPath &&
+    !pathname.startsWith(`${effectiveSetupRedirectPath}/`);
   const isRedirectingForOnboarding =
     shouldCheckOnboarding &&
     !isOnboardingLoading &&
@@ -67,8 +90,8 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
   useRedirectToSignIn(authStatus === 'signed-out');
 
   useEffect(() => {
-    if (isRedirectingForSetup && setupRedirectPath) {
-      router.replace(setupRedirectPath);
+    if (isRedirectingForSetup && effectiveSetupRedirectPath) {
+      router.replace(effectiveSetupRedirectPath);
     } else if (isRedirectingForOnboarding) {
       router.replace('/onboarding');
     }
@@ -76,7 +99,7 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
     isRedirectingForOnboarding,
     isRedirectingForSetup,
     router,
-    setupRedirectPath,
+    effectiveSetupRedirectPath,
   ]);
 
   if (!isSignedIn) {
@@ -84,7 +107,10 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
   }
 
   if (
-    (shouldCheckSetup && (isSetupLoading || isRedirectingForSetup)) ||
+    (shouldCheckSetup &&
+      (isSetupLoading ||
+        isSetupSessionLookupPending ||
+        isRedirectingForSetup)) ||
     (shouldCheckOnboarding &&
       (isOnboardingLoading || isRedirectingForOnboarding))
   ) {

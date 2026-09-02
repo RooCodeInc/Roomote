@@ -14,6 +14,7 @@ import {
   getOrCreateFastAgentSession,
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  FastAgentDurableRetryScheduledError,
   resolveApiBaseUrl,
 } from '@roomote/cloud-agents/server';
 import {
@@ -26,10 +27,15 @@ import {
   withThreadReplyFooterLock,
 } from '@roomote/communication';
 import {
+  admitFastAgentHumanFollowUp,
+  persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
+  wakeFastAgentParentEventAt,
+  wakeFastAgentParentEventNow,
+  type FastAgentDurableTurn,
 } from '@roomote/sdk/server';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, type TaskInitiator } from '@roomote/types';
 
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
 import {
@@ -99,6 +105,10 @@ export async function processDiscordFastAgentMessage(
     interaction?: DiscordInteractionReplyContext;
     activeTasks?: { taskId: string }[];
     directedAtRoomote?: boolean;
+    /** Attribution for tasks Fast delegates from this turn; automation-identity
+     * turns pass their automation initiator so delegated work keeps automation
+     * provenance instead of appearing installer-initiated. */
+    delegatedTaskInitiator?: TaskInitiator;
     onAccepted?: (abort: () => Promise<void>) => void;
     onRejected?: () => void;
   } & DiscordFastAgentSource,
@@ -150,14 +160,10 @@ export async function processDiscordFastAgentMessage(
         : {}),
     },
   };
-  const releaseFastAgentLock = await acquireFastAgentTurnLock({ conversation });
-  if (!releaseFastAgentLock) {
-    input.onRejected?.();
-    console.error(
-      `[Discord] Fast turn lock did not become available for ${conversation.workspaceId}:${conversation.conversationId}`,
-    );
-    return false;
-  }
+  let releaseFastAgentLock = await acquireFastAgentTurnLock({
+    conversation,
+    maxWaitMs: 0,
+  });
 
   try {
     const history =
@@ -176,11 +182,61 @@ export async function processDiscordFastAgentMessage(
       userId: input.senderUserId,
       conversation,
     });
+    const humanFollowUpEvent = {
+      type: 'human_follow_up' as const,
+      eventId,
+      currentMessageId: anchorMessageId ?? eventId,
+      userId: input.senderUserId,
+      question: input.question,
+      senderDisplayName:
+        input.interaction?.interaction.member?.nick ??
+        input.sender.global_name ??
+        input.sender.username,
+      senderExternalId: input.sender.id,
+    };
+    let durableTurn: FastAgentDurableTurn | null = null;
+    if (!releaseFastAgentLock) {
+      const admission = await admitFastAgentHumanFollowUp({
+        parent: { sessionId: session.id, conversation },
+        event: humanFollowUpEvent,
+      });
+      if (admission.kind !== 'turn') {
+        input.onAccepted?.(admission.abort);
+        return true;
+      }
+      releaseFastAgentLock = admission.turnLock;
+      durableTurn = admission.durable;
+    }
+    if (!releaseFastAgentLock) {
+      input.onRejected?.();
+      return false;
+    }
+    const activeTurnLock = releaseFastAgentLock;
+    // Durable admission: the turn is persisted under this process's claim
+    // before it runs, so an interruption hands it to the queue.
+    durableTurn ??= await persistFastAgentInlineHumanTurn({
+      parent: { sessionId: session.id, conversation },
+      event: humanFollowUpEvent,
+    }).catch((error) => {
+      console.error(
+        `[DiscordFastAgent] Failed to persist Fast turn admission: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    });
+    const durableTurnForResume = durableTurn;
+    if (durableTurnForResume) {
+      activeTurnLock.durableRowId = durableTurnForResume.id;
+      activeTurnLock.durableResume = () =>
+        wakeFastAgentParentEventNow({
+          conversationId: session.id,
+          eventKey: durableTurnForResume.eventKey,
+        });
+    }
     const footerContext = await resolveFastSessionReplyFooterContext({
       sessionId: session.id,
     });
     input.onAccepted?.(() =>
-      releaseFastAgentLock.abort(
+      activeTurnLock.abort(
         new Error('Fast suggestion launch settlement failed.'),
       ),
     );
@@ -250,7 +306,10 @@ export async function processDiscordFastAgentMessage(
       apiBaseUrl,
       conversation,
       currentMessageId: anchorMessageId ?? input.interaction?.interaction.id,
-      signal: releaseFastAgentLock.signal,
+      signal: activeTurnLock.signal,
+      ...(durableTurnForResume
+        ? { durableAdmission: { eventId: durableTurnForResume.id } }
+        : {}),
       senderDisplayName:
         input.interaction?.interaction.member?.nick ??
         input.sender.global_name ??
@@ -265,6 +324,23 @@ export async function processDiscordFastAgentMessage(
             entry.user !== input.sender.id,
         ),
       adapter: {
+        ...(durableTurnForResume
+          ? {
+              requestDurableResume: () =>
+                wakeFastAgentParentEventNow({
+                  conversationId: session.id,
+                  eventKey: durableTurnForResume.eventKey,
+                }),
+              requestDurableRetry: (retryAt: Date) =>
+                wakeFastAgentParentEventAt(
+                  {
+                    conversationId: session.id,
+                    eventKey: durableTurnForResume.eventKey,
+                  },
+                  retryAt,
+                ),
+            }
+          : {}),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId: input.senderUserId,
@@ -301,6 +377,9 @@ export async function processDiscordFastAgentMessage(
             applicationId: input.applicationId,
             requesterDiscordUserId: input.sender.id,
             launchOwnerUserId: input.senderUserId,
+            ...(input.delegatedTaskInitiator
+              ? { initiator: input.delegatedTaskInitiator }
+              : {}),
             queuedMessage: {
               provider: 'discord',
               text: prompt,
@@ -437,7 +516,7 @@ export async function processDiscordFastAgentMessage(
       await postFastReplyWithFooter(response);
     }
   } finally {
-    await releaseFastAgentLock().catch(() => {});
+    await releaseFastAgentLock?.().catch(() => {});
   }
   return true;
 }
@@ -453,6 +532,13 @@ export function startDiscordFastAgentResponse(
         onRejected,
       }),
     onError: (error) => {
+      if (error instanceof FastAgentDurableRetryScheduledError) {
+        // Not a failure: the queue re-runs this turn at the scheduled time.
+        console.info(
+          `[Discord] Fast turn parked for a durable retry: ${error.message}`,
+        );
+        return;
+      }
       console.error(
         `[Discord] Fast suggestion response failed: ${error instanceof Error ? error.message : String(error)}`,
       );

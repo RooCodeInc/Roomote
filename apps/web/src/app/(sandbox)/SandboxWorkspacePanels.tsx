@@ -73,7 +73,9 @@ export function ResponsiveWorkspacePanels({
   mainSize = 50,
   panelSize = 50,
 }: ResponsiveWorkspacePanelsProps) {
-  const isMdOrLarger = useMediaQuery('(min-width: 768px)');
+  const isMdOrLarger = useMediaQuery('(min-width: 768px)', {
+    initializeWithValue: false,
+  });
 
   if (!isMdOrLarger) {
     return (

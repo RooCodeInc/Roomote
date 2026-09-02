@@ -64,6 +64,8 @@ describe('createFastAgentSlackTaskLauncher', () => {
       launchTask({
         prompt: 'Add a regression test',
         environmentId: 'env-1',
+        branch: 'feature/source-branch',
+        launchIdempotencyKey: 'artifact-build:launch-1',
         model: 'anthropic/claude-sonnet-5',
         parentSessionId: '11111111-1111-4111-8111-111111111111',
         postKickoff,
@@ -104,6 +106,8 @@ describe('createFastAgentSlackTaskLauncher', () => {
               },
             },
             environmentId: 'env-1',
+            branch: 'feature/source-branch',
+            launchIdempotencyKey: 'artifact-build:launch-1',
             harnessModelOverrides: {
               'opencode-server': 'anthropic/claude-sonnet-5',
             },
@@ -410,6 +414,8 @@ describe('createFastAgentWebTaskLauncher', () => {
     })({
       prompt: 'Fix checkout',
       environmentId: null,
+      branch: 'feature/source-branch',
+      launchIdempotencyKey: 'artifact-build:launch-1',
       parentSessionId: '11111111-1111-4111-8111-111111111111',
       postKickoff,
     });
@@ -419,5 +425,16 @@ describe('createFastAgentWebTaskLauncher', () => {
       taskUrl: 'https://roomote.example/task/task-1',
       taskLinkRendered: true,
     });
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            branch: 'feature/source-branch',
+            launchIdempotencyKey: 'artifact-build:launch-1',
+          }),
+        }),
+      }),
+      expect.any(Object),
+    );
   });
 });

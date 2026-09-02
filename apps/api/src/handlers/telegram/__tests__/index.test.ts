@@ -698,7 +698,7 @@ describe('Telegram webhook handler', () => {
       replyToMessageId: '400',
       userId: 'mapped-user-1',
     });
-    expect(continueFastReplyMock).toHaveBeenCalledWith(
+    expect(queueFastReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: '22222222-2222-4222-8222-222222222222',
         userId: 'mapped-user-1',
@@ -707,6 +707,38 @@ describe('Telegram webhook handler', () => {
     );
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
+  });
+
+  it('does not acknowledge a Telegram Fast reply when durable admission fails', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    findFastReplySessionMock.mockResolvedValueOnce({
+      id: '22222222-2222-4222-8222-222222222222',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '222',
+        conversationId: '222:user:mapped-user-1',
+        replyTarget: { channelId: '222' },
+      },
+    });
+    queueFastReplyMock.mockRejectedValueOnce(new Error('database unavailable'));
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          reply_to_message: {
+            message_id: 400,
+            date: 1,
+            text: 'Fast answer',
+            chat: { id: 222, type: 'private' },
+          },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(addReactionMock).not.toHaveBeenCalled();
+    expect(redisDelMock).toHaveBeenCalledWith('telegram:update:123');
   });
 
   it('fails closed when a Telegram reply targets a Fast message on another route', async () => {
@@ -844,7 +876,7 @@ describe('Telegram webhook handler', () => {
       threadId: '77',
       userId: 'mapped-user-1',
     });
-    expect(continueFastReplyMock).toHaveBeenCalledWith(
+    expect(queueFastReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({ question: 'keep going' }),
     );
   });

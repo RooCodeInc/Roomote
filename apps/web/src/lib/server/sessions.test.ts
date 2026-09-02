@@ -29,6 +29,7 @@ vi.mock('@roomote/sdk/server', () => ({
 
 import {
   findAccessibleSession,
+  getArtifactBuildParentSession,
   getLatestExternalSessionEvent,
   getSessionById,
   getSessionForTask,
@@ -44,7 +45,84 @@ describe('unified Session queries', () => {
     syncFastSlackTitle.mockReset();
     syncFastSlackTitle.mockResolvedValue(undefined);
   });
-  it('scopes list and detail reads to owners, participants, and admins', async () => {
+
+  it('resolves an artifact through its owning task to the canonical Session', async () => {
+    const owner = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      fastConversationId: conversation!.id,
+    });
+    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'fast_delegation',
+    });
+    const [artifact] = await db
+      .insert(taskArtifacts)
+      .values({
+        taskId: task.id,
+        path: 'plans/build.md',
+        version: 3,
+        contentType: 'text/markdown',
+        size: 100,
+        uploaded: true,
+      })
+      .returning();
+
+    await expect(
+      getArtifactBuildParentSession(
+        { userId: owner.id, isAdmin: false },
+        artifact!.id,
+      ),
+    ).resolves.toEqual({
+      sourceTaskId: task.id,
+      sourceArtifactPath: 'plans/build.md',
+      sourceArtifactVersion: 3,
+      sessionId: session.id,
+      fastConversationId: conversation!.id,
+    });
+  });
+
+  it('keeps artifact ownership when its task has no Session parent', async () => {
+    const owner = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: owner.id });
+    const [artifact] = await db
+      .insert(taskArtifacts)
+      .values({
+        taskId: task.id,
+        path: 'plans/orphan.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 100,
+        uploaded: true,
+      })
+      .returning();
+
+    await expect(
+      getArtifactBuildParentSession(
+        { userId: owner.id, isAdmin: false },
+        artifact!.id,
+      ),
+    ).resolves.toEqual({
+      sourceTaskId: task.id,
+      sourceArtifactPath: 'plans/orphan.md',
+      sourceArtifactVersion: 1,
+      sessionId: null,
+      fastConversationId: null,
+    });
+  });
+  it('opens detail reads to everyone but scopes the list like tasks', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
     const session = await sessionFactory.create({
@@ -53,6 +131,7 @@ describe('unified Session queries', () => {
       title: 'Visible Session',
     });
 
+    // Anyone with the link can open the Session.
     await expect(
       findAccessibleSession({ userId: owner.id, isAdmin: false }, session.id),
     ).resolves.toMatchObject({ id: session.id });
@@ -61,19 +140,30 @@ describe('unified Session queries', () => {
         { userId: stranger.id, isAdmin: false },
         session.id,
       ),
-    ).resolves.toBeNull();
-    await expect(
-      findAccessibleSession({ userId: stranger.id, isAdmin: true }, session.id),
     ).resolves.toMatchObject({ id: session.id });
 
-    const list = await getSessions(
+    // The list defaults mirror /tasks: admins see everything, other users
+    // see only Sessions they own or participate in.
+    const ownerList = await getSessions(
       { userId: owner.id, isAdmin: false },
       { scope: 'all' },
     );
-    expect(list.sessions.map((row) => row.id)).toContain(session.id);
+    expect(ownerList.sessions.map((row) => row.id)).toContain(session.id);
+    const strangerList = await getSessions(
+      { userId: stranger.id, isAdmin: false },
+      { scope: 'all' },
+    );
+    expect(strangerList.sessions.map((row) => row.id)).not.toContain(
+      session.id,
+    );
+    const adminList = await getSessions(
+      { userId: stranger.id, isAdmin: true },
+      { scope: 'all' },
+    );
+    expect(adminList.sessions.map((row) => row.id)).toContain(session.id);
   });
 
-  it('filters recent-session lookups by id without bypassing access scope', async () => {
+  it('filters recent-session lookups by id without bypassing list scope', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
     const included = await sessionFactory.create({
@@ -88,16 +178,16 @@ describe('unified Session queries', () => {
       title: 'Newer but not included',
       activityAt: 300,
     });
-    const inaccessible = await sessionFactory.create({
+    const otherOwned = await sessionFactory.create({
       ownerKind: 'user',
       ownerUserId: stranger.id,
-      title: 'Inaccessible Session',
+      title: 'Outside the list scope',
       activityAt: 200,
     });
 
     const result = await getSessions(
       { userId: owner.id, isAdmin: false },
-      { ids: [included.id, inaccessible.id] },
+      { ids: [included.id, otherOwned.id] },
     );
 
     expect(result.sessions.map((session) => session.id)).toEqual([included.id]);
@@ -178,7 +268,7 @@ describe('unified Session queries', () => {
     ]);
   });
 
-  it('lists only distinct visible sources available to the current user', async () => {
+  it('lists only distinct visible sources within the list scope', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
     await sessionFactory.create({
@@ -309,6 +399,7 @@ describe('unified Session queries', () => {
       directInferenceCostMicroUsd: 1_100_000,
       inferenceCostMicroUsd: 2_100_000,
     });
+    expect(detail?.tasks).toHaveLength(3);
     expect(detail?.tasks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -838,12 +929,20 @@ describe('unified Session queries', () => {
       initiatorUserId: owner.id,
       title: 'Second task',
     });
+    // Explicit attachedAt values: rows inserted in one statement share a
+    // timestamp, which makes the attachedAt ordering below nondeterministic.
     await db.insert(sessionTasks).values([
-      { sessionId: session.id, taskId: firstTask.id, origin: 'direct_launch' },
+      {
+        sessionId: session.id,
+        taskId: firstTask.id,
+        origin: 'direct_launch',
+        attachedAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
       {
         sessionId: session.id,
         taskId: secondTask.id,
         origin: 'fast_delegation',
+        attachedAt: new Date('2026-01-01T00:00:01.000Z'),
       },
     ]);
     await db.insert(taskArtifacts).values([
@@ -878,20 +977,23 @@ describe('unified Session queries', () => {
       session.id,
     );
 
-    expect(detail?.tasks).toEqual([
-      expect.objectContaining({
-        taskId: firstTask.id,
-        artifacts: [
-          expect.objectContaining({ path: 'reports/result.md', version: 2 }),
-        ],
-      }),
-      expect.objectContaining({
-        taskId: secondTask.id,
-        artifacts: [
-          expect.objectContaining({ path: 'reports/result.md', version: 1 }),
-        ],
-      }),
-    ]);
+    expect(detail?.tasks).toHaveLength(2);
+    expect(detail?.tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskId: firstTask.id,
+          artifacts: [
+            expect.objectContaining({ path: 'reports/result.md', version: 2 }),
+          ],
+        }),
+        expect.objectContaining({
+          taskId: secondTask.id,
+          artifacts: [
+            expect.objectContaining({ path: 'reports/result.md', version: 1 }),
+          ],
+        }),
+      ]),
+    );
   });
 
   it('resolves the latest external event from visible messages only', async () => {

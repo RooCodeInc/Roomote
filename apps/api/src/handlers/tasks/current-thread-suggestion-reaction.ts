@@ -15,6 +15,7 @@ export type ClaimedCurrentThreadSuggestion = {
   targetRepositoryFullName: string | null;
   targetEnvironmentId?: string | null;
   usesRouterLaunch?: boolean;
+  launchTarget?: string;
   launchClaimedAt: Date;
 };
 
@@ -92,6 +93,9 @@ export async function claimCurrentThreadSuggestionByMessage(
         : claimed.targetRepositoryFullName,
       targetEnvironmentId: routed ? null : claimed.targetEnvironmentId,
       usesRouterLaunch: routed,
+      ...(typeof trackedCard.metadata?.launchTarget === 'string'
+        ? { launchTarget: trackedCard.metadata.launchTarget }
+        : {}),
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };

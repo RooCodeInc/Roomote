@@ -233,11 +233,9 @@ export function NewTaskForm({
   }) => {
     if (result.success && 'taskId' in result) {
       onTaskStarted?.();
-      router.push(
-        result.sessionId
-          ? `/sessions/${result.sessionId}`
-          : `/task/${result.taskId}`,
-      );
+      // A direct launch into an environment or repository is a task, not a
+      // conversation — land on the task view even though a Session wraps it.
+      router.push(`/task/${result.taskId}`);
     } else if ('error' in result) {
       toast.error(result.error);
     }
@@ -279,8 +277,15 @@ export function NewTaskForm({
     [onTaskStarted, startFastSessionMutation, router],
   );
   const launchTaskModels = useLaunchTaskModels();
+  const selectedWorkspace = form.watch('repository');
+  const isFastWorkspace =
+    selectedWorkspace === FAST_EXECUTION ||
+    selectedWorkspace === AUTO_WORKSPACE_VALUE;
   const selectedModelId =
-    selectedModelOverrideId ?? launchTaskModels.data?.defaultModelId;
+    selectedModelOverrideId ??
+    (isFastWorkspace
+      ? launchTaskModels.data?.defaultFastModelId
+      : launchTaskModels.data?.defaultModelId);
 
   const launchTask = useCallback(
     async (payload: {
@@ -350,7 +355,7 @@ export function NewTaskForm({
           text: submission.description ?? '',
           images: submission.images,
           attachmentTexts: submission.attachmentTexts,
-          model: selectedModelId,
+          model: selectedModelOverrideId,
         });
         return;
       }
@@ -363,7 +368,7 @@ export function NewTaskForm({
           text: submission.description ?? '',
           images: submission.images,
           attachmentTexts: submission.attachmentTexts,
-          model: selectedModelId,
+          model: selectedModelOverrideId,
         });
         return;
       }
@@ -394,7 +399,7 @@ export function NewTaskForm({
       canSelectBranch,
       wiggleWorkspace,
       startFastSession,
-      selectedModelId,
+      selectedModelOverrideId,
     ],
   );
 

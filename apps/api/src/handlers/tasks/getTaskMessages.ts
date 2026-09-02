@@ -92,8 +92,16 @@ export async function getTaskMessages(
 
     const orderBy =
       order === 'desc'
-        ? [desc(taskMessages.ts), desc(taskMessages.createdAt)]
-        : [asc(taskMessages.ts), asc(taskMessages.createdAt)];
+        ? [
+            desc(taskMessages.ts),
+            desc(taskMessages.createdAt),
+            desc(taskMessages.id),
+          ]
+        : [
+            asc(taskMessages.ts),
+            asc(taskMessages.createdAt),
+            asc(taskMessages.id),
+          ];
 
     const selectRows = () =>
       db

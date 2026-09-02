@@ -1901,6 +1901,9 @@ export function AutomationsSettings() {
               },
             });
             break;
+          case 'queued':
+            toast.success(`${automationLabel} was queued to run.`);
+            break;
           case 'completed':
             toast.success(`${automationLabel} ran successfully.`);
             break;

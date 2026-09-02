@@ -1,6 +1,9 @@
 services:
   db-migrate:
     env_file: !reset []
+    depends_on:
+      postgres:
+        required: true
 
   web:
     env_file: !reset []
@@ -20,6 +23,8 @@ services:
   postgres:
     ports:
       - '127.0.0.1:${DEPLOYMENT_CI_POSTGRES_PORT:-55432}:5432'
+    healthcheck:
+      start_period: 120s
 
   redis:
     ports:

@@ -1,4 +1,9 @@
-import { TaskEventName, type TaskEvent } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  TaskEventName,
+  type AcpPersistedEnvelope,
+  type TaskEvent,
+} from '@roomote/types';
 
 import type { OpenCodeServerClient } from '../opencode-server/client';
 import { OpenCodeServerHarness } from '../opencode-server/harness';
@@ -251,7 +256,6 @@ describe('OpenCode subagent run tracking', () => {
           }),
         },
       });
-
       await vi.advanceTimersByTimeAsync(SIX_HOURS_MS);
 
       expect(client.abort).not.toHaveBeenCalled();
@@ -469,9 +473,13 @@ describe('OpenCode subagent run tracking', () => {
   it('keeps the background tracker across parent turn finish', async () => {
     const { client, harness } = createHarness();
     const outputs: Array<Record<string, unknown>> = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
     harness.on('runtimeOutput', (event) => {
       outputs.push(event as unknown as Record<string, unknown>);
     });
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
 
     try {
       await connectHarness(harness, client);
@@ -516,6 +524,11 @@ describe('OpenCode subagent run tracking', () => {
       });
 
       expect(subagentActivityEvents(outputs).length).toBeGreaterThan(0);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) => envelope.metadata?.sessionId === 'ses_child_1',
+        ),
+      ).toBe(true);
       expect(client.abort).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
@@ -525,9 +538,13 @@ describe('OpenCode subagent run tracking', () => {
   it('clears foreground trackers when the parent turn finishes', async () => {
     const { client, harness } = createHarness();
     const outputs: Array<Record<string, unknown>> = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
     harness.on('runtimeOutput', (event) => {
       outputs.push(event as unknown as Record<string, unknown>);
     });
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
 
     try {
       await connectHarness(harness, client);
@@ -539,6 +556,7 @@ describe('OpenCode subagent run tracking', () => {
       });
 
       const settledCount = subagentActivityEvents(outputs).length;
+      const persistedCount = persistedEnvelopes.length;
 
       // Foreground spawn tracking ended with the turn: late child events are
       // inert.
@@ -549,11 +567,24 @@ describe('OpenCode subagent run tracking', () => {
         },
       });
       await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_child_late',
+            sessionID: 'ses_child_1',
+            role: 'assistant',
+            time: { created: 1, completed: 2 },
+          },
+        },
+      });
+      await client.emit({
         type: 'session.idle',
         properties: { sessionID: 'ses_child_1' },
       });
 
       expect(subagentActivityEvents(outputs)).toHaveLength(settledCount);
+      expect(persistedEnvelopes).toHaveLength(persistedCount);
+      expect(client.message).not.toHaveBeenCalled();
       expect(client.abort).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
@@ -1133,6 +1164,85 @@ describe('OpenCode subagent live activity', () => {
       const details = (activity[0]!.payload as Record<string, unknown>)
         .subagentActivity as Record<string, unknown>;
       expect(details.lastMessage).toBe('The latest child response.');
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it('persists linked child tool lifecycle events with relationship metadata', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildToolPart({
+            callId: 'child_call_1',
+            command: 'agent-browser screenshot --full-page',
+          }),
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            ...createChildToolPart({
+              callId: 'child_call_1',
+              command: 'agent-browser screenshot --full-page',
+              status: 'completed',
+            }),
+            state: {
+              status: 'completed',
+              input: { command: 'agent-browser screenshot --full-page' },
+              output: 'Screenshot captured.',
+            },
+          },
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createSubtaskPart({
+            id: 'prt_child_subtask_1',
+            sessionID: 'ses_child_1',
+            messageID: 'msg_child_1',
+          }),
+        },
+      });
+
+      const parentSpawn = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall &&
+          envelope.metadata?.sessionId === 'ses_1',
+      );
+      expect(parentSpawn?.payload).toMatchObject({
+        senderThreadId: 'ses_1',
+        receiverThreadIds: ['ses_child_1'],
+        agentType: 'proof-runner',
+      });
+
+      const childEvents = persistedEnvelopes.filter(
+        (envelope) => envelope.metadata?.sessionId === 'ses_child_1',
+      );
+      expect(childEvents.map((envelope) => envelope.eventType)).toEqual([
+        ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+        ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+      ]);
+      for (const childEvent of childEvents) {
+        expect(childEvent.metadata).toMatchObject({
+          sessionId: 'ses_child_1',
+          parentSessionId: 'ses_1',
+          agentType: 'proof-runner',
+          isSubagent: true,
+        });
+      }
     } finally {
       await harness.dispose();
     }

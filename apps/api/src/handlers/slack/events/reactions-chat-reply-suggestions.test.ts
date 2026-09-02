@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
 
 const mocks = vi.hoisted(() => ({
   claimWorkItem: vi.fn(),
@@ -16,7 +17,20 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const claimedAt = new Date('2026-08-06T00:00:00.000Z');
-const workItem = {
+const workItem: {
+  id: string;
+  title: string;
+  brief: string;
+  category: string;
+  priority: string;
+  investigationContext: string;
+  repositoryIds: string[];
+  targetRepositoryFullName: string | null;
+  targetEnvironmentId: string | null;
+  readinessMessage: null;
+  sortOrder: number;
+  status: string;
+} = {
   id: 'work-item-1',
   title: 'Add retry telemetry',
   brief: 'Instrument retry exhaustion.',
@@ -144,6 +158,8 @@ describe('chat reply suggestion reactions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getConfiguration.mockResolvedValue(null);
+    workItem.targetRepositoryFullName = 'acme/app';
+    workItem.targetEnvironmentId = 'environment-1';
     mocks.routeFastReaction.mockResolvedValue(false);
     mocks.trackedMessageFindFirst.mockResolvedValue({
       id: 'tracked-message-1',
@@ -348,6 +364,242 @@ describe('chat reply suggestion reactions', () => {
       expect.anything(),
       { id: 'work-item-1', taskId: null, claimedAt },
     );
+  });
+
+  it('forces a concrete suggestion target to coding even when Fast is the user default', async () => {
+    mocks.trackedMessageFindFirst.mockResolvedValue({
+      id: 'tracked-message-1',
+      workItemId: 'work-item-1',
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        launchTarget: 'environment-1',
+      },
+    });
+    mocks.lookupSlackUserMapping.mockResolvedValue({
+      hasInactiveMapping: false,
+      activeMapping: { userId: 'user-1' },
+    });
+    const slack = {
+      postMessage: vi.fn(async () => 'seeded-thread-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(mocks.resolveWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ targetEnvironmentId: 'environment-1' }),
+    );
+    expect(mocks.startSlackAppMentionTask).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: 'environment-1' }),
+    );
+    expect(mocks.startFastAgentResponse).not.toHaveBeenCalled();
+  });
+
+  it('launches an all-repositories suggestion directly without routing', async () => {
+    workItem.targetRepositoryFullName = ALL_REPOSITORIES;
+    workItem.targetEnvironmentId = null;
+    mocks.trackedMessageFindFirst.mockResolvedValue({
+      id: 'tracked-message-1',
+      workItemId: 'work-item-1',
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        launchTarget: ALL_REPOSITORIES,
+      },
+    });
+    mocks.resolveWorkspace.mockResolvedValue({
+      workspace: {
+        repoForPayload: ALL_REPOSITORIES,
+        workspaceDisplayName: 'all repositories',
+      },
+      failureReason: null,
+    });
+    const slack = {
+      postMessage: vi.fn(async () => 'seeded-thread-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(mocks.startSlackAppMentionTask).toHaveBeenCalledWith(
+      expect.objectContaining({ repo: ALL_REPOSITORIES }),
+    );
+    expect(mocks.startAutoRoutedSlackTask).not.toHaveBeenCalled();
+  });
+
+  it('reports an explicit environment target as unavailable after its column was cleared', async () => {
+    // The environment FK nulled the work item's column when the environment
+    // was deleted; the card still names it, so the resolver must be asked
+    // about that environment rather than reporting "no target repository".
+    workItem.targetRepositoryFullName = null;
+    workItem.targetEnvironmentId = null;
+    mocks.trackedMessageFindFirst.mockResolvedValue({
+      id: 'tracked-message-1',
+      workItemId: 'work-item-1',
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        launchTarget: 'environment-1',
+      },
+    });
+    mocks.resolveWorkspace.mockResolvedValue({
+      workspace: null,
+      failureReason:
+        "I couldn't start this suggestion because its environment is no longer available.",
+    });
+    const slack = {
+      postMessage: vi.fn(async () => 'seeded-thread-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(mocks.resolveWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ targetEnvironmentId: 'environment-1' }),
+    );
+    expect(mocks.startSlackAppMentionTask).not.toHaveBeenCalled();
+    expect(mocks.startAutoRoutedSlackTask).not.toHaveBeenCalled();
+    expect(mocks.releaseWorkItemClaim).toHaveBeenCalledWith(expect.anything(), {
+      id: 'work-item-1',
+      claimedAt,
+    });
+    expect(slack.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('no longer available'),
+      }),
+    );
+  });
+
+  it('prompts an unlinked reactor to link before starting a Fast-targeted suggestion', async () => {
+    workItem.targetRepositoryFullName = FAST_EXECUTION;
+    workItem.targetEnvironmentId = null;
+    mocks.trackedMessageFindFirst.mockResolvedValue({
+      id: 'tracked-message-1',
+      workItemId: 'work-item-1',
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        launchTarget: FAST_EXECUTION,
+      },
+    });
+    mocks.lookupSlackUserMapping.mockResolvedValue({
+      hasInactiveMapping: false,
+      activeMapping: null,
+    });
+    const slack = {
+      postMessage: vi.fn(async () => 'seeded-thread-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    // No claim, no seeded thread, no launch of any kind: just the link prompt.
+    expect(mocks.claimWorkItem).not.toHaveBeenCalled();
+    expect(mocks.startFastAgentResponse).not.toHaveBeenCalled();
+    expect(mocks.startAutoRoutedSlackTask).not.toHaveBeenCalled();
+    expect(mocks.startSlackAppMentionTask).not.toHaveBeenCalled();
+    expect(slack.postMessage).toHaveBeenCalledTimes(1);
+    expect(slack.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('linked Roomote account'),
+      }),
+    );
+    expect(slack.deleteMessage).not.toHaveBeenCalled();
+  });
+
+  it('forces a Fast-targeted suggestion into a Fast session', async () => {
+    workItem.targetRepositoryFullName = FAST_EXECUTION;
+    workItem.targetEnvironmentId = null;
+    mocks.trackedMessageFindFirst.mockResolvedValue({
+      id: 'tracked-message-1',
+      workItemId: 'work-item-1',
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        launchTarget: FAST_EXECUTION,
+      },
+    });
+    mocks.lookupSlackUserMapping.mockResolvedValue({
+      hasInactiveMapping: false,
+      activeMapping: { userId: 'user-1' },
+    });
+    const slack = {
+      postMessage: vi.fn(async () => 'seeded-thread-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(mocks.startFastAgentResponse).toHaveBeenCalled();
+    expect(mocks.resolveWorkspace).not.toHaveBeenCalled();
+    expect(mocks.startSlackAppMentionTask).not.toHaveBeenCalled();
+    expect(mocks.startAutoRoutedSlackTask).not.toHaveBeenCalled();
   });
 
   it('releases the claim when the Fast turn lock is busy', async () => {

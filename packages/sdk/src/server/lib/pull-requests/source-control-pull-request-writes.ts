@@ -4,6 +4,7 @@ import { type TaskRun } from '@roomote/db/server';
 import {
   getSourceControlProviderLabel,
   sourceControlProviderSchema,
+  TaskPayloadKind,
   type SourceControlProvider,
 } from '@roomote/types';
 import { z } from 'zod';
@@ -32,6 +33,9 @@ import {
   type FetchImpl,
   type RepositoryRow,
 } from './source-control-pull-request-shared';
+import { markRoomotePullRequestReadyAfterCleanReview } from './mark-roomote-pull-request-ready';
+import { getTerminalReviewSummaryResult } from '../task-runs/github-pr-review-check';
+import { enqueuePrReviewNotification } from '../task-runs/pr-review-notification';
 
 const ADO_API_VERSION = '7.1';
 // `/_apis/connectionData` is a preview-only resource: Azure DevOps answers
@@ -62,6 +66,7 @@ export const sourceControlPullRequestWriteInputSchema = z.object({
     'create_pull_request_review_comment',
     'update_pull_request_comment',
     'resolve_pull_request_thread',
+    'request_pull_request_reviewers',
     'submit_pull_request_review',
     'dismiss_pull_request_review',
   ]),
@@ -114,6 +119,10 @@ export const sourceControlPullRequestWriteInputSchema = z.object({
   resolved: z.boolean().optional(),
   /** Required for submit_pull_request_review. */
   reviewEvent: z.enum(['approve', 'request_changes', 'comment']).optional(),
+  /** GitHub user logins for request_pull_request_reviewers. */
+  reviewers: z.array(z.string().trim().min(1)).optional(),
+  /** GitHub team slugs for request_pull_request_reviewers. */
+  teamReviewers: z.array(z.string().trim().min(1)).optional(),
   sourceControlProvider: sourceControlProviderSchema.optional(),
 });
 
@@ -313,28 +322,146 @@ export async function writeSourceControlPullRequestForTaskRun({
     host: payloadHost,
   });
 
+  let result: SourceControlPullRequestWriteResult;
   switch (provider) {
     case 'github':
-      return writeGitHubPullRequest({ input, repository, provider });
+      result = await writeGitHubPullRequest({ input, repository, provider });
+      break;
     case 'gitlab':
-      return writeGitLabMergeRequest({
+      result = await writeGitLabMergeRequest({
         input,
         repository,
         provider,
         fetchImpl,
       });
+      break;
     case 'gitea':
-      return writeGiteaPullRequest({ input, repository, provider, fetchImpl });
-    case 'bitbucket':
-      return writeBitbucketPullRequest({
+      result = await writeGiteaPullRequest({
         input,
         repository,
         provider,
         fetchImpl,
       });
+      break;
+    case 'bitbucket':
+      result = await writeBitbucketPullRequest({
+        input,
+        repository,
+        provider,
+        fetchImpl,
+      });
+      break;
     case 'ado':
-      return writeAdoPullRequest({ input, repository, provider, fetchImpl });
+      result = await writeAdoPullRequest({
+        input,
+        repository,
+        provider,
+        fetchImpl,
+      });
+      break;
   }
+
+  await maybeMarkPullRequestReadyAfterReviewSummary({
+    taskRun,
+    input,
+    result,
+    provider,
+    host: payloadHost,
+    fetchImpl,
+  });
+  return result;
+}
+
+async function maybeMarkPullRequestReadyAfterReviewSummary({
+  taskRun,
+  input,
+  result,
+  provider,
+  host,
+  fetchImpl,
+}: {
+  taskRun: TaskRun;
+  input: SourceControlPullRequestWriteInput;
+  result: SourceControlPullRequestWriteResult;
+  provider: SourceControlProvider;
+  host?: string;
+  fetchImpl: FetchImpl;
+}): Promise<void> {
+  if (
+    !result.applied ||
+    (input.action !== 'create_pull_request_comment' &&
+      input.action !== 'update_pull_request_comment') ||
+    !input.body ||
+    (taskRun.payloadKind !== TaskPayloadKind.GithubPrReview &&
+      taskRun.payloadKind !== TaskPayloadKind.GithubPrReviewSync)
+  ) {
+    return;
+  }
+
+  const payload = getPayloadRecord(taskRun.payload);
+  const reviewHeadSha =
+    typeof payload.headSha === 'string'
+      ? payload.headSha
+      : typeof payload.sha === 'string'
+        ? payload.sha
+        : null;
+  if (!reviewHeadSha) return;
+
+  const terminalResult = getTerminalReviewSummaryResult({
+    reviewSummaryBody: input.body,
+    expectedHeadSha: reviewHeadSha,
+  });
+  if (terminalResult?.conclusion !== 'success') return;
+
+  // GitHub's issue-comment webhook owns durable summary persistence and then
+  // calls the same provider-neutral transition. Other providers do not expose
+  // an equivalent edited-summary webhook consistently, so the successful
+  // Roomote comment write is their authoritative persistence boundary.
+  if (provider === 'github') return;
+
+  const notificationResult = await enqueuePrReviewNotification({
+    repository: input.repositoryFullName,
+    prNumber: input.prNumber,
+    prUrl:
+      typeof payload.prUrl === 'string' ? payload.prUrl : (result.url ?? ''),
+    sourceControlProvider: provider,
+    event: {
+      kind: 'review_summary',
+      providerEventId: `roomote-review-summary:${provider}:${result.commentId ?? input.commentId ?? 'unknown'}:${reviewHeadSha}`,
+      authorLogin: 'roomote',
+      reviewHeadSha,
+      reviewTaskId: taskRun.taskId,
+      reviewResult: {
+        reviewKind:
+          taskRun.payloadKind === TaskPayloadKind.GithubPrReviewSync
+            ? 'sync'
+            : 'initial',
+        outcome: 'clean',
+        findingCount: 0,
+        approvalStatus: null,
+        headSha: reviewHeadSha,
+      },
+      summary: terminalResult.summary,
+      ...(result.url ? { url: result.url } : {}),
+      observedAt: Date.now(),
+      roomoteAuthored: true,
+    },
+  });
+  if (notificationResult.reason === 'stale_review_cycle') return;
+
+  await markRoomotePullRequestReadyAfterCleanReview({
+    sourceControlProvider: provider,
+    repository: input.repositoryFullName,
+    ...(host ? { host } : {}),
+    prNumber: input.prNumber,
+    reviewHeadSha,
+    reviewResult: {
+      outcome: 'clean',
+      findingCount: 0,
+      headSha: reviewHeadSha,
+    },
+    fetchImpl,
+  });
 }
 
 function normalizeOptionalWriteIds(
@@ -381,6 +508,9 @@ function assertWriteInputFields(
     case 'resolve_pull_request_thread':
       requireThreadId(input);
       requireResolved(input);
+      break;
+    case 'request_pull_request_reviewers':
+      requireReviewerTargets(input);
       break;
     case 'submit_pull_request_review':
       requireReviewEvent(input);
@@ -536,6 +666,17 @@ function requireReviewEvent(
   }
 
   return input.reviewEvent;
+}
+
+function requireReviewerTargets(
+  input: SourceControlPullRequestWriteInput,
+): void {
+  if (!input.reviewers?.length && !input.teamReviewers?.length) {
+    throw new SourceControlWriteError(
+      400,
+      `reviewers or teamReviewers is required for ${input.action}.`,
+    );
+  }
 }
 
 function buildWriteResult({
@@ -735,6 +876,19 @@ async function writeGitHubPullRequest({
         repository,
         threadId: thread?.id ?? threadId,
       });
+    }
+    case 'request_pull_request_reviewers': {
+      await octokit.rest.pulls.requestReviewers({
+        owner,
+        repo,
+        pull_number: input.prNumber,
+        ...(input.reviewers?.length ? { reviewers: input.reviewers } : {}),
+        ...(input.teamReviewers?.length
+          ? { team_reviewers: input.teamReviewers }
+          : {}),
+      });
+
+      return buildWriteResult({ input, provider, repository });
     }
     case 'submit_pull_request_review': {
       const reviewEvent = requireReviewEvent(input);
@@ -1049,6 +1203,16 @@ async function writeGitLabMergeRequest({
         repository,
         applied: false,
         warnings: ['GitLab does not expose review dismissal.'],
+      });
+    case 'request_pull_request_reviewers':
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        applied: false,
+        warnings: [
+          'GitLab does not support reviewer requests through this source-control interface.',
+        ],
       });
   }
 }
@@ -1463,6 +1627,16 @@ async function writeGiteaPullRequest({
         applied: false,
         warnings: ['Gitea does not expose review dismissal.'],
       });
+    case 'request_pull_request_reviewers':
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        applied: false,
+        warnings: [
+          'Gitea does not support reviewer requests through this source-control interface.',
+        ],
+      });
   }
 }
 
@@ -1728,6 +1902,16 @@ async function writeBitbucketPullRequest({
         applied: false,
         warnings: ['Bitbucket does not expose review dismissal.'],
       });
+    case 'request_pull_request_reviewers':
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        applied: false,
+        warnings: [
+          'Bitbucket does not support reviewer requests through this source-control interface.',
+        ],
+      });
   }
 }
 
@@ -1966,6 +2150,16 @@ async function writeAdoPullRequest({
         repository,
         applied: false,
         warnings: ['Azure DevOps does not expose review dismissal.'],
+      });
+    case 'request_pull_request_reviewers':
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        applied: false,
+        warnings: [
+          'Azure DevOps does not support reviewer requests through this source-control interface.',
+        ],
       });
   }
 }

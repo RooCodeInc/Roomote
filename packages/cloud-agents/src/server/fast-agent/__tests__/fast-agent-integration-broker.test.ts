@@ -294,6 +294,33 @@ describe('fast-agent integration broker', () => {
     });
   });
 
+  it('keeps deployment-disabled Roomote channel tools out of Fast inventory', async () => {
+    mocks.configuredServers = {
+      roomote: {
+        url: 'https://app.example.test/mcp',
+        headers: {},
+        disabledTools: ['post_to_channel'],
+      },
+    };
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'manage_tasks' },
+      { name: 'list_chat_channels' },
+      { name: 'post_to_channel' },
+      { name: 'send_chat_reaction_emoji' },
+    ]);
+
+    const integrations = await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://app.example.test/_roomote-api',
+    });
+
+    expect(integrations[0]?.tools.map(({ name }) => name)).toEqual([
+      'manage_tasks',
+      'list_chat_channels',
+      'send_chat_reaction_emoji',
+    ]);
+  });
+
   it('injects the current user token into deployment proxies behind a reverse-proxy base path', async () => {
     mocks.configuredServers = {
       roomote: {
@@ -429,6 +456,47 @@ describe('fast-agent integration broker', () => {
       }),
     ]);
     expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps serving a catalog left idle for a long time instead of blocking on rediscovery', async () => {
+    vi.useFakeTimers({ now: new Date('2026-08-19T00:00:00.000Z') });
+    mocks.configuredServers = {
+      notion: {
+        url: 'https://api.example.com/api/mcp/notion',
+        headers: {},
+      },
+    };
+
+    await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(1);
+
+    // Well past the refresh interval. Another user's cache miss runs the
+    // eviction pass that used to drop entries this old.
+    await vi.advanceTimersByTimeAsync(45 * 60_000);
+    await listFastAgentIntegrations({
+      userId: 'user-2',
+      apiBaseUrl: 'https://api.example.com',
+    });
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
+
+    mocks.listMcpTools.mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+    await expect(
+      listFastAgentIntegrations({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: 'notion',
+        tools: [expect.objectContaining({ name: 'search' })],
+      }),
+    ]);
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(3);
   });
 
   it('excludes tools disabled by the deployment', async () => {

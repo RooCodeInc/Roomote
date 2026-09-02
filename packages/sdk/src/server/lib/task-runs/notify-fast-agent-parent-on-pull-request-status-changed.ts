@@ -11,13 +11,9 @@ import {
   type SourceControlProvider,
 } from '@roomote/types';
 
-import {
-  deliverFastAgentParentEvent,
-  type FastAgentPullRequestContext,
-} from '../fast-agent-parent-event';
+import type { FastAgentPullRequestContext } from '../fast-agent-parent-event';
+import { enqueueFastAgentParentEvent } from '../fast-agent-parent-event-queue';
 import { deliverFastAgentParentPrEvent } from './deliver-fast-agent-parent-pr-event';
-
-const PR_STATUS_DELIVERY_LOCK_WAIT_MS = 30_000;
 
 function buildNotifiedResultKey(params: {
   prUrl: string;
@@ -69,8 +65,8 @@ export async function notifyFastAgentParentOnPullRequestStatusChanged(params: {
     run: params.run,
     deliveryKey: notifiedResultKey,
     logPrefix: 'notifyFastAgentParentOnPullRequestStatusChanged',
-    deliver: () =>
-      deliverFastAgentParentEvent({
+    deliver: async () => {
+      await enqueueFastAgentParentEvent({
         parent,
         event: {
           type: 'pull_request_status_changed',
@@ -87,14 +83,15 @@ export async function notifyFastAgentParentOnPullRequestStatusChanged(params: {
           status: params.pullRequest.status,
           actorLogin: params.actorLogin,
         },
-        lockWaitMs: PR_STATUS_DELIVERY_LOCK_WAIT_MS,
-      }),
+      });
+      return 'delivered';
+    },
     recordLifecycle: () =>
       recordTaskRunLifecycleEvent(db, {
         runId: params.run.id,
         taskId: params.run.taskId,
         eventType: 'decision',
-        message: `Passed ${params.pullRequest.status} pull request ${pullRequest.repository ?? 'unknown'}#${pullRequest.number ?? 'unknown'} to the Fast parent orchestrator.`,
+        message: `Queued ${params.pullRequest.status} pull request ${pullRequest.repository ?? 'unknown'}#${pullRequest.number ?? 'unknown'} for the Fast parent orchestrator.`,
         details: {
           reason: 'fast_agent_parent_pr_status_event',
           fastAgentSessionId: parent.sessionId,

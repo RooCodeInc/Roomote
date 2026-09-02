@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   createActivity: vi.fn(() => ({ start: vi.fn(), settle: vi.fn() })),
   slackPostThreadMessage: vi.fn(),
   slackUpdateMessage: vi.fn(),
+  admitHumanFollowUp: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -40,6 +41,10 @@ vi.mock('../automations/destination', () => ({
   findTeamsConversationRoute: mocks.findTeamsConversationRoute,
 }));
 
+vi.mock('./fast-agent-human-follow-up', () => ({
+  admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
+}));
+
 import {
   and,
   db,
@@ -51,7 +56,11 @@ import {
   userFactory,
 } from '@roomote/db/server';
 
-import { buildFastAgentSurfaceReplyDelivery } from './fast-agent-surface-reply';
+import {
+  buildFastAgentSurfaceReplyDelivery,
+  continueFastAgentSurfaceReply,
+  queueFastAgentSurfaceReply,
+} from './fast-agent-surface-reply';
 
 async function createConversation(input: {
   userId: string;
@@ -103,6 +112,10 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     });
     mocks.slackPostThreadMessage.mockResolvedValue('slack-message-1');
     mocks.slackUpdateMessage.mockResolvedValue(true);
+    mocks.admitHumanFollowUp.mockResolvedValue({
+      kind: 'queued',
+      abort: vi.fn(),
+    });
   });
 
   it('serves web sessions with a transcript-only adapter', async () => {
@@ -126,6 +139,30 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('reports durable admission failures instead of acknowledging the queued follow-up', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'web',
+    });
+    mocks.admitHumanFollowUp.mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+
+    await expect(
+      queueFastAgentSurfaceReply({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Matt',
+        question: 'Follow up',
+        currentMessageId: 'web-message-1',
+      }),
+    ).rejects.toThrow('database unavailable');
+    expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({ forceQueue: true }),
+    );
+  });
+
   it('serves automation sessions the same transcript-only adapter', async () => {
     const user = await userFactory.create();
     const conversation = await createConversation({
@@ -143,7 +180,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     expect(delivery?.conversation.surface).toBe('automation');
   });
 
-  it('allows recorded participants but rejects unrelated users', async () => {
+  it('allows every deployment user to reply, like tasks', async () => {
     const owner = await userFactory.create();
     const participant = await userFactory.create();
     const bystander = await userFactory.create();
@@ -180,7 +217,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         senderDisplayName: null,
         question: 'Bystander follow-up',
       }),
-    ).resolves.toBeNull();
+    ).resolves.not.toBeNull();
   });
 
   it('returns null for a Slack session without an installation', async () => {
@@ -406,5 +443,60 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         text: expect.not.stringContaining('external_input'),
       }),
     );
+  });
+});
+
+describe('continueFastAgentSurfaceReply admission hooks', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reports admission with the queued follow-up’s abort before the turn runs', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'web',
+    });
+    const abort = vi.fn();
+    mocks.admitHumanFollowUp.mockResolvedValue({ kind: 'queued', abort });
+    const onAccepted = vi.fn();
+    const onRejected = vi.fn();
+
+    await expect(
+      continueFastAgentSurfaceReply({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Matt',
+        question: 'Follow up',
+        currentMessageId: 'message-1',
+        onAccepted,
+        onRejected,
+      }),
+    ).resolves.toBe(true);
+
+    expect(onAccepted).toHaveBeenCalledWith(abort);
+    expect(onRejected).not.toHaveBeenCalled();
+  });
+
+  it('reports rejection when the session has no delivery route', async () => {
+    const user = await userFactory.create();
+    const onAccepted = vi.fn();
+    const onRejected = vi.fn();
+
+    await expect(
+      continueFastAgentSurfaceReply({
+        sessionId: '00000000-0000-4000-8000-000000000000',
+        userId: user.id,
+        senderDisplayName: null,
+        question: 'Follow up',
+        currentMessageId: 'message-1',
+        onAccepted,
+        onRejected,
+      }),
+    ).resolves.toBe(false);
+
+    expect(onRejected).toHaveBeenCalledTimes(1);
+    expect(onAccepted).not.toHaveBeenCalled();
+    expect(mocks.admitHumanFollowUp).not.toHaveBeenCalled();
   });
 });

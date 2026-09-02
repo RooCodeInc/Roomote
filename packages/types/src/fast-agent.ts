@@ -84,14 +84,26 @@ export const fastAgentParentSchema = z.object({
 
 export type FastAgentParent = z.infer<typeof fastAgentParentSchema>;
 
+export const FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE = 'human_follow_up' as const;
+
+export const fastAgentHumanFollowUpEventSchema = z.object({
+  type: z.literal(FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE),
+  eventId: z.string().min(1),
+  currentMessageId: z.string().min(1),
+  userId: z.string().min(1),
+  question: z.string().min(1),
+  images: z.array(z.string()).optional(),
+  senderDisplayName: z.string().min(1).optional(),
+  senderExternalId: z.string().min(1).optional(),
+});
+
+export type FastAgentHumanFollowUpEvent = z.infer<
+  typeof fastAgentHumanFollowUpEventSchema
+>;
+
 export type TaskReportConsumer = 'direct-user' | 'orchestrator';
 
-export const taskReportConsumerSchema = z
-  .enum(['direct-user', 'orchestrator', 'fast-orchestrator'])
-  .transform(
-    (consumer): TaskReportConsumer =>
-      consumer === 'fast-orchestrator' ? 'orchestrator' : consumer,
-  );
+export const taskReportConsumerSchema = z.enum(['direct-user', 'orchestrator']);
 
 /**
  * A delegated Fast child keeps its parent's coordinates for lifecycle routing,
@@ -138,9 +150,5 @@ export function getTaskReportConsumerFromPayload(
     }
   }
 
-  // Existing orchestrator-owned tasks still need the report contract when
-  // they resume or settle after an upgrade.
-  return getFastAgentParentFromPayload(payload)
-    ? 'orchestrator'
-    : 'direct-user';
+  return 'direct-user';
 }

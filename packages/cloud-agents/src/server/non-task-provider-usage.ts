@@ -109,6 +109,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   brainSynthesis: 'brain_synthesis',
   chatAudioTranscription: 'chat_audio_transcription',
   chatVideoDescription: 'chat_video_description',
+  composerSuggestionGeneration: 'composer_suggestion_generation',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
   fastAgentQuestionAnswering: 'fast_agent',
   inferenceValidation: 'inference_validation',
@@ -216,12 +217,61 @@ export type NonTaskOpenCodeSession = {
   id?: string;
 };
 
+export type NonTaskOpenCodeMessageTokens = {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+};
+
 export type NonTaskOpenCodeCompletedMessage = {
   id: string | null;
   sessionId: string;
   createdAtMs: number | null;
   completedAtMs: number | null;
+  /** Provider usage OpenCode attached to the message, when reported. */
+  tokens?: NonTaskOpenCodeMessageTokens;
 };
+
+/**
+ * How long each step before the OpenCode prompt request took. Lets callers
+ * separate server spawn, session validation, and session creation from the
+ * model's own latency.
+ */
+export type NonTaskOpenCodePromptSetupTiming = {
+  serverLeaseMs: number;
+  sessionValidateMs?: number;
+  sessionCreateMs?: number;
+  eventSubscribeMs?: number;
+  totalMs: number;
+};
+
+function readNonTaskOpenCodeMessageTokens(
+  info: NonTaskOpenCodeMessageInfo,
+): NonTaskOpenCodeMessageTokens | undefined {
+  if (!info.tokens) return undefined;
+  return {
+    input: asFiniteNumber(info.tokens.input) ?? 0,
+    output: asFiniteNumber(info.tokens.output) ?? 0,
+    reasoning: asFiniteNumber(info.tokens.reasoning) ?? 0,
+    cacheRead: asFiniteNumber(info.tokens.cache?.read) ?? 0,
+    cacheWrite: asFiniteNumber(info.tokens.cache?.write) ?? 0,
+  };
+}
+
+export type NonTaskOpenCodeAssistantMessage = {
+  id: string;
+  sessionId: string;
+  parentId: string | null;
+  createdAtMs: number | null;
+};
+
+export type NonTaskOpenCodeNativeSteer = (input: {
+  messageId: string;
+  text: string;
+  files?: NonTaskPromptFile[];
+}) => Promise<void>;
 
 export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
@@ -230,7 +280,15 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   onMessageCompleted?: (
     message: NonTaskOpenCodeCompletedMessage,
   ) => Promise<void> | void;
-  onPromptStarted?: () => void;
+  onAssistantMessageStarted?: (
+    message: NonTaskOpenCodeAssistantMessage,
+  ) => Promise<void> | void;
+  onAssistantMessageCompleted?: (
+    message: NonTaskOpenCodeCompletedMessage,
+  ) => Promise<void> | void;
+  onPromptStarted?: (setup: NonTaskOpenCodePromptSetupTiming) => void;
+  onNativeSteerReady?: (steer: NonTaskOpenCodeNativeSteer) => void;
+  onNativeSteerClosed?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
   permission?: PermissionRuleset;
@@ -793,8 +851,16 @@ async function runNonTaskSdkPrompt(
     directory?: string;
     ephemeral?: boolean;
     env?: Partial<Record<string, string>>;
-    onPromptStarted?: () => void;
+    onPromptStarted?: (setup: NonTaskOpenCodePromptSetupTiming) => void;
+    onNativeSteerReady?: (steer: NonTaskOpenCodeNativeSteer) => void;
+    onNativeSteerClosed?: () => void;
     onMessageCompleted?: (
+      message: NonTaskOpenCodeCompletedMessage,
+    ) => Promise<void> | void;
+    onAssistantMessageStarted?: (
+      message: NonTaskOpenCodeAssistantMessage,
+    ) => Promise<void> | void;
+    onAssistantMessageCompleted?: (
       message: NonTaskOpenCodeCompletedMessage,
     ) => Promise<void> | void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
@@ -820,6 +886,11 @@ async function runNonTaskSdkPrompt(
     `OpenCode structured prompt failed (model ${model})`;
   const sessionDirectory =
     options.directory ?? resolveNonTaskSessionDirectory();
+  const setupStartedAtMs = Date.now();
+  const setupTiming: NonTaskOpenCodePromptSetupTiming = {
+    serverLeaseMs: 0,
+    totalMs: 0,
+  };
   const server = await leaseOpenCodeSdkServer({
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
@@ -831,6 +902,7 @@ async function runNonTaskSdkPrompt(
         : Math.min(timeoutMs, DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS),
     useConfiguredServer: options.useConfiguredServer,
   });
+  setupTiming.serverLeaseMs = Date.now() - setupStartedAtMs;
   const abortController = new AbortController();
   const timeout =
     timeoutMs === null
@@ -862,6 +934,7 @@ async function runNonTaskSdkPrompt(
     });
     let sessionId = options.session?.id;
     if (sessionId && options.validateSession) {
+      const validateStartedAtMs = Date.now();
       const validationResult = await client.session.messages(
         {
           sessionID: sessionId,
@@ -882,8 +955,10 @@ async function runNonTaskSdkPrompt(
       if (!validationResult.data || validationResult.data.length === 0) {
         throw new NonTaskOpenCodeSessionNotFoundError();
       }
+      setupTiming.sessionValidateMs = Date.now() - validateStartedAtMs;
     }
     if (!sessionId) {
+      const createStartedAtMs = Date.now();
       const sessionResult = await client.session.create(
         {
           directory: sessionDirectory,
@@ -903,6 +978,7 @@ async function runNonTaskSdkPrompt(
       if (options.session) {
         options.session.id = sessionId;
       }
+      setupTiming.sessionCreateMs = Date.now() - createStartedAtMs;
     }
     await options.onSessionReady?.(sessionId);
 
@@ -966,18 +1042,24 @@ async function runNonTaskSdkPrompt(
       rejectSessionError = reject;
     });
     let eventMonitor: Promise<void> | undefined;
+    const observedAssistantMessageIds = new Set<string>();
+    const completedAssistantMessageIds = new Set<string>();
     const needsEventMonitor = Boolean(
       params.onProviderRetry ||
+      options.onAssistantMessageStarted ||
+      options.onAssistantMessageCompleted ||
       options.onSubagentSessionReady ||
       options.trackSessionTreeUsage,
     );
 
     if (needsEventMonitor) {
       try {
+        const subscribeStartedAtMs = Date.now();
         const subscription = await client.event.subscribe(
           { directory: sessionDirectory },
           { signal: eventAbortController.signal },
         );
+        setupTiming.eventSubscribeMs = Date.now() - subscribeStartedAtMs;
         eventMonitor = (async () => {
           try {
             for await (const event of subscription.stream) {
@@ -999,14 +1081,59 @@ async function runNonTaskSdkPrompt(
                   return;
                 }
               } else if (
-                options.trackSessionTreeUsage &&
                 event.type === 'message.updated' &&
                 event.properties.info.role === 'assistant' &&
-                event.properties.info.time.completed !== undefined &&
                 trackedSessionIds.has(event.properties.info.sessionID)
               ) {
-                void recordUsageOnce(event.properties.info);
-                markUsageEventObserved(event.properties.info);
+                const info = event.properties.info;
+                const messageId = asString(info.id);
+                if (
+                  info.sessionID === sessionId &&
+                  messageId &&
+                  !observedAssistantMessageIds.has(messageId)
+                ) {
+                  observedAssistantMessageIds.add(messageId);
+                  try {
+                    await options.onAssistantMessageStarted?.({
+                      id: messageId,
+                      sessionId,
+                      parentId: asString(info.parentID) ?? null,
+                      createdAtMs: asFiniteNumber(info.time.created) ?? null,
+                    });
+                  } catch (error) {
+                    rejectSessionError(error);
+                    return;
+                  }
+                }
+                if (
+                  info.sessionID === sessionId &&
+                  messageId &&
+                  info.time.completed !== undefined &&
+                  !completedAssistantMessageIds.has(messageId)
+                ) {
+                  completedAssistantMessageIds.add(messageId);
+                  try {
+                    const tokens = readNonTaskOpenCodeMessageTokens(info);
+                    await options.onAssistantMessageCompleted?.({
+                      id: messageId,
+                      sessionId,
+                      createdAtMs: asFiniteNumber(info.time.created) ?? null,
+                      completedAtMs:
+                        asFiniteNumber(info.time.completed) ?? null,
+                      ...(tokens ? { tokens } : {}),
+                    });
+                  } catch (error) {
+                    rejectSessionError(error);
+                    return;
+                  }
+                }
+                if (
+                  options.trackSessionTreeUsage &&
+                  info.time.completed !== undefined
+                ) {
+                  void recordUsageOnce(info);
+                  markUsageEventObserved(info);
+                }
               } else if (
                 event.type === 'session.status' &&
                 event.properties.sessionID === sessionId &&
@@ -1089,7 +1216,8 @@ async function runNonTaskSdkPrompt(
 
     try {
       const turnStartedAtMs = Date.now();
-      options.onPromptStarted?.();
+      setupTiming.totalMs = turnStartedAtMs - setupStartedAtMs;
+      options.onPromptStarted?.(setupTiming);
       const promptRequest = client.session.prompt(
         {
           sessionID: sessionId,
@@ -1100,9 +1228,39 @@ async function runNonTaskSdkPrompt(
         },
         { signal: abortController.signal },
       );
-      const promptResult = needsEventMonitor
-        ? await Promise.race([promptRequest, sessionError])
-        : await promptRequest;
+      options.onNativeSteerReady?.(async (input) => {
+        const result = await client.session.promptAsync(
+          {
+            sessionID: sessionId,
+            directory: sessionDirectory,
+            messageID: input.messageId,
+            parts: [
+              { type: 'text', text: input.text },
+              ...(input.files ?? []).map((file) => ({
+                type: 'file' as const,
+                mime: file.mime,
+                ...(file.filename ? { filename: file.filename } : {}),
+                url: file.url,
+              })),
+            ],
+          },
+          { signal: abortController.signal },
+        );
+        if (result.error) {
+          throw new NonTaskOpenCodePromptError(
+            result.error,
+            'OpenCode native Fast steer failed',
+          );
+        }
+      });
+      let promptResult: Awaited<typeof promptRequest>;
+      try {
+        promptResult = needsEventMonitor
+          ? await Promise.race([promptRequest, sessionError])
+          : await promptRequest;
+      } finally {
+        options.onNativeSteerClosed?.();
+      }
 
       if (promptResult.error || !promptResult.data) {
         if (isOpenCodeSessionMissing(promptResult.error)) {
@@ -1250,6 +1408,9 @@ async function runNonTaskSdkPrompt(
       }
 
       try {
+        const finalTokens = readNonTaskOpenCodeMessageTokens(
+          promptResult.data.info,
+        );
         await options.onMessageCompleted?.({
           id: asString(promptResult.data.info.id) ?? null,
           sessionId,
@@ -1257,6 +1418,7 @@ async function runNonTaskSdkPrompt(
             asFiniteNumber(promptResult.data.info.time?.created) ?? null,
           completedAtMs:
             asFiniteNumber(promptResult.data.info.time?.completed) ?? null,
+          ...(finalTokens ? { tokens: finalTokens } : {}),
         });
       } catch (error) {
         console.warn(
@@ -1395,6 +1557,10 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       directory: options.directory,
       env: options.env,
       onPromptStarted: options.onPromptStarted,
+      onNativeSteerReady: options.onNativeSteerReady,
+      onNativeSteerClosed: options.onNativeSteerClosed,
+      onAssistantMessageStarted: options.onAssistantMessageStarted,
+      onAssistantMessageCompleted: options.onAssistantMessageCompleted,
       onMessageCompleted: options.onMessageCompleted,
       onSessionReady: options.onSessionReady,
       onSubagentSessionReady: options.onSubagentSessionReady,

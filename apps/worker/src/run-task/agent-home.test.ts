@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  statSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -928,6 +929,124 @@ describe('generateOpenCodeConfig provider support', () => {
     );
     expect(config.agent.general?.tools).not.toHaveProperty('pylon_*');
     expect(config.agent.architect?.tools).toBeUndefined();
+  });
+
+  it('keeps remote integrations off the mounted config and reachable on demand', () => {
+    const homeDir = createHomeDir();
+    const runtimeEnv = {
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      OPENROUTER_API_KEY: 'openrouter-key',
+      ROOMOTE_PROOF_BROWSER_TARGET: 'http://127.0.0.1:3000',
+      ROOMOTE_MCP_PYLON_BEARER_TOKEN: 'run-token',
+    };
+    const result = generateOpenCodeConfig({
+      homeDir,
+      runtimeEnv,
+      mcpServers: [
+        {
+          type: 'local',
+          name: 'roomote',
+          command: 'node',
+          args: ['roomote-mcp-server.js'],
+          environment: { ROOMOTE_CLOUD_TOKEN: 'cloud-token' },
+        },
+        {
+          type: 'remote',
+          name: 'gbrain',
+          url: 'https://api.example.com/api/mcp/gbrain',
+        },
+        {
+          type: 'remote',
+          name: 'pylon',
+          url: 'https://api.example.com/api/mcp/pylon',
+          headers: {
+            Authorization: 'Bearer {env:ROOMOTE_MCP_PYLON_BEARER_TOKEN}',
+          },
+        },
+        {
+          type: 'local',
+          name: 'custom-tools',
+          command: 'custom-mcp',
+        },
+      ],
+    });
+    const config = JSON.parse(result.configContent) as {
+      agent: Record<string, { tools?: Record<string, boolean> }>;
+      instructions: string[];
+      mcp: Record<string, { environment?: Record<string, string> }>;
+    };
+
+    // Member server, memory server, and local servers stay mounted; the
+    // remote integration does not.
+    expect(Object.keys(config.mcp).sort()).toEqual([
+      'custom-tools',
+      'gbrain',
+      'roomote',
+    ]);
+    const catalogPath = join(
+      result.openCodeConfigDir,
+      'on-demand-mcp-servers.json',
+    );
+    expect(config.mcp.roomote?.environment).toMatchObject({
+      ROOMOTE_CLOUD_TOKEN: 'cloud-token',
+      ROOMOTE_ON_DEMAND_MCP_CATALOG_PATH: catalogPath,
+    });
+    // The catalog carries the resolved proxy credential for the member
+    // server's own process, and only that process can read it.
+    expect(JSON.parse(readFileSync(catalogPath, 'utf8'))).toEqual({
+      servers: [
+        {
+          name: 'pylon',
+          displayName: 'Pylon',
+          description: expect.any(String),
+          url: 'https://api.example.com/api/mcp/pylon',
+          headers: { Authorization: 'Bearer run-token' },
+        },
+      ],
+    });
+    expect(statSync(catalogPath).mode & 0o777).toBe(0o600);
+    expect(result.configContent).not.toContain('run-token');
+
+    // Agents kept off the integration's mounted tools cannot reach it through
+    // the on-demand tools either; the proof runner keeps its other member tools.
+    expect(config.agent['proof-runner']?.tools).toMatchObject({
+      'pylon_*': false,
+      roomote_find_integration_tools: false,
+      roomote_call_integration_tool: false,
+    });
+
+    const integrationInstructions = readFileSync(
+      config.instructions.find((entry) => entry.includes('integration'))!,
+      'utf8',
+    );
+    expect(integrationInstructions).toContain('# On-demand integrations');
+    expect(integrationInstructions).toContain('- Pylon [id: pylon]');
+    expect(integrationInstructions).toContain('roomote_find_integration_tools');
+    expect(integrationInstructions).toContain('roomote_call_integration_tool');
+  });
+
+  it('mounts every server when no Roomote member server can proxy on-demand calls', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+      mcpServers: [
+        {
+          type: 'remote',
+          name: 'pylon',
+          url: 'https://api.example.com/api/mcp/pylon',
+        },
+      ],
+    });
+    const config = JSON.parse(result.configContent) as {
+      mcp: Record<string, unknown>;
+    };
+    expect(Object.keys(config.mcp)).toEqual(['pylon']);
+    expect(
+      existsSync(join(result.openCodeConfigDir, 'on-demand-mcp-servers.json')),
+    ).toBe(false);
   });
 
   it('prefixes bare LiteLLM route names when LITELLM_BASE_URL is set', () => {

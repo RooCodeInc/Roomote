@@ -17,6 +17,7 @@ const read = (path) => readFileSync(join(root, path), 'utf8');
 const catalog = JSON.parse(read('deploy/deployment-catalog.json'));
 const installer = read('deploy/install.sh');
 const deployer = read('deploy/scripts/deploy.sh');
+const upgradeCompatibility = read('deploy/ci/upgrade-compatibility.sh');
 const productionEnvExample = read('.env.production.example');
 
 function fail(message) {
@@ -88,6 +89,11 @@ assert(
     digitalOceanTerraform.includes('var.domain == var.dns_zone'),
   'DigitalOcean Terraform: zone-apex domains must map to "@"/"*" record names',
 );
+assert(
+  upgradeCompatibility.includes('COMPOSE_PROFILES=local-postgres,brain') &&
+    upgradeCompatibility.includes('bullmq gbrain preview-proxy'),
+  'upgrade compatibility: the Brain profile must boot gbrain explicitly',
+);
 
 function commandText(command) {
   if (Array.isArray(command)) return command.join(' ');
@@ -116,6 +122,7 @@ const composeEnv = {
   DEFAULT_COMPUTE_PROVIDER: 'docker',
   DOCKER_WORKER_IMAGE: 'roomote-worker:deployment-ci',
   ENCRYPTION_KEY: 'deployment-ci-encryption-key',
+  GBRAIN_IMAGE: '',
   IMAGE_NAMESPACE: 'roomote',
   IMAGE_REGISTRY: 'localhost',
   JOB_AUTH_PRIVATE_KEY: 'deployment-ci-job-private-key',
@@ -228,6 +235,38 @@ function validateComposeShape(shape) {
           `${shape.name}: ${serviceName} must receive PREVIEW_PROXY_SUBDOMAIN_SUFFIX`,
         );
       }
+    }
+
+    if (shape.name === 'installer-production') {
+      const expectedGbrainImage = `${composeEnv.IMAGE_REGISTRY}/${composeEnv.IMAGE_NAMESPACE}/roomote-gbrain:${composeEnv.ROOMOTE_VERSION}`;
+      assert(
+        config.services.gbrain?.image === expectedGbrainImage,
+        `installer-production: gbrain must default to matching release image ${expectedGbrainImage}`,
+      );
+
+      const overrideImage = 'registry.example/roomote/gbrain:operator-pinned';
+      const overrideConfig = JSON.parse(
+        execFileSync('docker', args, {
+          cwd: root,
+          env: { ...composeEnv, GBRAIN_IMAGE: overrideImage },
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      );
+      assert(
+        overrideConfig.services.gbrain?.image === overrideImage,
+        'installer-production: explicit GBRAIN_IMAGE must override the matching release default',
+      );
+      assert(
+        config.services.gbrain?.healthcheck?.test?.length,
+        'installer-production: gbrain must have a healthcheck for upgrade validation',
+      );
+      assert(
+        config.services.gbrain?.depends_on?.postgres?.condition ===
+          'service_healthy' &&
+          config.services.gbrain?.depends_on?.postgres?.required === false,
+        'installer-production: gbrain must wait for optional local Postgres health',
+      );
     }
 
     if (

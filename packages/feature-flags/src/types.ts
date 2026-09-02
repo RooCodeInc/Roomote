@@ -2,7 +2,9 @@
  * Feature flag types and configuration
  */
 
-export const FeatureFlag = {} as const;
+export const FeatureFlag = {
+  ComposerSuggestions: 'composerSuggestions',
+} as const;
 
 export type FeatureFlag = (typeof FeatureFlag)[keyof typeof FeatureFlag];
 
@@ -17,6 +19,8 @@ export interface FeatureFlagConfig<T extends FeatureFlagValue = boolean> {
   override?: T | (() => T);
   metadataKey?: string;
   legacyMetadataKeys?: string[];
+  /** Human-readable name shown in settings; falls back to the flag id. */
+  label?: string;
   description?: string;
   group?: string;
 }

@@ -35,6 +35,7 @@ const {
   fromFn,
   selectFn,
   inArrayFn,
+  existsFn,
 } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- suppressed for oxlint; ESLint's own rule is offloaded and reports this directive as unused, which is a false positive
   type AnyMock = Mock<(...args: any[]) => any>;
@@ -63,6 +64,7 @@ const {
     direction: 'desc',
   }));
   const inArrayFn: AnyMock = vi.fn();
+  const existsFn: AnyMock = vi.fn(() => ({ exists: true }));
   const eqFn: AnyMock = vi.fn();
   const gtFn: AnyMock = vi.fn();
   const orFn: AnyMock = vi.fn();
@@ -100,6 +102,7 @@ const {
     fromFn,
     selectFn,
     inArrayFn,
+    existsFn,
   };
 });
 
@@ -168,12 +171,18 @@ vi.mock('@roomote/db/server', () => ({
     id: 'id',
     taskId: 'taskId',
   },
+  tasks: {
+    id: 'taskId',
+    state: 'taskState',
+    activityAt: 'activityAt',
+  },
   eq: eqFn,
   and: vi.fn(),
   or: orFn,
   isNull: vi.fn(),
   isNotNull: vi.fn(),
   inArray: inArrayFn,
+  exists: existsFn,
   gt: gtFn,
   lte: vi.fn(),
   asc: ascFn,
@@ -315,6 +324,44 @@ describe('sleepTaskRunNow', () => {
       snapshotIntentId: expect.stringMatching(/^manual_sleep-123-/),
       triggerPath: 'manual_sleep',
     });
+    expect(mockEnterStandby).not.toHaveBeenCalled();
+  });
+
+  it('preserves the merged-PR trigger through snapshot handoff', async () => {
+    mockDbQueryTaskRunsFindFirst.mockResolvedValue({
+      id: 123,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Idle,
+      taskPhase: null,
+      machineId: 'modal-machine-1',
+      vendor: 'modal',
+      taskId: 'task-1',
+      snapshotRequestedAt: null,
+      sandboxCmdId: 'command-1',
+      sleepAt: new Date(Date.now() + 30_000),
+      sleepRequestedAt: null,
+      startedAt: new Date(),
+      workerHeartbeatAt: new Date(),
+      snapshotId: null,
+    });
+    mockCreateSnapshot.mockResolvedValue(true);
+
+    await sleepTaskRunNow(123, 'merged_pr', 700);
+
+    expect(mockCreateSnapshot).toHaveBeenCalledWith({
+      runId: 123,
+      sandboxId: 'modal-machine-1',
+      snapshotIntentId: expect.stringMatching(/^merged_pr-123-/),
+      triggerPath: 'merged_pr',
+    });
+    expect(eqFn).toHaveBeenCalledWith('activityAt', 700);
+  });
+
+  it('does not sleep a merged-PR task that resumed before dequeue', async () => {
+    await sleepTaskRunNow(123, 'merged_pr');
+
+    expect(mockGetInstanceStatus).not.toHaveBeenCalled();
+    expect(mockCreateSnapshot).not.toHaveBeenCalled();
     expect(mockEnterStandby).not.toHaveBeenCalled();
   });
 });
@@ -1032,6 +1079,40 @@ describe('sleepCheckJob', () => {
     );
   });
 
+  it('finalizes a missing Modal sandbox once and does not select it on the next tick', async () => {
+    const mockJob = {
+      id: 102,
+      machineId: 'modal-missing',
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'modal',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+      sleepAt: new Date(Date.now() + 30 * 60 * 1_000),
+    };
+
+    mockJobQueries({ hardLimitJobs: [mockJob] });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
+
+    await sleepCheckJob();
+
+    // A finalized run is absent from every candidate query on the next tick.
+    mockJobQueries({});
+    await sleepCheckJob();
+
+    expect(mockGetInstanceStatus).toHaveBeenCalledTimes(1);
+    expect(mockFinishRun).toHaveBeenCalledTimes(1);
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 102,
+      status: RunStatus.Failed,
+      error: expect.stringContaining('in status stopped'),
+    });
+    expect(mockCreateSnapshot).not.toHaveBeenCalled();
+    expect(mockDestroyInstance).not.toHaveBeenCalled();
+  });
+
   it('finalizes a run whose azure instance no longer exists instead of retrying forever', async () => {
     const mockJob = {
       id: 100,
@@ -1103,29 +1184,29 @@ describe('sleepCheckJob', () => {
     expect(mockEnterStandby).not.toHaveBeenCalled();
   });
 
-  it('keeps retrying on transient provider errors instead of finalizing', async () => {
+  it('retries transient Modal probe errors on the next tick instead of finalizing', async () => {
     const mockJob = {
       id: 101,
       machineId: 'sb-flaky',
       payloadKind: TaskPayloadKind.StandardTask,
       status: RunStatus.Running,
       taskPhase: 'waiting_for_prompt',
-      vendor: 'azure',
+      vendor: 'modal',
       snapshotId: null,
       sleepRequestedAt: null,
       snapshotRequestedAt: null,
       sleepAt: new Date(Date.now() + 30 * 60 * 1_000),
     };
 
-    mockJobQueries({ hardLimitJobs: [mockJob] });
-    const { AzureDataPlaneError } = await import('@roomote/compute-providers');
-    mockGetInstanceStatus.mockRejectedValue(
-      new AzureDataPlaneError('Upstream timeout.', 502),
-    );
+    mockGetInstanceStatus.mockRejectedValue(new Error('Upstream timeout.'));
 
+    mockJobQueries({ hardLimitJobs: [mockJob] });
+    await sleepCheckJob();
+    mockJobQueries({ hardLimitJobs: [mockJob] });
     await sleepCheckJob();
 
     // Transient error: generic catch clears claims so the next tick retries.
+    expect(mockGetInstanceStatus).toHaveBeenCalledTimes(2);
     expect(mockFinishRun).not.toHaveBeenCalled();
     expect(setFn).toHaveBeenLastCalledWith({
       sleepRequestedAt: null,

@@ -3,7 +3,7 @@ import { formatDistanceToNow } from 'date-fns';
 
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
 import { formatAutomationLabel } from '@/lib/task-creator-filter';
-import { Avatar, Spinner } from '@/components/system';
+import { Avatar } from '@/components/system';
 import { PullRequestBadge } from '@/components/sandbox';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { SessionSearchSnippet } from '@/components/sessions/SessionSearchSnippet';
@@ -99,12 +99,7 @@ export function SessionCard({
           className="line-clamp-2"
         />
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          {status === 'active' ? (
-            <>
-              <Spinner />
-              <span className="sr-only">Active</span>
-            </>
-          ) : status === 'ready' ? null : (
+          {status === 'active' || status === 'ready' ? null : (
             <SessionStatusBadge status={status} className="capitalize" />
           )}
           <span>{getSessionSurfaceLabel(session.sourceSurface)}</span>

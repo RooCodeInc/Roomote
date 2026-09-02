@@ -52,10 +52,10 @@ curl -fsSL https://get.roomote.dev | bash
 ```
 
 The installer brings up the full stack from published images and prints a setup
-link. For this self-hosted path, open it in a browser and the wizard walks you
-through the rest: sign-in provider, source-control provider, a ChatGPT
-subscription or inference provider API key, communications provider,
-repositories, and a first task.
+link. Open it in a browser to create the first administrator and configure
+inference. Roomote then opens a persistent setup conversation where trusted
+cards guide you through source control, your first task, a sandbox provider,
+and recommended automations.
 
 No DNS setup is needed to try it out; pass `--domain roomote.example.com` for a
 production install on your own domain.
@@ -71,7 +71,7 @@ sudo bash install.sh
 
 ## Setup checklist
 
-Have these ready before the wizard asks for them:
+Have these ready before setup asks for them:
 
 - a public HTTPS URL for the deployment, especially when source-control or chat
   callbacks need to reach it
@@ -180,19 +180,27 @@ Roomote surfaces release history and available updates in the web app:
 - Managed Roomote inference from an eligible host, or a ChatGPT subscription or
   inference provider API key (OpenRouter, Anthropic, OpenAI, and others).
 - An account with a supported source-control provider. For GitHub, the setup
-  wizard creates the GitHub App; other providers use their documented OAuth or
-  credential flow.
+  conversation creates the GitHub App; other providers use their documented
+  OAuth or credential flow.
 - For Slack, Microsoft Teams, Telegram, and Discord: a workspace or server where
-  you can install an app or bot; the setup wizard prefills the Slack app
+  you can install an app or bot; the setup assistant prefills the Slack app
   manifest and creates Discord's installation link for you.
 
 ## Verify the deployment
 
-The final setup step offers a small set of preselected starter tasks. Keep the
-ones you want, clear any you do not want to run yet, then select **Go**. If you
-keep any selected, Roomote completes setup and opens one **Set up Roomote**
-Session that launches the starter tasks and keeps their progress together. You
-can also clear every selection and finish setup without starting a Session.
+After sign-in and inference are ready, setup continues entirely in a persistent
+conversation with Roomote. Trusted action cards appear beside the relevant
+messages for source control, first work, sandbox configuration, and automation
+recommendations. Detailed provider instructions and credential entry open in a
+dialog from the source-control card; Roomote never asks for credentials in
+chat.
+
+When repositories are connected, Roomote offers the preselected starter tasks
+in one structured multi-select question. Choosing at least one completes setup
+immediately, then Roomote launches each choice as visible work attached to the
+same session. A launch failure does not reopen setup; ask Roomote to retry that
+item. Automation recommendations are analyzed after repository sync and appear
+only after at least one starter task launches. They remain optional.
 
 After setup, run a small task that uses the first environment if you did not
 start one from the starter list. A healthy deployment should let you:

@@ -1,5 +1,7 @@
 import {
+  ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
+  extractAcpMessageText,
   parsePrReviewActionOffer,
   type PrReviewActionOfferStatus,
   sanitizeEnvelopeFields,
@@ -10,7 +12,6 @@ import {
   db,
   desc,
   eq,
-  exists,
   fastAgentConversations,
   fastAgentMessages,
   llmUsageEvents,
@@ -27,6 +28,7 @@ import {
 import type { FastAgentMessage } from '@roomote/db';
 
 import type { UserAuthSuccess } from '@/types';
+import { COMPOSER_SUGGESTION_HISTORY_LIMIT } from './composer-suggestion-history';
 
 type FastSessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
 
@@ -65,7 +67,39 @@ export type FastSessionMessage = Pick<
   | 'nativeSessionId'
   | 'nativeMessageId'
   | 'createdAt'
->;
+> & {
+  userName?: string | null;
+  userEmail?: string | null;
+  userImageUrl?: string | null;
+};
+
+const fastSessionMessageSelection = {
+  id: fastAgentMessages.id,
+  eventId: fastAgentMessages.eventId,
+  turnId: fastAgentMessages.turnId,
+  turnSeq: fastAgentMessages.turnSeq,
+  ts: fastAgentMessages.ts,
+  eventType: fastAgentMessages.eventType,
+  role: fastAgentMessages.role,
+  contentBlocks: fastAgentMessages.contentBlocks,
+  metadata: fastAgentMessages.metadata,
+  payload: fastAgentMessages.payload,
+  source: fastAgentMessages.source,
+  nativeSessionId: fastAgentMessages.nativeSessionId,
+  nativeMessageId: fastAgentMessages.nativeMessageId,
+  createdAt: fastAgentMessages.createdAt,
+  userName: sql<
+    string | null
+  >`coalesce(${fastAgentMessages.metadata} ->> 'userName', ${users.name})`,
+  userEmail: sql<
+    string | null
+  >`coalesce(${fastAgentMessages.metadata} ->> 'userEmail', ${users.email})`,
+  userImageUrl: sql<
+    string | null
+  >`coalesce(${fastAgentMessages.metadata} ->> 'userImageUrl', ${users.imageUrl})`,
+};
+
+const fastSessionMessageUserJoin = sql`${users.id}::text = ${fastAgentMessages.metadata} ->> 'userId'`;
 
 export function buildFastSessionPrReviewDestinationKey(session: {
   surface: string;
@@ -147,29 +181,10 @@ const fastSessionSelection = {
   updatedAt: fastAgentConversations.updatedAt,
 };
 
-function fastSessionScope(auth: FastSessionAuth) {
-  if (auth.isAdmin) {
-    return undefined;
-  }
-
-  // Shared-surface conversations (e.g. Slack channels/threads) are stamped
-  // with the first participant's userId, but every participant's prompts are
-  // persisted with their own userId in the message metadata — so a session is
-  // visible to its owner and to anyone who spoke in it.
-  return or(
-    eq(fastAgentConversations.userId, auth.userId),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(fastAgentMessages)
-        .where(
-          and(
-            eq(fastAgentMessages.conversationId, fastAgentConversations.id),
-            sql`${fastAgentMessages.metadata} ->> 'userId' = ${auth.userId}`,
-          ),
-        ),
-    ),
-  );
+function fastSessionScope(_auth: FastSessionAuth) {
+  // Sessions follow the same visibility rules as tasks: every authenticated
+  // user of the deployment can read every conversation and its transcript.
+  return undefined;
 }
 
 /** Light session lookup with the same visibility scope as the list/detail. */
@@ -189,8 +204,18 @@ export async function findAccessibleFastSession(
       reasoningEffort: fastAgentConversations.reasoningEffort,
     })
     .from(fastAgentConversations)
+    .leftJoin(
+      sessions,
+      eq(sessions.fastConversationId, fastAgentConversations.id),
+    )
     .where(
-      and(eq(fastAgentConversations.id, sessionId), fastSessionScope(auth)),
+      and(
+        or(
+          eq(fastAgentConversations.id, sessionId),
+          eq(sessions.id, sessionId),
+        ),
+        fastSessionScope(auth),
+      ),
     )
     .limit(1);
 
@@ -347,26 +372,14 @@ export async function getFastSessionMessagesSince(
 }> {
   const rows = await db
     .select({
-      id: fastAgentMessages.id,
-      eventId: fastAgentMessages.eventId,
-      turnId: fastAgentMessages.turnId,
-      turnSeq: fastAgentMessages.turnSeq,
-      ts: fastAgentMessages.ts,
-      eventType: fastAgentMessages.eventType,
-      role: fastAgentMessages.role,
-      contentBlocks: fastAgentMessages.contentBlocks,
-      metadata: fastAgentMessages.metadata,
-      payload: fastAgentMessages.payload,
-      source: fastAgentMessages.source,
-      nativeSessionId: fastAgentMessages.nativeSessionId,
-      nativeMessageId: fastAgentMessages.nativeMessageId,
-      createdAt: fastAgentMessages.createdAt,
+      ...fastSessionMessageSelection,
       // Millisecond Dates truncate Postgres microsecond timestamps, which
       // would replay the newest row on every poll — keep the cursor as a
       // fractional epoch-millisecond float instead.
       updatedAtMs: sql<number>`extract(epoch from ${fastAgentMessages.updatedAt}) * 1000`,
     })
     .from(fastAgentMessages)
+    .leftJoin(users, fastSessionMessageUserJoin)
     .where(
       and(
         eq(fastAgentMessages.conversationId, sessionId),
@@ -390,6 +403,60 @@ export async function getFastSessionMessagesSince(
   return { messages, cursor };
 }
 
+/**
+ * The newest persisted user/assistant conversation reduced to the minimal
+ * shape the composer-suggestion prompt is built from. Bounded in SQL so long
+ * sessions never load their full transcript; tool events never leave the DB.
+ */
+export async function getFastSessionSuggestableMessages(
+  sessionId: string,
+): Promise<
+  Array<{
+    id: string;
+    eventType: string;
+    role: string | null;
+    text: string | null;
+  }>
+> {
+  const rows = await db
+    .select({
+      id: fastAgentMessages.id,
+      eventType: fastAgentMessages.eventType,
+      role: fastAgentMessages.role,
+      contentBlocks: fastAgentMessages.contentBlocks,
+      payload: fastAgentMessages.payload,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, sessionId),
+        inArray(fastAgentMessages.eventType, [
+          ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        ]),
+        sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+      ),
+    )
+    .orderBy(
+      desc(fastAgentMessages.ts),
+      desc(fastAgentMessages.turnSeq),
+      desc(fastAgentMessages.createdAt),
+      desc(fastAgentMessages.id),
+    )
+    .limit(COMPOSER_SUGGESTION_HISTORY_LIMIT);
+
+  return rows.reverse().map((row) => ({
+    id: row.id,
+    eventType: row.eventType,
+    role: row.role,
+    text:
+      extractAcpMessageText(
+        row.contentBlocks,
+        (row.payload as Record<string, unknown> | null) ?? null,
+      ) ?? null,
+  }));
+}
+
 export async function getFastSessionById(
   auth: FastSessionAuth,
   sessionId: string,
@@ -408,23 +475,9 @@ export async function getFastSessionById(
   }
 
   const rows = await db
-    .select({
-      id: fastAgentMessages.id,
-      eventId: fastAgentMessages.eventId,
-      turnId: fastAgentMessages.turnId,
-      turnSeq: fastAgentMessages.turnSeq,
-      ts: fastAgentMessages.ts,
-      eventType: fastAgentMessages.eventType,
-      role: fastAgentMessages.role,
-      contentBlocks: fastAgentMessages.contentBlocks,
-      metadata: fastAgentMessages.metadata,
-      payload: fastAgentMessages.payload,
-      source: fastAgentMessages.source,
-      nativeSessionId: fastAgentMessages.nativeSessionId,
-      nativeMessageId: fastAgentMessages.nativeMessageId,
-      createdAt: fastAgentMessages.createdAt,
-    })
+    .select(fastSessionMessageSelection)
     .from(fastAgentMessages)
+    .leftJoin(users, fastSessionMessageUserJoin)
     .where(
       and(
         eq(fastAgentMessages.conversationId, session.id),
