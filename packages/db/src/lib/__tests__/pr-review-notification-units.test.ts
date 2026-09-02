@@ -23,6 +23,7 @@ import {
   retireCanonicalPrReviewActionsForPullRequest,
   runFactory,
   taskFactory,
+  taskMessages,
   taskPullRequests,
   tasks,
   transitionCanonicalPrReviewDelivery,
@@ -1204,6 +1205,7 @@ describe('canonical PR review notification ownership', () => {
 
   it('retires only awaiting offers from older PR heads after a new commit', async () => {
     const task = await taskFactory.create();
+    const run = await runFactory.create({ taskId: task.id });
     const repository = `owner/new-commit-${task.id}`;
     await associate(task.id, repository, 24);
 
@@ -1216,6 +1218,45 @@ describe('canonical PR review notification ownership', () => {
       }),
     );
     const oldDeliveryId = await postAction(repository);
+    const user = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: `new-commit-${randomUUID()}`,
+      })
+      .returning();
+    await Promise.all([
+      db.insert(fastAgentMessages).values({
+        conversationId: conversation!.id,
+        eventId: 'new-commit:assistant:0',
+        turnId: 'new-commit',
+        turnSeq: 1,
+        ts: 1,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Resolve this feedback?' }],
+        metadata: { visibleInTranscript: true },
+        payload: {
+          prReviewAction: { deliveryId: oldDeliveryId, status: 'pending' },
+        },
+        source: 'web',
+      }),
+      db.insert(taskMessages).values({
+        runId: run.id,
+        taskId: task.id,
+        ts: Date.now(),
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        protocol: 'roomote_runtime',
+        contentBlocks: [{ type: 'text', text: 'Resolve this feedback?' }],
+        payload: {
+          prReviewAction: { deliveryId: oldDeliveryId, status: 'pending' },
+        },
+      }),
+    ]);
 
     await expect(
       retireCanonicalPrReviewActionsForPullRequest({
@@ -1232,6 +1273,26 @@ describe('canonical PR review notification ownership', () => {
       }),
     ]);
     await expect(deliveryStatusOf(oldDeliveryId)).resolves.toBe('dismissed');
+    await expect(
+      db.query.fastAgentMessages.findFirst({
+        where: eq(fastAgentMessages.conversationId, conversation!.id),
+        columns: { payload: true },
+      }),
+    ).resolves.toMatchObject({
+      payload: {
+        prReviewAction: { deliveryId: oldDeliveryId, status: 'dismissed' },
+      },
+    });
+    await expect(
+      db.query.taskMessages.findFirst({
+        where: eq(taskMessages.taskId, task.id),
+        columns: { payload: true },
+      }),
+    ).resolves.toMatchObject({
+      payload: {
+        prReviewAction: { deliveryId: oldDeliveryId, status: 'dismissed' },
+      },
+    });
 
     await persistPrReviewEvent(
       eventInput({
@@ -1288,6 +1349,56 @@ describe('canonical PR review notification ownership', () => {
       ),
     ).resolves.toBe(false);
   });
+
+  it.each(['claimed', 'prepared'] as const)(
+    'fences an older-head offer in the %s state',
+    async (state) => {
+      const task = await taskFactory.create();
+      const repository = `owner/${state}-new-commit-${task.id}`;
+      await associate(task.id, repository, 26);
+      await persistPrReviewEvent(
+        eventInput({
+          repository,
+          prNumber: 26,
+          eventKey: `${state}-old-head-${task.id}`,
+          headSha: 'old-head',
+        }),
+      );
+      const claim = (await claimForRepository(repository)).find(
+        ({ repository: claimedRepository }) => claimedRepository === repository,
+      );
+      if (!claim || claim.ownershipVersion !== 'canonical') {
+        throw new Error('expected canonical claim');
+      }
+      if (state === 'prepared') {
+        await transitionCanonicalPrReviewDelivery({
+          deliveryId: claim.deliveryId,
+          leaseToken: claim.leaseToken,
+          expected: 'claimed',
+          status: 'prepared',
+        });
+      }
+
+      await retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 26,
+        currentHeadSha: 'new-head',
+      });
+
+      await expect(deliveryStatusOf(claim.deliveryId)).resolves.toBe(
+        'dismissed',
+      );
+      await expect(
+        transitionCanonicalPrReviewDelivery({
+          deliveryId: claim.deliveryId,
+          leaseToken: claim.leaseToken,
+          expected: state,
+          status: state === 'claimed' ? 'prepared' : 'prompt_posting',
+        }),
+      ).resolves.toBe(false);
+    },
+  );
 
   it('keeps exactly one awaiting offer when two actions attach concurrently', async () => {
     const sessionConversation = `supersede-race-${randomUUID()}`;

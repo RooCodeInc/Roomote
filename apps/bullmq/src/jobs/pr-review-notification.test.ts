@@ -31,6 +31,7 @@ const {
   mockIsDurable,
   mockMigrateLegacy,
   mockRenewLease,
+  mockUpdateTaskPrReviewOfferStatus,
   mockEq,
   MockPrReviewNotificationRateLimitError,
 } = vi.hoisted(() => ({
@@ -64,6 +65,7 @@ const {
   mockIsDurable: vi.fn(),
   mockMigrateLegacy: vi.fn(),
   mockRenewLease: vi.fn(),
+  mockUpdateTaskPrReviewOfferStatus: vi.fn(),
   mockEq: vi.fn((...args: unknown[]) => ({ eq: args })),
   MockPrReviewNotificationRateLimitError: class extends Error {
     constructor(readonly retryAfterMs: number) {
@@ -209,6 +211,7 @@ vi.mock('@roomote/sdk/server', () => ({
   migrateLegacyPrReviewNotificationRequest: mockMigrateLegacy,
   attachPendingPrReviewActionMessageWithRetirement:
     mockAttachPendingPrReviewActionMessage,
+  updateTaskPrReviewOfferStatus: mockUpdateTaskPrReviewOfferStatus,
 }));
 
 import type { Job } from 'bullmq';
@@ -286,6 +289,7 @@ describe('prReviewNotificationJob', () => {
       superseded: [],
     });
     mockRetirePrReviewActionMessages.mockResolvedValue(undefined);
+    mockUpdateTaskPrReviewOfferStatus.mockResolvedValue(undefined);
     mockFindAutoHandlePrReviewFeedbackPreference.mockResolvedValue(null);
     mockStickyFooterPost.mockResolvedValue('999.888');
     mockPostMessage.mockResolvedValue({
@@ -1593,6 +1597,38 @@ describe('prReviewNotificationJob', () => {
       { leaseToken },
     );
     expect(mockFinalize).not.toHaveBeenCalled();
+  });
+
+  it('dismisses a persisted web offer that loses its publish fence', async () => {
+    const deliveryId = '11111111-1111-4111-8111-111111111111';
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: null,
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Would you like me to resolve these issues?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockAttachPendingPrReviewActionMessage.mockResolvedValue({
+      attached: false,
+      superseded: [],
+    });
+
+    await expect(
+      prReviewNotificationJob(
+        makeJob({
+          ownershipVersion: 'canonical',
+          deliveryId,
+          deliveryState: 'claimed',
+          deliveryIds: [deliveryId],
+          leaseToken: '22222222-2222-4222-8222-222222222222',
+        }) as never,
+      ),
+    ).rejects.toThrow('Canonical web task review offer lost its publish fence');
+    expect(mockUpdateTaskPrReviewOfferStatus).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      deliveryIds: [deliveryId],
+      status: 'dismissed',
+    });
   });
 
   it('skips without posting when the notification is not worth sending', async () => {

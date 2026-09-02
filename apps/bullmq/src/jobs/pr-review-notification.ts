@@ -43,6 +43,7 @@ import {
   requeuePendingPrReviewActivity,
   schedulePrReviewNotificationJob,
   setPendingPrReviewAction,
+  updateTaskPrReviewOfferStatus,
 } from '@roomote/sdk/server';
 import {
   buildSlackPrReviewActionBlocks,
@@ -1057,6 +1058,11 @@ ${delivery.text}`;
           { leaseToken: data.leaseToken },
         );
       if (!attached) {
+        await updateTaskPrReviewOfferStatus({
+          taskId: data.taskId,
+          deliveryIds: [taskReviewActionDeliveryId],
+          status: 'dismissed',
+        });
         throw new Error(
           'Canonical web task review offer lost its publish fence',
         );

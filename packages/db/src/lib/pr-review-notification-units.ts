@@ -28,6 +28,7 @@ import {
   prReviewNotificationDeliveries,
   prReviewNotificationUnitEvents,
   prReviewNotificationUnits,
+  taskMessages,
   taskPullRequests,
   taskRuns,
   tasks,
@@ -1533,27 +1534,63 @@ export async function retireCanonicalPrReviewActionsForPullRequest(input: {
         ),
       ),
     );
-  const rows = await db
-    .update(prReviewNotificationDeliveries)
-    .set({
-      status: 'dismissed',
-      actionClaimedAt: new Date(),
-      completedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        inArray(prReviewNotificationDeliveries.status, [
-          'prompt_posting',
-          'awaiting_user_action',
-        ]),
-        inArray(
-          prReviewNotificationDeliveries.notificationUnitId,
-          matchingUnits,
+  const rows = await db.transaction(async (tx) => {
+    const retired = await tx
+      .update(prReviewNotificationDeliveries)
+      .set({
+        status: 'dismissed',
+        leaseToken: null,
+        leaseExpiresAt: null,
+        actionClaimedAt: new Date(),
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          inArray(prReviewNotificationDeliveries.status, [
+            'pending',
+            'claimed',
+            'prepared',
+            'prompt_posting',
+            'awaiting_user_action',
+          ]),
+          inArray(
+            prReviewNotificationDeliveries.notificationUnitId,
+            matchingUnits,
+          ),
         ),
-      ),
-    )
-    .returning({ id: prReviewNotificationDeliveries.id });
+      )
+      .returning({ id: prReviewNotificationDeliveries.id });
+
+    if (retired.length > 0) {
+      const deliveryIds = retired.map(({ id }) => id);
+      await tx
+        .update(fastAgentMessages)
+        .set({
+          payload: sql`jsonb_set(coalesce(${fastAgentMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb('dismissed'::text), true)`,
+          updatedAt: sql`now()`,
+        })
+        .where(
+          inArray(
+            sql<string>`${fastAgentMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
+            deliveryIds,
+          ),
+        );
+      await tx
+        .update(taskMessages)
+        .set({
+          payload: sql`jsonb_set(coalesce(${taskMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb('dismissed'::text), true)`,
+        })
+        .where(
+          inArray(
+            sql<string>`${taskMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
+            deliveryIds,
+          ),
+        );
+    }
+
+    return retired;
+  });
   return Promise.all(rows.map(({ id }) => getCanonicalPrReviewAction(id)));
 }
 
