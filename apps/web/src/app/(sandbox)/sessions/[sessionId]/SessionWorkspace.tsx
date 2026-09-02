@@ -2,9 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -26,12 +24,7 @@ import {
   getUserDisplayName,
   humanizeFilename,
 } from '@/lib';
-import {
-  getSessionPullRequests,
-  type SessionPullRequest,
-} from '@/lib/session-pull-requests';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
-import { PullRequestBadge } from '@/components/sandbox';
 import {
   getSessionSurfaceBrandIcon,
   getSessionSurfaceLabel,
@@ -177,29 +170,6 @@ export type SessionInfo = {
     }
   >;
 };
-
-const SessionPullRequestsContext = createContext<SessionPullRequest[]>([]);
-
-export function SessionHeaderExtras({ status }: { status: string | null }) {
-  const pullRequests = useContext(SessionPullRequestsContext);
-
-  if (pullRequests.length === 0 && !status) return null;
-
-  return (
-    <div className="flex max-w-full min-w-0 flex-wrap items-center justify-end gap-x-4 gap-y-2 text-xs text-muted-foreground">
-      {pullRequests.map((pullRequest) => (
-        <PullRequestBadge
-          key={`${pullRequest.repository}:${pullRequest.number}`}
-          repo={pullRequest.repository}
-          prNumber={pullRequest.number}
-          url={pullRequest.url}
-          iconClassName="text-muted-foreground"
-        />
-      ))}
-      {status ? <SessionStatusBadge status={status} /> : null}
-    </div>
-  );
-}
 
 function SessionArtifactCard({
   artifact,
@@ -715,7 +685,6 @@ export function SessionWorkspace({
   const fastTasks = currentFastTasks ?? session.taskCards ?? [];
   const taskCards = isFastTaskSource ? fastTasks : sessionTasks;
   const artifactTasks = isFastTaskSource ? fastTasks : sessionTasks;
-  const sessionPullRequests = getSessionPullRequests(sessionTasks);
   const runningTasks = taskCards.filter((task) =>
     isTaskExecutingTurn(task.latestRun?.status, task.latestRun?.taskPhase),
   );
@@ -907,17 +876,15 @@ export function SessionWorkspace({
             panel?.kind === 'tasks' && panel.autoOpened ? 33.3333 : undefined
           }
           main={
-            <SessionPullRequestsContext.Provider value={sessionPullRequests}>
-              <SessionRunningTaskCountContext.Provider value={runningTaskCount}>
-                <SessionTaskStateRevisionContext.Provider
-                  value={taskStateRevision}
-                >
-                  <OpenSessionTasksPanelContext.Provider value={openTasksPanel}>
-                    {children}
-                  </OpenSessionTasksPanelContext.Provider>
-                </SessionTaskStateRevisionContext.Provider>
-              </SessionRunningTaskCountContext.Provider>
-            </SessionPullRequestsContext.Provider>
+            <SessionRunningTaskCountContext.Provider value={runningTaskCount}>
+              <SessionTaskStateRevisionContext.Provider
+                value={taskStateRevision}
+              >
+                <OpenSessionTasksPanelContext.Provider value={openTasksPanel}>
+                  {children}
+                </OpenSessionTasksPanelContext.Provider>
+              </SessionTaskStateRevisionContext.Provider>
+            </SessionRunningTaskCountContext.Provider>
           }
           panel={panelContent}
         />

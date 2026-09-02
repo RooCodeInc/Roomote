@@ -23,11 +23,7 @@ import { WorkspaceHeader } from '@/components/layout';
 import { findDeploymentSetupSessionId } from '@/trpc/commands/setup/setup-session';
 import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionTaskTimeline } from './SessionTaskTimeline';
-import {
-  SessionHeaderExtras,
-  SessionWorkspace,
-  type SessionInfo,
-} from './SessionWorkspace';
+import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
 import { SessionReadTracker } from './SessionReadTracker';
 import { SetupAutomationRecommendationsCard } from './setup/SetupAutomationRecommendationsCard';
 import { SetupSandboxCard } from './setup/SetupSandboxCard';
@@ -168,12 +164,6 @@ export default async function SessionDetailPage({
                         },
                       }
                     : {})}
-                  headerExtras={
-                    <SessionHeaderExtras
-                      key="session-header-extras"
-                      status={unifiedSession.status}
-                    />
-                  }
                   {...(isSetupSession
                     ? { timelineExtras: setupTimelineExtras }
                     : {})}
@@ -184,12 +174,11 @@ export default async function SessionDetailPage({
             <>
               <WorkspaceHeader
                 className="py-4"
-                contentClassName="items-stretch gap-2 pr-12 @[600px]:items-center @[600px]:gap-3 @[600px]:pr-4"
+                contentClassName="flex-row items-center gap-3"
               >
-                <h1 className="min-w-0 flex-1 break-words text-sm font-medium @[600px]:truncate">
+                <h1 className="min-w-0 flex-1 truncate text-sm font-medium">
                   {unifiedSession.title}
                 </h1>
-                <SessionHeaderExtras status={unifiedSession.status} />
               </WorkspaceHeader>
               <SessionTaskTimeline
                 sessionId={unifiedSession.id}

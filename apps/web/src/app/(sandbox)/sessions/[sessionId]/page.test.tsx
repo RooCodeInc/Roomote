@@ -66,9 +66,6 @@ vi.mock('./SessionTaskTimeline', () => ({
 }));
 vi.mock('./SessionWorkspace', () => ({
   SessionWorkspace: sessionWorkspaceMock,
-  SessionHeaderExtras: ({ status }: { status: string | null }) => (
-    <div data-testid="session-header-extras">{status}</div>
-  ),
 }));
 vi.mock('./SessionReadTracker', () => ({
   SessionReadTracker: () => null,
@@ -327,6 +324,9 @@ describe('Session detail page', () => {
     expect(transcriptMock.mock.calls[0]?.[0]).not.toHaveProperty(
       'timelineExtras',
     );
+    expect(transcriptMock.mock.calls[0]?.[0]).not.toHaveProperty(
+      'headerExtras',
+    );
   });
 
   it('renders a task-only workspace for unified sessions without a Fast conversation', async () => {
@@ -368,6 +368,7 @@ describe('Session detail page', () => {
     expect(transcriptMock).not.toHaveBeenCalled();
     expect(html).toContain('Task-only session');
     expect(html).toContain('session-task-timeline');
+    expect(html).not.toContain('completed');
     expect(sessionTaskTimelineMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: '6a1f8f1e-0000-4000-8000-000000000004',

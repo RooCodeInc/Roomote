@@ -10,11 +10,7 @@ import {
 } from '@testing-library/react';
 
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
-import {
-  SessionHeaderExtras,
-  SessionWorkspace,
-  type SessionInfo,
-} from './SessionWorkspace';
+import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
 import {
   useOpenSessionTaskPanel,
   useOpenSessionTasksPanel,
@@ -356,125 +352,6 @@ describe('SessionWorkspace', () => {
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
     expect(artifacts.querySelector('svg')).toHaveClass('lucide-layout-grid');
-  });
-
-  it('aggregates task pull requests in the header and removes duplicates', async () => {
-    const firstTask = {
-      ...singleTask,
-      pullRequests: [
-        {
-          id: 'pr-1',
-          url: 'https://github.com/acme/widgets/pull/42',
-          number: 42,
-          title: 'First PR',
-          repository: 'acme/widgets',
-          status: 'open',
-        },
-      ],
-    };
-    const secondTask = {
-      ...singleTask,
-      taskId: 'task-2',
-      pullRequests: [
-        {
-          id: 'pr-duplicate-number',
-          url: 'https://github.com/acme/widgets/pull/42?duplicate=1',
-          number: 42,
-          title: 'Duplicate PR',
-          repository: 'acme/widgets',
-          status: 'open',
-        },
-        {
-          id: 'pr-duplicate-url',
-          url: 'https://github.com/acme/widgets/pull/42',
-          number: 99,
-          title: 'Duplicate URL',
-          repository: 'acme/other',
-          status: 'open',
-        },
-        {
-          id: 'pr-2',
-          url: 'https://github.com/acme/api/pull/7',
-          number: 7,
-          title: 'Second PR',
-          repository: 'acme/api',
-          status: 'open',
-        },
-        {
-          id: 'pr-closed',
-          url: 'https://github.com/acme/api/pull/8',
-          number: 8,
-          title: 'Closed PR',
-          repository: 'acme/api',
-          status: 'closed',
-        },
-        {
-          id: 'pr-merged',
-          url: 'https://github.com/acme/api/pull/9',
-          number: 9,
-          title: 'Merged PR',
-          repository: 'acme/api',
-          status: 'merged',
-        },
-      ],
-    };
-
-    renderWorkspace({
-      isMobile: false,
-      children: <SessionHeaderExtras status="active" />,
-      sessionOverride: { tasks: [firstTask, secondTask] },
-    });
-
-    expect(await screen.findByText('active')).toBeVisible();
-    expect(screen.getByRole('link', { name: 'widgets#42' })).toHaveAttribute(
-      'href',
-      'https://github.com/acme/widgets/pull/42',
-    );
-    expect(screen.getByRole('link', { name: 'api#7' })).toHaveAttribute(
-      'href',
-      'https://github.com/acme/api/pull/7',
-    );
-    expect(screen.getAllByRole('link')).toHaveLength(2);
-  });
-
-  it('updates header pull requests from refreshed session tasks', async () => {
-    const { queryClient } = renderWorkspace({
-      isMobile: false,
-      children: <SessionHeaderExtras status="active" />,
-      sessionOverride: { tasks: [] },
-    });
-
-    expect(screen.queryByRole('link')).toBeNull();
-    await waitFor(() =>
-      expect(
-        queryClient.getQueryState(['sessions', 'byId', session.id])?.status,
-      ).toBe('success'),
-    );
-    act(() => {
-      queryClient.setQueryData(['sessions', 'byId', session.id], {
-        ...session,
-        status: 'active',
-        tasks: [
-          {
-            ...singleTask,
-            pullRequests: [
-              {
-                id: 'pr-new',
-                url: 'https://github.com/acme/new/pull/123',
-                number: 123,
-                title: 'Newly opened PR',
-                repository: 'acme/new',
-                status: 'open',
-              },
-            ],
-          },
-        ],
-      });
-    });
-
-    expect(
-      await screen.findByRole('link', { name: 'new#123' }),
-    ).toHaveAttribute('target', '_blank');
   });
 
   it('matches the task sidebar replacement behavior and controls on mobile', () => {
