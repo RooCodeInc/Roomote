@@ -3467,6 +3467,49 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       }
     });
 
+    it('keeps the durable row recoverable when a pre-ack action is refused', async () => {
+      mocks.appendMemory.mockResolvedValue({ saved: true });
+      const results: unknown[] = [];
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          results.push(
+            await invokeTool(nativeToolNames.saveMemory, {
+              memory: 'Too early.',
+            }),
+          );
+          expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'On it.',
+          });
+          results.push(
+            await invokeTool(nativeToolNames.saveMemory, {
+              memory: 'Dan prefers short replies.',
+            }),
+          );
+          return 'Done.';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        durableAdmission,
+      });
+
+      expect(results[0]).toEqual({
+        success: false,
+        error:
+          'Post an acknowledgement with send_chat_reply before this action.',
+      });
+      expect(results[1]).toMatchObject({ success: true });
+      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
+        'durable-row-1',
+        'Native tool save_memory is not replay-safe.',
+      );
+    });
+
     it('hands a replay-safe turn to the queue on shutdown without a closeout', async () => {
       const controller = new AbortController();
       const shutdown = new FastAgentProcessShutdownError('SIGTERM');

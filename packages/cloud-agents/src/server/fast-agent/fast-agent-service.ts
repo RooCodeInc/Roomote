@@ -2290,6 +2290,12 @@ export async function answerFastAgentQuestion({
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
         turnProgressMarker += 1;
+        // The acknowledgement gate runs before replay revocation: a refused
+        // pre-ack call must leave the durable row recoverable.
+        const startDenial = authorizeToolStart(
+          `${call.integrationId}_${call.toolName}`,
+        );
+        if (startDenial) return startDenial;
         if (
           !isReplaySafeFastAgentMcpCall(call) &&
           !(await revokeDurableTurnReplay(
@@ -2378,10 +2384,6 @@ export async function answerFastAgentQuestion({
         const sendsChatReaction =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME;
-        const startDenial = authorizeToolStart(
-          `${call.integrationId}_${call.toolName}`,
-        );
-        if (startDenial) return startDenial;
         const signature = buildIntegrationCallSignature({
           integrationId: call.integrationId,
           toolName: call.toolName,
@@ -2468,6 +2470,10 @@ export async function answerFastAgentQuestion({
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
         turnProgressMarker += 1;
+        // The acknowledgement gate runs before replay revocation: a refused
+        // pre-ack call must leave the durable row recoverable.
+        const startDenial = authorizeToolStart(call.name);
+        if (startDenial) return startDenial;
         if (
           !isReplaySafeFastAgentNativeTool(call) &&
           !(await revokeDurableTurnReplay(
@@ -2487,9 +2493,6 @@ export async function answerFastAgentQuestion({
               'This platform event may only be presented to the user with a closeout.',
           };
         }
-        const startDenial = authorizeToolStart(call.name);
-        if (startDenial) return startDenial;
-
         switch (call.name) {
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
             const args = chatReplyArgsSchema.parse(call.args);
