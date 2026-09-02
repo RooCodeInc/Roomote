@@ -1772,7 +1772,9 @@ export function startFastAgentResponse(params: {
     onError: (error) => {
       if (error instanceof FastAgentDurableRetryScheduledError) {
         // Not a failure: the queue re-runs this turn at the scheduled time.
-        console.info(errorLogPrefix, error.message);
+        console.info(
+          `[SlackWebhook] Fast turn parked for a durable retry: ${error.message}`,
+        );
         return;
       }
       console.error(

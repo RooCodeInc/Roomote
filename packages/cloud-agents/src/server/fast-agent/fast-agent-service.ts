@@ -633,7 +633,7 @@ export class FastAgentDurableRetryScheduledError extends Error {
  * Find a park signal inside an error chain: an aborted OpenCode prompt may
  * surface the abort reason wrapped as a prompt error's cause.
  */
-function findFastAgentDurableRetryScheduledError(
+export function findFastAgentDurableRetryScheduledError(
   error: unknown,
 ): FastAgentDurableRetryScheduledError | null {
   let current: unknown = error;

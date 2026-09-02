@@ -7,9 +7,9 @@ const mocks = vi.hoisted(() => {
 
     constructor(
       message: string,
-      options: { replyPosted: boolean; permanent?: boolean },
+      options: { replyPosted: boolean; permanent?: boolean; cause?: unknown },
     ) {
-      super(message);
+      super(message, options.cause ? { cause: options.cause } : undefined);
       this.replyPosted = options.replyPosted;
       this.permanent = options.permanent ?? false;
     }
@@ -46,6 +46,15 @@ vi.mock('@roomote/redis', () => ({ getRedis: vi.fn(() => ({})) }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
+  findFastAgentDurableRetryScheduledError: (error: unknown) =>
+    error instanceof Error &&
+    error.name === 'FastAgentDurableRetryScheduledError'
+      ? error
+      : error instanceof Error &&
+          error.cause instanceof Error &&
+          error.cause.name === 'FastAgentDurableRetryScheduledError'
+        ? error.cause
+        : null,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -391,12 +400,57 @@ describe('Fast parent event durable queue', () => {
       }),
       mocks.releaseLock,
     );
+    // The resumed run settled its own row; the drain must not overwrite
+    // that settlement (a replay-withdrawn row would otherwise also read as
+    // delivered, losing its recorded reason).
     expect(
       mocks.updateSet.mock.calls.some(
         ([value]) =>
           value && typeof value === 'object' && 'deliveredAt' in value,
       ),
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it('finishes quietly when the resumed run parks itself for a scheduled retry', async () => {
+    const inlineRow = {
+      ...pendingRow('inline-4', {
+        type: 'human_follow_up' as const,
+        eventId: '100.5',
+        currentMessageId: '100.5',
+        userId: 'user-1',
+        question: 'Any luck?',
+      }),
+      admission: 'inline' as const,
+      claimedUntil: null,
+    };
+    mocks.findPending
+      .mockResolvedValueOnce(inlineRow)
+      .mockResolvedValueOnce(inlineRow);
+    const parked = new Error('parked');
+    parked.name = 'FastAgentDurableRetryScheduledError';
+    mocks.deliver.mockRejectedValueOnce(
+      new mocks.DeliveryError('wrapped', { replyPosted: false, cause: parked }),
+    );
+
+    await expect(
+      drainFastAgentParentEvents({
+        conversationId: parent.sessionId,
+        eventKey: inlineRow.eventKey,
+      }),
+    ).resolves.toBeUndefined();
+
+    // No failure recorded on the row and no BullMQ failure: the row already
+    // carries its retry time and its delayed wakeup is queued.
+    expect(
+      mocks.updateSet.mock.calls.some(
+        ([value]) =>
+          value &&
+          typeof value === 'object' &&
+          'lastError' in value &&
+          value.lastError,
+      ),
+    ).toBe(false);
+    expect(mocks.releaseLock).toHaveBeenCalled();
   });
 
   it('leaves a resumed inline turn pending when the run deferred itself', async () => {

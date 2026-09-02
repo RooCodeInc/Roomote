@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto';
 
 import { Queue } from 'bullmq';
 
-import { acquireFastAgentTurnLock } from '@roomote/cloud-agents/server';
+import {
+  acquireFastAgentTurnLock,
+  findFastAgentDurableRetryScheduledError,
+} from '@roomote/cloud-agents/server';
 import {
   and,
   asc,
@@ -365,20 +368,32 @@ export async function drainFastAgentParentEvents(
           },
           turnLock,
         );
-        if (row.admission === 'inline' && (await isStillPending(row.id))) {
-          // The resumed run settles its own row. If it is still pending, the
-          // run handed it back: either it parked itself for a scheduled
-          // retry (its delayed wakeup is already queued) or its terminal
-          // revocation did not land and it released the claim for the next
-          // recovery sweep. Either way, do not settle it here or re-run it
-          // in a tight loop.
-          console.warn(
-            `[FastAgentParentEventQueue] Resumed Fast turn ${row.id} handed itself back to the queue; leaving it pending.`,
-          );
-          return;
+        if (row.admission === 'inline') {
+          // The resumed run settles its own row (delivered, or withdrawn
+          // from replay before a terminal action), so nothing is written
+          // here. If it is still pending, the run handed it back without
+          // settling: its terminal revocation did not land and it released
+          // the claim for the next recovery sweep. Do not re-run it in a
+          // tight loop.
+          if (await isStillPending(row.id)) {
+            console.warn(
+              `[FastAgentParentEventQueue] Resumed Fast turn ${row.id} handed itself back to the queue; leaving it pending.`,
+            );
+            return;
+          }
+          continue;
         }
         await markDelivered(row.id);
       } catch (error) {
+        if (findFastAgentDurableRetryScheduledError(error)) {
+          // The resumed run parked itself for a scheduled retry: the row
+          // already carries its retry time and its delayed wakeup is queued,
+          // so this drain is simply done with it.
+          console.info(
+            `[FastAgentParentEventQueue] Resumed Fast turn ${row.id} parked itself for a scheduled retry.`,
+          );
+          return;
+        }
         const deliveryError =
           error instanceof FastAgentParentEventDeliveryError ? error : null;
         if (deliveryError?.replyPosted) {
