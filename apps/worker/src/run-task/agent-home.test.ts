@@ -71,8 +71,16 @@ describe('createIntegrationMcpInstructions', () => {
     ]);
 
     expect(
-      instructions?.match(/first normal context or work tool call/g),
+      instructions?.match(
+        /Brain-specific guidance below owns the required initial recall/g,
+      ),
     ).toHaveLength(1);
+    expect(instructions).toContain(
+      'Once that query returns, the initial Brain preflight is satisfied for the request',
+    );
+    expect(instructions).toContain(
+      'A tool result, runtime continuation, retry, or continued work on the same topic does not reset it',
+    );
     expect(instructions).toContain(
       'Another installed memory server owns the required initial recall',
     );
