@@ -2073,10 +2073,11 @@ export async function answerFastAgentQuestion({
         return toolFailure(error);
       }
     };
-    // Single owner of the human-turn work-start gate. OpenCode's plugin hook
-    // asks the bridge to authorize every tool call (native, MCP, skills, spill
-    // recovery, built-in `task`) before it runs, so this predicate is the only
-    // place that decides which tools may precede the acknowledgement.
+    // Single owner of the human-turn work-start gate, applied in-process to
+    // every native and MCP tool call before it runs. Only text communication
+    // (a reply, a first progress note, or a task kickoff) opens the gate; a
+    // reaction never does. The listed tools are the ones allowed to precede
+    // that communication.
     const acknowledgementExemptToolIds = new Set<string>([
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
@@ -2189,6 +2190,10 @@ export async function answerFastAgentQuestion({
         const sendsChatReaction =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME;
+        const startDenial = authorizeToolStart(
+          `${call.integrationId}_${call.toolName}`,
+        );
+        if (startDenial) return startDenial;
         const signature = buildIntegrationCallSignature({
           integrationId: call.integrationId,
           toolName: call.toolName,
@@ -2286,6 +2291,8 @@ export async function answerFastAgentQuestion({
               'This platform event may only be presented to the user with a closeout.',
           };
         }
+        const startDenial = authorizeToolStart(call.name);
+        if (startDenial) return startDenial;
 
         switch (call.name) {
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
@@ -2966,7 +2973,6 @@ export async function answerFastAgentQuestion({
                             {
                               allowSkillAccess: true,
                               allowSpillRecovery: true,
-                              authorizeToolStart,
                               skillStore,
                               spillBudget,
                             },
