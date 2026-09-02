@@ -81,6 +81,25 @@ describe('useSessionPresence', () => {
     );
   });
 
+  it('restores presence when returning from the back-forward cache', () => {
+    renderHook(() => useSessionPresence(SESSION_ID));
+
+    act(() => window.dispatchEvent(new Event('pagehide')));
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `/api/sessions/${SESSION_ID}/presence`,
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+
+    act(() => window.dispatchEvent(new Event('pageshow')));
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `/api/sessions/${SESSION_ID}/presence`,
+      expect.objectContaining({ method: 'POST' }),
+    );
+
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   it('does not activate from a hidden tab', () => {
     visibilityState = 'hidden';
 

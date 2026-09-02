@@ -45,12 +45,14 @@ export function useSessionPresence(sessionId: string) {
 
     syncPresence();
     window.addEventListener('focus', syncPresence);
+    window.addEventListener('pageshow', syncPresence);
     window.addEventListener('blur', disconnect);
     window.addEventListener('pagehide', disconnect);
     document.addEventListener('visibilitychange', syncPresence);
 
     return () => {
       window.removeEventListener('focus', syncPresence);
+      window.removeEventListener('pageshow', syncPresence);
       window.removeEventListener('blur', disconnect);
       window.removeEventListener('pagehide', disconnect);
       document.removeEventListener('visibilitychange', syncPresence);
