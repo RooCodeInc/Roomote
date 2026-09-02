@@ -17,6 +17,7 @@ import {
 } from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
+import type { FastAgentStartResult } from '../fast-agent-entry.js';
 import { launchClaimedSuggestedTask } from '../tasks/suggestion-launch.js';
 import {
   resolveSuggestedTaskLaunchTarget,
@@ -259,6 +260,8 @@ type TeamsSuggestionLaunchOutcome =
 type LaunchClaimedTeamsSuggestionResult =
   | { result: 'started'; runId: number | null }
   | { result: 'replied_inline' }
+  /** The launch was refused with a reason that was posted to the user. */
+  | { result: 'rejected' }
   /**
    * The fenced finalize lost to a reclaim after the task was enqueued: the
    * orphaned run was best-effort canceled and the user got a corrective
@@ -284,7 +287,12 @@ export async function launchClaimedTeamsSuggestion(params: {
     promptText: string,
     target: SuggestedTaskLaunchTarget,
   ) => Promise<TeamsSuggestionLaunchOutcome>;
-  launchFast?: (promptText: string) => Promise<boolean>;
+  /**
+   * Starts a Fast turn from the suggestion prompt. Must resolve on admission
+   * (not turn completion) so the claim is finalized promptly, and return an
+   * abort handle so a lost finalize can cancel the orphaned turn.
+   */
+  launchFast?: (promptText: string) => Promise<FastAgentStartResult>;
   /** Posts a best-effort visible reply into the conversation. */
   postMessage: (text: string) => Promise<void>;
 }): Promise<LaunchClaimedTeamsSuggestionResult> {
@@ -305,10 +313,18 @@ export async function launchClaimedTeamsSuggestion(params: {
     launch: async (mode) => {
       const promptText = buildTeamsSuggestionTaskPromptText(suggestion);
       if (mode === 'fast') {
-        const accepted = (await params.launchFast?.(promptText)) ?? false;
-        return accepted
-          ? { accepted: true, runId: null, taskId: null }
-          : { accepted: false, reason: 'Fast mode is unavailable.' };
+        const fastStart = (await params.launchFast?.(promptText)) ?? {
+          accepted: false as const,
+          reason: 'Fast mode is unavailable.',
+        };
+        return fastStart.accepted
+          ? {
+              accepted: true,
+              runId: null,
+              taskId: null,
+              abort: fastStart.abort,
+            }
+          : fastStart;
       }
       const launch = await params.launchTask(promptText, target);
       return launch.status === 'started'
@@ -325,6 +341,14 @@ export async function launchClaimedTeamsSuggestion(params: {
     return { result: 'started', runId: launchResult.runId };
   }
   if (launchResult.status === 'rejected') {
+    // A reasoned rejection (a refused Fast turn) posted nothing itself;
+    // reasonless rejections already replied inline from task routing.
+    if (launchResult.reason) {
+      await params.postMessage(
+        `Could not start "${suggestion.title}" — ${launchResult.reason}`,
+      );
+      return { result: 'rejected' };
+    }
     return { result: 'replied_inline' };
   }
   if (

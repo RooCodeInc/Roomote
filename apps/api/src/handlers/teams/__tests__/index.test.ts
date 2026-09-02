@@ -575,6 +575,92 @@ describe('Teams webhook handler', () => {
     expect(queueFastReplyMock).not.toHaveBeenCalled();
   });
 
+  it('starts a Fast-targeted suggestion in the personal chat’s shared Fast session', async () => {
+    trackedSuggestionMessageFindFirstMock.mockResolvedValue({
+      workItemId: 'suggestion-1',
+    });
+    teamsUserMappingFindFirstMock.mockResolvedValue({
+      userId: 'mapped-user-1',
+    });
+    resolveAndClaimTeamsSuggestionReactionMock.mockResolvedValue({
+      outcome: 'claimed',
+      suggestion: {
+        id: 'suggestion-1',
+        title: 'Fix the flaky test',
+        brief: 'Remove the timing race.',
+        investigationContext: null,
+        targetRepositoryFullName: '__fast__',
+        targetEnvironmentId: null,
+        launchTarget: '__fast__',
+        launchClaimedAt: new Date('2026-08-07T00:00:00.000Z'),
+      },
+    });
+    const abort = vi.fn();
+    continueFastReplyMock.mockImplementation(
+      async ({ onAccepted }: { onAccepted?: (abort: unknown) => void }) => {
+        onAccepted?.(abort);
+        return true;
+      },
+    );
+    launchClaimedTeamsSuggestionMock.mockImplementation(
+      async ({
+        launchFast,
+      }: {
+        launchFast: (prompt: string) => Promise<{ accepted: boolean }>;
+      }) => {
+        const fastStart = await launchFast('Fix the flaky test');
+        expect(fastStart).toEqual({ accepted: true, abort });
+        return { result: 'started', runId: null };
+      },
+    );
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          type: 'messageReaction',
+          id: 'suggestion-reaction-1',
+          text: undefined,
+          entities: undefined,
+          replyToId: 'suggestion-card-1',
+          reactionsAdded: [{ type: 'like' }],
+          conversation: {
+            id: 'a:personal-conversation',
+            tenantId: 'tenant-1',
+            conversationType: 'personal',
+          },
+        }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      started: true,
+      runId: null,
+    });
+    // Same identity as the default personal-chat Fast path, so the user's
+    // next DM continues this session instead of orphaning it.
+    expect(getFastSessionMock).toHaveBeenCalledWith({
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'teams',
+        workspaceId: 'tenant-1',
+        conversationId: 'a:personal-conversation:user:mapped-user-1',
+        replyTarget: { channelId: 'a:personal-conversation' },
+      },
+    });
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Fix the flaky test',
+        currentMessageId: 'suggestion-reaction-1',
+      }),
+    );
+  });
+
   it('queues a native reaction on the owner’s bound Fast message', async () => {
     teamsUserMappingFindFirstMock.mockResolvedValue({
       userId: 'mapped-user-1',

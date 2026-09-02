@@ -288,6 +288,68 @@ describe('Discord component callbacks', () => {
     });
   });
 
+  it('fails loudly instead of routing elsewhere when a legacy pinned environment no longer resolves', async () => {
+    const claimedAt = new Date('2026-08-28T00:00:00.000Z');
+    mocks.claimSuggestionByMessage.mockResolvedValue({
+      outcome: 'claimed',
+      suggestion: {
+        id: 'suggestion-1',
+        title: 'Fix tests',
+        brief: 'Repair the flaky suite.',
+        investigationContext: null,
+        targetRepositoryFullName: 'acme/app',
+        targetEnvironmentId: 'env-1',
+        usesRouterLaunch: false,
+        launchClaimedAt: claimedAt,
+      },
+    });
+    mocks.resolveChannel.mockResolvedValue({
+      channelId: 'channel-1',
+      channelName: 'general',
+      channelType: 0,
+      guildId: 'guild-1',
+      isDirectMessage: false,
+      isThread: false,
+    });
+    mocks.resolveWorkspace.mockResolvedValue(null);
+    const postMessage = vi.fn();
+
+    await handleDiscordSuggestionReaction({
+      provider: { postMessage } as never,
+      applicationId: 'app-1',
+      channel: {
+        channelId: 'thread-1',
+        channelName: 'Suggested tasks',
+        channelType: 11,
+        guildId: 'guild-1',
+        parentChannelId: 'channel-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+      channelId: 'thread-1',
+      messageId: 'suggestion-message-1',
+      eventId: 'reaction-1',
+      sender: { id: 'discord-user-1', username: 'matt' },
+    });
+
+    expect(mocks.resolveWorkspace).toHaveBeenCalledWith({
+      type: 'environment',
+      id: 'env-1',
+      name: 'env-1',
+    });
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.finalizeWorkItem).not.toHaveBeenCalled();
+    expect(mocks.releaseWorkItem).toHaveBeenCalledWith(expect.anything(), {
+      id: 'suggestion-1',
+      claimedAt,
+    });
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('Could not start'),
+      }),
+    );
+  });
+
   it.each([
     {
       label: 'concrete environment',

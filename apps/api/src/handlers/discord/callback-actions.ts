@@ -27,7 +27,10 @@ import { parsePrReviewActionCallbackData } from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
 import { launchClaimedSuggestedTask } from '../tasks/suggestion-launch.js';
-import { resolveSuggestedTaskLaunchTarget } from '../tasks/suggestion-launch-target.js';
+import {
+  resolveSuggestedTaskLaunchTarget,
+  resolveSuggestedTaskPinnedEnvironmentId,
+} from '../tasks/suggestion-launch-target.js';
 import {
   claimCurrentThreadSuggestionByMessage,
   findCurrentThreadSuggestionIdByMessage,
@@ -391,20 +394,26 @@ async function launchClaimedDiscordSuggestion(input: {
           channel: launchChannel.channelId,
           turnPolicy: { reactionsAllowed: true },
         };
+        const pinnedEnvironmentId = resolveSuggestedTaskPinnedEnvironmentId(
+          launchTarget,
+          suggestion,
+        );
         const workspaceOverride =
           launchTarget.kind === 'all_repositories'
             ? {
                 repoForPayload: ALL_REPOSITORIES,
                 workspaceDisplayName: 'all repos',
               }
-            : suggestion.targetEnvironmentId
+            : pinnedEnvironmentId
               ? await resolveDiscordWorkspace({
                   type: 'environment',
-                  id: suggestion.targetEnvironmentId,
-                  name: suggestion.targetEnvironmentId,
+                  id: pinnedEnvironmentId,
+                  name: pinnedEnvironmentId,
                 })
               : undefined;
-        if (launchTarget.kind === 'environment' && !workspaceOverride) {
+        // A pinned environment that no longer resolves must fail loudly
+        // rather than fall back to routing (legacy pinned cards included).
+        if (pinnedEnvironmentId && !workspaceOverride) {
           throw new Error('The suggestion target environment is unavailable.');
         }
         const started = await startNewDiscordTask({

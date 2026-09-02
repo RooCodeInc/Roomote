@@ -14,6 +14,7 @@ import {
   getTeamsActivityTenantId,
   isTeamsBotAuthoredActivity,
   isTeamsNativeReactionType,
+  isTeamsPersonalConversation,
   isTeamsTaskEntryActivity,
   parseTeamsActivity,
   teamsActivityToQueuedCommunicationMessage,
@@ -90,7 +91,12 @@ import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.j
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import { findCurrentThreadSuggestionIdByMessage } from '../tasks/current-thread-suggestion-reaction.js';
 import {
+  startAcceptedFastAgentTurn,
+  type FastAgentStartResult,
+} from '../fast-agent-entry.js';
+import {
   resolveSuggestedTaskLaunchTarget,
+  resolveSuggestedTaskPinnedEnvironmentId,
   type SuggestedTaskLaunchTarget,
 } from '../tasks/suggestion-launch-target.js';
 import {
@@ -112,67 +118,118 @@ import {
 import { shouldRouteUnmentionedTeamsThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
 const TEAMS_ACTIVITY_DEDUP_PREFIX = 'teams:activity:';
-
-async function resolveTeamsSuggestionWorkspace(
-  suggestion: ClaimedTeamsSuggestion,
-  target: SuggestedTaskLaunchTarget,
-) {
-  if (target.kind === 'all_repositories') {
-    return {
-      repoForPayload: ALL_REPOSITORIES,
-      workspaceDisplayName: 'all repos',
-    };
-  }
-  if (!suggestion.targetEnvironmentId) return undefined;
-  return resolveTeamsWorkspace({
-    type: 'environment',
-    id: suggestion.targetEnvironmentId,
-    name: suggestion.targetEnvironmentId,
-  });
-}
-
-async function startTeamsFastSuggestion(params: {
-  activity: TeamsActivity;
-  metadata: TeamsActivityCommunicationMetadata;
-  mappedUserId: string;
-  prompt: string;
-  currentMessageId: string;
-}): Promise<boolean> {
-  const tenantId = params.metadata.teamsTenantId;
-  if (!tenantId) return false;
-  const fastChannelId = getTeamsBaseConversationId(
-    params.metadata.communicationChannelId,
-  );
-  const providerConversationId =
-    params.metadata.communicationThreadId ?? params.currentMessageId;
-  const session = await getOrCreateFastAgentSession({
-    userId: params.mappedUserId,
-    conversation: {
-      surface: 'teams',
-      workspaceId: tenantId,
-      conversationId: `${providerConversationId}:user:${params.mappedUserId}`,
-      replyTarget: {
-        channelId: fastChannelId,
-        ...(params.metadata.communicationThreadId
-          ? { threadId: params.metadata.communicationThreadId }
-          : {}),
-      },
-    },
-  });
-  return continueFastAgentSurfaceReply({
-    sessionId: session.id,
-    userId: params.mappedUserId,
-    senderDisplayName: params.activity.from?.name?.trim() || null,
-    question: params.prompt,
-    currentMessageId: params.currentMessageId,
-  });
-}
 const TEAMS_ACTIVITY_DEDUP_TTL_SECONDS = 5 * 60;
 const TEAMS_AUTH_TOKEN_PREFIX = 'teams:auth:';
 const TEAMS_AUTH_TOKEN_TTL_SECONDS = 15 * 60;
 const TEAMS_ACCOUNT_LABEL = 'Microsoft Teams account';
 const TEAMS_ACCOUNT_LINK_FALLBACK_INSTRUCTION =
   'Please open a personal chat with me and send your request there so I can link your account privately.';
+
+/**
+ * Resolve the workspace a claimed suggestion is pinned to. Returns the
+ * override to launch with, or `unavailableEnvironmentId` when the suggestion
+ * pins an environment that no longer resolves (the launch must fail loudly
+ * rather than fall back to routing; legacy pinned cards included).
+ */
+async function resolveTeamsSuggestionWorkspace(
+  suggestion: ClaimedTeamsSuggestion,
+  target: SuggestedTaskLaunchTarget,
+): Promise<{
+  workspaceOverride: Awaited<ReturnType<typeof resolveTeamsWorkspace>>;
+  unavailableEnvironmentId: string | null;
+}> {
+  if (target.kind === 'all_repositories') {
+    return {
+      workspaceOverride: {
+        repoForPayload: ALL_REPOSITORIES,
+        workspaceDisplayName: 'all repos',
+      },
+      unavailableEnvironmentId: null,
+    };
+  }
+  const pinnedEnvironmentId = resolveSuggestedTaskPinnedEnvironmentId(
+    target,
+    suggestion,
+  );
+  if (!pinnedEnvironmentId) {
+    return { workspaceOverride: null, unavailableEnvironmentId: null };
+  }
+  const workspaceOverride = await resolveTeamsWorkspace({
+    type: 'environment',
+    id: pinnedEnvironmentId,
+    name: pinnedEnvironmentId,
+  });
+  return {
+    workspaceOverride,
+    unavailableEnvironmentId: workspaceOverride ? null : pinnedEnvironmentId,
+  };
+}
+
+/**
+ * Start a Fast turn for a claimed suggestion. Resolves on admission (not on
+ * turn completion) so the suggestion claim can be finalized immediately, and
+ * returns an abort handle so a lost finalize can cancel the orphaned turn.
+ */
+function startTeamsFastSuggestion(params: {
+  activity: TeamsActivity;
+  metadata: TeamsActivityCommunicationMetadata;
+  mappedUserId: string;
+  prompt: string;
+  currentMessageId: string;
+}): Promise<FastAgentStartResult> {
+  const tenantId = params.metadata.teamsTenantId;
+  if (!tenantId) {
+    return Promise.resolve({
+      accepted: false,
+      reason: 'Fast mode is unavailable in this Teams conversation.',
+    });
+  }
+  const fastChannelId = getTeamsBaseConversationId(
+    params.metadata.communicationChannelId,
+  );
+  // Same session identity as the default Fast message path: personal chats
+  // share one session per user (a DM has no threads, even though the reaction
+  // activity replies to the card), channel posts get one per root message.
+  const personalChat = isTeamsPersonalConversation(params.activity);
+  const threadId = personalChat
+    ? undefined
+    : params.metadata.communicationThreadId;
+  const providerConversationId =
+    threadId ?? (personalChat ? fastChannelId : params.currentMessageId);
+  return startAcceptedFastAgentTurn({
+    run: async ({ onAccepted, onRejected }) => {
+      const session = await getOrCreateFastAgentSession({
+        userId: params.mappedUserId,
+        conversation: {
+          surface: 'teams',
+          workspaceId: tenantId,
+          conversationId: `${providerConversationId}:user:${params.mappedUserId}`,
+          replyTarget: {
+            channelId: fastChannelId,
+            ...(threadId ? { threadId } : {}),
+          },
+        },
+      });
+      return continueFastAgentSurfaceReply({
+        sessionId: session.id,
+        userId: params.mappedUserId,
+        senderDisplayName: params.activity.from?.name?.trim() || null,
+        question: params.prompt,
+        currentMessageId: params.currentMessageId,
+        onAccepted,
+        onRejected,
+      });
+    },
+    busyMessage: 'Fast mode is unavailable.',
+    onError: (error) => {
+      apiLogger.error(
+        `[teams] Fast suggestion response failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    },
+  });
+}
 const MICROSOFT_ENTRA_PROVIDER_ID = 'microsoft-entra-id';
 const CLAIM_PENDING_TEAMS_AUTH_TOKEN_LUA = `
 local val = redis.call('get', KEYS[1])
@@ -2060,11 +2117,12 @@ teams.post('/', async (c) => {
     const suggestionTarget = resolveSuggestedTaskLaunchTarget(
       claimedSuggestionReaction,
     );
-    const workspaceOverride = await resolveTeamsSuggestionWorkspace(
-      claimedSuggestionReaction,
-      suggestionTarget,
-    );
-    if (suggestionTarget.kind === 'environment' && !workspaceOverride) {
+    const { workspaceOverride, unavailableEnvironmentId } =
+      await resolveTeamsSuggestionWorkspace(
+        claimedSuggestionReaction,
+        suggestionTarget,
+      );
+    if (unavailableEnvironmentId) {
       await releaseWorkItemClaim(db, {
         id: claimedSuggestionReaction.id,
         claimedAt: claimedSuggestionReaction.launchClaimedAt,
@@ -2312,11 +2370,12 @@ teams.post('/', async (c) => {
         const suggestionTarget = resolveSuggestedTaskLaunchTarget(
           resolution.suggestion,
         );
-        const workspaceOverride = await resolveTeamsSuggestionWorkspace(
-          resolution.suggestion,
-          suggestionTarget,
-        );
-        if (suggestionTarget.kind === 'environment' && !workspaceOverride) {
+        const { workspaceOverride, unavailableEnvironmentId } =
+          await resolveTeamsSuggestionWorkspace(
+            resolution.suggestion,
+            suggestionTarget,
+          );
+        if (unavailableEnvironmentId) {
           await releaseWorkItemClaim(db, {
             id: resolution.suggestion.id,
             claimedAt: resolution.suggestion.launchClaimedAt,

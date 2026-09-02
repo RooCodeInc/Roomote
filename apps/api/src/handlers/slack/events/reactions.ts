@@ -163,6 +163,8 @@ async function finalizeSuggestionLaunch(params: {
 
 const REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE =
   'I could not start this because your linked Roomote account was removed. Ask an admin to restore your access, then reconnect Slack.';
+const UNLINKED_SLACK_ACCOUNT_FAST_LAUNCH_FAILURE =
+  'This suggestion starts in Fast mode, which needs a linked Roomote account. Link your account, then react again.';
 
 async function launchTaskSuggestionTaskFromReaction({
   teamId,
@@ -389,7 +391,13 @@ async function launchTaskSuggestionTaskFromReaction({
   ) {
     const resolved = await resolveSuggestionLaunchWorkspaceFromMetadata({
       targetRepositoryFullName: workItem.targetRepositoryFullName,
-      targetEnvironmentId: workItem.targetEnvironmentId,
+      // An explicit environment target survives the work item's column being
+      // cleared (environment deleted), so the resolver reports it unavailable
+      // instead of "no target repository".
+      targetEnvironmentId:
+        launchTarget.kind === 'environment'
+          ? launchTarget.environmentId
+          : workItem.targetEnvironmentId,
       readinessMessage: workItem.readinessMessage,
     });
     suggestionWorkspace = resolved.workspace;
@@ -415,6 +423,23 @@ async function launchTaskSuggestionTaskFromReaction({
       })}${workItem.title}`,
       brief: suggestionBrief,
       reason: REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE,
+    });
+    return true;
+  }
+
+  // A Fast-targeted suggestion has no coding fallback and a Fast turn needs a
+  // linked user, so an unlinked reactor gets the link prompt before any claim
+  // (the other chat surfaces gate on account linking the same way).
+  if (usesFastLaunchTarget && !reactingUserMapping.activeMapping) {
+    await postSuggestionLaunchFailureMessage({
+      slack,
+      channelId,
+      title: `${buildSuggestionBadgePrefix({
+        category: workItem.category,
+        priority: workItem.priority,
+      })}${workItem.title}`,
+      brief: suggestionBrief,
+      reason: UNLINKED_SLACK_ACCOUNT_FAST_LAUNCH_FAILURE,
     });
     return true;
   }

@@ -25,8 +25,12 @@ import {
 } from '@roomote/db/server';
 
 import { apiLogger } from '../../logging.js';
+import { startAcceptedFastAgentTurn } from '../fast-agent-entry.js';
 import { launchClaimedSuggestedTask } from '../tasks/suggestion-launch.js';
-import { resolveSuggestedTaskLaunchTarget } from '../tasks/suggestion-launch-target.js';
+import {
+  resolveSuggestedTaskLaunchTarget,
+  resolveSuggestedTaskPinnedEnvironmentId,
+} from '../tasks/suggestion-launch-target.js';
 import {
   claimCurrentThreadSuggestionByMessage,
   findCurrentThreadSuggestionIdByMessage,
@@ -274,20 +278,26 @@ async function handleSuggestionLaunchCallback(params: {
 
   try {
     const launchTarget = resolveSuggestedTaskLaunchTarget(suggestion);
+    const pinnedEnvironmentId = resolveSuggestedTaskPinnedEnvironmentId(
+      launchTarget,
+      suggestion,
+    );
     const workspaceOverride =
       launchTarget.kind === 'all_repositories'
         ? {
             repoForPayload: ALL_REPOSITORIES,
             workspaceDisplayName: 'all repos',
           }
-        : suggestion.targetEnvironmentId
+        : pinnedEnvironmentId
           ? await resolveTelegramWorkspace({
               type: 'environment',
-              id: suggestion.targetEnvironmentId,
-              name: suggestion.targetEnvironmentId,
+              id: pinnedEnvironmentId,
+              name: pinnedEnvironmentId,
             })
           : undefined;
-    if (launchTarget.kind === 'environment' && !workspaceOverride) {
+    // A pinned environment that no longer resolves must fail loudly rather
+    // than fall back to routing (legacy pinned cards included).
+    if (pinnedEnvironmentId && !workspaceOverride) {
       throw new Error('The suggestion target environment is unavailable.');
     }
     const launchResult = await launchClaimedSuggestedTask({
@@ -319,16 +329,37 @@ async function handleSuggestionLaunchCallback(params: {
               },
             },
           });
-          const accepted = await continueFastAgentSurfaceReply({
-            sessionId: session.id,
-            userId: senderUserId,
-            senderDisplayName: queuedMessage.user,
-            question: promptText,
-            currentMessageId: messageId,
+          // Resolve on admission, not on turn completion: the claim is
+          // finalized as soon as the Fast session accepts the follow-up, and
+          // the abort handle lets a lost finalize cancel the orphaned turn.
+          const fastStart = await startAcceptedFastAgentTurn({
+            run: ({ onAccepted, onRejected }) =>
+              continueFastAgentSurfaceReply({
+                sessionId: session.id,
+                userId: senderUserId,
+                senderDisplayName: queuedMessage.user,
+                question: promptText,
+                currentMessageId: messageId,
+                onAccepted,
+                onRejected,
+              }),
+            busyMessage: 'Fast mode is unavailable.',
+            onError: (error) => {
+              apiLogger.error(
+                `[telegram] Fast suggestion response failed for work item ${params.suggestionId}: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              );
+            },
           });
-          return accepted
-            ? { accepted: true, runId: null, taskId: null }
-            : { accepted: false, reason: 'Fast mode is unavailable.' };
+          return fastStart.accepted
+            ? {
+                accepted: true,
+                runId: null,
+                taskId: null,
+                abort: fastStart.abort,
+              }
+            : fastStart;
         }
         const started = await startNewTelegramTask({
           message,
@@ -374,6 +405,14 @@ async function handleSuggestionLaunchCallback(params: {
         text: launchResult.readOnly
           ? MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE
           : `Could not start "${suggestion.title}" — try describing the task in a message instead.`,
+      });
+    } else if (launchResult.status === 'rejected' && launchResult.reason) {
+      // A reasoned rejection (a refused Fast turn) posted nothing itself;
+      // reasonless rejections already replied inline from task routing.
+      await postTelegramMessageBestEffort({
+        chatId,
+        replyToMessageId: messageId,
+        text: `Could not start "${suggestion.title}" — ${launchResult.reason}`,
       });
     }
   } catch (error) {

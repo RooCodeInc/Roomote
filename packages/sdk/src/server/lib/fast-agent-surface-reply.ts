@@ -123,6 +123,15 @@ type FastAgentSurfaceReplyParams = {
   replyToMessageId?: string;
   images?: string[];
   externalInput?: FastAgentReactionExternalInput;
+  /**
+   * Admission-time hooks for callers that must not block on the whole turn
+   * (suggestion launchers finalize their claim as soon as the turn is
+   * admitted). `onAccepted` fires once the follow-up is durably queued,
+   * steered into a running turn, or owns the turn lock, with a callback that
+   * aborts that admission; `onRejected` fires when the session refuses it.
+   */
+  onAccepted?: (abort: () => Promise<void>) => void;
+  onRejected?: () => void;
 };
 
 // Sessions follow the same rules as tasks: every authenticated user of the
@@ -518,11 +527,15 @@ export async function continueFastAgentSurfaceReply(
 ): Promise<boolean> {
   const delivery = await buildFastAgentSurfaceReplyDelivery(params);
   if (!delivery) {
+    params.onRejected?.();
     return false;
   }
 
   const admission = await admitFastAgentSurfaceHumanFollowUp(params, delivery);
-  if (admission && admission.kind !== 'turn') return true;
+  if (admission && admission.kind !== 'turn') {
+    params.onAccepted?.(admission.abort);
+    return true;
+  }
 
   return runFastAgentSurfaceReply({ ...params, delivery, admission });
 }
@@ -571,7 +584,11 @@ async function runFastAgentSurfaceReply(
     (await acquireFastAgentTurnLock({
       conversation: delivery.conversation,
     }));
-  if (!release) return false;
+  if (!release) {
+    params.onRejected?.();
+    return false;
+  }
+  params.onAccepted?.(() => release.abort());
 
   const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
   try {
