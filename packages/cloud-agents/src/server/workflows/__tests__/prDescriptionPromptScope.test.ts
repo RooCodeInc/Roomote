@@ -183,6 +183,22 @@ describe('PR description prompt scope', () => {
       );
     }
 
+    for (const skillContent of [
+      createPrSkill,
+      createDraftPrSkill,
+      fixPrSkill,
+    ]) {
+      expect(skillContent).toContain(
+        '`mcp__roomote__manage_artifacts` with `action: "list"` and `artifactType: "visual-proof"`',
+      );
+      expect(skillContent).toContain(
+        'When a timeout summary conflicts with verified uploads from that same latest attempt, include the verified current-attempt artifacts and do not claim proof timed out.',
+      );
+      expect(skillContent).toContain(
+        'Never infer that an older listed artifact belongs to the current proof cycle',
+      );
+    }
+
     expect(createDraftPrSkill).toContain(
       'HEAD` to capture the full PR diff for the branch. Use this local git diff for every provider.',
     );

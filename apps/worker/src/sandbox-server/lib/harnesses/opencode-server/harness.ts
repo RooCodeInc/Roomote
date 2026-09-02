@@ -335,7 +335,7 @@ const FALLBACK_OPENCODE_STOP_HOOK_REMINDER =
 const ROOMOTE_OPENCODE_VISUAL_AGENT_NAME = 'visual';
 const CAPTURE_VISUAL_PROOF_SKILL = 'capture-visual-proof';
 const VISUAL_PROOF_TIMEOUT_RECOVERY_PROMPT =
-  'The visual proof step exceeded its shared five-minute deadline. Do not retry capture or run further proof recovery. Return a blocked proof handoff with blocker type `proof capture timed out`, then continue the active parent workflow without visual proof.';
+  "The visual proof step exceeded its shared five-minute deadline. Do not retry capture or run further proof recovery. Before reporting the outcome, list this task's `visual-proof` artifacts once and reconcile them with upload results from the latest proof-runner attempt. Current-attempt artifacts that finished uploading remain authoritative even when deadline handling interrupted the parent; carry them into delivery instead of reporting a timeout. If no current-attempt uploads can be verified, return a blocked proof handoff with blocker type `proof capture timed out`, then continue the active parent workflow without visual proof. Never reuse artifacts from an earlier proof cycle.";
 // OpenCode's built-in tool for loading skills into the session.
 const OPENCODE_SKILL_TOOL = 'skill';
 // Hidden continuation submitted automatically after a turn that exited plan

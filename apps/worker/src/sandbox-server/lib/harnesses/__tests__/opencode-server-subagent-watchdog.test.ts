@@ -971,6 +971,22 @@ describe('OpenCode visual proof deadline', () => {
           ]),
         },
       });
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        request: {
+          parts: expect.arrayContaining([
+            expect.objectContaining({
+              text: expect.stringContaining(
+                "list this task's `visual-proof` artifacts once",
+              ),
+            }),
+            expect.objectContaining({
+              text: expect.stringContaining(
+                'Current-attempt artifacts that finished uploading remain authoritative',
+              ),
+            }),
+          ]),
+        },
+      });
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('shared 5000ms deadline'),
       );
