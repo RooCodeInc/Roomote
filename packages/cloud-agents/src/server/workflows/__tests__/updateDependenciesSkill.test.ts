@@ -33,4 +33,34 @@ describe('update-dependencies guidance', () => {
       'Do not mistake warmed-workspace dependency drift for a genuine regression in the proposed update.',
     );
   });
+
+  it('requests matching dependency-update reviewers after creating a Dependabot remediation PR', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      "First inspect `.github/dependabot.yml` and match the alert's package ecosystem and manifest directory to the applicable `updates` entry",
+    );
+    expect(skillContent).toContain(
+      '`.github/renovate.json`, `.github/renovate.json5`, `renovate.json`, `renovate.json5`, `.renovaterc`, and `.renovaterc.json`',
+    );
+    expect(skillContent).toContain(
+      'matching `packageRules` for the affected package, manager or ecosystem, and manifest path',
+    );
+    expect(skillContent).toContain(
+      'effective `reviewers`, `additionalReviewers`, `assignees`, and `additionalAssignees`',
+    );
+    expect(skillContent).toContain(
+      'After `create-draft-pr` (or an explicitly requested PR-delivery skill) returns the GitHub pull request number',
+    );
+    expect(skillContent).toContain(
+      '`POST repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers`',
+    );
+    expect(skillContent).toContain(
+      "Assign separately configured assignees with GitHub's issue-assignee API rather than converting assignees into reviewers",
+    );
+    expect(skillContent).toContain('Do not infer reviewers from `CODEOWNERS`');
+    expect(skillContent).toContain(
+      'preserve the existing delivery behavior and finish without an ownership mutation',
+    );
+  });
 });
