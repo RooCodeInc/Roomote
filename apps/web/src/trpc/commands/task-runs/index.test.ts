@@ -128,7 +128,6 @@ const auth = {
   name: 'Test User',
   primaryEmail: 'test@example.com',
   isAdmin: true,
-  featureFlags: {},
   anonymousAnalyticsEnabled: false,
   cloudEnabled: false,
   cookieConsentedAt: null,

@@ -12,7 +12,6 @@ import {
 } from '@roomote/db/server';
 import type { UserRole } from '@roomote/types';
 import {
-  evaluateFeatureFlagsFromMetadata,
   isAnonymousAnalyticsEnabledFromMetadata,
   normalizeMetadataRecord,
 } from '@roomote/feature-flags';
@@ -422,10 +421,6 @@ export async function authorize(): Promise<UserAuthSuccess | AuthError> {
     return authContext;
   }
 
-  const featureFlags = evaluateFeatureFlagsFromMetadata(
-    authContext.deploymentMetadata,
-  );
-
   const anonymousAnalyticsEnabled =
     isTelemetryEnvAllowed() &&
     isAnonymousAnalyticsEnabledFromMetadata(
@@ -440,7 +435,6 @@ export async function authorize(): Promise<UserAuthSuccess | AuthError> {
     name: authContext.name,
     primaryEmail: authContext.primaryEmail,
     isAdmin: authContext.isAdmin,
-    featureFlags,
     anonymousAnalyticsEnabled,
     cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
     // Drives the Memory item in Settings navigation. Wiring presence, not

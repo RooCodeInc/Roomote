@@ -6,7 +6,6 @@ import * as linearSessions from './linear-sessions';
 import * as repositories from './repositories';
 import * as taskRuns from './task-runs';
 import * as environments from './environments';
-import * as featureFlags from './feature-flags';
 import * as mcpConnections from './mcp-connections';
 import * as userApiKeys from './user-api-keys';
 import * as llmUsage from './llm-usage';
@@ -20,7 +19,6 @@ const sdk = {
   repositories,
   taskRuns,
   environments,
-  featureFlags,
   mcpConnections,
   userApiKeys,
   llmUsage,
