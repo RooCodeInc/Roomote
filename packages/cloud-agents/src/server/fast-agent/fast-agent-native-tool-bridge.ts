@@ -5,19 +5,14 @@ import {
 } from 'node:http';
 import {
   chmodSync,
-  lstatSync,
-  readdirSync,
+  existsSync,
   mkdirSync,
   rmSync,
-  statSync,
-  symlinkSync,
-  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { join } from 'node:path';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { createRequire } from 'node:module';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
@@ -482,7 +477,6 @@ const activeExecutors = new Map<string, ActiveExecutor>();
 const mcpCapabilities = new Map<string, FastAgentMcpCapability>();
 const sessionRuntimes = new Map<string, FastAgentNativeToolRuntime>();
 let bridgePromise: Promise<FastAgentNativeToolBridge> | undefined;
-const require = createRequire(import.meta.url);
 
 function writeJson(
   response: ServerResponse,
@@ -719,68 +713,6 @@ async function readRequestBody(request: IncomingMessage): Promise<unknown> {
   }
 
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
-}
-
-/**
- * The generated tool sources import zod, and OpenCode's own runtime loads
- * them from the tool directory — so a real zod package must exist on disk to
- * symlink there. In development that's the workspace install; in the app
- * image, where service bundles inline zod, it's the service runtime-deps tree
- * that ships next to the dist (asserted at image build). This wrapper exists
- * so a packaging regression names the requirement instead of surfacing as a
- * bare module-not-found mid-turn.
- */
-function resolveZodDirectoryForTools(): string {
-  const candidates: string[] = [];
-  let resolveError: unknown;
-  try {
-    candidates.push(dirname(require.resolve('zod/package.json')));
-  } catch (error) {
-    resolveError = error;
-  }
-  // Bundled hosts rewrite require.resolve: Turbopack dev yields a virtual
-  // '[project]/...' specifier and the webpack production build yields a
-  // numeric module id, neither of which exists on disk. Validate the
-  // resolution and fall back to walking the real node_modules tree from the
-  // working directory, including pnpm stores without a top-level zod link
-  // (the Next standalone output ships zod only under node_modules/.pnpm).
-  for (let dir = process.cwd(); ;) {
-    candidates.push(join(dir, 'node_modules', 'zod'));
-    const pnpmStore = join(dir, 'node_modules', '.pnpm');
-    try {
-      const storeEntries = readdirSync(pnpmStore)
-        .filter((entry) => entry.startsWith('zod@'))
-        .sort();
-      for (const entry of storeEntries) {
-        candidates.push(join(pnpmStore, entry, 'node_modules', 'zod'));
-      }
-    } catch {
-      // No pnpm store at this level.
-    }
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  for (const candidate of candidates) {
-    try {
-      if (
-        isAbsolute(candidate) &&
-        statSync(join(candidate, 'package.json')).isFile()
-      ) {
-        return candidate;
-      }
-    } catch {
-      // Try the next candidate.
-    }
-  }
-  throw new Error(
-    'Fast native tools need the zod package on disk to link into the ' +
-      'OpenCode tool directory, and none is resolvable from this process. ' +
-      'In the app image zod ships in each service runtime-deps tree ' +
-      '(asserted at image build); if this error reaches production, that ' +
-      'service packaging step regressed. ' +
-      `${resolveError instanceof Error ? resolveError.message : String(resolveError ?? 'require.resolve returned a non-filesystem path')}`,
-  );
 }
 
 export async function formatFastAgentMcpResultForModel(
@@ -1171,14 +1103,12 @@ function ensureRuntimeRootDirectory(): string {
  * directory (and whatever OpenCode already installed into it).
  */
 function createSharedToolsDirectory(): string {
-  const zodDirectory = resolveZodDirectoryForTools();
   const contentHash = createHash('sha256')
     .update(
       JSON.stringify({
-        layout: 2,
+        layout: 3,
         bridge: FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE,
         tools: FAST_AGENT_NATIVE_TOOL_SOURCES,
-        zod: zodDirectory,
       }),
     )
     .digest('hex');
@@ -1189,40 +1119,18 @@ function createSharedToolsDirectory(): string {
   const toolsDirectory = join(directory, 'tools');
   mkdirSync(toolsDirectory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
-  writeFileSync(
-    join(directory, 'package.json'),
-    JSON.stringify({ private: true, type: 'module' }),
-    'utf8',
-  );
-  // OpenCode installs `@opencode-ai/plugin` into every config directory
-  // whose lockfile does not already list it. The Fast tools import only the
-  // bridge shim and the zod link below, so a lockfile that declares the
-  // dependency satisfies that check without a network install (and without
-  // OpenCode rewriting this package.json).
-  writeFileSync(
-    join(directory, 'package-lock.json'),
-    JSON.stringify({
-      name: 'roomote-fast-tools',
-      lockfileVersion: 3,
-      packages: { '': { dependencies: { '@opencode-ai/plugin': '*' } } },
-    }),
-    'utf8',
-  );
-  const toolNodeModules = join(directory, 'node_modules');
-  mkdirSync(toolNodeModules, { recursive: true });
-  const zodLink = join(toolNodeModules, 'zod');
-  try {
-    if (lstatSync(zodLink).isSymbolicLink()) unlinkSync(zodLink);
-    else rmSync(zodLink, { recursive: true, force: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
-  try {
-    symlinkSync(zodDirectory, zodLink, 'dir');
-  } catch (error) {
-    // Another process on this host materialized the same directory between
-    // the unlink and the symlink; the target is identical by construction.
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  // OpenCode installs `@opencode-ai/plugin` (and with it the zod major it
+  // validates tool arguments against) into this directory the first time it
+  // boots here, then reuses the install for every later conversation on the
+  // host. The tools' `zod` import must resolve to that copy: pointing it at
+  // the app's own zod 3 made OpenCode's zod 4 validator reject array
+  // arguments. Leave package.json without a lockfile so the install runs.
+  if (!existsSync(join(directory, 'package.json'))) {
+    writeFileSync(
+      join(directory, 'package.json'),
+      JSON.stringify({ private: true, type: 'module' }),
+      'utf8',
+    );
   }
   writeFileSync(
     join(directory, 'roomote-fast-tool-bridge.js'),
