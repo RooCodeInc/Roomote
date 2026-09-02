@@ -3145,6 +3145,18 @@ export const fastAgentParentEvents = pgTable(
     lastError: text('last_error'),
     deliveredAt: timestamp('delivered_at'),
     discardedAt: timestamp('discarded_at'),
+    /**
+     * 'inline' marks a human turn the accepting process persisted before
+     * running it itself (durable admission). Null rows were queued for the
+     * worker as before. Both drain through the same queue path.
+     */
+    admission: text('admission').$type<'inline'>(),
+    /**
+     * While set and in the future, a live inline owner is executing this
+     * row; the drain and recovery sweep leave it alone. The owner renews it
+     * as it works and clears it on interruption so recovery starts at once.
+     */
+    claimedUntil: timestamp('claimed_until'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },

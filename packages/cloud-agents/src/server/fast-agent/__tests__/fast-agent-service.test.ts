@@ -31,6 +31,10 @@ const mocks = vi.hoisted(() => ({
   markRetryNoticeInterruption: vi.fn(),
   renewRespondingLease: vi.fn(),
   findUnresolvedRequest: vi.fn(),
+  markDurableDelivered: vi.fn(),
+  releaseDurableClaim: vi.fn(),
+  renewDurableClaim: vi.fn(),
+  revokeDurableReplay: vi.fn(),
   getUnifiedSession: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
@@ -100,6 +104,10 @@ vi.mock('../fast-agent-conversation-repository', () => ({
     mocks.markRetryNoticeInterruption,
   renewFastSessionRespondingLease: mocks.renewRespondingLease,
   findFastAgentUnresolvedRequest: mocks.findUnresolvedRequest,
+  markFastAgentDurableTurnDelivered: mocks.markDurableDelivered,
+  releaseFastAgentDurableTurnClaim: mocks.releaseDurableClaim,
+  renewFastAgentDurableTurnClaim: mocks.renewDurableClaim,
+  revokeFastAgentDurableTurnReplay: mocks.revokeDurableReplay,
 }));
 
 vi.mock('../../router', () => ({
@@ -114,6 +122,7 @@ vi.mock('@roomote/db/server', () => ({
   isNull: vi.fn((value) => value),
   sql: vi.fn(),
   fastAgentParentEvents: {
+    admission: 'admission',
     conversationId: 'conversationId',
     createdAt: 'createdAt',
     deliveredAt: 'deliveredAt',
@@ -390,6 +399,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.markRetryNoticeInterruption.mockResolvedValue(undefined);
     mocks.renewRespondingLease.mockResolvedValue(true);
     mocks.findUnresolvedRequest.mockResolvedValue(null);
+    mocks.markDurableDelivered.mockResolvedValue(true);
+    mocks.releaseDurableClaim.mockResolvedValue(true);
+    mocks.renewDurableClaim.mockResolvedValue(true);
+    mocks.revokeDurableReplay.mockResolvedValue(true);
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
@@ -3300,6 +3313,490 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe('durable admission', () => {
+    const durableAdmission = { eventId: 'durable-row-1' };
+
+    it('keeps replay open through an acknowledgement and closes it before the closeout', async () => {
+      const order: string[] = [];
+      mocks.revokeDurableReplay.mockImplementation(async (_id, reason) => {
+        order.push(`revoke:${reason}`);
+        return true;
+      });
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Looking into it.',
+          });
+          order.push('acked');
+          expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Done.',
+          });
+          order.push('closed');
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        durableAdmission,
+      });
+
+      expect(order).toEqual([
+        'acked',
+        'revoke:Native tool send_chat_reply is not replay-safe.',
+        'closed',
+      ]);
+      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
+        'durable-row-1',
+        expect.any(String),
+      );
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('revokes replay before a task launch runs', async () => {
+      const order: string[] = [];
+      mocks.revokeDurableReplay.mockImplementation(async () => {
+        order.push('revoke');
+        return true;
+      });
+      const adapter = callbacks({
+        launchTask: vi.fn<LaunchFastAgentTask>(async () => {
+          order.push('launch');
+          return { success: true, taskId: 'task-1' };
+        }),
+      });
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix the bug',
+            environmentId: 'env-1',
+            kickoffMessage: 'Starting.',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Launched.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        durableAdmission,
+      });
+
+      expect(order.slice(0, 2)).toEqual(['revoke', 'launch']);
+      expect(mocks.revokeDurableReplay).toHaveBeenCalledTimes(1);
+      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
+        'durable-row-1',
+        'Native tool launch_task is not replay-safe.',
+      );
+    });
+
+    it('refuses a non-replayable action when the revocation does not land', async () => {
+      mocks.revokeDurableReplay.mockRejectedValueOnce(new Error('db down'));
+      const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+        success: true,
+        taskId: 'task-1',
+      }));
+      let launchResult: unknown;
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          launchResult = await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix the bug',
+            environmentId: 'env-1',
+            kickoffMessage: 'Starting.',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Could not launch.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ launchTask }),
+        durableAdmission,
+      });
+
+      expect(launchTask).not.toHaveBeenCalled();
+      expect(launchResult).toMatchObject({
+        success: false,
+        error: expect.stringContaining('could not durably record'),
+      });
+      // The later closeout retried the revocation successfully.
+      expect(mocks.revokeDurableReplay).toHaveBeenCalledTimes(2);
+    });
+
+    it('refuses a non-replayable action when the row was already settled elsewhere', async () => {
+      mocks.revokeDurableReplay.mockResolvedValue(false);
+      const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+        success: true,
+        taskId: 'task-1',
+      }));
+      let launchResult: unknown;
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          launchResult = await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix the bug',
+            environmentId: 'env-1',
+            kickoffMessage: 'Starting.',
+          });
+          return 'Stopping.';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ launchTask }),
+        durableAdmission,
+      });
+
+      expect(launchTask).not.toHaveBeenCalled();
+      expect(launchResult).toMatchObject({
+        success: false,
+        error: expect.stringContaining('could not durably record'),
+      });
+    });
+
+    it('withdraws a plain-text turn from replay before its terminal closeout', async () => {
+      const order: string[] = [];
+      mocks.revokeDurableReplay.mockImplementation(async () => {
+        order.push('revoke');
+        return true;
+      });
+      const postReply = vi.fn(async () => {
+        order.push('post');
+        return { messageId: 'reply-1' };
+      });
+      mocks.generateText.mockResolvedValueOnce('All done.');
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+      });
+
+      expect(order).toEqual(['revoke', 'post']);
+      expect(postReply).toHaveBeenCalledWith(
+        expect.objectContaining({ purpose: 'closeout', message: 'All done.' }),
+      );
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('hands the turn to the queue when the terminal closeout cannot be withdrawn from replay', async () => {
+      mocks.revokeDurableReplay.mockResolvedValue(false);
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+      const requestDurableResume = vi.fn().mockResolvedValue(undefined);
+      mocks.generateText.mockResolvedValueOnce('All done.');
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply, requestDurableResume }),
+        durableAdmission,
+      });
+
+      // No closeout, and the row stays recoverable so the resumed run
+      // delivers the answer instead of the user getting nothing.
+      expect(postReply).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
+      expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
+      expect(requestDurableResume).toHaveBeenCalledOnce();
+    });
+
+    it('hands the turn to the queue when the error closeout cannot be withdrawn from replay', async () => {
+      mocks.revokeDurableReplay.mockResolvedValue(false);
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+      const requestDurableResume = vi.fn().mockResolvedValue(undefined);
+      mocks.generateText.mockRejectedValueOnce(new Error('provider exploded'));
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply, requestDurableResume }),
+        durableAdmission,
+      });
+
+      expect(postReply).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
+      expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
+      expect(requestDurableResume).toHaveBeenCalledOnce();
+    });
+
+    it('posts no interruption closeout when a cancelled turn cannot be withdrawn from replay', async () => {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      const cancelled = new Error('Fast suggestion launch settlement failed.');
+      mocks.revokeDurableReplay.mockResolvedValue(false);
+      const postReply = vi.fn().mockImplementation(async () => {
+        // The visible retry notice is up; cancel during its backoff.
+        controller.abort(cancelled);
+        return { messageId: 'retry-1' };
+      });
+      const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
+      const rateLimitError = new Error('429 Too Many Requests') as Error & {
+        providerError: unknown;
+      };
+      rateLimitError.providerError = {
+        data: { responseHeaders: { 'retry-after': '60' } },
+      };
+      mocks.generateText.mockRejectedValue(rateLimitError);
+
+      try {
+        const resultPromise = answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ postReply, replaceReply }),
+          signal: controller.signal,
+          durableAdmission,
+        });
+        const rejection = expect(resultPromise).rejects.toBe(cancelled);
+        await vi.runAllTimersAsync();
+        await rejection;
+
+        expect(postReply).toHaveBeenCalledTimes(1);
+        expect(replaceReply).not.toHaveBeenCalled();
+        expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
+          'durable-row-1',
+          'Turn interrupted without replay (turn_aborted).',
+        );
+        expect(mocks.releaseDurableClaim).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps the durable row recoverable when a pre-ack action is refused', async () => {
+      mocks.appendMemory.mockResolvedValue({ saved: true });
+      const results: unknown[] = [];
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          results.push(
+            await invokeTool(nativeToolNames.saveMemory, {
+              memory: 'Too early.',
+            }),
+          );
+          expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'On it.',
+          });
+          results.push(
+            await invokeTool(nativeToolNames.saveMemory, {
+              memory: 'Dan prefers short replies.',
+            }),
+          );
+          return 'Done.';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        durableAdmission,
+      });
+
+      expect(results[0]).toEqual({
+        success: false,
+        error:
+          'Post an acknowledgement with send_chat_reply before this action.',
+      });
+      expect(results[1]).toMatchObject({ success: true });
+      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
+        'durable-row-1',
+        'Native tool save_memory is not replay-safe.',
+      );
+    });
+
+    it('hands a replay-safe turn to the queue on shutdown without a closeout', async () => {
+      const controller = new AbortController();
+      const shutdown = new FastAgentProcessShutdownError('SIGTERM');
+      const requestDurableResume = vi.fn().mockResolvedValue(undefined);
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Looking into it.',
+          });
+          controller.abort(shutdown);
+          throw shutdown;
+        },
+      );
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ postReply, requestDurableResume }),
+          signal: controller.signal,
+          durableAdmission,
+        }),
+      ).rejects.toBe(shutdown);
+
+      expect(postReply).toHaveBeenCalledTimes(1);
+      expect(postReply).toHaveBeenCalledWith(
+        expect.objectContaining({ purpose: 'ack' }),
+      );
+      expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
+      expect(requestDurableResume).toHaveBeenCalledOnce();
+      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+      expect(mocks.markShutdownCloseoutSettled).toHaveBeenCalledWith(
+        controller.signal,
+      );
+    });
+
+    it('posts the restart closeout when the interrupted turn already acted', async () => {
+      const controller = new AbortController();
+      const shutdown = new FastAgentProcessShutdownError('SIGTERM');
+      const requestDurableResume = vi.fn().mockResolvedValue(undefined);
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix the bug',
+            environmentId: 'env-1',
+            kickoffMessage: 'Starting.',
+          });
+          controller.abort(shutdown);
+          throw shutdown;
+        },
+      );
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ postReply, requestDurableResume }),
+          signal: controller.signal,
+          durableAdmission,
+        }),
+      ).rejects.toBe(shutdown);
+
+      expect(postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message:
+          'Roomote restarted while working on this request. Please send it again.',
+      });
+      expect(mocks.releaseDurableClaim).not.toHaveBeenCalled();
+      expect(requestDurableResume).not.toHaveBeenCalled();
+    });
+
+    it('does not resume a deliberately cancelled turn', async () => {
+      const controller = new AbortController();
+      const cancelled = new Error('Fast suggestion launch settlement failed.');
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          controller.abort(cancelled);
+          throw cancelled;
+        },
+      );
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks(),
+          signal: controller.signal,
+          durableAdmission,
+        }),
+      ).rejects.toBe(cancelled);
+
+      expect(mocks.releaseDurableClaim).not.toHaveBeenCalled();
+      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
+        'durable-row-1',
+        'Turn interrupted without replay (turn_aborted).',
+      );
+    });
+
+    it('never steers a turn with its own inline-admitted row', async () => {
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          // Native steering is available, so the steer poll runs between
+          // tool calls and issues its pending-follow-up query.
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Done.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        durableAdmission,
+      });
+
+      // The steer poll must skip inline-admitted rows: they are whole turns
+      // (this one, or one awaiting queue resumption), never steers.
+      expect(mocks.getPendingHumanFollowUp).toHaveBeenCalled();
+      for (const [query] of mocks.getPendingHumanFollowUp.mock.calls) {
+        expect(query.where).toContain('admission');
+      }
+    });
+
+    it('marks a resumed turn so the model does not re-acknowledge', async () => {
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        resumedAfterInterruption: true,
+      });
+
+      const call = mocks.generateText.mock.calls[0]?.[0];
+      expect(call.prompt).toContain('<resumed_turn>');
+      expect(call.prompt.indexOf('<resumed_turn>')).toBeLessThan(
+        call.prompt.indexOf('What does this service do?'),
+      );
+      expect(call.system).toContain('`<resumed_turn>` marker');
+    });
+
+    it('renews the durable claim alongside the responding lease', async () => {
+      vi.useFakeTimers();
+      mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
+      let finishInference: (() => void) | undefined;
+      mocks.generateText.mockImplementation(
+        () =>
+          new Promise<string>((resolve) => {
+            finishInference = () => resolve('All done.');
+          }),
+      );
+
+      try {
+        const answer = answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks(),
+          durableAdmission,
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(FAST_RESPONDING_LEASE_RENEW_MS);
+        expect(mocks.renewDurableClaim).toHaveBeenCalledWith('durable-row-1');
+
+        finishInference?.();
+        await vi.advanceTimersByTimeAsync(1);
+        await answer;
+        expect(mocks.markDurableDelivered).toHaveBeenCalledWith(
+          'durable-row-1',
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('posts a terminal closeout when API shutdown interrupts silent retry backoff', async () => {

@@ -36,7 +36,11 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import { findTeamsConversationRoute } from '../automations/destination';
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
-import { admitFastAgentHumanFollowUp } from './fast-agent-human-follow-up';
+import {
+  admitFastAgentHumanFollowUp,
+  persistFastAgentInlineHumanTurn,
+} from './fast-agent-human-follow-up';
+import { wakeFastAgentParentEventNow } from './fast-agent-parent-event-queue';
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
@@ -574,6 +578,41 @@ async function runFastAgentSurfaceReply(
     const activeTasks = params.externalInput
       ? await getActiveFastAgentTasks(params.sessionId)
       : undefined;
+    // Durable admission for human turns (reactions are not replayable
+    // requests): persisted under this owner's claim before the turn runs.
+    const durableTurn = params.externalInput
+      ? null
+      : ((admission?.kind === 'turn' ? admission.durable : null) ??
+        (await persistFastAgentInlineHumanTurn({
+          parent: {
+            sessionId: params.sessionId,
+            conversation: delivery.conversation,
+          },
+          event: {
+            type: 'human_follow_up',
+            eventId: params.currentMessageId,
+            currentMessageId: params.currentMessageId,
+            userId: params.userId,
+            question: params.question,
+            ...(params.images?.length ? { images: params.images } : {}),
+            ...(params.senderDisplayName
+              ? { senderDisplayName: params.senderDisplayName }
+              : {}),
+          },
+        }).catch((error) => {
+          console.error(
+            `[Fast Agent] Failed to persist surface turn admission: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return null;
+        })));
+    if (durableTurn) {
+      release.durableRowId = durableTurn.id;
+      release.durableResume = () =>
+        wakeFastAgentParentEventNow({
+          conversationId: params.sessionId,
+          eventKey: durableTurn.eventKey,
+        });
+    }
     await answerFastAgentQuestion({
       question: params.question,
       images: params.images,
@@ -582,6 +621,7 @@ async function runFastAgentSurfaceReply(
       conversation: delivery.conversation,
       currentMessageId: params.currentMessageId,
       signal: release.signal,
+      ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
       senderDisplayName: params.senderDisplayName ?? undefined,
       ...(activeTasks ? { activeTasks } : {}),
       ...(params.externalInput
@@ -600,6 +640,15 @@ async function runFastAgentSurfaceReply(
             apiBaseUrl,
             includeRoomoteMemberTools: true,
           }),
+        ...(durableTurn
+          ? {
+              requestDurableResume: () =>
+                wakeFastAgentParentEventNow({
+                  conversationId: params.sessionId,
+                  eventKey: durableTurn.eventKey,
+                }),
+            }
+          : {}),
         ...delivery.adapter,
       },
     });

@@ -10,6 +10,8 @@ import {
   eq,
   fastAgentParentEvents,
   isNull,
+  lt,
+  or,
   sql,
   taskRuns,
 } from '@roomote/db/server';
@@ -83,6 +85,17 @@ async function addWakeupJob(request: FastAgentParentEventQueueRequest) {
   await getFastAgentParentEventQueue().add('deliver', request, {
     jobId: request.eventKey,
   });
+}
+
+/**
+ * Wake the queue for a persisted row right away, for an interrupted inline
+ * owner handing its turn back. Failure is not fatal: the recovery sweep
+ * recreates the wakeup within its interval.
+ */
+export async function wakeFastAgentParentEventNow(
+  request: FastAgentParentEventQueueRequest,
+): Promise<void> {
+  await addWakeupJob(request);
 }
 
 function wakeFastAgentParentEvent(request: FastAgentParentEventQueueRequest) {
@@ -167,6 +180,13 @@ function pendingPredicate(conversationId?: string) {
       : []),
     isNull(fastAgentParentEvents.deliveredAt),
     isNull(fastAgentParentEvents.discardedAt),
+    // An inline-admitted turn stays with its live owner while the owner's
+    // claim is current; the queue takes over once the claim is released or
+    // expires.
+    or(
+      isNull(fastAgentParentEvents.claimedUntil),
+      lt(fastAgentParentEvents.claimedUntil, new Date()),
+    ),
   );
 }
 
@@ -198,6 +218,14 @@ async function buildRetryTaskStart(
     where: eq(taskRuns.id, runId),
   });
   return run ? () => retryFastAgentStartup(run, parent) : undefined;
+}
+
+async function isStillPending(id: string): Promise<boolean> {
+  const row = await db.query.fastAgentParentEvents.findFirst({
+    where: eq(fastAgentParentEvents.id, id),
+    columns: { deliveredAt: true, discardedAt: true },
+  });
+  return Boolean(row) && !row!.deliveredAt && !row!.discardedAt;
 }
 
 async function markDelivered(id: string) {
@@ -273,9 +301,30 @@ export async function drainFastAgentParentEvents(
             parent: row.parent,
             event: row.event,
             ...(retryTaskStart ? { retryTaskStart } : {}),
+            // An inline-admitted row only reaches the queue after its owner
+            // was interrupted, so this delivery is a resumption.
+            ...(row.admission === 'inline'
+              ? {
+                  resumedAfterInterruption: true,
+                  // The resumed run owns the same row: it revokes replay
+                  // before any non-replayable action, so a worker death
+                  // after such an action cannot drain the row again.
+                  durableAdmission: { eventId: row.id },
+                }
+              : {}),
           },
           turnLock,
         );
+        if (row.admission === 'inline' && (await isStillPending(row.id))) {
+          // The resumed run settles its own row. If it is still pending, the
+          // run deferred itself (its terminal revocation did not land) and
+          // released the claim; leave it for the next recovery sweep rather
+          // than settling it here or re-running it in a tight loop.
+          console.warn(
+            `[FastAgentParentEventQueue] Resumed Fast turn ${row.id} deferred itself; leaving it for the next recovery sweep.`,
+          );
+          return;
+        }
         await markDelivered(row.id);
       } catch (error) {
         const deliveryError =

@@ -211,10 +211,13 @@ export {
   FastAgentParentBusyError,
   FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
   recoverPendingFastAgentParentEvents,
+  wakeFastAgentParentEventNow,
   type FastAgentParentEventQueueRequest,
 } from './lib/fast-agent-parent-event-queue';
 export {
   admitFastAgentHumanFollowUp,
+  persistFastAgentInlineHumanTurn,
+  type FastAgentDurableTurn,
   type FastAgentHumanFollowUpAdmission,
 } from './lib/fast-agent-human-follow-up';
 

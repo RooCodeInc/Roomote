@@ -76,6 +76,21 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(eventPrompt).not.toContain('<unresolved_request>');
   });
 
+  it('tells resumed human turns not to acknowledge again', () => {
+    const humanPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+    const eventPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+    });
+
+    expect(humanPrompt).toContain('`<resumed_turn>` marker');
+    expect(humanPrompt).toContain('Do not acknowledge the request again');
+    expect(eventPrompt).not.toContain('<resumed_turn>');
+  });
+
   it('omits the release identifier when no version is resolved', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
