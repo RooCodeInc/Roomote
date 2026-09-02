@@ -206,12 +206,12 @@ export function pendingResponseReducer(
   };
 }
 
-function ThinkingMessage() {
+function ThinkingMessage({ label = 'Thinking' }: { label?: string }) {
   return (
     <Message from="assistant" className="chat-reasoning-message">
       <MessageContent>
         <Shimmer className="text-sm font-light" direction="rl" duration={1}>
-          Thinking
+          {label}
         </Shimmer>
       </MessageContent>
     </Message>
@@ -660,10 +660,12 @@ export function FastSessionTranscript({
           {hasVisibleAssistantMessage ? timelineExtras : null}
           {pendingResponseState.pendingAfter !== null ? (
             <ThinkingMessage />
-          ) : !isSending &&
-            conversationResponding !== true &&
-            runningTaskCount > 0 &&
-            openTasksPanel ? (
+          ) : conversationResponding === true ? (
+            // Visible output (a tool call, an acknowledgement) has arrived
+            // but the turn is still running: the responding lease is the
+            // authority, and it clears the moment the closeout lands.
+            <ThinkingMessage label="Working" />
+          ) : !isSending && runningTaskCount > 0 && openTasksPanel ? (
             <RunningTasksMessage
               count={runningTaskCount}
               onOpenTasks={openTasksPanel}
