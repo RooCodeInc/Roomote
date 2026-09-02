@@ -59,7 +59,9 @@ const mocks = vi.hoisted(() => ({
 const nativeToolNames = vi.hoisted(
   () =>
     ({
+      callIntegrationTool: 'call_integration_tool',
       cancelTask: 'cancel_task',
+      findIntegrationTools: 'find_integration_tools',
       ignoreEvent: 'ignore_event',
       launchTask: 'launch_task',
       retryTaskStart: 'retry_task_start',
@@ -2687,6 +2689,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           success: true,
           result: { matches: ['fast-agent.ts'] },
         });
+        // On-demand servers stay reachable to subagents through the two
+        // shared lookup and call tools.
+        await expect(
+          subagentExecutor({
+            agent: 'advisor',
+            name: nativeToolNames.findIntegrationTools,
+            args: { integrationId: 'github', toolName: 'search_code' },
+          }),
+        ).resolves.toEqual({
+          success: true,
+          tools: [
+            expect.objectContaining({
+              integrationId: 'github',
+              name: 'search_code',
+            }),
+          ],
+        });
+        await expect(
+          subagentExecutor({
+            agent: 'advisor',
+            name: nativeToolNames.callIntegrationTool,
+            args: {
+              integrationId: 'github',
+              toolName: 'search_code',
+              args: { query: 'Fast Agent advisor lazy' },
+            },
+          }),
+        ).resolves.toEqual({
+          success: true,
+          result: { matches: ['fast-agent.ts'] },
+        });
         await parentExecutor({
           name: nativeToolNames.sendChatReply,
           args: {
@@ -2701,7 +2734,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(
       answerFastAgentQuestion({ ...baseParams, adapter }),
     ).resolves.toBe('Subagent review completed.');
-    expect(mocks.callIntegration).toHaveBeenCalledTimes(2);
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(3);
     expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
       'conversation-1',
       expect.arrayContaining([
@@ -3372,6 +3405,103 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           nativeMessageId: 'native-message-1',
         }),
       }),
+    );
+  });
+
+  it('exposes on-demand integrations through find_integration_tools and call_integration_tool', async () => {
+    const inputSchema = {
+      type: 'object',
+      properties: { query: { type: 'string' } },
+      required: ['query'],
+    };
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Repository access',
+        tools: [
+          { name: 'search_code', description: 'Search code', inputSchema },
+          { name: 'list_issues', description: 'List issues', inputSchema },
+        ],
+      },
+    ]);
+    const toolResults: unknown[] = [];
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        toolResults.push(
+          await invokeTool(nativeToolNames.findIntegrationTools, {
+            integrationId: 'github',
+            query: 'search',
+          }),
+        );
+        toolResults.push(
+          await invokeTool(nativeToolNames.findIntegrationTools, {
+            integrationId: 'missing',
+          }),
+        );
+        toolResults.push(
+          await invokeTool(nativeToolNames.callIntegrationTool, {
+            integrationId: 'github',
+            toolName: 'search_code',
+            args: { query: 'fast agent' },
+          }),
+        );
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Looking.',
+        });
+        toolResults.push(
+          await invokeTool(nativeToolNames.callIntegrationTool, {
+            integrationId: 'github',
+            toolName: 'search_code',
+            args: { query: 'fast agent' },
+          }),
+        );
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Found it.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    // Lookups need no acknowledgement and return the schema to call with.
+    expect(toolResults[0]).toEqual({
+      success: true,
+      tools: [
+        {
+          integrationId: 'github',
+          name: 'search_code',
+          description: 'Search code',
+          inputSchema,
+        },
+      ],
+    });
+    expect(toolResults[1]).toEqual({
+      success: false,
+      error: expect.stringContaining('"missing"'),
+    });
+    // Calls follow the same gate as natively mounted MCP tools.
+    expect(toolResults[2]).toEqual({
+      success: false,
+      error: expect.stringContaining('acknowledgement'),
+    });
+    expect(toolResults[3]).toEqual({
+      success: true,
+      result: { matches: ['fast-agent.ts'] },
+    });
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(1);
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'conversation-1' }),
+      expect.any(Array),
+      {
+        integrationId: 'github',
+        toolName: 'search_code',
+        args: { query: 'fast agent' },
+      },
     );
   });
 

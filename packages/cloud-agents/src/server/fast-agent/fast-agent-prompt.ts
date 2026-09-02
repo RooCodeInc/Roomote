@@ -16,6 +16,7 @@ import {
   type FastAgentTurnSource,
 } from './fast-agent-conversation';
 import type { FastAgentActiveTask } from './fast-agent-session';
+import { isFastAgentNativeIntegration } from './fast-agent-tool-policy';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
 
 function formatRepositoriesForPrompt(
@@ -82,12 +83,26 @@ function formatIntegrationsForPrompt(
     return '- No deployment MCP servers are available in fast mode.';
   }
 
-  return integrations
-    .map(
-      (integration) =>
-        `### ${integration.name} [tool prefix: ${integration.id}_]\n${integration.description}${integration.instructions ? `\n\n${integration.instructions}` : ''}`,
-    )
-    .join('\n\n');
+  const native = integrations.filter((integration) =>
+    isFastAgentNativeIntegration(integration.id),
+  );
+  const onDemand = integrations.filter(
+    (integration) => !isFastAgentNativeIntegration(integration.id),
+  );
+  const sections = native.map(
+    (integration) =>
+      `### ${integration.name} [tool prefix: ${integration.id}_]\n${integration.description}${integration.instructions ? `\n\n${integration.instructions}` : ''}`,
+  );
+  if (onDemand.length > 0) {
+    sections.push(
+      `### On-demand servers\nThe servers below are not mounted as individual tools. Call \`find_integration_tools\` with the server id (and a tool name or keywords) to get a tool's input schema, then \`call_integration_tool\` with that server id, tool name, and arguments. Tool names are listed so you can pick the right server without searching.`,
+      ...onDemand.map(
+        (integration) =>
+          `#### ${integration.name} [id: ${integration.id}]\n${integration.description}${integration.instructions ? `\n\n${integration.instructions}` : ''}\nTools: ${integration.tools.map((tool) => tool.name).join(', ')}`,
+      ),
+    );
+  }
+  return sections.join('\n\n');
 }
 
 export function buildFastAgentSystemPrompt({
@@ -264,7 +279,7 @@ ${reactionGuidance}
 - Use \`roomote_get_chat_message_context\` or \`roomote_get_chat_channel_messages\` for additional chat context. Pass the target channel or message reference required by the native tool schema. Slack channel history defaults to the previous 24 hours when \`oldest\` is omitted.
 - Never send conversational acknowledgements to a task. "Okay", "cool", "thanks", status questions, and similar conversation are addressed to you. Use a user-visible chat tool.
 - Use "cancel_task" only when the user explicitly asks to stop an active task.
-- Call a listed deployment MCP tool directly when it can answer the request. Fast receives the same actor-authorized remote and deployment-proxied MCP tool catalog as delegated tasks, with each tool exposed individually under its server prefix and native JSON schema; local stdio servers remain sandbox-only.
+- Call a deployment MCP tool when it can answer the request. Fast receives the same actor-authorized remote and deployment-proxied MCP tool catalog as delegated tasks; local stdio servers remain sandbox-only. Servers listed with a tool prefix expose each tool individually with its native JSON schema. On-demand servers are reached through \`find_integration_tools\` (fetch the schema by server id and tool name, or search by keywords) followed by \`call_integration_tool\`; the same acknowledgement, duplicate, and audit rules apply to both paths.
 - Use \`roomote_manage_custom_automations\` for custom automation lifecycle requests. It uses the current user's deployment authorization, is admin-only, and is unavailable to advisor and judge subagents. List before modifying an existing automation, use "list_models" before setting a model override, use update with "enabled" to enable or disable, and use "run_now" rather than "launch_task" to test an automation. Communicate first on a human-authored turn; platform events remain exempt. Delete only when the user explicitly requests it, and after creating an automation ask whether they want to run it now.
 
 ${recurringAutomationGuidance}

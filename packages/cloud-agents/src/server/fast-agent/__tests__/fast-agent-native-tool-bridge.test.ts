@@ -650,7 +650,7 @@ describe('Fast native OpenCode tool bridge', () => {
     };
     const runtime = await getFastAgentNativeToolRuntime('native-mcp', [
       {
-        id: 'github',
+        id: 'roomote',
         name: 'GitHub',
         description: 'Repository access',
         tools: [
@@ -665,16 +665,16 @@ describe('Fast native OpenCode tool bridge', () => {
       mcp: Record<string, { url: string; headers: Record<string, string> }>;
     };
     const executor = vi.fn(async ({ args }) => ({ matches: [args.query] }));
-    expect(config.mcp.github!.headers.Authorization).toBe(
+    expect(config.mcp.roomote!.headers.Authorization).toBe(
       `Bearer ${runtime.mcpCapability}`,
     );
-    expect(config.mcp.github!.headers.Authorization).not.toContain(
+    expect(config.mcp.roomote!.headers.Authorization).not.toContain(
       runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN,
     );
     expect(config.agent.build.tools).toMatchObject({
       '*': false,
       task: true,
-      'github_*': true,
+      'roomote_*': true,
     });
     const serverConfig = JSON.parse(
       buildOpenCodeCliEnv(runtime.env, {
@@ -698,28 +698,76 @@ describe('Fast native OpenCode tool bridge', () => {
     try {
       await expect(
         listMcpTools({
-          url: config.mcp.github!.url,
-          headers: config.mcp.github!.headers,
+          url: config.mcp.roomote!.url,
+          headers: config.mcp.roomote!.headers,
         }),
       ).resolves.toEqual([
         { name: 'search_code', description: 'Search code', inputSchema },
       ]);
       await expect(
         callMcpTool({
-          url: config.mcp.github!.url,
-          headers: config.mcp.github!.headers,
+          url: config.mcp.roomote!.url,
+          headers: config.mcp.roomote!.headers,
           toolName: 'search_code',
           args: { query: 'Fast', filters: null },
         }),
       ).resolves.toEqual({ matches: ['Fast'] });
       expect(executor).toHaveBeenCalledWith({
-        integrationId: 'github',
+        integrationId: 'roomote',
         toolName: 'search_code',
         args: { query: 'Fast', filters: null },
       });
     } finally {
       unbind();
     }
+  });
+
+  it('registers only native servers with OpenCode and keeps on-demand servers off the request', async () => {
+    const runtime = await getFastAgentNativeToolRuntime('lazy-mcp', [
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Deployment access',
+        tools: [{ name: 'manage_tasks', inputSchema: { type: 'object' } }],
+      },
+      {
+        id: 'gbrain',
+        name: 'Brain',
+        description: 'Deployment memory',
+        tools: [{ name: 'query', inputSchema: { type: 'object' } }],
+      },
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Repository access',
+        tools: Array.from({ length: 40 }, (_, index) => ({
+          name: `tool_${index}`,
+          inputSchema: { type: 'object' },
+        })),
+      },
+    ]);
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    ) as {
+      agent: { build: { tools: Record<string, boolean> } };
+      mcp: Record<string, unknown>;
+    };
+
+    expect(Object.keys(config.mcp).sort()).toEqual(['gbrain', 'roomote']);
+    expect(config.agent.build.tools).toMatchObject({
+      'roomote_*': true,
+      'gbrain_*': true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: true,
+    });
+    expect(config.agent.build.tools).not.toHaveProperty('github_*');
+    const toolsDirectory = join(runtime.env.OPENCODE_CONFIG_DIR!, 'tools');
+    expect(await readdir(toolsDirectory)).toEqual(
+      expect.arrayContaining([
+        'find_integration_tools.js',
+        'call_integration_tool.js',
+      ]),
+    );
   });
 
   it('keeps member task inspection namespaced from native task mutations', async () => {
@@ -756,7 +804,7 @@ describe('Fast native OpenCode tool bridge', () => {
     const parentSessionId = 'mcp-spill-parent-session';
     const runtime = await getFastAgentNativeToolRuntime(conversationId, [
       {
-        id: 'github',
+        id: 'roomote',
         name: 'GitHub',
         description: 'Repository access',
         tools: [{ name: 'search_code' }],
@@ -780,8 +828,8 @@ describe('Fast native OpenCode tool bridge', () => {
 
     try {
       const descriptor = (await callMcpTool({
-        url: config.mcp.github!.url,
-        headers: config.mcp.github!.headers,
+        url: config.mcp.roomote!.url,
+        headers: config.mcp.roomote!.headers,
         toolName: 'search_code',
         args: {},
       })) as {
@@ -831,7 +879,7 @@ describe('Fast native OpenCode tool bridge', () => {
     )}${marker}`;
     const runtime = await getFastAgentNativeToolRuntime(conversationId, [
       {
-        id: 'github',
+        id: 'roomote',
         name: 'GitHub',
         description: 'Repository access',
         tools: [{ name: 'search_code' }],
@@ -856,8 +904,8 @@ describe('Fast native OpenCode tool bridge', () => {
 
     try {
       const descriptor = (await callMcpTool({
-        url: config.mcp.github!.url,
-        headers: config.mcp.github!.headers,
+        url: config.mcp.roomote!.url,
+        headers: config.mcp.roomote!.headers,
         toolName: 'search_code',
         args: {},
       })) as { spill: { byteLength: number; handle: string } };
@@ -904,7 +952,7 @@ describe('Fast native OpenCode tool bridge', () => {
   it('revokes an in-flight MCP completion before it can recreate spill state', async () => {
     const conversationId = 'mcp-revocation-conversation';
     const integration = {
-      id: 'github',
+      id: 'roomote',
       name: 'GitHub',
       description: 'Repository access',
       tools: [{ name: 'search_code' }],
@@ -936,8 +984,8 @@ describe('Fast native OpenCode tool bridge', () => {
 
     try {
       const staleCall = callMcpTool({
-        url: config.mcp.github!.url,
-        headers: config.mcp.github!.headers,
+        url: config.mcp.roomote!.url,
+        headers: config.mcp.roomote!.headers,
         toolName: 'search_code',
         args: {},
       });
@@ -970,8 +1018,8 @@ describe('Fast native OpenCode tool bridge', () => {
       );
       try {
         const descriptor = (await callMcpTool({
-          url: config.mcp.github!.url,
-          headers: config.mcp.github!.headers,
+          url: config.mcp.roomote!.url,
+          headers: config.mcp.roomote!.headers,
           toolName: 'search_code',
           args: {},
         })) as { spill: { handle: string }; truncated: boolean };
