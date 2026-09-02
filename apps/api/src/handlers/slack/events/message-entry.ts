@@ -6,6 +6,7 @@ import {
   syncAutoStartChannelCacheBestEffort,
 } from '@roomote/redis';
 import {
+  FastAgentDurableRetryScheduledError,
   hasFastAgentSession,
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS,
 } from '@roomote/cloud-agents/server';
@@ -1769,6 +1770,11 @@ export function startFastAgentResponse(params: {
         onRejected,
       }),
     onError: (error) => {
+      if (error instanceof FastAgentDurableRetryScheduledError) {
+        // Not a failure: the queue re-runs this turn at the scheduled time.
+        console.info(errorLogPrefix, error.message);
+        return;
+      }
       console.error(
         errorLogPrefix,
         error instanceof Error ? error.message : String(error),

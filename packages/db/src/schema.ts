@@ -3157,6 +3157,19 @@ export const fastAgentParentEvents = pgTable(
      * as it works and clears it on interruption so recovery starts at once.
      */
     claimedUntil: timestamp('claimed_until'),
+    /**
+     * Durable retry scheduling for an inline-admitted turn: while set and
+     * in the future, the turn is waiting out an inference retry backoff
+     * with no live owner, and the drain and recovery sweep leave it alone
+     * until the time arrives. The previous release ignores this column and
+     * would re-run such a row immediately, which is safe (N-1 rollback).
+     */
+    retryAt: timestamp('retry_at'),
+    /**
+     * Automatic inference retries this turn has consumed across every
+     * owner, so the per-turn retry cap holds through restarts and handoffs.
+     */
+    inferenceRetries: integer('inference_retries').notNull().default(0),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },

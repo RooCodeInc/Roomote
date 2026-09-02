@@ -101,11 +101,13 @@ import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill
 import {
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+  findFastAgentActiveInferenceRetryNotice,
   markFastAgentDurableTurnDelivered,
   markFastAgentInferenceRetryNoticeInterruption,
   releaseFastAgentDurableTurnClaim,
   renewFastAgentDurableTurnClaim,
   revokeFastAgentDurableTurnReplay,
+  scheduleFastAgentDurableTurnRetry,
   reconcileFastAgentInferenceRetryNotices,
   renewFastSessionRespondingLease,
   RESTARTED_ACTIVE_TURN_MESSAGE,
@@ -576,6 +578,21 @@ type FastAgentInferenceRetryOptions = {
   canRetry?: (error: unknown, failure: FastAgentInferenceFailure) => boolean;
   prepareRetry?: () => Promise<void> | void;
   /**
+   * Offered the pending backoff after its notice is recorded and before the
+   * process would sleep it out. Returning true means the wait now belongs to
+   * durable scheduling and this execution must stop without an outcome; the
+   * loop then throws FastAgentDurableRetryScheduledError.
+   */
+  deferRetry?: (
+    notice: FastAgentInferenceRetryNotice & { totalRetryCount: number },
+  ) => Promise<boolean>;
+  /**
+   * Automatic retries already consumed by earlier executions of this turn,
+   * so a resumed run continues the same bounded budget (and the same
+   * backoff progression) instead of starting a fresh one.
+   */
+  initialRetryCount?: number;
+  /**
    * Consume forward progress made since the previous failure. Returning true
    * grants a fresh bounded retry budget, mirroring how standard-task provider
    * recovery resets after every completed turn. Callers must only return true
@@ -595,6 +612,20 @@ class FastAgentTurnClosedError extends Error {
   constructor() {
     super('The Fast turn delivered its closeout.');
     this.name = 'FastAgentTurnClosedError';
+  }
+}
+
+/**
+ * Thrown out of a turn whose pending inference retry was parked durably: the
+ * queue re-runs the same turn at the scheduled time, so this execution ends
+ * with no user-visible outcome and no settlement of its own.
+ */
+export class FastAgentDurableRetryScheduledError extends Error {
+  constructor(public readonly retryAt: Date) {
+    super(
+      `Fast turn parked for a durable inference retry at ${retryAt.toISOString()}.`,
+    );
+    this.name = 'FastAgentDurableRetryScheduledError';
   }
 }
 
@@ -729,8 +760,8 @@ async function runFastAgentInferenceWithRetries<T>(
   onRetry?: (notice: FastAgentInferenceRetryNotice) => Promise<void>,
   options: FastAgentInferenceRetryOptions = {},
 ): Promise<T> {
-  let totalRetryCount = 0;
-  for (let retryNumber = 0; ; retryNumber += 1) {
+  let totalRetryCount = options.initialRetryCount ?? 0;
+  for (let retryNumber = totalRetryCount; ; retryNumber += 1) {
     try {
       options.signal?.throwIfAborted();
       return await run();
@@ -779,6 +810,22 @@ async function runFastAgentInferenceWithRetries<T>(
       } catch (noticeError) {
         console.warn(
           `[Fast Agent] Failed to post inference retry notice: ${formatErrorForLog(noticeError)}`,
+        );
+      }
+      // The notice is recorded first so a resumed run can find and keep
+      // editing it; only then may the wait leave this process.
+      if (
+        options.deferRetry &&
+        (await options.deferRetry({
+          failure,
+          attemptNumber,
+          maxAttempts: maxRetries,
+          delayMs,
+          totalRetryCount,
+        }))
+      ) {
+        throw new FastAgentDurableRetryScheduledError(
+          new Date(Date.now() + delayMs),
         );
       }
       await options.prepareRetry?.();
@@ -890,6 +937,8 @@ function escapeFastAgentEnvelopeJson(value: Record<string, string>): string {
 const UNRESOLVED_REQUEST_TEXT_MAX_CHARS = 2_000;
 const FAST_AGENT_RESUMED_TURN_MARKER =
   '<resumed_turn>A service restart interrupted the previous attempt at this request before it finished.</resumed_turn>';
+const FAST_AGENT_RESUMED_RETRY_TURN_MARKER =
+  '<resumed_turn>The previous attempt at this request failed with a temporary inference provider error and is being retried automatically.</resumed_turn>';
 
 function wrapFastAgentUnresolvedRequest(
   request: FastAgentUnresolvedRequest,
@@ -937,6 +986,7 @@ function buildFastAgentMessages({
   slackRoomoteUserId,
   unresolvedRequest,
   resumedAfterInterruption = false,
+  resumedAfterInferenceRetry = false,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -954,6 +1004,7 @@ function buildFastAgentMessages({
   slackRoomoteUserId?: string;
   unresolvedRequest?: FastAgentUnresolvedRequest | null;
   resumedAfterInterruption?: boolean;
+  resumedAfterInferenceRetry?: boolean;
 }): {
   bootstrapMessages: ModelMessage[];
   turnMessages: ModelMessage[];
@@ -999,7 +1050,9 @@ function buildFastAgentMessages({
     : undefined;
   const resumedTurnText = resumedAfterInterruption
     ? FAST_AGENT_RESUMED_TURN_MARKER
-    : undefined;
+    : resumedAfterInferenceRetry
+      ? FAST_AGENT_RESUMED_RETRY_TURN_MARKER
+      : undefined;
 
   if (compatibilityMessages.length > 0) {
     const supplementalThreadContext = buildSupplementalThreadContext({
@@ -1144,6 +1197,7 @@ export async function answerFastAgentQuestion({
   currentDurableHumanFollowUpEventId,
   durableAdmission,
   resumedAfterInterruption = false,
+  resumedAfterInferenceRetry = false,
 }: {
   question: string;
   images?: string[];
@@ -1180,9 +1234,16 @@ export async function answerFastAgentQuestion({
    * turn stays replay-safe the row remains pending under this owner's claim,
    * so an interruption hands it to the durable queue instead of the user.
    */
-  durableAdmission?: { eventId: string };
+  durableAdmission?: {
+    eventId: string;
+    /** Automatic inference retries earlier executions already consumed. */
+    inferenceRetries?: number;
+  };
   /** The durable queue is re-running this turn after an interruption. */
   resumedAfterInterruption?: boolean;
+  /** The durable queue is re-running this turn at its scheduled retry time
+   * after a previous execution parked it on a temporary provider failure. */
+  resumedAfterInferenceRetry?: boolean;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
     currentMessageId,
@@ -1332,6 +1393,58 @@ export async function answerFastAgentQuestion({
         );
       },
     );
+  };
+  // Set once this execution has parked the turn for a scheduled retry: the
+  // row, its retry notice, and the responding lease now belong to the run
+  // the queue starts at the scheduled time, so nothing here may settle them.
+  let durableTurnDeferred = false;
+  /**
+   * Move a pending inference retry out of this process. Only a turn that is
+   * still replay-safe can be re-run elsewhere; anything else keeps its
+   * backoff in process exactly as before. A schedule that does not land
+   * (row superseded or withdrawn, write failed) also falls back to the
+   * in-process wait, so durability here is best effort like admission.
+   */
+  const deferInferenceRetry = async (
+    notice: FastAgentInferenceRetryNotice & { totalRetryCount: number },
+  ): Promise<boolean> => {
+    if (
+      !durableAdmission ||
+      !durableTurnReplayable ||
+      !adapter.requestDurableRetry ||
+      Env.R_FAST_DURABLE_RETRY_DISABLED ||
+      notice.delayMs === undefined ||
+      signal?.aborted ||
+      isInstructionClosed()
+    ) {
+      return false;
+    }
+    const retryAt = new Date(Date.now() + notice.delayMs);
+    const scheduled = await scheduleFastAgentDurableTurnRetry(
+      durableAdmission.eventId,
+      {
+        retryAt,
+        inferenceRetries: notice.totalRetryCount,
+        reason: `Inference retry ${notice.attemptNumber}${notice.maxAttempts ? `/${notice.maxAttempts}` : ''} scheduled (${notice.failure.reason}).`,
+      },
+    ).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to schedule a durable inference retry: ${formatErrorForLog(error)}`,
+      );
+      return false;
+    });
+    if (!scheduled) return false;
+    durableTurnReplayable = false;
+    durableTurnDeferred = true;
+    await adapter.requestDurableRetry(retryAt).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to queue the durable inference retry wakeup: ${formatErrorForLog(error)}`,
+      );
+    });
+    console.info(
+      `[Fast Agent] Parked the turn for a durable inference retry (row=${durableAdmission.eventId}, retryAt=${retryAt.toISOString()}, retries=${notice.totalRetryCount}, reason=${notice.failure.reason}).`,
+    );
+    return true;
   };
   let activeHumanSteerPoll = Promise.resolve();
   const injectedHumanFollowUpIds = new Set<string>();
@@ -1910,14 +2023,47 @@ export async function answerFastAgentQuestion({
       currentMessageReactable,
     });
     canonicalConversationId = session.id;
-    await reconcileFastAgentInferenceRetryNotices(
-      session.id,
-      'next_turn_reconcile',
-    ).catch((error) => {
-      console.warn(
-        `[Fast Agent] Failed to reconcile interrupted inference retry notices: ${formatErrorForLog(error)}`,
-      );
-    });
+    // A resumed execution of this same turn inherits the retry notice its
+    // predecessor left active, so the eventual answer edits that notice in
+    // place; only when no such notice exists (or this is a new turn) does a
+    // still-active notice mean an interrupted turn to reconcile.
+    const inheritedRetryNotice =
+      durableAdmission &&
+      (resumedAfterInterruption || resumedAfterInferenceRetry)
+        ? await findFastAgentActiveInferenceRetryNotice(
+            session.id,
+            turnId,
+          ).catch((error) => {
+            console.warn(
+              `[Fast Agent] Failed to look up the inherited inference retry notice: ${formatErrorForLog(error)}`,
+            );
+            return null;
+          })
+        : null;
+    if (inheritedRetryNotice) {
+      inferenceRetryAttempted = true;
+      inferenceRetryCanonicalEvent = {
+        eventId: inheritedRetryNotice.eventId,
+        turnSeq: nextTurnSeq++,
+      };
+      nextRetryNoticeOrdinal += 1;
+      inferenceRetryReply = inheritedRetryNotice.platformMessageId
+        ? { messageId: inheritedRetryNotice.platformMessageId }
+        : undefined;
+      inferenceRecoveryEpisodeStartedAt = inheritedRetryNotice.ts;
+      if (inheritedRetryNotice.platformMessageId) {
+        reportedInferenceNotices.add(inheritedRetryNotice.text);
+      }
+    } else {
+      await reconcileFastAgentInferenceRetryNotices(
+        session.id,
+        'next_turn_reconcile',
+      ).catch((error) => {
+        console.warn(
+          `[Fast Agent] Failed to reconcile interrupted inference retry notices: ${formatErrorForLog(error)}`,
+        );
+      });
+    }
     await setFastSessionResponding(
       session.id,
       true,
@@ -2058,6 +2204,7 @@ export async function answerFastAgentQuestion({
       slackRoomoteUserId,
       unresolvedRequest,
       resumedAfterInterruption,
+      resumedAfterInferenceRetry,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
       Env.RELEASE_PRODUCT_VERSION,
@@ -3518,6 +3665,10 @@ export async function answerFastAgentQuestion({
                 // conversation lock forever if the provider stalls again.
                 promptTimeoutMs = FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS;
               },
+              deferRetry: deferInferenceRetry,
+              ...(durableAdmission?.inferenceRetries
+                ? { initialRetryCount: durableAdmission.inferenceRetries }
+                : {}),
               signal,
             },
           );
@@ -3598,6 +3749,17 @@ export async function answerFastAgentQuestion({
     await mirrorPendingMessages();
     return lastVisibleMessage;
   } catch (error) {
+    if (error instanceof FastAgentDurableRetryScheduledError) {
+      // The turn is parked, not failed: its notice stays active for the
+      // resumed run to edit, its row waits for the scheduled time, and no
+      // closeout is owed by this execution. The process-local OpenCode
+      // session is dropped because the resumed run rebuilds from history.
+      diagnostics.recordFailure('cancelled', error);
+      if (canonicalConversationId) {
+        fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
+      }
+      throw error;
+    }
     const terminalError =
       signal?.aborted && signal.reason instanceof Error ? signal.reason : error;
     diagnostics.recordFailure(
@@ -3810,7 +3972,9 @@ export async function answerFastAgentQuestion({
     // scheduled reconciler repairs the marker later when no successor appears.
     const lockOwnershipLost =
       signal?.aborted && signal.reason instanceof FastAgentTurnLockLostError;
-    if (canonicalConversationId && !lockOwnershipLost) {
+    // A parked turn is still responding from the user's point of view: the
+    // lease and the active retry notice carry over to the scheduled run.
+    if (canonicalConversationId && !lockOwnershipLost && !durableTurnDeferred) {
       await setFastSessionResponding(canonicalConversationId, false).catch(
         (error) => {
           console.warn(

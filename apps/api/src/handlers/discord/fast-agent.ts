@@ -30,6 +30,7 @@ import {
   persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
+  wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
   type FastAgentDurableTurn,
 } from '@roomote/sdk/server';
@@ -329,6 +330,14 @@ export async function processDiscordFastAgentMessage(
                   conversationId: session.id,
                   eventKey: durableTurnForResume.eventKey,
                 }),
+              requestDurableRetry: (retryAt: Date) =>
+                wakeFastAgentParentEventAt(
+                  {
+                    conversationId: session.id,
+                    eventKey: durableTurnForResume.eventKey,
+                  },
+                  retryAt,
+                ),
             }
           : {}),
         resolveMcpServerConfigs: () =>

@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => {
     updateWhere: vi.fn(),
     findPending: vi.fn(),
     findRun: vi.fn(),
+    selectRows: vi.fn(),
     acquireLock: vi.fn(),
     releaseLock: Object.assign(vi.fn(), {
       signal: new AbortController().signal,
@@ -52,6 +53,16 @@ vi.mock('@roomote/db/server', () => ({
     insert: vi.fn(() => ({ values: mocks.insertValues })),
     transaction: mocks.transaction,
     update: vi.fn(() => ({ set: mocks.updateSet })),
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => {
+          // Both recovery queries await the rows; the pending one first
+          // orders them.
+          const rows: Promise<unknown[]> = mocks.selectRows();
+          return Object.assign(rows, { orderBy: vi.fn(() => rows) });
+        }),
+      })),
+    })),
     query: {
       fastAgentParentEvents: { findFirst: mocks.findPending },
       taskRuns: { findFirst: mocks.findRun },
@@ -60,8 +71,10 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...values: unknown[]) => values),
   asc: vi.fn((value: unknown) => value),
   eq: vi.fn((...values: unknown[]) => values),
+  gt: vi.fn((...values: unknown[]) => values),
   isNull: vi.fn((value: unknown) => value),
   lt: vi.fn((...values: unknown[]) => values),
+  lte: vi.fn((...values: unknown[]) => values),
   or: vi.fn((...values: unknown[]) => values),
   sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
     strings: [...strings],
@@ -74,6 +87,8 @@ vi.mock('@roomote/db/server', () => ({
     attempts: 'attempts',
     admission: 'admission',
     claimedUntil: 'claimed_until',
+    retryAt: 'retry_at',
+    inferenceRetries: 'inference_retries',
     createdAt: 'created_at',
     deliveredAt: 'delivered_at',
     discardedAt: 'discarded_at',
@@ -100,6 +115,7 @@ import {
   enqueueFastAgentParentEvent,
   enqueueFastAgentParentEventForRun,
   FastAgentParentBusyError,
+  recoverPendingFastAgentParentEvents,
 } from './fast-agent-parent-event-queue';
 import type { FastAgentParentEvent } from './fast-agent-parent-event';
 
@@ -173,6 +189,7 @@ describe('Fast parent event durable queue', () => {
     mocks.updateSet.mockReturnValue({ where: mocks.updateWhere });
     mocks.updateWhere.mockResolvedValue(undefined);
     mocks.queueAdd.mockResolvedValue(undefined);
+    mocks.selectRows.mockResolvedValue([]);
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
     mocks.releaseLock.mockResolvedValue(undefined);
     mocks.deliver.mockResolvedValue('delivered');
@@ -417,6 +434,94 @@ describe('Fast parent event durable queue', () => {
       ),
     ).toBe(false);
     expect(mocks.releaseLock).toHaveBeenCalled();
+  });
+
+  it('re-runs a scheduled retry row as a retry resumption with queue wakeups bound', async () => {
+    const retryRow = {
+      ...pendingRow('inline-3', {
+        type: 'human_follow_up' as const,
+        eventId: '100.4',
+        currentMessageId: '100.4',
+        userId: 'user-1',
+        question: 'Still failing?',
+      }),
+      admission: 'inline' as const,
+      claimedUntil: null,
+      retryAt: new Date(Date.now() - 10),
+      inferenceRetries: 2,
+    };
+    mocks.findPending
+      .mockResolvedValueOnce(retryRow)
+      .mockResolvedValueOnce(retryRow)
+      .mockResolvedValueOnce({ deliveredAt: new Date(), discardedAt: null })
+      .mockResolvedValueOnce(undefined);
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: retryRow.eventKey,
+    });
+
+    const [params] = mocks.deliver.mock.calls[0]!;
+    expect(params).toMatchObject({
+      resumedAfterInferenceRetry: true,
+      durableAdmission: { eventId: 'inline-3', inferenceRetries: 2 },
+    });
+    expect(params.resumedAfterInterruption).toBeUndefined();
+
+    // A second park schedules its own delayed wakeup keyed by the time.
+    const retryAt = new Date(Date.now() + 30_000);
+    await params.requestDurableRetry(retryAt);
+    const [name, request, options] = mocks.queueAdd.mock.lastCall!;
+    expect(name).toBe('deliver');
+    expect(request).toEqual({
+      conversationId: parent.sessionId,
+      eventKey: retryRow.eventKey,
+    });
+    expect(options.jobId).toBe(
+      `${retryRow.eventKey}-retry-${retryAt.getTime()}`,
+    );
+    expect(options.delay).toBeGreaterThan(29_000);
+    expect(options.delay).toBeLessThanOrEqual(30_000);
+
+    // An interruption of the resumed run wakes the queue at once.
+    await params.requestDurableResume();
+    expect(mocks.queueAdd).toHaveBeenLastCalledWith(
+      'deliver',
+      { conversationId: parent.sessionId, eventKey: retryRow.eventKey },
+      { jobId: retryRow.eventKey },
+    );
+  });
+
+  it('leaves scheduled retries alone until their time', async () => {
+    mocks.findPending.mockResolvedValueOnce(undefined);
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: 'key-idle',
+    });
+
+    const [query] = mocks.findPending.mock.calls[0]!;
+    expect(JSON.stringify(query.where)).toContain('retry_at');
+  });
+
+  it('re-adds delayed wakeups for scheduled retries during recovery', async () => {
+    const retryAt = new Date(Date.now() + 20_000);
+    mocks.selectRows
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { conversationId: parent.sessionId, eventKey: 'key-sched', retryAt },
+      ]);
+
+    await expect(recoverPendingFastAgentParentEvents()).resolves.toBe(0);
+
+    expect(mocks.queueAdd).toHaveBeenCalledOnce();
+    expect(mocks.queueAdd).toHaveBeenCalledWith(
+      'deliver',
+      { conversationId: parent.sessionId, eventKey: 'key-sched' },
+      expect.objectContaining({
+        jobId: `key-sched-retry-${retryAt.getTime()}`,
+      }),
+    );
   });
 
   it('returns a retryable busy signal without occupying a worker slot', async () => {

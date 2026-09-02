@@ -1488,8 +1488,16 @@ type FastAgentParentEventDeliveryParams = {
   /** The queue is re-running an inline-admitted human turn that was
    * interrupted before it finished. */
   resumedAfterInterruption?: boolean;
-  /** The inline-admitted row the resumed run executes and settles. */
-  durableAdmission?: { eventId: string };
+  /** The queue is re-running an inline-admitted human turn whose previous
+   * execution parked it for a durable inference retry. */
+  resumedAfterInferenceRetry?: boolean;
+  /** The inline-admitted row the resumed run executes and settles, with the
+   * automatic retries earlier executions already consumed. */
+  durableAdmission?: { eventId: string; inferenceRetries?: number };
+  /** Queue wakeups a resumed run uses when it hands the row back again:
+   * immediately after an interruption, or at a scheduled retry time. */
+  requestDurableResume?: () => Promise<void>;
+  requestDurableRetry?: (retryAt: Date) => Promise<void>;
 };
 
 /** Give a structured child event to the Fast orchestrator for presentation. */
@@ -1591,6 +1599,9 @@ export async function deliverFastAgentParentEventWithLock(
       ...(params.resumedAfterInterruption
         ? { resumedAfterInterruption: true }
         : {}),
+      ...(params.resumedAfterInferenceRetry
+        ? { resumedAfterInferenceRetry: true }
+        : {}),
       ...(params.durableAdmission
         ? { durableAdmission: params.durableAdmission }
         : {}),
@@ -1633,6 +1644,12 @@ export async function deliverFastAgentParentEventWithLock(
           }),
         ...(params.retryTaskStart
           ? { retryTaskStart: params.retryTaskStart }
+          : {}),
+        ...(params.requestDurableResume
+          ? { requestDurableResume: params.requestDurableResume }
+          : {}),
+        ...(params.requestDurableRetry
+          ? { requestDurableRetry: params.requestDurableRetry }
           : {}),
       },
     });

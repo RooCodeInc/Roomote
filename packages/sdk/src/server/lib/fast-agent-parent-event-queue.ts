@@ -9,8 +9,10 @@ import {
   db,
   eq,
   fastAgentParentEvents,
+  gt,
   isNull,
   lt,
+  lte,
   or,
   sql,
   taskRuns,
@@ -96,6 +98,23 @@ export async function wakeFastAgentParentEventNow(
   request: FastAgentParentEventQueueRequest,
 ): Promise<void> {
   await addWakeupJob(request);
+}
+
+/**
+ * Wake the queue for a durably scheduled retry once its time arrives. The
+ * job id carries the scheduled time so a repeated schedule (the owner's own
+ * hint plus every recovery sweep before the time) collapses into one wakeup
+ * while a later reschedule of the same row still gets its own. Failure is
+ * not fatal: the recovery sweep re-adds the delayed wakeup.
+ */
+export async function wakeFastAgentParentEventAt(
+  request: FastAgentParentEventQueueRequest,
+  retryAt: Date,
+): Promise<void> {
+  await getFastAgentParentEventQueue().add('deliver', request, {
+    jobId: `${request.eventKey}-retry-${retryAt.getTime()}`,
+    delay: Math.max(0, retryAt.getTime() - Date.now()),
+  });
 }
 
 function wakeFastAgentParentEvent(request: FastAgentParentEventQueueRequest) {
@@ -187,6 +206,20 @@ function pendingPredicate(conversationId?: string) {
       isNull(fastAgentParentEvents.claimedUntil),
       lt(fastAgentParentEvents.claimedUntil, new Date()),
     ),
+    // A durably scheduled inference retry is not due before its time.
+    or(
+      isNull(fastAgentParentEvents.retryAt),
+      lte(fastAgentParentEvents.retryAt, new Date()),
+    ),
+  );
+}
+
+/** Pending rows parked for a durable inference retry that is not due yet. */
+function scheduledRetryPredicate() {
+  return and(
+    isNull(fastAgentParentEvents.deliveredAt),
+    isNull(fastAgentParentEvents.discardedAt),
+    gt(fastAgentParentEvents.retryAt, new Date()),
   );
 }
 
@@ -296,20 +329,37 @@ export async function drainFastAgentParentEvents(
           row.retryTaskStartRunId,
           row.parent,
         );
+        const wakeRequest = {
+          conversationId: request.conversationId,
+          eventKey: row.eventKey,
+        };
         await deliverFastAgentParentEventWithLock(
           {
             parent: row.parent,
             event: row.event,
             ...(retryTaskStart ? { retryTaskStart } : {}),
             // An inline-admitted row only reaches the queue after its owner
-            // was interrupted, so this delivery is a resumption.
+            // was interrupted or parked it for a scheduled retry, so this
+            // delivery is a resumption of the same turn.
             ...(row.admission === 'inline'
               ? {
-                  resumedAfterInterruption: true,
+                  ...(row.retryAt
+                    ? { resumedAfterInferenceRetry: true }
+                    : { resumedAfterInterruption: true }),
                   // The resumed run owns the same row: it revokes replay
                   // before any non-replayable action, so a worker death
-                  // after such an action cannot drain the row again.
-                  durableAdmission: { eventId: row.id },
+                  // after such an action cannot drain the row again. The
+                  // consumed retry count keeps the per-turn cap honest.
+                  durableAdmission: {
+                    eventId: row.id,
+                    inferenceRetries: row.inferenceRetries,
+                  },
+                  // A resumed run that is interrupted again, or parks itself
+                  // for another retry, hands the row back through these.
+                  requestDurableResume: () =>
+                    wakeFastAgentParentEventNow(wakeRequest),
+                  requestDurableRetry: (retryAt: Date) =>
+                    wakeFastAgentParentEventAt(wakeRequest, retryAt),
                 }
               : {}),
           },
@@ -317,11 +367,13 @@ export async function drainFastAgentParentEvents(
         );
         if (row.admission === 'inline' && (await isStillPending(row.id))) {
           // The resumed run settles its own row. If it is still pending, the
-          // run deferred itself (its terminal revocation did not land) and
-          // released the claim; leave it for the next recovery sweep rather
-          // than settling it here or re-running it in a tight loop.
+          // run handed it back: either it parked itself for a scheduled
+          // retry (its delayed wakeup is already queued) or its terminal
+          // revocation did not land and it released the claim for the next
+          // recovery sweep. Either way, do not settle it here or re-run it
+          // in a tight loop.
           console.warn(
-            `[FastAgentParentEventQueue] Resumed Fast turn ${row.id} deferred itself; leaving it for the next recovery sweep.`,
+            `[FastAgentParentEventQueue] Resumed Fast turn ${row.id} handed itself back to the queue; leaving it pending.`,
           );
           return;
         }
@@ -369,6 +421,24 @@ export async function recoverPendingFastAgentParentEvents(): Promise<number> {
 
   for (const row of rows) {
     await addWakeupJob(row);
+  }
+
+  // Rows parked for a scheduled retry get their delayed wakeup re-added, so
+  // a Redis outage or a restart between the schedule and its time does not
+  // leave the retry waiting for a sweep that happens to land after it.
+  const scheduled = await db
+    .select({
+      conversationId: fastAgentParentEvents.conversationId,
+      eventKey: fastAgentParentEvents.eventKey,
+      retryAt: fastAgentParentEvents.retryAt,
+    })
+    .from(fastAgentParentEvents)
+    .where(scheduledRetryPredicate());
+  for (const row of scheduled) {
+    await wakeFastAgentParentEventAt(
+      { conversationId: row.conversationId, eventKey: row.eventKey },
+      row.retryAt!,
+    );
   }
   return rows.length;
 }

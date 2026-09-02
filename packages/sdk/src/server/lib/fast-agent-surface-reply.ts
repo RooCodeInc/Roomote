@@ -40,7 +40,10 @@ import {
   admitFastAgentHumanFollowUp,
   persistFastAgentInlineHumanTurn,
 } from './fast-agent-human-follow-up';
-import { wakeFastAgentParentEventNow } from './fast-agent-parent-event-queue';
+import {
+  wakeFastAgentParentEventAt,
+  wakeFastAgentParentEventNow,
+} from './fast-agent-parent-event-queue';
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
@@ -647,6 +650,14 @@ async function runFastAgentSurfaceReply(
                   conversationId: params.sessionId,
                   eventKey: durableTurn.eventKey,
                 }),
+              requestDurableRetry: (retryAt: Date) =>
+                wakeFastAgentParentEventAt(
+                  {
+                    conversationId: params.sessionId,
+                    eventKey: durableTurn.eventKey,
+                  },
+                  retryAt,
+                ),
             }
           : {}),
         ...delivery.adapter,
