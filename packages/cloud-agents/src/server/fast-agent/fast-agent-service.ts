@@ -12,7 +12,6 @@ import {
   FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
-  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   ROOMOTE_MCP_ID,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
@@ -1844,6 +1843,7 @@ export async function answerFastAgentQuestion({
       releaseVersion,
     });
     let visibleUpdatePosted = false;
+    let substantiveWorkAcknowledged = false;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
 
@@ -1889,6 +1889,10 @@ export async function answerFastAgentQuestion({
       inferenceRetryCanonicalEvent = undefined;
       lastVisibleMessage = reply.message;
       visibleUpdatePosted = true;
+      // Any text reply posted by the model (acknowledgement, first progress
+      // update, or task kickoff) is the textual communication the work-start
+      // gate requires. Reactions deliberately do not set this flag.
+      substantiveWorkAcknowledged = true;
       if (reply.purpose === 'closeout' || reply.purpose === 'clarification') {
         closedInstructionVersions.add(instructionVersion);
       }
@@ -2069,14 +2073,28 @@ export async function answerFastAgentQuestion({
         return toolFailure(error);
       }
     };
-    const requireAcknowledgement = () =>
-      !platformEvent && !visibleUpdatePosted
-        ? {
+    // Single owner of the human-turn work-start gate, applied in-process to
+    // every native and MCP tool call before it runs. Only text communication
+    // (a reply, a first progress note, or a task kickoff) opens the gate; a
+    // reaction never does. The listed tools are the ones allowed to precede
+    // that communication.
+    const acknowledgementExemptToolIds = new Set<string>([
+      FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
+      FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
+      FAST_AGENT_NATIVE_TOOL_NAMES.launchTask,
+      FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+      `${ROOMOTE_MCP_ID}_${CHAT_REACTION_EMOJI_TOOL_NAME}`,
+    ]);
+    const authorizeToolStart = (toolId: string) =>
+      platformEvent ||
+      substantiveWorkAcknowledged ||
+      acknowledgementExemptToolIds.has(toolId)
+        ? null
+        : {
             success: false as const,
             error:
               'Post an acknowledgement with send_chat_reply before this action.',
-          }
-        : null;
+          };
 
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
@@ -2169,16 +2187,13 @@ export async function answerFastAgentQuestion({
                     }
                   : chatScopedIntegrationArguments
             : chatScopedIntegrationArguments;
-        const managesCustomAutomations =
-          call.integrationId === ROOMOTE_MCP_ID &&
-          call.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
         const sendsChatReaction =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME;
-        if (!managesCustomAutomations && !sendsChatReaction) {
-          const ackError = requireAcknowledgement();
-          if (ackError) return ackError;
-        }
+        const startDenial = authorizeToolStart(
+          `${call.integrationId}_${call.toolName}`,
+        );
+        if (startDenial) return startDenial;
         const signature = buildIntegrationCallSignature({
           integrationId: call.integrationId,
           toolName: call.toolName,
@@ -2276,6 +2291,8 @@ export async function answerFastAgentQuestion({
               'This platform event may only be presented to the user with a closeout.',
           };
         }
+        const startDenial = authorizeToolStart(call.name);
+        if (startDenial) return startDenial;
 
         switch (call.name) {
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
@@ -2523,6 +2540,7 @@ export async function answerFastAgentQuestion({
               currentTasks.set(result.taskId, { taskId: result.taskId });
               if (result.kickoffDelivered) {
                 visibleUpdatePosted = true;
+                substantiveWorkAcknowledged = true;
               }
               if (!kickoffDelivered && !result.kickoffDelivered) {
                 await deliverKickoff(result);
@@ -2565,8 +2583,6 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask: {
             const args = taskIdArgsSchema.parse(call.args);
-            const ackError = requireAcknowledgement();
-            if (ackError) return ackError;
             const target = selectActiveTaskId(args.taskId, currentTasks);
             if (!target.taskId) return { success: false, error: target.error };
             const targetTask = currentTasks.get(target.taskId);

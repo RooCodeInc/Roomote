@@ -132,10 +132,13 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'the first model-selected action must communicate with the user before substantive model-invoked work',
     );
-    expect(prompt).toContain('`send_chat_reaction` with purpose `ack`');
     expect(prompt).toContain(
-      'A reaction counts as communication only when the current message is reactable',
+      'use `send_chat_reply` with purpose `ack`, or use `launch_task` so its kickoff is posted first',
     );
+    expect(prompt).toContain(
+      'A reaction never satisfies this startup requirement, including an "eyes" reaction',
+    );
+    expect(prompt).not.toContain('`send_chat_reaction` with purpose `ack`');
     expect(prompt).toContain(
       'A direct closeout or clarification that fully handles the turn is already the first communication',
     );
@@ -156,6 +159,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Existing active tasks do not block');
     expect(prompt).toContain('send_chat_reply');
     expect(prompt).toContain('send_chat_reaction');
+    expect(prompt).toContain(
+      'Use `send_chat_reaction` only for an optional reaction or an emoji-only terminal answer',
+    );
+    expect(prompt).toContain(
+      'It does not satisfy the turn-start acknowledgement required before continuing work',
+    );
     expect(prompt).toContain('`advisor` and `judge` subagents');
     expect(prompt).toContain('opaque conversation-owned handle');
     expect(prompt).toContain('no generic filesystem');
