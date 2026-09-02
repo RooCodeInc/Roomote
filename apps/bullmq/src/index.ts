@@ -51,6 +51,7 @@ import { startPullRequestMergeabilityCheckQueue } from './pull-request-mergeabil
 import { startTaskSleepQueue } from './task-sleep-queue';
 import { startAutomationRecommendationsQueue } from './automation-recommendations-queue';
 import { startFastAgentParentEventQueue } from './fast-agent-parent-event-queue';
+import { resolveBullMqHealth } from './health';
 
 // Resolve auto-generated auth keypairs before any queue worker starts so
 // scheduled jobs that sign tokens observe the resolved keys.
@@ -268,32 +269,37 @@ app.get('/admin/health', async (c) => {
     const jobCounts = await schedulerQueue.getJobCounts();
     const sandboxOidcRefreshJobCounts =
       await sandboxOidcRefreshQueue.getJobCounts();
+    const redisStatus = redis?.status ?? 'unhealthy';
+    const health = resolveBullMqHealth(redisStatus);
 
-    return c.json({
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      services: {
-        redis: redis?.status ?? 'unhealthy',
-        queues: {
-          scheduler: {
-            waiting: jobCounts.waiting,
-            active: jobCounts.active,
-            completed: jobCounts.completed,
-            failed: jobCounts.failed,
-            delayed: jobCounts.delayed,
-            repeat: jobCounts.repeat,
-          },
-          sandboxOidcRefresh: {
-            waiting: sandboxOidcRefreshJobCounts.waiting,
-            active: sandboxOidcRefreshJobCounts.active,
-            completed: sandboxOidcRefreshJobCounts.completed,
-            failed: sandboxOidcRefreshJobCounts.failed,
-            delayed: sandboxOidcRefreshJobCounts.delayed,
-            repeat: sandboxOidcRefreshJobCounts.repeat,
+    return c.json(
+      {
+        status: health.status,
+        timestamp: new Date().toISOString(),
+        services: {
+          redis: redisStatus,
+          queues: {
+            scheduler: {
+              waiting: jobCounts.waiting,
+              active: jobCounts.active,
+              completed: jobCounts.completed,
+              failed: jobCounts.failed,
+              delayed: jobCounts.delayed,
+              repeat: jobCounts.repeat,
+            },
+            sandboxOidcRefresh: {
+              waiting: sandboxOidcRefreshJobCounts.waiting,
+              active: sandboxOidcRefreshJobCounts.active,
+              completed: sandboxOidcRefreshJobCounts.completed,
+              failed: sandboxOidcRefreshJobCounts.failed,
+              delayed: sandboxOidcRefreshJobCounts.delayed,
+              repeat: sandboxOidcRefreshJobCounts.repeat,
+            },
           },
         },
       },
-    });
+      health.httpStatus,
+    );
   } catch (error) {
     return c.json(
       {
