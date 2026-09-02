@@ -2,6 +2,7 @@ import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   createFastAgentWebTaskLauncher,
+  FastAgentDurableRetryScheduledError,
   fastAgentConversationRepository,
   getActiveFastAgentTasks,
   resolveApiBaseUrl,
@@ -621,6 +622,16 @@ async function runFastAgentSurfaceReply(
           : {}),
         ...delivery.adapter,
       },
+    }).catch((error: unknown) => {
+      // Not a failure: the turn parked itself for a durable retry and the
+      // queue re-runs it at the scheduled time, so the reply is on its way.
+      if (error instanceof FastAgentDurableRetryScheduledError) {
+        console.info(
+          `[Fast Agent] Surface reply turn parked for a durable retry: ${error.message}`,
+        );
+        return;
+      }
+      throw error;
     });
     return true;
   } finally {

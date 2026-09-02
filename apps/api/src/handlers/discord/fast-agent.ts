@@ -14,6 +14,7 @@ import {
   getOrCreateFastAgentSession,
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  FastAgentDurableRetryScheduledError,
   resolveApiBaseUrl,
 } from '@roomote/cloud-agents/server';
 import {
@@ -531,6 +532,13 @@ export function startDiscordFastAgentResponse(
         onRejected,
       }),
     onError: (error) => {
+      if (error instanceof FastAgentDurableRetryScheduledError) {
+        // Not a failure: the queue re-runs this turn at the scheduled time.
+        console.info(
+          `[Discord] Fast turn parked for a durable retry: ${error.message}`,
+        );
+        return;
+      }
       console.error(
         `[Discord] Fast suggestion response failed: ${error instanceof Error ? error.message : String(error)}`,
       );
