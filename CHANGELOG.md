@@ -49,7 +49,7 @@ Roomote 1.1 adds contextual message suggestions, clean-review handoff across sou
 
 ### Highlights
 
-- Get contextual next-message suggestions in task and Session composers with simple keyboard controls.
+- Get contextual next-message suggestions in task and Session composers, with simple keyboard controls and an optional admin setting.
 - Hand clean Roomote-created drafts to human reviewers automatically across supported source-control providers without approving or merging them.
 - Choose Claude Fable 5.1 from Roomote's curated model catalog across supported inference providers.
 - Keep Fast follow-ups, interruption recovery, Session activity, and pull-request lifecycle updates accurate through busy or interrupted work.
@@ -58,7 +58,7 @@ Roomote 1.1 adds contextual message suggestions, clean-review handoff across sou
 
 - Add Claude Fable 5.1 to Roomote's curated recommended-model catalog across supported inference providers.
 - Let admins opt in to marking clean Roomote-created draft pull requests and merge requests ready for human review across GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket Cloud without approving or merging them.
-- Add helper-model-generated Message Suggestions to task and Session composers, with Tab acceptance, Escape dismissal, and bounded conversation context.
+- Add optional helper-model-generated Message Suggestions to task and Session composers, with Tab acceptance, Escape dismissal, bounded conversation context, and an experimental admin setting.
 
 ### Patch changes
 
