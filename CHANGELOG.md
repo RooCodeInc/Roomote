@@ -2,6 +2,40 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.1.0 (2026-09-02)
+
+Roomote 1.1 adds contextual message suggestions, clean-review handoff across source-control providers, Claude Fable 5.1, and stronger Fast and Session reliability.
+
+### Highlights
+
+- Get contextual next-message suggestions in task and Session composers, with simple keyboard controls and an optional admin setting.
+- Hand clean Roomote-created drafts to human reviewers automatically across supported source-control providers without approving or merging them.
+- Choose Claude Fable 5.1 from Roomote's curated model catalog across supported inference providers.
+- Keep Fast follow-ups, interruption recovery, Session activity, and pull-request lifecycle updates accurate through busy or interrupted work.
+
+### Minor changes
+
+- Add Claude Fable 5.1 to Roomote's curated recommended-model catalog across supported inference providers.
+- Let admins opt in to marking clean Roomote-created draft pull requests and merge requests ready for human review across GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket Cloud without approving or merging them.
+- Add optional helper-model-generated Message Suggestions to task and Session composers, with Tab acceptance, Escape dismissal, bounded conversation context, and an experimental admin setting.
+
+### Patch changes
+
+- Combine rapid same-user Fast follow-ups into one ordered update so every message reaches the active response together without losing attachments or durable history.
+- Keep Build this work in the artifact's existing Session with its environment, branch, model, plan, routing, and retry identity.
+- Repair stale setup-completion state when reseeding reused demo sandboxes so authenticated settings remain reachable without changing production onboarding.
+- Prevent Fast custom automations from posting duplicate Slack reports when bookkeeping fails after the original report was delivered.
+- Make Fast interruption recovery accurate and resilient by attributing causes, using honest restart copy, draining in-flight turns during API shutdown, renewing live-turn leases, and resuming the original unresolved request after a later nudge.
+- Require Fast to send a text acknowledgement or delivered task kickoff before starting tool-driven work so a reaction alone cannot leave users waiting through silent execution.
+- Route Linear issue discussion through the dedicated comment operation and surface the actual Linear tool error when a request fails.
+- Ensure Ping telemetry, version checks, and instance reports always carry a non-empty application version, including when a release version is unavailable.
+- Keep pull-request delivery and lifecycle reporting authoritative so successful remote creation does not appear failed when parent notification is delayed and stale child reports cannot contradict merged or closed events.
+- Keep Session task activity and navigation accurate by showing running follow-up turns, removing redundant Roomote self-links from delegated-task kickoffs, and returning to the originating nested task after an artifact preview.
+- Let Roomote MCP and other task-management callers inspect and continue valid user-facing Session links whether they contain the canonical Session ID or a retained Fast conversation identifier.
+- Preserve authored Slack invocation text for Fast prompts and render installed Roomote app mentions as readable `@Roomote` text instead of raw bot IDs.
+- Put inactive Roomote tasks to sleep after their pull request merges while preserving active or recently resumed work and keeping the parent Session state accurate.
+- Deliver inference usage threshold alerts for ChatGPT, GitHub Copilot, and xAI Grok subscriptions alongside the existing finite-quota providers.
+
 ## 1.0.2 (2026-09-01)
 
 Roomote 1.0.2 makes Fast follow-ups reliable and steerable during active work, moves artifact builds into Sessions, and strengthens conversational and unattended automations.
