@@ -27,9 +27,24 @@ describe('reaction emoji matching', () => {
     expect(reactionEmojiMatches(':ship_it:', 'eyes')).toBe(false);
   });
 
-  it('formats known aliases as Unicode and custom names as Slack markup', () => {
-    expect(formatReactionEmojiForDisplay('exploding_head')).toBe('🤯');
-    expect(formatReactionEmojiForDisplay(':+1:')).toBe('👍');
+  it.each([
+    ['exploding_head', '🤯'],
+    ['shocked_face_with_exploding_head', '🤯'],
+    [':+1:', '👍'],
+    ['thumbsup', '👍'],
+    ['flag-gb', '🇬🇧'],
+    ['female-technologist', '👩‍💻'],
+    ['thumbsup::skin-tone-6', '👍🏿'],
+    [':thumbsup::skin-tone-6:', '👍🏿'],
+    ['female-technologist::skin-tone-3', '👩🏼‍💻'],
+  ])('formats standard shortcode %s as %s', (shortcode, emoji) => {
+    expect(formatReactionEmojiForDisplay(shortcode)).toBe(emoji);
+  });
+
+  it('formats unknown workspace emoji as Slack markup', () => {
     expect(formatReactionEmojiForDisplay('Ship_It')).toBe(':ship_it:');
+    expect(formatReactionEmojiForDisplay('ship_it::skin-tone-3')).toBe(
+      ':ship_it::skin-tone-3:',
+    );
   });
 });

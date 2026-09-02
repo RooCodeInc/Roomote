@@ -207,6 +207,9 @@ describe('AcpTextMessage', () => {
   it.each([
     ['+1', '👍'],
     ['exploding_head', '🤯'],
+    ['flag-gb', '🇬🇧'],
+    ['thumbsup::skin-tone-6', '👍🏿'],
+    ['female-technologist::skin-tone-3', '👩🏼‍💻'],
     ['ship_it', ':ship_it:'],
   ])('renders reaction receipt %s as %s', (reaction, expected) => {
     render(
