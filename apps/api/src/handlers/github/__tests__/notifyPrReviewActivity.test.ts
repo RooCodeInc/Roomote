@@ -3,6 +3,7 @@
 const {
   mockCompleteGithubPrReviewCheckFromSummary,
   mockEnqueuePrReviewNotification,
+  mockMarkRoomotePullRequestReadyAfterCleanReview,
   mockStartPrReviewNotificationCycle,
 } = vi.hoisted(() => ({
   mockCompleteGithubPrReviewCheckFromSummary: vi
@@ -11,6 +12,9 @@ const {
   mockEnqueuePrReviewNotification: vi.fn().mockResolvedValue({
     notifiedTaskCount: 1,
   }),
+  mockMarkRoomotePullRequestReadyAfterCleanReview: vi
+    .fn()
+    .mockResolvedValue('review_not_clean'),
   mockStartPrReviewNotificationCycle: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -30,6 +34,8 @@ vi.mock('@roomote/sdk/server', () => ({
   completeGithubPrReviewCheckFromSummary:
     mockCompleteGithubPrReviewCheckFromSummary,
   enqueuePrReviewNotification: mockEnqueuePrReviewNotification,
+  markRoomotePullRequestReadyAfterCleanReview:
+    mockMarkRoomotePullRequestReadyAfterCleanReview,
   startPrReviewNotificationCycle: mockStartPrReviewNotificationCycle,
 }));
 

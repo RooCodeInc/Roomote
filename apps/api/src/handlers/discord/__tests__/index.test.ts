@@ -119,6 +119,8 @@ vi.mock('@roomote/sdk/server', () => ({
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
   queueFastAgentSurfaceReply: mocks.queueFastSurfaceReply,
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
+  persistFastAgentInlineHumanTurn: vi.fn(async () => null),
+  wakeFastAgentParentEventNow: vi.fn(async () => undefined),
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
 

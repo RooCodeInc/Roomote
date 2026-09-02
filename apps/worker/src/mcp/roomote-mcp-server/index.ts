@@ -7,6 +7,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
+  CALL_INTEGRATION_TOOL_TOOL,
+  FIND_INTEGRATION_TOOLS_TOOL,
   CHAT_CHANNELS_TOOL,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
@@ -33,6 +35,12 @@ import {
 } from '../../monitoring/sentry.js';
 
 import { handleCreatePlan } from './create-plan.js';
+import {
+  callOnDemandIntegrationTool,
+  findOnDemandIntegrationTools,
+  loadOnDemandMcpCatalog,
+  shouldRegisterOnDemandIntegrationTools,
+} from './on-demand-integrations.js';
 import { handleUpload } from './upload.js';
 import { handleDescribeVideo } from './describe-video.js';
 import { handleDownload } from './download.js';
@@ -1150,6 +1158,52 @@ roomoteMcpServer.registerTool(
     );
   },
 );
+
+if (shouldRegisterOnDemandIntegrationTools()) {
+  roomoteMcpServer.registerTool(
+    FIND_INTEGRATION_TOOLS_TOOL.name,
+    {
+      title: FIND_INTEGRATION_TOOLS_TOOL.title,
+      description: FIND_INTEGRATION_TOOLS_TOOL.description,
+      inputSchema: FIND_INTEGRATION_TOOLS_TOOL.inputSchema,
+      annotations: FIND_INTEGRATION_TOOLS_TOOL.annotations,
+    },
+    async (params): Promise<ToolResult> => {
+      try {
+        return await findOnDemandIntegrationTools(
+          loadOnDemandMcpCatalog(),
+          params,
+        );
+      } catch (error) {
+        return errorResult(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    },
+  );
+
+  roomoteMcpServer.registerTool(
+    CALL_INTEGRATION_TOOL_TOOL.name,
+    {
+      title: CALL_INTEGRATION_TOOL_TOOL.title,
+      description: CALL_INTEGRATION_TOOL_TOOL.description,
+      inputSchema: CALL_INTEGRATION_TOOL_TOOL.inputSchema,
+      annotations: CALL_INTEGRATION_TOOL_TOOL.annotations,
+    },
+    async (params): Promise<ToolResult> => {
+      try {
+        return await callOnDemandIntegrationTool(
+          loadOnDemandMcpCatalog(),
+          params,
+        );
+      } catch (error) {
+        return errorResult(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    },
+  );
+}
 
 if (shouldRegisterTaskMemoryTool()) {
   roomoteMcpServer.registerTool(

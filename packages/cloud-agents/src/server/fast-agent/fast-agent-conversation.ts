@@ -141,4 +141,10 @@ export type FastAgentTurnAdapter = {
   resolveMcpServerConfigs?: () => Promise<
     Record<string, FastAgentMcpServerConfig>
   >;
+  /**
+   * Called when an interrupted turn is still safe to replay and has handed
+   * itself back to the durable queue; wakes the queue so recovery does not
+   * wait for the next sweep. Best effort.
+   */
+  requestDurableResume?: () => Promise<void>;
 };

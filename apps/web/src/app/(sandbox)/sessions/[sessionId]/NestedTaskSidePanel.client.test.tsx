@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { RunStatus } from '@roomote/types';
 
@@ -14,10 +14,6 @@ vi.mock('../../task/[taskId]/hooks/use-task-message-envelopes', () => ({
     useTaskMessageEnvelopesMock(...args),
 }));
 
-vi.mock('../../task/[taskId]/hooks/ArtifactLinkProvider', () => ({
-  ArtifactLinkProvider: ({ children }: { children: ReactNode }) => children,
-}));
-
 vi.mock('../../task/[taskId]/hooks/HistoricalSandboxProvider', () => ({
   HistoricalSandboxProvider: ({ children }: { children: ReactNode }) => (
     <div data-testid="historical-provider">{children}</div>
@@ -31,12 +27,22 @@ vi.mock('../../task/[taskId]/hooks/SandboxProvider', () => ({
 }));
 
 vi.mock('../../task/[taskId]/Messages', () => ({
-  Messages: ({ footer }: { footer?: ReactNode }) => (
-    <div>
-      Child transcript
-      {footer}
-    </div>
-  ),
+  Messages: ({ footer }: { footer?: ReactNode }) => {
+    const artifactLink = useArtifactLink();
+
+    return (
+      <div>
+        Child transcript
+        <button
+          type="button"
+          onClick={() => artifactLink?.openArtifact('proof/result.png', 2)}
+        >
+          Open nested artifact
+        </button>
+        {footer}
+      </div>
+    );
+  },
 }));
 
 vi.mock('../../task/[taskId]/startup', () => ({
@@ -68,6 +74,7 @@ vi.mock('../../task/[taskId]/sidebar-panels/SidePanelHeader', () => ({
   ),
 }));
 
+import { useArtifactLink } from '../../task/[taskId]/hooks/ArtifactLinkProvider';
 import { NestedTaskSidePanel } from './NestedTaskSidePanel';
 
 const baseSession = {
@@ -189,5 +196,22 @@ describe('NestedTaskSidePanel', () => {
     expect(screen.getByText('Child transcript')).toBeInTheDocument();
     expect(screen.queryByTestId('startup-progress')).not.toBeInTheDocument();
     expect(screen.getByTestId('live-provider')).toBeInTheDocument();
+  });
+
+  it('routes transcript artifact clicks through the session panel callback', () => {
+    const onOpenArtifact = vi.fn();
+    render(
+      <NestedTaskSidePanel
+        taskId="child-1"
+        onClose={vi.fn()}
+        onOpenArtifact={onOpenArtifact}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Open nested artifact' }),
+    );
+
+    expect(onOpenArtifact).toHaveBeenCalledWith('proof/result.png', 2);
   });
 });

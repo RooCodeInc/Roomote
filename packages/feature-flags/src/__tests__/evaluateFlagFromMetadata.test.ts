@@ -24,15 +24,20 @@ describe('generic feature flag evaluation', () => {
     });
   });
 
-  it('evaluates to an empty object with the empty flag config', () => {
-    expect(evaluateFeatureFlagsFromMetadata({})).toEqual({});
+  it('evaluates configured flags and ignores stale metadata keys', () => {
+    expect(evaluateFeatureFlagsFromMetadata({})).toEqual({
+      composerSuggestions: false,
+    });
     expect(
       evaluateFeatureFlagsFromMetadata({
         stale_flag: true,
         sessions_data: true,
         sessions_ui: 'true',
       }),
-    ).toEqual({});
+    ).toEqual({ composerSuggestions: false });
+    expect(
+      evaluateFeatureFlagsFromMetadata({ composerSuggestions: true }),
+    ).toEqual({ composerSuggestions: true });
   });
 });
 

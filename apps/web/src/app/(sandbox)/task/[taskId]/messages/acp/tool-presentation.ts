@@ -307,6 +307,11 @@ function resolveReceiptLanguage(
       verb: byPhase('Saving', 'Saved', 'Failed to Save'),
       object: 'Memory',
     };
+  if (toolName === 'find_integration_tools')
+    return {
+      verb: byPhase('Searching', 'Searched', 'Failed to Search'),
+      object: 'Integration Tools',
+    };
   return null;
 }
 

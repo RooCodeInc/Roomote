@@ -255,9 +255,14 @@ Then verify:
   created missing changesets normally leave no final diff because they are
   created and consumed in the same working tree.
 
-Run the release-script tests and the repository's appropriate static checks
-before opening the PR. When `apps/docs` changed, also run
-`mise exec -- pnpm --filter @roomote/docs check`.
+Do not manually rerun the release-script tests, docs validation, repository
+lint/format, type checks, Knip, or the pre-push script while preparing the PR.
+The PR workflows run the full versions of those checks for changes targeting
+`develop`; allow the ordinary push hook to run exactly once as the local static
+gate instead of invoking it separately. Do not merge the release PR until the
+**CI** workflow and, when `apps/docs` changed, the **Docs** workflow succeed.
+Treat that as a release-process gate even when repository rules do not require
+status checks.
 
 ### 10. Open the release PR
 
@@ -363,18 +368,19 @@ Verify that:
   and `CHANGELOG.md`
 
 Preserve the changeset commit in branch history even though the version commit
-deletes its file. Run the release scripts, focused product tests and typechecks,
-formatting check, and full pre-push gate:
+deletes its file. Do not manually rerun the release-script tests, focused product
+tests and type checks covered by the repository suite, formatting, Knip, or the
+pre-push script. The hotfix PR workflows run their full versions for changes
+targeting `main`; allow the ordinary push hook to run exactly once as the local
+static gate instead of invoking it separately. Do not merge the production
+hotfix PR until the **CI** workflow and, when `apps/docs` changed, the **Docs**
+workflow succeed. Treat that as a release-process gate even when repository
+rules do not require status checks.
 
-```bash
-pnpm test:release-scripts
-pnpm exec oxfmt --check .
-node scripts/pre-push-checks.mjs
-```
-
-Repeat any relevant live check after final conflict resolution or release edits.
-Failed or unavailable checks are release blockers unless a maintainer explicitly
-accepts and records the risk.
+Repeat any relevant live check after final conflict resolution or release edits;
+CI cannot replace external-service or production-like evidence. Failed or
+unavailable release-specific or live checks are release blockers unless a
+maintainer explicitly accepts and records the risk.
 
 ### D. Open the production hotfix PR
 

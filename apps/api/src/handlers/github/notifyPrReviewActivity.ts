@@ -11,6 +11,7 @@ import { Schemas as GitHubSchemas } from '@roomote/github';
 import {
   completeGithubPrReviewCheckFromSummary,
   enqueuePrReviewNotification,
+  markRoomotePullRequestReadyAfterCleanReview,
   startPrReviewNotificationCycle,
   type EnqueuePrReviewNotificationInput,
   type StartPrReviewNotificationCycleInput,
@@ -531,9 +532,10 @@ export async function queuePrReviewSummaryNotification(
     }
 
     const { event } = lifecycle.notification.input;
-    const operations: Promise<unknown>[] = [
-      enqueuePrReviewNotification(lifecycle.notification.input),
-    ];
+    const notificationResult = await enqueuePrReviewNotification(
+      lifecycle.notification.input,
+    );
+    const operations: Promise<unknown>[] = [];
     if (
       eventPayload.installation?.id &&
       event.reviewTaskId &&
@@ -559,6 +561,23 @@ export async function queuePrReviewSummaryNotification(
         .join(', ');
       console.warn(
         `[queuePrReviewSummaryNotification] Skipping check completion for ${reference.repository}#${reference.prNumber}: summary is missing ${missing}`,
+      );
+    }
+    if (
+      notificationResult.reason !== 'stale_review_cycle' &&
+      event.reviewHeadSha &&
+      event.reviewResult?.outcome === 'clean' &&
+      (event.reviewResult.findingCount === null ||
+        event.reviewResult.findingCount === 0)
+    ) {
+      operations.push(
+        markRoomotePullRequestReadyAfterCleanReview({
+          sourceControlProvider: 'github',
+          repository: lifecycle.notification.input.repository,
+          prNumber: lifecycle.notification.input.prNumber,
+          reviewHeadSha: event.reviewHeadSha,
+          reviewResult: event.reviewResult,
+        }),
       );
     }
     await Promise.all(operations);

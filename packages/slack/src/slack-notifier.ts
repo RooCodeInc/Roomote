@@ -226,6 +226,8 @@ type SlackChannelInfoContext = {
 export class SlackNotifier {
   private readonly token: string;
   private readonly channelInfoCache: SlackChannelInfoCache | null;
+  private readonly botUserId: string | null;
+  private readonly botName: string | null;
   private client?: WebClient;
   private channelDiscovery?: SlackChannelDiscovery;
   private ownBotIdentityPromise?: Promise<{
@@ -235,10 +237,17 @@ export class SlackNotifier {
 
   constructor(
     token: string,
-    options: { channelInfoCache?: SlackChannelInfoCache } = {},
+    options: {
+      channelInfoCache?: SlackChannelInfoCache;
+      botUserId?: string | null;
+      botName?: string | null;
+      appName?: string | null;
+    } = {},
   ) {
     this.token = token;
     this.channelInfoCache = options.channelInfoCache ?? null;
+    this.botUserId = options.botUserId?.trim() || null;
+    this.botName = options.botName?.trim() || options.appName?.trim() || null;
   }
 
   private getClient(): WebClient {
@@ -2419,8 +2428,21 @@ export class SlackNotifier {
       ),
     ];
 
-    // Fetch user display names
-    const usernameMap = await this.getUsersInfo(userIds);
+    const botNameOverrides = new Map<string, string>();
+    if (this.botUserId && this.botName && userIds.includes(this.botUserId)) {
+      botNameOverrides.set(this.botUserId, this.botName);
+    }
+
+    // Fetch display names that are not already known from installation metadata.
+    const unresolvedUserIds = userIds.filter(
+      (userId) => !botNameOverrides.has(userId),
+    );
+    const usernameMap = unresolvedUserIds.length
+      ? await this.getUsersInfo(unresolvedUserIds)
+      : new Map<string, string>();
+    for (const [userId, botName] of botNameOverrides) {
+      usernameMap.set(userId, botName);
+    }
 
     // Replace each mention with the user's display name
     let result = text;

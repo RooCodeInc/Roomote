@@ -24,7 +24,13 @@ import { Messages } from '../../task/[taskId]/Messages';
 import { SidePanelHeader } from '../../task/[taskId]/sidebar-panels/SidePanelHeader';
 import { Startup } from '../../task/[taskId]/startup';
 
-function NestedTaskTranscript({ session }: { session: TaskSession }) {
+function NestedTaskTranscript({
+  session,
+  onOpenArtifact,
+}: {
+  session: TaskSession;
+  onOpenArtifact?: (path: string, version?: number) => void;
+}) {
   const history = useTaskMessageEnvelopes(session.taskId);
 
   if (session.isSessionLoading) {
@@ -65,7 +71,7 @@ function NestedTaskTranscript({ session }: { session: TaskSession }) {
   }
 
   const transcript = (
-    <ArtifactLinkProvider session={session}>
+    <ArtifactLinkProvider session={session} onOpenArtifact={onOpenArtifact}>
       <Messages
         session={session}
         initialScrollBehavior="instant"
@@ -121,9 +127,11 @@ function NestedTaskTranscript({ session }: { session: TaskSession }) {
 export function NestedTaskSidePanel({
   taskId,
   onClose,
+  onOpenArtifact,
 }: {
   taskId: string;
   onClose: () => void;
+  onOpenArtifact?: (path: string, version?: number) => void;
 }) {
   const session = useTaskSession(taskId, { refetchInterval: 2_000 });
   const title = session.task?.title?.trim() || 'Task';
@@ -146,7 +154,10 @@ export function NestedTaskSidePanel({
         }
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <NestedTaskTranscript session={session} />
+        <NestedTaskTranscript
+          session={session}
+          onOpenArtifact={onOpenArtifact}
+        />
       </div>
     </FramedSurface>
   );
