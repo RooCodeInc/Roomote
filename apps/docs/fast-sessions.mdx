@@ -70,7 +70,9 @@ several are active. A Session link with a selected task opens that task's full
 workspace while keeping the Session conversation alongside it on desktop.
 
 The transcript renders prompts, replies, and tool activity in real time with a
-generated title that updates as the Session evolves.
+generated title that updates as the Session evolves. Replies appear as the
+model writes them, then settle into the saved message once the reply is
+delivered.
 
 Fast sessions can also render presentational widgets such as status cards,
 tables, and plans directly in the transcript. Widget HTML is sanitized and
@@ -94,7 +96,8 @@ posting a duplicate acknowledgement.
 Fast replies across Slack, Discord, Microsoft Teams, and Telegram link back to
 the Session view and can resume the same Session directly from chat. Roomote
 verifies the provider installation, conversation, and linked user before it
-accepts the follow-up.
+accepts the follow-up. On Slack, a longer reply streams into the thread as the
+model writes it and settles into the finished message.
 
 Follow-ups sent while Fast is responding are retained before Roomote reports
 that they were accepted. A correction from the same person can steer the active

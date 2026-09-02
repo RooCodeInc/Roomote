@@ -2,6 +2,8 @@ export * from './fast-agent-constants';
 export * from './fast-agent-conversation';
 export * from './fast-agent-conversation-repository';
 export * from './fast-agent-prompt';
+export * from './fast-agent-reply-stream';
+export * from './fast-agent-surface-reply-stream';
 export * from './fast-agent-service';
 export * from './fast-agent-turn-lock';
 export * from './fast-agent-session';

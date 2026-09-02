@@ -10,18 +10,6 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "require": "./src/index.ts"
-    },
-    "./server": {
-      "types": "./src/server/index.ts",
-      "import": "./src/server/index.ts",
-      "require": "./src/server/index.ts"
-    }
-  },
-  "typesVersions": {
-    "*": {
-      "server": [
-        "./src/server/index.ts"
-      ]
     }
   },
   "scripts": {
@@ -31,10 +19,6 @@
     "check-types:fast": "tsgo --noEmit",
     "test": "vitest",
     "clean": "rimraf .turbo"
-  },
-  "dependencies": {
-    "@roomote/db": "workspace:^",
-    "ioredis": "^5.10.1"
   },
   "devDependencies": {
     "@roomote/config-typescript": "workspace:^",

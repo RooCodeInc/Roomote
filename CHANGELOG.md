@@ -56,7 +56,7 @@ Roomote 1.1 adds contextual message suggestions, clean-review handoff across sou
 
 - Add Claude Fable 5.1 to Roomote's curated recommended-model catalog across supported inference providers.
 - Let admins opt in to marking clean Roomote-created draft pull requests and merge requests ready for human review across GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket Cloud without approving or merging them.
-- Add optional helper-model-generated Message Suggestions to task and Session composers, with Tab acceptance, Escape dismissal, bounded conversation context, and an experimental admin setting.
+- Add helper-model-generated Message Suggestions to task and Session composers, with Tab acceptance, Escape dismissal, and bounded conversation context.
 
 ### Patch changes
 

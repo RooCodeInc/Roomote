@@ -7,7 +7,6 @@ import { toast } from 'sonner';
 import type { ReasoningEffort } from '@roomote/types';
 
 import { ROOMOTE_FILE_ATTACHMENT_ACCEPT } from '@/lib/prompt-attachments';
-import { useUser } from '@/hooks/useUser';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
 import {
   SUGGESTION_MIN_HISTORY_MESSAGES,
@@ -106,11 +105,6 @@ export function SessionPromptInput({
     disabled: isBusy,
   });
 
-  // Experimental, deployment-wide opt-in. The server enforces the flag too;
-  // this just avoids pointless requests while it is off.
-  const { user } = useUser();
-  const suggestionsEnabled = user?.featureFlags?.composerSuggestions === true;
-
   const composerSuggestionQuery = useQuery(
     trpc.fastSessions.composerSuggestion.queryOptions(
       {
@@ -123,7 +117,6 @@ export function SessionPromptInput({
         // the agent is still working, and each would otherwise generate and
         // surface a premature suggestion.
         enabled:
-          suggestionsEnabled &&
           !agentWorking &&
           historyMessageCount >= SUGGESTION_MIN_HISTORY_MESSAGES,
         staleTime: Number.POSITIVE_INFINITY,

@@ -168,16 +168,12 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     // this gate each one would generate and surface a premature suggestion
     // while the agent is still working.
     const isAwaitingHuman = taskPhase === 'waiting_for_prompt';
-    // Experimental, deployment-wide opt-in. The server enforces the flag too;
-    // this just avoids pointless requests while it is off.
-    const suggestionsEnabled = user?.featureFlags?.composerSuggestions === true;
 
     const composerSuggestionQuery = useQuery(
       trpc.tasks.composerSuggestion.queryOptions(
         { taskId: taskId ?? '', historyRevision },
         {
           enabled:
-            suggestionsEnabled &&
             Boolean(taskId) &&
             connected &&
             !readOnly &&
