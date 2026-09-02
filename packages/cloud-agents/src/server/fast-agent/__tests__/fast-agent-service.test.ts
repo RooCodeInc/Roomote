@@ -2320,7 +2320,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       .map(([input]) => input.message)
       .find(
         (message) =>
-          message.eventId === '100.2:tool:0' &&
+          message.eventId === '100.2:tool:1' &&
           message.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult,
       );
     expect(toolResult).toMatchObject({
@@ -2424,7 +2424,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       .map(([input]) => input.message)
       .find(
         (message) =>
-          message.eventId === '100.2:tool:0' &&
+          message.eventId === '100.2:tool:1' &&
           message.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult,
       );
     expect(widgetResult).toMatchObject({
