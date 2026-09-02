@@ -4,13 +4,12 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 1.2.0 (2026-09-02)
 
-Roomote 1.2 makes Fast work durable and responsive, expands Session and automation workflows, enables Notion database administration and Message Suggestions by default, and adds guided setup and Gemini 3.8 Flash.
+Roomote 1.2 enables contextual Message Suggestions by default, streams Fast replies across web and Slack, guides first administrators in one resumable setup Session, and recommends Gemini 3.8 Flash.
 
 ### Highlights
 
-- Keep replay-safe Fast turns moving through process interruptions and provider retry waits without duplicate acknowledgements or repeated side effects.
-- Reply to and manage live nested tasks inside Sessions while retaining complete delegated activity, pull-request links, and readable transcripts.
-- Give automations per-suggestion workspace targets, model-specific reasoning effort, durable admission, and repository-configured dependency reviewers.
+- Get contextual Message Suggestions by default in task and Session composers.
+- See Fast replies stream into web Session transcripts and Slack threads while the model writes them.
 - Guide first administrators through setup in one persistent, resumable Session.
 - Recommend Gemini 3.8 Flash across Google Gemini, OpenRouter, Vercel AI Gateway, Requesty, and OpenCode Zen.
 
@@ -23,7 +22,7 @@ Roomote 1.2 makes Fast work durable and responsive, expands Session and automati
 - Let users reply to and manage live nested tasks directly inside Sessions, including attachments, commands, pending input, cancellation, and sleeping-task wakeup.
 - Let each launchable Fast automation suggestion select its own named environment, all-repositories, or Fast target across Slack, Discord, Microsoft Teams, and Telegram.
 - Let visual-proof runs use transparently disclosed simulated state when genuine setup is impractical, while clearly limiting the evidence to rendered appearance, layout, and interaction.
-- Enable contextual Message Suggestions by default for task and Session composers without requiring an experimental feature flag.
+- Enable contextual Message Suggestions by default for task and Session composers.
 - Let Roomote agents create and update Notion databases, data sources, properties, and views through the public API while leaving unsupported block reordering and hosted-MCP-only features unavailable.
 
 ### Patch changes
@@ -50,7 +49,7 @@ Roomote 1.1 adds contextual message suggestions, clean-review handoff across sou
 
 ### Highlights
 
-- Get contextual next-message suggestions in task and Session composers, with simple keyboard controls and an optional admin setting.
+- Get contextual next-message suggestions in task and Session composers with simple keyboard controls.
 - Hand clean Roomote-created drafts to human reviewers automatically across supported source-control providers without approving or merging them.
 - Choose Claude Fable 5.1 from Roomote's curated model catalog across supported inference providers.
 - Keep Fast follow-ups, interruption recovery, Session activity, and pull-request lifecycle updates accurate through busy or interrupted work.
@@ -59,7 +58,7 @@ Roomote 1.1 adds contextual message suggestions, clean-review handoff across sou
 
 - Add Claude Fable 5.1 to Roomote's curated recommended-model catalog across supported inference providers.
 - Let admins opt in to marking clean Roomote-created draft pull requests and merge requests ready for human review across GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket Cloud without approving or merging them.
-- Add optional helper-model-generated Message Suggestions to task and Session composers, with Tab acceptance, Escape dismissal, bounded conversation context, and an experimental admin setting.
+- Add helper-model-generated Message Suggestions to task and Session composers, with Tab acceptance, Escape dismissal, and bounded conversation context.
 
 ### Patch changes
 
