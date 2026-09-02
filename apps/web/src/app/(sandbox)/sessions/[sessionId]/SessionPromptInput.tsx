@@ -163,6 +163,7 @@ export function SessionPromptInput({
     });
     if (sent) {
       setPrompt('');
+      setIsTextareaFocused(false);
       // Remount the root to clear held attachments.
       setResetKey((previous) => previous + 1);
     }
