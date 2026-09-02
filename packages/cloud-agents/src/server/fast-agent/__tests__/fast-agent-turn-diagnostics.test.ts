@@ -80,6 +80,93 @@ describe('FastAgentTurnDiagnostics', () => {
     expect(logMessage).toContain('recoveredAfterOpenCodeProviderRetry=true');
   });
 
+  it('reports OpenCode setup phases, model requests, and token totals', () => {
+    let currentTime = 2_000;
+    const { diagnostics, logger } = createTestDiagnostics(() => currentTime);
+
+    diagnostics.recordPromptContext({
+      systemPromptChars: 12_345,
+      environmentCount: 3,
+      integrationCount: 2,
+      integrationToolCount: 41,
+      activeTaskCount: 1,
+    });
+    diagnostics.markInferenceQueued();
+    diagnostics.markInferenceSetupStarted();
+    currentTime = 2_500;
+    diagnostics.markInferenceStarted();
+    diagnostics.recordInferenceSetupTiming({
+      serverLeaseMs: 400,
+      sessionCreateMs: 60,
+      eventSubscribeMs: 15,
+      totalMs: 500,
+    });
+    // A retry attempt's setup must not overwrite the first attempt's spawn.
+    diagnostics.recordInferenceSetupTiming({ serverLeaseMs: 1, totalMs: 2 });
+    diagnostics.recordAssistantMessageStarted();
+    currentTime = 8_500;
+    const firstMessage = {
+      id: 'msg-1',
+      sessionId: 'ses-1',
+      createdAtMs: 2_500,
+      completedAtMs: 8_500,
+      tokens: {
+        input: 9_000,
+        output: 200,
+        reasoning: 700,
+        cacheRead: 3_000,
+        cacheWrite: 0,
+      },
+    };
+    diagnostics.recordAssistantMessageCompleted(firstMessage);
+    diagnostics.recordVisibleReply();
+    diagnostics.recordAssistantMessageStarted();
+    currentTime = 15_000;
+    diagnostics.recordAssistantMessageCompleted({
+      id: 'msg-2',
+      sessionId: 'ses-1',
+      createdAtMs: 8_600,
+      completedAtMs: 15_000,
+      tokens: {
+        input: 12_500,
+        output: 20,
+        reasoning: 300,
+        cacheRead: 0,
+        cacheWrite: 0,
+      },
+    });
+    // The final prompt result repeats the last message; count it once.
+    diagnostics.recordAssistantMessageCompleted({
+      id: 'msg-2',
+      sessionId: 'ses-1',
+      createdAtMs: 8_600,
+      completedAtMs: 15_000,
+      tokens: firstMessage.tokens,
+    });
+    diagnostics.markInferenceFinished();
+    diagnostics.finish();
+
+    const logMessage = logger.info.mock.calls[0]?.[0] as string;
+    expect(logMessage).toContain('openCodeServerLeaseMs=400');
+    expect(logMessage).toContain('openCodeSessionCreateMs=60');
+    expect(logMessage).toContain('openCodeEventSubscribeMs=15');
+    expect(logMessage).toContain('openCodeSetupMs=500');
+    expect(logMessage).not.toContain('openCodeSessionValidateMs');
+    expect(logMessage).toContain('modelRequestCount=2');
+    expect(logMessage).toContain('completedModelRequestCount=2');
+    expect(logMessage).toContain('firstModelResponseDurationMs=6000');
+    expect(logMessage).toContain('postReplyInferenceDurationMs=6500');
+    expect(logMessage).toContain('inputTokens=21500');
+    expect(logMessage).toContain('cacheReadTokens=3000');
+    expect(logMessage).toContain('outputTokens=220');
+    expect(logMessage).toContain('reasoningTokens=1000');
+    expect(logMessage).toContain('maxContextTokens=12500');
+    expect(logMessage).toContain('systemPromptChars=12345');
+    expect(logMessage).toContain('integrationToolCount=41');
+    expect(logMessage).toContain('environmentCount=3');
+    expect(logMessage).toContain('activeTaskCount=1');
+  });
+
   it('records bounded redacted context for each failed inference attempt', () => {
     const { diagnostics, logger } = createTestDiagnostics(() => 5_000);
     const secret = 'sk-provider-secret-1234567890';

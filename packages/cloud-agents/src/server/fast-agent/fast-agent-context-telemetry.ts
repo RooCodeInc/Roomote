@@ -208,6 +208,17 @@ export function captureFastAgentTurnSettled(input: {
   visibleReplyCount: number;
   openCodeProviderRetryEventCount: number;
   roomoteInferenceRetryCount: number;
+  modelRequestCount?: number;
+  firstModelResponseDurationMs?: number;
+  postReplyInferenceDurationMs?: number;
+  inputTokens?: number;
+  cacheReadTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  maxContextTokens?: number;
+  systemPromptChars?: number;
+  integrationToolCount?: number;
+  openCodeServerLeaseMs?: number;
 }): void {
   void captureEvent('fast_turn_settled', {
     userId: input.userId,
@@ -230,6 +241,19 @@ export function captureFastAgentTurnSettled(input: {
       opencode_provider_retry_event_count:
         input.openCodeProviderRetryEventCount,
       roomote_inference_retry_count: input.roomoteInferenceRetryCount,
+      model_request_count: input.modelRequestCount ?? null,
+      first_model_response_duration_ms:
+        input.firstModelResponseDurationMs ?? null,
+      post_reply_inference_duration_ms:
+        input.postReplyInferenceDurationMs ?? null,
+      input_tokens: input.inputTokens ?? null,
+      cache_read_tokens: input.cacheReadTokens ?? null,
+      output_tokens: input.outputTokens ?? null,
+      reasoning_tokens: input.reasoningTokens ?? null,
+      max_context_tokens: input.maxContextTokens ?? null,
+      system_prompt_chars: input.systemPromptChars ?? null,
+      integration_tool_count: input.integrationToolCount ?? null,
+      opencode_server_lease_ms: input.openCodeServerLeaseMs ?? null,
     },
   });
 }

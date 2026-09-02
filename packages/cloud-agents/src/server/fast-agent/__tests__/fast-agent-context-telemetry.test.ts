@@ -205,6 +205,17 @@ describe('captureFastAgentInferenceContext', () => {
         visible_reply_count: 1,
         opencode_provider_retry_event_count: 0,
         roomote_inference_retry_count: 0,
+        model_request_count: null,
+        first_model_response_duration_ms: null,
+        post_reply_inference_duration_ms: null,
+        input_tokens: null,
+        cache_read_tokens: null,
+        output_tokens: null,
+        reasoning_tokens: null,
+        max_context_tokens: null,
+        system_prompt_chars: null,
+        integration_tool_count: null,
+        opencode_server_lease_ms: null,
       },
     });
     expect(captureEvent.mock.calls[0]?.[1]?.properties).not.toHaveProperty(
