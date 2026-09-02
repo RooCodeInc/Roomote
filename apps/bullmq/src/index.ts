@@ -8,7 +8,9 @@ import { HonoAdapter } from '@bull-board/hono';
 
 import {
   bootstrapGeneratedAuthKeypairs,
+  db,
   ensureAutomationRows,
+  waitForMigrations,
 } from '@roomote/db/server';
 import {
   DISCORD_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME,
@@ -51,6 +53,25 @@ import { startPullRequestMergeabilityCheckQueue } from './pull-request-mergeabil
 import { startTaskSleepQueue } from './task-sleep-queue';
 import { startAutomationRecommendationsQueue } from './automation-recommendations-queue';
 import { startFastAgentParentEventQueue } from './fast-agent-parent-event-queue';
+
+// Deployments roll every service at once while migrations run only ahead
+// of the api service. A boot that reads a column the pending migration adds
+// would crash-loop past the platform's restart budget and stay down after
+// the migration lands, so wait for the schema instead.
+try {
+  const readiness = await waitForMigrations({
+    database: db,
+    log: (message) => console.info(message),
+  });
+  if (readiness.state === 'unmanaged') {
+    console.info(
+      'Database has no migration bookkeeping; assuming its schema is managed directly.',
+    );
+  }
+} catch (error) {
+  console.error('Database migrations did not become ready', error);
+  process.exit(1);
+}
 
 // Resolve auto-generated auth keypairs before any queue worker starts so
 // scheduled jobs that sign tokens observe the resolved keys.
