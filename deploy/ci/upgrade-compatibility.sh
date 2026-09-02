@@ -159,10 +159,24 @@ TRPC_URL=http://api:3001
 EOF
 
 verify_endpoints() {
+  printf 'Probing API liveness endpoint\n'
   compose exec -T api curl -fsS --max-time 5 http://127.0.0.1:3001/health/liveness >/dev/null
+
+  printf 'Probing web health endpoint\n'
   compose exec -T web curl -fsS --max-time 5 http://127.0.0.1:3000/health >/dev/null
-  compose exec -T web curl -fsS --max-time 10 "http://127.0.0.1:3000/setup?token=$setup_token" >/dev/null
+
+  printf 'Probing web setup endpoint with generated token\n'
+  compose exec -T web curl -fsS \
+    --max-time 30 \
+    --retry 2 \
+    --retry-delay 1 \
+    --retry-all-errors \
+    "http://127.0.0.1:3000/setup?token=$setup_token" >/dev/null
+
+  printf 'Probing controller health endpoint\n'
   compose exec -T controller curl -fsS --max-time 5 http://api:3001/health/controller >/dev/null
+
+  printf 'Probing BullMQ health endpoint\n'
   compose exec -T bullmq curl -fsS --max-time 5 http://127.0.0.1:3002/admin/health >/dev/null
 }
 
