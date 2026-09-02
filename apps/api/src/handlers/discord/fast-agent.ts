@@ -14,6 +14,7 @@ import {
   getOrCreateFastAgentSession,
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  FastAgentDurableRetryScheduledError,
   resolveApiBaseUrl,
 } from '@roomote/cloud-agents/server';
 import {
@@ -30,6 +31,7 @@ import {
   persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
+  wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
   type FastAgentDurableTurn,
 } from '@roomote/sdk/server';
@@ -329,6 +331,14 @@ export async function processDiscordFastAgentMessage(
                   conversationId: session.id,
                   eventKey: durableTurnForResume.eventKey,
                 }),
+              requestDurableRetry: (retryAt: Date) =>
+                wakeFastAgentParentEventAt(
+                  {
+                    conversationId: session.id,
+                    eventKey: durableTurnForResume.eventKey,
+                  },
+                  retryAt,
+                ),
             }
           : {}),
         resolveMcpServerConfigs: () =>
@@ -522,6 +532,13 @@ export function startDiscordFastAgentResponse(
         onRejected,
       }),
     onError: (error) => {
+      if (error instanceof FastAgentDurableRetryScheduledError) {
+        // Not a failure: the queue re-runs this turn at the scheduled time.
+        console.info(
+          `[Discord] Fast turn parked for a durable retry: ${error.message}`,
+        );
+        return;
+      }
       console.error(
         `[Discord] Fast suggestion response failed: ${error instanceof Error ? error.message : String(error)}`,
       );

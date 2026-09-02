@@ -147,4 +147,11 @@ export type FastAgentTurnAdapter = {
    * wait for the next sweep. Best effort.
    */
   requestDurableResume?: () => Promise<void>;
+  /**
+   * Called when a replay-safe turn has parked itself for a durable inference
+   * retry; schedules the queue wakeup for `retryAt` so the retry does not
+   * wait for a recovery sweep. Best effort. Without this hook the turn keeps
+   * its retry backoff in process.
+   */
+  requestDurableRetry?: (retryAt: Date) => Promise<void>;
 };

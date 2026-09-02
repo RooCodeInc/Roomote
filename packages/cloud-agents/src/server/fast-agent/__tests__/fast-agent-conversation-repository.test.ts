@@ -13,8 +13,10 @@ import {
 
 import {
   fastAgentConversationRepository,
+  findFastAgentActiveInferenceRetryNotice,
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+  scheduleFastAgentDurableTurnRetry,
   markFastAgentDurableTurnDelivered,
   releaseFastAgentDurableTurnClaim,
   renewFastAgentDurableTurnClaim,
@@ -1175,6 +1177,183 @@ describe('Fast conversation repository', () => {
     await expect(
       revokeFastAgentDurableTurnReplay(completed, 'late'),
     ).resolves.toBe(false);
+  });
+
+  it('parks a durable turn for a scheduled retry and lets a resumed run find its notice', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const parent = { sessionId: session.id, conversation: slackConversation };
+    const [row] = await db
+      .insert(fastAgentParentEvents)
+      .values({
+        conversationId: session.id,
+        eventKey: 'durable-retry',
+        parent,
+        event: { type: 'human_follow_up', eventId: 'durable-retry' },
+        admission: 'inline',
+        claimedUntil: new Date(Date.now() + 1_000),
+      })
+      .returning({ id: fastAgentParentEvents.id });
+    const readRow = async () => {
+      const [current] = await db
+        .select({
+          claimedUntil: fastAgentParentEvents.claimedUntil,
+          retryAt: fastAgentParentEvents.retryAt,
+          inferenceRetries: fastAgentParentEvents.inferenceRetries,
+          lastError: fastAgentParentEvents.lastError,
+        })
+        .from(fastAgentParentEvents)
+        .where(eq(fastAgentParentEvents.id, row!.id));
+      return current!;
+    };
+
+    // Parking releases the owner's claim and records when and why.
+    const retryAt = new Date(Date.now() + 45_000);
+    await expect(
+      scheduleFastAgentDurableTurnRetry(row!.id, {
+        retryAt,
+        inferenceRetries: 2,
+        reason: 'Inference retry 2/6 scheduled (timeout).',
+      }),
+    ).resolves.toBe(true);
+    const parked = await readRow();
+    expect(parked).toMatchObject({
+      claimedUntil: null,
+      inferenceRetries: 2,
+      lastError: 'Inference retry 2/6 scheduled (timeout).',
+    });
+    expect(parked.retryAt?.getTime()).toBe(retryAt.getTime());
+
+    // A settled row can no longer be parked.
+    await expect(markFastAgentDurableTurnDelivered(row!.id)).resolves.toBe(
+      true,
+    );
+    await expect(
+      scheduleFastAgentDurableTurnRetry(row!.id, {
+        retryAt,
+        inferenceRetries: 3,
+        reason: 'late',
+      }),
+    ).resolves.toBe(false);
+    expect((await readRow()).inferenceRetries).toBe(2);
+
+    // The resumed run finds the notice its predecessor left active for this
+    // turn, and only while it is still active.
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-retry:retry-notice:0',
+        turnId: 'turn-retry',
+        turnSeq: 1,
+        ts: 100,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying in 45s' }],
+        metadata: {
+          visibleInTranscript: true,
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
+          platformMessageId: 'notice-1',
+        },
+        payload: { purpose: 'progress' },
+        source: 'slack',
+      },
+    });
+    await expect(
+      findFastAgentActiveInferenceRetryNotice(session.id, 'turn-retry'),
+    ).resolves.toEqual({
+      eventId: 'turn-retry:retry-notice:0',
+      ts: 100,
+      text: 'Retrying in 45s',
+      platformMessageId: 'notice-1',
+    });
+    await expect(
+      findFastAgentActiveInferenceRetryNotice(session.id, 'turn-other'),
+    ).resolves.toBeNull();
+    await reconcileFastAgentInferenceRetryNotices(
+      session.id,
+      'turn_settled_reconcile',
+    );
+    await expect(
+      findFastAgentActiveInferenceRetryNotice(session.id, 'turn-retry'),
+    ).resolves.toBeNull();
+  });
+
+  it('does not reconcile an expired lease while a durable retry is scheduled', async () => {
+    const user = await createUser();
+    const conversation = {
+      surface: 'web' as const,
+      workspaceId: user.id,
+      conversationId: crypto.randomUUID(),
+    };
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-1:retry-notice:0',
+        turnId: 'turn-1',
+        turnSeq: 1,
+        ts: 100,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying in 45s' }],
+        metadata: {
+          visibleInTranscript: true,
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
+        },
+        payload: { purpose: 'progress' },
+        source: 'web',
+      },
+    });
+    await db
+      .update(sessions)
+      .set({ respondingUntil: new Date(Date.now() - 1_000) })
+      .where(eq(sessions.fastConversationId, session.id));
+    await db.insert(fastAgentParentEvents).values({
+      conversationId: session.id,
+      eventKey: `scheduled-retry-${session.id}`,
+      parent: { sessionId: session.id, conversation },
+      event: { type: 'human_follow_up', eventId: 'scheduled-retry' },
+      admission: 'inline',
+      retryAt: new Date(Date.now() + 60_000),
+    });
+    const readNotice = async () => {
+      const [notice] = await db
+        .select({ metadata: fastAgentMessages.metadata })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(fastAgentMessages.conversationId, session.id),
+            eq(fastAgentMessages.eventId, 'turn-1:retry-notice:0'),
+          ),
+        );
+      return notice!.metadata;
+    };
+
+    // The lease is inactive, but the scheduled retry still owns the notice.
+    await reconcileExpiredFastAgentInferenceRetryNotices();
+    expect(await readNotice()).toMatchObject({ inferenceRetryActive: true });
+
+    // Once the row is settled, the same notice is an orphan again.
+    await db
+      .update(fastAgentParentEvents)
+      .set({ deliveredAt: new Date() })
+      .where(eq(fastAgentParentEvents.conversationId, session.id));
+    await reconcileExpiredFastAgentInferenceRetryNotices();
+    expect(await readNotice()).toMatchObject({
+      inferenceRetryActive: false,
+      purpose: 'closeout',
+      interruptionReason: 'expired_lease_reconcile',
+    });
   });
 
   it('renews only a live responding lease', async () => {

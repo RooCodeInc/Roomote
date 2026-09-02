@@ -132,6 +132,10 @@ const serverSchema = {
   // run inline without a persisted claim, so an interrupted turn is not
   // resumed by the parent-event queue (the pre-durable-admission behavior).
   R_FAST_DURABLE_ADMISSION_DISABLED: optInBoolean(),
+  // Kill switch for durable retry scheduling. When set, a replay-safe Fast
+  // turn waits out inference retry backoff inside its owning process (the
+  // pre-scheduling behavior) instead of parking the turn for the queue.
+  R_FAST_DURABLE_RETRY_DISABLED: optInBoolean(),
   // Operator kill switch for admin-configured custom MCP servers. Deliberately
   // independent of R_CURATED_INTEGRATIONS_DISABLED: operators who disable the
   // curated catalog are the primary custom-server audience.
