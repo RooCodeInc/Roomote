@@ -29,7 +29,7 @@ type IssueFixerLaunchIssue = {
 };
 
 /**
- * Shared launch path for webhook-driven issue triage across supported SCMs.
+ * Shared launch path for webhook-driven issue implementation across supported SCMs.
  * Caller has already resolved the active Roomote repository row and normalized
  * the issue payload.
  */

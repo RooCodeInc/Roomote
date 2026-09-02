@@ -51,7 +51,7 @@ export const PRODUCT_TIPS = [
   {
     title: 'Triage issues as they arrive',
     description:
-      'Roomote can investigate each newly opened issue and post a concrete implementation plan with the relevant code paths before anyone picks it up.',
+      'Roomote can investigate each newly opened issue, implement the fix, and open a pull request with the relevant code paths before anyone picks it up.',
   },
   {
     title: 'Keep old PRs mergeable',

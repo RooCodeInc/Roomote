@@ -35,6 +35,28 @@ describe('buildIssueFixerFixPrompt', () => {
     expect(prompt).not.toContain('Comment formats');
   });
 
+  it('defaults to implementing the issue and opening a pull request', () => {
+    const prompt = buildIssueFixerFixPrompt({
+      repositoryFullName: 'acme/api',
+      environmentId: 'env-api',
+      trigger: 'webhook',
+      sourceControlProvider: 'github',
+      githubAppSlug: 'roomote',
+      issue: {
+        repositoryFullName: 'acme/api',
+        number: 12,
+        title: 'Broken checkout',
+        url: 'https://github.com/acme/api/issues/12',
+      },
+    });
+
+    expect(prompt).toContain('<run_mode>issue_implement</run_mode>');
+    expect(prompt).toContain('Implement GitHub issue #12');
+    expect(prompt).toContain('open a pull request');
+    expect(prompt).not.toContain('issue_plan_only');
+    expect(prompt).not.toContain('Do not implement code');
+  });
+
   it('uses the full GitHub app mention after opting out', () => {
     setGitHubRoomoteMentionSettingCache({
       value: false,
@@ -87,7 +109,7 @@ describe('buildIssueFixerFixPrompt', () => {
       '<source_control_provider>gitlab</source_control_provider>',
     );
     expect(prompt).toContain('<continue_mention>@roomote</continue_mention>');
-    expect(prompt).toContain('Triage GitLab issue #9');
+    expect(prompt).toContain('Implement GitLab issue #9');
     expect(prompt).toContain('source="gitlab_issue_body"');
     expect(prompt).not.toContain('GITLAB_TOKEN');
     expect(prompt).not.toContain('GitLab REST API');

@@ -23,4 +23,17 @@ describe('issue-fixer skill', () => {
     expect(skill).not.toContain('GITEA_TOKEN');
     expect(skill).not.toContain('Post with provider-native tooling');
   });
+
+  it('implements the issue and opens a pull request by default', () => {
+    const skill = readIssueFixerSkill();
+
+    expect(skill).toContain('implement-changes');
+    expect(skill).toContain('open a pull request');
+    expect(skill).toContain('An existing plan comment is not a skip');
+    expect(skill).not.toContain(
+      'Do not implement the fix or open a pull request',
+    );
+    expect(skill).not.toContain('plan-only scope');
+    expect(skill).not.toContain("if you'd like me to implement");
+  });
 });

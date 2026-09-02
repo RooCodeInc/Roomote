@@ -1,6 +1,9 @@
 import { render, screen } from '@testing-library/react';
 
-import { ScheduleOnlyAutomationContent } from './ScheduleOnlyAutomationContent';
+import {
+  SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS,
+  ScheduleOnlyAutomationContent,
+} from './ScheduleOnlyAutomationContent';
 
 describe('ScheduleOnlyAutomationContent', () => {
   it('renders the CI triage toggle for toggle-based automations', () => {
@@ -83,5 +86,21 @@ describe('ScheduleOnlyAutomationContent', () => {
 
     expect(screen.getByText(details[0])).toBeInTheDocument();
     expect(screen.getByText(details[1])).toBeInTheDocument();
+  });
+
+  it('describes Triage Issues as implementing and opening a pull request by default', () => {
+    const { description, details } =
+      SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS.issueFixer;
+    const detailsText = details.join(' ');
+
+    expect(description).toContain('implement the fix, and open a pull request');
+    expect(description).not.toContain('implementation plan');
+    expect(detailsText).toContain(
+      'Implements the fix and opens a pull request by default.',
+    );
+    expect(detailsText).not.toMatch(/plan only/i);
+    expect(detailsText).not.toContain(
+      'It does not implement the fix or open a pull request automatically.',
+    );
   });
 });

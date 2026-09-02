@@ -9,7 +9,7 @@ import type { GitLabIssueWebhook } from './types';
 const OPEN_ACTIONS = new Set(['open', 'reopen']);
 
 /**
- * Launch plan-only issue triage when a plain GitLab issue is opened/reopened.
+ * Launch issue implementation when a plain GitLab issue is opened/reopened.
  */
 export async function handleGitLabIssue(
   payload: GitLabIssueWebhook,

@@ -3047,7 +3047,7 @@ export function AutomationsSettings() {
                             )
                           }
                           rows={4}
-                          placeholder="Optional guidance for how to triage issues and write plans"
+                          placeholder="Optional guidance for how to implement issues"
                         />
                         {fieldErrors.issueFixerInstructions ? (
                           <p className="text-xs text-destructive">

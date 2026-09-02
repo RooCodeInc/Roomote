@@ -12,7 +12,7 @@ import type { GiteaIssueWebhook } from './types';
 const OPEN_ACTIONS = new Set(['opened', 'reopened']);
 
 /**
- * Launch plan-only issue triage when a plain Gitea issue is opened/reopened.
+ * Launch issue implementation when a plain Gitea issue is opened/reopened.
  */
 export async function handleGiteaIssue(
   payload: GiteaIssueWebhook,

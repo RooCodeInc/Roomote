@@ -63,7 +63,7 @@ These automations react to pull requests, issues, and repository state.
 | Automation                 | What it does                                                      | Good first use                                                         |
 | -------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | **Review Code**            | Reviews pull requests automatically or on demand                  | Add an extra reviewer for regressions, risky changes, and missed tests |
-| **Triage Issues**          | Posts clarifying questions or an implementation plan when an issue is opened/reopened on GitHub, GitLab, or Gitea | Get a grounded plan on the issue without auto-opening a PR           |
+| **Triage Issues**          | Implements opened or reopened GitHub, GitLab, or Gitea issues and opens a pull request, or posts clarifying questions when the work is too unclear to ship | Get a pull request on the issue without waiting for a mention           |
 | **Resolve PR Conflicts**   | Looks for merge conflicts and helps fix them on open PRs          | Keep long-running branches from getting stuck                          |
 | **Merge announcer**        | Summarizes commits pushed to active repositories' default branches and names the pusher | Keep the team aware of changes that land outside pull requests |
 
@@ -80,11 +80,11 @@ installations that do not have that permission.
 For **Triage Issues**, turn the toggle on once a supported source-control
 provider is connected (GitHub, GitLab, or Gitea) and the repos you care about
 have configured Roomote environments. When an issue is opened or reopened,
-Roomote starts a task immediately, investigates the issue, and posts a concrete
-plan or clarifying questions as a comment on that issue. It does not need a
-Manager Channel, does not post Slack digests, does not implement the fix, and
-does not open a pull request automatically. Azure DevOps work items and
-Bitbucket issues are not covered yet.
+Roomote starts a task immediately, investigates the issue, and implements the
+fix. It opens a pull request and comments the pull request URL on the issue. If
+the work is too unclear to ship, it posts clarifying questions instead and
+waits for a reply. It does not need a Manager Channel and does not post Slack
+digests. Azure DevOps work items and Bitbucket issues are not covered yet.
 
 For **Resolve PR Conflicts**, pick a schedule, PR age cap, and label. The
 label is the team-controlled opt-in for scheduled scans. Make sure the label

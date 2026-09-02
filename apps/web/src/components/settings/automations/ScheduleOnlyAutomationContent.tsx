@@ -75,11 +75,11 @@ export const SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS = {
   },
   issueFixer: {
     description:
-      'When an issue is opened or reopened on GitHub, GitLab, or Gitea, investigate it and post a concrete implementation plan on the issue.',
+      'When an issue is opened or reopened on GitHub, GitLab, or Gitea, investigate it, implement the fix, and open a pull request.',
     details: [
       'Runs immediately from the issue webhook — not on a daily or weekly batch schedule.',
       'Supports GitHub, GitLab, and Gitea issues. Azure DevOps work items and Bitbucket issues are not covered yet.',
-      'Posts a plan only. It does not implement the fix or open a pull request automatically.',
+      'Implements the fix and opens a pull request by default. Posts clarifying questions on the issue instead when the work is too unclear to ship.',
       'Only repositories covered by a configured Roomote environment are eligible.',
     ],
     icon: Wrench,

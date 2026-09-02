@@ -52,8 +52,8 @@ function resolveContinueMention({
 }
 
 /**
- * Builds the one-task Triage Issues prompt: investigate a named issue and post
- * either clarifying questions or a plan on that issue (provider-neutral).
+ * Builds the one-task Triage Issues prompt: investigate a named issue,
+ * implement the fix, and open a pull request (provider-neutral).
  */
 export function buildIssueFixerFixPrompt({
   repositoryFullName,
@@ -122,7 +122,7 @@ export function buildIssueFixerFixPrompt({
 
 <task_context>
   <source>issue_fixer</source>
-  <run_mode>issue_plan_only</run_mode>
+  <run_mode>issue_implement</run_mode>
   <trigger>${trigger}</trigger>
   <source_control_provider>${sourceControlProvider}</source_control_provider>
   <repository_scope>${repositoryFullName}</repository_scope>
@@ -137,7 +137,7 @@ export function buildIssueFixerFixPrompt({
   </issue>
 </task_context>
 
-Triage ${providerLabel} issue #${issue.number} in ${repositoryFullName}. Post either clarifying questions or a concrete implementation plan as a comment on that issue. Do not implement code and do not open a pull request.
+Implement ${providerLabel} issue #${issue.number} in ${repositoryFullName}. If the issue is too unclear to ship safely, post clarifying questions as a comment and stop. Otherwise implement the fix, open a pull request, and comment the pull request URL on the issue. Do not wait for a human to tag Roomote.
 
 Issue URL: ${issue.url}
 Title: ${escapedTitle}

@@ -40,7 +40,7 @@ function issueLabels(labels: IssueFixerPayload['issue']['labels']): string[] {
 }
 
 /**
- * Launch one environment-backed plan-only triage task the moment a GitHub
+ * Launch one environment-backed implementation task the moment a GitHub
  * issue is opened or reopened (one task per issue event).
  */
 export async function handleGitHubIssueFixer(

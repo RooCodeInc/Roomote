@@ -247,7 +247,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     slackIcon: 'wrench',
     scheduleModes: ISSUE_FIXER_SCHEDULE_MODES,
     // Webhook-driven on new issues only (no Run now / batch scan).
-    // Plans are posted on the issue itself, not as Slack suggestion cards.
+    // Fixes are implemented as pull requests; comments land on the issue.
     // GitHub/GitLab/Gitea issue open events launch issue_fixer triage.
     // ADO work-item @mentions start StandardTask (not issue_fixer); Bitbucket
     // issues are not yet supported.
