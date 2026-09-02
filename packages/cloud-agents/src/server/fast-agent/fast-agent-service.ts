@@ -111,7 +111,10 @@ import {
   type FastAgentMcpToolCall,
   type FastAgentNativeToolCall,
 } from './fast-agent-native-tool-bridge';
-import { getFastAgentNativeAcpKind } from './fast-agent-tool-policy';
+import {
+  getFastAgentNativeAcpKind,
+  isFastAgentNativeIntegration,
+} from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
   listFastAgentIntegrations,
@@ -2359,14 +2362,31 @@ export async function answerFastAgentQuestion({
       }
     };
 
+    // Natively mounted servers are excluded from both the lookup and the
+    // call path: their tools are already exposed by name, and the subagent
+    // tool filter denies some of them, which the shared call path must not
+    // bypass.
+    const onDemandIntegrations = availableIntegrations.filter(
+      (integration) => !isFastAgentNativeIntegration(integration.id),
+    );
+    const nativeIntegrationError = (integrationId: string) => ({
+      success: false as const,
+      error: `The "${integrationId}" server is mounted natively; call its tools directly by their ${integrationId}_ prefixed names.`,
+    });
     const describeIntegrationTools = (
       args: z.infer<typeof findIntegrationToolsArgsSchema>,
     ) => {
-      const found = findFastAgentIntegrationTools(availableIntegrations, args);
+      if (
+        args.integrationId &&
+        isFastAgentNativeIntegration(args.integrationId)
+      ) {
+        return nativeIntegrationError(args.integrationId);
+      }
+      const found = findFastAgentIntegrationTools(onDemandIntegrations, args);
       if (found.unknownIntegration) {
         return {
           success: false as const,
-          error: `No deployment MCP server with id "${args.integrationId}" is available in fast mode.`,
+          error: `No on-demand deployment MCP server with id "${args.integrationId}" is available in fast mode.`,
         };
       }
       return {
@@ -2394,6 +2414,9 @@ export async function answerFastAgentQuestion({
         }
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool) {
           const args = callIntegrationToolArgsSchema.parse(call.args);
+          if (isFastAgentNativeIntegration(args.integrationId)) {
+            return nativeIntegrationError(args.integrationId);
+          }
           return await executeMcpTool({
             integrationId: args.integrationId,
             toolName: args.toolName,
@@ -2807,6 +2830,9 @@ export async function answerFastAgentQuestion({
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool: {
             const args = callIntegrationToolArgsSchema.parse(call.args);
+            if (isFastAgentNativeIntegration(args.integrationId)) {
+              return nativeIntegrationError(args.integrationId);
+            }
             return executeMcpTool({
               integrationId: args.integrationId,
               toolName: args.toolName,

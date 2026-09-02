@@ -2720,6 +2720,22 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           success: true,
           result: { matches: ['fast-agent.ts'] },
         });
+        // The shared call path must not hand subagents parent-only member
+        // tools that the subagent tool filter denies.
+        await expect(
+          subagentExecutor({
+            agent: 'judge',
+            name: nativeToolNames.callIntegrationTool,
+            args: {
+              integrationId: 'roomote',
+              toolName: 'manage_custom_automations',
+              args: { action: 'list' },
+            },
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: expect.stringContaining('mounted natively'),
+        });
         await parentExecutor({
           name: nativeToolNames.sendChatReply,
           args: {
@@ -3424,6 +3440,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           { name: 'list_issues', description: 'List issues', inputSchema },
         ],
       },
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Deployment access',
+        tools: [{ name: 'manage_custom_automations', inputSchema }],
+      },
     ]);
     const toolResults: unknown[] = [];
     mocks.generateText.mockImplementation(
@@ -3440,6 +3462,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             integrationId: 'missing',
           }),
         );
+        // Natively mounted servers are neither searchable nor callable here.
+        toolResults.push(
+          await invokeTool(nativeToolNames.findIntegrationTools, {
+            query: 'automations',
+          }),
+        );
         toolResults.push(
           await invokeTool(nativeToolNames.callIntegrationTool, {
             integrationId: 'github',
@@ -3451,6 +3479,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           purpose: 'ack',
           message: 'Looking.',
         });
+        toolResults.push(
+          await invokeTool(nativeToolNames.callIntegrationTool, {
+            integrationId: 'roomote',
+            toolName: 'manage_custom_automations',
+            args: { action: 'list' },
+          }),
+        );
         toolResults.push(
           await invokeTool(nativeToolNames.callIntegrationTool, {
             integrationId: 'github',
@@ -3484,12 +3519,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       success: false,
       error: expect.stringContaining('"missing"'),
     });
+    expect(toolResults[2]).toEqual({ success: true, tools: [] });
     // Calls follow the same gate as natively mounted MCP tools.
-    expect(toolResults[2]).toEqual({
+    expect(toolResults[3]).toEqual({
       success: false,
       error: expect.stringContaining('acknowledgement'),
     });
-    expect(toolResults[3]).toEqual({
+    expect(toolResults[4]).toEqual({
+      success: false,
+      error: expect.stringContaining('mounted natively'),
+    });
+    expect(toolResults[5]).toEqual({
       success: true,
       result: { matches: ['fast-agent.ts'] },
     });
