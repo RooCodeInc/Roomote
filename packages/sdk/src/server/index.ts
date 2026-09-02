@@ -270,6 +270,7 @@ export {
   beginCanonicalPrReviewWebPrompt,
   beginCanonicalPrReviewWebAutoDispatch,
   completeCanonicalPrReviewAutoDispatch,
+  markCanonicalPrReviewAutoDispatchPosted,
   consumePendingPrReviewActivity,
   dispatchDuePrReviewNotifications,
   enqueuePrReviewNotification,

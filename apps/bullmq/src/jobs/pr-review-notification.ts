@@ -23,6 +23,7 @@ import {
   buildPrReviewNotificationPostInput,
   createPrReviewNotificationTelemetry,
   getCommunicationProviderAdapter,
+  markCanonicalPrReviewAutoDispatchPosted,
   type PrReviewNotificationRequest,
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
@@ -225,6 +226,7 @@ async function postPrReviewNotification({
   action,
   canonicalDeliveryId,
   canonicalLeaseToken,
+  idempotencyKey,
 }: {
   taskId: string;
   route: PrReviewNotificationRoute;
@@ -233,6 +235,7 @@ async function postPrReviewNotification({
   action?: PrReviewNotificationAction;
   canonicalDeliveryId?: string;
   canonicalLeaseToken?: string;
+  idempotencyKey?: string;
 }): Promise<string | null> {
   // Stored before posting: an orphaned record just expires, while a posted
   // message without a record would leave dead buttons.
@@ -292,6 +295,7 @@ async function postPrReviewNotification({
           }
         : { blocks: [{ type: 'markdown', text }] }),
       utmCampaign: 'slack.pr_review',
+      clientMsgId: idempotencyKey,
     });
 
     if (nonce && messageTs) {
@@ -325,6 +329,7 @@ async function postPrReviewNotification({
   }
 
   const postInput = buildPrReviewNotificationPostInput(route, text);
+  postInput.idempotencyKey = idempotencyKey;
 
   if (action && nonce && isButtonRouteProvider(route.provider)) {
     postInput.buttons = [
@@ -766,6 +771,7 @@ export const prReviewNotificationJob = async (
     }
 
     let autoHandledText: string | null = null;
+    let autoHandledRunId: number | null = null;
     const ownsAutoHandleDispatch =
       directAutoHandleRoute !== null || deliveredToFastParent;
     if (
@@ -822,17 +828,7 @@ export const prReviewNotificationJob = async (
       );
 
       if (dispatched.outcome !== 'unavailable') {
-        if (
-          !(await completeCanonicalPrReviewAutoDispatch({
-            request: data,
-            runId: dispatched.runId,
-          }))
-        ) {
-          console.log(
-            `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its completion fence after dispatch`,
-          );
-          return;
-        }
+        autoHandledRunId = dispatched.runId;
         autoHandledText = `New review feedback — I'm on it:
 ${delivery.text}`;
         console.log(
@@ -904,6 +900,63 @@ ${delivery.text}`;
       }
     }
 
+    let autoHandledMessageTs = data.providerMessageId ?? null;
+    if (autoHandledText && delivery.route && !autoHandledMessageTs) {
+      if (!(await renewPrReviewNotificationRequestLease(data))) {
+        console.log(
+          `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its continuation-posting fence, skipping`,
+        );
+        return;
+      }
+      autoHandledMessageTs = await postPrReviewNotification({
+        taskId: data.taskId,
+        route: delivery.route,
+        text: autoHandledText,
+        idempotencyKey: data.deliveryId,
+      });
+      if (!autoHandledMessageTs) {
+        throw new Error(
+          `Continuation post for canonical delivery ${data.deliveryId} returned no message id`,
+        );
+      }
+      if (
+        !(await markCanonicalPrReviewAutoDispatchPosted({
+          request: data,
+          messageId: autoHandledMessageTs,
+        }))
+      ) {
+        console.log(
+          `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its continuation-post checkpoint fence, skipping`,
+        );
+        return;
+      }
+    }
+
+    if (
+      autoHandledRunId !== null &&
+      !(await completeCanonicalPrReviewAutoDispatch({
+        request: data,
+        runId: autoHandledRunId,
+      }))
+    ) {
+      console.log(
+        `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its completion fence after dispatch`,
+      );
+      return;
+    }
+
+    if (autoHandledText && delivery.route) {
+      await recordPrReviewNotificationDeliveryBestEffort({
+        runId: latestJob.id,
+        taskId: data.taskId,
+        route: delivery.route,
+        text: autoHandledText,
+        ...(autoHandledMessageTs ? { messageTs: autoHandledMessageTs } : {}),
+      });
+      await finalizePrReviewNotificationRequest(data);
+      return;
+    }
+
     if (deliveredToFastParent && (!autoHandleUserId || autoHandledText)) {
       await recordPrReviewNotificationDeliveryBestEffort({
         runId: latestJob.id,
@@ -919,24 +972,6 @@ ${delivery.text}`;
 
     // Once retries are exhausted, continue into the normal offer path even
     // though the Fast parent already received the deduplicated summary.
-
-    if (autoHandledText && delivery.route) {
-      const messageTs = await postPrReviewNotification({
-        taskId: data.taskId,
-        route: delivery.route,
-        text: autoHandledText,
-      });
-
-      await recordPrReviewNotificationDeliveryBestEffort({
-        runId: latestJob.id,
-        taskId: data.taskId,
-        route: delivery.route,
-        text: autoHandledText,
-        ...(messageTs ? { messageTs } : {}),
-      });
-      await finalizePrReviewNotificationRequest(data);
-      return;
-    }
 
     // Chat delivery is optional (web-only tasks have no route). Task history is
     // always recorded so the web task view shows the self-review summary.

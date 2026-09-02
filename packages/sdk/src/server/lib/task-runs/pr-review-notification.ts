@@ -6,6 +6,7 @@ import type { TaskRun } from '@roomote/db/server';
 import {
   buildPrReviewEventKey,
   claimDuePrReviewDeliveries,
+  checkpointCanonicalPrReviewAutoDispatchPost,
   completePrReviewDeliveries,
   db,
   deferPrReviewDeliveries,
@@ -173,6 +174,7 @@ export const prReviewNotificationRequestSchema = z.object({
   routeWorkspaceId: z.string().nullable().optional(),
   routeChannelId: z.string().nullable().optional(),
   routeThreadId: z.string().nullable().optional(),
+  providerMessageId: z.string().nullable().optional(),
   dispatchKey: z.string().optional(),
 });
 
@@ -767,6 +769,7 @@ export async function dispatchDuePrReviewNotifications(): Promise<number> {
               routeWorkspaceId: claim.routeWorkspaceId,
               routeChannelId: claim.routeChannelId,
               routeThreadId: claim.routeThreadId,
+              providerMessageId: claim.providerMessageId,
               dispatchKey: claim.dispatchKey,
             }
           : {}),
@@ -1012,6 +1015,20 @@ export async function completeCanonicalPrReviewAutoDispatch(input: {
     expected: 'auto_dispatch_pending',
     status: 'completed',
     values: { dispatchedRunId: input.runId },
+  });
+}
+
+export async function markCanonicalPrReviewAutoDispatchPosted(input: {
+  request: PrReviewNotificationRequest;
+  messageId: string;
+}): Promise<boolean> {
+  const { request } = input;
+  if (request.ownershipVersion !== 'canonical' || !request.deliveryId) {
+    return true;
+  }
+  return checkpointCanonicalPrReviewAutoDispatchPost({
+    deliveryId: request.deliveryId,
+    messageId: input.messageId,
   });
 }
 

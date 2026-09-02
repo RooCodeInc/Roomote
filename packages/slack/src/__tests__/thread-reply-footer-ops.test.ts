@@ -109,6 +109,7 @@ describe('thread-reply-footer-ops', () => {
       threadTs: '100.000',
       taskId: 'task-1',
       text: 'review summary',
+      clientMsgId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     });
 
     expect(ts).toBe('222.000');
@@ -117,6 +118,7 @@ describe('thread-reply-footer-ops', () => {
         channel: 'C1',
         thread_ts: '100.000',
         text: 'review summary',
+        client_msg_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
         blocks: expect.arrayContaining([
           expect.objectContaining({
             type: 'context',
