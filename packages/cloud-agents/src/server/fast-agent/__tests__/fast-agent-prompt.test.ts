@@ -4,25 +4,6 @@ import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { createMemoryMcpInstructions } from '@roomote/types';
 
 describe('buildFastAgentSystemPrompt', () => {
-  it('uses native final output instead of chat reply instructions on web', () => {
-    const prompt = buildFastAgentSystemPrompt({
-      availableEnvironments: [],
-      surface: 'web',
-    });
-
-    expect(prompt).not.toContain('send_chat_reply');
-    expect(prompt).not.toContain(
-      'Final assistant text is not implicitly posted',
-    );
-    expect(prompt).toContain(
-      'Your final assistant response text is persisted to the web transcript',
-    );
-    expect(prompt).toContain(
-      'Do not add final response text that merely repeats that kickoff',
-    );
-    expect(prompt).toContain('`request_user_input` is also user-visible');
-  });
-
   it('includes a resolved release identifier before turn startup and environments', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

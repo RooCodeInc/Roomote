@@ -1894,6 +1894,8 @@ export async function answerFastAgentQuestion({
     const ordinal = nextToolOrdinal++;
     const toolCallId = `${turnId}:tool:${ordinal}`;
     const isMcp = Boolean(mcpServerName && mcpToolName);
+    const visibleInTranscript =
+      title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply;
     const canonicalEvent = allocateCanonicalEvent(`tool:${ordinal}`);
     await persistCanonicalMessage(
       {
@@ -1903,7 +1905,7 @@ export async function answerFastAgentQuestion({
         eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
         role: 'tool',
         contentBlocks: [],
-        metadata: { visibleInTranscript: true },
+        metadata: { visibleInTranscript },
         payload: {
           toolCallId,
           title,
@@ -1934,6 +1936,7 @@ export async function answerFastAgentQuestion({
       mcpServerName,
       mcpToolName,
       kind,
+      visibleInTranscript,
       canonicalEvent,
     };
   };
@@ -1956,7 +1959,7 @@ export async function answerFastAgentQuestion({
         eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
         role: 'tool',
         contentBlocks: output ? [{ type: 'text', text: output }] : [],
-        metadata: { visibleInTranscript: true, truncated },
+        metadata: { visibleInTranscript: event.visibleInTranscript, truncated },
         payload: {
           toolCallId: event.toolCallId,
           title: event.title,
@@ -2669,7 +2672,6 @@ export async function answerFastAgentQuestion({
     ]);
     const authorizeToolStart = (toolId: string) =>
       platformEvent ||
-      conversation.surface === 'web' ||
       substantiveWorkAcknowledged ||
       acknowledgementExemptToolIds.has(toolId)
         ? null

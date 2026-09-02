@@ -415,7 +415,7 @@ describe('Fast session queries', () => {
     expect(result?.messageCount).toBe(0);
   });
 
-  it('returns native tool event payloads unchanged', async () => {
+  it('returns visible native tool event payloads unchanged', async () => {
     const owner = await userFactory.create();
     const session = await createFastSession({
       userId: owner.id,
@@ -430,7 +430,7 @@ describe('Fast session queries', () => {
       role: 'tool',
       payload: {
         toolCallId: 'turn-1:tool:0',
-        toolName: 'send_chat_reply',
+        toolName: 'launch_task',
         status: 'completed',
         output: '{"delivered":true}',
       },
@@ -443,9 +443,51 @@ describe('Fast session queries', () => {
 
     expect(result?.messages[0]?.payload).toMatchObject({
       toolCallId: 'turn-1:tool:0',
-      toolName: 'send_chat_reply',
+      toolName: 'launch_task',
       status: 'completed',
     });
+  });
+
+  it('hides send_chat_reply tool events while keeping the delivered reply', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'hidden-reply-tool-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:tool:0',
+      turnSeq: 1,
+      eventType: 'roomote_runtime.tool_result',
+      role: 'tool',
+      metadata: { visibleInTranscript: false },
+      payload: {
+        toolCallId: 'turn-1:tool:0',
+        toolName: 'send_chat_reply',
+        status: 'completed',
+        output: '{"delivered":true}',
+      },
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:assistant:0',
+      turnSeq: 2,
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+    });
+
+    const result = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(result?.messages.map((message) => message.eventId)).toEqual([
+      'turn-1:assistant:0',
+    ]);
+    expect(result?.messages[0]?.contentBlocks).toEqual([
+      { type: 'text', text: 'turn-1:assistant:0' },
+    ]);
   });
 
   it('grants every deployment user access to shared conversations', async () => {

@@ -558,7 +558,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('posts an immediate answer through a native chat tool', async () => {
+  it('delivers native chat replies without showing their tool event', async () => {
     const adapter = callbacks();
 
     const result = await answerFastAgentQuestion({
@@ -624,7 +624,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         message: expect.objectContaining({
           eventId: '100.2:tool:0',
           eventType: 'roomote_runtime.tool_call',
-          metadata: { visibleInTranscript: true },
+          metadata: { visibleInTranscript: false },
           payload: expect.objectContaining({
             toolCallId: '100.2:tool:0',
             toolName: 'send_chat_reply',
@@ -660,6 +660,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       'roomote_runtime.tool_call',
       'roomote_runtime.tool_result',
     ]);
+    expect(
+      toolWrites.map((message) => message.metadata?.visibleInTranscript),
+    ).toEqual([false, false]);
     expect(new Set(toolWrites.map((message) => message.turnSeq)).size).toBe(1);
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4599,118 +4602,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           nativeSessionId: 'opencode-session-1',
           nativeMessageId: 'native-message-1',
         }),
-      }),
-    );
-  });
-
-  it('persists native final assistant text for web Sessions', async () => {
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await options.onMessageCompleted?.({
-          id: 'web-native-message-1',
-          sessionId: 'opencode-session-1',
-          createdAtMs: 100,
-          completedAtMs: 200,
-        });
-        return 'Native web response';
-      },
-    );
-    const adapter = callbacks();
-
-    await expect(
-      answerFastAgentQuestion({
-        ...baseParams,
-        conversation: {
-          surface: 'web',
-          workspaceId: 'user-1',
-          conversationId: 'web-session-1',
-        },
-        adapter,
-      }),
-    ).resolves.toBe('Native web response');
-    expect(adapter.postReply).toHaveBeenCalledOnce();
-    expect(mocks.upsertMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: expect.objectContaining({
-          eventType: 'roomote_runtime.assistant_message',
-          contentBlocks: [{ type: 'text', text: 'Native web response' }],
-          nativeMessageId: 'web-native-message-1',
-          payload: { purpose: 'closeout' },
-          source: 'web',
-        }),
-      }),
-    );
-  });
-
-  it('does not require an unavailable chat acknowledgement before web tools', async () => {
-    let toolResult: unknown;
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        toolResult = await invokeTool(nativeToolNames.saveMemory, {
-          memory: 'The user prefers native web transcript replies.',
-        });
-        return 'Saved.';
-      },
-    );
-
-    await answerFastAgentQuestion({
-      ...baseParams,
-      conversation: {
-        surface: 'web',
-        workspaceId: 'user-1',
-        conversationId: 'web-session-1',
-      },
-      adapter: callbacks(),
-    });
-
-    expect(toolResult).toMatchObject({ success: true });
-    expect(mocks.appendMemory).toHaveBeenCalledOnce();
-  });
-
-  it('does not append a redundant web closeout after a launch kickoff', async () => {
-    const adapter = callbacks({
-      launchTask: vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
-        await postKickoff({
-          taskId: 'task-1',
-          taskUrl: 'https://roomote.example/task-1',
-        });
-        return {
-          success: true,
-          taskId: 'task-1',
-          taskUrl: 'https://roomote.example/task-1',
-          kickoffDelivered: true,
-        };
-      }),
-    });
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.launchTask, {
-          prompt: 'Inspect the repository.',
-          kickoffMessage: 'I’m inspecting the repository.',
-        });
-        return '';
-      },
-    );
-
-    await answerFastAgentQuestion({
-      ...baseParams,
-      conversation: {
-        surface: 'web',
-        workspaceId: 'user-1',
-        conversationId: 'web-session-1',
-      },
-      adapter,
-    });
-
-    expect(adapter.postReply).toHaveBeenCalledOnce();
-    expect(adapter.postReply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        purpose: 'progress',
-        kickoff: true,
-        message: expect.stringContaining('I’m inspecting the repository.'),
       }),
     );
   });

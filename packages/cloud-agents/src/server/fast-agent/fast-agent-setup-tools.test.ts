@@ -33,21 +33,6 @@ describe('Fast structured input tool filtering', () => {
       ],
     ).toBe(true);
   });
-
-  it('uses native transcript output only for web Sessions', () => {
-    expect(
-      buildFastAgentToolFilter([], { surface: 'web' })[
-        FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply
-      ],
-    ).toBe(false);
-    for (const surface of ['slack', 'discord', 'automation'] as const) {
-      expect(
-        buildFastAgentToolFilter([], { surface })[
-          FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply
-        ],
-      ).toBe(true);
-    }
-  });
 });
 
 describe('setup prompt guidance and snapshot injection', () => {
