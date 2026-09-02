@@ -750,6 +750,32 @@ describe('Fast native OpenCode tool bridge', () => {
     ).toBe(false);
   });
 
+  it('omits chat replies from web runtimes without changing chat runtimes', async () => {
+    const webRuntime = await getFastAgentNativeToolRuntime(
+      'web-native-tools',
+      [],
+      { surface: 'web' },
+    );
+    const chatRuntime = await getFastAgentNativeToolRuntime(
+      'chat-native-tools',
+      [],
+      { surface: 'discord' },
+    );
+    const webConfig = JSON.parse(
+      await readFile(join(webRuntime.directory, 'opencode.json'), 'utf8'),
+    ) as { agent: { build: { tools: Record<string, boolean> } } };
+    const chatConfig = JSON.parse(
+      await readFile(join(chatRuntime.directory, 'opencode.json'), 'utf8'),
+    ) as { agent: { build: { tools: Record<string, boolean> } } };
+
+    expect(
+      webConfig.agent.build.tools[FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply],
+    ).toBe(false);
+    expect(
+      chatConfig.agent.build.tools[FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply],
+    ).toBe(true);
+  });
+
   it('registers only native servers with OpenCode and keeps on-demand servers off the request', async () => {
     const runtime = await getFastAgentNativeToolRuntime('lazy-mcp', [
       {

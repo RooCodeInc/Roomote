@@ -53,6 +53,9 @@ export function buildFastAgentToolFilter(
 ): Record<string, boolean> {
   return {
     ...FAST_AGENT_NATIVE_TOOL_FILTER,
+    ...(options.surface === 'web'
+      ? { [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: false }
+      : {}),
     ...(options.surface && options.surface !== 'web'
       ? { [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: false }
       : {}),

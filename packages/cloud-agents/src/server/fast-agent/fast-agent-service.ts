@@ -2669,6 +2669,7 @@ export async function answerFastAgentQuestion({
     ]);
     const authorizeToolStart = (toolId: string) =>
       platformEvent ||
+      conversation.surface === 'web' ||
       substantiveWorkAcknowledged ||
       acknowledgementExemptToolIds.has(toolId)
         ? null
