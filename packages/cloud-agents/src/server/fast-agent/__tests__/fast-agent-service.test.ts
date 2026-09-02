@@ -558,7 +558,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('posts an immediate answer through a native chat tool', async () => {
+  it('delivers native chat replies without showing their tool event', async () => {
     const adapter = callbacks();
 
     const result = await answerFastAgentQuestion({
@@ -624,7 +624,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         message: expect.objectContaining({
           eventId: '100.2:tool:0',
           eventType: 'roomote_runtime.tool_call',
-          metadata: { visibleInTranscript: true },
+          metadata: { visibleInTranscript: false },
           payload: expect.objectContaining({
             toolCallId: '100.2:tool:0',
             toolName: 'send_chat_reply',
@@ -660,6 +660,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       'roomote_runtime.tool_call',
       'roomote_runtime.tool_result',
     ]);
+    expect(
+      toolWrites.map((message) => message.metadata?.visibleInTranscript),
+    ).toEqual([false, false]);
     expect(new Set(toolWrites.map((message) => message.turnSeq)).size).toBe(1);
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.objectContaining({
