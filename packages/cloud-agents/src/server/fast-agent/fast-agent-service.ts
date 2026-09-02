@@ -111,7 +111,10 @@ import {
   type FastAgentMcpToolCall,
   type FastAgentNativeToolCall,
 } from './fast-agent-native-tool-bridge';
-import { getFastAgentNativeAcpKind } from './fast-agent-tool-policy';
+import {
+  getFastAgentNativeAcpKind,
+  isFastAgentNativeIntegration,
+} from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
   listFastAgentIntegrations,
@@ -380,6 +383,85 @@ const taskIdArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
 });
 const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
+const findIntegrationToolsArgsSchema = z.object({
+  integrationId: z.string().trim().min(1).optional(),
+  toolName: z.string().trim().min(1).optional(),
+  query: z.string().trim().min(1).optional(),
+  limit: z.number().int().positive().max(25).optional(),
+});
+const callIntegrationToolArgsSchema = z.object({
+  integrationId: z.string().trim().min(1),
+  toolName: z.string().trim().min(1),
+  args: z.record(z.unknown()).optional(),
+});
+const FIND_INTEGRATION_TOOLS_DEFAULT_LIMIT = 10;
+
+/**
+ * Resolve on-demand integration tools for `find_integration_tools`. Exact
+ * server and tool names win; otherwise every query term must appear in the
+ * tool's name or description. Results carry the input schema the model needs
+ * to call the tool, bounded so a broad query cannot inline a whole catalog.
+ */
+function findFastAgentIntegrationTools(
+  integrations: FastAgentIntegration[],
+  args: z.infer<typeof findIntegrationToolsArgsSchema>,
+): {
+  tools: Array<{
+    integrationId: string;
+    name: string;
+    description?: string;
+    inputSchema?: unknown;
+  }>;
+  truncated: boolean;
+  unknownIntegration: boolean;
+} {
+  const limit = args.limit ?? FIND_INTEGRATION_TOOLS_DEFAULT_LIMIT;
+  const scoped = args.integrationId
+    ? integrations.filter(
+        (integration) => integration.id === args.integrationId,
+      )
+    : integrations;
+  if (args.integrationId && scoped.length === 0) {
+    return { tools: [], truncated: false, unknownIntegration: true };
+  }
+  const terms = (args.query ?? '')
+    .toLowerCase()
+    .split(/\s+/u)
+    .filter((term) => term.length > 0);
+  const matches: Array<{
+    integrationId: string;
+    name: string;
+    description?: string;
+    inputSchema?: unknown;
+    exact: boolean;
+  }> = [];
+  for (const integration of scoped) {
+    for (const tool of integration.tools) {
+      if (args.toolName && tool.name !== args.toolName) continue;
+      const haystack = `${tool.name} ${tool.description ?? ''}`.toLowerCase();
+      if (terms.length > 0 && !terms.every((term) => haystack.includes(term))) {
+        continue;
+      }
+      matches.push({
+        integrationId: integration.id,
+        name: tool.name,
+        ...(tool.description ? { description: tool.description } : {}),
+        ...(tool.inputSchema !== undefined
+          ? { inputSchema: tool.inputSchema }
+          : {}),
+        exact:
+          Boolean(args.toolName) ||
+          terms.some((term) => tool.name.toLowerCase() === term),
+      });
+    }
+  }
+  matches.sort((left, right) => Number(right.exact) - Number(left.exact));
+  return {
+    tools: matches.slice(0, limit).map(({ exact: _exact, ...tool }) => tool),
+    truncated: matches.length > limit,
+    unknownIntegration: false,
+  };
+}
 const saveMemoryArgsSchema = z.object({
   memory: z.string().trim().min(1).max(FAST_AGENT_MEMORY_FACT_MAX_CHARS),
 });
@@ -2105,6 +2187,9 @@ export async function answerFastAgentQuestion({
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
       FAST_AGENT_NATIVE_TOOL_NAMES.launchTask,
       FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+      // A catalog lookup reads nothing external; the call it prepares for is
+      // still gated on the acknowledgement.
+      FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools,
       `${ROOMOTE_MCP_ID}_${CHAT_REACTION_EMOJI_TOOL_NAME}`,
     ]);
     const authorizeToolStart = (toolId: string) =>
@@ -2289,6 +2374,75 @@ export async function answerFastAgentQuestion({
       }
     };
 
+    // Natively mounted servers are excluded from both the lookup and the
+    // call path: their tools are already exposed by name, and the subagent
+    // tool filter denies some of them, which the shared call path must not
+    // bypass.
+    const onDemandIntegrations = availableIntegrations.filter(
+      (integration) => !isFastAgentNativeIntegration(integration.id),
+    );
+    const nativeIntegrationError = (integrationId: string) => ({
+      success: false as const,
+      error: `The "${integrationId}" server is mounted natively; call its tools directly by their ${integrationId}_ prefixed names.`,
+    });
+    const describeIntegrationTools = (
+      args: z.infer<typeof findIntegrationToolsArgsSchema>,
+    ) => {
+      if (
+        args.integrationId &&
+        isFastAgentNativeIntegration(args.integrationId)
+      ) {
+        return nativeIntegrationError(args.integrationId);
+      }
+      const found = findFastAgentIntegrationTools(onDemandIntegrations, args);
+      if (found.unknownIntegration) {
+        return {
+          success: false as const,
+          error: `No on-demand deployment MCP server with id "${args.integrationId}" is available in fast mode.`,
+        };
+      }
+      return {
+        success: true as const,
+        tools: found.tools,
+        ...(found.truncated
+          ? {
+              guidance:
+                'More tools matched than were returned. Narrow the query or pass integrationId or toolName.',
+            }
+          : {}),
+      };
+    };
+    // Subagents may look up and call on-demand deployment MCP tools; every
+    // other Fast tool stays with the parent. Calls run through the parent's
+    // MCP executor, so gating, duplicate detection, and auditing are shared.
+    const executeSubagentNativeTool = async (
+      call: FastAgentNativeToolCall,
+    ): Promise<unknown> => {
+      try {
+        if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools) {
+          return describeIntegrationTools(
+            findIntegrationToolsArgsSchema.parse(call.args),
+          );
+        }
+        if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool) {
+          const args = callIntegrationToolArgsSchema.parse(call.args);
+          if (isFastAgentNativeIntegration(args.integrationId)) {
+            return nativeIntegrationError(args.integrationId);
+          }
+          return await executeMcpTool({
+            integrationId: args.integrationId,
+            toolName: args.toolName,
+            args: args.args ?? {},
+          });
+        }
+      } catch (error) {
+        return toolFailure(error);
+      }
+      return {
+        success: false,
+        error: 'That tool is reserved for the Fast parent agent.',
+      };
+    };
     const executeNativeToolInner = async (
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
@@ -2681,6 +2835,22 @@ export async function answerFastAgentQuestion({
             };
           }
 
+          case FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools: {
+            return describeIntegrationTools(
+              findIntegrationToolsArgsSchema.parse(call.args),
+            );
+          }
+          case FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool: {
+            const args = callIntegrationToolArgsSchema.parse(call.args);
+            if (isFastAgentNativeIntegration(args.integrationId)) {
+              return nativeIntegrationError(args.integrationId);
+            }
+            return executeMcpTool({
+              integrationId: args.integrationId,
+              toolName: args.toolName,
+              args: args.args ?? {},
+            });
+          }
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {
             ignoreEventArgsSchema.parse(call.args);
             if (platformEvent && platformEventVisibility === 'required') {
@@ -3034,12 +3204,7 @@ export async function answerFastAgentQuestion({
                           bindFastAgentNativeToolExecutor(
                             subagentSessionID,
                             session.id,
-                            () =>
-                              Promise.resolve({
-                                success: false,
-                                error:
-                                  'That tool is reserved for the Fast parent agent.',
-                              }),
+                            executeSubagentNativeTool,
                             {
                               allowSkillAccess: false,
                               allowSpillRecovery: false,

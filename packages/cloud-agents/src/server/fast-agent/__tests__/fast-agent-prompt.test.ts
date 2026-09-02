@@ -275,6 +275,34 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('lists on-demand servers by name with their tool names instead of mounting them', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      availableIntegrations: [
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Deployment access',
+          tools: [{ name: 'manage_tasks' }],
+        },
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Repository access',
+          tools: [{ name: 'search_code' }, { name: 'list_issues' }],
+        },
+      ],
+    });
+
+    expect(prompt).toContain('Roomote [tool prefix: roomote_]');
+    expect(prompt).toContain('### On-demand servers');
+    expect(prompt).toContain('#### GitHub [id: github]');
+    expect(prompt).toContain('Tools: search_code, list_issues');
+    expect(prompt).not.toContain('GitHub [tool prefix: github_]');
+    expect(prompt).toContain('`find_integration_tools`');
+    expect(prompt).toContain('`call_integration_tool`');
+  });
+
   it('includes shared memory guidance when a memory MCP is available', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

@@ -52,7 +52,10 @@ import {
   isRoomoteTaskSandboxHost,
   shouldOverrideFastProjectConfigForTaskSandbox,
 } from './fast-agent-runtime-context';
-import { buildFastAgentToolFilter } from './fast-agent-tool-policy';
+import {
+  buildFastAgentToolFilter,
+  isFastAgentNativeIntegration,
+} from './fast-agent-tool-policy';
 
 export {
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -368,6 +371,37 @@ export default {
     memory: z.string().min(1).describe("One self-contained fact a future conversation can act on without this conversation's context"),
   },
   execute: (args, context) => invoke("save_memory", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Look up on-demand deployment MCP tools by server, name, or keywords. Returns each match's server id, name, description, and input schema so it can be called with call_integration_tool.",
+  args: {
+    integrationId: z.string().min(1).optional().describe("Exact server id from Deployment MCP Servers to list that server's tools"),
+    toolName: z.string().min(1).optional().describe("Exact tool name to fetch one tool's schema"),
+    query: z.string().min(1).optional().describe("Keywords matched against tool names and descriptions"),
+    limit: z.number().int().positive().max(25).optional(),
+  },
+  execute: (args, context) => invoke("find_integration_tools", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Call an on-demand deployment MCP tool by server id and tool name with arguments matching the schema returned by find_integration_tools.",
+  args: {
+    integrationId: z.string().min(1).describe("Exact server id from Deployment MCP Servers"),
+    toolName: z.string().min(1).describe("Exact tool name on that server"),
+    args: z.record(z.string(), z.unknown()).optional().describe("Tool arguments matching the tool's input schema"),
+  },
+  execute: (args, context) => invoke("call_integration_tool", args, context),
 }
 `,
 
@@ -1269,6 +1303,13 @@ export async function getFastAgentNativeToolRuntime(
     revoked: false,
   });
   pruneSessionRuntimes();
+  // Only native servers are registered with OpenCode. On-demand servers stay
+  // reachable through the capability (find_integration_tools and
+  // call_integration_tool route to the same executor) without their schemas
+  // being sent on every model request.
+  const nativeIntegrations = integrations.filter((integration) =>
+    isFastAgentNativeIntegration(integration.id),
+  );
   writeFileSync(
     join(runtime.directory, 'opencode.json'),
     JSON.stringify({
@@ -1279,12 +1320,12 @@ export async function getFastAgentNativeToolRuntime(
       agent: {
         build: {
           tools: buildFastAgentToolFilter(
-            integrations.map((integration) => integration.id),
+            nativeIntegrations.map((integration) => integration.id),
           ),
         },
       },
       mcp: Object.fromEntries(
-        integrations.map((integration) => [
+        nativeIntegrations.map((integration) => [
           integration.id,
           {
             type: 'remote',

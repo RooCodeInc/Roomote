@@ -59,7 +59,9 @@ const mocks = vi.hoisted(() => ({
 const nativeToolNames = vi.hoisted(
   () =>
     ({
+      callIntegrationTool: 'call_integration_tool',
       cancelTask: 'cancel_task',
+      findIntegrationTools: 'find_integration_tools',
       ignoreEvent: 'ignore_event',
       launchTask: 'launch_task',
       retryTaskStart: 'retry_task_start',
@@ -2748,6 +2750,53 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           success: true,
           result: { matches: ['fast-agent.ts'] },
         });
+        // On-demand servers stay reachable to subagents through the two
+        // shared lookup and call tools.
+        await expect(
+          subagentExecutor({
+            agent: 'advisor',
+            name: nativeToolNames.findIntegrationTools,
+            args: { integrationId: 'github', toolName: 'search_code' },
+          }),
+        ).resolves.toEqual({
+          success: true,
+          tools: [
+            expect.objectContaining({
+              integrationId: 'github',
+              name: 'search_code',
+            }),
+          ],
+        });
+        await expect(
+          subagentExecutor({
+            agent: 'advisor',
+            name: nativeToolNames.callIntegrationTool,
+            args: {
+              integrationId: 'github',
+              toolName: 'search_code',
+              args: { query: 'Fast Agent advisor lazy' },
+            },
+          }),
+        ).resolves.toEqual({
+          success: true,
+          result: { matches: ['fast-agent.ts'] },
+        });
+        // The shared call path must not hand subagents parent-only member
+        // tools that the subagent tool filter denies.
+        await expect(
+          subagentExecutor({
+            agent: 'judge',
+            name: nativeToolNames.callIntegrationTool,
+            args: {
+              integrationId: 'roomote',
+              toolName: 'manage_custom_automations',
+              args: { action: 'list' },
+            },
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: expect.stringContaining('mounted natively'),
+        });
         await parentExecutor({
           name: nativeToolNames.sendChatReply,
           args: {
@@ -2762,7 +2811,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(
       answerFastAgentQuestion({ ...baseParams, adapter }),
     ).resolves.toBe('Subagent review completed.');
-    expect(mocks.callIntegration).toHaveBeenCalledTimes(2);
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(3);
     expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
       'conversation-1',
       expect.arrayContaining([
@@ -3433,6 +3482,127 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           nativeMessageId: 'native-message-1',
         }),
       }),
+    );
+  });
+
+  it('exposes on-demand integrations through find_integration_tools and call_integration_tool', async () => {
+    const inputSchema = {
+      type: 'object',
+      properties: { query: { type: 'string' } },
+      required: ['query'],
+    };
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Repository access',
+        tools: [
+          { name: 'search_code', description: 'Search code', inputSchema },
+          { name: 'list_issues', description: 'List issues', inputSchema },
+        ],
+      },
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Deployment access',
+        tools: [{ name: 'manage_custom_automations', inputSchema }],
+      },
+    ]);
+    const toolResults: unknown[] = [];
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        toolResults.push(
+          await invokeTool(nativeToolNames.findIntegrationTools, {
+            integrationId: 'github',
+            query: 'search',
+          }),
+        );
+        toolResults.push(
+          await invokeTool(nativeToolNames.findIntegrationTools, {
+            integrationId: 'missing',
+          }),
+        );
+        // Natively mounted servers are neither searchable nor callable here.
+        toolResults.push(
+          await invokeTool(nativeToolNames.findIntegrationTools, {
+            query: 'automations',
+          }),
+        );
+        toolResults.push(
+          await invokeTool(nativeToolNames.callIntegrationTool, {
+            integrationId: 'github',
+            toolName: 'search_code',
+            args: { query: 'fast agent' },
+          }),
+        );
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Looking.',
+        });
+        toolResults.push(
+          await invokeTool(nativeToolNames.callIntegrationTool, {
+            integrationId: 'roomote',
+            toolName: 'manage_custom_automations',
+            args: { action: 'list' },
+          }),
+        );
+        toolResults.push(
+          await invokeTool(nativeToolNames.callIntegrationTool, {
+            integrationId: 'github',
+            toolName: 'search_code',
+            args: { query: 'fast agent' },
+          }),
+        );
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Found it.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    // Lookups need no acknowledgement and return the schema to call with.
+    expect(toolResults[0]).toEqual({
+      success: true,
+      tools: [
+        {
+          integrationId: 'github',
+          name: 'search_code',
+          description: 'Search code',
+          inputSchema,
+        },
+      ],
+    });
+    expect(toolResults[1]).toEqual({
+      success: false,
+      error: expect.stringContaining('"missing"'),
+    });
+    expect(toolResults[2]).toEqual({ success: true, tools: [] });
+    // Calls follow the same gate as natively mounted MCP tools.
+    expect(toolResults[3]).toEqual({
+      success: false,
+      error: expect.stringContaining('acknowledgement'),
+    });
+    expect(toolResults[4]).toEqual({
+      success: false,
+      error: expect.stringContaining('mounted natively'),
+    });
+    expect(toolResults[5]).toEqual({
+      success: true,
+      result: { matches: ['fast-agent.ts'] },
+    });
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(1);
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'conversation-1' }),
+      expect.any(Array),
+      {
+        integrationId: 'github',
+        toolName: 'search_code',
+        args: { query: 'fast agent' },
+      },
     );
   });
 
