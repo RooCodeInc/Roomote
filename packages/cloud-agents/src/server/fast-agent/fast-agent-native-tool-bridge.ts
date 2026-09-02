@@ -388,7 +388,7 @@ export default {
     query: z.string().min(1).optional().describe(${JSON.stringify(FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS.query)}),
     limit: z.number().int().positive().max(${INTEGRATION_TOOL_LOOKUP_MAX_LIMIT}).optional().describe(${JSON.stringify(FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS.limit)}),
   },
-  execute: (args, context) => invoke("find_integration_tools", args, context),
+  execute: (args, context) => invoke(${JSON.stringify(FIND_INTEGRATION_TOOLS_TOOL.name)}, args, context),
 }
 `,
 
@@ -403,7 +403,7 @@ export default {
     toolName: z.string().min(1).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.toolName)}),
     args: z.record(z.string(), z.unknown()).optional().describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args)}),
   },
-  execute: (args, context) => invoke("call_integration_tool", args, context),
+  execute: (args, context) => invoke(${JSON.stringify(CALL_INTEGRATION_TOOL_TOOL.name)}, args, context),
 }
 `,
 
