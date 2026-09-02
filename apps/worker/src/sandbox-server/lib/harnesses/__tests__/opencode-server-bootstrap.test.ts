@@ -1507,174 +1507,6 @@ describe('opencode-server bootstrap', () => {
     expect(runtimeEnv).not.toHaveProperty('R_VISION_MODEL');
   });
 
-  it('configures a hidden proof-runner subagent when a proof browser target is provided', async () => {
-    const { prepareOpenCodeCommandEnv } =
-      await import('../opencode-server/bootstrap');
-
-    const homeDir = createTempHome();
-    const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
-      runtimeEnv: {
-        ...createDirectHarnessRuntimeEnv(homeDir),
-        ROOMOTE_PROOF_BROWSER_TARGET: 'http://localhost:3000/',
-      },
-      workspacePath: '/tmp/workspace',
-      logger: createLogger(),
-    });
-
-    const config = readRoomoteOpenCodeOverlay(runtimeEnv) as {
-      agent?: Record<string, unknown>;
-      instructions?: string[];
-    };
-    const proofRunnerInstructionsPath = path.join(
-      homeDir,
-      '.config',
-      'opencode',
-      'roomote-opencode-proof-runner-instructions.md',
-    );
-    const judgeModelInstructionsPath = path.join(
-      homeDir,
-      '.config',
-      'opencode',
-      'roomote-opencode-judge-model-instructions.md',
-    );
-    const advisorModelInstructionsPath = path.join(
-      homeDir,
-      '.config',
-      'opencode',
-      'roomote-opencode-advisor-model-instructions.md',
-    );
-    const proofRunnerAgent = config.agent?.['proof-runner'] as {
-      prompt?: string;
-    };
-
-    expect(config.agent?.['proof-runner']).toMatchObject({
-      description: expect.stringContaining('proof'),
-      mode: 'subagent',
-      hidden: true,
-      permission: {
-        bash: 'allow',
-        read: 'allow',
-        edit: 'deny',
-        task: 'deny',
-        skill: 'allow',
-      },
-      tools: {
-        ...slackPostingToolExclusions,
-        roomote_manage_source_control: false,
-        roomote_manage_tasks: false,
-        roomote_manage_environments: false,
-      },
-    });
-    const proofRunnerTools = (
-      config.agent?.['proof-runner'] as { tools?: Record<string, boolean> }
-    ).tools;
-    expect(proofRunnerTools).not.toHaveProperty('roomote_manage_artifacts');
-    expect(Object.values(proofRunnerTools ?? {})).not.toContain(true);
-    expect(proofRunnerAgent.prompt).toContain(
-      'Browser target: http://localhost:3000/',
-    );
-    expect(proofRunnerAgent.prompt).toContain('manage_artifacts');
-    expect(proofRunnerAgent.prompt).toContain('agent-browser');
-    expect(proofRunnerAgent.prompt).toContain(
-      'explicitly load the `agent-browser` skill',
-    );
-    expect(proofRunnerAgent.prompt).toContain(
-      'agent-browser skills get core --full',
-    );
-    expect(proofRunnerAgent.prompt).toContain(
-      'not an OpenCode tool or MCP tool',
-    );
-    expect(config.instructions).toEqual([
-      judgeModelInstructionsPath,
-      advisorModelInstructionsPath,
-      proofRunnerInstructionsPath,
-    ]);
-    expect(fs.readFileSync(proofRunnerInstructionsPath, 'utf8')).toContain(
-      'proof-runner',
-    );
-    expect(fs.readFileSync(proofRunnerInstructionsPath, 'utf8')).toContain(
-      'http://localhost:3000/',
-    );
-    expect(runtimeEnv).not.toHaveProperty('ROOMOTE_PROOF_BROWSER_TARGET');
-  });
-
-  it('does not add a proof-runner subagent when no proof browser target is provided', async () => {
-    const { prepareOpenCodeCommandEnv } =
-      await import('../opencode-server/bootstrap');
-
-    const homeDir = createTempHome();
-
-    const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
-      runtimeEnv: createDirectHarnessRuntimeEnv(homeDir),
-      workspacePath: '/tmp/workspace',
-      logger: createLogger(),
-    });
-
-    const config = readRoomoteOpenCodeOverlay(runtimeEnv) as {
-      agent?: Record<string, unknown>;
-      instructions?: string[];
-    };
-    const proofRunnerInstructionsPath = path.join(
-      homeDir,
-      '.config',
-      'opencode',
-      'roomote-opencode-proof-runner-instructions.md',
-    );
-
-    expect(config.agent).toEqual({
-      judge: expect.objectContaining({ model: 'test-provider/main-model' }),
-      advisor: expect.objectContaining({ model: 'test-provider/main-model' }),
-      architect: expect.objectContaining({ mode: 'primary' }),
-      general: { tools: slackPostingToolExclusions },
-    });
-    expect(config.instructions).toEqual([
-      path.join(
-        homeDir,
-        '.config',
-        'opencode',
-        'roomote-opencode-judge-model-instructions.md',
-      ),
-      path.join(
-        homeDir,
-        '.config',
-        'opencode',
-        'roomote-opencode-advisor-model-instructions.md',
-      ),
-    ]);
-    expect(fs.existsSync(proofRunnerInstructionsPath)).toBe(false);
-    expect(runtimeEnv).not.toHaveProperty('ROOMOTE_PROOF_BROWSER_TARGET');
-  });
-
-  it('registers both the visual and proof-runner subagents together', async () => {
-    const { prepareOpenCodeCommandEnv } =
-      await import('../opencode-server/bootstrap');
-
-    const homeDir = createTempHome();
-
-    const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
-      runtimeEnv: {
-        ...createDirectHarnessRuntimeEnv(homeDir),
-        R_VISION_MODEL: 'test-provider/vision-model',
-        ROOMOTE_PROOF_BROWSER_TARGET: 'http://localhost:3000/',
-      },
-      workspacePath: '/tmp/workspace',
-      logger: createLogger(),
-    });
-
-    const config = readRoomoteOpenCodeOverlay(runtimeEnv) as {
-      agent?: Record<string, unknown>;
-      instructions?: string[];
-    };
-
-    expect(config.agent?.visual).toMatchObject({ mode: 'subagent' });
-    expect(config.agent?.judge).toMatchObject({ mode: 'subagent' });
-    expect(config.agent?.advisor).toMatchObject({ mode: 'subagent' });
-    expect(config.agent?.['proof-runner']).toMatchObject({
-      mode: 'subagent',
-    });
-    expect(config.instructions).toHaveLength(4);
-  });
-
   it('excludes the Slack-posting tools from every generated subagent and the built-in general agent', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
@@ -1686,7 +1518,6 @@ describe('opencode-server bootstrap', () => {
         ...createDirectHarnessRuntimeEnv(homeDir),
         R_VISION_MODEL: 'test-provider/vision-model',
         R_EXPLORE_MODEL: 'test-provider/explore-model',
-        ROOMOTE_PROOF_BROWSER_TARGET: 'http://localhost:3000/',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
@@ -1701,7 +1532,6 @@ describe('opencode-server bootstrap', () => {
       'judge',
       'advisor',
       'explore',
-      'proof-runner',
       'general',
     ]) {
       expect(config.agent?.[agentName]?.tools, agentName).toMatchObject(

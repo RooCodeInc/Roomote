@@ -921,13 +921,12 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(config.agent.judge?.model).toBe('openrouter/openai/gpt-5.6-terra');
   });
 
-  it('isolates visual and proof agents from unrelated MCP tool schemas', () => {
+  it('isolates the visual agent from unrelated MCP tool schemas', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
         R_MODEL: 'openrouter/openai/gpt-5.6-terra',
         R_VISION_MODEL: 'openrouter/google/gemini-3.6-flash',
-        ROOMOTE_PROOF_BROWSER_TARGET: 'http://127.0.0.1:3000',
         OPENROUTER_API_KEY: 'openrouter-key',
       },
       mcpServers: [
@@ -971,15 +970,6 @@ describe('generateOpenCodeConfig provider support', () => {
       );
     }
 
-    expect(config.agent['proof-runner']?.tools).toMatchObject({
-      'pylon_*': false,
-      'custom-tools_*': false,
-      roomote_manage_source_control: false,
-    });
-    expect(config.agent['proof-runner']?.tools).not.toHaveProperty('roomote_*');
-    expect(config.agent['proof-runner']?.tools).not.toHaveProperty(
-      'roomote_manage_artifacts',
-    );
     expect(config.agent.general?.tools).not.toHaveProperty('pylon_*');
     expect(config.agent.architect?.tools).toBeUndefined();
   });
@@ -989,7 +979,6 @@ describe('generateOpenCodeConfig provider support', () => {
     const runtimeEnv = {
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',
       OPENROUTER_API_KEY: 'openrouter-key',
-      ROOMOTE_PROOF_BROWSER_TARGET: 'http://127.0.0.1:3000',
       ROOMOTE_MCP_PYLON_BEARER_TOKEN: 'run-token',
     };
     const result = generateOpenCodeConfig({
@@ -1059,14 +1048,6 @@ describe('generateOpenCodeConfig provider support', () => {
     });
     expect(statSync(catalogPath).mode & 0o777).toBe(0o600);
     expect(result.configContent).not.toContain('run-token');
-
-    // Agents kept off the integration's mounted tools cannot reach it through
-    // the on-demand tools either; the proof runner keeps its other member tools.
-    expect(config.agent['proof-runner']?.tools).toMatchObject({
-      'pylon_*': false,
-      roomote_find_integration_tools: false,
-      roomote_call_integration_tool: false,
-    });
 
     const integrationInstructions = readFileSync(
       config.instructions.find((entry) => entry.includes('integration'))!,
