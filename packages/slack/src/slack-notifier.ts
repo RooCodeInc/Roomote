@@ -1300,6 +1300,77 @@ export class SlackNotifier {
    * Uses conversations.replies to find thread replies (the started message
    * is always posted as a thread reply with thread_ts).
    */
+  /**
+   * Message streaming (`chat.startStream` / `appendStream` / `stopStream`):
+   * one reply that renders as it is written. Every method reports failure
+   * instead of throwing so a caller can fall back to a normal post.
+   */
+  public async startMessageStream(params: {
+    channel: string;
+    threadTs: string;
+    recipientTeamId: string;
+    recipientUserId: string;
+    markdownText: string;
+  }): Promise<string | null> {
+    try {
+      const response = await this.getClient().chat.startStream({
+        channel: params.channel,
+        thread_ts: params.threadTs,
+        recipient_team_id: params.recipientTeamId,
+        recipient_user_id: params.recipientUserId,
+        markdown_text: params.markdownText,
+      });
+      return response.ok && typeof response.ts === 'string'
+        ? response.ts
+        : null;
+    } catch (error) {
+      console.error(
+        `[startMessageStream] Slack chat.startStream failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  public async appendMessageStream(params: {
+    channel: string;
+    ts: string;
+    markdownText: string;
+  }): Promise<boolean> {
+    try {
+      const response = await this.getClient().chat.appendStream({
+        channel: params.channel,
+        ts: params.ts,
+        markdown_text: params.markdownText,
+      });
+      return response.ok === true;
+    } catch (error) {
+      console.error(
+        `[appendMessageStream] Slack chat.appendStream failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  }
+
+  public async stopMessageStream(params: {
+    channel: string;
+    ts: string;
+    markdownText?: string;
+  }): Promise<boolean> {
+    try {
+      const response = await this.getClient().chat.stopStream({
+        channel: params.channel,
+        ts: params.ts,
+        ...(params.markdownText ? { markdown_text: params.markdownText } : {}),
+      });
+      return response.ok === true;
+    } catch (error) {
+      console.error(
+        `[stopMessageStream] Slack chat.stopStream failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  }
+
   public async getMessageBlocks({
     channel,
     messageTs,

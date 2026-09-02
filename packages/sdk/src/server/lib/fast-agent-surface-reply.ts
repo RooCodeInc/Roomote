@@ -26,6 +26,8 @@ import {
 } from '@roomote/slack';
 
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
+import { createSlackFastReplyStream } from './fast-agent-slack-reply-stream';
+import { findSlackConversationSubjectByUserId } from './slack-conversation-log';
 import {
   createFastAgentCommunicationTaskLauncher,
   createFastAgentDiscordTaskLauncher,
@@ -230,10 +232,36 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           senderDisplayName: params.senderDisplayName,
           text: params.question,
         });
+    // Streaming a reply outside a DM needs the Slack user it is addressed
+    // to; a sender without a linked Slack account gets whole replies.
+    const senderSubject = await findSlackConversationSubjectByUserId({
+      userId: params.userId,
+      slackTeamId: conversation.workspaceId,
+    }).catch(() => null);
 
     return {
       conversation,
       adapter: {
+        ...(senderSubject
+          ? {
+              createReplyStream: () =>
+                createSlackFastReplyStream({
+                  slack,
+                  conversation,
+                  channelId: conversation.replyTarget.channelId,
+                  threadTs: threadId,
+                  recipientTeamId: conversation.workspaceId,
+                  recipientUserId: senderSubject.subjectSlackUserId,
+                  sessionId: session.id,
+                  footerContext,
+                  takeQuote: () => {
+                    const quote = pendingQuote;
+                    pendingQuote = null;
+                    return quote;
+                  },
+                }),
+            }
+          : {}),
         activity: createFastAgentSlackSessionActivity({
           slack,
           workspaceId: conversation.workspaceId,

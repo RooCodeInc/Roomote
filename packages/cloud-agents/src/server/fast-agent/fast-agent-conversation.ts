@@ -82,6 +82,19 @@ export type FastAgentReplyHandle = {
   messageId: string;
 };
 
+/**
+ * A reply rendered on its surface while the model is still writing it.
+ * `append` opens the stream on first use and extends it afterwards;
+ * `finish` ends it with the delivered reply and returns the message, or
+ * nothing when the stream never opened so the caller posts normally;
+ * `abort` ends it without a reply, leaving what was streamed.
+ */
+export type FastAgentReplyStream = {
+  append: (text: string) => Promise<void>;
+  finish: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | undefined>;
+  abort: () => Promise<void>;
+};
+
 export type FastAgentReaction = {
   name: string;
   purpose: 'ack' | 'closeout';
@@ -160,6 +173,8 @@ export type FastAgentTurnAdapter = {
    */
   assertTaskLaunch?: () => Promise<void>;
   postReply: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | void>;
+  /** Surfaces with a streaming API render the reply as it is written. */
+  createReplyStream?: () => FastAgentReplyStream;
   replaceReply?: (
     handle: FastAgentReplyHandle,
     reply: FastAgentReply,

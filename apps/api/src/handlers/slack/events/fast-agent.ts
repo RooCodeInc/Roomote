@@ -28,6 +28,7 @@ import {
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
   type FastAgentDurableTurn,
+  createSlackFastReplyStream,
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
 } from '@roomote/sdk/server';
@@ -366,6 +367,24 @@ export async function processFastAgentMessage(params: {
             includeRoomoteMemberTools: true,
           }),
         launchTask,
+        ...(event.user
+          ? {
+              createReplyStream: () =>
+                createSlackFastReplyStream({
+                  slack,
+                  conversation,
+                  channelId: event.channel,
+                  threadTs: threadId,
+                  recipientTeamId: teamId,
+                  recipientUserId: event.user,
+                  sessionId: session.id,
+                  footerContext,
+                  onDelivered: () => {
+                    didSendVisibleResponse = true;
+                  },
+                }),
+            }
+          : {}),
         postReply: async ({ message, kickoff }) => {
           const posted = await postSlackThreadMarkdownMessage({
             slack,
