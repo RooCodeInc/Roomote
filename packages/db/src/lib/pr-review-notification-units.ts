@@ -6,10 +6,10 @@ import {
   eq,
   gt,
   inArray,
+  isNotNull,
   isNull,
   lte,
   ne,
-  or,
   sql,
 } from 'drizzle-orm';
 
@@ -1528,10 +1528,11 @@ export async function retireCanonicalPrReviewActionsForPullRequest(input: {
         ),
         eq(prReviewNotificationUnits.repository, input.repository),
         eq(prReviewNotificationUnits.prNumber, input.prNumber),
-        or(
-          isNull(prReviewNotificationUnits.headSha),
-          ne(prReviewNotificationUnits.headSha, input.currentHeadSha),
-        ),
+        // Units without a recorded head (PR-conversation comments, summaries
+        // whose marker sha could not be parsed) cannot be proven stale, so
+        // they are left alone rather than retired on every push.
+        isNotNull(prReviewNotificationUnits.headSha),
+        ne(prReviewNotificationUnits.headSha, input.currentHeadSha),
       ),
     );
   const rows = await db.transaction(async (tx) => {
@@ -1547,10 +1548,12 @@ export async function retireCanonicalPrReviewActionsForPullRequest(input: {
       })
       .where(
         and(
+          // Only offers whose controls are posted (or being posted) are
+          // superseded. Deliveries that have not posted yet still carry the
+          // reviewer's text and are head-filtered at prepare time instead, and
+          // text-only routes hold no posting fence that could stop a stale
+          // post if their lease were revoked here.
           inArray(prReviewNotificationDeliveries.status, [
-            'pending',
-            'claimed',
-            'prepared',
             'prompt_posting',
             'awaiting_user_action',
           ]),
@@ -1560,10 +1563,16 @@ export async function retireCanonicalPrReviewActionsForPullRequest(input: {
           ),
         ),
       )
-      .returning({ id: prReviewNotificationDeliveries.id });
+      .returning({
+        id: prReviewNotificationDeliveries.id,
+        taskId: prReviewNotificationDeliveries.taskId,
+      });
 
     if (retired.length > 0) {
       const deliveryIds = retired.map(({ id }) => id);
+      const taskIds = [
+        ...new Set(retired.flatMap(({ taskId }) => (taskId ? [taskId] : []))),
+      ];
       await tx
         .update(fastAgentMessages)
         .set({
@@ -1576,17 +1585,24 @@ export async function retireCanonicalPrReviewActionsForPullRequest(input: {
             deliveryIds,
           ),
         );
-      await tx
-        .update(taskMessages)
-        .set({
-          payload: sql`jsonb_set(coalesce(${taskMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb('dismissed'::text), true)`,
-        })
-        .where(
-          inArray(
-            sql<string>`${taskMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
-            deliveryIds,
-          ),
-        );
+      if (taskIds.length > 0) {
+        // Scope by task so the update uses task_messages_task_id_ts_idx
+        // instead of scanning every transcript row for the payload match.
+        await tx
+          .update(taskMessages)
+          .set({
+            payload: sql`jsonb_set(coalesce(${taskMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb('dismissed'::text), true)`,
+          })
+          .where(
+            and(
+              inArray(taskMessages.taskId, taskIds),
+              inArray(
+                sql<string>`${taskMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
+                deliveryIds,
+              ),
+            ),
+          );
+      }
     }
 
     return retired;

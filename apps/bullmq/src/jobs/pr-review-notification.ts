@@ -7,6 +7,7 @@ import {
   db,
   desc,
   eq,
+  getCanonicalPrReviewAction,
   slackInstallations,
   taskPullRequests,
   taskRuns,
@@ -218,6 +219,23 @@ function getPersistedButtonRoute(
     channelId: data.routeChannelId,
     threadId: data.routeThreadId ?? null,
   };
+}
+
+/**
+ * A lost publish fence means another actor moved the delivery out of
+ * `prompt_posting`. Only flip the transcript card to dismissed when the
+ * delivery really was superseded; an expired lease re-claimed by another
+ * worker leaves the same delivery id live, and that worker's card must stay
+ * actionable.
+ */
+async function dismissWebOfferIfSuperseded(
+  deliveryId: string,
+  dismiss: () => Promise<void>,
+): Promise<void> {
+  const action = await getCanonicalPrReviewAction(deliveryId);
+  if (action?.status === 'dismissed') {
+    await dismiss();
+  }
 }
 
 async function postPrReviewNotification({
@@ -778,10 +796,12 @@ export const prReviewNotificationJob = async (
           { leaseToken: data.leaseToken },
         );
       if (!attached) {
-        await updateFastAgentPrReviewOfferStatus({
-          deliveryIds: [webReviewActionDeliveryId],
-          status: 'dismissed',
-        });
+        await dismissWebOfferIfSuperseded(webReviewActionDeliveryId, () =>
+          updateFastAgentPrReviewOfferStatus({
+            deliveryIds: [webReviewActionDeliveryId],
+            status: 'dismissed',
+          }),
+        );
         throw new Error(
           'Canonical Fast web review offer lost its publish fence',
         );
@@ -905,17 +925,20 @@ ${delivery.text}`;
               'Canonical Fast web review fallback was not delivered',
             );
           }
+          const fallbackDeliveryId = data.deliveryId;
           const { attached } =
             await attachPendingPrReviewActionMessageWithRetirement(
-              data.deliveryId,
-              data.deliveryId,
+              fallbackDeliveryId,
+              fallbackDeliveryId,
               { leaseToken: data.leaseToken },
             );
           if (!attached) {
-            await updateFastAgentPrReviewOfferStatus({
-              deliveryIds: [data.deliveryId],
-              status: 'dismissed',
-            });
+            await dismissWebOfferIfSuperseded(fallbackDeliveryId, () =>
+              updateFastAgentPrReviewOfferStatus({
+                deliveryIds: [fallbackDeliveryId],
+                status: 'dismissed',
+              }),
+            );
             throw new Error(
               'Canonical Fast web review fallback lost its publish fence',
             );
@@ -1067,11 +1090,13 @@ ${delivery.text}`;
           { leaseToken: data.leaseToken },
         );
       if (!attached) {
-        await updateTaskPrReviewOfferStatus({
-          taskId: data.taskId,
-          deliveryIds: [taskReviewActionDeliveryId],
-          status: 'dismissed',
-        });
+        await dismissWebOfferIfSuperseded(taskReviewActionDeliveryId, () =>
+          updateTaskPrReviewOfferStatus({
+            taskId: data.taskId,
+            deliveryIds: [taskReviewActionDeliveryId],
+            status: 'dismissed',
+          }),
+        );
         throw new Error(
           'Canonical web task review offer lost its publish fence',
         );

@@ -21,6 +21,7 @@ const {
   mockQueuePrReviewSummaryNotification,
   mockQueuePrCiFailureNotification,
   mockRetirePendingPrReviewActionsForPullRequest,
+  mockGetCurrentGitHubPrHeadSha,
   mockRecordWebhook,
   mockResolveConfiguredGitHubAppSlug,
   mockResolveGitHubRoomoteMentionEnabled,
@@ -60,6 +61,7 @@ const {
   mockQueuePrReviewSummaryNotification: vi.fn(),
   mockQueuePrCiFailureNotification: vi.fn(),
   mockRetirePendingPrReviewActionsForPullRequest: vi.fn(),
+  mockGetCurrentGitHubPrHeadSha: vi.fn(),
   mockRecordWebhook: vi.fn(),
   mockResolveConfiguredGitHubAppSlug: vi.fn(),
   mockResolveGitHubRoomoteMentionEnabled: vi.fn(),
@@ -179,6 +181,10 @@ vi.mock('../handlePrSynchronize', () => ({
   handlePrSynchronize: mockHandlePrSynchronize,
 }));
 
+vi.mock('../currentPrHead', () => ({
+  getCurrentGitHubPrHeadSha: mockGetCurrentGitHubPrHeadSha,
+}));
+
 vi.mock('../handlePushConflictCheck', () => ({
   handlePushConflictCheck: mockHandlePushConflictCheck,
 }));
@@ -262,6 +268,7 @@ describe('github webhook router', () => {
     mockQueuePrReviewSummaryNotification.mockReset();
     mockQueuePrCiFailureNotification.mockReset();
     mockRetirePendingPrReviewActionsForPullRequest.mockReset();
+    mockGetCurrentGitHubPrHeadSha.mockReset();
     mockRecordWebhook.mockReset();
     mockResolveConfiguredGitHubAppSlug.mockReset();
     mockResolveGitHubRoomoteMentionEnabled.mockReset();
@@ -285,6 +292,8 @@ describe('github webhook router', () => {
     mockHandleGitHubIssueFixer.mockResolvedValue({ status: 'ok' });
     mockHandlePushConflictCheck.mockResolvedValue({ status: 'ok' });
     mockHandlePrSynchronize.mockResolvedValue({ status: 'ok' });
+    mockGetCurrentGitHubPrHeadSha.mockResolvedValue('live-head');
+    mockRetirePendingPrReviewActionsForPullRequest.mockResolvedValue(undefined);
     mockHandleMergeAnnouncerPush.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
       async (
@@ -661,7 +670,7 @@ describe('github webhook router', () => {
     ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
   });
 
-  it('retires pending review actions before handling a synchronized PR', async () => {
+  it('retires review actions for older heads using the live PR head on synchronize', async () => {
     const payload = makePullRequestPayload('synchronize');
 
     const response = await app.request('http://localhost/api/webhooks/github', {
@@ -675,18 +684,70 @@ describe('github webhook router', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(mockRetirePendingPrReviewActionsForPullRequest).toHaveBeenCalledWith(
-      {
+    expect(mockHandlePrSynchronize).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(
+        mockRetirePendingPrReviewActionsForPullRequest,
+      ).toHaveBeenCalledWith({
         sourceControlProvider: 'github',
         repository: 'test-org/test-repo',
         prNumber: 42,
-        currentHeadSha: 'new-head',
+        currentHeadSha: 'live-head',
+      });
+    });
+    expect(mockGetCurrentGitHubPrHeadSha).toHaveBeenCalledWith({
+      installationId: 1,
+      repository: 'test-org/test-repo',
+      prNumber: 42,
+    });
+  });
+
+  it('skips retiring review actions when the live PR head cannot be resolved', async () => {
+    mockGetCurrentGitHubPrHeadSha.mockResolvedValue(null);
+    const payload = makePullRequestPayload('synchronize');
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-sync-2',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
       },
-    );
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandlePrSynchronize).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(mockGetCurrentGitHubPrHeadSha).toHaveBeenCalledTimes(1);
+    });
     expect(
-      mockRetirePendingPrReviewActionsForPullRequest.mock
-        .invocationCallOrder[0],
-    ).toBeLessThan(mockHandlePrSynchronize.mock.invocationCallOrder[0]!);
+      mockRetirePendingPrReviewActionsForPullRequest,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('still handles a synchronized PR when retiring review actions fails', async () => {
+    mockRetirePendingPrReviewActionsForPullRequest.mockRejectedValue(
+      new Error('db unavailable'),
+    );
+    const payload = makePullRequestPayload('synchronize');
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-sync-3',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandlePrSynchronize).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(mockRetirePendingPrReviewActionsForPullRequest).toHaveBeenCalled();
+    });
+    expect(mockRecordWebhook).toHaveBeenCalledTimes(1);
   });
 
   it('routes plain issue comments through handleGitHubIssueComment', async () => {

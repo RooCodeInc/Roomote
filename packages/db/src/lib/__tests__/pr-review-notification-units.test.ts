@@ -1351,7 +1351,7 @@ describe('canonical PR review notification ownership', () => {
   });
 
   it.each(['claimed', 'prepared'] as const)(
-    'fences an older-head offer in the %s state',
+    'leaves an older-head delivery that has not posted yet in the %s state',
     async (state) => {
       const task = await taskFactory.create();
       const repository = `owner/${state}-new-commit-${task.id}`;
@@ -1379,16 +1379,16 @@ describe('canonical PR review notification ownership', () => {
         });
       }
 
-      await retireCanonicalPrReviewActionsForPullRequest({
-        sourceControlProvider: 'github',
-        repository,
-        prNumber: 26,
-        currentHeadSha: 'new-head',
-      });
+      await expect(
+        retireCanonicalPrReviewActionsForPullRequest({
+          sourceControlProvider: 'github',
+          repository,
+          prNumber: 26,
+          currentHeadSha: 'new-head',
+        }),
+      ).resolves.toEqual([]);
 
-      await expect(deliveryStatusOf(claim.deliveryId)).resolves.toBe(
-        'dismissed',
-      );
+      await expect(deliveryStatusOf(claim.deliveryId)).resolves.toBe(state);
       await expect(
         transitionCanonicalPrReviewDelivery({
           deliveryId: claim.deliveryId,
@@ -1396,9 +1396,74 @@ describe('canonical PR review notification ownership', () => {
           expected: state,
           status: state === 'claimed' ? 'prepared' : 'prompt_posting',
         }),
-      ).resolves.toBe(false);
+      ).resolves.toBe(true);
     },
   );
+
+  it('leaves a pending older-head delivery for the reviewer text to be delivered', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/pending-new-commit-${task.id}`;
+    await associate(task.id, repository, 27);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 27,
+        eventKey: `pending-old-head-${task.id}`,
+        headSha: 'old-head',
+      }),
+    );
+    const [delivery] = await db
+      .select({ id: prReviewNotificationDeliveries.id })
+      .from(prReviewNotificationDeliveries)
+      .innerJoin(
+        prReviewNotificationUnits,
+        eq(
+          prReviewNotificationUnits.id,
+          prReviewNotificationDeliveries.notificationUnitId,
+        ),
+      )
+      .where(eq(prReviewNotificationUnits.repository, repository));
+    if (!delivery) throw new Error('expected a pending delivery');
+
+    await expect(
+      retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 27,
+        currentHeadSha: 'new-head',
+      }),
+    ).resolves.toEqual([]);
+    await expect(deliveryStatusOf(delivery.id)).resolves.toBe('pending');
+    await expect(claimForRepository(repository)).resolves.toEqual([
+      expect.objectContaining({ deliveryId: delivery.id }),
+    ]);
+  });
+
+  it('leaves an awaiting offer whose unit has no recorded head', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/headless-new-commit-${task.id}`;
+    await associate(task.id, repository, 28);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 28,
+        eventKey: `headless-${task.id}`,
+      }),
+    );
+    const deliveryId = await postAction(repository);
+
+    await expect(
+      retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 28,
+        currentHeadSha: 'new-head',
+      }),
+    ).resolves.toEqual([]);
+    await expect(deliveryStatusOf(deliveryId)).resolves.toBe(
+      'awaiting_user_action',
+    );
+  });
 
   it('keeps exactly one awaiting offer when two actions attach concurrently', async () => {
     const sessionConversation = `supersede-race-${randomUUID()}`;

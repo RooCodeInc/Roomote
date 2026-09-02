@@ -33,6 +33,7 @@ const {
   mockRenewLease,
   mockUpdateFastAgentPrReviewOfferStatus,
   mockUpdateTaskPrReviewOfferStatus,
+  mockGetCanonicalPrReviewAction,
   mockEq,
   MockPrReviewNotificationRateLimitError,
 } = vi.hoisted(() => ({
@@ -68,6 +69,7 @@ const {
   mockRenewLease: vi.fn(),
   mockUpdateFastAgentPrReviewOfferStatus: vi.fn(),
   mockUpdateTaskPrReviewOfferStatus: vi.fn(),
+  mockGetCanonicalPrReviewAction: vi.fn(),
   mockEq: vi.fn((...args: unknown[]) => ({ eq: args })),
   MockPrReviewNotificationRateLimitError: class extends Error {
     constructor(readonly retryAfterMs: number) {
@@ -95,6 +97,8 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn(() => 'and-condition'),
   eq: mockEq,
   desc: vi.fn(() => 'desc-order'),
+  getCanonicalPrReviewAction: (...args: unknown[]) =>
+    mockGetCanonicalPrReviewAction(...args),
   taskRuns: { taskId: 'taskId', createdAt: 'createdAt' },
   taskPullRequests: {
     taskId: 'taskId',
@@ -294,6 +298,7 @@ describe('prReviewNotificationJob', () => {
     mockRetirePrReviewActionMessages.mockResolvedValue(undefined);
     mockUpdateFastAgentPrReviewOfferStatus.mockResolvedValue(undefined);
     mockUpdateTaskPrReviewOfferStatus.mockResolvedValue(undefined);
+    mockGetCanonicalPrReviewAction.mockResolvedValue({ status: 'dismissed' });
     mockFindAutoHandlePrReviewFeedbackPreference.mockResolvedValue(null);
     mockStickyFooterPost.mockResolvedValue('999.888');
     mockPostMessage.mockResolvedValue({
@@ -1633,6 +1638,38 @@ describe('prReviewNotificationJob', () => {
       deliveryIds: [deliveryId],
       status: 'dismissed',
     });
+  });
+
+  it('keeps a web offer live when its publish fence was re-leased rather than superseded', async () => {
+    const deliveryId = '11111111-1111-4111-8111-111111111112';
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: null,
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Would you like me to resolve these issues?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockAttachPendingPrReviewActionMessage.mockResolvedValue({
+      attached: false,
+      superseded: [],
+    });
+    mockGetCanonicalPrReviewAction.mockResolvedValue({
+      status: 'awaiting_user_action',
+    });
+
+    await expect(
+      prReviewNotificationJob(
+        makeJob({
+          ownershipVersion: 'canonical',
+          deliveryId,
+          deliveryState: 'claimed',
+          deliveryIds: [deliveryId],
+          leaseToken: '22222222-2222-4222-8222-222222222223',
+        }) as never,
+      ),
+    ).rejects.toThrow('Canonical web task review offer lost its publish fence');
+    expect(mockGetCanonicalPrReviewAction).toHaveBeenCalledWith(deliveryId);
+    expect(mockUpdateTaskPrReviewOfferStatus).not.toHaveBeenCalled();
   });
 
   it('skips without posting when the notification is not worth sending', async () => {
