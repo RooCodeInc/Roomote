@@ -53,7 +53,7 @@ describe('Capture visual proof skill', () => {
     // The snapshot must cover committed work too: fix-pr commits and pushes
     // before this step, so `git diff HEAD` alone would be empty there.
     expect(skillContent).toContain(
-      'git diff "$(git merge-base HEAD origin/HEAD 2>/dev/null || echo HEAD~1)" > /tmp/capture-visual-proof/diff-at-start.patch',
+      'git diff "$(git merge-base HEAD origin/HEAD 2>/dev/null || git rev-parse --verify -q HEAD~1 || git hash-object -t tree /dev/null)" > /tmp/capture-visual-proof/diff-at-start.patch',
     );
     expect(skillContent).toContain('Do not snapshot only `git diff HEAD`');
     // Untracked files must be captured by content, not as a path list, or a
