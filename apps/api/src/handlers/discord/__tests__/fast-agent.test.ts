@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   startTask: vi.fn(),
   recordProviderMessage: vi.fn(),
   admitHumanFollowUp: vi.fn(),
+  persistInlineHumanTurn: vi.fn(),
+  wakeParentEventAt: vi.fn(),
+  wakeParentEventNow: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -36,8 +39,9 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
-  persistFastAgentInlineHumanTurn: vi.fn(async () => null),
-  wakeFastAgentParentEventNow: vi.fn(async () => undefined),
+  persistFastAgentInlineHumanTurn: mocks.persistInlineHumanTurn,
+  wakeFastAgentParentEventAt: mocks.wakeParentEventAt,
+  wakeFastAgentParentEventNow: mocks.wakeParentEventNow,
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
@@ -106,11 +110,22 @@ describe('getDiscordFastLaunchSourceEventId', () => {
 describe('processDiscordFastAgentMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    const turnLock = mocks.releaseLock as typeof mocks.releaseLock & {
+      signal?: AbortSignal;
+      durableRowId?: string;
+      durableResume?: () => Promise<void>;
+    };
+    delete turnLock.signal;
+    delete turnLock.durableRowId;
+    delete turnLock.durableResume;
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
     mocks.admitHumanFollowUp.mockResolvedValue({
       kind: 'turn',
       turnLock: mocks.releaseLock,
     });
+    mocks.persistInlineHumanTurn.mockResolvedValue(null);
+    mocks.wakeParentEventAt.mockResolvedValue(undefined);
+    mocks.wakeParentEventNow.mockResolvedValue(undefined);
     mocks.releaseLock.mockResolvedValue(undefined);
     mocks.fetchHistory.mockResolvedValue([]);
     mocks.getMessage.mockReturnValue({ id: 'source-1' });
@@ -164,6 +179,80 @@ describe('processDiscordFastAgentMessage', () => {
     );
     expect(onAccepted).toHaveBeenCalledWith(abort);
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it('carries a durably admitted Discord turn into scheduled inference retry recovery', async () => {
+    const retryAt = new Date(Date.now() + 45_000);
+    const lockSignal = new AbortController().signal;
+    const turnLock = mocks.releaseLock as typeof mocks.releaseLock & {
+      signal: AbortSignal;
+      durableRowId?: string;
+      durableResume?: () => Promise<void>;
+    };
+    Object.assign(turnLock, { signal: lockSignal });
+    mocks.persistInlineHumanTurn.mockResolvedValueOnce({
+      id: 'durable-row-1',
+      eventKey: 'event-key-1',
+    });
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { requestDurableRetry: (at: Date) => Promise<void> };
+      }) => {
+        await adapter.requestDurableRetry(retryAt);
+        return '';
+      },
+    );
+
+    await expect(
+      processDiscordFastAgentMessage({
+        eventId: 'event-2',
+        question: 'Investigate the provider outage',
+        sender: { id: 'discord-user-1', username: 'Matt' },
+        senderUserId: 'user-1',
+        provider: {} as never,
+        applicationId: 'app-1',
+        channel: {
+          channelId: 'dm-1',
+          channelType: 1,
+          isDirectMessage: true,
+          isThread: false,
+        } as never,
+        metadata: { communicationChannelId: 'dm-1' } as never,
+        conversationId: 'dm-1',
+      }),
+    ).resolves.toBe(true);
+
+    expect(mocks.persistInlineHumanTurn).toHaveBeenCalledWith({
+      parent: {
+        sessionId: 'fast-session-1',
+        conversation: expect.objectContaining({ surface: 'discord' }),
+      },
+      event: expect.objectContaining({
+        eventId: 'event-2',
+        question: 'Investigate the provider outage',
+      }),
+    });
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        signal: lockSignal,
+        durableAdmission: { eventId: 'durable-row-1' },
+      }),
+    );
+    expect(mocks.wakeParentEventAt).toHaveBeenCalledWith(
+      {
+        conversationId: 'fast-session-1',
+        eventKey: 'event-key-1',
+      },
+      retryAt,
+    );
+    expect(turnLock.durableRowId).toBe('durable-row-1');
+    await turnLock.durableResume?.();
+    expect(mocks.wakeParentEventNow).toHaveBeenCalledWith({
+      conversationId: 'fast-session-1',
+      eventKey: 'event-key-1',
+    });
   });
 
   it('replaces a Fast retry notice in place', async () => {
