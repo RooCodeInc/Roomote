@@ -11,6 +11,7 @@ import {
   isNull,
   ne,
 } from '@roomote/db/server';
+import { Env } from '@roomote/env';
 import type {
   FastAgentHumanFollowUpEvent,
   FastAgentParent,
@@ -46,6 +47,9 @@ export async function persistFastAgentInlineHumanTurn(params: {
   parent: FastAgentParent;
   event: FastAgentHumanFollowUpEvent;
 }): Promise<FastAgentDurableTurn | null> {
+  if (Env.R_FAST_DURABLE_ADMISSION_DISABLED) {
+    return null;
+  }
   const eventKey = buildFastAgentParentEventKey(params);
   // Admission and supersession commit together, so recovery can never see
   // the new row without the older interrupted row already retired.

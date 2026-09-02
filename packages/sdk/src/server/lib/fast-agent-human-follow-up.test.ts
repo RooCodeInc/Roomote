@@ -11,6 +11,12 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   FAST_AGENT_DURABLE_TURN_CLAIM_MS: 15 * 60 * 1000,
 }));
 
+const envMock = vi.hoisted(() => ({
+  R_FAST_DURABLE_ADMISSION_DISABLED: false,
+}));
+
+vi.mock('@roomote/env', () => ({ Env: envMock }));
+
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...values) => values),
   eq: vi.fn((...values) => values),
@@ -89,6 +95,19 @@ describe('persistFastAgentInlineHumanTurn', () => {
     expect(mocks.insertOnConflict).toHaveBeenCalledOnce();
     // The supersede sweep runs once the row is known to be pending.
     expect(mocks.updateWhere).toHaveBeenCalledOnce();
+  });
+
+  it('persists nothing when the durable admission kill switch is set', async () => {
+    envMock.R_FAST_DURABLE_ADMISSION_DISABLED = true;
+    try {
+      await expect(
+        persistFastAgentInlineHumanTurn({ parent, event }),
+      ).resolves.toBeNull();
+      expect(mocks.insertOnConflict).not.toHaveBeenCalled();
+      expect(mocks.updateWhere).not.toHaveBeenCalled();
+    } finally {
+      envMock.R_FAST_DURABLE_ADMISSION_DISABLED = false;
+    }
   });
 
   it('returns no durable handle when the same message already settled', async () => {
