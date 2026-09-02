@@ -209,16 +209,25 @@ export function captureFastAgentTurnSettled(input: {
   openCodeProviderRetryEventCount: number;
   roomoteInferenceRetryCount: number;
   modelRequestCount?: number;
+  completedModelRequestCount?: number;
   firstModelResponseDurationMs?: number;
   postReplyInferenceDurationMs?: number;
   inputTokens?: number;
   cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   outputTokens?: number;
   reasoningTokens?: number;
   maxContextTokens?: number;
   systemPromptChars?: number;
+  environmentCount?: number;
+  integrationCount?: number;
   integrationToolCount?: number;
+  activeTaskCount?: number;
   openCodeServerLeaseMs?: number;
+  openCodeSessionValidateMs?: number;
+  openCodeSessionCreateMs?: number;
+  openCodeEventSubscribeMs?: number;
+  openCodeSetupMs?: number;
 }): void {
   void captureEvent('fast_turn_settled', {
     userId: input.userId,
@@ -242,18 +251,27 @@ export function captureFastAgentTurnSettled(input: {
         input.openCodeProviderRetryEventCount,
       roomote_inference_retry_count: input.roomoteInferenceRetryCount,
       model_request_count: input.modelRequestCount ?? null,
+      completed_model_request_count: input.completedModelRequestCount ?? null,
       first_model_response_duration_ms:
         input.firstModelResponseDurationMs ?? null,
       post_reply_inference_duration_ms:
         input.postReplyInferenceDurationMs ?? null,
       input_tokens: input.inputTokens ?? null,
       cache_read_tokens: input.cacheReadTokens ?? null,
+      cache_write_tokens: input.cacheWriteTokens ?? null,
       output_tokens: input.outputTokens ?? null,
       reasoning_tokens: input.reasoningTokens ?? null,
       max_context_tokens: input.maxContextTokens ?? null,
       system_prompt_chars: input.systemPromptChars ?? null,
+      environment_count: input.environmentCount ?? null,
+      integration_count: input.integrationCount ?? null,
       integration_tool_count: input.integrationToolCount ?? null,
+      active_task_count: input.activeTaskCount ?? null,
       opencode_server_lease_ms: input.openCodeServerLeaseMs ?? null,
+      opencode_session_validate_ms: input.openCodeSessionValidateMs ?? null,
+      opencode_session_create_ms: input.openCodeSessionCreateMs ?? null,
+      opencode_event_subscribe_ms: input.openCodeEventSubscribeMs ?? null,
+      opencode_setup_ms: input.openCodeSetupMs ?? null,
     },
   });
 }

@@ -1,3 +1,7 @@
+const captureEvent = vi.hoisted(() => vi.fn());
+
+vi.mock('@roomote/telemetry/server', () => ({ captureEvent }));
+
 import { FastAgentTurnDiagnostics } from '../fast-agent-turn-diagnostics';
 
 const conversation = {
@@ -165,6 +169,36 @@ describe('FastAgentTurnDiagnostics', () => {
     expect(logMessage).toContain('integrationToolCount=41');
     expect(logMessage).toContain('environmentCount=3');
     expect(logMessage).toContain('activeTaskCount=1');
+
+    // Telemetry carries the same set so the event can back the same
+    // analysis as the log line.
+    expect(captureEvent).toHaveBeenCalledWith(
+      'fast_turn_settled',
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          model_request_count: 2,
+          completed_model_request_count: 2,
+          first_model_response_duration_ms: 6_000,
+          post_reply_inference_duration_ms: 6_500,
+          input_tokens: 21_500,
+          cache_read_tokens: 3_000,
+          cache_write_tokens: 0,
+          output_tokens: 220,
+          reasoning_tokens: 1_000,
+          max_context_tokens: 12_500,
+          system_prompt_chars: 12_345,
+          environment_count: 3,
+          integration_count: 2,
+          integration_tool_count: 41,
+          active_task_count: 1,
+          opencode_server_lease_ms: 400,
+          opencode_session_validate_ms: null,
+          opencode_session_create_ms: 60,
+          opencode_event_subscribe_ms: 15,
+          opencode_setup_ms: 500,
+        }),
+      }),
+    );
   });
 
   it('records bounded redacted context for each failed inference attempt', () => {
