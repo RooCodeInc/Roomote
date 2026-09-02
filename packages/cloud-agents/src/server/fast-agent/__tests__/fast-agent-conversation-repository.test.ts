@@ -12,11 +12,15 @@ import {
 } from '@roomote/db/server';
 
 import {
+  beginFastAgentTurnEffect,
+  completeFastAgentTurnEffect,
   fastAgentConversationRepository,
   findFastAgentActiveInferenceRetryNotice,
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+  listFastAgentTurnEffects,
   scheduleFastAgentDurableTurnRetry,
+  withdrawFastAgentTurnEffect,
   markFastAgentDurableTurnDelivered,
   releaseFastAgentDurableTurnClaim,
   renewFastAgentDurableTurnClaim,
@@ -1354,6 +1358,71 @@ describe('Fast conversation repository', () => {
       purpose: 'closeout',
       interruptionReason: 'expired_lease_reconcile',
     });
+  });
+
+  it('journals side effects per turn with started, completed, and withdrawn states', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const [row] = await db
+      .insert(fastAgentParentEvents)
+      .values({
+        conversationId: session.id,
+        eventKey: 'durable-journal',
+        parent: { sessionId: session.id, conversation: slackConversation },
+        event: { type: 'human_follow_up', eventId: 'durable-journal' },
+        admission: 'inline',
+      })
+      .returning({ id: fastAgentParentEvents.id });
+    const parentEventId = row!.id;
+
+    // First write starts the effect; a repeat of the same signature returns
+    // the existing entry instead of a second one.
+    const launch = await beginFastAgentTurnEffect({
+      parentEventId,
+      kind: 'task_action',
+      signature: 'launch_task:["Fix it","env-1",null,undefined]',
+    });
+    expect(launch.existing).toBe(false);
+    expect(launch.effect.status).toBe('started');
+    const repeat = await beginFastAgentTurnEffect({
+      parentEventId,
+      kind: 'task_action',
+      signature: 'launch_task:["Fix it","env-1",null,undefined]',
+    });
+    expect(repeat.existing).toBe(true);
+    expect(repeat.effect.id).toBe(launch.effect.id);
+
+    await completeFastAgentTurnEffect(launch.effect.id, { taskId: 'task-1' });
+    const message = await beginFastAgentTurnEffect({
+      parentEventId,
+      kind: 'task_action',
+      signature: 'send_task_message:task-1',
+    });
+    await withdrawFastAgentTurnEffect(message.effect.id);
+    const reply = await beginFastAgentTurnEffect({
+      parentEventId,
+      kind: 'chat_reply',
+      signature: JSON.stringify(['ack', 'On it.', []]),
+    });
+
+    // A resumed run sees the completed launch with its result, the started
+    // reply as ambiguous, and nothing of the withdrawn message.
+    const effects = await listFastAgentTurnEffects(parentEventId);
+    expect(effects.map((effect) => [effect.kind, effect.status])).toEqual([
+      ['task_action', 'completed'],
+      ['chat_reply', 'started'],
+    ]);
+    expect(effects[0]!.result).toEqual({ taskId: 'task-1' });
+    expect(effects[1]!.id).toBe(reply.effect.id);
+
+    // Journal rows live and die with their parent-event row.
+    await db
+      .delete(fastAgentParentEvents)
+      .where(eq(fastAgentParentEvents.id, parentEventId));
+    await expect(listFastAgentTurnEffects(parentEventId)).resolves.toEqual([]);
   });
 
   it('renews only a live responding lease', async () => {

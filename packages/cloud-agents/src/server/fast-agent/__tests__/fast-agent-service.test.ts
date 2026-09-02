@@ -37,6 +37,10 @@ const mocks = vi.hoisted(() => ({
   revokeDurableReplay: vi.fn(),
   scheduleDurableRetry: vi.fn(),
   findActiveRetryNotice: vi.fn(),
+  beginTurnEffect: vi.fn(),
+  completeTurnEffect: vi.fn(),
+  withdrawTurnEffect: vi.fn(),
+  listTurnEffects: vi.fn(),
   getUnifiedSession: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
@@ -112,6 +116,10 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   revokeFastAgentDurableTurnReplay: mocks.revokeDurableReplay,
   scheduleFastAgentDurableTurnRetry: mocks.scheduleDurableRetry,
   findFastAgentActiveInferenceRetryNotice: mocks.findActiveRetryNotice,
+  beginFastAgentTurnEffect: mocks.beginTurnEffect,
+  completeFastAgentTurnEffect: mocks.completeTurnEffect,
+  withdrawFastAgentTurnEffect: mocks.withdrawTurnEffect,
+  listFastAgentTurnEffects: mocks.listTurnEffects,
 }));
 
 vi.mock('../../router', () => ({
@@ -412,6 +420,20 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.revokeDurableReplay.mockResolvedValue(true);
     mocks.scheduleDurableRetry.mockResolvedValue(true);
     mocks.findActiveRetryNotice.mockResolvedValue(null);
+    let nextEffectId = 0;
+    mocks.beginTurnEffect.mockImplementation(async ({ kind, signature }) => ({
+      effect: {
+        id: `effect-${(nextEffectId += 1)}`,
+        kind,
+        signature,
+        status: 'started',
+        result: null,
+      },
+      existing: false,
+    }));
+    mocks.completeTurnEffect.mockResolvedValue(undefined);
+    mocks.withdrawTurnEffect.mockResolvedValue(undefined);
+    mocks.listTurnEffects.mockResolvedValue([]);
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
@@ -3327,12 +3349,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   describe('durable admission', () => {
     const durableAdmission = { eventId: 'durable-row-1' };
 
-    it('keeps replay open through an acknowledgement and closes it before the closeout', async () => {
-      const order: string[] = [];
-      mocks.revokeDurableReplay.mockImplementation(async (_id, reason) => {
-        order.push(`revoke:${reason}`);
-        return true;
-      });
+    it('journals replies instead of withdrawing the turn from replay', async () => {
       mocks.generateText.mockImplementationOnce(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
@@ -3340,13 +3357,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             purpose: 'ack',
             message: 'Looking into it.',
           });
-          order.push('acked');
-          expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
             message: 'Done.',
           });
-          order.push('closed');
           return '';
         },
       );
@@ -3357,23 +3371,40 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         durableAdmission,
       });
 
-      expect(order).toEqual([
-        'acked',
-        'revoke:Native tool send_chat_reply is not replay-safe.',
-        'closed',
+      // The row stays replayable throughout: each reply is recorded in the
+      // journal (started before the post, completed after) instead of
+      // withdrawing the turn from recovery.
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+      const journaled = mocks.beginTurnEffect.mock.calls.map(([input]) => [
+        input.kind,
+        JSON.parse(input.signature)[0],
       ]);
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
-        'durable-row-1',
-        expect.any(String),
-      );
+      expect(journaled).toEqual([
+        ['chat_reply', 'ack'],
+        ['chat_reply', 'closeout'],
+      ]);
+      expect(mocks.completeTurnEffect).toHaveBeenCalledTimes(2);
+      expect(mocks.completeTurnEffect).toHaveBeenLastCalledWith('effect-2', {
+        purpose: 'closeout',
+        message: 'Done.',
+      });
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 
-    it('revokes replay before a task launch runs', async () => {
+    it('journals a task launch before it runs and completes it after', async () => {
       const order: string[] = [];
-      mocks.revokeDurableReplay.mockImplementation(async () => {
-        order.push('revoke');
-        return true;
+      mocks.beginTurnEffect.mockImplementation(async ({ kind, signature }) => {
+        order.push(`journal:${kind}`);
+        return {
+          effect: {
+            id: 'effect-launch',
+            kind,
+            signature,
+            status: 'started',
+            result: null,
+          },
+          existing: false,
+        };
       });
       const adapter = callbacks({
         launchTask: vi.fn<LaunchFastAgentTask>(async () => {
@@ -3403,15 +3434,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         durableAdmission,
       });
 
-      expect(order.slice(0, 2)).toEqual(['revoke', 'launch']);
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledTimes(1);
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
-        'durable-row-1',
-        'Native tool launch_task is not replay-safe.',
-      );
+      expect(order.slice(0, 2)).toEqual(['journal:task_action', 'launch']);
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+      expect(mocks.completeTurnEffect).toHaveBeenCalledWith('effect-launch', {
+        taskId: 'task-1',
+      });
     });
 
-    it('refuses a non-replayable action when the revocation does not land', async () => {
+    it('refuses an action when neither the journal nor the withdrawal lands', async () => {
+      mocks.beginTurnEffect.mockRejectedValueOnce(new Error('db down'));
       mocks.revokeDurableReplay.mockRejectedValueOnce(new Error('db down'));
       const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
         success: true,
@@ -3445,11 +3476,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         success: false,
         error: expect.stringContaining('could not durably record'),
       });
-      // The later closeout retried the revocation successfully.
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledTimes(2);
+      // The journal failure fell back to withdrawal, which also failed; the
+      // later closeout journaled normally, so no further withdrawal ran.
+      expect(mocks.revokeDurableReplay).toHaveBeenCalledTimes(1);
     });
 
-    it('refuses a non-replayable action when the row was already settled elsewhere', async () => {
+    it('refuses an action when the journal is down and the row was already settled elsewhere', async () => {
+      mocks.beginTurnEffect.mockRejectedValue(new Error('db down'));
       mocks.revokeDurableReplay.mockResolvedValue(false);
       const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
         success: true,
@@ -3481,11 +3514,20 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
     });
 
-    it('withdraws a plain-text turn from replay before its terminal closeout', async () => {
+    it('journals a plain-text terminal closeout before posting it', async () => {
       const order: string[] = [];
-      mocks.revokeDurableReplay.mockImplementation(async () => {
-        order.push('revoke');
-        return true;
+      mocks.beginTurnEffect.mockImplementation(async ({ kind, signature }) => {
+        order.push(`journal:${JSON.parse(signature)[1]}`);
+        return {
+          effect: {
+            id: 'effect-closeout',
+            kind,
+            signature,
+            status: 'started',
+            result: null,
+          },
+          existing: false,
+        };
       });
       const postReply = vi.fn(async () => {
         order.push('post');
@@ -3499,14 +3541,20 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         durableAdmission,
       });
 
-      expect(order).toEqual(['revoke', 'post']);
+      expect(order).toEqual(['journal:All done.', 'post']);
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+      expect(mocks.completeTurnEffect).toHaveBeenCalledWith('effect-closeout', {
+        purpose: 'closeout',
+        message: 'All done.',
+      });
       expect(postReply).toHaveBeenCalledWith(
         expect.objectContaining({ purpose: 'closeout', message: 'All done.' }),
       );
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 
-    it('hands the turn to the queue when the terminal closeout cannot be withdrawn from replay', async () => {
+    it('hands the turn to the queue when the terminal closeout can be neither journaled nor withdrawn', async () => {
+      mocks.beginTurnEffect.mockRejectedValue(new Error('db down'));
       mocks.revokeDurableReplay.mockResolvedValue(false);
       const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
       const requestDurableResume = vi.fn().mockResolvedValue(undefined);
@@ -3526,7 +3574,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(requestDurableResume).toHaveBeenCalledOnce();
     });
 
-    it('hands the turn to the queue when the error closeout cannot be withdrawn from replay', async () => {
+    it('hands the turn to the queue when the error closeout can be neither journaled nor withdrawn', async () => {
+      mocks.beginTurnEffect.mockRejectedValue(new Error('db down'));
       mocks.revokeDurableReplay.mockResolvedValue(false);
       const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
       const requestDurableResume = vi.fn().mockResolvedValue(undefined);
@@ -3623,9 +3672,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           'Post an acknowledgement with send_chat_reply before this action.',
       });
       expect(results[1]).toMatchObject({ success: true });
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
-        'durable-row-1',
-        'Native tool save_memory is not replay-safe.',
+      // The refused pre-ack call journaled nothing; the later save was
+      // journaled as a memory write and the row stayed replayable.
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+      expect(
+        mocks.beginTurnEffect.mock.calls.filter(
+          ([input]) => input.kind === 'memory_write',
+        ),
+      ).toHaveLength(1);
+      expect(mocks.completeTurnEffect).toHaveBeenCalledWith(
+        expect.any(String),
+        { memory: 'Dan prefers short replies.' },
       );
     });
 
@@ -3668,7 +3725,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
     });
 
-    it('posts the restart closeout when the interrupted turn already acted', async () => {
+    it('hands a turn that already launched a task back to the queue on shutdown', async () => {
       const controller = new AbortController();
       const shutdown = new FastAgentProcessShutdownError('SIGTERM');
       const requestDurableResume = vi.fn().mockResolvedValue(undefined);
@@ -3689,19 +3746,144 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await expect(
         answerFastAgentQuestion({
           ...baseParams,
-          adapter: callbacks({ postReply, requestDurableResume }),
+          adapter: callbacks({
+            launchTask: vi.fn<LaunchFastAgentTask>(async () => ({
+              success: true,
+              taskId: 'task-1',
+            })),
+            postReply,
+            requestDurableResume,
+          }),
           signal: controller.signal,
           durableAdmission,
         }),
       ).rejects.toBe(shutdown);
 
+      // The launch is journaled as completed, so the turn is still safe to
+      // resume: no restart closeout, the row goes back to the queue, and
+      // the resumed run will see the launch in the journal.
+      expect(postReply).not.toHaveBeenCalledWith(
+        expect.objectContaining({ purpose: 'closeout' }),
+      );
+      expect(mocks.completeTurnEffect).toHaveBeenCalledWith(
+        expect.any(String),
+        { taskId: 'task-1' },
+      );
+      expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
+      expect(requestDurableResume).toHaveBeenCalledOnce();
+    });
+
+    it('lets a resumed run continue from a journaled launch without launching again', async () => {
+      mocks.listTurnEffects.mockResolvedValueOnce([
+        {
+          id: 'effect-launch',
+          kind: 'task_action',
+          signature: 'launch_task:["Fix the bug","env-1",null,undefined]',
+          status: 'completed',
+          result: {
+            taskId: 'task-1',
+            taskUrl: 'https://roomote.example/task/task-1',
+          },
+        },
+      ]);
+      const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+        success: true,
+        taskId: 'task-2',
+      }));
+      let launchResult: unknown;
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          // A re-prompted model may word the launch differently.
+          launchResult = await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix the bug, please',
+            environmentId: 'env-1',
+            kickoffMessage: 'Starting.',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Task task-1 is on it.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ launchTask }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      expect(launchTask).not.toHaveBeenCalled();
+      expect(launchResult).toMatchObject({
+        success: false,
+        error: expect.stringContaining('already launched for this request'),
+      });
+      const call = mocks.generateText.mock.calls[0]?.[0];
+      expect(call.prompt).toContain('<completed_actions>');
+      expect(call.prompt).toContain('Launched task task-1');
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('settles a resumed run whose predecessor already delivered the closeout', async () => {
+      mocks.listTurnEffects.mockResolvedValueOnce([
+        {
+          id: 'effect-closeout',
+          kind: 'chat_reply',
+          signature: JSON.stringify(['closeout', 'Done earlier.', []]),
+          status: 'completed',
+          result: { purpose: 'closeout', message: 'Done earlier.' },
+        },
+      ]);
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ postReply }),
+          durableAdmission,
+          resumedAfterInterruption: true,
+        }),
+      ).resolves.toBe('Done earlier.');
+
+      // Nothing is owed: no second inference, no second answer.
+      expect(mocks.generateText).not.toHaveBeenCalled();
+      expect(postReply).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('fails closed when a predecessor left an effect in an unknown state', async () => {
+      mocks.listTurnEffects.mockResolvedValueOnce([
+        {
+          id: 'effect-launch',
+          kind: 'task_action',
+          signature: 'launch_task:["Fix the bug","env-1",null,undefined]',
+          status: 'started',
+          result: null,
+        },
+      ]);
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      // Whether the launch happened is unknown, so the turn is withdrawn and
+      // the user is told honestly instead of a possible duplicate launch.
+      expect(mocks.generateText).not.toHaveBeenCalled();
+      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
+        'durable-row-1',
+        expect.stringContaining('Ambiguous side effect'),
+      );
       expect(postReply).toHaveBeenCalledWith({
         purpose: 'closeout',
         message:
           'Roomote restarted while working on this request. Please send it again.',
       });
-      expect(mocks.releaseDurableClaim).not.toHaveBeenCalled();
-      expect(requestDurableResume).not.toHaveBeenCalled();
     });
 
     it('does not resume a deliberately cancelled turn', async () => {

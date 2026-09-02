@@ -201,6 +201,7 @@ export {
   fastAgentMessagesRelations,
   fastAgentParentEvents,
   fastAgentParentEventsRelations,
+  fastAgentTurnEffects,
   fastAgentProviderMessages,
   fastAgentProviderMessagesRelations,
   fastAgentPrFeedbackDeliveries,

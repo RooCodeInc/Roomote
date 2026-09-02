@@ -8,6 +8,7 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   fastAgentParentEvents,
+  fastAgentTurnEffects,
   ensureSessionForFastConversation,
   advanceSessionNotifiedCursor,
   advanceSessionReadCursor,
@@ -460,6 +461,113 @@ export async function findFastAgentActiveInferenceRetryNotice(
     platformMessageId:
       typeof platformMessageId === 'string' ? platformMessageId : null,
   };
+}
+
+export type FastAgentTurnEffectKind =
+  | 'chat_reply'
+  | 'chat_reaction'
+  | 'task_action'
+  | 'memory_write';
+
+export type FastAgentTurnEffect = {
+  id: string;
+  kind: FastAgentTurnEffectKind;
+  signature: string;
+  status: 'started' | 'completed';
+  result: Record<string, unknown> | null;
+};
+
+/**
+ * Side-effect journal for a durably admitted turn. An effect is recorded as
+ * started before the action runs and completed after, so a resumed run can
+ * tell "already done" from "unknown". Returns the existing entry when the
+ * same effect was already journaled (by this run or a predecessor), else the
+ * freshly started one.
+ */
+export async function beginFastAgentTurnEffect(params: {
+  parentEventId: string;
+  kind: FastAgentTurnEffectKind;
+  signature: string;
+}): Promise<{ effect: FastAgentTurnEffect; existing: boolean }> {
+  const inserted = await db
+    .insert(fastAgentTurnEffects)
+    .values({
+      parentEventId: params.parentEventId,
+      kind: params.kind,
+      signature: params.signature,
+      status: 'started',
+    })
+    .onConflictDoNothing({
+      target: [
+        fastAgentTurnEffects.parentEventId,
+        fastAgentTurnEffects.kind,
+        fastAgentTurnEffects.signature,
+      ],
+    })
+    .returning({
+      id: fastAgentTurnEffects.id,
+      kind: fastAgentTurnEffects.kind,
+      signature: fastAgentTurnEffects.signature,
+      status: fastAgentTurnEffects.status,
+      result: fastAgentTurnEffects.result,
+    });
+  if (inserted[0]) return { effect: inserted[0], existing: false };
+  const [existing] = await db
+    .select({
+      id: fastAgentTurnEffects.id,
+      kind: fastAgentTurnEffects.kind,
+      signature: fastAgentTurnEffects.signature,
+      status: fastAgentTurnEffects.status,
+      result: fastAgentTurnEffects.result,
+    })
+    .from(fastAgentTurnEffects)
+    .where(
+      and(
+        eq(fastAgentTurnEffects.parentEventId, params.parentEventId),
+        eq(fastAgentTurnEffects.kind, params.kind),
+        eq(fastAgentTurnEffects.signature, params.signature),
+      ),
+    )
+    .limit(1);
+  if (!existing) {
+    throw new Error('Fast turn effect vanished between insert and lookup.');
+  }
+  return { effect: existing, existing: true };
+}
+
+/** The action landed; record what it produced so a resumed run can reuse it. */
+export async function completeFastAgentTurnEffect(
+  id: string,
+  result: Record<string, unknown> | null = null,
+): Promise<void> {
+  await db
+    .update(fastAgentTurnEffects)
+    .set({ status: 'completed', result, updatedAt: new Date() })
+    .where(eq(fastAgentTurnEffects.id, id));
+}
+
+/**
+ * The action definitely did not happen (the provider rejected it before any
+ * effect), so the entry is withdrawn and the same action may be tried again.
+ */
+export async function withdrawFastAgentTurnEffect(id: string): Promise<void> {
+  await db.delete(fastAgentTurnEffects).where(eq(fastAgentTurnEffects.id, id));
+}
+
+export async function listFastAgentTurnEffects(
+  parentEventId: string,
+): Promise<FastAgentTurnEffect[]> {
+  return db
+    .select({
+      id: fastAgentTurnEffects.id,
+      kind: fastAgentTurnEffects.kind,
+      signature: fastAgentTurnEffects.signature,
+      status: fastAgentTurnEffects.status,
+      result: fastAgentTurnEffects.result,
+    })
+    .from(fastAgentTurnEffects)
+    .where(eq(fastAgentTurnEffects.parentEventId, parentEventId))
+    .orderBy(fastAgentTurnEffects.createdAt);
 }
 
 /** The turn produced its outcome; nothing is left to recover. */

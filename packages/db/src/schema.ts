@@ -3187,6 +3187,42 @@ export const fastAgentParentEvents = pgTable(
 );
 
 /**
+ * fast_agent_turn_effects
+ *
+ * Side-effect journal for durably admitted Fast turns. Each row records one
+ * external action (a chat reply, a reaction, a task launch or message or
+ * cancellation, a memory write) keyed by the same signature the turn uses to
+ * de-duplicate in memory, so a run the queue resumes on another process
+ * knows what its predecessor already did: completed effects are not
+ * repeated, and an effect that started without completing marks the turn
+ * as not safely resumable. Rows live and die with their parent-event row.
+ */
+export const fastAgentTurnEffects = pgTable(
+  'fast_agent_turn_effects',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    parentEventId: uuid('parent_event_id')
+      .notNull()
+      .references(() => fastAgentParentEvents.id, { onDelete: 'cascade' }),
+    kind: text('kind')
+      .notNull()
+      .$type<'chat_reply' | 'chat_reaction' | 'task_action' | 'memory_write'>(),
+    signature: text('signature').notNull(),
+    status: text('status').notNull().$type<'started' | 'completed'>(),
+    result: jsonb('result').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('fast_agent_turn_effects_signature_unique').on(
+      table.parentEventId,
+      table.kind,
+      table.signature,
+    ),
+  ],
+);
+
+/**
  * fast_agent_messages
  *
  * Forward-only canonical Fast/OpenCode transcript events. During the N-1

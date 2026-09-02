@@ -101,8 +101,13 @@ import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill
 import {
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+  beginFastAgentTurnEffect,
+  completeFastAgentTurnEffect,
   findFastAgentActiveInferenceRetryNotice,
+  listFastAgentTurnEffects,
   markFastAgentDurableTurnDelivered,
+  withdrawFastAgentTurnEffect,
+  type FastAgentTurnEffectKind,
   markFastAgentInferenceRetryNoticeInterruption,
   releaseFastAgentDurableTurnClaim,
   renewFastAgentDurableTurnClaim,
@@ -546,6 +551,29 @@ function isReplaySafeFastAgentNativeTool(
   }
 }
 
+/**
+ * Native tools whose external effect is recorded in the durable side-effect
+ * journal before it runs and completed after. A run the queue resumes reads
+ * the journal, so these no longer withdraw the turn from replay: a completed
+ * effect is not repeated, and an effect left started marks the turn as not
+ * safely resumable instead.
+ */
+function isJournaledFastAgentNativeTool(
+  call: FastAgentNativeToolCall,
+): boolean {
+  switch (call.name) {
+    case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply:
+    case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction:
+    case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask:
+    case FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage:
+    case FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask:
+    case FAST_AGENT_NATIVE_TOOL_NAMES.saveMemory:
+      return true;
+    default:
+      return false;
+  }
+}
+
 export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
 export const FAST_AGENT_TRANSIENT_INFERENCE_MAX_RETRIES = 6;
 // Matches the standard-task recovery delay ceiling so a single Fast failure
@@ -949,6 +977,14 @@ function wrapFastAgentMessage(
   })}\n</current_message>`;
 }
 
+/** Plain text inside a prompt envelope must not be able to close it. */
+function escapeFastAgentEnvelopeText(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
 function escapeFastAgentEnvelopeJson(value: Record<string, string>): string {
   return JSON.stringify(value)
     .replaceAll('&', '&amp;')
@@ -1009,6 +1045,7 @@ function buildFastAgentMessages({
   unresolvedRequest,
   resumedAfterInterruption = false,
   resumedAfterInferenceRetry = false,
+  completedEffects = [],
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -1027,6 +1064,8 @@ function buildFastAgentMessages({
   unresolvedRequest?: FastAgentUnresolvedRequest | null;
   resumedAfterInterruption?: boolean;
   resumedAfterInferenceRetry?: boolean;
+  /** Actions a previous execution of this turn already completed. */
+  completedEffects?: string[];
 }): {
   bootstrapMessages: ModelMessage[];
   turnMessages: ModelMessage[];
@@ -1070,11 +1109,17 @@ function buildFastAgentMessages({
   const unresolvedRequestText = unresolvedRequest
     ? wrapFastAgentUnresolvedRequest(unresolvedRequest)
     : undefined;
-  const resumedTurnText = resumedAfterInterruption
+  const resumedMarker = resumedAfterInterruption
     ? FAST_AGENT_RESUMED_TURN_MARKER
     : resumedAfterInferenceRetry
       ? FAST_AGENT_RESUMED_RETRY_TURN_MARKER
       : undefined;
+  // The journal of what the previous attempt already did travels with the
+  // marker so the model continues from there instead of redoing it.
+  const resumedTurnText =
+    resumedMarker && completedEffects.length > 0
+      ? `${resumedMarker}\n<completed_actions>\nThe previous attempt already completed these actions. Do not repeat them:\n${completedEffects.map((effect) => `- ${escapeFastAgentEnvelopeText(effect)}`).join('\n')}\n</completed_actions>`
+      : resumedMarker;
 
   if (compatibilityMessages.length > 0) {
     const supplementalThreadContext = buildSupplementalThreadContext({
@@ -1501,6 +1546,62 @@ export async function answerFastAgentQuestion({
       `[Fast Agent] Parked the turn for a durable inference retry (row=${durableAdmission.eventId}, retryAt=${retryAt.toISOString()}, retries=${inferenceRetries}, reason=${notice.failure.reason}).`,
     );
     return retryAt;
+  };
+  // Side-effect journal. Every journaled action is written as started before
+  // it runs and completed after, keyed by the same signature the in-memory
+  // guards use, so a run the queue resumes elsewhere inherits what already
+  // happened. Journaling is best effort in one direction only: when the
+  // journal cannot be written the turn withdraws from replay first (the
+  // pre-journal rule), and when a completion cannot be written the entry
+  // stays started, which a resumed run treats as not safely resumable.
+  const completedMemorySignatures = new Set<string>();
+  const priorEffectSummaries: string[] = [];
+  let priorLaunchedTaskId: string | null = null;
+  let priorDeliveredCloseout: string | null = null;
+  let priorAmbiguousEffect: string | null = null;
+  type EffectHandle = { id: string | null };
+  const beginEffect = async (
+    kind: FastAgentTurnEffectKind,
+    signature: string,
+  ): Promise<EffectHandle | { refused: { success: false; error: string } }> => {
+    if (!durableAdmission || !durableTurnReplayable) return { id: null };
+    try {
+      const { effect } = await beginFastAgentTurnEffect({
+        parentEventId: durableAdmission.eventId,
+        kind,
+        signature,
+      });
+      return { id: effect.id };
+    } catch (error) {
+      console.warn(
+        `[Fast Agent] Failed to journal a ${kind} effect; withdrawing the turn from replay instead: ${formatErrorForLog(error)}`,
+      );
+      if (!(await revokeDurableTurnReplay(`Journal write failed (${kind}).`))) {
+        return {
+          refused: { success: false, error: DURABLE_REVOKE_FAILED_TOOL_ERROR },
+        };
+      }
+      return { id: null };
+    }
+  };
+  const completeEffect = async (
+    handle: EffectHandle,
+    result: Record<string, unknown> | null = null,
+  ) => {
+    if (!handle.id) return;
+    await completeFastAgentTurnEffect(handle.id, result).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to complete a journaled effect; a resumed run will treat it as ambiguous: ${formatErrorForLog(error)}`,
+      );
+    });
+  };
+  const withdrawEffect = async (handle: EffectHandle) => {
+    if (!handle.id) return;
+    await withdrawFastAgentTurnEffect(handle.id).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to withdraw a journaled effect: ${formatErrorForLog(error)}`,
+      );
+    });
   };
   let activeHumanSteerPoll = Promise.resolve();
   const injectedHumanFollowUpIds = new Set<string>();
@@ -2133,6 +2234,78 @@ export async function answerFastAgentQuestion({
         );
       });
     }
+    // A resumed execution inherits its predecessors' side-effect journal:
+    // completed effects seed the in-memory duplicate guards and are listed
+    // for the model; a delivered closeout means the answer already went out;
+    // an effect left started means the outcome is unknown and the turn must
+    // not be re-run. Acted on just before inference, once the reply helpers
+    // exist.
+    if (
+      durableAdmission &&
+      (resumedAfterInterruption || resumedAfterInferenceRetry)
+    ) {
+      const effects = await listFastAgentTurnEffects(
+        durableAdmission.eventId,
+      ).catch((error) => {
+        console.warn(
+          `[Fast Agent] Failed to load the side-effect journal: ${formatErrorForLog(error)}`,
+        );
+        return null;
+      });
+      if (effects === null) {
+        priorAmbiguousEffect = 'journal unavailable';
+      }
+      for (const effect of effects ?? []) {
+        if (effect.status !== 'completed') {
+          priorAmbiguousEffect ??= `${effect.kind} ${effect.signature.slice(0, 80)}`;
+          continue;
+        }
+        switch (effect.kind) {
+          case 'chat_reply': {
+            completedChatReplySignatures.add(effect.signature);
+            const purpose = String(effect.result?.purpose ?? '');
+            const message = String(effect.result?.message ?? '');
+            if (purpose === 'closeout' || purpose === 'clarification') {
+              priorDeliveredCloseout ??= message;
+            } else if (message) {
+              priorEffectSummaries.push(
+                `Posted a reply: "${message.slice(0, 200)}"`,
+              );
+            }
+            break;
+          }
+          case 'chat_reaction':
+            completedChatReactionSignatures.add(effect.signature);
+            break;
+          case 'task_action': {
+            completedTaskActions.add(effect.signature);
+            const taskId =
+              typeof effect.result?.taskId === 'string'
+                ? effect.result.taskId
+                : null;
+            if (effect.signature.startsWith('launch_task:')) {
+              priorLaunchedTaskId ??= taskId;
+              priorEffectSummaries.push(
+                `Launched task ${taskId ?? '(id unknown)'}${typeof effect.result?.taskUrl === 'string' ? ` (${effect.result.taskUrl})` : ''}`,
+              );
+            } else if (effect.signature.startsWith('send_task_message:')) {
+              priorEffectSummaries.push(
+                `Sent a message to task ${taskId ?? ''}`.trim(),
+              );
+            } else if (effect.signature.startsWith('cancel_task:')) {
+              priorEffectSummaries.push(`Canceled task ${taskId ?? ''}`.trim());
+            }
+            break;
+          }
+          case 'memory_write':
+            completedMemorySignatures.add(effect.signature);
+            priorEffectSummaries.push(
+              `Saved a memory: "${String(effect.result?.memory ?? '').slice(0, 200)}"`,
+            );
+            break;
+        }
+      }
+    }
     await setFastSessionResponding(
       session.id,
       true,
@@ -2274,6 +2447,7 @@ export async function answerFastAgentQuestion({
       unresolvedRequest,
       resumedAfterInterruption,
       resumedAfterInferenceRetry,
+      completedEffects: priorEffectSummaries,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
       Env.RELEASE_PRODUCT_VERSION,
@@ -2380,6 +2554,12 @@ export async function answerFastAgentQuestion({
           duplicate: true,
           closed: isInstructionClosed(instructionVersion),
         };
+      }
+      // The reaction itself was already posted by the caller; record it as
+      // completed so a resumed run does not react twice.
+      const reactionEffect = await beginEffect('chat_reaction', signature);
+      if (!('refused' in reactionEffect)) {
+        await completeEffect(reactionEffect, { name, purpose, messageId });
       }
       completedChatReactionSignatures.add(signature);
       turnVisibleMessages.push(
@@ -2841,6 +3021,7 @@ export async function answerFastAgentQuestion({
         if (startDenial) return startDenial;
         if (
           !isReplaySafeFastAgentNativeTool(call) &&
+          !isJournaledFastAgentNativeTool(call) &&
           !(await revokeDurableTurnReplay(
             `Native tool ${call.name} is not replay-safe.`,
           ))
@@ -2916,22 +3097,36 @@ export async function answerFastAgentQuestion({
               };
             }
             throwIfTurnCancelled();
-            await postReply(
-              {
-                purpose: args.purpose,
-                message: args.message,
-                ...(args.imageArtifactIds?.length
-                  ? { imageArtifactIds: args.imageArtifactIds }
-                  : {}),
-                ...(args.suggestions?.length
-                  ? { suggestions: args.suggestions }
-                  : {}),
-              },
-              false,
-              undefined,
-              instructionVersion,
-            );
+            const replyEffect = await beginEffect('chat_reply', signature);
+            if ('refused' in replyEffect) return replyEffect.refused;
+            try {
+              await postReply(
+                {
+                  purpose: args.purpose,
+                  message: args.message,
+                  ...(args.imageArtifactIds?.length
+                    ? { imageArtifactIds: args.imageArtifactIds }
+                    : {}),
+                  ...(args.suggestions?.length
+                    ? { suggestions: args.suggestions }
+                    : {}),
+                },
+                false,
+                undefined,
+                instructionVersion,
+              );
+            } catch (error) {
+              // A rejected post never reached the chat; a resumed run may
+              // try again. (A post that reached the provider but failed
+              // afterwards is not distinguishable here and stays started.)
+              await withdrawEffect(replyEffect);
+              throw error;
+            }
             completedChatReplySignatures.add(signature);
+            await completeEffect(replyEffect, {
+              purpose: args.purpose,
+              message: args.message,
+            });
             return {
               success: true,
               delivered: true,
@@ -3026,6 +3221,17 @@ export async function answerFastAgentQuestion({
                 error: 'The same task was already launched in this turn.',
               };
             }
+            if (priorLaunchedTaskId) {
+              // A previous execution of this same request already launched
+              // a task; a re-prompted model may word the launch differently,
+              // so the guard is per turn, not per signature.
+              return {
+                success: false,
+                error: `A task was already launched for this request before the restart (task ${priorLaunchedTaskId}). Continue with it instead of launching another.`,
+              };
+            }
+            const launchEffect = await beginEffect('task_action', signature);
+            if ('refused' in launchEffect) return launchEffect.refused;
             completedTaskActions.add(signature);
             let kickoffDelivered = false;
             const deliverKickoff = async (task: {
@@ -3092,6 +3298,9 @@ export async function answerFastAgentQuestion({
               });
             } catch (error) {
               completedTaskActions.delete(signature);
+              // The launch call failed outright; whether anything was created
+              // is unknown, so the journal entry stays started and a resumed
+              // run fails closed rather than launching again.
               throw error;
             }
             if (!result.success) {
@@ -3099,8 +3308,13 @@ export async function answerFastAgentQuestion({
               // same task in this turn; keeping the signature would reject
               // the retry as a duplicate.
               completedTaskActions.delete(signature);
+              await withdrawEffect(launchEffect);
             }
             if (result.success) {
+              await completeEffect(launchEffect, {
+                taskId: result.taskId,
+                ...(result.taskUrl ? { taskUrl: result.taskUrl } : {}),
+              });
               currentTasks.set(result.taskId, { taskId: result.taskId });
               if (result.kickoffDelivered) {
                 visibleUpdatePosted = true;
@@ -3124,6 +3338,8 @@ export async function answerFastAgentQuestion({
                 error: 'A message was already sent to that task this turn.',
               };
             }
+            const messageEffect = await beginEffect('task_action', signature);
+            if ('refused' in messageEffect) return messageEffect.refused;
             completedTaskActions.add(signature);
             throwIfTurnCancelled();
             const message = args.includeAttachments
@@ -3142,6 +3358,11 @@ export async function answerFastAgentQuestion({
                   : {}),
               },
             );
+            if (result.success) {
+              await completeEffect(messageEffect, { taskId: target.taskId });
+            } else {
+              await withdrawEffect(messageEffect);
+            }
             return result;
           }
 
@@ -3168,6 +3389,8 @@ export async function answerFastAgentQuestion({
                 error: 'That task was already canceled.',
               };
             }
+            const cancelEffect = await beginEffect('task_action', signature);
+            if ('refused' in cancelEffect) return cancelEffect.refused;
             completedTaskActions.add(signature);
             throwIfTurnCancelled();
             const result = await cancelFastAgentTask(
@@ -3175,7 +3398,10 @@ export async function answerFastAgentQuestion({
               target.taskId,
             );
             if (result.success) {
+              await completeEffect(cancelEffect, { taskId: target.taskId });
               currentTasks.delete(target.taskId);
+            } else {
+              await withdrawEffect(cancelEffect);
             }
             return result;
           }
@@ -3204,18 +3430,37 @@ export async function answerFastAgentQuestion({
               };
             }
             throwIfTurnCancelled();
+            const memorySignature = createHash('sha256')
+              .update(args.memory)
+              .digest('hex');
+            if (completedMemorySignatures.has(memorySignature)) {
+              return {
+                success: true,
+                saved: true,
+                duplicate: true,
+                note: 'This memory was already saved for this request.',
+              };
+            }
+            const memoryEffect = await beginEffect(
+              'memory_write',
+              memorySignature,
+            );
+            if ('refused' in memoryEffect) return memoryEffect.refused;
             const result = await appendFastAgentMemory(
               db,
               session.id,
               args.memory,
             );
             if (!result.saved) {
+              await withdrawEffect(memoryEffect);
               return {
                 success: false,
                 error:
                   "This conversation's memory is full. Start a new conversation to save further memories.",
               };
             }
+            completedMemorySignatures.add(memorySignature);
+            await completeEffect(memoryEffect, { memory: args.memory });
             return {
               success: true,
               saved: true,
@@ -3316,6 +3561,38 @@ export async function answerFastAgentQuestion({
       durableOpenCodeSessionId = openCodeSessionId;
       session.openCodeSessionId = openCodeSessionId;
     };
+    if (priorDeliveredCloseout !== null) {
+      // The predecessor delivered the answer and only failed to settle its
+      // row afterwards; nothing is owed to the user, so do not re-prompt.
+      console.info(
+        `[Fast Agent] Resumed turn found its closeout already delivered; settling without re-running (row=${durableAdmission?.eventId}).`,
+      );
+      lastVisibleMessage = priorDeliveredCloseout;
+      await settleDurableTurn();
+      return lastVisibleMessage;
+    }
+    if (priorAmbiguousEffect !== null) {
+      // An effect started without completing, so replaying could duplicate
+      // it. Fail closed the way a pre-journal interruption did: withdraw the
+      // row, tell the user honestly, and let them decide.
+      console.warn(
+        `[Fast Agent] Resumed turn found an ambiguous side effect (${priorAmbiguousEffect}); not re-running (row=${durableAdmission?.eventId}).`,
+      );
+      const revoked = await revokeDurableTurnReplay(
+        `Ambiguous side effect on resume: ${priorAmbiguousEffect}`,
+      );
+      if (revoked && !isInstructionClosed()) {
+        await postReply({
+          purpose: 'closeout',
+          message: RESTARTED_ACTIVE_TURN_MESSAGE,
+        });
+      } else if (!revoked) {
+        terminalRevocationFailed = true;
+      }
+      await settleDurableTurn();
+      await mirrorPendingMessages();
+      return lastVisibleMessage;
+    }
     diagnostics.markInferenceQueued();
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
@@ -3810,21 +4087,31 @@ export async function answerFastAgentQuestion({
     ) {
       const message = promptText.trim();
       // A terminal closeout is itself a side effect a replay would repeat:
-      // withdraw the turn from recovery before posting it.
-      const terminalReplayRevoked =
-        await revokeDurableTurnReplay('Terminal closeout.');
-      if (!terminalReplayRevoked) {
+      // journal it before posting so a resumed run knows the answer went
+      // out. Only when it cannot be journaled (and the fallback withdrawal
+      // does not land either) is the closeout skipped for recovery.
+      const terminalEffect = await beginEffect(
+        'chat_reply',
+        JSON.stringify(['closeout', message, []]),
+      );
+      if ('refused' in terminalEffect) {
         terminalRevocationFailed = true;
         console.warn(
           '[Fast Agent] Skipping the terminal closeout because the turn could not be withdrawn from replay.',
         );
       } else if (message) {
-        await postReply(
-          { purpose: 'closeout', message },
-          false,
-          completedOpenCodeMessage,
-          terminalInstructionVersion,
-        );
+        try {
+          await postReply(
+            { purpose: 'closeout', message },
+            false,
+            completedOpenCodeMessage,
+            terminalInstructionVersion,
+          );
+        } catch (error) {
+          await withdrawEffect(terminalEffect);
+          throw error;
+        }
+        await completeEffect(terminalEffect, { purpose: 'closeout', message });
       } else if (!visibleUpdatePosted) {
         // A delivered update is already a complete visible response. Stay
         // silent rather than append a generic closeout that contradicts it.
@@ -4010,10 +4297,16 @@ export async function answerFastAgentQuestion({
             inferenceRetryAttempted,
           )
         : 'I hit an error while handling that request. Please try again in a moment.';
-    // The error closeout is terminal too; a replay must not post it twice.
+    // The error closeout is terminal too; journal it so a replay does not
+    // post it twice, falling back to withdrawal when the journal is down.
+    const errorEffect = isInstructionClosed()
+      ? null
+      : await beginEffect(
+          'chat_reply',
+          JSON.stringify(['closeout', message, []]),
+        );
     const errorReplayRevoked =
-      !isInstructionClosed() &&
-      (await revokeDurableTurnReplay('Error closeout.'));
+      errorEffect !== null && !('refused' in errorEffect);
     if (!isInstructionClosed() && !errorReplayRevoked) {
       terminalRevocationFailed = true;
       console.warn(
@@ -4043,7 +4336,13 @@ export async function answerFastAgentQuestion({
         inferenceRetryMessageIndex = undefined;
         inferenceRetryCanonicalEvent = undefined;
         lastVisibleMessage = message;
+        if (errorEffect && !('refused' in errorEffect)) {
+          await completeEffect(errorEffect, { purpose: 'closeout', message });
+        }
       } catch (postError) {
+        if (errorEffect && !('refused' in errorEffect)) {
+          await withdrawEffect(errorEffect);
+        }
         console.error(
           `[Fast Agent] Failed to post error closeout: ${formatErrorForLog(postError)}`,
         );
