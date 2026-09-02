@@ -53,10 +53,13 @@ describe('update-dependencies guidance', () => {
       'After `create-draft-pr` (or an explicitly requested PR-delivery skill) returns the GitHub pull request number',
     );
     expect(skillContent).toContain(
-      '`POST repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers`',
+      'Call `manage_source_control` with action `request_pull_request_reviewers`',
     );
     expect(skillContent).toContain(
-      "Assign separately configured assignees with GitHub's issue-assignee API rather than converting assignees into reviewers",
+      'passing user logins as `reviewers` and team slugs as `teamReviewers`',
+    );
+    expect(skillContent).toContain(
+      "pass separately configured assignees from the matching dependency-update config into the PR-delivery skill's existing `assignees` contract rather than converting assignees into reviewers",
     );
     expect(skillContent).toContain('Do not infer reviewers from `CODEOWNERS`');
     expect(skillContent).toContain(
