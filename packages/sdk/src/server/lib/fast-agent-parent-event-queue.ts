@@ -352,10 +352,16 @@ export async function drainFastAgentParentEvents(
                   // The resumed run owns the same row: it revokes replay
                   // before any non-replayable action, so a worker death
                   // after such an action cannot drain the row again. The
-                  // consumed retry count keeps the per-turn cap honest.
+                  // persisted retry state keeps the horizon and cap honest.
                   durableAdmission: {
                     eventId: row.id,
                     inferenceRetries: row.inferenceRetries,
+                    ...(row.inferenceRecoveryStartedAt
+                      ? {
+                          inferenceRecoveryStartedAt:
+                            row.inferenceRecoveryStartedAt,
+                        }
+                      : {}),
                   },
                   // A resumed run that is interrupted again, or parks itself
                   // for another retry, hands the row back through these.

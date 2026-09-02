@@ -98,6 +98,7 @@ vi.mock('@roomote/db/server', () => ({
     claimedUntil: 'claimed_until',
     retryAt: 'retry_at',
     inferenceRetries: 'inference_retries',
+    inferenceRecoveryStartedAt: 'inference_recovery_started_at',
     createdAt: 'created_at',
     deliveredAt: 'delivered_at',
     discardedAt: 'discarded_at',
@@ -503,6 +504,7 @@ describe('Fast parent event durable queue', () => {
       claimedUntil: null,
       retryAt: new Date(Date.now() - 10),
       inferenceRetries: 2,
+      inferenceRecoveryStartedAt: new Date(Date.now() - 60_000),
     };
     mocks.findPending
       .mockResolvedValueOnce(retryRow)
@@ -518,7 +520,11 @@ describe('Fast parent event durable queue', () => {
     const [params] = mocks.deliver.mock.calls[0]!;
     expect(params).toMatchObject({
       resumedAfterInferenceRetry: true,
-      durableAdmission: { eventId: 'inline-3', inferenceRetries: 2 },
+      durableAdmission: {
+        eventId: 'inline-3',
+        inferenceRetries: 2,
+        inferenceRecoveryStartedAt: retryRow.inferenceRecoveryStartedAt,
+      },
     });
     expect(params.resumedAfterInterruption).toBeUndefined();
 

@@ -1203,6 +1203,8 @@ describe('Fast conversation repository', () => {
           claimedUntil: fastAgentParentEvents.claimedUntil,
           retryAt: fastAgentParentEvents.retryAt,
           inferenceRetries: fastAgentParentEvents.inferenceRetries,
+          inferenceRecoveryStartedAt:
+            fastAgentParentEvents.inferenceRecoveryStartedAt,
           lastError: fastAgentParentEvents.lastError,
         })
         .from(fastAgentParentEvents)
@@ -1212,10 +1214,12 @@ describe('Fast conversation repository', () => {
 
     // Parking releases the owner's claim and records when and why.
     const retryAt = new Date(Date.now() + 45_000);
+    const inferenceRecoveryStartedAt = new Date();
     await expect(
       scheduleFastAgentDurableTurnRetry(row!.id, {
         retryAt,
         inferenceRetries: 2,
+        inferenceRecoveryStartedAt,
         reason: 'Inference retry 2/6 scheduled (timeout).',
       }),
     ).resolves.toBe(true);
@@ -1226,6 +1230,24 @@ describe('Fast conversation repository', () => {
       lastError: 'Inference retry 2/6 scheduled (timeout).',
     });
     expect(parked.retryAt?.getTime()).toBe(retryAt.getTime());
+    expect(parked.inferenceRecoveryStartedAt?.getTime()).toBe(
+      inferenceRecoveryStartedAt.getTime(),
+    );
+
+    // A later owner advances retry state without resetting the episode clock.
+    await expect(
+      scheduleFastAgentDurableTurnRetry(row!.id, {
+        retryAt: new Date(retryAt.getTime() + 60_000),
+        inferenceRetries: 3,
+        inferenceRecoveryStartedAt: new Date(
+          inferenceRecoveryStartedAt.getTime() + 60_000,
+        ),
+        reason: 'Inference retry 3/128 scheduled (timeout).',
+      }),
+    ).resolves.toBe(true);
+    expect((await readRow()).inferenceRecoveryStartedAt?.getTime()).toBe(
+      inferenceRecoveryStartedAt.getTime(),
+    );
 
     // A settled row can no longer be parked.
     await expect(markFastAgentDurableTurnDelivered(row!.id)).resolves.toBe(
@@ -1234,11 +1256,12 @@ describe('Fast conversation repository', () => {
     await expect(
       scheduleFastAgentDurableTurnRetry(row!.id, {
         retryAt,
-        inferenceRetries: 3,
+        inferenceRetries: 4,
+        inferenceRecoveryStartedAt,
         reason: 'late',
       }),
     ).resolves.toBe(false);
-    expect((await readRow()).inferenceRetries).toBe(2);
+    expect((await readRow()).inferenceRetries).toBe(3);
 
     // The resumed run finds the notice its predecessor left active for this
     // turn, and only while it is still active.

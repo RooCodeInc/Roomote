@@ -1,0 +1,1 @@
+ALTER TABLE "fast_agent_parent_events" ADD COLUMN "inference_recovery_started_at" timestamp;

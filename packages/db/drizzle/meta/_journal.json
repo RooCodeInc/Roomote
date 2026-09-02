@@ -512,6 +512,13 @@
       "when": 1788330125016,
       "tag": "0072_nice_triathlon",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1788355995577,
+      "tag": "0073_chief_felicia_hardy",
+      "breakpoints": true
     }
   ]
 }

@@ -558,6 +558,12 @@ const FAST_AGENT_SILENT_RECOVERY_WINDOW_MS = 30_000;
 // Progress-based budget resets are bounded so one turn cannot retry forever:
 // this caps total automatic retries across every reset within a single turn.
 export const FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN = 12;
+// Replay-safe turns may outlive one process and ride out a meaningful provider
+// outage, but recovery remains bounded in persisted wall-clock time and count.
+export const FAST_AGENT_DURABLE_INFERENCE_RETRY_HORIZON_MS = 15 * 60_000;
+// This only guards pathological near-zero provider delays; under normal
+// exponential or Retry-After waits the 15-minute horizon binds first.
+export const FAST_AGENT_DURABLE_INFERENCE_MAX_RETRIES = 128;
 const FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS = 5 * 60_000;
 const FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO = 0.2;
 const FAST_AGENT_PROVIDER_RECOVERY_PROMPT =
@@ -580,12 +586,16 @@ type FastAgentInferenceRetryOptions = {
   /**
    * Offered the pending backoff after its notice is recorded and before the
    * process would sleep it out. Returning true means the wait now belongs to
-   * durable scheduling and this execution must stop without an outcome; the
-   * loop then throws FastAgentDurableRetryScheduledError.
+   * durable scheduling and this execution must stop without an outcome.
+   * `exhausted` means the next wait would cross the persisted recovery horizon.
    */
   deferRetry?: (
     notice: FastAgentInferenceRetryNotice & { totalRetryCount: number },
-  ) => Promise<boolean>;
+  ) => Promise<'scheduled' | 'exhausted' | false>;
+  resolveRetryLimits?: (failure: FastAgentInferenceFailure) => {
+    maxRetries: number;
+    maxTotalRetries: number;
+  };
   /**
    * Automatic retries already consumed by earlier executions of this turn,
    * so a resumed run continues the same bounded budget (and the same
@@ -659,6 +669,19 @@ class FastAgentInferenceError extends Error {
   }
 }
 
+function findFastAgentInferenceError(
+  error: unknown,
+): FastAgentInferenceError | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < 6 && current; depth += 1) {
+    if (current instanceof FastAgentInferenceError) return current;
+    if (typeof current !== 'object') return null;
+    const record = current as { cause?: unknown; providerError?: unknown };
+    current = record.cause ?? record.providerError;
+  }
+  return null;
+}
+
 function resolveFastAgentInferenceMaxRetries(
   failure: FastAgentInferenceFailure,
 ): number {
@@ -719,23 +742,38 @@ function formatFastAgentInferenceRetryNotice(
 function formatFastAgentInferenceFailure(
   failure: FastAgentInferenceFailure,
   retried: boolean,
+  requestPreserved: boolean,
 ): string {
+  const preservedRequestRecovery =
+    'The original request is preserved in this conversation; send any follow-up to resume it.';
   switch (failure.reason) {
     case 'content_filter':
       return 'The inference provider blocked this response with its content filter, so retrying will not help. Try rephrasing the request or asking in a new thread.';
     case 'rate_limited':
+      if (requestPreserved) {
+        return `The inference provider is still rate limiting requests after automatic recovery. ${preservedRequestRecovery}`;
+      }
       return retried
         ? 'The inference provider is still rate limiting requests after retrying. Any delegated tasks can keep running; please try again when provider capacity is available.'
         : 'The inference provider is rate limiting requests. Any delegated tasks can keep running; please try again when provider capacity is available.';
     case 'timeout':
+      if (requestPreserved) {
+        return `The inference provider did not respond after automatic recovery. ${preservedRequestRecovery}`;
+      }
       return retried
         ? 'The inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.'
         : 'The inference provider did not respond. Any delegated tasks can keep running; please try again in a moment.';
     case 'endpoint_unreachable':
+      if (requestPreserved) {
+        return `Could not reach the inference provider after automatic recovery. ${preservedRequestRecovery}`;
+      }
       return retried
         ? 'Could not reach the inference provider after retrying. Please try again in a moment.'
         : 'Could not reach the inference provider. Please try again in a moment.';
     case 'gateway_blocked':
+      if (requestPreserved) {
+        return `The request is still being blocked by the inference provider gateway after automatic recovery. ${preservedRequestRecovery}`;
+      }
       return retried
         ? 'The request is still being blocked by the inference provider gateway after retrying. Please try again in a moment.'
         : 'The request was blocked by the inference provider gateway. Please try again in a moment.';
@@ -745,8 +783,13 @@ function formatFastAgentInferenceFailure(
       return 'Could not authenticate with the configured inference provider. An administrator needs to reconnect or replace its credentials.';
     case 'model_unavailable':
       return 'The configured model is not available from the inference provider. An administrator needs to select an available model.';
-    default:
-      return 'Could not complete the request because the inference provider returned an error. Please try again in a moment.';
+    case 'provider_error':
+      if (!failure.retryable) {
+        return 'The inference provider rejected this request, and retrying it unchanged will not help. Revise the request or provider configuration before continuing.';
+      }
+      return requestPreserved
+        ? `The inference provider is still unavailable after automatic recovery. ${preservedRequestRecovery}`
+        : 'The inference provider is still unavailable after automatic retries. Send a follow-up to check the current state before continuing.';
   }
 }
 
@@ -787,6 +830,8 @@ async function runFastAgentInferenceWithRetries<T>(
       // provider backoff is not a failure to classify or retry here.
       const parked = findFastAgentDurableRetryScheduledError(error);
       if (parked) throw parked;
+      const terminalInferenceError = findFastAgentInferenceError(error);
+      if (terminalInferenceError) throw terminalInferenceError;
       // Session loss is the session manager's bootstrap signal, not a
       // provider failure this loop should absorb.
       if (isNonTaskOpenCodeSessionNotFoundError(error)) {
@@ -794,9 +839,13 @@ async function runFastAgentInferenceWithRetries<T>(
       }
 
       const failure = classifyNonTaskInferenceError(error);
+      const retryLimits = options.resolveRetryLimits?.(failure) ?? {
+        maxRetries: resolveFastAgentInferenceMaxRetries(failure),
+        maxTotalRetries: FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN,
+      };
       if (
         failure.retryable &&
-        totalRetryCount < FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN &&
+        totalRetryCount < retryLimits.maxTotalRetries &&
         options.consumeRetryBudgetReset?.() === true
       ) {
         // The failed attempt made real forward progress that the next warm
@@ -804,12 +853,12 @@ async function runFastAgentInferenceWithRetries<T>(
         // way standard-task recovery resets after each completed turn.
         retryNumber = 0;
       }
-      const maxRetries = resolveFastAgentInferenceMaxRetries(failure);
+      const { maxRetries, maxTotalRetries } = retryLimits;
       if (
         !failure.retryable ||
         options.canRetry?.(error, failure) === false ||
         retryNumber >= maxRetries ||
-        totalRetryCount >= FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN
+        totalRetryCount >= maxTotalRetries
       ) {
         throw new FastAgentInferenceError(failure, error);
       }
@@ -835,26 +884,27 @@ async function runFastAgentInferenceWithRetries<T>(
       }
       // The notice is recorded first so a resumed run can find and keep
       // editing it; only then may the wait leave this process.
-      if (
-        options.deferRetry &&
-        (await options.deferRetry({
+      if (options.deferRetry) {
+        const deferral = await options.deferRetry({
           failure,
           attemptNumber,
           maxAttempts: maxRetries,
           delayMs,
           totalRetryCount,
-        }))
-      ) {
-        throw new FastAgentDurableRetryScheduledError(
-          new Date(Date.now() + delayMs),
-        );
+        });
+        if (deferral === 'exhausted') {
+          throw new FastAgentInferenceError(failure, error);
+        }
+        if (deferral === 'scheduled') {
+          throw new FastAgentDurableRetryScheduledError(
+            new Date(Date.now() + delayMs),
+          );
+        }
       }
       await options.prepareRetry?.();
       await waitForFastAgentInferenceRetry(delayMs, options.signal);
     }
   }
-
-  throw new Error('Fast mode exhausted its inference retry loop.');
 }
 
 function buildUserTextMessage(text: string): ModelMessage {
@@ -1259,6 +1309,8 @@ export async function answerFastAgentQuestion({
     eventId: string;
     /** Automatic inference retries earlier executions already consumed. */
     inferenceRetries?: number;
+    /** Start of the persisted provider-recovery horizon. */
+    inferenceRecoveryStartedAt?: Date;
   };
   /** The durable queue is re-running this turn after an interruption. */
   resumedAfterInterruption?: boolean;
@@ -1429,12 +1481,19 @@ export async function answerFastAgentQuestion({
    * (row superseded or withdrawn, write failed) also falls back to the
    * in-process wait, so durability here is best effort like admission.
    */
+  const inferenceRecoveryStartedAt =
+    durableAdmission?.inferenceRecoveryStartedAt ?? new Date();
+  const inferenceRecoveryDeadlineAt = new Date(
+    inferenceRecoveryStartedAt.getTime() +
+      FAST_AGENT_DURABLE_INFERENCE_RETRY_HORIZON_MS,
+  );
   const deferInferenceRetry = async (
     notice: FastAgentInferenceRetryNotice & { totalRetryCount: number },
-  ): Promise<boolean> => {
+  ): Promise<'scheduled' | 'exhausted' | false> => {
     if (
       !durableAdmission ||
       !durableTurnReplayable ||
+      !notice.failure.retryable ||
       !adapter.requestDurableRetry ||
       Env.R_FAST_DURABLE_RETRY_DISABLED ||
       notice.delayMs === undefined ||
@@ -1444,11 +1503,15 @@ export async function answerFastAgentQuestion({
       return false;
     }
     const retryAt = new Date(Date.now() + notice.delayMs);
+    if (retryAt > inferenceRecoveryDeadlineAt) {
+      return 'exhausted';
+    }
     const scheduled = await scheduleFastAgentDurableTurnRetry(
       durableAdmission.eventId,
       {
         retryAt,
         inferenceRetries: notice.totalRetryCount,
+        inferenceRecoveryStartedAt,
         reason: `Inference retry ${notice.attemptNumber}${notice.maxAttempts ? `/${notice.maxAttempts}` : ''} scheduled (${notice.failure.reason}).`,
       },
     ).catch((error) => {
@@ -1469,7 +1532,7 @@ export async function answerFastAgentQuestion({
     console.info(
       `[Fast Agent] Parked the turn for a durable inference retry (row=${durableAdmission.eventId}, retryAt=${retryAt.toISOString()}, retries=${notice.totalRetryCount}, reason=${notice.failure.reason}).`,
     );
-    return true;
+    return 'scheduled';
   };
   let activeHumanSteerPoll = Promise.resolve();
   const injectedHumanFollowUpIds = new Set<string>();
@@ -3340,7 +3403,16 @@ export async function answerFastAgentQuestion({
             ? 'turn_delta'
             : 'bootstrap';
         let attemptSessionPath = sessionPath;
-        let promptTimeoutMs: number | null = null;
+        let promptTimeoutMs: number | null =
+          durableAdmission?.inferenceRecoveryStartedAt
+            ? Math.max(
+                1,
+                Math.min(
+                  FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS,
+                  inferenceRecoveryDeadlineAt.getTime() - Date.now(),
+                ),
+              )
+            : null;
         let resolvedInferenceModel: string | undefined;
         const captureInferenceContext = (
           attemptScope: 'prompt_submission' | 'provider_retry',
@@ -3462,29 +3534,46 @@ export async function answerFastAgentQuestion({
                         // interrupts most often. A replay-safe turn parks
                         // at that time instead and lets the queue re-prompt;
                         // the abort below ends this prompt with the park as
-                        // its reason. The per-turn cap bounds the handoffs,
-                        // after which OpenCode's in-process retries resume.
+                        // its reason. The persisted horizon and safety cap
+                        // bound handoffs across every process and restart.
                         if (
                           event.nextRetryAtMs !== undefined &&
                           durableRetriesConsumed <
-                            FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN
+                            FAST_AGENT_DURABLE_INFERENCE_MAX_RETRIES
                         ) {
                           const delayMs = Math.max(
                             0,
                             event.nextRetryAtMs - Date.now(),
                           );
-                          const parked = await deferInferenceRetry({
-                            failure: classifyNonTaskInferenceError(
-                              new Error(event.message),
-                            ),
+                          const failure = classifyNonTaskInferenceError(
+                            new Error(event.message),
+                          );
+                          if (!failure.retryable) {
+                            providerRetryAbortController.abort(
+                              new FastAgentInferenceError(
+                                failure,
+                                new Error(event.message),
+                              ),
+                            );
+                            return;
+                          }
+                          const deferral = await deferInferenceRetry({
+                            failure,
                             attemptNumber: durableRetriesConsumed + 1,
                             delayMs,
                             totalRetryCount: durableRetriesConsumed + 1,
                           });
-                          if (parked) {
+                          if (deferral === 'scheduled') {
                             providerRetryAbortController.abort(
                               new FastAgentDurableRetryScheduledError(
                                 new Date(Date.now() + delayMs),
+                              ),
+                            );
+                          } else if (deferral === 'exhausted') {
+                            providerRetryAbortController.abort(
+                              new FastAgentInferenceError(
+                                failure,
+                                new Error(event.message),
                               ),
                             );
                           }
@@ -3656,6 +3745,9 @@ export async function answerFastAgentQuestion({
                 // handler records the outcome, not a failed attempt.
                 const parked = findFastAgentDurableRetryScheduledError(error);
                 if (parked) throw parked;
+                const terminalInferenceError =
+                  findFastAgentInferenceError(error);
+                if (terminalInferenceError) throw terminalInferenceError;
                 const failure = classifyNonTaskInferenceError(error);
                 const attemptStage = !resolvedInferenceModel
                   ? 'model_resolution'
@@ -3747,9 +3839,34 @@ export async function answerFastAgentQuestion({
                 }
                 // Keep every recovery attempt bounded so it cannot hold the
                 // conversation lock forever if the provider stalls again.
-                promptTimeoutMs = FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS;
+                promptTimeoutMs = Math.max(
+                  1,
+                  Math.min(
+                    FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS,
+                    durableAdmission?.inferenceRecoveryStartedAt
+                      ? inferenceRecoveryDeadlineAt.getTime() - Date.now()
+                      : FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS,
+                  ),
+                );
               },
               deferRetry: deferInferenceRetry,
+              resolveRetryLimits: (failure) => {
+                if (
+                  failure.retryable &&
+                  durableAdmission &&
+                  durableTurnReplayable &&
+                  !Env.R_FAST_DURABLE_RETRY_DISABLED
+                ) {
+                  return {
+                    maxRetries: FAST_AGENT_DURABLE_INFERENCE_MAX_RETRIES,
+                    maxTotalRetries: FAST_AGENT_DURABLE_INFERENCE_MAX_RETRIES,
+                  };
+                }
+                return {
+                  maxRetries: resolveFastAgentInferenceMaxRetries(failure),
+                  maxTotalRetries: FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN,
+                };
+              },
               ...(durableAdmission?.inferenceRetries
                 ? { initialRetryCount: durableAdmission.inferenceRetries }
                 : {}),
@@ -3971,6 +4088,11 @@ export async function answerFastAgentQuestion({
       }
       throw signal.reason instanceof Error ? signal.reason : error;
     }
+    const inferenceFailure =
+      error instanceof FastAgentInferenceError ? error.failure : null;
+    const requestPreserved = Boolean(
+      inferenceFailure?.retryable && durableAdmission && durableTurnReplayable,
+    );
     if (canonicalConversationId) {
       // The system-posted closeout below is mirrored to compatibility history,
       // not to OpenCode's live transcript. Force the next turn to bootstrap so
@@ -3979,13 +4101,15 @@ export async function answerFastAgentQuestion({
     }
     if (platformEvent) throw error;
 
-    const message =
-      error instanceof FastAgentInferenceError
-        ? formatFastAgentInferenceFailure(
-            error.failure,
-            inferenceRetryAttempted,
-          )
-        : 'I hit an error while handling that request. Please try again in a moment.';
+    const message = inferenceFailure
+      ? formatFastAgentInferenceFailure(
+          inferenceFailure,
+          inferenceRetryAttempted,
+          requestPreserved,
+        )
+      : 'I hit an error while handling that request. Please try again in a moment.';
+    const interruptionReason: FastAgentInterruptionReason | undefined =
+      requestPreserved ? 'provider_recovery_exhausted' : undefined;
     // The error closeout is terminal too; a replay must not post it twice.
     const errorReplayRevoked =
       !isInstructionClosed() &&
@@ -4000,8 +4124,11 @@ export async function answerFastAgentQuestion({
       try {
         const reply = { purpose: 'closeout' as const, message };
         if (
-          !(await replaceInferenceRetryReply(reply, true, () =>
-            diagnostics.recordVisibleReply(),
+          !(await replaceInferenceRetryReply(
+            reply,
+            true,
+            () => diagnostics.recordVisibleReply(),
+            interruptionReason,
           ))
         ) {
           const posted = await adapter.postReply(reply);
@@ -4013,6 +4140,7 @@ export async function answerFastAgentQuestion({
               `assistant:${nextAssistantOrdinal++}`,
             ),
             platformMessageId: posted?.messageId,
+            interruptionReason,
           });
         }
         inferenceRetryReply = undefined;

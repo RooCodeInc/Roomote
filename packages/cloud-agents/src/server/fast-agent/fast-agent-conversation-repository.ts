@@ -76,6 +76,7 @@ export type FastAgentInterruptionReason =
   | 'api_shutdown'
   | 'turn_aborted'
   | 'lock_lost'
+  | 'provider_recovery_exhausted'
   | 'next_turn_reconcile'
   | 'turn_settled_reconcile'
   | 'expired_lease_reconcile';
@@ -393,14 +394,19 @@ export async function revokeFastAgentDurableTurnReplay(
 /**
  * Park the turn for a durable inference retry: the owner gives up its claim
  * and the queue re-runs the row once `retryAt` arrives, on whichever process
- * is alive then. The consumed retry count travels with the row so the
- * per-turn cap holds across owners. False once the row is no longer pending
- * (superseded or already withdrawn), in which case the caller keeps the
- * retry in process.
+ * is alive then. The consumed retry count and recovery start travel with the
+ * row so the retry horizon and safety cap hold across owners and restarts.
+ * False once the row is no longer pending (superseded or already withdrawn),
+ * in which case the caller keeps the retry in process.
  */
 export async function scheduleFastAgentDurableTurnRetry(
   id: string,
-  params: { retryAt: Date; inferenceRetries: number; reason: string },
+  params: {
+    retryAt: Date;
+    inferenceRetries: number;
+    inferenceRecoveryStartedAt: Date;
+    reason: string;
+  },
 ): Promise<boolean> {
   const rows = await db
     .update(fastAgentParentEvents)
@@ -408,6 +414,7 @@ export async function scheduleFastAgentDurableTurnRetry(
       claimedUntil: null,
       retryAt: params.retryAt,
       inferenceRetries: params.inferenceRetries,
+      inferenceRecoveryStartedAt: sql`coalesce(${fastAgentParentEvents.inferenceRecoveryStartedAt}, ${params.inferenceRecoveryStartedAt.toISOString()}::timestamp)`,
       lastError: params.reason,
       updatedAt: new Date(),
     })

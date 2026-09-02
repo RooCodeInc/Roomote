@@ -1544,7 +1544,11 @@ type FastAgentParentEventDeliveryParams = {
   resumedAfterInferenceRetry?: boolean;
   /** The inline-admitted row the resumed run executes and settles, with the
    * automatic retries earlier executions already consumed. */
-  durableAdmission?: { eventId: string; inferenceRetries?: number };
+  durableAdmission?: {
+    eventId: string;
+    inferenceRetries?: number;
+    inferenceRecoveryStartedAt?: Date;
+  };
   /** Queue wakeups a resumed run uses when it hands the row back again:
    * immediately after an interruption, or at a scheduled retry time. */
   requestDurableResume?: () => Promise<void>;

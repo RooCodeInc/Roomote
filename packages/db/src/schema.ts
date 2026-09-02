@@ -3167,9 +3167,17 @@ export const fastAgentParentEvents = pgTable(
     retryAt: timestamp('retry_at'),
     /**
      * Automatic inference retries this turn has consumed across every
-     * owner, so the per-turn retry cap holds through restarts and handoffs.
+     * owner, preserving backoff progression and the safety cap through
+     * restarts and handoffs.
      */
     inferenceRetries: integer('inference_retries').notNull().default(0),
+    /**
+     * First retryable provider failure in the current durable recovery
+     * episode. The deadline is derived from this persisted timestamp so a
+     * process restart cannot reset recovery into an unbounded loop. The
+     * previous release ignores this nullable column (N-1 safe).
+     */
+    inferenceRecoveryStartedAt: timestamp('inference_recovery_started_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
