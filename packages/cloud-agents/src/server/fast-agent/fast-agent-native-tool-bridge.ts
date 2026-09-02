@@ -1102,38 +1102,79 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
     throw new Error('Fast tool bridge did not receive a TCP address.');
   }
 
+  const sharedToolsDirectory = createSharedToolsDirectory();
+
   return {
     token,
     url: `http://127.0.0.1:${address.port}`,
     env: {
       ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: token,
       ROOMOTE_FAST_TOOL_BRIDGE_URL: `http://127.0.0.1:${address.port}/tool`,
+      // Every Fast conversation gets its own OpenCode project directory, and
+      // OpenCode boots a fresh instance per directory. Serving the native
+      // tools from one extra config directory keeps that per-conversation
+      // boot down to reading `opencode.json`: OpenCode runs a dependency
+      // install (`@opencode-ai/plugin`) for each `.opencode` directory it
+      // loads, which cost roughly a second on the first message of every
+      // conversation when the tools lived inside the conversation directory.
+      OPENCODE_CONFIG_DIR: sharedToolsDirectory,
     },
   };
 }
 
-function createRuntimeDirectory(sessionId: string): string {
+function ensureRuntimeRootDirectory(): string {
   const rootDirectory = join(tmpdir(), 'roomote-fast-opencode');
   mkdirSync(rootDirectory, { recursive: true, mode: 0o700 });
   chmodSync(rootDirectory, 0o700);
+  return rootDirectory;
+}
+
+/**
+ * Materializes the native Fast tools in a content-addressed directory shared
+ * by every conversation on this host. The path hashes the generated sources,
+ * so a deploy that changes or removes a tool lands in a new directory and the
+ * old one is never loaded again, while an unchanged deploy reuses the
+ * directory (and whatever OpenCode already installed into it).
+ */
+function createSharedToolsDirectory(): string {
+  const zodDirectory = resolveZodDirectoryForTools();
+  const contentHash = createHash('sha256')
+    .update(
+      JSON.stringify({
+        layout: 2,
+        bridge: FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE,
+        tools: FAST_AGENT_NATIVE_TOOL_SOURCES,
+        zod: zodDirectory,
+      }),
+    )
+    .digest('hex');
   const directory = join(
-    rootDirectory,
-    createHash('sha256').update(sessionId).digest('hex'),
+    ensureRuntimeRootDirectory(),
+    `shared-tools-${contentHash.slice(0, 32)}`,
   );
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const toolsDirectory = join(directory, 'tools');
+  mkdirSync(toolsDirectory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
-  const toolsDirectory = join(directory, '.opencode', 'tools');
-  // Recreate the tool directory from scratch: a reused runtime directory may
-  // hold tool files from an older code version, and stale tools would stay
-  // loadable (and invokable) after a deploy that removed them.
-  rmSync(toolsDirectory, { recursive: true, force: true });
-  mkdirSync(toolsDirectory, { recursive: true });
   writeFileSync(
-    join(directory, '.opencode', 'package.json'),
+    join(directory, 'package.json'),
     JSON.stringify({ private: true, type: 'module' }),
     'utf8',
   );
-  const toolNodeModules = join(directory, '.opencode', 'node_modules');
+  // OpenCode installs `@opencode-ai/plugin` into every config directory
+  // whose lockfile does not already list it. The Fast tools import only the
+  // bridge shim and the zod link below, so a lockfile that declares the
+  // dependency satisfies that check without a network install (and without
+  // OpenCode rewriting this package.json).
+  writeFileSync(
+    join(directory, 'package-lock.json'),
+    JSON.stringify({
+      name: 'roomote-fast-tools',
+      lockfileVersion: 3,
+      packages: { '': { dependencies: { '@opencode-ai/plugin': '*' } } },
+    }),
+    'utf8',
+  );
+  const toolNodeModules = join(directory, 'node_modules');
   mkdirSync(toolNodeModules, { recursive: true });
   const zodLink = join(toolNodeModules, 'zod');
   try {
@@ -1142,15 +1183,36 @@ function createRuntimeDirectory(sessionId: string): string {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  symlinkSync(resolveZodDirectoryForTools(), zodLink, 'dir');
+  try {
+    symlinkSync(zodDirectory, zodLink, 'dir');
+  } catch (error) {
+    // Another process on this host materialized the same directory between
+    // the unlink and the symlink; the target is identical by construction.
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
   writeFileSync(
-    join(directory, '.opencode', 'roomote-fast-tool-bridge.js'),
+    join(directory, 'roomote-fast-tool-bridge.js'),
     FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE,
     'utf8',
   );
   for (const [name, source] of Object.entries(FAST_AGENT_NATIVE_TOOL_SOURCES)) {
     writeFileSync(join(toolsDirectory, `${name}.js`), source, 'utf8');
   }
+  return directory;
+}
+
+function createRuntimeDirectory(sessionId: string): string {
+  const directory = join(
+    ensureRuntimeRootDirectory(),
+    createHash('sha256').update(sessionId).digest('hex'),
+  );
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  chmodSync(directory, 0o700);
+  // Earlier releases wrote the native tools into a per-conversation
+  // `.opencode` directory. A reused conversation directory must shed it: its
+  // presence makes OpenCode run a dependency install on every boot and would
+  // keep stale tool files loadable after a deploy that removed them.
+  rmSync(join(directory, '.opencode'), { recursive: true, force: true });
   return directory;
 }
 
