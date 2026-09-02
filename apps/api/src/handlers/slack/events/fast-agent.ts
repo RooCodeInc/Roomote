@@ -34,7 +34,10 @@ import {
 } from '@roomote/sdk/server';
 
 import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
-import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
+import {
+  postSlackThreadMarkdownMessage,
+  guardReplyStreamBySourceMessage,
+} from '../helpers/thread-posting.js';
 import { processSlackAttachments } from '../helpers/attachments.js';
 
 export function stripLeadingFastCommandMention(text: string): string {
@@ -370,19 +373,27 @@ export async function processFastAgentMessage(params: {
         ...(event.user
           ? {
               createReplyStream: () =>
-                createSlackFastReplyStream({
-                  slack,
-                  conversation,
-                  channelId: event.channel,
-                  threadTs: threadId,
-                  recipientTeamId: teamId,
-                  recipientUserId: event.user,
-                  sessionId: session.id,
-                  footerContext,
-                  onDelivered: () => {
-                    didSendVisibleResponse = true;
+                guardReplyStreamBySourceMessage(
+                  createSlackFastReplyStream({
+                    slack,
+                    conversation,
+                    channelId: event.channel,
+                    threadTs: threadId,
+                    recipientTeamId: teamId,
+                    recipientUserId: event.user,
+                    sessionId: session.id,
+                    footerContext,
+                    onDelivered: () => {
+                      didSendVisibleResponse = true;
+                    },
+                  }),
+                  {
+                    slack,
+                    channel: event.channel,
+                    threadTs: threadId,
+                    sourceMessageTs: event.ts,
                   },
-                }),
+                ),
             }
           : {}),
         postReply: async ({ message, kickoff }) => {

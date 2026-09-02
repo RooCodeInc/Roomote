@@ -153,6 +153,24 @@ describe('createSlackFastReplyStream', () => {
     );
   });
 
+  it('yields no delivery when the final rewrite is rejected so the reply is posted instead', async () => {
+    const slack = slackMock();
+    mocks.updateWithFooter.mockResolvedValue(false);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { stream, onDelivered } = build(slack, null);
+
+    await stream.append('Looking');
+    await expect(
+      stream.finish({ purpose: 'closeout', message: 'Looking.' }),
+    ).resolves.toBeUndefined();
+    expect(slack.stopMessageStream).toHaveBeenCalledTimes(1);
+    expect(mocks.recordMessage).not.toHaveBeenCalled();
+    expect(onDelivered).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('did not accept the final body'),
+    );
+  });
+
   it('aborts by stopping the stream and leaving its text', async () => {
     const slack = slackMock();
     const { stream } = build(slack, null);

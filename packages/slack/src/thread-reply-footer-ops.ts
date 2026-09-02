@@ -348,6 +348,24 @@ export async function updateSlackThreadMessageWithFooterText(params: {
             error instanceof Error ? error.message : String(error)
           }`,
         );
+        // Without the pointer no later reply could strip this footer, so
+        // take it back off rather than let the thread collect duplicates.
+        try {
+          await removeSlackThreadReplyFooter({
+            slack: params.slack,
+            channel: params.channel,
+            threadTs: params.threadTs,
+            messageTs: params.messageTs,
+          });
+        } catch (removeError) {
+          console.error(
+            `[slackThreadFooter] Failed to remove footer from Slack message ${params.messageTs} after persistence failure: ${
+              removeError instanceof Error
+                ? removeError.message
+                : String(removeError)
+            }`,
+          );
+        }
       }
 
       return true;
