@@ -43,9 +43,9 @@ export function formatRecommendationApplicationReceipt(input: {
 }): string {
   if (input.action === 'skipped') return 'Skipped recommended automations.';
   if (input.enabledTitles.length === 0) {
-    return 'Saved with no recommended automations enabled.';
+    return 'No recommended automations were enabled.';
   }
-  return `Saved ${formatList(input.enabledTitles)}.`;
+  return `Enabled ${formatList(input.enabledTitles)}.`;
 }
 
 export function buildSetupReceiptMessage(input: {

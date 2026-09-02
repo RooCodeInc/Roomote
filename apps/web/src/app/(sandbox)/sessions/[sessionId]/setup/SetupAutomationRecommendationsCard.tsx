@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import { useUser } from '@/hooks/useUser';
@@ -12,8 +13,8 @@ import { SetupSessionActionCard } from './SetupSessionActionCard';
 /**
  * Inline automation-recommendations card. Rendered in the conversational
  * setup workspace and in the setup session's normal route after activation.
- * Apply or Skip notifies Roomote so it can acknowledge the choice and
- * continue naturally. Optional: never blocks activation or launched tasks.
+ * Enabling the selection adds a transcript-only acknowledgement and dismisses
+ * the card. Optional: never blocks activation or launched tasks.
  */
 export function SetupAutomationRecommendationsCard({
   sessionId,
@@ -22,12 +23,17 @@ export function SetupAutomationRecommendationsCard({
 }) {
   const trpc = useTRPC();
   const { user } = useUser();
+  const [dismissed, setDismissed] = useState(false);
   const status = useQuery(trpc.setupNew.status.queryOptions());
   const tasks = useQuery(trpc.fastSessions.tasks.queryOptions({ sessionId }));
+  const recommendations = status.data?.setupNewState.automationRecommendations;
 
   if (
+    dismissed ||
     user?.isAdmin !== true ||
-    status.data?.setupNewState.automationRecommendations?.status !== 'ready' ||
+    recommendations?.status !== 'ready' ||
+    recommendations.dismissed ||
+    (recommendations.applicationState ?? 'pending') !== 'pending' ||
     !tasks.data?.length
   ) {
     return null;
@@ -35,11 +41,11 @@ export function SetupAutomationRecommendationsCard({
 
   return (
     <SetupSessionActionCard
-      title="Recommended automations"
+      title="I found some stuff to automate"
       icon={<Zap />}
-      intro="Review the recurring work I found in your repositories, then choose what to turn on."
+      intro="Looking at your repos, I recommend enabling these to run in the background and do work on your behalf."
     >
-      <AutomationRecommendations onContinue={() => undefined} />
+      <AutomationRecommendations onContinue={() => setDismissed(true)} />
     </SetupSessionActionCard>
   );
 }

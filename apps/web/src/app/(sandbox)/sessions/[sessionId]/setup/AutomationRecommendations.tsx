@@ -99,19 +99,6 @@ export function AutomationRecommendations({
       },
     }),
   );
-  const skipRecommendations = useMutation(
-    trpc.automations.skipRecommendations.mutationOptions({
-      onSuccess: (skippedBatch) => {
-        if (skippedBatch) {
-          queryClient.setQueryData(
-            trpc.automations.listRecommendations.queryKey(),
-            skippedBatch,
-          );
-        }
-        onContinue(skippedBatch);
-      },
-    }),
-  );
   const recoveryAttemptedRef = useRef(false);
   const [pendingTooLong, setPendingTooLong] = useState(false);
   const startRecommendations = useMutation(
@@ -156,14 +143,11 @@ export function AutomationRecommendations({
   const handleContinue = () => {
     if (batch?.status === 'ready') {
       applyRecommendations.mutate();
-      return;
     }
-    if (pending || failed) {
-      skipRecommendations.mutate();
-      return;
-    }
-    onContinue(batch);
   };
+  const hasSelection =
+    batch?.status === 'ready' &&
+    batch.recommendations.some((recommendation) => recommendation.enabled);
 
   useEffect(() => {
     if (!pending) {
@@ -199,7 +183,7 @@ export function AutomationRecommendations({
           <AlertTriangle className="size-4" />
           <AlertDescription>
             Recommendation review failed before it could be shown. Retry to try
-            again, or continue without reviewing automations.
+            again.
           </AlertDescription>
         </Alert>
       ) : (
@@ -227,20 +211,12 @@ export function AutomationRecommendations({
             {applyRecommendations.error.message}
           </AlertDescription>
         </Alert>
-      ) : skipRecommendations.error ? (
-        <Alert variant="destructive">
-          <AlertTriangle className="size-4" />
-          <AlertDescription>
-            Could not skip the recommendation review:{' '}
-            {skipRecommendations.error.message}
-          </AlertDescription>
-        </Alert>
       ) : pendingTooLong ? (
         <Alert>
           <AlertTriangle className="size-4" />
           <AlertDescription>
             Recommendation review is taking longer than expected. You can keep
-            waiting, retry it, or continue without reviewing automations.
+            waiting or retry it.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -267,14 +243,10 @@ export function AutomationRecommendations({
           disabled={
             setEnabled.isPending ||
             applyRecommendations.isPending ||
-            skipRecommendations.isPending
+            !hasSelection
           }
         >
-          {applyRecommendations.isPending
-            ? 'Applying...'
-            : pending
-              ? 'Skip'
-              : 'Save'}
+          {applyRecommendations.isPending ? 'Enabling...' : 'Enable'}
         </Button>
       </SetupSessionActionCardActions>
     </div>

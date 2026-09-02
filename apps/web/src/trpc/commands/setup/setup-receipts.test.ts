@@ -63,7 +63,7 @@ describe('setup transcript receipts', () => {
         action: 'saved',
         enabledTitles: ['Review code', 'Triage CI failures'],
       }),
-    ).toBe('Saved Review code and Triage CI failures.');
+    ).toBe('Enabled Review code and Triage CI failures.');
     expect(
       formatRecommendationApplicationReceipt({
         action: 'skipped',
