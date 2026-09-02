@@ -478,8 +478,9 @@ export const sleepCheckJob = async () => {
 
       if (
         candidates.hardLimitJob &&
-        typeof timeoutRemainingMs === 'number' &&
-        timeoutRemainingMs <= SNAPSHOT_CHECK_THRESHOLD_MS
+        (status === 'stopped' ||
+          (typeof timeoutRemainingMs === 'number' &&
+            timeoutRemainingMs <= SNAPSHOT_CHECK_THRESHOLD_MS))
       ) {
         const result = await handleTimedSleepCandidate({
           job: candidates.hardLimitJob,
