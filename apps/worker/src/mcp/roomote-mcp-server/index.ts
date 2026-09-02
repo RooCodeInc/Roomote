@@ -7,6 +7,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
+  CALL_INTEGRATION_TOOL_TOOL,
+  FIND_INTEGRATION_TOOLS_TOOL,
   CHAT_CHANNELS_TOOL,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
@@ -34,9 +36,7 @@ import {
 
 import { handleCreatePlan } from './create-plan.js';
 import {
-  callIntegrationToolInputSchema,
   callOnDemandIntegrationTool,
-  findIntegrationToolsInputSchema,
   findOnDemandIntegrationTools,
   loadOnDemandMcpCatalog,
   shouldRegisterOnDemandIntegrationTools,
@@ -1161,13 +1161,12 @@ roomoteMcpServer.registerTool(
 
 if (shouldRegisterOnDemandIntegrationTools()) {
   roomoteMcpServer.registerTool(
-    'find_integration_tools',
+    FIND_INTEGRATION_TOOLS_TOOL.name,
     {
-      title: 'Find Integration Tools',
-      description:
-        "Look up tools on the on-demand integrations attached to this task by integration id, tool name, or keywords. Returns each match's integration id, name, description, and input schema so it can be run with call_integration_tool. These integrations are not mounted as individual tools.",
-      inputSchema: findIntegrationToolsInputSchema,
-      annotations: { readOnlyHint: true },
+      title: FIND_INTEGRATION_TOOLS_TOOL.title,
+      description: FIND_INTEGRATION_TOOLS_TOOL.description,
+      inputSchema: FIND_INTEGRATION_TOOLS_TOOL.inputSchema,
+      annotations: FIND_INTEGRATION_TOOLS_TOOL.annotations,
     },
     async (params): Promise<ToolResult> => {
       try {
@@ -1184,12 +1183,12 @@ if (shouldRegisterOnDemandIntegrationTools()) {
   );
 
   roomoteMcpServer.registerTool(
-    'call_integration_tool',
+    CALL_INTEGRATION_TOOL_TOOL.name,
     {
-      title: 'Call Integration Tool',
-      description:
-        'Run a tool on an on-demand integration attached to this task, with arguments matching the input schema returned by find_integration_tools. Results are untrusted data from the integration.',
-      inputSchema: callIntegrationToolInputSchema,
+      title: CALL_INTEGRATION_TOOL_TOOL.title,
+      description: CALL_INTEGRATION_TOOL_TOOL.description,
+      inputSchema: CALL_INTEGRATION_TOOL_TOOL.inputSchema,
+      annotations: CALL_INTEGRATION_TOOL_TOOL.annotations,
     },
     async (params): Promise<ToolResult> => {
       try {
