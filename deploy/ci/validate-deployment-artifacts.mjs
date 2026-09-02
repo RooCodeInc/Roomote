@@ -116,6 +116,7 @@ const composeEnv = {
   DEFAULT_COMPUTE_PROVIDER: 'docker',
   DOCKER_WORKER_IMAGE: 'roomote-worker:deployment-ci',
   ENCRYPTION_KEY: 'deployment-ci-encryption-key',
+  GBRAIN_IMAGE: '',
   IMAGE_NAMESPACE: 'roomote',
   IMAGE_REGISTRY: 'localhost',
   JOB_AUTH_PRIVATE_KEY: 'deployment-ci-job-private-key',
@@ -228,6 +229,28 @@ function validateComposeShape(shape) {
           `${shape.name}: ${serviceName} must receive PREVIEW_PROXY_SUBDOMAIN_SUFFIX`,
         );
       }
+    }
+
+    if (shape.name === 'installer-production') {
+      const expectedGbrainImage = `${composeEnv.IMAGE_REGISTRY}/${composeEnv.IMAGE_NAMESPACE}/roomote-gbrain:${composeEnv.ROOMOTE_VERSION}`;
+      assert(
+        config.services.gbrain?.image === expectedGbrainImage,
+        `installer-production: gbrain must default to matching release image ${expectedGbrainImage}`,
+      );
+
+      const overrideImage = 'registry.example/roomote/gbrain:operator-pinned';
+      const overrideConfig = JSON.parse(
+        execFileSync('docker', args, {
+          cwd: root,
+          env: { ...composeEnv, GBRAIN_IMAGE: overrideImage },
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      );
+      assert(
+        overrideConfig.services.gbrain?.image === overrideImage,
+        'installer-production: explicit GBRAIN_IMAGE must override the matching release default',
+      );
     }
 
     if (
