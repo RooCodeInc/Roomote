@@ -386,7 +386,7 @@ function SetupSessionConversationStory() {
         </Message>
 
         <SetupSessionActionCard
-          title="Set up a sandbox"
+          title="I need a sandbox to run this task"
           icon={<Container />}
           intro="Choose where I should run the work you selected. This is a one-time setup for this deployment."
         >
