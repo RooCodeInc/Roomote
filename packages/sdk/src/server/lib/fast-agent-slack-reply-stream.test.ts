@@ -30,6 +30,7 @@ function slackMock() {
     ),
     appendMessageStream: vi.fn(async () => true),
     stopMessageStream: vi.fn(async () => true),
+    deleteMessage: vi.fn(async () => true),
     updateMessage: vi.fn(async () => true),
     getMessageBlocks: vi.fn(async () => []),
   };
@@ -47,14 +48,13 @@ function build(slack: ReturnType<typeof slackMock>, quote: string | null) {
     recipientUserId: 'U1',
     sessionId: 'session-1',
     footerContext: {} as never,
-    takeQuote: () => {
-      const value = pendingQuote;
+    getQuote: () => pendingQuote,
+    onDelivered: () => {
       pendingQuote = null;
-      return value;
+      onDelivered();
     },
-    onDelivered,
   });
-  return { stream, onDelivered };
+  return { stream, onDelivered, getPendingQuote: () => pendingQuote };
 }
 
 describe('createSlackFastReplyStream', () => {
@@ -66,7 +66,7 @@ describe('createSlackFastReplyStream', () => {
 
   it('starts on the first append, appends after, and finishes into the canonical reply body', async () => {
     const slack = slackMock();
-    const { stream, onDelivered } = build(slack, '> Matt: hi');
+    const { stream, onDelivered, getPendingQuote } = build(slack, '> Matt: hi');
 
     await stream.append('Looking');
     await stream.append(' at the logs');
@@ -111,6 +111,7 @@ describe('createSlackFastReplyStream', () => {
       expect.objectContaining({ sessionId: 'session-1', messageId: '200.1' }),
     );
     expect(onDelivered).toHaveBeenCalledOnce();
+    expect(getPendingQuote()).toBeNull();
     // Finishing twice or aborting afterwards does nothing more.
     await expect(
       stream.finish({ purpose: 'closeout', message: 'again' }),
@@ -153,21 +154,65 @@ describe('createSlackFastReplyStream', () => {
     );
   });
 
-  it('yields no delivery when the final rewrite is rejected so the reply is posted instead', async () => {
+  it('removes the partial stream before falling back to a normal post', async () => {
     const slack = slackMock();
     mocks.updateWithFooter.mockResolvedValue(false);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const { stream, onDelivered } = build(slack, null);
+    const { stream, onDelivered, getPendingQuote } = build(slack, '> Matt: hi');
 
     await stream.append('Looking');
     await expect(
       stream.finish({ purpose: 'closeout', message: 'Looking.' }),
     ).resolves.toBeUndefined();
     expect(slack.stopMessageStream).toHaveBeenCalledTimes(1);
+    expect(slack.deleteMessage).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: '200.1',
+    });
     expect(mocks.recordMessage).not.toHaveBeenCalled();
     expect(onDelivered).not.toHaveBeenCalled();
+    expect(getPendingQuote()).toBe('> Matt: hi');
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('did not accept the final body'),
+    );
+  });
+
+  it('keeps the partial stream as the delivery when it cannot be removed', async () => {
+    const slack = slackMock();
+    mocks.updateWithFooter.mockResolvedValue(false);
+    slack.deleteMessage.mockResolvedValue(false);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { stream, onDelivered } = build(slack, null);
+
+    await stream.append('Looking');
+    await expect(
+      stream.finish({ purpose: 'closeout', message: 'Looking.' }),
+    ).resolves.toEqual({ messageId: '200.1' });
+    expect(mocks.recordMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'session-1', messageId: '200.1' }),
+    );
+    expect(onDelivered).toHaveBeenCalledOnce();
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('partial stream could not be removed'),
+    );
+  });
+
+  it('removes the partial stream when the final rewrite throws', async () => {
+    const slack = slackMock();
+    mocks.updateWithFooter.mockRejectedValue(new Error('lock timed out'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { stream } = build(slack, null);
+
+    await stream.append('Looking');
+    await expect(
+      stream.finish({ purpose: 'closeout', message: 'Looking.' }),
+    ).resolves.toBeUndefined();
+    expect(slack.deleteMessage).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: '200.1',
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to apply the final body'),
     );
   });
 
