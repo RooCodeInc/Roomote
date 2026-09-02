@@ -2752,6 +2752,7 @@ export class OpenCodeServerHarness
     this.clearSubagentActivityFlush(watchdog);
     if (watchdog.childSessionId) {
       this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
+      this.linkedChildSessions.delete(watchdog.childSessionId);
     }
     this.activeSubagentWatchdogs.delete(eventKey);
   }
@@ -2785,6 +2786,7 @@ export class OpenCodeServerHarness
       this.activeSubagentWatchdogs.delete(eventKey);
       if (watchdog.childSessionId) {
         this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
+        this.linkedChildSessions.delete(watchdog.childSessionId);
       }
     }
   }

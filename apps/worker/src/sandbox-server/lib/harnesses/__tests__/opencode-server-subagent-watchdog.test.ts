@@ -473,9 +473,13 @@ describe('OpenCode subagent run tracking', () => {
   it('keeps the background tracker across parent turn finish', async () => {
     const { client, harness } = createHarness();
     const outputs: Array<Record<string, unknown>> = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
     harness.on('runtimeOutput', (event) => {
       outputs.push(event as unknown as Record<string, unknown>);
     });
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
 
     try {
       await connectHarness(harness, client);
@@ -520,6 +524,11 @@ describe('OpenCode subagent run tracking', () => {
       });
 
       expect(subagentActivityEvents(outputs).length).toBeGreaterThan(0);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) => envelope.metadata?.sessionId === 'ses_child_1',
+        ),
+      ).toBe(true);
       expect(client.abort).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
@@ -529,9 +538,13 @@ describe('OpenCode subagent run tracking', () => {
   it('clears foreground trackers when the parent turn finishes', async () => {
     const { client, harness } = createHarness();
     const outputs: Array<Record<string, unknown>> = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
     harness.on('runtimeOutput', (event) => {
       outputs.push(event as unknown as Record<string, unknown>);
     });
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
 
     try {
       await connectHarness(harness, client);
@@ -543,6 +556,7 @@ describe('OpenCode subagent run tracking', () => {
       });
 
       const settledCount = subagentActivityEvents(outputs).length;
+      const persistedCount = persistedEnvelopes.length;
 
       // Foreground spawn tracking ended with the turn: late child events are
       // inert.
@@ -553,11 +567,24 @@ describe('OpenCode subagent run tracking', () => {
         },
       });
       await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_child_late',
+            sessionID: 'ses_child_1',
+            role: 'assistant',
+            time: { created: 1, completed: 2 },
+          },
+        },
+      });
+      await client.emit({
         type: 'session.idle',
         properties: { sessionID: 'ses_child_1' },
       });
 
       expect(subagentActivityEvents(outputs)).toHaveLength(settledCount);
+      expect(persistedEnvelopes).toHaveLength(persistedCount);
+      expect(client.message).not.toHaveBeenCalled();
       expect(client.abort).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
