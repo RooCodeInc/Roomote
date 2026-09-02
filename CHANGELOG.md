@@ -24,7 +24,7 @@ Roomote 1.2 makes Fast work durable and responsive, expands Session and automati
 - Let each launchable Fast automation suggestion select its own named environment, all-repositories, or Fast target across Slack, Discord, Microsoft Teams, and Telegram.
 - Let visual-proof runs use transparently disclosed simulated state when genuine setup is impractical, while clearly limiting the evidence to rendered appearance, layout, and interaction.
 - Enable contextual Message Suggestions by default for task and Session composers without requiring an experimental feature flag.
-- Let Roomote agents create and update Notion data sources, including properties, options, and relation targets, while keeping destructive schema operations unavailable.
+- Let Roomote agents create and update Notion databases, data sources, properties, and views through the public API while leaving unsupported block reordering and hosted-MCP-only features unavailable.
 
 ### Patch changes
 
