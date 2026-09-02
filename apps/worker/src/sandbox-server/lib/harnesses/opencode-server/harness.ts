@@ -292,6 +292,11 @@ interface ActiveOpenCodeSubagentWatchdog {
   activityFlushTimer: ReturnType<typeof setTimeout> | null;
 }
 
+interface OpenCodeChildSessionRelationship {
+  parentSessionId: string;
+  agentType: string | null;
+}
+
 const OPEN_CODE_EXECUTE_TOOLS = new Set(['bash', 'shell']);
 const OPEN_CODE_READ_TOOLS = new Set(['read']);
 const OPEN_CODE_SEARCH_TOOLS = new Set(['grep', 'glob', 'find', 'list', 'ls']);
@@ -1432,6 +1437,9 @@ function normalizeOpenCodeToolPart(
     !mcpInvocation.isMcp && OPEN_CODE_SEARCH_TOOLS.has(normalizedToolName);
   const isSubagentSpawn =
     !mcpInvocation.isMcp && isOpenCodeSubagentTaskTool(normalizedToolName);
+  const childSessionId = isSubagentSpawn
+    ? extractOpenCodeTaskToolChildSessionId(toolPart)
+    : null;
   const kind = mcpInvocation.isMcp
     ? 'mcp'
     : isSubagentSpawn
@@ -1473,6 +1481,8 @@ function normalizeOpenCodeToolPart(
     ...(isSubagentSpawn
       ? {
           isSubagentSpawn: true,
+          senderThreadId: context.sessionId,
+          receiverThreadIds: childSessionId ? [childSessionId] : [],
           agentType: asString(asRecord(input)?.subagent_type) ?? null,
         }
       : {}),
@@ -1602,7 +1612,10 @@ export class OpenCodeServerHarness
   private readonly streamedMessageIds = new Set<string>();
   private readonly streamedReasoningMessageIds = new Set<string>();
   private readonly persistedMessageIds = new Set<string>();
-  private readonly recordedChildUsageMessageIds = new Set<string>();
+  private readonly linkedChildSessions = new Map<
+    string,
+    OpenCodeChildSessionRelationship
+  >();
   private readonly emittedToolCallKeys = new Set<string>();
   private readonly persistedToolResultKeys = new Set<string>();
   private readonly activeExecuteToolProgress = new Map<
@@ -2608,6 +2621,10 @@ export class OpenCodeServerHarness
       existing.updatePayload = input.updatePayload;
       if (existing.childSessionId) {
         this.childSessionWatchdogKeys.set(existing.childSessionId, eventKey);
+        this.linkedChildSessions.set(existing.childSessionId, {
+          parentSessionId: existing.sessionId,
+          agentType: existing.agentType,
+        });
       }
       return;
     }
@@ -2633,6 +2650,10 @@ export class OpenCodeServerHarness
     this.activeSubagentWatchdogs.set(eventKey, watchdog);
     if (input.childSessionId) {
       this.childSessionWatchdogKeys.set(input.childSessionId, eventKey);
+      this.linkedChildSessions.set(input.childSessionId, {
+        parentSessionId: input.sessionId,
+        agentType: input.agentType,
+      });
     }
     this.logger.info(
       `Tracking OpenCode subagent run toolCallId=${input.toolCallId} agentType=${
@@ -3054,17 +3075,11 @@ export class OpenCodeServerHarness
     });
   }
 
-  /**
-   * Hidden accounting for subagent (child-session) turns: completed assistant
-   * messages on child sessions never reach the main-session finalize path, so
-   * emit their inference usage directly from the event payload. The agent name
-   * comes from the message itself, with the parent spawn watchdog's agentType
-   * as a fallback.
-   */
-  private handleChildSessionMessageUpdated(
+  private async handleChildSessionMessageUpdated(
     childSessionId: string,
     payload: OpenCodeEventPayload,
-  ): void {
+    relationship: OpenCodeChildSessionRelationship,
+  ): Promise<void> {
     if (payload.type !== 'message.updated') {
       return;
     }
@@ -3082,40 +3097,30 @@ export class OpenCodeServerHarness
     }
 
     const eventKey = this.childSessionWatchdogKeys.get(childSessionId);
-    const watchdog = eventKey
-      ? this.activeSubagentWatchdogs.get(eventKey)
-      : undefined;
-
-    watchdog?.childAssistantMessageIds.add(info.id);
+    this.activeSubagentWatchdogs
+      .get(eventKey ?? '')
+      ?.childAssistantMessageIds.add(info.id);
 
     if (!info.time?.completed) {
       return;
     }
 
-    if (this.recordedChildUsageMessageIds.has(info.id)) {
-      return;
-    }
-
-    this.recordedChildUsageMessageIds.add(info.id);
-    this.emit(
-      'runtimeInferenceUsage',
-      createInferenceUsageEvent(
-        info,
-        createTokenUsage(info),
-        this.resolveChildSessionAgentType(childSessionId),
-      ),
-    );
+    await this.finalizeAssistantMessage(info.id, {
+      sessionId: childSessionId,
+      metadata: this.childSessionMetadata(relationship),
+      agentType: relationship.agentType ?? undefined,
+      finalizeParentTurn: false,
+    });
   }
 
-  private resolveChildSessionAgentType(
-    childSessionId: string,
-  ): string | undefined {
-    const eventKey = this.childSessionWatchdogKeys.get(childSessionId);
-    const watchdog = eventKey
-      ? this.activeSubagentWatchdogs.get(eventKey)
-      : undefined;
-
-    return watchdog?.agentType ?? undefined;
+  private childSessionMetadata(
+    relationship: OpenCodeChildSessionRelationship,
+  ): Record<string, unknown> {
+    return {
+      parentSessionId: relationship.parentSessionId,
+      agentType: relationship.agentType,
+      isSubagent: true,
+    };
   }
 
   private updateExecuteToolProgress(
@@ -3871,13 +3876,18 @@ export class OpenCodeServerHarness
     const sessionId = eventSessionId(payload);
 
     if (sessionId && this.sessionId && sessionId !== this.sessionId) {
+      const relationship = this.linkedChildSessions.get(sessionId);
+      if (!relationship) {
+        return;
+      }
+
       // Child-session events are turn progress for the parent too: they mean
       // OpenCode is alive executing a spawn the in-flight turn is waiting on.
       this.stallWatchdogs.noteProgress();
 
-      // Child-session (subagent) events are otherwise dropped here; fold tool
-      // activity into the parent spawn row and record hidden inference usage
-      // before returning. A child session going idle or erroring is its
+      // Keep the parent spawn summary while routing linked child messages and
+      // tools through the same envelope pipeline as main-session events. A
+      // child session going idle or erroring is its
       // terminal signal — handled per launch kind by
       // handleChildSessionTerminal — and must never finish the parent turn.
       if (payload.type === 'session.idle' || payload.type === 'session.error') {
@@ -3887,7 +3897,16 @@ export class OpenCodeServerHarness
 
       this.clearSubagentSettlement(sessionId);
       this.handleChildSessionToolActivity(sessionId, payload);
-      this.handleChildSessionMessageUpdated(sessionId, payload);
+      const metadata = this.childSessionMetadata(relationship);
+      if (payload.type === 'message.part.updated') {
+        this.handleMessagePartUpdated(payload, metadata);
+      } else if (payload.type === 'message.updated') {
+        await this.handleChildSessionMessageUpdated(
+          sessionId,
+          payload,
+          relationship,
+        );
+      }
       return;
     }
 
@@ -4492,7 +4511,10 @@ export class OpenCodeServerHarness
     return this.providerRateLimitRetryTimer !== null;
   }
 
-  private handleMessagePartUpdated(payload: OpenCodeEventPayload): void {
+  private handleMessagePartUpdated(
+    payload: OpenCodeEventPayload,
+    metadata?: Record<string, unknown>,
+  ): void {
     const properties = asRecord(payload.properties);
     const part = asRecord(properties?.part) as OpenCodePart | null;
 
@@ -4558,6 +4580,7 @@ export class OpenCodeServerHarness
         sessionId,
         messageId,
         text: delta,
+        metadata,
       });
       return;
     }
@@ -4578,23 +4601,32 @@ export class OpenCodeServerHarness
         sessionId,
         messageId,
         text: delta,
+        metadata,
       });
       return;
     }
 
     if (part.type === 'tool') {
       const toolPart = part as OpenCodeToolPart;
-      this.handleToolPartUpdated(toolPart, { sessionId, messageId, partId });
+      this.handleToolPartUpdated(
+        toolPart,
+        { sessionId, messageId, partId },
+        metadata,
+      );
       return;
     }
 
     if (part.type === 'subtask') {
       const subtaskPart = part as OpenCodeSubtaskPart;
-      this.handleSubtaskPartUpdated(subtaskPart, {
-        sessionId,
-        messageId,
-        partId,
-      });
+      this.handleSubtaskPartUpdated(
+        subtaskPart,
+        {
+          sessionId,
+          messageId,
+          partId,
+        },
+        metadata,
+      );
     }
   }
 
@@ -4605,6 +4637,7 @@ export class OpenCodeServerHarness
       messageId?: string;
       partId: string;
     },
+    metadata?: Record<string, unknown>,
   ): void {
     const normalized = normalizeOpenCodeToolPart(
       toolPart,
@@ -4692,6 +4725,7 @@ export class OpenCodeServerHarness
         status: normalized.status,
         payload: normalized.callPayload,
         contentText: normalized.contentText,
+        metadata,
       });
     }
 
@@ -4714,6 +4748,7 @@ export class OpenCodeServerHarness
             subagentActivity: terminalSubagentActivity,
           }
         : normalized.updatePayload,
+      metadata,
     });
 
     if (
@@ -4735,6 +4770,7 @@ export class OpenCodeServerHarness
               subagentActivity: terminalSubagentActivity,
             }
           : normalized.resultPayload,
+        metadata,
       });
     }
   }
@@ -4878,6 +4914,7 @@ export class OpenCodeServerHarness
       messageId?: string;
       partId: string;
     },
+    metadata?: Record<string, unknown>,
   ): void {
     const normalized = normalizeOpenCodeSubtaskPart(subtaskPart, context);
     const eventKey = buildOpenCodeToolEventKey({
@@ -4924,6 +4961,7 @@ export class OpenCodeServerHarness
       status: normalized.status,
       payload: normalized.callPayload,
       contentText: normalized.contentText,
+      metadata,
     });
   }
 
@@ -5232,8 +5270,14 @@ export class OpenCodeServerHarness
 
   private async finalizeAssistantMessage(
     messageId: string,
+    options?: {
+      sessionId?: string;
+      metadata?: Record<string, unknown>;
+      agentType?: string;
+      finalizeParentTurn?: boolean;
+    },
   ): Promise<FinalizedAssistantTurn | null> {
-    const sessionId = this.sessionId;
+    const sessionId = options?.sessionId ?? this.sessionId;
 
     if (!sessionId || this.persistedMessageIds.has(messageId)) {
       return null;
@@ -5245,7 +5289,7 @@ export class OpenCodeServerHarness
       signal: this.eventAbortController.signal,
     });
 
-    return this.persistAssistantMessage(message);
+    return this.persistAssistantMessage(message, options);
   }
 
   /**
@@ -5328,8 +5372,15 @@ export class OpenCodeServerHarness
 
   private persistAssistantMessage(
     message: OpenCodeSessionMessage,
+    options?: {
+      metadata?: Record<string, unknown>;
+      agentType?: string;
+      finalizeParentTurn?: boolean;
+    },
   ): FinalizedAssistantTurn {
-    this.recordSessionMessageId(message.info.id);
+    if (options?.finalizeParentTurn !== false) {
+      this.recordSessionMessageId(message.info.id);
+    }
     const text = extractAssistantText(message);
     const tokenUsage = createTokenUsage(message.info);
     const finalized = {
@@ -5349,6 +5400,7 @@ export class OpenCodeServerHarness
         messageId: message.info.id,
         text: reasoning,
         hadDelta: this.streamedReasoningMessageIds.has(message.info.id),
+        metadata: options?.metadata,
       });
     }
     this.runtimeEvents.assistantMessage({
@@ -5356,6 +5408,7 @@ export class OpenCodeServerHarness
       messageId: message.info.id,
       text,
       hadDelta: this.streamedMessageIds.has(message.info.id),
+      metadata: options?.metadata,
     });
     this.runtimeEvents.usageUpdate({
       sessionId: message.info.sessionID,
@@ -5365,9 +5418,11 @@ export class OpenCodeServerHarness
     });
     this.emit(
       'runtimeInferenceUsage',
-      createInferenceUsageEvent(message.info, tokenUsage),
+      createInferenceUsageEvent(message.info, tokenUsage, options?.agentType),
     );
-    this.finalizedAssistantTurn = finalized;
+    if (options?.finalizeParentTurn !== false) {
+      this.finalizedAssistantTurn = finalized;
+    }
 
     return finalized;
   }
