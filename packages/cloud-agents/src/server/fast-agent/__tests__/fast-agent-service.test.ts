@@ -3387,18 +3387,42 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 
-    it('skips the terminal closeout when the turn cannot be withdrawn from replay', async () => {
+    it('hands the turn to the queue when the terminal closeout cannot be withdrawn from replay', async () => {
       mocks.revokeDurableReplay.mockResolvedValue(false);
       const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+      const requestDurableResume = vi.fn().mockResolvedValue(undefined);
       mocks.generateText.mockResolvedValueOnce('All done.');
 
       await answerFastAgentQuestion({
         ...baseParams,
-        adapter: callbacks({ postReply }),
+        adapter: callbacks({ postReply, requestDurableResume }),
+        durableAdmission,
+      });
+
+      // No closeout, and the row stays recoverable so the resumed run
+      // delivers the answer instead of the user getting nothing.
+      expect(postReply).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
+      expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
+      expect(requestDurableResume).toHaveBeenCalledOnce();
+    });
+
+    it('hands the turn to the queue when the error closeout cannot be withdrawn from replay', async () => {
+      mocks.revokeDurableReplay.mockResolvedValue(false);
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+      const requestDurableResume = vi.fn().mockResolvedValue(undefined);
+      mocks.generateText.mockRejectedValueOnce(new Error('provider exploded'));
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply, requestDurableResume }),
         durableAdmission,
       });
 
       expect(postReply).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
+      expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
+      expect(requestDurableResume).toHaveBeenCalledOnce();
     });
 
     it('posts no interruption closeout when a cancelled turn cannot be withdrawn from replay', async () => {

@@ -1237,8 +1237,32 @@ export async function answerFastAgentQuestion({
   };
   const DURABLE_REVOKE_FAILED_TOOL_ERROR =
     'Roomote could not durably record this action before running it. Try the action again.';
+  // Set when a terminal closeout was skipped because its revocation did not
+  // land: the user has no answer yet, so settlement must hand the turn to
+  // the queue instead of marking it delivered.
+  let terminalRevocationFailed = false;
   const settleDurableTurn = async () => {
     if (!durableAdmission) return;
+    if (terminalRevocationFailed) {
+      durableTurnReplayable = false;
+      const released = await releaseFastAgentDurableTurnClaim(
+        durableAdmission.eventId,
+      ).catch((error) => {
+        console.warn(
+          `[Fast Agent] Failed to release durable turn claim after a skipped closeout: ${formatErrorForLog(error)}`,
+        );
+        return false;
+      });
+      await adapter.requestDurableResume?.().catch((error) => {
+        console.warn(
+          `[Fast Agent] Failed to wake durable turn resume after a skipped closeout: ${formatErrorForLog(error)}`,
+        );
+      });
+      console.info(
+        `[Fast Agent] Durable turn handed to the queue after a skipped closeout (row=${durableAdmission.eventId}, released=${released}).`,
+      );
+      return;
+    }
     durableTurnReplayable = false;
     await markFastAgentDurableTurnDelivered(durableAdmission.eventId).catch(
       (error) => {
@@ -3327,6 +3351,7 @@ export async function answerFastAgentQuestion({
       const terminalReplayRevoked =
         await revokeDurableTurnReplay('Terminal closeout.');
       if (!terminalReplayRevoked) {
+        terminalRevocationFailed = true;
         console.warn(
           '[Fast Agent] Skipping the terminal closeout because the turn could not be withdrawn from replay.',
         );
@@ -3512,10 +3537,16 @@ export async function answerFastAgentQuestion({
           )
         : 'I hit an error while handling that request. Please try again in a moment.';
     // The error closeout is terminal too; a replay must not post it twice.
-    if (
+    const errorReplayRevoked =
       !isInstructionClosed() &&
-      (await revokeDurableTurnReplay('Error closeout.'))
-    ) {
+      (await revokeDurableTurnReplay('Error closeout.'));
+    if (!isInstructionClosed() && !errorReplayRevoked) {
+      terminalRevocationFailed = true;
+      console.warn(
+        '[Fast Agent] Skipping the error closeout because the turn could not be withdrawn from replay.',
+      );
+    }
+    if (errorReplayRevoked) {
       try {
         const reply = { purpose: 'closeout' as const, message };
         if (
