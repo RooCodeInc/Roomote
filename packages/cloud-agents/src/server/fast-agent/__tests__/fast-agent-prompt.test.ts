@@ -76,6 +76,21 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(eventPrompt).not.toContain('<unresolved_request>');
   });
 
+  it('tells resumed human turns not to acknowledge again', () => {
+    const humanPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+    const eventPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+    });
+
+    expect(humanPrompt).toContain('`<resumed_turn>` marker');
+    expect(humanPrompt).toContain('Do not acknowledge the request again');
+    expect(eventPrompt).not.toContain('<resumed_turn>');
+  });
+
   it('omits the release identifier when no version is resolved', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
@@ -273,6 +288,34 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain(
       'current-channel chat context tools are the only direct external capabilities',
     );
+  });
+
+  it('lists on-demand servers by name with their tool names instead of mounting them', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      availableIntegrations: [
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Deployment access',
+          tools: [{ name: 'manage_tasks' }],
+        },
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Repository access',
+          tools: [{ name: 'search_code' }, { name: 'list_issues' }],
+        },
+      ],
+    });
+
+    expect(prompt).toContain('Roomote [tool prefix: roomote_]');
+    expect(prompt).toContain('### On-demand servers');
+    expect(prompt).toContain('#### GitHub [id: github]');
+    expect(prompt).toContain('Tools: search_code, list_issues');
+    expect(prompt).not.toContain('GitHub [tool prefix: github_]');
+    expect(prompt).toContain('`find_integration_tools`');
+    expect(prompt).toContain('`call_integration_tool`');
   });
 
   it('includes shared memory guidance when a memory MCP is available', () => {
@@ -544,7 +587,9 @@ describe('buildFastAgentSystemPrompt', () => {
       retryTaskStartAvailable: true,
     });
 
-    expect(prompt).toContain('post exactly one closeout');
+    expect(prompt).toContain(
+      'produce exactly one user-visible terminal response',
+    );
     expect(prompt.indexOf('## Turn Startup (Highest Priority)')).toBeLessThan(
       prompt.indexOf('## Delegated Task Platform Event'),
     );
@@ -632,6 +677,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Automation Platform Event');
     expect(prompt).toContain('Execute the automation prompt now');
     expect(prompt).toContain("closeout's `suggestions` array");
+    expect(prompt).toContain('Each suggestion may independently set');
+    expect(prompt).toContain('`__all_repositories__`');
+    expect(prompt).toContain('`__fast__`');
     expect(prompt).toContain('do not promise reaction-triggered launching');
     expect(prompt).not.toContain('<slack_modern_markdown>');
   });
@@ -692,7 +740,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('requires a visible closeout for visibility-required platform events', () => {
+  it('requires a visible terminal response for visibility-required platform events', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       turnSource: 'platform_event',
@@ -700,12 +748,15 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(prompt).toContain(
-      'requires a user-visible closeout because it carries user-useful substance',
+      'requires one user-visible terminal response because it carries user-useful substance',
     );
     expect(prompt).toContain(
       'Present its result, changed expectation, required decision, or recovery action; never narrate lifecycle state alone',
     );
     expect(prompt).toContain('Do not call "ignore_event"');
+    expect(prompt).toContain(
+      'Use a closeout unless the setup instructions require `request_user_input`',
+    );
     expect(prompt).not.toContain(
       'Call "ignore_event" when it is routine, redundant, or not worth interrupting the user',
     );

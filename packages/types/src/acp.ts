@@ -74,6 +74,13 @@ export function normalizeAcpReasoningText(text: string): string {
 
 export const ACP_LOGICAL_EVENT_ID_KEY = 'logicalEventId' as const;
 
+/**
+ * Canonical transcript-only record of a trusted setup-card action. These
+ * messages are visible as user choices but are never submitted to the model
+ * or mirrored into Fast Agent compatibility history.
+ */
+export const SETUP_RECEIPT_INPUT_KIND = 'setup_receipt' as const;
+
 export interface AcpLogicalEventIdParts {
   sessionId: string | null | undefined;
   turnId?: string | null | undefined;
@@ -168,6 +175,8 @@ export interface AcpRequestUserInputQuestion {
   isOther: boolean;
   isSecret: boolean;
   options?: AcpRequestUserInputQuestionOption[];
+  /** Multiple-choice questions default to one selection when absent. */
+  multiple?: boolean;
 }
 
 export type AcpRequestUserInputAnswers = Record<
@@ -176,6 +185,43 @@ export type AcpRequestUserInputAnswers = Record<
     answers: string[];
   }
 >;
+
+export function getAcpRequestUserInputValidationError(
+  questions: AcpRequestUserInputQuestion[],
+  answers: AcpRequestUserInputAnswers,
+  resolution: 'submitted' | 'cancelled' = 'submitted',
+): string | null {
+  const questionIds = new Set(questions.map((question) => question.id));
+  if (Object.keys(answers).some((questionId) => !questionIds.has(questionId))) {
+    return 'One or more answers do not belong to this request.';
+  }
+  if (resolution === 'cancelled') return null;
+
+  for (const question of questions) {
+    const submitted = answers[question.id]?.answers ?? [];
+    if (new Set(submitted).size !== submitted.length) {
+      return 'Duplicate answers are not allowed.';
+    }
+    if (submitted.length === 0) {
+      return 'Answer every question before submitting.';
+    }
+    if (!question.multiple && submitted.length > 1) {
+      return 'This question accepts a single answer.';
+    }
+    if (question.options?.length) {
+      const optionLabels = new Set(
+        question.options.map((option) => option.label),
+      );
+      const customAnswerCount = submitted.filter(
+        (answer) => !optionLabels.has(answer),
+      ).length;
+      if (customAnswerCount > (question.isOther ? 1 : 0)) {
+        return 'One or more selections are not valid options.';
+      }
+    }
+  }
+  return null;
+}
 
 export interface AcpRequestUserInputRequestParams {
   sessionId: string;
@@ -187,6 +233,7 @@ export interface AcpRequestUserInputRequestParams {
 export interface AcpRequestUserInputPayload extends AcpRequestUserInputRequestParams {
   requestId: string;
   status: 'pending';
+  preset?: 'setup_starter_tasks';
 }
 
 export interface AcpRequestUserInputResponsePayload {
@@ -263,7 +310,7 @@ function parseAcpRequestUserInputQuestionOption(
   return { label, description };
 }
 
-function parseAcpRequestUserInputQuestion(
+export function parseAcpRequestUserInputQuestion(
   value: unknown,
 ): AcpRequestUserInputQuestion | null {
   const record = asRecordOrNull(value);
@@ -291,6 +338,7 @@ function parseAcpRequestUserInputQuestion(
     isOther: record?.isOther === true,
     isSecret: record?.isSecret === true,
     ...(options ? { options } : {}),
+    ...(record?.multiple === true ? { multiple: true } : {}),
   };
 }
 
@@ -356,6 +404,8 @@ export function parseAcpRequestUserInputPayload(
 ): AcpRequestUserInputPayload | null {
   const requestId = asStringOrNull(payload?.requestId);
   const request = parseAcpRequestUserInputRequestParams(payload);
+  const preset =
+    payload?.preset === 'setup_starter_tasks' ? payload.preset : undefined;
 
   if (!requestId || !request) {
     return null;
@@ -365,6 +415,7 @@ export function parseAcpRequestUserInputPayload(
     requestId,
     ...request,
     status: 'pending',
+    ...(preset ? { preset } : {}),
   };
 }
 
@@ -1137,10 +1188,51 @@ export function normalizePlanPayload(
   return { entries };
 }
 
+// Name of the on-demand integration call tool (FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool;
+// the catalog module imports this one, so the literal lives here).
+const ON_DEMAND_INTEGRATION_CALL_TOOL_NAME = 'call_integration_tool';
+
+/**
+ * `call_integration_tool` is transport, not what the agent did. When a tool
+ * call is that wrapper, present the integration and tool it invoked, exactly
+ * as a directly mounted MCP call would have been shown.
+ */
+function unwrapOnDemandIntegrationCall(
+  update: Record<string, unknown>,
+): AcpMcpInvocation | null {
+  const candidates = [
+    asStringOrNull(update.mcpToolName),
+    asStringOrNull(update.toolName),
+    asStringOrNull(update.title),
+  ];
+  const isWrapper = candidates.some(
+    (name) =>
+      name === ON_DEMAND_INTEGRATION_CALL_TOOL_NAME ||
+      name?.endsWith(`_${ON_DEMAND_INTEGRATION_CALL_TOOL_NAME}`),
+  );
+  if (!isWrapper) {
+    return null;
+  }
+  const rawInput = asRecordOrNull(update.rawInput);
+  // Fast records native tool arguments under `arguments`; sandbox ACP events
+  // carry the tool input directly.
+  const args = asRecordOrNull(rawInput?.arguments) ?? rawInput;
+  const integrationId = asStringOrNull(args?.integrationId);
+  const toolName = asStringOrNull(args?.toolName);
+  if (!integrationId || !toolName) {
+    return null;
+  }
+  return { mcpServerName: integrationId, mcpToolName: toolName };
+}
+
 export function extractAcpMcpInvocation(
   update: Record<string, unknown>,
   options: ExtractAcpMcpInvocationOptions = {},
 ): AcpMcpInvocation | null {
+  const unwrapped = unwrapOnDemandIntegrationCall(update);
+  if (unwrapped) {
+    return unwrapped;
+  }
   const kind = asStringOrNull(update.kind);
   const mcpServerName = asStringOrNull(update.mcpServerName);
   const mcpToolName = asStringOrNull(update.mcpToolName);

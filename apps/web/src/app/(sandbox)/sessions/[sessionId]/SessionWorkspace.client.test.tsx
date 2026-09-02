@@ -11,7 +11,7 @@ import {
 
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
 import {
-  SessionHeaderExtras,
+  SessionHeaderPullRequests,
   SessionWorkspace,
   type SessionInfo,
 } from './SessionWorkspace';
@@ -421,11 +421,11 @@ describe('SessionWorkspace', () => {
 
     renderWorkspace({
       isMobile: false,
-      children: <SessionHeaderExtras status="active" />,
+      children: <SessionHeaderPullRequests />,
       sessionOverride: { tasks: [firstTask, secondTask] },
     });
 
-    expect(await screen.findByText('active')).toBeVisible();
+    expect(screen.queryByText('active')).toBeNull();
     expect(screen.getByRole('link', { name: 'widgets#42' })).toHaveAttribute(
       'href',
       'https://github.com/acme/widgets/pull/42',
@@ -440,7 +440,7 @@ describe('SessionWorkspace', () => {
   it('updates header pull requests from refreshed session tasks', async () => {
     const { queryClient } = renderWorkspace({
       isMobile: false,
-      children: <SessionHeaderExtras status="active" />,
+      children: <SessionHeaderPullRequests />,
       sessionOverride: { tasks: [] },
     });
 
@@ -475,6 +475,7 @@ describe('SessionWorkspace', () => {
     expect(
       await screen.findByRole('link', { name: 'new#123' }),
     ).toHaveAttribute('target', '_blank');
+    expect(screen.queryByText('active')).toBeNull();
   });
 
   it('matches the task sidebar replacement behavior and controls on mobile', () => {
@@ -956,6 +957,60 @@ describe('SessionWorkspace', () => {
       }),
     ).toBeInTheDocument();
     expect(routerReplaceMock).not.toHaveBeenCalled();
+  });
+
+  it('automatically opens the Tasks panel when a second task starts on desktop', async () => {
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      sessionOverride: { taskSource: 'fast', taskCards: [] },
+      queriedFastTasks: [
+        {
+          taskId: 'task-2',
+          title: 'First running task',
+          latestRun: {
+            status: RunStatus.Running,
+            taskPhase: 'running',
+          },
+          artifacts: [],
+        },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Tasks' })).toBeEnabled(),
+    );
+
+    act(() => {
+      queryClient.setQueryData(
+        ['fastSessions', 'tasks', session.id],
+        [
+          {
+            taskId: 'task-2',
+            title: 'First running task',
+            latestRun: {
+              status: RunStatus.Running,
+              taskPhase: 'running',
+            },
+            artifacts: [],
+          },
+          {
+            taskId: 'task-3',
+            title: 'Second running task',
+            latestRun: {
+              status: RunStatus.Pending,
+              taskPhase: null,
+            },
+            artifacts: [],
+          },
+        ],
+      );
+    });
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'View coding task: Second running task',
+      }),
+    ).toBeVisible();
   });
 
   it('populates the Artifacts panel from refreshed Fast-session tasks', async () => {

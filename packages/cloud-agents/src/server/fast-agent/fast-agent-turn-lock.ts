@@ -1,5 +1,6 @@
 import { acquireRedisLock } from '@roomote/redis';
 import type { FastAgentConversation } from './fast-agent-conversation';
+import { releaseFastAgentDurableTurnClaim } from './fast-agent-conversation-repository';
 
 const FAST_AGENT_TURN_LOCK_PREFIX = 'fast-agent:conversation-lock:';
 const FAST_AGENT_TURN_LOCK_TTL_SECONDS = 600;
@@ -32,6 +33,16 @@ export type FastAgentTurnLockHandle = (() => Promise<void>) & {
   /** Resolves after shutdown closeout delivery settles, without waiting for
    * unrelated inference cleanup that may itself be stuck. */
   shutdownCloseoutSettled: Promise<void>;
+  /**
+   * The inline-admitted durable row this turn executes, when durable
+   * admission applied. Bound by the accepting handler so a shutdown can
+   * release the row's claim even if the turn is interrupted before it
+   * reaches its own abort handling (for example during setup).
+   */
+  durableRowId?: string;
+  /** Wakes the queue for the bound row after a shutdown release so recovery
+   * does not wait for the periodic sweep. Best effort. */
+  durableResume?: () => Promise<void>;
 };
 
 /** Mark the user-visible shutdown closeout as posted and persisted (or as
@@ -59,6 +70,32 @@ export async function abortActiveFastAgentTurns(
   const activeLocks = [...activeFastAgentTurnLocks];
   await Promise.allSettled(
     activeLocks.map((lock) => lock.abortForShutdown(processShutdownReason!)),
+  );
+  // A turn interrupted before it reached its own abort handling (still in
+  // setup, no inference yet) never releases its durable claim, and the row
+  // would wait out the full claim lease before recovery. Release here for
+  // every bound row; the release is a guarded no-op for rows the turn
+  // already revoked or settled, so replay safety is unaffected.
+  await Promise.allSettled(
+    activeLocks
+      .filter((lock) => lock.durableRowId)
+      .map(async (lock) => {
+        const released = await releaseFastAgentDurableTurnClaim(
+          lock.durableRowId!,
+        ).catch((error) => {
+          console.warn(
+            `[Fast Agent] Failed to release durable turn claim during shutdown: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return false;
+        });
+        if (released) {
+          await lock.durableResume?.().catch((error) => {
+            console.warn(
+              `[Fast Agent] Failed to wake durable turn resume during shutdown: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+        }
+      }),
   );
   return activeLocks.length;
 }

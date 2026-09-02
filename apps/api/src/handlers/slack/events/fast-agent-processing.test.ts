@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   postThreadMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
   admitHumanFollowUp: vi.fn(),
+  resolveFooterContext: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -63,16 +64,15 @@ vi.mock('@roomote/cloud-agents', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
+  persistFastAgentInlineHumanTurn: vi.fn(async () => null),
+  wakeFastAgentParentEventNow: vi.fn(async () => undefined),
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
 
 vi.mock('@roomote/communication', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/communication')>()),
-  resolveFastSessionReplyFooterContext: vi.fn(async () => ({
-    linkedPrs: [],
-    livePreviewUrl: null,
-  })),
+  resolveFastSessionReplyFooterContext: mocks.resolveFooterContext,
 }));
 
 vi.mock('../helpers/thread-posting.js', () => ({
@@ -118,6 +118,10 @@ describe('processFastAgentMessage', () => {
       messageId: '101.001',
     });
     mocks.recordProviderMessage.mockResolvedValue(undefined);
+    mocks.resolveFooterContext.mockResolvedValue({
+      linkedPrs: [],
+      livePreviewUrl: null,
+    });
     mocks.admitHumanFollowUp.mockResolvedValue({
       kind: 'turn',
       turnLock: mocks.releaseLock,
@@ -505,6 +509,84 @@ describe('processFastAgentMessage', () => {
         activeTasks: [{ taskId: 'review-task' }],
       }),
     );
+  });
+
+  it('overlaps the thread fetch and processing reaction before the Fast turn', async () => {
+    const threadMessages = createDeferred<never[]>();
+    const reaction = createDeferred<boolean>();
+    const slack = {
+      addReaction: vi.fn(() => reaction.promise),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(() => threadMessages.promise),
+    };
+
+    const processing = processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: '!fast how are things?',
+        ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+    });
+    await vi.waitFor(() => {
+      expect(slack.addReaction).toHaveBeenCalledOnce();
+    });
+
+    // The thread history and the reaction are in flight together instead of
+    // the reaction gating the fetch.
+    expect(slack.fetchThreadMessages).toHaveBeenCalledOnce();
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+
+    reaction.resolve(true);
+    threadMessages.resolve([]);
+    await processing;
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ question: 'how are things?' }),
+    );
+    expect(slack.removeReaction).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'eyes', timestamp: '100.001' }),
+    );
+  });
+
+  it('clears a processing reaction that landed while an earlier step failed', async () => {
+    const reaction = createDeferred<boolean>();
+    const slack = {
+      addReaction: vi.fn(() => reaction.promise),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+    mocks.resolveFooterContext.mockImplementationOnce(async () => {
+      reaction.resolve(true);
+      throw new Error('footer context unavailable');
+    });
+
+    await expect(
+      processFastAgentMessage({
+        event: {
+          type: 'message',
+          channel: 'C123',
+          user: 'U123',
+          text: '!fast how are things?',
+          ts: '100.001',
+        } as never,
+        slack: slack as never,
+        userId: 'user-1',
+        teamId: 'T123',
+      }),
+    ).rejects.toThrow('footer context unavailable');
+
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+    expect(slack.removeReaction).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'eyes', timestamp: '100.001' }),
+    );
+    expect(mocks.releaseLock).toHaveBeenCalled();
   });
 
   it('passes an image from the initial Slack message to the Fast model', async () => {

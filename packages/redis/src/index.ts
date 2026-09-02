@@ -1,8 +1,13 @@
-import { Redis } from 'ioredis';
-
-import { Env } from '@roomote/env';
+import type { Redis } from 'ioredis';
 
 export type { Redis } from 'ioredis';
+export { getRedis } from './client';
+export {
+  disconnectSessionPresence,
+  isSessionUserPresent,
+  refreshSessionPresence,
+  SESSION_PRESENCE_LEASE_MS,
+} from './session-presence';
 
 export const REDIS_KEYS = {
   MENTIONED_THREADS: 'slack:mentioned_threads',
@@ -52,31 +57,6 @@ export async function syncAutoStartChannelCacheBestEffort(params: {
     params.onError?.(error);
   }
 }
-
-let redis: Redis | null = null;
-
-function resolveRedisUrl(): string {
-  // In apps/web on Vercel, dotenvx decrypts into process.env at runtime after
-  // @roomote/env may already have snapshotted an earlier value.
-  const redisUrl = process.env.REDIS_URL?.trim() || Env.REDIS_URL?.trim();
-
-  if (!redisUrl) {
-    throw new Error('REDIS_URL is not configured');
-  }
-
-  return redisUrl;
-}
-
-export const getRedis = () => {
-  if (!redis) {
-    redis = new Redis(resolveRedisUrl(), {
-      maxRetriesPerRequest: null,
-      connectTimeout: 5000,
-    });
-  }
-
-  return redis;
-};
 
 export { acquireRedisLock, withRedisLock, withContention } from './lock';
 export type {

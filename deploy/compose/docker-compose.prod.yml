@@ -308,11 +308,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-roomote-postgres-password}
       POSTGRES_DB: ${POSTGRES_DB:-roomote}
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 5s
       timeout: 30s
       retries: 5
-      start_period: 30s
+      start_period: 120s
 
   redis:
     image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
@@ -517,9 +517,9 @@ services:
   # COMPOSE_PROFILES=brain (local-postgres precedent); deployments
   # that never enable the profile see no infrastructure change. Internal-only:
   # no published ports and no Caddy route; the API fronts it at
-  # /api/mcp/gbrain. Set GBRAIN_IMAGE to the pinned published image once the
-  # publish workflow ships it; until then the installer builds from
-  # .docker/gbrain. Wire R_GBRAIN_URL plus static tokens into api/bullmq
+  # /api/mcp/gbrain. By default it uses the same registry, namespace, and
+  # release tag as the app image; GBRAIN_IMAGE can override the complete ref.
+  # Wire R_GBRAIN_URL plus static tokens into api/bullmq
   # (operator-pinned), or the normal path: set GBRAIN_ADMIN_BOOTSTRAP_TOKEN
   # (>= 32 chars of [A-Za-z0-9_-]) and paste http://gbrain:8931 plus that
   # same token into Settings > Integrations > Brain; Roomote then
@@ -528,9 +528,13 @@ services:
   gbrain:
     profiles:
       - brain
-    image: ${GBRAIN_IMAGE:-roomote-gbrain:local}
+    image: ${GBRAIN_IMAGE:-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-gbrain:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}}
     restart: unless-stopped
     networks: [default]
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
     environment:
       GBRAIN_DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
       GBRAIN_ADMIN_BOOTSTRAP_TOKEN: ${GBRAIN_ADMIN_BOOTSTRAP_TOKEN:-}
@@ -551,6 +555,17 @@ services:
       - gbrain_data:/data
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      # The image is bun-based and ships no curl or wget.
+      test:
+        [
+          'CMD-SHELL',
+          'bun -e "const r = await fetch(\"http://127.0.0.1:8931/health\"); process.exit(r.ok ? 0 : 1)"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
 
   # Self-run embedding model for the Brain (opt-in, CPU).
   # Enable with the `local-inference` compose profile. The upstream URLs are

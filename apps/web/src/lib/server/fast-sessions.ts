@@ -17,6 +17,7 @@ import {
   llmUsageEvents,
   inArray,
   isNull,
+  or,
   sessions,
   sql,
   taskArtifacts,
@@ -66,7 +67,39 @@ export type FastSessionMessage = Pick<
   | 'nativeSessionId'
   | 'nativeMessageId'
   | 'createdAt'
->;
+> & {
+  userName?: string | null;
+  userEmail?: string | null;
+  userImageUrl?: string | null;
+};
+
+const fastSessionMessageSelection = {
+  id: fastAgentMessages.id,
+  eventId: fastAgentMessages.eventId,
+  turnId: fastAgentMessages.turnId,
+  turnSeq: fastAgentMessages.turnSeq,
+  ts: fastAgentMessages.ts,
+  eventType: fastAgentMessages.eventType,
+  role: fastAgentMessages.role,
+  contentBlocks: fastAgentMessages.contentBlocks,
+  metadata: fastAgentMessages.metadata,
+  payload: fastAgentMessages.payload,
+  source: fastAgentMessages.source,
+  nativeSessionId: fastAgentMessages.nativeSessionId,
+  nativeMessageId: fastAgentMessages.nativeMessageId,
+  createdAt: fastAgentMessages.createdAt,
+  userName: sql<
+    string | null
+  >`coalesce(${fastAgentMessages.metadata} ->> 'userName', ${users.name})`,
+  userEmail: sql<
+    string | null
+  >`coalesce(${fastAgentMessages.metadata} ->> 'userEmail', ${users.email})`,
+  userImageUrl: sql<
+    string | null
+  >`coalesce(${fastAgentMessages.metadata} ->> 'userImageUrl', ${users.imageUrl})`,
+};
+
+const fastSessionMessageUserJoin = sql`${users.id}::text = ${fastAgentMessages.metadata} ->> 'userId'`;
 
 export function buildFastSessionPrReviewDestinationKey(session: {
   surface: string;
@@ -171,8 +204,18 @@ export async function findAccessibleFastSession(
       reasoningEffort: fastAgentConversations.reasoningEffort,
     })
     .from(fastAgentConversations)
+    .leftJoin(
+      sessions,
+      eq(sessions.fastConversationId, fastAgentConversations.id),
+    )
     .where(
-      and(eq(fastAgentConversations.id, sessionId), fastSessionScope(auth)),
+      and(
+        or(
+          eq(fastAgentConversations.id, sessionId),
+          eq(sessions.id, sessionId),
+        ),
+        fastSessionScope(auth),
+      ),
     )
     .limit(1);
 
@@ -329,26 +372,14 @@ export async function getFastSessionMessagesSince(
 }> {
   const rows = await db
     .select({
-      id: fastAgentMessages.id,
-      eventId: fastAgentMessages.eventId,
-      turnId: fastAgentMessages.turnId,
-      turnSeq: fastAgentMessages.turnSeq,
-      ts: fastAgentMessages.ts,
-      eventType: fastAgentMessages.eventType,
-      role: fastAgentMessages.role,
-      contentBlocks: fastAgentMessages.contentBlocks,
-      metadata: fastAgentMessages.metadata,
-      payload: fastAgentMessages.payload,
-      source: fastAgentMessages.source,
-      nativeSessionId: fastAgentMessages.nativeSessionId,
-      nativeMessageId: fastAgentMessages.nativeMessageId,
-      createdAt: fastAgentMessages.createdAt,
+      ...fastSessionMessageSelection,
       // Millisecond Dates truncate Postgres microsecond timestamps, which
       // would replay the newest row on every poll — keep the cursor as a
       // fractional epoch-millisecond float instead.
       updatedAtMs: sql<number>`extract(epoch from ${fastAgentMessages.updatedAt}) * 1000`,
     })
     .from(fastAgentMessages)
+    .leftJoin(users, fastSessionMessageUserJoin)
     .where(
       and(
         eq(fastAgentMessages.conversationId, sessionId),
@@ -444,23 +475,9 @@ export async function getFastSessionById(
   }
 
   const rows = await db
-    .select({
-      id: fastAgentMessages.id,
-      eventId: fastAgentMessages.eventId,
-      turnId: fastAgentMessages.turnId,
-      turnSeq: fastAgentMessages.turnSeq,
-      ts: fastAgentMessages.ts,
-      eventType: fastAgentMessages.eventType,
-      role: fastAgentMessages.role,
-      contentBlocks: fastAgentMessages.contentBlocks,
-      metadata: fastAgentMessages.metadata,
-      payload: fastAgentMessages.payload,
-      source: fastAgentMessages.source,
-      nativeSessionId: fastAgentMessages.nativeSessionId,
-      nativeMessageId: fastAgentMessages.nativeMessageId,
-      createdAt: fastAgentMessages.createdAt,
-    })
+    .select(fastSessionMessageSelection)
     .from(fastAgentMessages)
+    .leftJoin(users, fastSessionMessageUserJoin)
     .where(
       and(
         eq(fastAgentMessages.conversationId, session.id),

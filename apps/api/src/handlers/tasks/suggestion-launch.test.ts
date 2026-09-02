@@ -69,6 +69,20 @@ describe('resolveSuggestedTaskLaunchMode', () => {
       }),
     ).toBe('coding');
   });
+
+  it.each(['fast', 'coding'] as const)(
+    'honors an explicit %s launch mode',
+    (requiredMode) => {
+      expect(
+        resolveSuggestedTaskLaunchMode({
+          fastEligible: requiredMode !== 'fast',
+          userDefaultEnabled: requiredMode !== 'fast',
+          fastAvailable: requiredMode !== 'fast',
+          requiredMode,
+        }),
+      ).toBe(requiredMode);
+    },
+  );
 });
 
 describe('launchClaimedSuggestedTask', () => {

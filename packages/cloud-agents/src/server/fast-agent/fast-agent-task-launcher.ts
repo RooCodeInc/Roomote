@@ -3,6 +3,7 @@ import {
   buildFastAgentChildTaskMetadata,
   buildSlackThreadPermalink,
   TaskPayloadKind,
+  type ReasoningEffort,
   type StandardTask,
   type TaskInitiator,
   type TaskSurface,
@@ -42,6 +43,7 @@ export function createFastAgentTaskLauncher(
       branch?: string;
       launchIdempotencyKey?: string;
       model?: string | null;
+      reasoningEffort?: ReasoningEffort | null;
       parentSessionId: string;
     }) => StandardTask | Promise<StandardTask>;
   } & FastAgentTaskLaunchHooks,
@@ -53,6 +55,7 @@ export function createFastAgentTaskLauncher(
     branch,
     launchIdempotencyKey,
     model,
+    reasoningEffort,
     parentSessionId,
     postKickoff,
   }) => {
@@ -62,6 +65,7 @@ export function createFastAgentTaskLauncher(
       branch,
       launchIdempotencyKey,
       model,
+      reasoningEffort,
       parentSessionId,
     });
     const taskWithLaunchOverrides =
@@ -175,7 +179,13 @@ export function createFastAgentSlackTaskLauncher(
     afterKickoff: params.afterKickoff,
     onQueueFailure: params.onQueueFailure,
     rendersTaskLink: params.rendersTaskLink,
-    buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
+    buildTask: ({
+      prompt,
+      environmentId,
+      model,
+      reasoningEffort,
+      parentSessionId,
+    }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
         repo: ALL_REPOSITORIES,
@@ -210,6 +220,7 @@ export function createFastAgentSlackTaskLauncher(
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
       },
     }),
   });
@@ -234,6 +245,7 @@ export function createFastAgentWebTaskLauncher(params: {
       branch,
       launchIdempotencyKey,
       model,
+      reasoningEffort,
       parentSessionId,
     }) => ({
       type: TaskPayloadKind.StandardTask,
@@ -252,6 +264,7 @@ export function createFastAgentWebTaskLauncher(params: {
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
       },
     }),
   });

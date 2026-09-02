@@ -170,6 +170,106 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
     mockEnqueuePrReviewNotification.mockResolvedValue({ notifiedTaskCount: 1 });
   });
 
+  it('requests GitHub user and team reviewers with the installation token', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const requestReviewers = vi.fn().mockResolvedValue({ data: {} });
+    mockGetOctokit.mockReturnValue({
+      rest: { pulls: { requestReviewers } },
+    });
+
+    const parsedInput = sourceControlPullRequestWriteInputSchema.parse({
+      action: 'request_pull_request_reviewers',
+      repositoryFullName: 'acme/backend',
+      prNumber: 55,
+      reviewers: [' alice '],
+      teamReviewers: ['platform'],
+      sourceControlProvider: 'github',
+    });
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: parsedInput,
+    });
+
+    expect(requestReviewers).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      pull_number: 55,
+      reviewers: ['alice'],
+      team_reviewers: ['platform'],
+    });
+    expect(result).toMatchObject({
+      success: true,
+      action: 'request_pull_request_reviewers',
+      provider: 'github',
+      number: 55,
+      applied: true,
+      warnings: [],
+    });
+  });
+
+  it('rejects reviewer requests without user or team targets', async () => {
+    await expect(
+      writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: 'github',
+        }),
+        input: {
+          action: 'request_pull_request_reviewers',
+          repositoryFullName: 'acme/backend',
+          prNumber: 55,
+          sourceControlProvider: 'github',
+        },
+      }),
+    ).rejects.toThrow(
+      'reviewers or teamReviewers is required for request_pull_request_reviewers',
+    );
+    expect(mockRepositoriesFindFirst).not.toHaveBeenCalled();
+  });
+
+  it('reports reviewer requests as unsupported on non-GitHub providers', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: '101',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitlab.com/acme/backend',
+    });
+
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'gitlab',
+      }),
+      input: {
+        action: 'request_pull_request_reviewers',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        reviewers: ['alice'],
+        sourceControlProvider: 'gitlab',
+      },
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      action: 'request_pull_request_reviewers',
+      provider: 'gitlab',
+      number: 55,
+      applied: false,
+      warnings: [
+        'GitLab does not support reviewer requests through this source-control interface.',
+      ],
+    });
+  });
+
   it('replies to a GitLab discussion in a GitHub-primary mixed task', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: null,

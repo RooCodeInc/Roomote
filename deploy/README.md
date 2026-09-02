@@ -106,6 +106,14 @@ worker images in lockstep. The worker repository defaults to
 `ROOMOTE_WORKER_IMAGE_REPO` (for forks or registry mirrors). Explicit values
 always win over the derived default.
 
+The optional Memory service follows the same release convention. With the
+`brain` Compose profile enabled and `GBRAIN_IMAGE` unset, production Compose
+pulls `${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/roomote-gbrain:${ROOMOTE_VERSION}`;
+official installs therefore use
+`ghcr.io/roocodeinc/roomote-gbrain:<matching-v*-release-tag>`. Set
+`GBRAIN_IMAGE` only to pin a complete custom image reference. Installer reruns
+and upgrades preserve that explicit override.
+
 The file must include the required production values from
 `.env.production.example`, especially:
 

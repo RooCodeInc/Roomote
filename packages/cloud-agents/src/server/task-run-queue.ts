@@ -62,6 +62,8 @@ import {
   tasks,
   users,
   environments,
+  sessions,
+  sessionTasks,
   and,
   desc,
   eq,
@@ -1562,6 +1564,8 @@ async function enqueueFreshLaunch(
   const fastParent = getFastAgentParentFromPayload(
     taskWithHarnessOverrides.payload,
   );
+  const launchIdempotencyKey =
+    taskWithHarnessOverrides.payload.launchIdempotencyKey;
 
   // Fresh runs are persisted atomically with either a new task or the existing
   // durable task they continue.
@@ -1574,6 +1578,62 @@ async function enqueueFreshLaunch(
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`fast-parent-launch:${fastParent.sessionId}`}, 0))`,
         );
+      }
+      if (launchIdempotencyKey) {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`task-launch:${launchIdempotencyKey}`}, 0))`,
+        );
+        const [existingRun] = await tx
+          .select()
+          .from(taskRuns)
+          .where(
+            and(
+              sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
+              isNull(taskRuns.canceledAt),
+            ),
+          )
+          .limit(1)
+          .for('update');
+        if (existingRun) {
+          const existingFastParent = getFastAgentParentFromPayload(
+            existingRun.payload,
+          );
+          if (
+            fastParent &&
+            existingFastParent?.sessionId !== fastParent.sessionId
+          ) {
+            throw new Error(
+              'Launch idempotency key is already attached to another Fast Session.',
+            );
+          }
+          if (fastParent) {
+            const [existingSession] = await tx
+              .select({ fastConversationId: sessions.fastConversationId })
+              .from(sessionTasks)
+              .innerJoin(sessions, eq(sessionTasks.sessionId, sessions.id))
+              .where(eq(sessionTasks.taskId, existingRun.taskId))
+              .limit(1);
+            if (
+              existingSession &&
+              existingSession.fastConversationId !== fastParent.sessionId
+            ) {
+              throw new Error(
+                'Launch idempotency key is already attached to another Session.',
+              );
+            }
+          }
+          await ensureSessionForTask(tx, {
+            taskId: existingRun.taskId,
+            fastConversationId: fastParent?.sessionId ?? null,
+            origin: fastParent ? 'fast_delegation' : 'direct_launch',
+            existingTaskReused: true,
+          });
+          return {
+            taskRun: existingRun,
+            createdRun: false,
+            reusedTask: true,
+          };
+        }
       }
       const chatgptConnected = effectiveTaskModel.startsWith('openai/')
         ? await isChatGptSubscriptionConnected(tx)

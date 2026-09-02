@@ -3145,6 +3145,31 @@ export const fastAgentParentEvents = pgTable(
     lastError: text('last_error'),
     deliveredAt: timestamp('delivered_at'),
     discardedAt: timestamp('discarded_at'),
+    /**
+     * 'inline' marks a human turn the accepting process persisted before
+     * running it itself (durable admission). Null rows were queued for the
+     * worker as before. Both drain through the same queue path.
+     */
+    admission: text('admission').$type<'inline'>(),
+    /**
+     * While set and in the future, a live inline owner is executing this
+     * row; the drain and recovery sweep leave it alone. The owner renews it
+     * as it works and clears it on interruption so recovery starts at once.
+     */
+    claimedUntil: timestamp('claimed_until'),
+    /**
+     * Durable retry scheduling for an inline-admitted turn: while set and
+     * in the future, the turn is waiting out an inference retry backoff
+     * with no live owner, and the drain and recovery sweep leave it alone
+     * until the time arrives. The previous release ignores this column and
+     * would re-run such a row immediately, which is safe (N-1 rollback).
+     */
+    retryAt: timestamp('retry_at'),
+    /**
+     * Automatic inference retries this turn has consumed across every
+     * owner, so the per-turn retry cap holds through restarts and handoffs.
+     */
+    inferenceRetries: integer('inference_retries').notNull().default(0),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -3887,6 +3912,8 @@ export const customAutomations = pgTable(
      * deployment default task model.
      */
     model: text('model'),
+    /** Optional reasoning override for the selected model. */
+    reasoningEffort: text('reasoning_effort').$type<ReasoningEffort>(),
     environmentId: uuid('environment_id').references(() => environments.id, {
       onDelete: 'set null',
     }),

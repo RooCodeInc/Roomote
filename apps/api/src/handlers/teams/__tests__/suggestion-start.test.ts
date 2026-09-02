@@ -152,6 +152,7 @@ describe('launchClaimedTeamsSuggestion', () => {
     expect(outcome).toEqual({ result: 'started', runId: 7 });
     expect(launchTask).toHaveBeenCalledWith(
       'Fix the flaky test\n\nThe retry loop never terminates.\n\nTarget repository: acme/app',
+      { kind: 'legacy_pinned' },
     );
     expect(finalizeWorkItemLaunchedMock).toHaveBeenCalledTimes(1);
     expect(finalizeWorkItemLaunchedMock).toHaveBeenCalledWith(
@@ -297,5 +298,144 @@ describe('launchClaimedTeamsSuggestion', () => {
     expect(postMessage).toHaveBeenCalledWith(
       'New tasks are paused due to a billing issue. Please check billing.',
     );
+  });
+
+  it.each([
+    {
+      label: 'concrete environment',
+      suggestion: {
+        launchTarget: 'env-1',
+        targetEnvironmentId: 'env-1',
+        targetRepositoryFullName: null,
+      },
+      expectedTarget: { kind: 'environment', environmentId: 'env-1' },
+    },
+    {
+      label: 'all repositories',
+      suggestion: {
+        launchTarget: '__all_repositories__',
+        targetRepositoryFullName: '__all_repositories__',
+      },
+      expectedTarget: { kind: 'all_repositories' },
+    },
+  ])(
+    'passes an explicit $label target to coding launch',
+    async ({ suggestion, expectedTarget }) => {
+      const launchTask = vi.fn().mockResolvedValue({
+        status: 'started',
+        launchResult: { id: 7, taskId: 'task-1' },
+      });
+
+      await launchClaimedTeamsSuggestion({
+        suggestion: { ...buildClaimedSuggestion(), ...suggestion },
+        launchTask,
+        launchFast: vi.fn(),
+        postMessage: vi.fn(),
+      });
+
+      expect(launchTask).toHaveBeenCalledWith(
+        expect.any(String),
+        expectedTarget,
+      );
+    },
+  );
+
+  it('starts a Fast-targeted suggestion without launching a coding task', async () => {
+    const launchTask = vi.fn();
+    const launchFast = vi
+      .fn()
+      .mockResolvedValue({ accepted: true, abort: vi.fn() });
+
+    await expect(
+      launchClaimedTeamsSuggestion({
+        suggestion: {
+          ...buildClaimedSuggestion(),
+          launchTarget: '__fast__',
+          targetRepositoryFullName: '__fast__',
+        },
+        launchTask,
+        launchFast,
+        postMessage: vi.fn(),
+      }),
+    ).resolves.toEqual({ result: 'started', runId: null });
+    expect(launchFast).toHaveBeenCalledWith(expect.any(String));
+    expect(launchTask).not.toHaveBeenCalled();
+    expect(finalizeWorkItemLaunchedMock).toHaveBeenCalledWith(
+      expect.anything(),
+      { id: 'work-item-1', taskId: null, claimedAt: CLAIMED_AT },
+    );
+  });
+
+  it('aborts the accepted Fast turn when finalize loses the fencing guard', async () => {
+    finalizeWorkItemLaunchedMock.mockResolvedValue(false);
+    const abort = vi.fn().mockResolvedValue(undefined);
+    const launchFast = vi.fn().mockResolvedValue({ accepted: true, abort });
+    const postMessage = vi.fn();
+
+    const outcome = await launchClaimedTeamsSuggestion({
+      suggestion: {
+        ...buildClaimedSuggestion(),
+        launchTarget: '__fast__',
+        targetRepositoryFullName: '__fast__',
+      },
+      launchTask: vi.fn(),
+      launchFast,
+      postMessage,
+    });
+
+    expect(outcome).toEqual({ result: 'already_started' });
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(cancelOrphanedWorkItemRunBestEffortMock).not.toHaveBeenCalled();
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.stringContaining('was already started elsewhere'),
+    );
+  });
+
+  it('posts the rejection reason and releases the claim when the Fast session refuses the suggestion', async () => {
+    const launchFast = vi
+      .fn()
+      .mockResolvedValue({ accepted: false, reason: 'Fast session is busy.' });
+    const postMessage = vi.fn();
+
+    const outcome = await launchClaimedTeamsSuggestion({
+      suggestion: {
+        ...buildClaimedSuggestion(),
+        launchTarget: '__fast__',
+        targetRepositoryFullName: '__fast__',
+      },
+      launchTask: vi.fn(),
+      launchFast,
+      postMessage,
+    });
+
+    expect(outcome).toEqual({ result: 'rejected' });
+    expect(postMessage).toHaveBeenCalledWith(
+      'Could not start "Fix the flaky test" — Fast session is busy.',
+    );
+    expect(finalizeWorkItemLaunchedMock).not.toHaveBeenCalled();
+    expect(releaseWorkItemClaimMock).toHaveBeenCalledWith(expect.anything(), {
+      id: 'work-item-1',
+      claimedAt: CLAIMED_AT,
+    });
+  });
+
+  it('posts a reason when a Fast-targeted suggestion has no Fast launcher', async () => {
+    const postMessage = vi.fn();
+
+    const outcome = await launchClaimedTeamsSuggestion({
+      suggestion: {
+        ...buildClaimedSuggestion(),
+        launchTarget: '__fast__',
+        targetRepositoryFullName: '__fast__',
+      },
+      launchTask: vi.fn(),
+      postMessage,
+    });
+
+    expect(outcome).toEqual({ result: 'rejected' });
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Fast mode is unavailable.'),
+    );
+    expect(releaseWorkItemClaimMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -5,6 +5,22 @@ import type { RoomoteConfig, ToolResult } from './types.js';
 const MESSAGE_TEXT_LIMIT = 500;
 const UNKNOWN_ROLE = 'unknown';
 
+function getSubagentLabel(metadata: Record<string, unknown> | null): string {
+  const parentSessionId = metadata?.parentSessionId;
+  const childSessionId = metadata?.sessionId;
+
+  if (
+    typeof parentSessionId !== 'string' ||
+    typeof childSessionId !== 'string'
+  ) {
+    return '';
+  }
+
+  const agentType =
+    typeof metadata?.agentType === 'string' ? metadata.agentType : 'unknown';
+  return ` [subagent:${agentType} session:${childSessionId} parent:${parentSessionId}]`;
+}
+
 function inferRoleFromEventType(eventType: string): string | null {
   if (eventType.startsWith('roomote_runtime.user')) return 'user';
   if (eventType.startsWith('roomote_runtime.assistant')) return 'assistant';
@@ -42,7 +58,7 @@ export async function handleGetTaskMessages(
     const lines = messages.map((m) => {
       const role = getMessageRole(m);
       const label = m.eventType;
-      const prefix = `[${role}] (${label})`;
+      const prefix = `[${role}] (${label})${getSubagentLabel(m.metadata)}`;
       const text = m.text
         ? m.text.length > MESSAGE_TEXT_LIMIT
           ? m.text.slice(0, MESSAGE_TEXT_LIMIT) + '...'

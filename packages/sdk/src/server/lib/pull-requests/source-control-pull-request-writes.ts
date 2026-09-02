@@ -66,6 +66,7 @@ export const sourceControlPullRequestWriteInputSchema = z.object({
     'create_pull_request_review_comment',
     'update_pull_request_comment',
     'resolve_pull_request_thread',
+    'request_pull_request_reviewers',
     'submit_pull_request_review',
     'dismiss_pull_request_review',
   ]),
@@ -118,6 +119,10 @@ export const sourceControlPullRequestWriteInputSchema = z.object({
   resolved: z.boolean().optional(),
   /** Required for submit_pull_request_review. */
   reviewEvent: z.enum(['approve', 'request_changes', 'comment']).optional(),
+  /** GitHub user logins for request_pull_request_reviewers. */
+  reviewers: z.array(z.string().trim().min(1)).optional(),
+  /** GitHub team slugs for request_pull_request_reviewers. */
+  teamReviewers: z.array(z.string().trim().min(1)).optional(),
   sourceControlProvider: sourceControlProviderSchema.optional(),
 });
 
@@ -504,6 +509,9 @@ function assertWriteInputFields(
       requireThreadId(input);
       requireResolved(input);
       break;
+    case 'request_pull_request_reviewers':
+      requireReviewerTargets(input);
+      break;
     case 'submit_pull_request_review':
       requireReviewEvent(input);
       break;
@@ -658,6 +666,17 @@ function requireReviewEvent(
   }
 
   return input.reviewEvent;
+}
+
+function requireReviewerTargets(
+  input: SourceControlPullRequestWriteInput,
+): void {
+  if (!input.reviewers?.length && !input.teamReviewers?.length) {
+    throw new SourceControlWriteError(
+      400,
+      `reviewers or teamReviewers is required for ${input.action}.`,
+    );
+  }
 }
 
 function buildWriteResult({
@@ -857,6 +876,19 @@ async function writeGitHubPullRequest({
         repository,
         threadId: thread?.id ?? threadId,
       });
+    }
+    case 'request_pull_request_reviewers': {
+      await octokit.rest.pulls.requestReviewers({
+        owner,
+        repo,
+        pull_number: input.prNumber,
+        ...(input.reviewers?.length ? { reviewers: input.reviewers } : {}),
+        ...(input.teamReviewers?.length
+          ? { team_reviewers: input.teamReviewers }
+          : {}),
+      });
+
+      return buildWriteResult({ input, provider, repository });
     }
     case 'submit_pull_request_review': {
       const reviewEvent = requireReviewEvent(input);
@@ -1171,6 +1203,16 @@ async function writeGitLabMergeRequest({
         repository,
         applied: false,
         warnings: ['GitLab does not expose review dismissal.'],
+      });
+    case 'request_pull_request_reviewers':
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        applied: false,
+        warnings: [
+          'GitLab does not support reviewer requests through this source-control interface.',
+        ],
       });
   }
 }
@@ -1585,6 +1627,16 @@ async function writeGiteaPullRequest({
         applied: false,
         warnings: ['Gitea does not expose review dismissal.'],
       });
+    case 'request_pull_request_reviewers':
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        applied: false,
+        warnings: [
+          'Gitea does not support reviewer requests through this source-control interface.',
+        ],
+      });
   }
 }
 
@@ -1850,6 +1902,16 @@ async function writeBitbucketPullRequest({
         applied: false,
         warnings: ['Bitbucket does not expose review dismissal.'],
       });
+    case 'request_pull_request_reviewers':
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        applied: false,
+        warnings: [
+          'Bitbucket does not support reviewer requests through this source-control interface.',
+        ],
+      });
   }
 }
 
@@ -2088,6 +2150,16 @@ async function writeAdoPullRequest({
         repository,
         applied: false,
         warnings: ['Azure DevOps does not expose review dismissal.'],
+      });
+    case 'request_pull_request_reviewers':
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        applied: false,
+        warnings: [
+          'Azure DevOps does not support reviewer requests through this source-control interface.',
+        ],
       });
   }
 }
