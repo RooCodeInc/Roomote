@@ -1365,14 +1365,24 @@ function filterHandledReviewEvents(
       }
     }
 
-    const isHeadScoped =
+    const requiresHeadVerification =
+      event.reviewHeadSha &&
+      (event.kind === 'review' ||
+        event.kind === 'review_comment' ||
+        event.kind === 'ci_failure' ||
+        event.kind === 'review_summary');
+    if (!context.currentHeadSha) {
+      return !requireLiveHead || !requiresHeadVerification;
+    }
+    const filtersAgainstCurrentHead =
       event.reviewHeadSha &&
       (event.kind === 'review' ||
         event.kind === 'ci_failure' ||
         event.kind === 'review_summary');
-    if (!isHeadScoped) return true;
-    if (!context.currentHeadSha) return !requireLiveHead;
-    return event.reviewHeadSha === context.currentHeadSha;
+    return (
+      !filtersAgainstCurrentHead ||
+      event.reviewHeadSha === context.currentHeadSha
+    );
   });
 }
 

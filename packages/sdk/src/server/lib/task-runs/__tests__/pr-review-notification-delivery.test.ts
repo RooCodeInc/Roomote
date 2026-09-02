@@ -264,7 +264,7 @@ describe('preparePrReviewNotificationDelivery', () => {
     expect(mockGenerateObject).not.toHaveBeenCalled();
   });
 
-  it('suppresses head-scoped GitHub events when the live PR head is unavailable', async () => {
+  it('suppresses head-scoped GitHub review comments when the live PR head is unavailable', async () => {
     mockPullsGet.mockRejectedValue(new Error('github unavailable'));
 
     await expect(
@@ -273,9 +273,9 @@ describe('preparePrReviewNotificationDelivery', () => {
         request: { ...request, sourceControlProvider: 'github' },
         events: [
           {
-            kind: 'review_summary',
-            authorLogin: 'roomote[bot]',
-            summary: 'One issue remains.',
+            kind: 'review_comment',
+            authorLogin: 'reviewer',
+            body: 'Please fix this.',
             reviewHeadSha: 'old-head',
           },
         ],
