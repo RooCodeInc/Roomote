@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   deleteReturning: vi.fn(),
   startFastAgentResponse: vi.fn(),
   abort: vi.fn(),
+  acquireRedisLock: vi.fn(),
+  releaseResumeLock: vi.fn(),
   SlackNotifier: vi.fn(function SlackNotifier() {}),
 }));
 
@@ -38,6 +40,10 @@ vi.mock('@roomote/slack', () => ({
   ),
 }));
 
+vi.mock('@roomote/redis', () => ({
+  acquireRedisLock: mocks.acquireRedisLock,
+}));
+
 vi.mock('../helpers/user-mapping.js', () => ({
   lookupSlackUserMapping: mocks.lookupSlackUserMapping,
 }));
@@ -50,6 +56,8 @@ describe('resumePendingSlackAuthRequest', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.abort.mockResolvedValue(undefined);
+    mocks.releaseResumeLock.mockResolvedValue(undefined);
+    mocks.acquireRedisLock.mockResolvedValue(mocks.releaseResumeLock);
     mocks.authTokenFindFirst.mockResolvedValue({
       token: 'state-1',
       slackUserId: 'U123',
@@ -95,6 +103,10 @@ describe('resumePendingSlackAuthRequest', () => {
       status: 'resumed',
     });
 
+    expect(mocks.acquireRedisLock).toHaveBeenCalledWith(
+      'slack:auth-resume:state-1',
+      { ttlSeconds: 900 },
+    );
     expect(mocks.startFastAgentResponse).toHaveBeenCalledWith(
       expect.objectContaining({
         event: {
@@ -111,6 +123,7 @@ describe('resumePendingSlackAuthRequest', () => {
       }),
     );
     expect(mocks.deleteReturning).toHaveBeenCalledTimes(1);
+    expect(mocks.releaseResumeLock).toHaveBeenCalledTimes(1);
   });
 
   it('does not consume or replay the request before account linking completes', async () => {
@@ -153,6 +166,20 @@ describe('resumePendingSlackAuthRequest', () => {
       error: 'fast_session_not_accepted',
     });
 
+    expect(mocks.deleteReturning).not.toHaveBeenCalled();
+    expect(mocks.releaseResumeLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not admit a second Fast turn while the request is being resumed', async () => {
+    mocks.acquireRedisLock.mockResolvedValue(null);
+    const { resumePendingSlackAuthRequest } = await import('./auth-resume.js');
+
+    await expect(resumePendingSlackAuthRequest('state-1')).resolves.toEqual({
+      success: false,
+      error: 'resume_in_progress',
+    });
+
+    expect(mocks.startFastAgentResponse).not.toHaveBeenCalled();
     expect(mocks.deleteReturning).not.toHaveBeenCalled();
   });
 });

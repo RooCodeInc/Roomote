@@ -62,6 +62,7 @@ slack.post('/auth/resume', async (c) => {
 
   const status =
     result.error === 'account_link_required' ||
+    result.error === 'resume_in_progress' ||
     result.error === 'fast_session_not_accepted'
       ? 409
       : result.error === 'invalid_or_expired_auth_token'
