@@ -12,6 +12,11 @@ import {
   buildSlackThreadFooterText,
   resolveSlackThreadFooterContext,
 } from './thread-footer';
+import {
+  buildSlackThreadActiveTaskBlocks,
+  getSlackThreadActiveTasks,
+  isSlackThreadActiveTaskBlock,
+} from './thread-active-tasks';
 
 export const SLACK_THREAD_REPLY_FOOTER_BLOCK_ID = 'roomote_thread_reply_footer';
 
@@ -71,6 +76,32 @@ export function isSlackThreadReplyFooterBlock(block: unknown): boolean {
       isSlackThreadReplyFooterText(contextElement.text)
     );
   });
+}
+
+function removeSlackThreadStickyBlocks(blocks: unknown[]): unknown[] {
+  return blocks.filter(
+    (block) =>
+      !isSlackThreadReplyFooterBlock(block) &&
+      !isSlackThreadActiveTaskBlock(block),
+  );
+}
+
+async function buildSlackThreadStickyBlocks(params: {
+  channel: string;
+  threadTs: string;
+  footerBlock: unknown;
+  includeActiveTasks: boolean;
+}): Promise<unknown[]> {
+  if (!params.includeActiveTasks) return [params.footerBlock];
+  try {
+    const tasks = await getSlackThreadActiveTasks(params);
+    return [...buildSlackThreadActiveTaskBlocks(tasks), params.footerBlock];
+  } catch (error) {
+    console.warn(
+      `[slackThreadFooter] Failed to load active tasks for thread ${params.threadTs}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return [params.footerBlock];
+  }
 }
 
 export function buildSlackThreadReplyFooterBlock(params: {
@@ -147,9 +178,7 @@ export async function removeSlackThreadReplyFooter(params: {
     return;
   }
 
-  const updatedBlocks = blocks.filter(
-    (block) => !isSlackThreadReplyFooterBlock(block),
-  );
+  const updatedBlocks = removeSlackThreadStickyBlocks(blocks);
 
   if (updatedBlocks.length === blocks.length) {
     return;
@@ -207,6 +236,12 @@ export async function postSlackThreadMessageWithFooterText(params: {
         params.channel,
         params.threadTs,
       );
+      const stickyBlocks = await buildSlackThreadStickyBlocks({
+        channel: params.channel,
+        threadTs: params.threadTs,
+        footerBlock,
+        includeActiveTasks: bodyBlocks.length <= 48,
+      });
 
       const nextMessageTs = await params.slack.postMessage({
         channel: params.channel,
@@ -214,7 +249,7 @@ export async function postSlackThreadMessageWithFooterText(params: {
         text: params.text,
         unfurl_links: false,
         unfurl_media: false,
-        blocks: [...bodyBlocks, footerBlock],
+        blocks: [...bodyBlocks, ...stickyBlocks],
         ...(params.clientMsgId ? { client_msg_id: params.clientMsgId } : {}),
       });
 
@@ -304,12 +339,18 @@ export async function updateSlackThreadMessageWithFooterText(params: {
         params.channel,
         params.threadTs,
       );
+      const stickyBlocks = await buildSlackThreadStickyBlocks({
+        channel: params.channel,
+        threadTs: params.threadTs,
+        footerBlock,
+        includeActiveTasks: params.bodyBlocks.length <= 48,
+      });
       const updated = await params.slack.updateMessage({
         channel: params.channel,
         ts: params.messageTs,
         message: {
           text: params.text,
-          blocks: [...params.bodyBlocks, footerBlock],
+          blocks: [...params.bodyBlocks, ...stickyBlocks],
         },
       });
       if (!updated) {
@@ -371,6 +412,56 @@ export async function updateSlackThreadMessageWithFooterText(params: {
       return true;
     },
   });
+}
+
+/** Rebuild the tracked footer carrier after a task summary changes status. */
+export async function refreshSlackThreadActiveTaskFooter(params: {
+  slack: Pick<SlackNotifier, 'getMessageBlocks' | 'updateMessage'>;
+  channel: string;
+  threadTs: string;
+}): Promise<void> {
+  try {
+    await withSlackThreadReplyFooterLock({
+      channel: params.channel,
+      threadTs: params.threadTs,
+      fn: async () => {
+        const messageTs = await getSlackThreadReplyFooterMessageTs(
+          params.channel,
+          params.threadTs,
+        );
+        if (!messageTs) return;
+
+        const blocks = await params.slack.getMessageBlocks({
+          channel: params.channel,
+          threadTs: params.threadTs,
+          messageTs,
+        });
+        if (!blocks) return;
+
+        const footerBlock = blocks.find(isSlackThreadReplyFooterBlock);
+        if (!footerBlock) return;
+        const bodyBlocks = removeSlackThreadStickyBlocks(blocks);
+
+        const stickyBlocks = await buildSlackThreadStickyBlocks({
+          channel: params.channel,
+          threadTs: params.threadTs,
+          footerBlock,
+          includeActiveTasks: bodyBlocks.length <= 48,
+        });
+        await params.slack.updateMessage({
+          channel: params.channel,
+          ts: messageTs,
+          message: {
+            blocks: [...bodyBlocks, ...stickyBlocks],
+          },
+        });
+      },
+    });
+  } catch (error) {
+    console.warn(
+      `[slackThreadFooter] Failed to refresh task summaries in thread ${params.threadTs}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 /**
