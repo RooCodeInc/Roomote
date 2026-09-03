@@ -112,6 +112,8 @@ type TaskPromptInputProps = {
   animateContainer?: boolean;
   /** Optional content rendered inside the prompt box, below the input. */
   suggestion?: ReactNode;
+  /** Optional controls rendered after the attachment action. */
+  tools?: ReactNode;
   /** Optional reason that disables the submit button and explains why. */
   submitDisabledReason?: string;
   /** When true, submit on Cmd/Ctrl+Enter instead of plain Enter. */
@@ -131,6 +133,7 @@ export function TaskPromptInput({
   textareaMaxHeight,
   animateContainer = true,
   suggestion,
+  tools,
   submitDisabledReason,
   submitWithMetaKey = true,
   submitIcon,
@@ -187,6 +190,7 @@ export function TaskPromptInput({
                 <PromptInputActionAddAttachments />
               </PromptInputActionMenuContent>
             </PromptInputActionMenu>
+            {tools}
           </PromptInputTools>
           <div className="flex items-center gap-1">
             <VoiceDictationButton

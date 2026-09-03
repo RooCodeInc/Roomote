@@ -77,7 +77,7 @@ vi.mock('@tanstack/react-query', async (importOriginal) => ({
   useQuery: () => ({ data: composerSuggestionState.data }),
 }));
 
-vi.mock('./SessionModelSwitcher', () => ({
+vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
   SessionModelSwitcher: ({
     model,
     onModelChange,
