@@ -4089,17 +4089,26 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(call.prompt).toContain(
         'read that error before deciding whether to retry',
       );
-      expect(
-        mocks.upsertMessage.mock.calls.map(([input]) => input.message),
-      ).not.toContainEqual(
-        expect.objectContaining({
-          contentBlocks: expect.arrayContaining([
-            expect.objectContaining({
-              text: expect.stringContaining('lost due to restart'),
-            }),
-          ]),
-        }),
+      // The envelope, the transcript block, and the lost-result placeholder
+      // are model input only: no persisted row ever contains them.
+      const persistedTexts = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .flatMap((message) =>
+          (message.contentBlocks ?? []).map(
+            (block: { text?: string }) => block.text ?? '',
+          ),
+        )
+        .join('\n');
+      expect(persistedTexts).not.toContain('lost due to restart');
+      expect(persistedTexts).not.toContain('<previous_attempt_transcript>');
+      expect(persistedTexts).not.toContain('<resumed_turn>');
+      // Nor does the durable history that seeds future cold starts.
+      const historyTexts = JSON.stringify(
+        mocks.appendVisibleMessages.mock.calls.map(([input]) => input.messages),
       );
+      expect(historyTexts).not.toContain('lost due to restart');
+      expect(historyTexts).not.toContain('previous_attempt_transcript');
+      expect(historyTexts).not.toContain('resumed_turn');
       expect(call.prompt.indexOf('<previous_attempt_transcript>')).toBeLessThan(
         call.prompt.indexOf('What does this service do?'),
       );
