@@ -275,6 +275,7 @@ export {
   beginCanonicalPrReviewWebAutoDispatch,
   completeCanonicalPrReviewAutoDispatch,
   consumePendingPrReviewActivity,
+  dispatchCanonicalPrReviewAutoFollowUp,
   dispatchDuePrReviewNotifications,
   enqueuePrReviewNotification,
   enqueuePrReviewNotificationInputSchema,

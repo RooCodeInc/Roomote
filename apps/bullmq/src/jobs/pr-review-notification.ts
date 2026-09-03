@@ -17,9 +17,7 @@ import {
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS,
   PrReviewNotificationRateLimitError,
   attachPendingPrReviewActionMessageWithRetirement,
-  beginCanonicalPrReviewAutoDispatch,
   beginCanonicalPrReviewPrompt,
-  beginCanonicalPrReviewWebAutoDispatch,
   beginCanonicalPrReviewWebPrompt,
   buildPrReviewNotificationPostInput,
   createPrReviewNotificationTelemetry,
@@ -28,7 +26,7 @@ import {
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
   completeCanonicalPrReviewAutoDispatch,
-  dispatchPrReviewFollowUp,
+  dispatchCanonicalPrReviewAutoFollowUp,
   findAutoHandlePrReviewFeedbackPreference,
   finalizePrReviewNotificationRequest,
   isDurablePrReviewNotificationRequest,
@@ -822,36 +820,19 @@ export const prReviewNotificationJob = async (
       (autoHandleRoute || canAutoHandleWeb) &&
       ownsAutoHandleDispatch
     ) {
-      const beginAutoDispatch = () =>
-        canAutoHandleWeb
-          ? beginCanonicalPrReviewWebAutoDispatch({
-              request: data,
-              followUpPrompt: followUp.prompt,
-              targetTaskId: autoHandlePreference.taskId,
-              actingUserId: autoHandleUserId,
-            })
-          : beginCanonicalPrReviewAutoDispatch({
-              request: data,
-              followUpPrompt: followUp.prompt,
-              targetTaskId: autoHandlePreference.taskId,
-              actingUserId: autoHandleUserId,
-              route: autoHandleRoute!,
-            });
-      if (!(await beginAutoDispatch())) {
-        await retrySupersededPrReviewAction(data);
-        console.log(
-          `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its automatic-dispatch fence, skipping`,
-        );
-        return;
-      }
       const dispatchInput = {
         taskId: autoHandlePreference.taskId,
         followUpPrompt: followUp.prompt,
         actingUserId: autoHandleUserId,
         ...(data.dispatchKey ? { idempotencyKey: data.dispatchKey } : {}),
       };
-      const dispatched = await dispatchPrReviewFollowUp(
-        canAutoHandleWeb
+      const dispatched = await dispatchCanonicalPrReviewAutoFollowUp({
+        request: data,
+        followUpPrompt: followUp.prompt,
+        targetTaskId: autoHandlePreference.taskId,
+        actingUserId: autoHandleUserId,
+        route: canAutoHandleWeb ? null : autoHandleRoute!,
+        dispatchInput: canAutoHandleWeb
           ? {
               ...dispatchInput,
               provider: 'web',
@@ -866,7 +847,14 @@ export const prReviewNotificationJob = async (
               channelId: autoHandleRoute!.channelId,
               threadId: autoHandleRoute!.threadId ?? null,
             },
-      );
+      });
+      if (!dispatched) {
+        await retrySupersededPrReviewAction(data);
+        console.log(
+          `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its automatic-dispatch fence, skipping`,
+        );
+        return;
+      }
 
       if (dispatched.outcome !== 'unavailable') {
         if (

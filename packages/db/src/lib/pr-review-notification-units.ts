@@ -954,6 +954,70 @@ export async function transitionCanonicalPrReviewDelivery(input: {
   return rows.length === 1;
 }
 
+/**
+ * Serializes an automatic follow-up enqueue with old-head retirement.
+ *
+ * The delivery row stays locked until `dispatch` settles. A concurrent
+ * synchronize transaction must therefore either fence the delivery before
+ * this transaction reads it, or wait until the follow-up has been enqueued.
+ * This closes the gap between a standalone state transition and the external
+ * enqueue that follows it.
+ */
+export async function withCanonicalPrReviewAutoDispatchFence<T>(
+  input: {
+    deliveryId: string;
+    leaseToken: string;
+    followUpPrompt: string;
+    targetTaskId: string;
+    actingUserId: string;
+    routeProvider: 'slack' | 'teams' | 'telegram' | 'discord' | null;
+    routeWorkspaceId: string | null;
+    routeChannelId: string | null;
+    routeThreadId: string | null;
+  },
+  dispatch: () => Promise<T>,
+): Promise<{ acquired: false } | { acquired: true; result: T }> {
+  return db.transaction(async (tx) => {
+    const [delivery] = await tx
+      .select({
+        id: prReviewNotificationDeliveries.id,
+        actionClaimedAt: prReviewNotificationDeliveries.actionClaimedAt,
+      })
+      .from(prReviewNotificationDeliveries)
+      .where(
+        and(
+          canonicalClaimWhere(input),
+          inArray(prReviewNotificationDeliveries.status, [
+            'prepared',
+            'auto_dispatch_pending',
+          ]),
+        ),
+      )
+      .for('update');
+
+    if (!delivery || delivery.actionClaimedAt !== null) {
+      return { acquired: false };
+    }
+
+    await tx
+      .update(prReviewNotificationDeliveries)
+      .set({
+        status: 'auto_dispatch_pending',
+        followUpPrompt: input.followUpPrompt,
+        targetTaskId: input.targetTaskId,
+        actingUserId: input.actingUserId,
+        routeProvider: input.routeProvider,
+        routeWorkspaceId: input.routeWorkspaceId,
+        routeChannelId: input.routeChannelId,
+        routeThreadId: input.routeThreadId,
+        updatedAt: new Date(),
+      })
+      .where(eq(prReviewNotificationDeliveries.id, delivery.id));
+
+    return { acquired: true, result: await dispatch() };
+  });
+}
+
 export async function deferCanonicalPrReviewDelivery(input: {
   deliveryId: string;
   leaseToken: string;

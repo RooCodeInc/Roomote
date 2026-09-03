@@ -30,6 +30,7 @@ import {
   transitionCanonicalPrReviewDelivery,
   upsertPrReviewAutoPreference,
   userFactory,
+  withCanonicalPrReviewAutoDispatchFence,
 } from '../../server';
 import { RunStatus } from '@roomote/types';
 
@@ -1491,6 +1492,84 @@ describe('canonical PR review notification ownership', () => {
         reviewActionSuperseded: true,
       }),
     ]);
+  });
+
+  it('holds the old-head retirement fence through automatic dispatch', async () => {
+    const user = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    const repository = `owner/locked-auto-dispatch-${task.id}`;
+    await associate(task.id, repository, 33);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 33,
+        eventKey: `locked-auto-dispatch-${task.id}`,
+        headSha: 'old-head',
+      }),
+    );
+    const claim = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    if (!claim || claim.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+    });
+
+    let releaseDispatch!: () => void;
+    const dispatchBlocked = new Promise<void>((resolve) => {
+      releaseDispatch = resolve;
+    });
+    let dispatchStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      dispatchStarted = resolve;
+    });
+    const order: string[] = [];
+    const dispatch = withCanonicalPrReviewAutoDispatchFence(
+      {
+        deliveryId: claim.deliveryId,
+        leaseToken: claim.leaseToken,
+        followUpPrompt: 'Resolve the review feedback.',
+        targetTaskId: task.id,
+        actingUserId: user.id,
+        routeProvider: 'slack',
+        routeWorkspaceId: 'T123',
+        routeChannelId: 'C123',
+        routeThreadId: '111.222',
+      },
+      async () => {
+        order.push('dispatch-start');
+        dispatchStarted();
+        await dispatchBlocked;
+        order.push('dispatch-end');
+        return 'queued';
+      },
+    );
+    await started;
+
+    const retirement = retireCanonicalPrReviewActionsForPullRequest({
+      sourceControlProvider: 'github',
+      repository,
+      prNumber: 33,
+      currentHeadSha: 'new-head',
+    }).then((result) => {
+      order.push('retirement-end');
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(order).toEqual(['dispatch-start']);
+
+    releaseDispatch();
+    await expect(dispatch).resolves.toEqual({
+      acquired: true,
+      result: 'queued',
+    });
+    await expect(retirement).resolves.toEqual([]);
+    expect(order).toEqual(['dispatch-start', 'dispatch-end', 'retirement-end']);
   });
 
   it('leaves a pending older-head delivery for the reviewer text to be delivered', async () => {

@@ -13,6 +13,7 @@ const {
   mockBeginCanonicalPrompt,
   mockBeginCanonicalWebPrompt,
   mockBeginCanonicalWebAutoDispatch,
+  mockDispatchCanonicalAutoFollowUp,
   mockReleaseCanonicalWebAutoDispatch,
   mockBeginCanonicalAutoDispatch,
   mockCompleteCanonicalAutoDispatch,
@@ -50,6 +51,7 @@ const {
   mockBeginCanonicalPrompt: vi.fn(),
   mockBeginCanonicalWebPrompt: vi.fn(),
   mockBeginCanonicalWebAutoDispatch: vi.fn(),
+  mockDispatchCanonicalAutoFollowUp: vi.fn(),
   mockReleaseCanonicalWebAutoDispatch: vi.fn(),
   mockBeginCanonicalAutoDispatch: vi.fn(),
   mockCompleteCanonicalAutoDispatch: vi.fn(),
@@ -204,6 +206,7 @@ vi.mock('@roomote/sdk/server', () => ({
   beginCanonicalPrReviewPrompt: mockBeginCanonicalPrompt,
   beginCanonicalPrReviewWebPrompt: mockBeginCanonicalWebPrompt,
   beginCanonicalPrReviewWebAutoDispatch: mockBeginCanonicalWebAutoDispatch,
+  dispatchCanonicalPrReviewAutoFollowUp: mockDispatchCanonicalAutoFollowUp,
   releaseCanonicalPrReviewWebAutoDispatch: mockReleaseCanonicalWebAutoDispatch,
   beginCanonicalPrReviewAutoDispatch: mockBeginCanonicalAutoDispatch,
   completeCanonicalPrReviewAutoDispatch: mockCompleteCanonicalAutoDispatch,
@@ -258,6 +261,23 @@ describe('prReviewNotificationJob', () => {
     mockBeginCanonicalWebAutoDispatch.mockResolvedValue(true);
     mockReleaseCanonicalWebAutoDispatch.mockResolvedValue(true);
     mockBeginCanonicalAutoDispatch.mockResolvedValue(true);
+    mockDispatchCanonicalAutoFollowUp.mockImplementation(async (input) => {
+      const began = input.route
+        ? await mockBeginCanonicalAutoDispatch({
+            request: input.request,
+            followUpPrompt: input.followUpPrompt,
+            targetTaskId: input.targetTaskId,
+            actingUserId: input.actingUserId,
+            route: input.route,
+          })
+        : await mockBeginCanonicalWebAutoDispatch({
+            request: input.request,
+            followUpPrompt: input.followUpPrompt,
+            targetTaskId: input.targetTaskId,
+            actingUserId: input.actingUserId,
+          });
+      return began ? mockDispatchFollowUp(input.dispatchInput) : null;
+    });
     mockCompleteCanonicalAutoDispatch.mockResolvedValue(true);
 
     mockFindFirstTaskRun.mockResolvedValue({
