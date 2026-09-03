@@ -2498,22 +2498,7 @@ export class SlackNotifier {
         matches.map((match) => match[1]).filter((id): id is string => !!id),
       ),
     ];
-
-    const botNameOverrides = new Map<string, string>();
-    if (this.botUserId && this.botName && userIds.includes(this.botUserId)) {
-      botNameOverrides.set(this.botUserId, this.botName);
-    }
-
-    // Fetch display names that are not already known from installation metadata.
-    const unresolvedUserIds = userIds.filter(
-      (userId) => !botNameOverrides.has(userId),
-    );
-    const usernameMap = unresolvedUserIds.length
-      ? await this.getUsersInfo(unresolvedUserIds)
-      : new Map<string, string>();
-    for (const [userId, botName] of botNameOverrides) {
-      usernameMap.set(userId, botName);
-    }
+    const usernameMap = await this.getUserDisplayNames(userIds);
 
     // Replace each mention with the user's display name
     let result = text;
@@ -2534,13 +2519,52 @@ export class SlackNotifier {
   }
 
   /**
+   * Resolves Slack user IDs to display names. The installation's own bot
+   * user resolves from stored metadata without a Slack API call; every other
+   * ID goes through `users.info`. IDs that cannot be resolved are omitted.
+   */
+  public async getUserDisplayNames(
+    userIds: string[],
+  ): Promise<Map<string, string>> {
+    const uniqueUserIds = [...new Set(userIds)];
+    const botNameOverrides = new Map<string, string>();
+    if (
+      this.botUserId &&
+      this.botName &&
+      uniqueUserIds.includes(this.botUserId)
+    ) {
+      botNameOverrides.set(this.botUserId, this.botName);
+    }
+
+    const unresolvedUserIds = uniqueUserIds.filter(
+      (userId) => !botNameOverrides.has(userId),
+    );
+    const usernameMap = unresolvedUserIds.length
+      ? await this.getUsersInfo(unresolvedUserIds)
+      : new Map<string, string>();
+    for (const [userId, botName] of botNameOverrides) {
+      usernameMap.set(userId, botName);
+    }
+
+    return usernameMap;
+  }
+
+  /**
    * Normalizes inbound Slack text for internal model/web consumption.
-   * - Expands user mentions to readable names.
+   * - Expands user mentions to readable names unless `preserveMentions` is
+   *   set, in which case raw `<@U…>` tokens stay in the text so the stored
+   *   message matches what the sender typed and the web transcript can
+   *   render them as linked mentions.
    * - Converts Slack mrkdwn links to standard markdown/plain URLs.
    */
-  public async normalizeIncomingText(text: string): Promise<string> {
+  public async normalizeIncomingText(
+    text: string,
+    options: { preserveMentions?: boolean } = {},
+  ): Promise<string> {
     return convertSlackLinksToMarkdown(
-      await this.replaceMentionsWithNames(text),
+      options.preserveMentions
+        ? text
+        : await this.replaceMentionsWithNames(text),
     );
   }
 }

@@ -5,6 +5,7 @@ import {
 } from '@roomote/auth';
 
 import {
+  SLACK_RESOLVE_USERS_MAX_IDS,
   ALL_REPOSITORIES,
   FAST_EXECUTION,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
@@ -148,6 +149,7 @@ import {
   startAuthenticateSlackAccountCommand,
   finishAuthenticateSlackAccountCommand,
   completePendingSlackAuthenticationCommand,
+  resolveSlackUsersCommand,
 } from '../commands/slack';
 import {
   getLinearInstallationCommand,
@@ -1332,6 +1334,28 @@ export const appRouter = createRouter({
     installation: protectedProcedure.query(({ ctx: { auth } }) =>
       getSlackInstallationCommand(auth),
     ),
+
+    resolveUsers: protectedProcedure
+      .input(
+        z.object({
+          scope: z.discriminatedUnion('kind', [
+            z.object({
+              kind: z.literal('task'),
+              taskId: z.string().trim().min(1).max(64),
+            }),
+            z.object({
+              kind: z.literal('session'),
+              sessionId: z.string().trim().min(1).max(64),
+            }),
+          ]),
+          userIds: z
+            .array(z.string().trim().min(1).max(64))
+            .max(SLACK_RESOLVE_USERS_MAX_IDS),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        resolveSlackUsersCommand(auth, input),
+      ),
 
     connectApp: protectedProcedure
       .input(z.object({ redirectPath: z.string().optional() }).optional())
