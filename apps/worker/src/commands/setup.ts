@@ -202,17 +202,21 @@ export async function setup({
     ...workerEnv.buildUserFacingEnv(),
     ...workspaceOpts.envVars,
   };
+  const isEnvironmentWorkspace = workspaceOpts.workspace.type === 'environment';
   const workspaceOptions = {
     ...workspaceOpts,
     cleanupLegacyPaths:
       workspaceOpts.taskRunType === TaskPayloadKind.SnapshotEnvironment,
-    envVars:
-      workspaceOpts.workspace.type === 'environment'
-        ? buildEnvironmentWorkspaceEnvVars(
-            inheritedWorkspaceEnvVars,
-            sandboxOpenRouterApiKey ?? workerEnv.sandboxOpenRouterApiKey,
-          )
-        : inheritedWorkspaceEnvVars,
+    envVars: isEnvironmentWorkspace
+      ? buildEnvironmentWorkspaceEnvVars(
+          inheritedWorkspaceEnvVars,
+          sandboxOpenRouterApiKey ?? workerEnv.sandboxOpenRouterApiKey,
+        )
+      : inheritedWorkspaceEnvVars,
+    userEnvVars:
+      isEnvironmentWorkspace && workspaceOpts.userEnvVars
+        ? buildEnvironmentWorkspaceEnvVars(workspaceOpts.userEnvVars)
+        : workspaceOpts.userEnvVars,
   };
   let result: PrepareWorkspaceResult | undefined;
   let backgroundEnvironmentSetupPromise:
