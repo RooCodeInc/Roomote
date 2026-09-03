@@ -46,29 +46,21 @@ and account balance are authoritative.
 
 When an environment task starts another Roomote deployment for development or
 smoke tests, create a separate spend-capped OpenRouter key and set it as
-`SANDBOX_OPENROUTER_API_KEY` on the parent controller. This launcher variable is
-reserved, so it cannot be added under **Settings > Environments > Deployment
-Environment Variables** or stored in an environment definition.
+`SANDBOX_OPENROUTER_API_KEY` under **Settings > Environments > Deployment
+Environment Variables**. You can alternatively set it on the parent controller.
+Do not store it in an environment definition.
 
 The environment worker maps the value to `OPENROUTER_API_KEY` while preparing
 the workspace. The nested deployment therefore uses Roomote's native OpenRouter
 provider without requiring the parent's normal `OPENROUTER_API_KEY`. Configure
-only the desired model mapping in the target environment:
-
-```yaml
-env:
-  R_MODEL: openrouter/google/gemini-3.8-flash
-  R_MODEL_REASONING_EFFORT: low
-  R_ORCHESTRATION_MODEL: openrouter/google/gemini-3.8-flash
-  R_ORCHESTRATION_MODEL_REASONING_EFFORT: low
-  R_SMALL_MODEL: openrouter/google/gemini-3.8-flash
-  R_SMALL_MODEL_REASONING_EFFORT: low
-```
+the nested deployment's models normally in its own Settings. The parent task's
+model mapping, presets, trial provider, and role overrides are not copied into
+the nested deployment.
 
 The mapped key is available to setup commands and services in that environment
 workspace, so use a capped key appropriate for sandbox access. The launcher
-source variable is not exposed there. Environment changes apply to new tasks,
-so start a new task after saving the model mapping or rotating the key.
+source variable is not exposed there. Deployment environment variable changes
+apply to new tasks, so start a new task after saving or rotating the key.
 
 ## Common issues
 

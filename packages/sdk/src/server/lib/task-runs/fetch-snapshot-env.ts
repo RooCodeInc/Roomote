@@ -44,6 +44,7 @@ export async function fetchSnapshotEnv(
     await resolveTaskRunSourceControlProviders(taskRun);
   const deploymentEnvVars = await fetchResolvedRuntimeEnvVars(undefined, {
     sourceControlProvider: sourceControlProviders,
+    includeSandboxOpenRouterApiKey: Boolean(taskRun.payload.environmentId),
   });
 
   const sourceControlToken = await createSourceControlTokenForTaskRun(

@@ -3,11 +3,13 @@ import type { UserAuthSuccess } from '@/types';
 const {
   mockDeleteWhere,
   mockFinalChain,
+  mockInsertReturning,
   mockSelectLimit,
   mockUpdateReturning,
 } = vi.hoisted(() => ({
   mockDeleteWhere: vi.fn(),
   mockFinalChain: vi.fn(),
+  mockInsertReturning: vi.fn(),
   mockSelectLimit: vi.fn(),
   mockUpdateReturning: vi.fn(),
 }));
@@ -33,6 +35,9 @@ vi.mock('@roomote/db/server', () => ({
       set: () => ({
         where: () => ({ returning: mockUpdateReturning }),
       }),
+    })),
+    insert: vi.fn(() => ({
+      values: () => ({ returning: mockInsertReturning }),
     })),
   },
   environmentVariables: {
@@ -84,6 +89,7 @@ describe('environment-variables commands', () => {
     mockDeleteWhere.mockResolvedValue(undefined);
     mockFinalChain.mockResolvedValue([]);
     mockUpdateReturning.mockResolvedValue([{ id: 'updated-env-var' }]);
+    mockInsertReturning.mockResolvedValue([{ id: 'created-env-var' }]);
   });
 
   describe('getEnvVarsCommand', () => {
@@ -125,15 +131,17 @@ describe('environment-variables commands', () => {
       );
     });
 
-    it('rejects the sandbox OpenRouter control-plane key', async () => {
+    it('allows the sandbox OpenRouter key to be stored', async () => {
+      mockSelectLimit.mockResolvedValue([]);
+
       await expect(
         createEnvVarCommand(buildMockAuth(), {
           name: 'SANDBOX_OPENROUTER_API_KEY',
-          value: 'must-not-be-saved',
+          value: 'sandbox-openrouter-key',
         }),
-      ).rejects.toThrow(
-        '"SANDBOX_OPENROUTER_API_KEY" is a reserved deployment variable and cannot be set here.',
-      );
+      ).resolves.toBeUndefined();
+
+      expect(mockInsertReturning).toHaveBeenCalledTimes(1);
     });
   });
 

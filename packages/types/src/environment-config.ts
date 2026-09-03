@@ -11,7 +11,7 @@ const environmentEnvMapSchema = z.record(z.string()).superRefine((env, ctx) => {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: [SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME],
-      message: `${SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME} is a reserved control-plane secret and cannot be stored in an environment definition`,
+      message: `${SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME} is a deployment-level preview key and cannot be stored in an environment definition`,
     });
   }
 });
