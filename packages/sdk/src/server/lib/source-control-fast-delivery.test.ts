@@ -153,6 +153,36 @@ describe('createFastAgentSourceControlTaskLauncher', () => {
     expect(task.payload).not.toHaveProperty('linkedWorkItems');
   });
 
+  it('refuses to launch a pull request child when the head branch is unknown', async () => {
+    const launch = createFastAgentSourceControlTaskLauncher({
+      userId: 'user-1',
+      conversation: buildSourceControlFastConversation({
+        provider: 'github',
+        host: 'github.com',
+        repositoryFullName: 'acme/api',
+        kind: 'pull',
+        number: 42,
+      }),
+      resolveTarget: vi.fn().mockResolvedValue({
+        repositoryId: 'repo-1',
+        pullRequest: { url: 'https://github.com/acme/api/pull/42' },
+      }),
+    });
+
+    await expect(
+      launch({
+        prompt: 'Address the review',
+        environmentId: 'env-1',
+        parentSessionId: 'fast-1',
+        postKickoff: vi.fn(),
+      }),
+    ).resolves.toEqual({
+      success: false,
+      error: expect.stringContaining('head branch could not be resolved'),
+    });
+    expect(mocks.createFastAgentTaskLauncher).not.toHaveBeenCalled();
+  });
+
   it('links an issue child to the issue without PR linkage', async () => {
     const conversation = buildSourceControlFastConversation({
       provider: 'github',

@@ -109,6 +109,15 @@ export function createFastAgentSourceControlTaskLauncher(params: {
       };
     }
     const target = await loadTarget();
+    // A pull request child must check out the PR head; without a resolved
+    // branch it would edit the environment's default branch instead.
+    if (target.pullRequest && !target.branch) {
+      return {
+        success: false,
+        error:
+          'The pull request head branch could not be resolved, so the task was not started.',
+      };
+    }
     // Only providers whose issues can be linked as work items record one.
     const linkedProvider = linkedWorkItemProviderSchema.safeParse(
       discussion.provider,

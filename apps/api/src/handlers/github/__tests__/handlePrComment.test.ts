@@ -184,6 +184,12 @@ describe('handlePrComment', () => {
     expect(createForIssueComment).toHaveBeenCalledWith(
       expect.objectContaining({ comment_id: 777, content: 'eyes' }),
     );
+    expect(mocks.getGitHubAutomationTargets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'pr_conflict_resolve',
+        requireLinkedSenderAccount: true,
+      }),
+    );
     expect(mocks.startSourceControlFastSessionTurn).toHaveBeenCalledWith({
       discussion: {
         provider: 'github',
@@ -253,6 +259,23 @@ describe('handlePrComment', () => {
         ],
       }),
     );
+  });
+
+  it('reports a setup gap instead of asking to link when the repository is not active', async () => {
+    mocks.getGitHubAutomationTargets.mockResolvedValue({
+      status: 'ok',
+      targets: [],
+    });
+
+    const result = await handlePrComment(makeIssueCommentPayload());
+
+    expect(result).toEqual({ status: 'ok', message: 'reviewer_gate_miss' });
+    expect(createComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining('could not start work on this PR'),
+      }),
+    );
+    expect(mocks.startSourceControlFastSessionTurn).not.toHaveBeenCalled();
   });
 
   it('prompts the commenter to link GitHub before starting work', async () => {

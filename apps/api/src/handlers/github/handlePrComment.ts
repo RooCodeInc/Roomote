@@ -178,10 +178,6 @@ function buildReviewerGateMissComment(): string {
   return `I saw the mention, but I could not start work on this PR with the current ${PRODUCT_NAME} GitHub setup.`;
 }
 
-function buildInternalErrorComment(): string {
-  return `I saw the mention, but something went wrong on the ${PRODUCT_NAME} side. Please try again in a moment.`;
-}
-
 async function fetchReviewCommentSnapshot({
   installationId,
   repositoryFullName,
@@ -686,26 +682,16 @@ export async function handlePrComment(
   }
 
   const pr = 'issue' in rest ? rest.issue : rest.pull_request;
-  const prAuthorLogin = pr.user?.login?.toLowerCase();
-
-  if (!prAuthorLogin) {
-    await postMentionResponseComment({
-      installationId: githubInstallationId,
-      target: mentionResponseTarget,
-      body: buildInternalErrorComment(),
-    });
-
-    return { status: 'ok', message: 'no_pr_author' };
-  }
 
   // The commenter must be a linked Roomote user: the Session runs as them.
+  // The non-review workflow resolves the repository and the linked account
+  // without the Review Code automation gates, which do not apply to a
+  // conversation.
   const reviewerGate = await getGitHubAutomationTargets({
-    workflow: 'pr_review',
+    workflow: 'pr_conflict_resolve',
     installation,
     repository,
     sender,
-    author: prAuthorLogin,
-    ignoreRoomoteAuthorRequirement: true,
     requireLinkedSenderAccount: true,
   });
 
@@ -731,7 +717,17 @@ export async function handlePrComment(
   const commenter = reviewerGate.targets[0];
   const commenterUserId = commenter?.properties.userId;
 
-  if (!commenter || !commenterUserId) {
+  if (!commenter) {
+    await postMentionResponseComment({
+      installationId: githubInstallationId,
+      target: mentionResponseTarget,
+      body: buildReviewerGateMissComment(),
+    });
+
+    return { status: 'ok', message: 'reviewer_gate_miss' };
+  }
+
+  if (!commenterUserId) {
     await postMentionResponseComment({
       installationId: githubInstallationId,
       target: mentionResponseTarget,
