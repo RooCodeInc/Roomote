@@ -29,7 +29,8 @@ import {
 import type { UserAuthSuccess } from '@/types';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { findAccessibleFastSession } from '@/lib/server/fast-sessions';
-import { getLatestTaskRunsByTaskId } from '@/lib/server/task-runs';
+
+import { getTaskByIdCommand } from '../tasks/by-id';
 import { getSlackRedirectUri } from '@/lib/server/slack-redirect-uri';
 import { syncUser } from '@/lib/server/sync-internal';
 import { buildSlackInstallUrl } from '@/lib/slack-install-url';
@@ -842,10 +843,12 @@ async function resolveSlackMentionScopeTeamId(
     return session?.surface === 'slack' ? (session.workspaceId ?? null) : null;
   }
 
-  const taskRun = (await getLatestTaskRunsByTaskId([scope.taskId]))[
-    scope.taskId
-  ];
-  return taskRun ? getSlackTeamIdFromTaskPayload(taskRun.payload) : null;
+  // Same lookup the task page uses, so soft-deleted or otherwise
+  // inaccessible tasks never reveal which workspace they came from.
+  const task = await getTaskByIdCommand(auth, { taskId: scope.taskId });
+  return task?.taskRun
+    ? getSlackTeamIdFromTaskPayload(task.taskRun.payload)
+    : null;
 }
 
 /**
