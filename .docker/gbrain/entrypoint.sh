@@ -375,7 +375,12 @@ run_job_worker() {
       --concurrency "${GBRAIN_WORKER_CONCURRENCY:-1}" \
       --pid-file "$DATA_DIR/gbrain-worker-supervisor.pid" &
     supervisor_pid=$!
-    trap 'kill -TERM "$supervisor_pid" 2>/dev/null' TERM INT
+    # Shutdown must end the wrapper too, whether it is waiting on a live
+    # supervisor or sleeping between retries; otherwise the loop outlives the
+    # entrypoint's stop and starts another supervisor mid-shutdown. Waiting
+    # for the forwarded signal to land lets the supervisor release its lock
+    # row, which is what spares the next container this whole retry.
+    trap 'kill -TERM "$supervisor_pid" 2>/dev/null; wait "$supervisor_pid" 2>/dev/null; exit 0' TERM INT
     if wait "$supervisor_pid"; then
       status=0
     else
@@ -387,7 +392,9 @@ run_job_worker() {
     fi
     attempt=$((attempt + 1))
     echo "[gbrain-entrypoint] job worker found the queue lock held; retrying in ${SUPERVISOR_LOCK_RETRY_SECONDS}s ($attempt/$SUPERVISOR_LOCK_RETRY_LIMIT)"
-    sleep "$SUPERVISOR_LOCK_RETRY_SECONDS"
+    # Backgrounded so the trap fires during the pause rather than after it.
+    sleep "$SUPERVISOR_LOCK_RETRY_SECONDS" &
+    wait $! || true
   done
 }
 
