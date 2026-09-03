@@ -113,7 +113,7 @@ import {
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   findFastAgentActiveInferenceRetryNotice,
-  markFastAgentDurableTurnDelivered,
+  settleFastAgentDurableTurn,
   markFastAgentInferenceRetryNoticeInterruption,
   releaseFastAgentDurableTurnClaim,
   renewFastAgentDurableTurnClaim,
@@ -1375,6 +1375,10 @@ export async function answerFastAgentQuestion({
     instructionVersion = currentInstructionVersion,
   ) => closedInstructionVersions.has(instructionVersion);
   let inferenceRetryReply: FastAgentReplyHandle | undefined;
+  // Whether the last retry-notice replacement also landed its canonical row.
+  // The surface edit and the transcript write can succeed independently, and
+  // only the latter makes the interruption recoverable by the next message.
+  let inferenceRetryReplacementRecorded = false;
   let inferenceRetryMessageIndex: number | undefined;
   let inferenceRetryCanonicalEvent:
     | { eventId: string; turnSeq: number }
@@ -1479,7 +1483,9 @@ export async function answerFastAgentQuestion({
       return;
     }
     durableTurnReplayable = false;
-    await markFastAgentDurableTurnDelivered(durableAdmission.eventId).catch(
+    // Delivered and settled in one statement: the user has an outcome, so
+    // the dead-turn reconciler must never speak for this turn.
+    await settleFastAgentDurableTurn(durableAdmission.eventId).catch(
       (error) => {
         console.warn(
           `[Fast Agent] Failed to settle durable turn: ${formatErrorForLog(error)}`,
@@ -2178,6 +2184,7 @@ export async function answerFastAgentQuestion({
     onDelivered?: () => void,
     interruptionReason?: FastAgentInterruptionReason,
   ): Promise<boolean> => {
+    inferenceRetryReplacementRecorded = false;
     if (!inferenceRetryCanonicalEvent) {
       return false;
     }
@@ -2248,7 +2255,7 @@ export async function answerFastAgentQuestion({
         buildAssistantTextMessage(reply.message);
     }
     if (inferenceRetryCanonicalEvent) {
-      await persistAssistantReply({
+      const persisted = await persistAssistantReply({
         reply,
         event: retryEvent,
         platformMessageId: inferenceRetryReply.messageId,
@@ -2256,6 +2263,7 @@ export async function answerFastAgentQuestion({
         interruptionReason,
         ts: noticeTs,
       });
+      inferenceRetryReplacementRecorded = persisted !== undefined;
     }
     return true;
   };
@@ -4303,11 +4311,15 @@ export async function answerFastAgentQuestion({
             : await revokeDurableTurnReplay(
                 `Turn interrupted without replay (${interruptionReason}).`,
               );
+        // Only a closeout that was actually recorded (or a deliberate
+        // cancellation, which owes none) settles the row; a failed post
+        // leaves it for the dead-turn reconciler to repair.
+        let closeoutRecorded = interruptionReason === 'turn_aborted';
         if (!terminalCloseoutAllowed) {
           // Resumable turns and unrevoked rows fall through to the rethrow
           // below without a user-facing closeout.
         } else if (!lockOwnershipLost && inferenceRetryReply) {
-          await replaceInferenceRetryReply(
+          const replacedRetryNotice = await replaceInferenceRetryReply(
             {
               purpose: 'closeout',
               // A shutdown is a restart the user can see through honestly;
@@ -4320,6 +4332,10 @@ export async function answerFastAgentQuestion({
             undefined,
             interruptionReason,
           );
+          // The surface edit alone is not a recorded closeout: without the
+          // canonical marker the next message cannot recover the request.
+          closeoutRecorded =
+            replacedRetryNotice && inferenceRetryReplacementRecorded;
         } else if (shutdownInterrupted && !isInstructionClosed()) {
           const reply = {
             purpose: 'closeout' as const,
@@ -4331,7 +4347,9 @@ export async function answerFastAgentQuestion({
               (await adapter.postReply(reply));
             diagnostics.recordVisibleReply();
             const retryEvent = inferenceRetryCanonicalEvent;
-            await persistAssistantReply({
+            // The persist is best effort; only a landed row counts as
+            // recorded, otherwise the dead-turn reconciler repairs it.
+            const persisted = await persistAssistantReply({
               reply,
               event:
                 retryEvent ??
@@ -4340,6 +4358,7 @@ export async function answerFastAgentQuestion({
               inferenceRetryNotice: Boolean(retryEvent),
               interruptionReason,
             });
+            closeoutRecorded = persisted !== undefined;
           } catch (postError) {
             console.error(
               `[Fast Agent] Failed to post shutdown closeout: ${formatErrorForLog(postError)}`,
@@ -4362,6 +4381,17 @@ export async function answerFastAgentQuestion({
               `[Fast Agent] Failed to record lock-lost interruption cause: ${formatErrorForLog(markError)}`,
             );
           });
+        }
+        if (terminalCloseoutAllowed && closeoutRecorded && durableAdmission) {
+          // This owner spoke for the turn (or deliberately stayed silent on
+          // a cancellation); the dead-turn reconciler must not add to it.
+          await settleFastAgentDurableTurn(durableAdmission.eventId).catch(
+            (settleError) => {
+              console.warn(
+                `[Fast Agent] Failed to mark the interrupted turn settled: ${formatErrorForLog(settleError)}`,
+              );
+            },
+          );
         }
       } finally {
         if (shutdownInterrupted) {

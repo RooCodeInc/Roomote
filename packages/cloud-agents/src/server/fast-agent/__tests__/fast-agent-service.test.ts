@@ -32,7 +32,7 @@ const mocks = vi.hoisted(() => ({
   markRetryNoticeInterruption: vi.fn(),
   renewRespondingLease: vi.fn(),
   findUnresolvedRequest: vi.fn(),
-  markDurableDelivered: vi.fn(),
+  settleDurableTurn: vi.fn(),
   releaseDurableClaim: vi.fn(),
   renewDurableClaim: vi.fn(),
   revokeDurableReplay: vi.fn(),
@@ -108,7 +108,7 @@ vi.mock('../fast-agent-conversation-repository', () => ({
     mocks.markRetryNoticeInterruption,
   renewFastSessionRespondingLease: mocks.renewRespondingLease,
   findFastAgentUnresolvedRequest: mocks.findUnresolvedRequest,
-  markFastAgentDurableTurnDelivered: mocks.markDurableDelivered,
+  settleFastAgentDurableTurn: mocks.settleDurableTurn,
   releaseFastAgentDurableTurnClaim: mocks.releaseDurableClaim,
   renewFastAgentDurableTurnClaim: mocks.renewDurableClaim,
   revokeFastAgentDurableTurnReplay: mocks.revokeDurableReplay,
@@ -429,7 +429,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.markRetryNoticeInterruption.mockResolvedValue(undefined);
     mocks.renewRespondingLease.mockResolvedValue(true);
     mocks.findUnresolvedRequest.mockResolvedValue(null);
-    mocks.markDurableDelivered.mockResolvedValue(true);
+    mocks.settleDurableTurn.mockResolvedValue(undefined);
     mocks.releaseDurableClaim.mockResolvedValue(true);
     mocks.renewDurableClaim.mockResolvedValue(true);
     mocks.revokeDurableReplay.mockResolvedValue(true);
@@ -3567,7 +3567,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         'durable-row-1',
         expect.any(String),
       );
-      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+      expect(mocks.settleDurableTurn).toHaveBeenCalledWith('durable-row-1');
     });
 
     it('revokes replay before a task launch runs', async () => {
@@ -3704,7 +3704,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(postReply).toHaveBeenCalledWith(
         expect.objectContaining({ purpose: 'closeout', message: 'All done.' }),
       );
-      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+      expect(mocks.settleDurableTurn).toHaveBeenCalledWith('durable-row-1');
     });
 
     it('hands the turn to the queue when the terminal closeout cannot be withdrawn from replay', async () => {
@@ -3722,7 +3722,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       // No closeout, and the row stays recoverable so the resumed run
       // delivers the answer instead of the user getting nothing.
       expect(postReply).not.toHaveBeenCalled();
-      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
+      expect(mocks.settleDurableTurn).not.toHaveBeenCalled();
       expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
       expect(requestDurableResume).toHaveBeenCalledOnce();
     });
@@ -3740,7 +3740,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
 
       expect(postReply).not.toHaveBeenCalled();
-      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
+      expect(mocks.settleDurableTurn).not.toHaveBeenCalled();
       expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
       expect(requestDurableResume).toHaveBeenCalledOnce();
     });
@@ -3862,7 +3862,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
       expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
       expect(requestDurableResume).toHaveBeenCalledOnce();
-      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
+      expect(mocks.settleDurableTurn).not.toHaveBeenCalled();
       expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
       expect(mocks.markShutdownCloseoutSettled).toHaveBeenCalledWith(
         controller.signal,
@@ -4000,12 +4000,187 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         finishInference?.();
         await vi.advanceTimersByTimeAsync(1);
         await answer;
-        expect(mocks.markDurableDelivered).toHaveBeenCalledWith(
-          'durable-row-1',
-        );
+        expect(mocks.settleDurableTurn).toHaveBeenCalledWith('durable-row-1');
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it('marks the durable turn settled once the user has an outcome, and not while parked', async () => {
+      // Delivered answer: settled.
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Done.',
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        durableAdmission,
+      });
+      expect(mocks.settleDurableTurn).toHaveBeenCalledWith('durable-row-1');
+
+      // Parked for a durable retry: the outcome belongs to the resumed run.
+      mocks.settleDurableTurn.mockClear();
+      mocks.generateText.mockImplementationOnce(
+        async (params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          await params.onProviderRetry?.({
+            attempt: 2,
+            message: 'Provider temporarily unavailable',
+            nextRetryAtMs: Date.now() + 45_000,
+          });
+          if (options.signal.aborted) throw options.signal.reason;
+          return '';
+        },
+      );
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({
+            requestDurableRetry: vi.fn().mockResolvedValue(undefined),
+          }),
+          durableAdmission,
+        }),
+      ).rejects.toBeInstanceOf(FastAgentDurableRetryScheduledError);
+      expect(mocks.settleDurableTurn).not.toHaveBeenCalled();
+    });
+
+    it('marks the turn settled after posting the restart closeout for a non-replayable turn', async () => {
+      const controller = new AbortController();
+      const shutdown = new FastAgentProcessShutdownError('SIGTERM');
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix the bug',
+            environmentId: 'env-1',
+            kickoffMessage: 'Starting.',
+          });
+          controller.abort(shutdown);
+          throw shutdown;
+        },
+      );
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({
+            postReply,
+            launchTask: vi.fn<LaunchFastAgentTask>(async () => ({
+              success: true,
+              taskId: 'task-1',
+            })),
+          }),
+          signal: controller.signal,
+          durableAdmission,
+        }),
+      ).rejects.toBe(shutdown);
+
+      expect(postReply).toHaveBeenLastCalledWith({
+        purpose: 'closeout',
+        message:
+          'Roomote restarted while working on this request. Please send it again.',
+      });
+      expect(mocks.settleDurableTurn).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('leaves the turn unsettled when the restart closeout could not be posted', async () => {
+      const controller = new AbortController();
+      const shutdown = new FastAgentProcessShutdownError('SIGTERM');
+      const postReply = vi.fn().mockRejectedValue(new Error('slack down'));
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix the bug',
+            environmentId: 'env-1',
+            kickoffMessage: 'Starting.',
+          });
+          controller.abort(shutdown);
+          throw shutdown;
+        },
+      );
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({
+            postReply,
+            launchTask: vi.fn<LaunchFastAgentTask>(async () => ({
+              success: true,
+              taskId: 'task-1',
+            })),
+          }),
+          signal: controller.signal,
+          durableAdmission,
+        }),
+      ).rejects.toBe(shutdown);
+
+      // Nothing reached the user, so the dead-turn reconciler still owns
+      // the closeout.
+      expect(mocks.settleDurableTurn).not.toHaveBeenCalled();
+    });
+
+    it('leaves the turn unsettled when the notice edit lands but its marker does not', async () => {
+      mocks.findActiveRetryNotice.mockResolvedValueOnce({
+        eventId: '100.2:retry-notice:0',
+        ts: Date.now() - 40_000,
+        text: 'The inference provider returned a temporary error. Retrying automatically…',
+        platformMessageId: 'notice-1',
+      });
+      // The transcript write for the closeout fails; every other write lands.
+      mocks.upsertMessage.mockImplementation(async (input) =>
+        input.message.metadata?.purpose === 'closeout'
+          ? Promise.reject(new Error('db unavailable'))
+          : { initialHumanTurn: false },
+      );
+      const controller = new AbortController();
+      const shutdown = new FastAgentProcessShutdownError('SIGTERM');
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix the bug',
+            environmentId: 'env-1',
+            kickoffMessage: 'Starting.',
+          });
+          controller.abort(shutdown);
+          throw shutdown;
+        },
+      );
+      const replaceReply = vi.fn().mockResolvedValue({ messageId: 'notice-1' });
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({
+            postReply: vi.fn().mockResolvedValue({ messageId: 'kickoff-1' }),
+            replaceReply,
+            launchTask: vi.fn<LaunchFastAgentTask>(async () => ({
+              success: true,
+              taskId: 'task-1',
+            })),
+          }),
+          signal: controller.signal,
+          durableAdmission: { eventId: 'durable-row-1', inferenceRetries: 1 },
+          resumedAfterInferenceRetry: true,
+        }),
+      ).rejects.toBe(shutdown);
+
+      // The user saw the edited notice, but without the canonical marker the
+      // next message cannot recover the request, so the row stays with the
+      // dead-turn reconciler.
+      expect(replaceReply).toHaveBeenCalledOnce();
+      expect(mocks.settleDurableTurn).not.toHaveBeenCalled();
     });
 
     it('rides out the first short retry in place and parks from the second', async () => {
@@ -4052,7 +4227,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       // This execution settles nothing: no closeout, no row settlement, no
       // interruption stamp on the notice, and the responding lease stays.
       expect(postReply).not.toHaveBeenCalled();
-      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
+      expect(mocks.settleDurableTurn).not.toHaveBeenCalled();
       expect(mocks.releaseDurableClaim).not.toHaveBeenCalled();
       expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
       expect(mocks.reconcileRetryNotices).not.toHaveBeenCalledWith(
@@ -4117,7 +4292,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         inferenceRetryActive: true,
         platformMessageId: 'notice-1',
       });
-      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
+      expect(mocks.settleDurableTurn).not.toHaveBeenCalled();
       expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
     });
 
@@ -4259,7 +4434,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       expect(mocks.scheduleDurableRetry).not.toHaveBeenCalled();
       expect(requestDurableRetry).not.toHaveBeenCalled();
-      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+      expect(mocks.settleDurableTurn).toHaveBeenCalledWith('durable-row-1');
     });
 
     it('keeps the retry in process once the turn is no longer replay-safe', async () => {
@@ -4337,9 +4512,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect(mocks.generateText).toHaveBeenCalledTimes(3);
         expect(mocks.scheduleDurableRetry).toHaveBeenCalledOnce();
         expect(requestDurableRetry).not.toHaveBeenCalled();
-        expect(mocks.markDurableDelivered).toHaveBeenCalledWith(
-          'durable-row-1',
-        );
+        expect(mocks.settleDurableTurn).toHaveBeenCalledWith('durable-row-1');
       } finally {
         vi.useRealTimers();
       }
@@ -4384,7 +4557,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       expect(mocks.scheduleDurableRetry).not.toHaveBeenCalled();
       expect(requestDurableRetry).not.toHaveBeenCalled();
-      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+      expect(mocks.settleDurableTurn).toHaveBeenCalledWith('durable-row-1');
     });
 
     it('backs off across handoffs instead of re-prompting at the provider cadence', async () => {
@@ -4488,7 +4661,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         inferenceRetryNotice: true,
         inferenceRetryActive: false,
       });
-      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+      expect(mocks.settleDurableTurn).toHaveBeenCalledWith('durable-row-1');
     });
 
     it('marks a retry-resumed turn so the model does not re-acknowledge', async () => {

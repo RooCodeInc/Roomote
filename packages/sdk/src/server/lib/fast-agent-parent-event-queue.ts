@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { Queue } from 'bullmq';
 
 import {
+  bindFastAgentTurnLockDurableRow,
   acquireFastAgentTurnLock,
   findFastAgentDurableRetryScheduledError,
 } from '@roomote/cloud-agents/server';
@@ -346,6 +347,8 @@ export async function drainFastAgentParentEvents(
 
   try {
     for (;;) {
+      turnLock.durableRowId = undefined;
+      turnLock.durableResume = undefined;
       const row = await getNextPendingEvent(request.conversationId);
       if (!row) return;
       if (
@@ -374,6 +377,14 @@ export async function drainFastAgentParentEvents(
           conversationId: request.conversationId,
           eventKey: row.eventKey,
         };
+        if (row.admission === 'inline') {
+          // Bind the row to the lock the same way the webhook handlers do,
+          // so a worker shutdown stamps and releases a resumed turn too.
+          await bindFastAgentTurnLockDurableRow(turnLock, {
+            rowId: row.id,
+            resume: () => wakeFastAgentParentEventNow(wakeRequest),
+          });
+        }
         await deliverFastAgentParentEventWithLock(
           {
             parent: row.parent,

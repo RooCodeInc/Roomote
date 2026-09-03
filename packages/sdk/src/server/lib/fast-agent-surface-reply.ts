@@ -1,4 +1,5 @@
 import {
+  bindFastAgentTurnLockDurableRow,
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   createFastAgentWebTaskLauncher,
@@ -680,12 +681,14 @@ async function runFastAgentSurfaceReply(
           return null;
         })));
     if (durableTurn) {
-      release.durableRowId = durableTurn.id;
-      release.durableResume = () =>
-        wakeFastAgentParentEventNow({
-          conversationId: params.sessionId,
-          eventKey: durableTurn.eventKey,
-        });
+      await bindFastAgentTurnLockDurableRow(release, {
+        rowId: durableTurn.id,
+        resume: () =>
+          wakeFastAgentParentEventNow({
+            conversationId: params.sessionId,
+            eventKey: durableTurn.eventKey,
+          }),
+      });
     }
     await answerFastAgentQuestion({
       question: params.question,

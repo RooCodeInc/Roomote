@@ -17,7 +17,10 @@ import {
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   scheduleFastAgentDurableTurnRetry,
-  markFastAgentDurableTurnDelivered,
+  settleFastAgentDurableTurn,
+  markFastAgentDurableTurnShutdown,
+  reconcileFastAgentDeadTurns,
+  RESTARTED_ACTIVE_TURN_MESSAGE,
   releaseFastAgentDurableTurnClaim,
   renewFastAgentDurableTurnClaim,
   revokeFastAgentDurableTurnReplay,
@@ -1279,17 +1282,18 @@ describe('Fast conversation repository', () => {
     expect(revoked.lastError).toBe('Native tool launch_task');
     await expect(renewFastAgentDurableTurnClaim(acted)).resolves.toBe(false);
     await expect(releaseFastAgentDurableTurnClaim(acted)).resolves.toBe(false);
-    await expect(markFastAgentDurableTurnDelivered(acted)).resolves.toBe(false);
+    // Settling a withdrawn row records the outcome without undoing the
+    // withdrawal.
+    await settleFastAgentDurableTurn(acted);
+    expect((await readRow(acted)).deliveredAt).toBeNull();
 
-    // Delivery settles a pending row exactly once.
+    // Settling a pending row delivers it, and only the first settle counts.
     const completed = await insertRow('durable-completed');
-    await expect(markFastAgentDurableTurnDelivered(completed)).resolves.toBe(
-      true,
-    );
-    expect((await readRow(completed)).deliveredAt).not.toBeNull();
-    await expect(markFastAgentDurableTurnDelivered(completed)).resolves.toBe(
-      false,
-    );
+    await settleFastAgentDurableTurn(completed);
+    const deliveredAt = (await readRow(completed)).deliveredAt;
+    expect(deliveredAt).not.toBeNull();
+    await settleFastAgentDurableTurn(completed);
+    expect((await readRow(completed)).deliveredAt).toEqual(deliveredAt);
     await expect(
       revokeFastAgentDurableTurnReplay(completed, 'late'),
     ).resolves.toBe(false);
@@ -1344,9 +1348,7 @@ describe('Fast conversation repository', () => {
     expect(parked.retryAt?.getTime()).toBe(retryAt.getTime());
 
     // A settled row can no longer be parked.
-    await expect(markFastAgentDurableTurnDelivered(row!.id)).resolves.toBe(
-      true,
-    );
+    await settleFastAgentDurableTurn(row!.id);
     await expect(
       scheduleFastAgentDurableTurnRetry(row!.id, {
         retryAt,
@@ -1470,6 +1472,290 @@ describe('Fast conversation repository', () => {
       purpose: 'closeout',
       interruptionReason: 'expired_lease_reconcile',
     });
+  });
+
+  it('closes out a turn whose owner was killed after withdrawing it from replay', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const parent = { sessionId: session.id, conversation: slackConversation };
+    const insertRow = async (
+      turnId: string,
+      values: Record<string, unknown>,
+    ) => {
+      const [row] = await db
+        .insert(fastAgentParentEvents)
+        .values({
+          conversationId: session.id,
+          eventKey: `dead-${turnId}`,
+          parent,
+          event: {
+            type: 'human_follow_up',
+            eventId: turnId,
+            currentMessageId: turnId,
+          },
+          admission: 'inline',
+          ...values,
+        })
+        .returning({ id: fastAgentParentEvents.id });
+      return row!.id;
+    };
+    const readRow = async (id: string) => {
+      const [row] = await db
+        .select({
+          settledAt: fastAgentParentEvents.settledAt,
+          shutdownAt: fastAgentParentEvents.shutdownAt,
+        })
+        .from(fastAgentParentEvents)
+        .where(eq(fastAgentParentEvents.id, id));
+      return row!;
+    };
+    const closeoutsFor = (turnId: string) =>
+      db
+        .select({
+          text: fastAgentMessages.contentBlocks,
+          metadata: fastAgentMessages.metadata,
+        })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(fastAgentMessages.conversationId, session.id),
+            eq(fastAgentMessages.turnId, turnId),
+            eq(fastAgentMessages.role, 'assistant'),
+          ),
+        );
+    await db
+      .update(sessions)
+      .set({ respondingUntil: new Date(Date.now() + 10 * 60_000) })
+      .where(eq(sessions.fastConversationId, session.id));
+
+    // Withdrawn from replay (a non-replayable tool ran), then the process
+    // was told to stop and killed before it could close out: the stamp is
+    // fresh, so the drain might still finish it. Not yet.
+    const killed = await insertRow('turn-killed', {
+      discardedAt: new Date(),
+      lastError: 'Native tool launch_task is not replay-safe.',
+      shutdownAt: new Date(),
+    });
+    await reconcileFastAgentDeadTurns();
+    expect((await readRow(killed)).settledAt).toBeNull();
+    expect(await closeoutsFor('turn-killed')).toHaveLength(0);
+
+    // Once the stamp is older than the drain window, it is a dead turn.
+    await db
+      .update(fastAgentParentEvents)
+      .set({ shutdownAt: new Date(Date.now() - 2 * 60_000) })
+      .where(eq(fastAgentParentEvents.id, killed));
+    await expect(reconcileFastAgentDeadTurns()).resolves.toBeGreaterThanOrEqual(
+      1,
+    );
+    expect((await readRow(killed)).settledAt).not.toBeNull();
+    const [closeout] = await closeoutsFor('turn-killed');
+    expect(closeout?.text).toEqual([
+      { type: 'text', text: RESTARTED_ACTIVE_TURN_MESSAGE },
+    ]);
+    expect(closeout?.metadata).toMatchObject({
+      purpose: 'closeout',
+      visibleInTranscript: true,
+      interruptionReason: 'api_shutdown',
+    });
+    // The session no longer reads as responding, and a second pass is a
+    // no-op.
+    const [after] = await db
+      .select({ respondingUntil: sessions.respondingUntil })
+      .from(sessions)
+      .where(eq(sessions.fastConversationId, session.id));
+    expect(after?.respondingUntil).toBeNull();
+    await reconcileFastAgentDeadTurns();
+    expect(await closeoutsFor('turn-killed')).toHaveLength(1);
+
+    // A turn that settled normally, a pending row (recovery's job), and a
+    // turn that already closed out are all left alone.
+    const settled = await insertRow('turn-settled', {
+      deliveredAt: new Date(Date.now() - 20 * 60_000),
+      updatedAt: new Date(Date.now() - 20 * 60_000),
+      settledAt: new Date(),
+    });
+    const pending = await insertRow('turn-pending', {
+      updatedAt: new Date(Date.now() - 20 * 60_000),
+      shutdownAt: new Date(Date.now() - 20 * 60_000),
+    });
+    const spoken = await insertRow('turn-spoken', {
+      discardedAt: new Date(Date.now() - 20 * 60_000),
+      updatedAt: new Date(Date.now() - 20 * 60_000),
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-spoken:assistant:0',
+        turnId: 'turn-spoken',
+        turnSeq: 1,
+        ts: Date.now(),
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'All done.' }],
+        metadata: { visibleInTranscript: true, purpose: 'closeout' },
+        payload: { purpose: 'closeout' },
+        source: 'slack',
+      },
+    });
+    await db
+      .update(sessions)
+      .set({ respondingUntil: null })
+      .where(eq(sessions.fastConversationId, session.id));
+    await reconcileFastAgentDeadTurns();
+    expect((await readRow(pending)).settledAt).toBeNull();
+    expect(await closeoutsFor('turn-pending')).toHaveLength(0);
+    expect(await closeoutsFor('turn-settled')).toHaveLength(0);
+    expect((await readRow(settled)).settledAt).not.toBeNull();
+    // Already spoken for: settled without a second closeout.
+    expect((await readRow(spoken)).settledAt).not.toBeNull();
+    expect(await closeoutsFor('turn-spoken')).toHaveLength(1);
+
+    // Without a stop signal, a lapsed lease plus a stale row is the signal.
+    const crashed = await insertRow('turn-crashed', {
+      discardedAt: new Date(Date.now() - 20 * 60_000),
+      updatedAt: new Date(Date.now() - 20 * 60_000),
+    });
+    await reconcileFastAgentDeadTurns();
+    expect((await readRow(crashed)).settledAt).not.toBeNull();
+    const [crashCloseout] = await closeoutsFor('turn-crashed');
+    expect(crashCloseout?.metadata).toMatchObject({
+      interruptionReason: 'expired_lease_reconcile',
+    });
+
+    // A turn that delivered a progress-only response (a task kickoff, say)
+    // and died before settling is spoken for: settle it silently rather than
+    // contradict it with a restart notice.
+    const kickoff = await insertRow('turn-kickoff', {
+      deliveredAt: new Date(Date.now() - 20 * 60_000),
+      updatedAt: new Date(Date.now() - 20 * 60_000),
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-kickoff:assistant:0',
+        turnId: 'turn-kickoff',
+        turnSeq: 1,
+        ts: Date.now() - 20 * 60_000,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Starting that task.' }],
+        metadata: { visibleInTranscript: true, purpose: 'progress' },
+        payload: { purpose: 'progress' },
+        source: 'slack',
+      },
+    });
+    await db
+      .update(sessions)
+      .set({ respondingUntil: null })
+      .where(eq(sessions.fastConversationId, session.id));
+    await reconcileFastAgentDeadTurns();
+    expect((await readRow(kickoff)).settledAt).not.toBeNull();
+    expect(await closeoutsFor('turn-kickoff')).toHaveLength(1);
+
+    // A turn whose conversation lock is still held is left alone however
+    // stale its row looks.
+    const live = await insertRow('turn-live', {
+      discardedAt: new Date(Date.now() - 20 * 60_000),
+      updatedAt: new Date(Date.now() - 20 * 60_000),
+    });
+    await reconcileFastAgentDeadTurns(100, { isTurnLive: async () => true });
+    expect((await readRow(live)).settledAt).toBeNull();
+    expect(await closeoutsFor('turn-live')).toHaveLength(0);
+    await reconcileFastAgentDeadTurns(100, { isTurnLive: async () => false });
+    expect((await readRow(live)).settledAt).not.toBeNull();
+
+    // A retry notice the dead owner left active becomes the closeout itself,
+    // so the retry-notice reconciler has nothing left to stamp.
+    const noticed = await insertRow('turn-noticed', {
+      discardedAt: new Date(Date.now() - 20 * 60_000),
+      updatedAt: new Date(Date.now() - 20 * 60_000),
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-noticed:retry-notice:0',
+        turnId: 'turn-noticed',
+        turnSeq: 1,
+        ts: Date.now() - 20 * 60_000,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying automatically…' }],
+        metadata: {
+          visibleInTranscript: false,
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
+        },
+        payload: { purpose: 'progress' },
+        source: 'slack',
+      },
+    });
+    await db
+      .update(sessions)
+      .set({ respondingUntil: null })
+      .where(eq(sessions.fastConversationId, session.id));
+    await reconcileFastAgentDeadTurns();
+    expect((await readRow(noticed)).settledAt).not.toBeNull();
+    const noticedRows = await closeoutsFor('turn-noticed');
+    expect(noticedRows).toHaveLength(1);
+    expect(noticedRows[0]?.text).toEqual([
+      { type: 'text', text: RESTARTED_ACTIVE_TURN_MESSAGE },
+    ]);
+    expect(noticedRows[0]?.metadata).toMatchObject({
+      visibleInTranscript: true,
+      purpose: 'closeout',
+      inferenceRetryActive: false,
+      interruptionReason: 'expired_lease_reconcile',
+    });
+    // Nothing left for the retry-notice reconciler to add.
+    await reconcileExpiredFastAgentInferenceRetryNotices();
+    expect(await closeoutsFor('turn-noticed')).toHaveLength(1);
+
+    // The marks themselves: a settled row refuses a later stamp.
+    await expect(markFastAgentDurableTurnShutdown(crashed)).resolves.toBe(
+      false,
+    );
+    // Settling a pending row marks it delivered in the same statement, so a
+    // kill can never land between the two.
+    const pendingSettle = await insertRow('turn-pending-settle', {});
+    await settleFastAgentDurableTurn(pendingSettle);
+    const [settledRow] = await db
+      .select({
+        deliveredAt: fastAgentParentEvents.deliveredAt,
+        settledAt: fastAgentParentEvents.settledAt,
+      })
+      .from(fastAgentParentEvents)
+      .where(eq(fastAgentParentEvents.id, pendingSettle));
+    expect(settledRow?.deliveredAt).not.toBeNull();
+    expect(settledRow?.settledAt).not.toBeNull();
+    // A withdrawn row keeps its withdrawal and is only settled.
+    const withdrawn = await insertRow('turn-withdrawn', {
+      discardedAt: new Date(),
+      lastError: 'Native tool launch_task is not replay-safe.',
+    });
+    await settleFastAgentDurableTurn(withdrawn);
+    const [withdrawnRow] = await db
+      .select({
+        deliveredAt: fastAgentParentEvents.deliveredAt,
+        settledAt: fastAgentParentEvents.settledAt,
+        lastError: fastAgentParentEvents.lastError,
+      })
+      .from(fastAgentParentEvents)
+      .where(eq(fastAgentParentEvents.id, withdrawn));
+    expect(withdrawnRow?.deliveredAt).toBeNull();
+    expect(withdrawnRow?.settledAt).not.toBeNull();
+    expect(withdrawnRow?.lastError).toBe(
+      'Native tool launch_task is not replay-safe.',
+    );
+
+    const fresh = await insertRow('turn-fresh', {});
+    await expect(markFastAgentDurableTurnShutdown(fresh)).resolves.toBe(true);
+    await settleFastAgentDurableTurn(fresh);
+    expect((await readRow(fresh)).settledAt).not.toBeNull();
   });
 
   it('renews only a live responding lease', async () => {

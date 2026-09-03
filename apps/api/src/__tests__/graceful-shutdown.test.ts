@@ -1,12 +1,14 @@
 const mocks = vi.hoisted(() => ({
   abortActiveFastAgentTurns: vi.fn(),
   beginFastAgentTurnDrain: vi.fn(),
+  markActiveFastAgentTurnsShutdown: vi.fn(async () => 0),
   waitForActiveFastAgentTurnsToSettle: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   abortActiveFastAgentTurns: mocks.abortActiveFastAgentTurns,
   beginFastAgentTurnDrain: mocks.beginFastAgentTurnDrain,
+  markActiveFastAgentTurnsShutdown: mocks.markActiveFastAgentTurnsShutdown,
   waitForActiveFastAgentTurnsToSettle:
     mocks.waitForActiveFastAgentTurnsToSettle,
   FastAgentProcessShutdownError: class extends Error {
@@ -50,6 +52,70 @@ describe('resolveApiShutdownDrainMs', () => {
 describe('gracefullyShutdownApi', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('stamps active durable turns with the stop signal before draining', async () => {
+    const server = {
+      close: vi.fn((callback: (error?: Error) => void) => callback()),
+    } as unknown as ServerType;
+    const order: string[] = [];
+    const markTurnsShutdown = vi.fn(async () => {
+      order.push('mark');
+      return 1;
+    });
+    const waitForTurns = vi.fn(async () => {
+      order.push('wait');
+      return 0;
+    });
+    const abortTurns = vi.fn(async () => {
+      order.push('abort');
+      return 0;
+    });
+
+    await gracefullyShutdownApi(server, 'SIGTERM', {
+      abortTurns,
+      beginDrain: vi.fn(),
+      markTurnsShutdown,
+      waitForTurns,
+      drainMs: 10,
+      exitProcess: vi.fn() as unknown as (code?: number) => never,
+      flushSentry: vi.fn().mockResolvedValue(undefined),
+    });
+
+    // The evidence lands before the drain can be cut short by a kill.
+    expect(order).toEqual(['mark', 'wait', 'abort']);
+  });
+
+  it('does not let a stalled stamp hold up the abort or the exit', async () => {
+    vi.useFakeTimers();
+    try {
+      const server = {
+        close: vi.fn((callback: (error?: Error) => void) => callback()),
+      } as unknown as ServerType;
+      const abortTurns = vi.fn().mockResolvedValue(0);
+      const exitProcess = vi.fn() as unknown as (code?: number) => never;
+
+      const shutdown = gracefullyShutdownApi(server, 'SIGTERM', {
+        abortTurns,
+        beginDrain: vi.fn(),
+        // A blocked database: the stamp never settles.
+        markTurnsShutdown: vi.fn(() => new Promise<number>(() => {})),
+        waitForTurns: vi.fn().mockResolvedValue(0),
+        drainMs: 0,
+        exitProcess,
+        flushSentry: vi.fn().mockResolvedValue(undefined),
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(abortTurns).toHaveBeenCalledOnce();
+      expect(exitProcess).not.toHaveBeenCalled();
+      // The stamp's own grace passes and shutdown finishes regardless.
+      await vi.advanceTimersByTimeAsync(2_000);
+      await shutdown;
+      expect(exitProcess).toHaveBeenCalledWith(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('drains active Fast turns before aborting the stragglers', async () => {

@@ -1,4 +1,8 @@
-import { reconcileExpiredFastAgentInferenceRetryNotices } from '@roomote/cloud-agents/server';
+import {
+  isFastAgentTurnLockHeld,
+  reconcileExpiredFastAgentInferenceRetryNotices,
+  reconcileFastAgentDeadTurns,
+} from '@roomote/cloud-agents/server';
 import {
   and,
   db,
@@ -208,6 +212,11 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
   let orphanFailures = 0;
   const reconciledRetryNotices =
     await reconcileExpiredFastAgentInferenceRetryNotices(BATCH_SIZE);
+  // Turns whose owner was killed or crashed without closing out: give them
+  // the honest restart closeout and release the responding lease.
+  const reconciledDeadTurns = await reconcileFastAgentDeadTurns(BATCH_SIZE, {
+    isTurnLive: isFastAgentTurnLockHeld,
+  });
 
   // Fast conversations without a session row (e.g. created before this
   // release finished its backfill) are adopted here so the unified list
@@ -356,6 +365,7 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
     refreshedSessions: recent.length,
     healedExpiredLeases: expiredLeases.length,
     reconciledRetryNotices,
+    reconciledDeadTurns,
   });
 }
 

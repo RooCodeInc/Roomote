@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { after } from 'next/server';
 
 import {
+  bindFastAgentTurnLockDurableRow,
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   createFastAgentWebTaskLauncher,
@@ -314,12 +315,14 @@ async function runWebFastAgentTurn({
           })
         : null;
     if (durableTurn && durableSessionId) {
-      release.durableRowId = durableTurn.id;
-      release.durableResume = () =>
-        wakeFastAgentParentEventNow({
-          conversationId: durableSessionId,
-          eventKey: durableTurn.eventKey,
-        });
+      await bindFastAgentTurnLockDurableRow(release, {
+        rowId: durableTurn.id,
+        resume: () =>
+          wakeFastAgentParentEventNow({
+            conversationId: durableSessionId,
+            eventKey: durableTurn.eventKey,
+          }),
+      });
     }
     await answerFastAgentQuestion({
       question,

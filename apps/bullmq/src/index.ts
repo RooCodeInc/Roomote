@@ -1,6 +1,13 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
+import {
+  abortActiveFastAgentTurns,
+  beginFastAgentTurnDrain,
+  FastAgentProcessShutdownError,
+  markActiveFastAgentTurnsShutdown,
+  waitForActiveFastAgentTurnsToSettle,
+} from '@roomote/cloud-agents/server';
 import { showRoutes } from 'hono/dev';
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
@@ -373,8 +380,46 @@ app.route('/admin/queues', serverAdapter.registerPlugin());
 
 app.get('/', (c) => c.redirect('/admin/queues'));
 
-async function gracefulShutdown() {
+// Resumed Fast turns run in this process, so a restart gives them the same
+// bounded window the API gives its own turns. Matches the API's default;
+// both must stay inside the platform's SIGTERM-to-SIGKILL grace.
+const FAST_TURN_SHUTDOWN_DRAIN_MS = 20_000;
+
+async function gracefulShutdown(signal: NodeJS.Signals = 'SIGTERM') {
   console.log('[Shutdown] Starting graceful shutdown...');
+
+  // Stop admitting turns, then stamp the active ones before anything that
+  // takes time: a kill right after the signal still leaves evidence for the
+  // dead-turn reconciler, and the shortened lock keeps a dead turn from
+  // sitting behind its lock's full TTL. Turns that finish inside the drain
+  // settle and release their own locks, so the stamp is moot for them.
+  const shutdownReason = new FastAgentProcessShutdownError(signal);
+  beginFastAgentTurnDrain(shutdownReason);
+  // The stamp runs alongside the drain, not before it: one DB update per
+  // active turn must never extend the shutdown budget.
+  const stampPromise = markActiveFastAgentTurnsShutdown({
+    lockTtlSeconds: Math.ceil(FAST_TURN_SHUTDOWN_DRAIN_MS / 1000) + 60,
+  }).catch(() => undefined);
+  const remainingTurns = await waitForActiveFastAgentTurnsToSettle(
+    FAST_TURN_SHUTDOWN_DRAIN_MS,
+  ).catch(() => 0);
+  if (remainingTurns > 0) {
+    console.warn(
+      `[Shutdown] Aborting ${remainingTurns} Fast turn(s) still active after the ${FAST_TURN_SHUTDOWN_DRAIN_MS}ms drain.`,
+    );
+  }
+  // Aborting releases each turn's durable claim and wakes the queue, so an
+  // interrupted resumed turn goes back to recovery instead of waiting out
+  // its claim lease.
+  await abortActiveFastAgentTurns(shutdownReason).catch(() => undefined);
+  // The stamps have had the drain and the abort to land; a slow one gets a
+  // last brief moment and then stops holding up the shutdown.
+  await Promise.race([
+    stampPromise,
+    new Promise((resolve) => {
+      setTimeout(resolve, 2_000).unref?.();
+    }),
+  ]);
 
   try {
     await schedulerWorker.close();

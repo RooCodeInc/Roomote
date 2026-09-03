@@ -463,16 +463,276 @@ export async function findFastAgentActiveInferenceRetryNotice(
   };
 }
 
-/** The turn produced its outcome; nothing is left to recover. */
-export async function markFastAgentDurableTurnDelivered(
+/**
+ * The owning process received its stop signal while this turn was active.
+ * Written before any drain so a kill that follows immediately still leaves
+ * evidence; a turn that finishes during the drain settles and the stamp is
+ * moot.
+ */
+export async function markFastAgentDurableTurnShutdown(
   id: string,
 ): Promise<boolean> {
   const rows = await db
     .update(fastAgentParentEvents)
-    .set({ deliveredAt: new Date(), lastError: null, updatedAt: new Date() })
-    .where(pendingDurableTurnWhere(id))
+    .set({ shutdownAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(fastAgentParentEvents.id, id),
+        isNull(fastAgentParentEvents.settledAt),
+      ),
+    )
     .returning({ id: fastAgentParentEvents.id });
   return rows.length > 0;
+}
+
+/**
+ * The turn reached a user-visible outcome, so no reconciler needs to speak
+ * for it. One statement: a turn that is still pending is marked delivered at
+ * the same instant it is settled, because two writes leave a window where a
+ * kill in between makes a completed turn look like a dead one. A turn that
+ * already withdrew from replay keeps its withdrawal and is only settled.
+ */
+export async function settleFastAgentDurableTurn(id: string): Promise<void> {
+  const stillPending = sql`${fastAgentParentEvents.deliveredAt} is null and ${fastAgentParentEvents.discardedAt} is null`;
+  await db
+    .update(fastAgentParentEvents)
+    .set({
+      settledAt: new Date(),
+      deliveredAt: sql`case when ${stillPending} then now() else ${fastAgentParentEvents.deliveredAt} end`,
+      lastError: sql`case when ${stillPending} then null else ${fastAgentParentEvents.lastError} end`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(fastAgentParentEvents.id, id),
+        isNull(fastAgentParentEvents.settledAt),
+      ),
+    );
+}
+
+// A stop signal is followed by a bounded drain (R_API_SHUTDOWN_DRAIN_MS,
+// 20s by default) in which the turn may still finish and settle; only a
+// stamp older than this is treated as a kill that cut the turn short.
+const FAST_AGENT_DEAD_TURN_SHUTDOWN_GRACE_MS = 60_000;
+
+/**
+ * Close out turns whose owner died without saying so. An inline turn that
+ * was withdrawn from replay (or delivered) but never settled, and whose
+ * process was either told to stop more than a minute ago or has let the
+ * responding lease lapse, ended in a kill or a crash. Give it the honest
+ * restart closeout the interrupted owner would have posted (which is also
+ * what lets the next human message carry the unresolved request), release
+ * the responding lease so the session stops reading as active, and settle
+ * the row. Pending rows are left alone: recovery re-runs those.
+ */
+export async function reconcileFastAgentDeadTurns(
+  limit = 100,
+  options: {
+    /** True while a process still holds the conversation's turn lock. */
+    isTurnLive?: (conversation: FastAgentConversation) => Promise<boolean>;
+  } = {},
+): Promise<number> {
+  const now = new Date();
+  const candidates = await db
+    .select({
+      id: fastAgentParentEvents.id,
+      conversationId: fastAgentParentEvents.conversationId,
+      event: fastAgentParentEvents.event,
+      parent: fastAgentParentEvents.parent,
+      shutdownAt: fastAgentParentEvents.shutdownAt,
+    })
+    .from(fastAgentParentEvents)
+    .innerJoin(
+      sessions,
+      eq(sessions.fastConversationId, fastAgentParentEvents.conversationId),
+    )
+    .where(
+      and(
+        eq(fastAgentParentEvents.admission, 'inline'),
+        isNull(fastAgentParentEvents.settledAt),
+        or(
+          isNotNull(fastAgentParentEvents.discardedAt),
+          isNotNull(fastAgentParentEvents.deliveredAt),
+        ),
+        or(
+          lt(
+            fastAgentParentEvents.shutdownAt,
+            new Date(now.getTime() - FAST_AGENT_DEAD_TURN_SHUTDOWN_GRACE_MS),
+          ),
+          and(
+            lt(
+              fastAgentParentEvents.updatedAt,
+              new Date(now.getTime() - FAST_RESPONDING_LEASE_MS),
+            ),
+            or(
+              isNull(sessions.respondingUntil),
+              lt(sessions.respondingUntil, now),
+            ),
+          ),
+        ),
+      ),
+    )
+    .limit(limit);
+
+  let reconciled = 0;
+  for (const candidate of candidates) {
+    // A held conversation lock means an owner (or a resumed run) is still
+    // executing this turn, however stale the row looks; leave it to them.
+    if (await options.isTurnLive?.(candidate.parent.conversation)) continue;
+    const event = candidate.event as {
+      currentMessageId?: unknown;
+      eventId?: unknown;
+    };
+    const turnId =
+      typeof event.currentMessageId === 'string'
+        ? event.currentMessageId
+        : typeof event.eventId === 'string'
+          ? event.eventId
+          : null;
+    const reason: FastAgentInterruptionReason = candidate.shutdownAt
+      ? 'api_shutdown'
+      : 'expired_lease_reconcile';
+    const closedOut = await db.transaction(async (tx) => {
+      // The same advisory lock every canonical write for this conversation
+      // takes, so a turn finishing concurrently is either fully visible to
+      // the re-checks below or waits until this closeout has landed.
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${candidate.conversationId}`}, 0))`,
+      );
+      const [current] = await tx
+        .select({
+          settledAt: fastAgentParentEvents.settledAt,
+          deliveredAt: fastAgentParentEvents.deliveredAt,
+        })
+        .from(fastAgentParentEvents)
+        .where(eq(fastAgentParentEvents.id, candidate.id));
+      if (!current || current.settledAt) return false;
+      // Delivered means the turn produced its response, even when that
+      // response was a progress-only update such as a task kickoff. Settle it
+      // silently rather than contradicting it with a restart notice.
+      const spokenFor = current.deliveredAt !== null;
+      let wroteCloseout = false;
+      if (turnId && !spokenFor) {
+        const [terminal] = await tx
+          .select({ id: fastAgentMessages.id })
+          .from(fastAgentMessages)
+          .where(
+            and(
+              eq(fastAgentMessages.conversationId, candidate.conversationId),
+              eq(fastAgentMessages.turnId, turnId),
+              eq(fastAgentMessages.role, 'assistant'),
+              or(
+                sql`${fastAgentMessages.metadata}->>'purpose' in ('closeout', 'clarification')`,
+                sql`${fastAgentMessages.metadata}->>'interruptionReason' IS NOT NULL`,
+              ),
+            ),
+          )
+          .limit(1);
+        if (!terminal) {
+          // A retry notice the dead owner left active becomes the closeout
+          // itself, the way the owner's own abort path would have replaced
+          // it; otherwise the retry-notice reconciler would add a second
+          // interruption beside this one.
+          const [notice] = await tx
+            .select({ id: fastAgentMessages.id })
+            .from(fastAgentMessages)
+            .where(
+              and(
+                eq(fastAgentMessages.conversationId, candidate.conversationId),
+                eq(fastAgentMessages.turnId, turnId),
+                activeInferenceRetryNoticeWhere(),
+              ),
+            )
+            .limit(1);
+          const closeoutMetadata = {
+            visibleInTranscript: true,
+            purpose: 'closeout',
+            interruptionReason: reason,
+          };
+          if (notice) {
+            await tx
+              .update(fastAgentMessages)
+              .set({
+                contentBlocks: [
+                  { type: 'text', text: RESTARTED_ACTIVE_TURN_MESSAGE },
+                ],
+                metadata: sql`coalesce(${fastAgentMessages.metadata}, '{}'::jsonb) || ${JSON.stringify(
+                  {
+                    ...closeoutMetadata,
+                    inferenceRetryNotice: true,
+                    inferenceRetryActive: false,
+                  },
+                )}::jsonb`,
+                payload: sql`coalesce(${fastAgentMessages.payload}, '{}'::jsonb) || '{"purpose":"closeout"}'::jsonb`,
+                ts: Date.now(),
+                updatedAt: new Date(),
+              })
+              .where(eq(fastAgentMessages.id, notice.id));
+          } else {
+            const [seqRow] = await tx
+              .select({
+                maxSeq: sql<number>`coalesce(max(${fastAgentMessages.turnSeq}), 0)`,
+              })
+              .from(fastAgentMessages)
+              .where(
+                and(
+                  eq(
+                    fastAgentMessages.conversationId,
+                    candidate.conversationId,
+                  ),
+                  eq(fastAgentMessages.turnId, turnId),
+                ),
+              );
+            await tx
+              .insert(fastAgentMessages)
+              .values({
+                conversationId: candidate.conversationId,
+                eventId: `${turnId}:interruption`,
+                turnId,
+                turnSeq: Number(seqRow?.maxSeq ?? 0) + 1,
+                ts: Date.now(),
+                eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+                role: 'assistant',
+                contentBlocks: [
+                  { type: 'text', text: RESTARTED_ACTIVE_TURN_MESSAGE },
+                ],
+                metadata: closeoutMetadata,
+                payload: { purpose: 'closeout' },
+                source: candidate.parent.conversation.surface,
+              })
+              .onConflictDoNothing();
+          }
+          wroteCloseout = true;
+        }
+      }
+      const session = await getSessionForFastConversation(
+        tx,
+        candidate.conversationId,
+      );
+      if (session) {
+        await touchSessionActivity(
+          tx,
+          session.id,
+          Math.floor(Date.now() / 1000),
+          {
+            respondingUntil: null,
+          },
+        );
+      }
+      await tx
+        .update(fastAgentParentEvents)
+        .set({ settledAt: new Date(), updatedAt: new Date() })
+        .where(eq(fastAgentParentEvents.id, candidate.id));
+      return wroteCloseout;
+    });
+    if (closedOut) {
+      console.warn(
+        `[Fast Agent] Closed out a dead turn (conversation=${candidate.conversationId}, turn=${turnId}, reason=${reason}).`,
+      );
+    }
+    reconciled += 1;
+  }
+  return reconciled;
 }
 
 /**

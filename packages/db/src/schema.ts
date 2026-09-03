@@ -3174,6 +3174,21 @@ export const fastAgentParentEvents = pgTable(
      * owner, so the per-turn retry cap holds through restarts and handoffs.
      */
     inferenceRetries: integer('inference_retries').notNull().default(0),
+    /**
+     * Stamped the moment the owning process receives its stop signal while
+     * this inline turn is still active, before any drain. A process killed
+     * before it can finish or close out leaves this behind as the evidence
+     * the dead-turn reconciler acts on immediately.
+     */
+    shutdownAt: timestamp('shutdown_at'),
+    /**
+     * The turn reached an outcome the user can see: its answer was
+     * delivered, or it was withdrawn from replay and closed out. Inline rows
+     * without this are still owned by a process or by recovery; one whose
+     * owner vanished is a dead turn. Both columns are ignored by the
+     * previous release (N-1 rollback safe).
+     */
+    settledAt: timestamp('settled_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -3187,6 +3202,12 @@ export const fastAgentParentEvents = pgTable(
     index('fast_agent_parent_events_retry_run_idx').on(
       table.retryTaskStartRunId,
     ),
+    // The dead-turn reconciler scans globally every minute for inline turns
+    // that never settled. Partial so it only ever holds the live handful
+    // rather than growing with the table's history.
+    index('fast_agent_parent_events_dead_turn_idx')
+      .on(table.shutdownAt, table.updatedAt)
+      .where(sql`${table.admission} = 'inline' and ${table.settledAt} is null`),
   ],
 );
 

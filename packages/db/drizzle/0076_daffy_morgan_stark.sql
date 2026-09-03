@@ -1,0 +1,1 @@
+CREATE INDEX "fast_agent_parent_events_dead_turn_idx" ON "fast_agent_parent_events" USING btree ("shutdown_at","updated_at") WHERE "fast_agent_parent_events"."admission" = 'inline' and "fast_agent_parent_events"."settled_at" is null;

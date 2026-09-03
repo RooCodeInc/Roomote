@@ -1,6 +1,9 @@
-import { acquireRedisLock } from '@roomote/redis';
+import { acquireRedisLock, getRedis } from '@roomote/redis';
 import type { FastAgentConversation } from './fast-agent-conversation';
-import { releaseFastAgentDurableTurnClaim } from './fast-agent-conversation-repository';
+import {
+  markFastAgentDurableTurnShutdown,
+  releaseFastAgentDurableTurnClaim,
+} from './fast-agent-conversation-repository';
 
 const FAST_AGENT_TURN_LOCK_PREFIX = 'fast-agent:conversation-lock:';
 const FAST_AGENT_TURN_LOCK_TTL_SECONDS = 600;
@@ -11,6 +14,9 @@ const activeFastAgentTurnLocks = new Set<FastAgentTurnLockHandle>();
 const shutdownCloseoutResolvers = new WeakMap<AbortSignal, () => void>();
 const shutdownCloseoutPendingSignals = new WeakSet<AbortSignal>();
 let processShutdownReason: FastAgentProcessShutdownError | null = null;
+// The lock TTL the stop signal asked for, remembered so a row bound after the
+// one-time stamp pass gets the same treatment.
+let shutdownLockTtlSeconds: number | undefined;
 
 export class FastAgentTurnLockLostError extends Error {
   constructor() {
@@ -43,6 +49,12 @@ export type FastAgentTurnLockHandle = (() => Promise<void>) & {
   /** Wakes the queue for the bound row after a shutdown release so recovery
    * does not wait for the periodic sweep. Best effort. */
   durableResume?: () => Promise<void>;
+  /**
+   * Shorten this handle's Redis lock to the given TTL, only while this
+   * handle still owns it (a successor's lock is never touched). Resolves
+   * 'lost' when ownership is gone.
+   */
+  shortenLock?: (ttlSeconds: number) => Promise<'renewed' | 'lost' | 'error'>;
 };
 
 /** Mark the user-visible shutdown closeout as posted and persisted (or as
@@ -61,6 +73,67 @@ export function markFastAgentShutdownCloseoutPending(
   if (!signal.aborted && shutdownCloseoutResolvers.has(signal)) {
     shutdownCloseoutPendingSignals.add(signal);
   }
+}
+
+/**
+ * Stamp every active durable turn with the stop signal, before any drain.
+ * A process killed right after SIGTERM then still leaves evidence for the
+ * dead-turn reconciler; a turn that finishes during the drain settles and
+ * the stamp is moot. Best effort, never throws.
+ */
+export async function markActiveFastAgentTurnsShutdown(
+  options: {
+    /**
+     * Shorten each bound turn's Redis lock to this many seconds. A process
+     * killed after the stop signal never releases its locks, and the
+     * dead-turn reconciler leaves a locked conversation alone, so without
+     * this the closeout waits out the full lock TTL. Pass a value that
+     * comfortably exceeds the drain window; a turn that finishes releases
+     * the lock itself, and a live turn's renewal tick extends it again.
+     */
+    lockTtlSeconds?: number;
+  } = {},
+): Promise<number> {
+  shutdownLockTtlSeconds = options.lockTtlSeconds;
+  const bound = [...activeFastAgentTurnLocks].filter(
+    (lock) => lock.durableRowId,
+  );
+  await Promise.allSettled(bound.map((lock) => stampTurnShutdown(lock)));
+  return bound.length;
+}
+
+async function stampTurnShutdown(lock: FastAgentTurnLockHandle): Promise<void> {
+  if (!lock.durableRowId) return;
+  await markFastAgentDurableTurnShutdown(lock.durableRowId).catch((error) => {
+    console.warn(
+      `[Fast Agent] Failed to stamp a durable turn with the shutdown signal: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+  if (shutdownLockTtlSeconds !== undefined && lock.shortenLock) {
+    // Ownership-checked: a lock this process already lost belongs to a
+    // successor and is left alone.
+    await lock.shortenLock(shutdownLockTtlSeconds).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to shorten a turn lock during shutdown: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+  }
+}
+
+/**
+ * Bind the inline-admitted durable row a turn executes to its lock. Every
+ * accepting path binds through here so that a row bound after the stop
+ * signal's one-time stamp pass (a worker between claiming its row and
+ * binding it, say) is still stamped and its lock still shortened, instead of
+ * dying unmarked and waiting out the lease.
+ */
+export async function bindFastAgentTurnLockDurableRow(
+  lock: FastAgentTurnLockHandle,
+  binding: { rowId: string; resume: () => Promise<void> },
+): Promise<void> {
+  lock.durableRowId = binding.rowId;
+  lock.durableResume = binding.resume;
+  if (processShutdownReason) await stampTurnShutdown(lock);
 }
 
 export async function abortActiveFastAgentTurns(
@@ -137,6 +210,17 @@ export async function waitForActiveFastAgentTurnsToSettle(
     });
   }
   return activeFastAgentTurnLocks.size;
+}
+
+/**
+ * Whether some process currently holds the conversation's turn lock, i.e. a
+ * turn (original or resumed) is still executing there. Used by reconcilers
+ * to leave live turns alone however stale their durable rows look.
+ */
+export async function isFastAgentTurnLockHeld(
+  conversation: FastAgentConversation,
+): Promise<boolean> {
+  return (await getRedis().exists(buildFastAgentTurnLockKey(conversation))) > 0;
 }
 
 /** Serialize every human and platform-generated Fast turn for one chat. */
@@ -230,6 +314,8 @@ export async function acquireFastAgentTurnLock(params: {
         }
       }) as FastAgentTurnLockHandle;
       releaseTurnLock.signal = ownership.signal;
+      releaseTurnLock.shortenLock = async (ttlSeconds) =>
+        redisReleased ? 'lost' : release.renewDetailed(ttlSeconds);
       releaseTurnLock.abort = async (reason) => {
         ownership.abort(reason);
         await releaseRedisTurnLock();

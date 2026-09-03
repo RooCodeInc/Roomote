@@ -46,6 +46,14 @@ vi.mock('bullmq', () => ({
 vi.mock('@roomote/redis', () => ({ getRedis: vi.fn(() => ({})) }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  // Real binding semantics so assertions on the bound row keep holding.
+  bindFastAgentTurnLockDurableRow: async (
+    lock: { durableRowId?: string; durableResume?: () => Promise<void> },
+    binding: { rowId: string; resume: () => Promise<void> },
+  ) => {
+    lock.durableRowId = binding.rowId;
+    lock.durableResume = binding.resume;
+  },
   acquireFastAgentTurnLock: mocks.acquireLock,
   findFastAgentDurableRetryScheduledError: (error: unknown) =>
     error instanceof Error &&
@@ -690,6 +698,42 @@ describe('Fast parent event durable queue', () => {
       { conversationId: parent.sessionId, eventKey: retryRow.eventKey },
       { jobId: retryRow.eventKey },
     );
+  });
+
+  it('binds a resumed inline row to the turn lock while it runs', async () => {
+    const inlineRow = {
+      ...pendingRow('inline-5', {
+        type: 'human_follow_up' as const,
+        eventId: '100.6',
+        currentMessageId: '100.6',
+        userId: 'user-1',
+        question: 'Bound?',
+      }),
+      admission: 'inline' as const,
+      claimedUntil: null,
+    };
+    mocks.findPending
+      .mockResolvedValueOnce(inlineRow)
+      .mockResolvedValueOnce(inlineRow)
+      .mockResolvedValueOnce({ deliveredAt: new Date(), discardedAt: null })
+      .mockResolvedValueOnce(undefined);
+    let boundDuringRun: string | undefined;
+    mocks.deliver.mockImplementationOnce(async (_params, lock) => {
+      boundDuringRun = lock.durableRowId;
+      return 'delivered';
+    });
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: inlineRow.eventKey,
+    });
+
+    // A worker shutdown can stamp and release the row exactly like the
+    // webhook handlers do for their own turns.
+    expect(boundDuringRun).toBe('inline-5');
+    expect(
+      (mocks.releaseLock as { durableRowId?: string }).durableRowId,
+    ).toBeUndefined();
   });
 
   it('leaves scheduled retries alone until their time', async () => {

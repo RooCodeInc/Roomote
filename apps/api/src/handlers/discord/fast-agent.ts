@@ -11,6 +11,7 @@ import {
   type DiscordCommunicationProvider,
 } from '@roomote/communication/discord-provider';
 import {
+  bindFastAgentTurnLockDurableRow,
   getOrCreateFastAgentSession,
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
@@ -241,12 +242,14 @@ export async function processDiscordFastAgentMessage(
     });
     const durableTurnForResume = durableTurn;
     if (durableTurnForResume) {
-      activeTurnLock.durableRowId = durableTurnForResume.id;
-      activeTurnLock.durableResume = () =>
-        wakeFastAgentParentEventNow({
-          conversationId: session.id,
-          eventKey: durableTurnForResume.eventKey,
-        });
+      await bindFastAgentTurnLockDurableRow(activeTurnLock, {
+        rowId: durableTurnForResume.id,
+        resume: () =>
+          wakeFastAgentParentEventNow({
+            conversationId: session.id,
+            eventKey: durableTurnForResume.eventKey,
+          }),
+      });
     }
     const footerContext = await resolveFastSessionReplyFooterContext({
       sessionId: session.id,

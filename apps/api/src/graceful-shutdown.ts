@@ -3,6 +3,7 @@ import {
   abortActiveFastAgentTurns,
   beginFastAgentTurnDrain,
   FastAgentProcessShutdownError,
+  markActiveFastAgentTurnsShutdown,
   waitForActiveFastAgentTurnsToSettle,
 } from '@roomote/cloud-agents/server';
 
@@ -12,6 +13,15 @@ import {
 // typical 30s SIGTERM-to-SIGKILL grace window. R_API_SHUTDOWN_DRAIN_MS
 // overrides it; 0 restores the previous abort-immediately behavior.
 const DEFAULT_API_SHUTDOWN_DRAIN_MS = 20_000;
+// How long a still-pending shutdown stamp may hold the exit after the drain
+// and the abort have already given it time.
+const STAMP_SETTLE_GRACE_MS = 2_000;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms).unref?.();
+  });
+}
 
 export function resolveApiShutdownDrainMs(
   env: NodeJS.ProcessEnv = process.env,
@@ -27,6 +37,7 @@ export function resolveApiShutdownDrainMs(
 type ApiShutdownOptions = {
   abortTurns?: typeof abortActiveFastAgentTurns;
   beginDrain?: typeof beginFastAgentTurnDrain;
+  markTurnsShutdown?: typeof markActiveFastAgentTurnsShutdown;
   waitForTurns?: typeof waitForActiveFastAgentTurnsToSettle;
   drainMs?: number;
   exitProcess?: (code?: number) => never;
@@ -41,6 +52,7 @@ export async function gracefullyShutdownApi(
   {
     abortTurns = abortActiveFastAgentTurns,
     beginDrain = beginFastAgentTurnDrain,
+    markTurnsShutdown = markActiveFastAgentTurnsShutdown,
     waitForTurns = waitForActiveFastAgentTurnsToSettle,
     drainMs = resolveApiShutdownDrainMs(),
     exitProcess = process.exit,
@@ -54,6 +66,13 @@ export async function gracefullyShutdownApi(
   // give in-flight turns a bounded window to finish on their own. Only the
   // stragglers still active at the deadline are aborted.
   beginDrain(reason);
+  // The platform may SIGKILL right after SIGTERM (Railway's default grace is
+  // zero), so the evidence that these turns were cut short is written now,
+  // alongside the drain rather than after it. A turn that finishes during
+  // the drain settles its row and the stamp is moot.
+  const markPromise = markTurnsShutdown({
+    lockTtlSeconds: Math.ceil(drainMs / 1000) + 60,
+  }).catch(() => 0);
   const closePromise = new Promise<Error | null>((resolve) => {
     server.close((error) => resolve(error ?? null));
   });
@@ -66,6 +85,11 @@ export async function gracefullyShutdownApi(
   const abortPromise = abortTurns(reason);
   const closeError = await closePromise;
   await abortPromise;
+  // The stamps have had the drain and the abort to land. Give a slow one a
+  // last brief moment, but never let it hold up the exit: losing a stamp
+  // costs latency (the reconciler falls back to the lease), holding the
+  // process costs the platform's patience.
+  await Promise.race([markPromise, delay(STAMP_SETTLE_GRACE_MS)]);
   if (closeError) {
     logError('[api] Graceful shutdown failed', closeError);
   }

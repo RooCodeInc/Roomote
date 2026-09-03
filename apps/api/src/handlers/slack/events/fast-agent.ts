@@ -1,4 +1,5 @@
 import {
+  bindFastAgentTurnLockDurableRow,
   getOrCreateFastAgentSession,
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
@@ -289,12 +290,14 @@ export async function processFastAgentMessage(params: {
       return null;
     });
     if (durableTurn) {
-      activeTurnLock.durableRowId = durableTurn.id;
-      activeTurnLock.durableResume = () =>
-        wakeFastAgentParentEventNow({
-          conversationId: session.id,
-          eventKey: durableTurn.eventKey,
-        });
+      await bindFastAgentTurnLockDurableRow(activeTurnLock, {
+        rowId: durableTurn.id,
+        resume: () =>
+          wakeFastAgentParentEventNow({
+            conversationId: session.id,
+            eventKey: durableTurn.eventKey,
+          }),
+      });
     }
     params.onAccepted?.(() =>
       activeTurnLock.abort(

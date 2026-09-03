@@ -1,17 +1,21 @@
-const { acquireRedisLockMock } = vi.hoisted(() => ({
+const { acquireRedisLockMock, redisExistsMock } = vi.hoisted(() => ({
   acquireRedisLockMock: vi.fn(),
+  redisExistsMock: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', () => ({
   acquireRedisLock: acquireRedisLockMock,
+  getRedis: () => ({ exists: redisExistsMock }),
 }));
 
-const { releaseDurableClaimMock } = vi.hoisted(() => ({
+const { releaseDurableClaimMock, markShutdownMock } = vi.hoisted(() => ({
   releaseDurableClaimMock: vi.fn(),
+  markShutdownMock: vi.fn(),
 }));
 
 vi.mock('../fast-agent-conversation-repository', () => ({
   releaseFastAgentDurableTurnClaim: releaseDurableClaimMock,
+  markFastAgentDurableTurnShutdown: markShutdownMock,
 }));
 
 type TurnLockModule = typeof import('../fast-agent-turn-lock');
@@ -141,6 +145,106 @@ describe('Fast turn shutdown drain', () => {
 
     expect(resume).not.toHaveBeenCalled();
     await settledLock!();
+  });
+
+  it('stamps every bound durable turn with the stop signal, and only those', async () => {
+    markShutdownMock.mockResolvedValue(true);
+    const boundLock = await turnLock.acquireFastAgentTurnLock({ conversation });
+    boundLock!.durableRowId = 'durable-row-1';
+    const unboundLock = await turnLock.acquireFastAgentTurnLock({
+      conversation: otherConversation,
+    });
+
+    await expect(
+      turnLock.markActiveFastAgentTurnsShutdown({ lockTtlSeconds: 80 }),
+    ).resolves.toBe(1);
+
+    expect(markShutdownMock).toHaveBeenCalledTimes(1);
+    expect(markShutdownMock).toHaveBeenCalledWith('durable-row-1');
+    // The bound turn's lock is shortened (ownership-checked, through the
+    // lock's own renew script) so a kill cannot pin the conversation for the
+    // full TTL; the unbound turn's lock is untouched.
+    const [boundRedisLock, unboundRedisLock] = await Promise.all(
+      acquireRedisLockMock.mock.results.map((result) => result.value),
+    );
+    expect(boundRedisLock.renewDetailed).toHaveBeenCalledWith(80);
+    expect(unboundRedisLock.renewDetailed).not.toHaveBeenCalled();
+    // The stamp is evidence only: nothing is aborted or released by it.
+    expect(boundLock!.signal.aborted).toBe(false);
+    await boundLock!();
+    await unboundLock!();
+  });
+
+  it('keeps going when a shutdown stamp fails', async () => {
+    markShutdownMock.mockRejectedValueOnce(new Error('db down'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const boundLock = await turnLock.acquireFastAgentTurnLock({ conversation });
+    boundLock!.durableRowId = 'durable-row-2';
+
+    await expect(turnLock.markActiveFastAgentTurnsShutdown()).resolves.toBe(1);
+
+    expect(warn).toHaveBeenCalledOnce();
+    const [redisLock] = await Promise.all(
+      acquireRedisLockMock.mock.results.map((result) => result.value),
+    );
+    expect(redisLock.renewDetailed).not.toHaveBeenCalled();
+    warn.mockRestore();
+    await boundLock!();
+  });
+
+  it('stamps and shortens a row bound after the stop signal', async () => {
+    markShutdownMock.mockResolvedValue(true);
+    const lateLock = await turnLock.acquireFastAgentTurnLock({ conversation });
+    turnLock.beginFastAgentTurnDrain(
+      new turnLock.FastAgentProcessShutdownError('SIGTERM'),
+    );
+    // The one-time pass finds nothing bound yet.
+    await expect(
+      turnLock.markActiveFastAgentTurnsShutdown({ lockTtlSeconds: 80 }),
+    ).resolves.toBe(0);
+    expect(markShutdownMock).not.toHaveBeenCalled();
+
+    // A worker that claimed its row before the signal binds it during the
+    // drain: the binding itself stamps and shortens, so an immediate kill
+    // still leaves evidence and a short lock.
+    const resume = vi.fn().mockResolvedValue(undefined);
+    await turnLock.bindFastAgentTurnLockDurableRow(lateLock!, {
+      rowId: 'durable-row-late',
+      resume,
+    });
+    expect(lateLock!.durableRowId).toBe('durable-row-late');
+    expect(lateLock!.durableResume).toBe(resume);
+    expect(markShutdownMock).toHaveBeenCalledWith('durable-row-late');
+    const [redisLock] = await Promise.all(
+      acquireRedisLockMock.mock.results.map((result) => result.value),
+    );
+    expect(redisLock.renewDetailed).toHaveBeenCalledWith(80);
+    await lateLock!();
+  });
+
+  it('binds without stamping while no stop signal has arrived', async () => {
+    const lock = await turnLock.acquireFastAgentTurnLock({ conversation });
+    await turnLock.bindFastAgentTurnLockDurableRow(lock!, {
+      rowId: 'durable-row-calm',
+      resume: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(lock!.durableRowId).toBe('durable-row-calm');
+    expect(markShutdownMock).not.toHaveBeenCalled();
+    await lock!();
+  });
+
+  it('reports whether a conversation turn lock is currently held', async () => {
+    redisExistsMock.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+
+    await expect(turnLock.isFastAgentTurnLockHeld(conversation)).resolves.toBe(
+      true,
+    );
+    await expect(turnLock.isFastAgentTurnLockHeld(conversation)).resolves.toBe(
+      false,
+    );
+    expect(redisExistsMock).toHaveBeenCalledWith(
+      'fast-agent:conversation-lock:slack:workspace-1:conversation-1',
+    );
   });
 
   it('aborts stragglers with the reason the drain began with', async () => {

@@ -74,6 +74,14 @@ vi.mock('@roomote/communication', async (importOriginal) => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  // Real binding semantics so assertions on the bound row keep holding.
+  bindFastAgentTurnLockDurableRow: async (
+    lock: { durableRowId?: string; durableResume?: () => Promise<void> },
+    binding: { rowId: string; resume: () => Promise<void> },
+  ) => {
+    lock.durableRowId = binding.rowId;
+    lock.durableResume = binding.resume;
+  },
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
   resolveApiBaseUrl: () => 'https://roomote.example.com',
