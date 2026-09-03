@@ -170,7 +170,7 @@ describe('SessionUserInputCard', () => {
     expect(screen.getByText('First task ideas')).toBeInTheDocument();
     expect(
       screen.getByText(
-        'I found a few things I could do right away. Click the button to get it going:',
+        'Optional: choose something I can start working on right away.',
       ),
     ).toBeInTheDocument();
     expect(
