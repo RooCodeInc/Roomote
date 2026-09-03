@@ -1,3 +1,8 @@
+import {
+  SETUP_STARTER_TASK_IDS,
+  type SetupStarterTaskId,
+} from '@roomote/types';
+
 /**
  * Fixed catalog of starter tasks offered on the final /setup step.
  *
@@ -8,14 +13,7 @@
  * workspace may span every connected repository.
  */
 
-export const SETUP_STARTER_TASK_IDS = [
-  'speed-up-ci',
-  'security-scan',
-  'fix-test-flakes',
-  'update-dependencies',
-] as const;
-
-export type SetupStarterTaskId = (typeof SETUP_STARTER_TASK_IDS)[number];
+export { SETUP_STARTER_TASK_IDS, type SetupStarterTaskId };
 
 type SetupStarterTask = {
   id: SetupStarterTaskId;

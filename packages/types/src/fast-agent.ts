@@ -5,6 +5,12 @@ export const fastAgentSurfaces = [
   'discord',
   'teams',
   'telegram',
+  'linear',
+  'github',
+  'gitlab',
+  'bitbucket',
+  'ado',
+  'gitea',
   'automation',
   'web',
 ] as const;
@@ -50,6 +56,47 @@ export const fastAgentConversationSchema = z.discriminatedUnion('surface', [
     replyTarget: fastAgentReplyTargetSchema,
   }),
   z.object({
+    surface: z.literal('linear'),
+    ...fastAgentConversationIdentitySchema,
+    /**
+     * A Linear agent session. `workspaceId` is the Linear organization,
+     * `conversationId` and `replyTarget.channelId` are the agent session id;
+     * replies post as agent-session response activities.
+     */
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  /**
+   * Source-control surfaces: a pull request or issue discussion.
+   * `workspaceId` is `<host>/<owner>/<repo>`, `conversationId` and
+   * `replyTarget.channelId` are `pull/<number>` or `issues/<number>`, and
+   * `replyTarget.threadId` is the review comment a reply threads under.
+   */
+  z.object({
+    surface: z.literal('github'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('gitlab'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('bitbucket'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('ado'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('gitea'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
     surface: z.literal('automation'),
     ...fastAgentConversationIdentitySchema,
   }),
@@ -60,6 +107,30 @@ export const fastAgentConversationSchema = z.discriminatedUnion('surface', [
 ]);
 
 export type FastAgentConversation = z.infer<typeof fastAgentConversationSchema>;
+
+export const fastAgentSourceControlSurfaces = [
+  'github',
+  'gitlab',
+  'bitbucket',
+  'ado',
+  'gitea',
+] as const;
+
+export type FastAgentSourceControlSurface =
+  (typeof fastAgentSourceControlSurfaces)[number];
+
+export type FastAgentSourceControlConversation = Extract<
+  FastAgentConversation,
+  { surface: FastAgentSourceControlSurface }
+>;
+
+export function isFastAgentSourceControlConversation(
+  conversation: FastAgentConversation,
+): conversation is FastAgentSourceControlConversation {
+  return (fastAgentSourceControlSurfaces as readonly string[]).includes(
+    conversation.surface,
+  );
+}
 
 export type FastAgentCommunicationConversation = Extract<
   FastAgentConversation,
@@ -119,6 +190,23 @@ export function buildFastAgentChildTaskMetadata(parent: FastAgentParent): {
   return {
     communicationContextInherited: true,
     reportConsumer: 'orchestrator',
+    fastAgentSessionId: parent.sessionId,
+    fastAgentParent: parent,
+  };
+}
+
+/**
+ * Session linkage without orchestrator report ownership: the task shows up in
+ * the parent Fast session (session_tasks + the fast task list) and can emit
+ * parent events, but keeps its own workflow's report and communication
+ * behavior. Used for review-pipeline tasks attached to the session whose
+ * delegated work opened the reviewed PR.
+ */
+export function buildFastAgentSessionAttachment(parent: FastAgentParent): {
+  fastAgentSessionId: string;
+  fastAgentParent: FastAgentParent;
+} {
+  return {
     fastAgentSessionId: parent.sessionId,
     fastAgentParent: parent,
   };

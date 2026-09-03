@@ -248,7 +248,7 @@ export function buildSandboxInstruction(
   if (hasLiveBrowser) {
     lines.push(
       '',
-      'This environment exposes a sandbox-local browser surface for delegated visual proof.',
+      'This environment exposes a sandbox-local browser surface for visual proof captured through the `capture-visual-proof` skill.',
       "Use the exact hostname and port from the environment configuration's local browser URL for proof capture, preserving `localhost` versus `127.0.0.1` exactly as configured. Use configured external preview URLs only when the public proxy or hostname itself is part of what you need to validate.",
     );
   }

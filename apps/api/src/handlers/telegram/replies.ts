@@ -165,39 +165,6 @@ export async function editTelegramForumTopicBestEffort(input: {
   }
 }
 
-/** Replace the text and keyboard of a bot message (cards, status lines). */
-export async function editTelegramMessageBestEffort(input: {
-  chatId: string;
-  messageId: string;
-  text: string;
-  textFormat?: 'plain' | 'markdown';
-  buttons?: CommunicationMessageButton[][];
-}): Promise<boolean> {
-  const provider = await createTelegramCommunicationProvider();
-
-  if (!provider) {
-    return false;
-  }
-
-  try {
-    await provider.editMessageText({
-      channelId: input.chatId,
-      messageId: input.messageId,
-      text: input.text,
-      ...(input.textFormat ? { textFormat: input.textFormat } : {}),
-      ...(input.buttons ? { buttons: input.buttons } : {}),
-    });
-    return true;
-  } catch (error) {
-    apiLogger.warn(
-      `[telegram] Failed to edit Telegram message: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    return false;
-  }
-}
-
 /** Answer a callback query so the clicked button stops showing a spinner. */
 export async function answerTelegramCallbackQueryBestEffort(input: {
   callbackQueryId: string;

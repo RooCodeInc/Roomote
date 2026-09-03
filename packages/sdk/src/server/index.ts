@@ -109,6 +109,11 @@ export {
 } from './lib/artifacts/raw-url';
 export { createTaskArtifactRecord } from './lib/artifacts/create-record';
 export {
+  createFastAgentConversationArtifact,
+  createFastAgentSessionArtifact,
+  createSessionArtifact,
+} from './lib/artifacts/create-session-artifact';
+export {
   notifyFastAgentParentOnArtifact,
   type FastArtifactNotificationResult,
 } from './lib/artifacts/notify-fast-agent-parent';
@@ -211,6 +216,7 @@ export {
   FastAgentParentBusyError,
   FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
   recoverPendingFastAgentParentEvents,
+  wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
   type FastAgentParentEventQueueRequest,
 } from './lib/fast-agent-parent-event-queue';
@@ -274,6 +280,7 @@ export {
   beginCanonicalPrReviewWebAutoDispatch,
   completeCanonicalPrReviewAutoDispatch,
   consumePendingPrReviewActivity,
+  dispatchCanonicalPrReviewAutoFollowUp,
   dispatchDuePrReviewNotifications,
   enqueuePrReviewNotification,
   enqueuePrReviewNotificationInputSchema,
@@ -288,6 +295,7 @@ export {
   prReviewActivityEventSchema,
   prReviewNotificationRequestSchema,
   requeuePendingPrReviewActivity,
+  retrySupersededPrReviewAction,
   resolvePrReviewNotificationRoute,
   schedulePrReviewNotificationJob,
   startPrReviewNotificationCycle,
@@ -305,6 +313,7 @@ export {
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
   getTaskPrReviewOfferStatus,
+  updateFastAgentPrReviewOfferStatus,
   updateTaskPrReviewOfferStatus,
   triagePrReviewActivity,
   type PreparedPrReviewNotification,
@@ -313,6 +322,11 @@ export {
 export * from './lib/task-runs/pr-review-action';
 export * from './lib/task-runs/pr-review-follow-up-dispatch';
 export * from './lib/fast-agent-surface-reply';
+export * from './lib/linear-fast-session';
+export * from './lib/linear-fast-session-turn';
+export * from './lib/source-control-fast-delivery';
+export * from './lib/source-control-fast-session';
+export * from './lib/fast-agent-slack-reply-stream';
 export * from './lib/fast-agent-provider-message';
 export * from './lib/task-runs/notify-fast-agent-parent-on-pr-feedback';
 export * from './lib/task-runs/notify-fast-agent-parent-on-pull-request-conflict';

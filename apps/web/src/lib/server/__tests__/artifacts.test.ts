@@ -55,13 +55,18 @@ describe('validateArtifactPath', () => {
     });
   });
 
-  it('should reject paths starting with /', () => {
-    const maliciousPaths = ['/etc/passwd', '/root/secret.txt', '/file.txt'];
+  it('should reject absolute paths', () => {
+    const maliciousPaths = [
+      '/etc/passwd',
+      '/root/secret.txt',
+      '/file.txt',
+      'C:\\Users\\roomote\\secret.txt',
+    ];
 
     maliciousPaths.forEach((path) => {
       const result = validateArtifactPath(path);
       expect(result.valid).toBe(false);
-      expect(result.error).toBe('Invalid path: must be relative to workspace');
+      expect(result.error).toBe('Invalid path: absolute paths are not allowed');
     });
   });
 
@@ -71,7 +76,7 @@ describe('validateArtifactPath', () => {
     maliciousPaths.forEach((path) => {
       const result = validateArtifactPath(path);
       expect(result.valid).toBe(false);
-      expect(result.error).toBe('Invalid path: contains null byte');
+      expect(result.error).toBe('Invalid path: null byte detected');
     });
   });
 

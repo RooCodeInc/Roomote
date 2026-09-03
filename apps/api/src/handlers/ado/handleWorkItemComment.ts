@@ -1,4 +1,3 @@
-import { getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   createAdoWorkItemComment,
   getAdoDeploymentUser,
@@ -19,7 +18,15 @@ import type { WebhookResponse } from '../../types';
 import { pickHostScopedRepository, toHostFromUrl } from '../utils';
 import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
 import { resolveMappedEnvironmentId } from '../shared/repository-environment';
-import { orchestrateIssueMention } from '../shared/issue-mention-orchestration';
+import {
+  startSourceControlFastSessionTurn,
+  type SourceControlFastDiscussion,
+} from '@roomote/sdk/server';
+import {
+  buildSourceControlIssueMentionContext,
+  resolveSourceControlIssueActiveTasks,
+  SOURCE_CONTROL_FAST_UNAVAILABLE_MESSAGE,
+} from '../shared/source-control-mention';
 import {
   getAdoIdentityName,
   isRoomoteAdoIdentity,
@@ -254,49 +261,6 @@ async function postWorkItemMentionResponseComment({
   }
 }
 
-function tryBuildTaskLink({
-  taskId,
-  campaign,
-}: {
-  taskId: string;
-  campaign: string;
-}): string | null {
-  try {
-    return getTaskUrl({
-      taskId,
-      utm: { source: 'ado-work-item-comment', campaign },
-    });
-  } catch (error) {
-    console.warn(
-      `[handleAdoWorkItemComment] failed to build task link for ${taskId}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-
-    return null;
-  }
-}
-
-function formatStartedReply(taskLink: string | null): string {
-  if (taskLink) {
-    return `I'm on it. I started a task for this work item, and I'll keep updates here.\n\n[See task](${taskLink})`;
-  }
-
-  return `I'm on it. I started a task for this work item, and I'll keep updates here.`;
-}
-
-function formatFollowUpReply(taskLink: string | null): string {
-  if (taskLink) {
-    return `I'm on it. I routed this request into the existing task for this work item so follow-up work stays on one Roomote thread, and I'll keep updates here.\n\n[See task](${taskLink})`;
-  }
-
-  return `I'm on it. I routed this request into the existing task for this work item so follow-up work stays on one Roomote thread, and I'll keep updates here.`;
-}
-
-function buildStartFailedComment(): string {
-  return `I saw the mention, but I could not start a task for this work item right now. Please try again in a moment.`;
-}
-
 /**
  * Resolve an active ADO repository for a work-item project. Prefers a repo
  * that already has an environment mapping so StandardTask launch can proceed.
@@ -470,36 +434,53 @@ export async function handleAdoWorkItemComment(
       : null;
   const workItemType = getStringField(fields, 'System.WorkItemType')?.trim();
 
-  return orchestrateIssueMention({
+  const discussion: SourceControlFastDiscussion = {
     provider: 'ado',
-    logPrefix: '[handleAdoWorkItemComment]',
-    repositoryId: repo.id,
+    host: repo.host ?? webhookHost ?? 'dev.azure.com',
+    repositoryFullName: repo.fullName,
+    kind: 'issues',
+    number: workItemId,
+  };
+  const activeTasks = await resolveSourceControlIssueActiveTasks({
+    provider: 'ado',
     repositoryFullName: repo.fullName,
     issueNumber: workItemId,
-    issueTitle: workItemTitle,
-    issueBody: workItemBody,
-    issueUrl: workItemUrl,
-    commentBody,
-    commenterLogin: commenter,
-    commenterUserId: linkedAccount.userId,
-    sourceControlHost: repo.host,
-    includeSourceControlOnPayload: true,
-    followUpCommenterDisplayName: commenter,
-    providerDisplayName: 'Azure DevOps',
-    resourceLabel: workItemType
-      ? `${workItemType.toLowerCase()} work item`
-      : 'work item',
-    issueBodySource: 'ado_work_item_description',
-    issueBodyContextLabel: `Work item description (context only):`,
-    postComment: (body) =>
-      postWorkItemMentionResponseComment({
-        project: projectName,
-        workItemId,
-        body,
-      }),
-    formatFollowUpReply,
-    formatStartedReply,
-    formatStartFailed: buildStartFailedComment,
-    tryBuildTaskLink,
+    host: discussion.host,
   });
+
+  const started = await startSourceControlFastSessionTurn({
+    discussion,
+    userId: linkedAccount.userId,
+    senderDisplayName: commenter,
+    question: commentBody,
+    agentContext: buildSourceControlIssueMentionContext({
+      providerLabel: 'Azure DevOps',
+      issueLabel: 'Work item',
+      repositoryFullName: repo.fullName,
+      number: workItemId,
+      title: workItemTitle,
+      body: workItemBody,
+      url: workItemUrl,
+      commenter,
+      commentBody,
+      ...(workItemType ? { extraLines: [`Type: ${workItemType}`] } : {}),
+    }),
+    currentMessageId: `ado:work-item:${workItemId}:${resource.rev ?? Date.now()}`,
+    activeTasks,
+  });
+
+  if (started.status !== 'queued') {
+    await postWorkItemMentionResponseComment({
+      project: projectName,
+      workItemId,
+      body: SOURCE_CONTROL_FAST_UNAVAILABLE_MESSAGE,
+    });
+    return { status: 'error', message: 'fast_unavailable' };
+  }
+
+  return {
+    status: 'ok',
+    message: 'fast_session_queued',
+    metadata: { fastConversationId: started.fastConversationId },
+  };
 }

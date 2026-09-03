@@ -72,7 +72,8 @@ export type TaskArtifact = {
 
 export type ArtifactWithContent = {
   id: string;
-  taskId: string;
+  taskId: string | null;
+  sessionId?: string | null;
   path: string;
   version: number;
   artifactType: TaskArtifactType;

@@ -1,4 +1,4 @@
-import type { FastAgentConversation } from '@roomote/types';
+import type { FastAgentConversation, ReasoningEffort } from '@roomote/types';
 
 export {
   isFastAgentCommunicationConversation,
@@ -25,7 +25,8 @@ export type FastAgentPlatformEventHandling = 'default' | 'present_only';
 export type FastAgentPlatformEventKind =
   | 'delegated_task'
   | 'automation'
-  | 'setup';
+  | 'setup'
+  | 'input_response';
 
 export type FastAgentReactionExternalInput = {
   type: 'reaction_added';
@@ -60,6 +61,9 @@ export function buildFastAgentReactionExternalInputQuestion(
 export type FastAgentSuggestedTask = {
   title: string;
   brief: string;
+  /** Exact environment ID or a platform workspace sentinel. Omission keeps
+   * the existing router-selected launch behavior. */
+  environmentId?: string;
 };
 
 export type FastAgentReply = {
@@ -78,19 +82,50 @@ export type FastAgentReplyHandle = {
   messageId: string;
 };
 
+/**
+ * A reply rendered on its surface while the model is still writing it.
+ * `append` opens the stream on first use and extends it afterwards;
+ * `finish` ends it with the delivered reply and returns the message, or
+ * nothing when the stream never opened so the caller posts normally;
+ * `abort` ends it without a reply, leaving what was streamed.
+ */
+export type FastAgentReplyStream = {
+  append: (text: string) => Promise<void>;
+  finish: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | undefined>;
+  abort: () => Promise<void>;
+};
+
 export type FastAgentReaction = {
   name: string;
   purpose: 'ack' | 'closeout';
   messageId: string;
 };
 
+export type CreateFastAgentArtifact = (params: {
+  path: string;
+  content: string;
+  contentType: string;
+  artifactType: 'general' | 'plan';
+}) => Promise<{
+  id: string;
+  path: string;
+  version: number;
+  artifactType: 'general' | 'plan';
+  contentType: string;
+  size: number;
+  viewUrl: string;
+}>;
+
 export type LaunchFastAgentTask = (params: {
   prompt: string;
   images?: string[];
   environmentId: string | null;
   branch?: string;
+  /** Optional launch idempotency key persisted in the standard task-run
+   * payload; a partial unique index makes concurrent retries converge. */
   launchIdempotencyKey?: string;
   model?: string | null;
+  reasoningEffort?: ReasoningEffort | null;
   parentSessionId: string;
   postKickoff: (task: {
     taskId: string;
@@ -127,10 +162,36 @@ export type FastAgentMcpServerConfig = {
   disabledTools?: string[];
 };
 
+/** Structured input request issued with the Fast-native request_user_input tool. */
+export type FastAgentInputRequest = {
+  requestId: string;
+  preset?: FastAgentInputPreset;
+  questions: Array<{
+    id: string;
+    header: string;
+    question: string;
+    isOther: boolean;
+    isSecret: boolean;
+    options?: Array<{ label: string; description: string }>;
+    multiple?: boolean;
+  }>;
+};
+
+export type FastAgentInputPreset = 'setup_starter_tasks';
+
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
+  /** Persist inline text output against the owning Session. */
+  createArtifact?: CreateFastAgentArtifact;
+  /**
+   * Optional surface-specific launch gate. Use this for durable product
+   * readiness conditions that the model prompt alone must not enforce.
+   */
+  assertTaskLaunch?: () => Promise<void>;
   postReply: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | void>;
+  /** Surfaces with a streaming API render the reply as it is written. */
+  createReplyStream?: () => FastAgentReplyStream;
   replaceReply?: (
     handle: FastAgentReplyHandle,
     reply: FastAgentReply,
@@ -141,10 +202,24 @@ export type FastAgentTurnAdapter = {
   resolveMcpServerConfigs?: () => Promise<
     Record<string, FastAgentMcpServerConfig>
   >;
+  /** Called when the turn ends waiting on structured user input. The caller
+   * persists the pending request and marks the session needs_input. */
+  requestUserInput?: (request: FastAgentInputRequest) => Promise<void>;
+  /** Resolve a trusted preset without accepting model-supplied options. */
+  resolveUserInputPreset?: (
+    preset: FastAgentInputPreset,
+  ) => Promise<FastAgentInputRequest['questions']>;
   /**
    * Called when an interrupted turn is still safe to replay and has handed
    * itself back to the durable queue; wakes the queue so recovery does not
    * wait for the next sweep. Best effort.
    */
   requestDurableResume?: () => Promise<void>;
+  /**
+   * Called when a turn has parked itself for a durable inference
+   * retry; schedules the queue wakeup for `retryAt` so the retry does not
+   * wait for a recovery sweep. Best effort. Without this hook the turn keeps
+   * its retry backoff in process.
+   */
+  requestDurableRetry?: (retryAt: Date) => Promise<void>;
 };

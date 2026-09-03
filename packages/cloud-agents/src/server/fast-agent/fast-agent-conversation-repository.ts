@@ -10,6 +10,7 @@ import {
   fastAgentParentEvents,
   ensureSessionForFastConversation,
   advanceSessionNotifiedCursor,
+  attachFastConversationToSession,
   advanceSessionReadCursor,
   getSessionForFastConversation,
   gt,
@@ -211,6 +212,187 @@ export async function markFastAgentInferenceRetryNoticeInterruption(
   return stamped.length > 0;
 }
 
+/** One action the interrupted attempt of a turn took, as the transcript recorded it. */
+export type FastAgentTurnAttemptAction = {
+  kind: 'action';
+  tool: string;
+  arguments: unknown;
+  /** 'unknown' when the call was recorded but the process died before its result. */
+  status: 'completed' | 'failed' | 'unknown';
+  result?: string;
+};
+
+export type FastAgentTurnAttemptReply = {
+  kind: 'reply';
+  /** A visible assistant reply the attempt already posted. */
+  text: string;
+};
+
+export type FastAgentTurnAttemptEvent =
+  | FastAgentTurnAttemptReply
+  | FastAgentTurnAttemptAction;
+
+export type FastAgentTurnAttemptSummary = {
+  /** Everything the attempt did, in transcript order, up to where it was cut. */
+  events: FastAgentTurnAttemptEvent[];
+  /**
+   * Where the resumed run must continue numbering its canonical events so
+   * its rows extend the transcript instead of overwriting the attempt's.
+   */
+  next: {
+    assistantOrdinal: number;
+    toolOrdinal: number;
+    retryNoticeOrdinal: number;
+    turnSeq: number;
+  };
+  /** The attempt's prompt row, so the resumed run keeps its place and time. */
+  prompt: { ts: number; turnSeq: number } | null;
+};
+
+const TURN_ATTEMPT_RESULT_MAX_CHARS = 1_200;
+
+/**
+ * What an earlier attempt at this turn already did, for the run that resumes
+ * it. Every tool call is recorded before it executes and its result after,
+ * so a resumed run can be told exactly what happened instead of starting the
+ * turn over and repeating actions. A call with no result is reported as
+ * unknown: the process died between starting it and recording the outcome.
+ */
+export async function loadFastAgentTurnAttemptSummary(
+  conversationId: string,
+  turnId: string,
+): Promise<FastAgentTurnAttemptSummary> {
+  const rows = await db
+    .select({
+      eventId: fastAgentMessages.eventId,
+      turnSeq: fastAgentMessages.turnSeq,
+      ts: fastAgentMessages.ts,
+      eventType: fastAgentMessages.eventType,
+      role: fastAgentMessages.role,
+      contentBlocks: fastAgentMessages.contentBlocks,
+      metadata: fastAgentMessages.metadata,
+      payload: fastAgentMessages.payload,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.turnId, turnId),
+      ),
+    )
+    .orderBy(fastAgentMessages.turnSeq, fastAgentMessages.ts);
+
+  const text = (blocks: unknown) =>
+    Array.isArray(blocks)
+      ? blocks
+          .flatMap((block) =>
+            block &&
+            typeof block === 'object' &&
+            (block as { type?: unknown }).type === 'text'
+              ? [String((block as { text?: unknown }).text ?? '')]
+              : [],
+          )
+          .join('')
+      : '';
+
+  const events: FastAgentTurnAttemptEvent[] = [];
+  // A call and its result share one canonical event, so normally only one row
+  // per call survives; when both are present the later row wins in place.
+  const actionIndexByCallId = new Map<string, number>();
+  const next = {
+    assistantOrdinal: 0,
+    toolOrdinal: 0,
+    retryNoticeOrdinal: 0,
+    turnSeq: 0,
+  };
+  let prompt: FastAgentTurnAttemptSummary['prompt'] = null;
+  const ordinalOf = (slot: string, eventId: string) => {
+    const match = new RegExp(`:${slot}:(\\d+)$`, 'u').exec(eventId);
+    return match ? Number(match[1]) + 1 : 0;
+  };
+  for (const row of rows) {
+    if (
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+      row.eventId === `${turnId}:user`
+    ) {
+      prompt = { ts: Number(row.ts), turnSeq: row.turnSeq };
+    }
+    next.turnSeq = Math.max(next.turnSeq, row.turnSeq + 1);
+    next.assistantOrdinal = Math.max(
+      next.assistantOrdinal,
+      ordinalOf('assistant', row.eventId),
+    );
+    next.toolOrdinal = Math.max(
+      next.toolOrdinal,
+      ordinalOf('tool', row.eventId),
+    );
+    next.retryNoticeOrdinal = Math.max(
+      next.retryNoticeOrdinal,
+      ordinalOf('retry-notice', row.eventId),
+    );
+    const payload = (row.payload ?? {}) as Record<string, unknown>;
+    const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+    if (
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall ||
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult
+    ) {
+      // A call and its result share one canonical event, so the result row
+      // replaces the call row once it lands and carries the arguments with
+      // it. A call row that is still present therefore has no result: the
+      // process died between starting the call and recording its outcome.
+      const toolCallId = String(payload.toolCallId ?? '');
+      if (!toolCallId) continue;
+      // Native and MCP calls wrap their input as `rawInput.arguments`;
+      // subagent task calls persist the input object directly.
+      const rawInput = payload.rawInput as
+        | { arguments?: unknown }
+        | Record<string, unknown>
+        | undefined;
+      const action: FastAgentTurnAttemptAction = {
+        kind: 'action',
+        tool: String(payload.toolName ?? payload.title ?? 'tool'),
+        arguments:
+          rawInput && typeof rawInput === 'object'
+            ? 'arguments' in rawInput
+              ? rawInput.arguments
+              : rawInput
+            : null,
+        status:
+          row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall
+            ? 'unknown'
+            : payload.status === 'failed'
+              ? 'failed'
+              : 'completed',
+      };
+      if (action.status !== 'unknown') {
+        const output = text(row.contentBlocks);
+        if (output) {
+          action.result =
+            output.length > TURN_ATTEMPT_RESULT_MAX_CHARS
+              ? `${output.slice(0, TURN_ATTEMPT_RESULT_MAX_CHARS)}…`
+              : output;
+        }
+      }
+      const index = actionIndexByCallId.get(toolCallId);
+      if (index === undefined) {
+        actionIndexByCallId.set(toolCallId, events.length);
+        events.push(action);
+      } else {
+        events[index] = action;
+      }
+    } else if (
+      row.role === 'assistant' &&
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+      metadata.visibleInTranscript !== false &&
+      metadata.interruptionReason === undefined
+    ) {
+      const reply = text(row.contentBlocks).trim();
+      if (reply) events.push({ kind: 'reply', text: reply });
+    }
+  }
+  return { events, next, prompt };
+}
+
 export type FastAgentUnresolvedRequest = {
   /** Turn whose human request never received a completed answer. */
   turnId: string;
@@ -390,6 +572,78 @@ export async function revokeFastAgentDurableTurnReplay(
   return rows.length > 0;
 }
 
+/**
+ * Park the turn for a durable inference retry: the owner gives up its claim
+ * and the queue re-runs the row once `retryAt` arrives, on whichever process
+ * is alive then. The consumed retry count travels with the row so the
+ * per-turn cap holds across owners. False once the row is no longer pending
+ * (superseded or already withdrawn), in which case the caller keeps the
+ * retry in process.
+ */
+export async function scheduleFastAgentDurableTurnRetry(
+  id: string,
+  params: { retryAt: Date; inferenceRetries: number; reason: string },
+): Promise<boolean> {
+  const rows = await db
+    .update(fastAgentParentEvents)
+    .set({
+      claimedUntil: null,
+      retryAt: params.retryAt,
+      inferenceRetries: params.inferenceRetries,
+      lastError: params.reason,
+      updatedAt: new Date(),
+    })
+    .where(pendingDurableTurnWhere(id))
+    .returning({ id: fastAgentParentEvents.id });
+  return rows.length > 0;
+}
+
+export type FastAgentActiveInferenceRetryNotice = {
+  eventId: string;
+  ts: number;
+  text: string;
+  platformMessageId: string | null;
+};
+
+/**
+ * The retry notice a previous execution of this same turn left active, so a
+ * resumed run can keep editing that notice instead of reconciling it into
+ * an interruption and posting its answer beside a stale "retrying" message.
+ */
+export async function findFastAgentActiveInferenceRetryNotice(
+  conversationId: string,
+  turnId: string,
+): Promise<FastAgentActiveInferenceRetryNotice | null> {
+  const [notice] = await db
+    .select({
+      eventId: fastAgentMessages.eventId,
+      ts: fastAgentMessages.ts,
+      contentBlocks: fastAgentMessages.contentBlocks,
+      metadata: fastAgentMessages.metadata,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.turnId, turnId),
+        activeInferenceRetryNoticeWhere(),
+      ),
+    )
+    .orderBy(desc(fastAgentMessages.ts))
+    .limit(1);
+  if (!notice) return null;
+  const platformMessageId = notice.metadata?.platformMessageId;
+  return {
+    eventId: notice.eventId,
+    ts: notice.ts,
+    text: notice.contentBlocks
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('\n'),
+    platformMessageId:
+      typeof platformMessageId === 'string' ? platformMessageId : null,
+  };
+}
+
 /** The turn produced its outcome; nothing is left to recover. */
 export async function markFastAgentDurableTurnDelivered(
   id: string,
@@ -446,6 +700,19 @@ export async function reconcileExpiredFastAgentInferenceRetryNotices(
           isNull(sessions.respondingUntil),
           lt(sessions.respondingUntil, new Date()),
         ),
+        // A durably scheduled retry (or a live inline claim) means the turn
+        // is still owned by recovery, not orphaned: its notice will be
+        // edited by the resumed run, so an expired lease must not turn it
+        // into an interruption in the meantime.
+        sql`not exists (
+          select 1 from ${fastAgentParentEvents}
+          where ${fastAgentParentEvents.conversationId} = ${fastAgentMessages.conversationId}
+            and ${fastAgentParentEvents.admission} = 'inline'
+            and ${fastAgentParentEvents.deliveredAt} is null
+            and ${fastAgentParentEvents.discardedAt} is null
+            and (${fastAgentParentEvents.retryAt} > now()
+              or ${fastAgentParentEvents.claimedUntil} > now())
+        )`,
       ),
     )
     .limit(limit);
@@ -470,6 +737,12 @@ export interface FastAgentConversationRepository {
   getOrCreate(input: {
     userId: string;
     conversation: FastAgentConversation;
+    /**
+     * Session to bind a newly created conversation to, when that Session has
+     * no conversation yet. A conversation that already exists keeps its own
+     * Session.
+     */
+    sessionId?: string;
   }): Promise<FastAgentConversationGetOrCreateResult>;
   findById(input: {
     id: string;
@@ -609,7 +882,7 @@ async function loadConversationRecord(
 
 export const fastAgentConversationRepository: FastAgentConversationRepository =
   {
-    async getOrCreate({ userId, conversation }) {
+    async getOrCreate({ userId, conversation, sessionId }) {
       return db.transaction(async (tx) => {
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${buildIdentityKey(conversation)}, 0))`,
@@ -625,6 +898,26 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           record = await tx.query.fastAgentConversations.findFirst({
             where: replyTargetWhere,
           });
+        }
+
+        // Launches into one Session with different conversation identities
+        // must agree on a single conversation. Serialize on the Session and
+        // reuse the conversation a concurrent launch already bound to it.
+        if (!record && sessionId) {
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-session-binding:${sessionId}`}, 0))`,
+          );
+          const [bound] = await tx
+            .select({ fastConversationId: sessions.fastConversationId })
+            .from(sessions)
+            .where(eq(sessions.id, sessionId))
+            .limit(1);
+          if (bound?.fastConversationId) {
+            return {
+              ...(await loadConversationRecord(tx, bound.fastConversationId)),
+              created: false,
+            };
+          }
         }
 
         if (!record) {
@@ -684,10 +977,20 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           .where(eq(fastAgentConversations.id, record.id))
           .returning();
 
-        await ensureSessionForFastConversation(tx, updated?.id ?? record.id);
+        const conversationId = updated?.id ?? record.id;
+        const attached =
+          created && sessionId
+            ? await attachFastConversationToSession(tx, {
+                sessionId,
+                fastConversationId: conversationId,
+              })
+            : null;
+        if (!attached) {
+          await ensureSessionForFastConversation(tx, conversationId);
+        }
 
         return {
-          ...(await loadConversationRecord(tx, updated?.id ?? record.id)),
+          ...(await loadConversationRecord(tx, conversationId)),
           created,
         };
       });

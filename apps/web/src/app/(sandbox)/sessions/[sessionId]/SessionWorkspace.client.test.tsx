@@ -11,7 +11,7 @@ import {
 
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
 import {
-  SessionHeaderExtras,
+  SessionHeaderPullRequests,
   SessionWorkspace,
   type SessionInfo,
 } from './SessionWorkspace';
@@ -37,7 +37,8 @@ const {
   routerReplaceMock: vi.fn(),
   artifactQueryState: { dataByPath: {} as Record<string, unknown> },
   artifactQueryInputs: [] as Array<{
-    taskId: string;
+    taskId?: string;
+    sessionId?: string;
     path: string;
     version?: number;
   }>,
@@ -87,22 +88,55 @@ vi.mock('@/trpc/client', () => ({
     artifacts: {
       byPath: {
         queryOptions: (
-          input: { taskId: string; path: string; version?: number },
+          input: {
+            taskId?: string;
+            sessionId?: string;
+            path: string;
+            version?: number;
+          },
           options?: Record<string, unknown>,
         ) => ({
           queryKey: ['artifacts', 'byPath', input],
           queryFn: async () => {
             artifactQueryInputs.push(input);
             return (
-              artifactQueryState.dataByPath[`${input.taskId}:${input.path}`] ??
-              artifactQueryState.dataByPath[input.path]
+              artifactQueryState.dataByPath[
+                `${input.taskId ?? input.sessionId}:${input.path}`
+              ] ?? artifactQueryState.dataByPath[input.path]
             );
           },
           ...options,
         }),
       },
     },
+    previewSettings: {
+      taskStatus: {
+        queryOptions: (
+          input: { taskId: string },
+          options?: Record<string, unknown>,
+        ) => ({
+          queryKey: ['previewSettings', 'taskStatus', input],
+          queryFn: async () => null,
+          ...options,
+        }),
+        queryKey: (input: { taskId: string }) => [
+          'previewSettings',
+          'taskStatus',
+          input,
+        ],
+      },
+      startSetupTask: {
+        mutationOptions: (options?: Record<string, unknown>) => ({
+          mutationFn: async () => ({ taskId: 'task-1', alreadyRunning: false }),
+          ...options,
+        }),
+      },
+    },
   }),
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({ isAdmin: true }),
 }));
 
 vi.mock('@/components/tasks/ArtifactViewerContent', () => ({
@@ -187,6 +221,7 @@ const singleTask: SessionInfo['tasks'][number] = {
   canAccessDetails: true,
   latestRun: null,
   artifacts: [],
+  previews: [],
   pullRequests: [],
 };
 
@@ -339,17 +374,21 @@ describe('SessionWorkspace', () => {
     };
   });
 
-  it('orders panel controls as tasks, artifacts, then session info', () => {
+  it('orders panel controls as tasks, preview, artifacts, then session info', () => {
     renderWorkspace({
       isMobile: false,
       sessionOverride: { tasks: [singleTask] },
     });
 
     const tasks = screen.getByRole('button', { name: 'Tasks' });
+    const preview = screen.getByRole('button', { name: 'Live Preview' });
     const artifacts = screen.getByRole('button', { name: 'Artifacts' });
     const sessionInfo = screen.getByRole('button', { name: 'Session info' });
 
-    expect(tasks.compareDocumentPosition(artifacts)).toBe(
+    expect(tasks.compareDocumentPosition(preview)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(preview.compareDocumentPosition(artifacts)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
     expect(artifacts.compareDocumentPosition(sessionInfo)).toBe(
@@ -421,11 +460,11 @@ describe('SessionWorkspace', () => {
 
     renderWorkspace({
       isMobile: false,
-      children: <SessionHeaderExtras status="active" />,
+      children: <SessionHeaderPullRequests />,
       sessionOverride: { tasks: [firstTask, secondTask] },
     });
 
-    expect(await screen.findByText('active')).toBeVisible();
+    expect(screen.queryByText('active')).toBeNull();
     expect(screen.getByRole('link', { name: 'widgets#42' })).toHaveAttribute(
       'href',
       'https://github.com/acme/widgets/pull/42',
@@ -440,7 +479,7 @@ describe('SessionWorkspace', () => {
   it('updates header pull requests from refreshed session tasks', async () => {
     const { queryClient } = renderWorkspace({
       isMobile: false,
-      children: <SessionHeaderExtras status="active" />,
+      children: <SessionHeaderPullRequests />,
       sessionOverride: { tasks: [] },
     });
 
@@ -475,6 +514,7 @@ describe('SessionWorkspace', () => {
     expect(
       await screen.findByRole('link', { name: 'new#123' }),
     ).toHaveAttribute('target', '_blank');
+    expect(screen.queryByText('active')).toBeNull();
   });
 
   it('matches the task sidebar replacement behavior and controls on mobile', () => {
@@ -493,7 +533,7 @@ describe('SessionWorkspace', () => {
     expect(
       screen.getByRole('heading', { name: 'Session Info' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('needs input')).toBeInTheDocument();
+    expect(screen.queryByText('needs input')).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Close session info' }),
     ).toBeNull();
@@ -742,6 +782,142 @@ describe('SessionWorkspace', () => {
     expect(screen.queryByText('No artifacts in this session yet.')).toBeNull();
   });
 
+  it('shows artifacts created directly by the Session', async () => {
+    artifactQueryState.dataByPath['session-1:notes/decision.md'] = {
+      id: 'session-artifact',
+      taskId: null,
+      sessionId: 'session-1',
+      path: 'notes/decision.md',
+      version: 1,
+      artifactType: 'general',
+      contentType: 'text/markdown',
+      size: 100,
+      createdAt: new Date('2026-01-05T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/session-artifact/download',
+    };
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: {
+        artifacts: [
+          {
+            id: 'session-artifact',
+            path: 'notes/decision.md',
+            version: 1,
+            artifactType: 'general',
+            contentType: 'text/markdown',
+            size: 100,
+            createdAt: new Date('2026-01-05T00:00:00.000Z'),
+          },
+        ],
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Open Decision from Session' }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Open Decision from Session' }),
+    );
+    await waitFor(() =>
+      expect(artifactQueryInputs).toContainEqual({
+        sessionId: 'session-1',
+        path: 'notes/decision.md',
+        version: 1,
+      }),
+    );
+  });
+
+  it('opens a deep-linked Session artifact without a click and clears the link on back', async () => {
+    artifactQueryState.dataByPath['session-1:notes/decision.md'] = {
+      id: 'session-artifact',
+      taskId: null,
+      sessionId: 'session-1',
+      path: 'notes/decision.md',
+      version: 1,
+      artifactType: 'general',
+      contentType: 'text/markdown',
+      size: 100,
+      createdAt: new Date('2026-01-05T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/session-artifact/download',
+    };
+    renderWorkspace({
+      isMobile: false,
+      searchParams: 'artifact=notes%2Fdecision.md&v=1',
+      sessionOverride: {
+        artifacts: [
+          {
+            id: 'session-artifact',
+            path: 'notes/decision.md',
+            version: 2,
+            artifactType: 'general',
+            contentType: 'text/markdown',
+            size: 100,
+            createdAt: new Date('2026-01-05T00:00:00.000Z'),
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByRole('heading', { name: 'Decision' })).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Open Decision from Session' }),
+    ).toBeNull();
+    await waitFor(() =>
+      expect(artifactQueryInputs).toContainEqual({
+        sessionId: 'session-1',
+        path: 'notes/decision.md',
+        version: 1,
+      }),
+    );
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to artifacts' }));
+
+    expect(routerReplaceMock).toHaveBeenCalledWith('/sessions/session-1');
+    expect(
+      screen.getByRole('button', { name: 'Open Decision from Session' }),
+    ).toBeVisible();
+  });
+
+  it('shows the artifact gallery when a deep link matches no Session artifact', () => {
+    renderWorkspace({
+      isMobile: false,
+      searchParams: 'artifact=notes%2Fmissing.md&v=1',
+    });
+
+    expect(screen.getByRole('heading', { name: 'Artifacts' })).toBeVisible();
+    expect(screen.getByText('No artifacts in this session yet.')).toBeVisible();
+    expect(artifactQueryInputs).toEqual([]);
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+  });
+
+  it('leaves the side panel to the URL-selected task when a deep link also names an artifact', () => {
+    renderWorkspace({
+      isMobile: false,
+      queriedTasks: [singleTask],
+      searchParams: 'task=task-1&artifact=notes%2Fdecision.md&v=1',
+      sessionOverride: {
+        tasks: [singleTask],
+        artifacts: [
+          {
+            id: 'session-artifact',
+            path: 'notes/decision.md',
+            version: 1,
+            artifactType: 'general',
+            contentType: 'text/markdown',
+            size: 100,
+            createdAt: new Date('2026-01-05T00:00:00.000Z'),
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Decision' })).toBeNull();
+  });
+
   it('aggregates latest artifacts per task and preserves duplicate paths across tasks', async () => {
     const sharedPath = 'reports/result.md';
     const firstTask = {
@@ -848,6 +1024,68 @@ describe('SessionWorkspace', () => {
     ).toBeVisible();
   });
 
+  it('disables the Live Preview control until a linked task has a live preview', () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    expect(screen.getByRole('button', { name: 'Live Preview' })).toBeDisabled();
+  });
+
+  it('collates live previews across tasks into the embedded preview panel', () => {
+    const firstTask = {
+      ...singleTask,
+      title: 'First execution',
+      previews: [
+        {
+          serviceName: 'WEB_APP',
+          url: 'https://task-1-web-app.preview.test/dashboard',
+          isPrimary: true,
+          runId: 11,
+        },
+      ],
+    };
+    const secondTask = {
+      ...singleTask,
+      taskId: 'task-2',
+      title: 'Second execution',
+      previews: [
+        {
+          serviceName: 'API',
+          url: 'https://task-2-api.preview.test/',
+          isPrimary: true,
+          runId: 22,
+        },
+      ],
+    };
+
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { tasks: [firstTask, secondTask] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Live Preview' }));
+
+    // The first task's primary preview opens by default, with the task title
+    // folded into the service picker since several tasks expose previews.
+    expect(
+      screen.getByRole('button', {
+        name: /Live Preview: Web App - First execution/,
+      }),
+    ).toBeVisible();
+    const iframe = screen.getByTitle('Live Preview');
+    expect(iframe).toHaveAttribute(
+      'src',
+      `/api/auth/preview-iframe?${new URLSearchParams({
+        preview_url: 'https://task-1-web-app.preview.test/dashboard',
+        task_run_id: '11',
+      }).toString()}`,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel' }));
+    expect(screen.queryByTitle('Live Preview')).toBeNull();
+  });
+
   it('enables and populates the Tasks panel from refreshed session tasks', async () => {
     const delegatedTask = {
       taskId: 'task-2',
@@ -860,6 +1098,7 @@ describe('SessionWorkspace', () => {
       canAccessDetails: true,
       latestRun: null,
       artifacts: [],
+      previews: [],
       pullRequests: [],
     };
     renderWorkspace({
@@ -894,6 +1133,7 @@ describe('SessionWorkspace', () => {
             taskPhase: 'running',
           },
           artifacts: [],
+          previews: [],
         },
       ],
     });
@@ -927,6 +1167,7 @@ describe('SessionWorkspace', () => {
             taskPhase: 'running',
           },
           artifacts: [],
+          previews: [],
         },
         {
           taskId: 'task-3',
@@ -936,6 +1177,7 @@ describe('SessionWorkspace', () => {
             taskPhase: null,
           },
           artifacts: [],
+          previews: [],
         },
       ],
     });
@@ -958,6 +1200,63 @@ describe('SessionWorkspace', () => {
     expect(routerReplaceMock).not.toHaveBeenCalled();
   });
 
+  it('automatically opens the Tasks panel when a second task starts on desktop', async () => {
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      sessionOverride: { taskSource: 'fast', taskCards: [] },
+      queriedFastTasks: [
+        {
+          taskId: 'task-2',
+          title: 'First running task',
+          latestRun: {
+            status: RunStatus.Running,
+            taskPhase: 'running',
+          },
+          artifacts: [],
+          previews: [],
+        },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Tasks' })).toBeEnabled(),
+    );
+
+    act(() => {
+      queryClient.setQueryData(
+        ['fastSessions', 'tasks', session.id],
+        [
+          {
+            taskId: 'task-2',
+            title: 'First running task',
+            latestRun: {
+              status: RunStatus.Running,
+              taskPhase: 'running',
+            },
+            artifacts: [],
+            previews: [],
+          },
+          {
+            taskId: 'task-3',
+            title: 'Second running task',
+            latestRun: {
+              status: RunStatus.Pending,
+              taskPhase: null,
+            },
+            artifacts: [],
+            previews: [],
+          },
+        ],
+      );
+    });
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'View coding task: Second running task',
+      }),
+    ).toBeVisible();
+  });
+
   it('populates the Artifacts panel from refreshed Fast-session tasks', async () => {
     renderWorkspace({
       isMobile: false,
@@ -967,6 +1266,7 @@ describe('SessionWorkspace', () => {
           taskId: 'fast-task-1',
           title: 'Fast execution',
           latestRun: null,
+          previews: [],
           artifacts: [
             {
               id: 'fast-artifact-1',
@@ -1005,6 +1305,7 @@ describe('SessionWorkspace', () => {
         taskPhase,
       },
       artifacts: [],
+      previews: [],
     });
     const { queryClient } = renderWorkspace({
       isMobile: false,

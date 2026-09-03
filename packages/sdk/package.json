@@ -78,6 +78,7 @@
     "clean": "rimraf .turbo"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1000.0",
     "@roomote/ado": "workspace:^",
     "@roomote/auth": "workspace:^",
     "@roomote/bitbucket": "workspace:^",
@@ -86,7 +87,6 @@
     "@roomote/compute-providers": "workspace:^",
     "@roomote/db": "workspace:^",
     "@roomote/env": "workspace:*",
-    "@roomote/feature-flags": "workspace:^",
     "@roomote/gitea": "workspace:^",
     "@roomote/github": "workspace:^",
     "@roomote/gitlab": "workspace:^",

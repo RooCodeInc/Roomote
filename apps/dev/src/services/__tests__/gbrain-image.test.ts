@@ -37,5 +37,12 @@ describe('gbrain image configuration', () => {
     expect(entrypoint).toContain(
       'https://github.com/garrytan/gbrain/issues/4294',
     );
+    // A supervisor beaten to the queue lock by a container still being
+    // replaced retries instead of taking the server down (LOCK_HELD = 2).
+    expect(entrypoint).toContain('SUPERVISOR_LOCK_HELD_EXIT=2');
+    expect(entrypoint).toContain('run_job_worker &');
+    expect(entrypoint).toContain(
+      'retrying in ${SUPERVISOR_LOCK_RETRY_SECONDS}s',
+    );
   });
 });

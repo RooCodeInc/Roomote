@@ -43,6 +43,7 @@ const {
   mockTxUpdate,
   mockTxDelete,
   mockTxDeleteWhere,
+  mockTxExecute,
   mockEnv,
 } = vi.hoisted(() => ({
   mockEnsureAdoServiceHooksForRepositories: vi.fn(),
@@ -87,6 +88,7 @@ const {
   mockTxUpdate: vi.fn(),
   mockTxDelete: vi.fn(),
   mockTxDeleteWhere: vi.fn(),
+  mockTxExecute: vi.fn(),
   mockEnv: {
     R_APP_URL: 'https://roomote.example.com',
     R_PUBLIC_URL: undefined as string | undefined,
@@ -178,6 +180,7 @@ vi.mock('@roomote/db/server', () => ({
   getDeploymentMarkRoomotePrReadyAfterCleanReview:
     mockGetDeploymentMarkRoomotePrReadyAfterCleanReview,
   resolveDeploymentEnvVar: mockResolveDeploymentEnvVar,
+  sql: vi.fn(() => 'sql-expression'),
   setDeploymentPrAction: vi.fn(),
   setDeploymentGitHubRoomoteMentionEnabled:
     mockSetDeploymentGitHubRoomoteMentionEnabled,
@@ -333,7 +336,11 @@ describe('source-control commands', () => {
     mockTxDeleteWhere.mockResolvedValue(undefined);
     mockTxDelete.mockReturnValue({ where: mockTxDeleteWhere });
     mockTransaction.mockImplementation(async (callback) =>
-      callback({ update: mockTxUpdate, delete: mockTxDelete }),
+      callback({
+        execute: mockTxExecute,
+        update: mockTxUpdate,
+        delete: mockTxDelete,
+      }),
     );
     mockEnvironmentMappingRows.rows = [
       { repositoryId: 'ado-repo-row-1' },
@@ -396,6 +403,10 @@ describe('source-control commands', () => {
     });
 
     expect(mockDisableGitHubAppCommand).toHaveBeenCalledWith(auth);
+    expect(mockTxExecute).toHaveBeenCalledWith('sql-expression');
+    expect(mockTxExecute.mock.invocationCallOrder[0]).toBeLessThan(
+      mockDisableGitHubAppCommand.mock.invocationCallOrder[0]!,
+    );
     expect(mockDeleteDeploymentEnvironmentVariables).toHaveBeenCalledWith(
       expect.anything(),
       [

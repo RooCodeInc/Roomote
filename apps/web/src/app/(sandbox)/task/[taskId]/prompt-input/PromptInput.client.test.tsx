@@ -109,17 +109,12 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: useTRPCMock,
 }));
 
-const userFlagsState = vi.hoisted(() => ({
-  current: { composerSuggestions: true } as Record<string, boolean>,
-}));
-
 vi.mock('@/hooks/useUser', () => ({
   useUser: () => ({
     authStatus: 'signed-in',
     isSignedIn: true,
     user: {
       name: null,
-      featureFlags: userFlagsState.current,
       resource: { imageUrl: undefined },
     },
   }),
@@ -1262,7 +1257,6 @@ describe('PromptInput', () => {
 
 describe('PromptInput ghost suggestion', () => {
   function renderConnectedComposer() {
-    userFlagsState.current = { composerSuggestions: true };
     useSandboxTaskPhaseMock.mockReturnValue('waiting_for_prompt');
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
@@ -1307,9 +1301,21 @@ describe('PromptInput ghost suggestion', () => {
 
     expect(textarea).toBeInTheDocument();
     expect(
+      screen.queryByRole('button', { name: 'Insert suggested message' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.focus(textarea);
+
+    expect(
       screen.getByRole('button', { name: 'Insert suggested message' }),
-    ).toBeInTheDocument();
+    ).toHaveTextContent('Tab to accept');
     expect(screen.getByText(/Press Tab to accept/)).toBeInTheDocument();
+
+    fireEvent.blur(textarea);
+
+    expect(
+      screen.queryByRole('button', { name: 'Insert suggested message' }),
+    ).not.toBeInTheDocument();
   });
 
   it('accepts the suggestion with Tab', () => {
@@ -1322,6 +1328,17 @@ describe('PromptInput ghost suggestion', () => {
     expect(
       screen.queryByRole('button', { name: 'Insert suggested message' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('accepts the focused suggestion when its hint is clicked', () => {
+    const textarea = renderConnectedComposer();
+    fireEvent.focus(textarea);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Insert suggested message' }),
+    );
+
+    expect(textarea).toHaveValue('Add a regression test for that');
   });
 
   it('dismisses the suggestion with Escape and does not re-show it', () => {
@@ -1357,25 +1374,6 @@ describe('PromptInput ghost suggestion', () => {
     expect(screen.getByPlaceholderText(/Message agent/i)).toHaveValue(
       'my own message',
     );
-  });
-
-  it('does not request a suggestion when the experimental flag is off', () => {
-    renderConnectedComposer();
-    cleanup();
-
-    userFlagsState.current = {};
-    render(
-      <PromptInput
-        onFileSearchOpen={() => {}}
-        onCommandSearchOpen={() => {}}
-        taskRun={createTaskRun(1)}
-      />,
-    );
-
-    const queryArg = useQueryMock.mock.calls.at(-1)?.[0] as {
-      enabled?: boolean;
-    };
-    expect(queryArg?.enabled).toBe(false);
   });
 
   it('hides the ghost suggestion while the agent is still working', () => {

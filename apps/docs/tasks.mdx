@@ -106,6 +106,14 @@ look for:
 - a diff or pull request for code changes
 - a clear explanation when something could not be verified
 
+Visual proof should use genuine application, authentication, database, and
+backend state when practical. When an artifact instead uses disclosed simulated
+state to make a UI reachable, treat it as evidence only for the rendered
+appearance, layout, or interaction under that setup. It does not verify real
+data flow, authorization, backend behavior, network behavior, or an end-to-end
+journey. The task report and artifact metadata should identify the simulation
+and state those limits explicitly.
+
 | Surface           | What to look for                                                                           |
 | ----------------- | ------------------------------------------------------------------------------------------ |
 | Transcript        | Whether Roomote understood the ask, adapted to new context, and explained blockers clearly |

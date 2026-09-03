@@ -10,6 +10,11 @@ const mocks = vi.hoisted(() => ({
   slackPostThreadMessage: vi.fn(),
   slackUpdateMessage: vi.fn(),
   admitHumanFollowUp: vi.fn(),
+  resolveLinearClient: vi.fn(),
+  linearEmitResponse: vi.fn(),
+  linearGetIssue: vi.fn(),
+  buildSourceControlDelivery: vi.fn(),
+  sourceControlPostComment: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -41,6 +46,23 @@ vi.mock('../automations/destination', () => ({
   findTeamsConversationRoute: mocks.findTeamsConversationRoute,
 }));
 
+vi.mock('./linear-fast-session', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./linear-fast-session')>();
+  return {
+    ...actual,
+    resolveLinearFastSessionClient: mocks.resolveLinearClient,
+  };
+});
+
+vi.mock('./source-control-fast-delivery', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('./source-control-fast-delivery')>();
+  return {
+    ...actual,
+    buildSourceControlFastDelivery: mocks.buildSourceControlDelivery,
+  };
+});
+
 vi.mock('./fast-agent-human-follow-up', () => ({
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
 }));
@@ -58,12 +80,20 @@ import {
 
 import {
   buildFastAgentSurfaceReplyDelivery,
+  continueFastAgentSurfaceReply,
   queueFastAgentSurfaceReply,
 } from './fast-agent-surface-reply';
 
 async function createConversation(input: {
   userId: string;
-  surface: 'web' | 'automation' | 'slack' | 'teams' | 'telegram';
+  surface:
+    | 'web'
+    | 'automation'
+    | 'slack'
+    | 'teams'
+    | 'telegram'
+    | 'linear'
+    | 'github';
   title?: string;
   replyTarget?: { channelId: string; threadId?: string };
 }) {
@@ -217,6 +247,111 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         question: 'Bystander follow-up',
       }),
     ).resolves.not.toBeNull();
+  });
+
+  it('posts Linear replies as agent-session responses and launches session-bound tasks', async () => {
+    mocks.resolveLinearClient.mockResolvedValue({
+      emitResponse: mocks.linearEmitResponse,
+      getAgentSessionIssue: mocks.linearGetIssue,
+    });
+    mocks.linearEmitResponse.mockResolvedValue({ success: true });
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'linear',
+      replyTarget: { channelId: 'agent-session-1' },
+    });
+
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Dana',
+      question: 'Fix the retry loop',
+      currentMessageId: 'activity-1',
+    });
+
+    expect(delivery?.conversation).toMatchObject({
+      surface: 'linear',
+      replyTarget: { channelId: 'agent-session-1' },
+    });
+    expect(mocks.resolveLinearClient).toHaveBeenCalledWith(
+      conversation.workspaceId,
+    );
+    const handle = await delivery!.adapter.postReply({
+      message: 'On it.',
+    } as never);
+    expect(mocks.linearEmitResponse).toHaveBeenCalledWith(
+      'agent-session-1',
+      'On it.',
+    );
+    expect(handle).toMatchObject({
+      messageId: expect.stringMatching(/^linear-response:/),
+    });
+    expect(delivery?.adapter.launchTask).toEqual(expect.any(Function));
+  });
+
+  it('posts GitHub replies as discussion comments and launches PR-bound tasks', async () => {
+    mocks.buildSourceControlDelivery.mockResolvedValue({
+      postComment: mocks.sourceControlPostComment,
+      resolveTarget: async () => ({}),
+    });
+    mocks.sourceControlPostComment.mockResolvedValue({ messageId: '5001' });
+    const user = await userFactory.create();
+    const [row] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'github',
+        workspaceId: `github.com/acme/api-${Date.now()}`,
+        conversationId: 'pull/42',
+        currentReplyChannelId: 'pull/42',
+        currentReplyThreadId: null,
+      })
+      .returning();
+
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: row!.id,
+      userId: user.id,
+      senderDisplayName: 'alice',
+      question: 'Address the review',
+      currentMessageId: 'github:comment:777',
+    });
+
+    expect(delivery?.conversation).toMatchObject({
+      surface: 'github',
+      conversationId: 'pull/42',
+    });
+    const handle = await delivery!.adapter.postReply({
+      message: 'On it.',
+    } as never);
+    expect(handle).toEqual({ messageId: '5001' });
+    expect(mocks.sourceControlPostComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        discussion: expect.objectContaining({ kind: 'pull', number: 42 }),
+        body: expect.stringContaining('On it.'),
+      }),
+    );
+    expect(delivery?.adapter.launchTask).toEqual(expect.any(Function));
+  });
+
+  it('returns null for a Linear session whose organization is not connected', async () => {
+    mocks.resolveLinearClient.mockResolvedValue(null);
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'linear',
+      replyTarget: { channelId: 'agent-session-1' },
+    });
+
+    await expect(
+      buildFastAgentSurfaceReplyDelivery({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: null,
+        question: 'Hello',
+        currentMessageId: 'activity-1',
+      }),
+    ).resolves.toBeNull();
   });
 
   it('returns null for a Slack session without an installation', async () => {
@@ -442,5 +577,60 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         text: expect.not.stringContaining('external_input'),
       }),
     );
+  });
+});
+
+describe('continueFastAgentSurfaceReply admission hooks', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reports admission with the queued follow-up’s abort before the turn runs', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'web',
+    });
+    const abort = vi.fn();
+    mocks.admitHumanFollowUp.mockResolvedValue({ kind: 'queued', abort });
+    const onAccepted = vi.fn();
+    const onRejected = vi.fn();
+
+    await expect(
+      continueFastAgentSurfaceReply({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Matt',
+        question: 'Follow up',
+        currentMessageId: 'message-1',
+        onAccepted,
+        onRejected,
+      }),
+    ).resolves.toBe(true);
+
+    expect(onAccepted).toHaveBeenCalledWith(abort);
+    expect(onRejected).not.toHaveBeenCalled();
+  });
+
+  it('reports rejection when the session has no delivery route', async () => {
+    const user = await userFactory.create();
+    const onAccepted = vi.fn();
+    const onRejected = vi.fn();
+
+    await expect(
+      continueFastAgentSurfaceReply({
+        sessionId: '00000000-0000-4000-8000-000000000000',
+        userId: user.id,
+        senderDisplayName: null,
+        question: 'Follow up',
+        currentMessageId: 'message-1',
+        onAccepted,
+        onRejected,
+      }),
+    ).resolves.toBe(false);
+
+    expect(onRejected).toHaveBeenCalledTimes(1);
+    expect(onAccepted).not.toHaveBeenCalled();
+    expect(mocks.admitHumanFollowUp).not.toHaveBeenCalled();
   });
 });

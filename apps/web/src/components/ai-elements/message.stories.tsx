@@ -1,17 +1,34 @@
 'use client';
 
+import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import {
   ACP_TOOL_KINDS,
+  buildSetupComputeStatus,
+  buildSetupSourceControlStatus,
   FAST_AGENT_NATIVE_TOOL_CATALOG,
+  type AutomationRecommendationBatch,
   type KnownAcpToolKind,
 } from '@roomote/types';
 import {
+  Button,
+  Container,
   CopyIcon,
+  GitBranch,
   RefreshCwIcon,
   ThumbsDownIcon,
   ThumbsUpIcon,
+  Zap,
 } from '@/components/system';
+import { TRPCReactProvider } from '@/trpc/client';
+import { AutomationRecommendationChoices } from '@/app/(sandbox)/sessions/[sessionId]/setup/AutomationRecommendations';
+import { SandboxProviderPicker } from '@/app/(sandbox)/sessions/[sessionId]/setup/SandboxProviderPicker';
+import {
+  SetupSessionActionCard,
+  SetupSessionActionCardActions,
+} from '@/app/(sandbox)/sessions/[sessionId]/setup/SetupSessionActionCard';
+import { SetupStarterTasksCard } from '@/app/(sandbox)/sessions/[sessionId]/setup/SetupStarterTasksCard';
+import { SourceControlProviderPicker } from '@/app/(sandbox)/sessions/[sessionId]/setup/SourceControlProviderPicker';
 
 import {
   Message,
@@ -233,6 +250,203 @@ function ToolCallInventory({
 // ---------------------------------------------------------------------------
 // Full Conversations
 // ---------------------------------------------------------------------------
+
+const SETUP_SOURCE_CONTROL = buildSetupSourceControlStatus({});
+const SETUP_COMPUTE = buildSetupComputeStatus({});
+const SETUP_STARTER_REQUEST = {
+  requestId: 'setup-story-starter-tasks',
+  preset: 'setup_starter_tasks' as const,
+  questions: [
+    {
+      id: 'starter_tasks',
+      header: 'First task',
+      question: 'What should I work on first?',
+      multiple: true,
+      isOther: false,
+      isSecret: false,
+      options: [
+        {
+          label: 'Speed up CI',
+          description: 'Find slow jobs and improve the feedback loop.',
+        },
+        {
+          label: 'Run a security scan',
+          description: 'Audit the codebase and fix high-confidence issues.',
+        },
+        {
+          label: 'Fix flaky tests',
+          description: 'Find unstable tests and make them deterministic.',
+        },
+        {
+          label: 'Update dependencies',
+          description: 'Upgrade stale packages and resolve breakages.',
+        },
+      ],
+    },
+  ],
+};
+const SETUP_AUTOMATION_BATCH: AutomationRecommendationBatch = {
+  version: 1,
+  inputFingerprint: 'storybook',
+  catalogVersion: 1,
+  status: 'ready',
+  startedAt: '2026-09-01T09:00:00.000Z',
+  completedAt: '2026-09-01T09:00:03.000Z',
+  partial: false,
+  errorCode: null,
+  dismissed: false,
+  applicationState: 'pending',
+  recommendations: [
+    {
+      id: 'storybook-review-code',
+      candidateId: 'built-in.review-code',
+      rank: 1,
+      score: 0.96,
+      explanation:
+        'Your team opens pull requests frequently, so an automatic first review can shorten feedback cycles.',
+      enabled: true,
+      lastRunTaskId: null,
+      automationId: null,
+    },
+    {
+      id: 'storybook-ci-failure-triage',
+      candidateId: 'built-in.ci-failure-triage',
+      rank: 2,
+      score: 0.88,
+      explanation:
+        'This repository has an active CI pipeline that Roomote can monitor and repair when the default branch breaks.',
+      enabled: true,
+      lastRunTaskId: null,
+      automationId: null,
+    },
+    {
+      id: 'storybook-security-auditor',
+      candidateId: 'built-in.security-auditor',
+      rank: 3,
+      score: 0.74,
+      explanation:
+        'A weekly security pass can catch vulnerable dependencies and common implementation risks early.',
+      enabled: false,
+      lastRunTaskId: null,
+      automationId: null,
+    },
+  ],
+};
+
+function SetupSessionConversationStory() {
+  const [automationBatch, setAutomationBatch] = useState(
+    SETUP_AUTOMATION_BATCH,
+  );
+
+  return (
+    <TRPCReactProvider>
+      <div className="flex flex-col gap-4">
+        <Message from="assistant">
+          <MessageContent>
+            Welcome to Roomote. I&apos;ll get this deployment ready with you,
+            right here in our conversation. First, let&apos;s connect the code
+            you want me to work on.
+          </MessageContent>
+        </Message>
+
+        <SetupSessionActionCard
+          title="Connect source control"
+          icon={<GitBranch />}
+          intro="Connect the service that hosts your repositories so I can work on your code."
+        >
+          <SourceControlProviderPicker
+            sourceControlSetup={SETUP_SOURCE_CONTROL}
+            onContinue={() => undefined}
+          />
+        </SetupSessionActionCard>
+
+        <Message from="user">
+          <MessageContent>GitHub is connected.</MessageContent>
+        </Message>
+        <Message from="assistant">
+          <MessageContent>
+            Perfect — I can see the repositories now. Let&apos;s choose some
+            useful work to start with while we finish the last bit of setup.
+          </MessageContent>
+        </Message>
+
+        <SetupStarterTasksCard
+          sessionId="setup-storybook"
+          request={SETUP_STARTER_REQUEST}
+        />
+
+        <Message from="user">
+          <MessageContent>Speed up CI and fix flaky tests.</MessageContent>
+        </Message>
+        <Message from="assistant">
+          <MessageContent>
+            Good choices. I&apos;ve saved both, so they won&apos;t get lost. One
+            last thing: choose the sandbox where I should run them.
+          </MessageContent>
+        </Message>
+
+        <SetupSessionActionCard
+          title="I need a sandbox to run this task"
+          icon={<Container />}
+          intro="Choose where I should run the work you selected. This is a one-time setup for this deployment."
+        >
+          <SandboxProviderPicker
+            computeSetup={SETUP_COMPUTE}
+            onContinue={() => undefined}
+          />
+        </SetupSessionActionCard>
+
+        <Message from="user">
+          <MessageContent>Use Modal.</MessageContent>
+        </Message>
+        <Message from="assistant">
+          <MessageContent>
+            You&apos;re all set. I&apos;ve started the CI investigation and
+            flaky-test cleanup in parallel. You can keep chatting with me here
+            while the work runs.
+          </MessageContent>
+        </Message>
+        <Message from="assistant">
+          <MessageContent>
+            I also found a few recurring jobs that fit this repository. Review
+            them whenever you&apos;re ready — they&apos;re optional and
+            won&apos;t hold up your first tasks.
+          </MessageContent>
+        </Message>
+
+        <SetupSessionActionCard
+          title="Recommended automations"
+          icon={<Zap />}
+          intro="Review the recurring work I found in your repositories, then choose what to turn on."
+        >
+          <AutomationRecommendationChoices
+            batch={automationBatch}
+            onEnabledChange={(id, enabled) =>
+              setAutomationBatch((current) => ({
+                ...current,
+                recommendations: current.recommendations.map((recommendation) =>
+                  recommendation.id === id
+                    ? { ...recommendation, enabled }
+                    : recommendation,
+                ),
+              }))
+            }
+          />
+          <SetupSessionActionCardActions>
+            <Button type="button" size="sm">
+              Save
+            </Button>
+          </SetupSessionActionCardActions>
+        </SetupSessionActionCard>
+      </div>
+    </TRPCReactProvider>
+  );
+}
+
+export const SetupSessionConversation: Story = {
+  name: 'Full Conversation (Setup Session)',
+  render: () => <SetupSessionConversationStory />,
+};
 
 export const FullConversationKitchenSink: Story = {
   name: 'Full Conversation (Kitchen Sink)',

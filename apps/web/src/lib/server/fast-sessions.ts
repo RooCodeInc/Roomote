@@ -17,6 +17,7 @@ import {
   llmUsageEvents,
   inArray,
   isNull,
+  or,
   sessions,
   sql,
   taskArtifacts,
@@ -28,6 +29,11 @@ import type { FastAgentMessage } from '@roomote/db';
 
 import type { UserAuthSuccess } from '@/types';
 import { COMPOSER_SUGGESTION_HISTORY_LIMIT } from './composer-suggestion-history';
+import {
+  buildSessionTaskPreviews,
+  getSessionPreviewProxyConfig,
+  type SessionTaskPreview,
+} from './session-task-previews';
 
 type FastSessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
 
@@ -44,6 +50,7 @@ type FastSessionTaskSummary = {
     size: number;
     createdAt: Date;
   }>;
+  previews: SessionTaskPreview[];
   latestRun: {
     status: (typeof taskRuns.$inferSelect)['status'];
     taskPhase: (typeof taskRuns.$inferSelect)['taskPhase'];
@@ -66,7 +73,39 @@ export type FastSessionMessage = Pick<
   | 'nativeSessionId'
   | 'nativeMessageId'
   | 'createdAt'
->;
+> & {
+  userName?: string | null;
+  userEmail?: string | null;
+  userImageUrl?: string | null;
+};
+
+const fastSessionMessageSelection = {
+  id: fastAgentMessages.id,
+  eventId: fastAgentMessages.eventId,
+  turnId: fastAgentMessages.turnId,
+  turnSeq: fastAgentMessages.turnSeq,
+  ts: fastAgentMessages.ts,
+  eventType: fastAgentMessages.eventType,
+  role: fastAgentMessages.role,
+  contentBlocks: fastAgentMessages.contentBlocks,
+  metadata: fastAgentMessages.metadata,
+  payload: fastAgentMessages.payload,
+  source: fastAgentMessages.source,
+  nativeSessionId: fastAgentMessages.nativeSessionId,
+  nativeMessageId: fastAgentMessages.nativeMessageId,
+  createdAt: fastAgentMessages.createdAt,
+  userName: sql<
+    string | null
+  >`coalesce(${fastAgentMessages.metadata} ->> 'userName', ${users.name})`,
+  userEmail: sql<
+    string | null
+  >`coalesce(${fastAgentMessages.metadata} ->> 'userEmail', ${users.email})`,
+  userImageUrl: sql<
+    string | null
+  >`coalesce(${fastAgentMessages.metadata} ->> 'userImageUrl', ${users.imageUrl})`,
+};
+
+const fastSessionMessageUserJoin = sql`${users.id}::text = ${fastAgentMessages.metadata} ->> 'userId'`;
 
 export function buildFastSessionPrReviewDestinationKey(session: {
   surface: string;
@@ -171,8 +210,18 @@ export async function findAccessibleFastSession(
       reasoningEffort: fastAgentConversations.reasoningEffort,
     })
     .from(fastAgentConversations)
+    .leftJoin(
+      sessions,
+      eq(sessions.fastConversationId, fastAgentConversations.id),
+    )
     .where(
-      and(eq(fastAgentConversations.id, sessionId), fastSessionScope(auth)),
+      and(
+        or(
+          eq(fastAgentConversations.id, sessionId),
+          eq(sessions.id, sessionId),
+        ),
+        fastSessionScope(auth),
+      ),
     )
     .limit(1);
 
@@ -221,6 +270,15 @@ export async function getFastSessionTasks(
         latestRunId: taskRuns.id,
         status: taskRuns.status,
         taskPhase: taskRuns.taskPhase,
+        machineDomain: taskRuns.machineDomain,
+        machineDomains: taskRuns.machineDomains,
+        initialPaths: taskRuns.initialPaths,
+        primaryPortName: taskRuns.primaryPortName,
+        sleepRequestedAt: taskRuns.sleepRequestedAt,
+        snapshotRequestedAt: taskRuns.snapshotRequestedAt,
+        snapshotCreatedAt: taskRuns.snapshotCreatedAt,
+        snapshotFailedAt: taskRuns.snapshotFailedAt,
+        snapshotId: taskRuns.snapshotId,
       })
       .from(taskRuns)
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
@@ -238,8 +296,18 @@ export async function getFastSessionTasks(
     .select({
       taskId: latestRunPerTask.taskId,
       title: latestRunPerTask.title,
+      latestRunId: latestRunPerTask.latestRunId,
       status: latestRunPerTask.status,
       taskPhase: latestRunPerTask.taskPhase,
+      machineDomain: latestRunPerTask.machineDomain,
+      machineDomains: latestRunPerTask.machineDomains,
+      initialPaths: latestRunPerTask.initialPaths,
+      primaryPortName: latestRunPerTask.primaryPortName,
+      sleepRequestedAt: latestRunPerTask.sleepRequestedAt,
+      snapshotRequestedAt: latestRunPerTask.snapshotRequestedAt,
+      snapshotCreatedAt: latestRunPerTask.snapshotCreatedAt,
+      snapshotFailedAt: latestRunPerTask.snapshotFailedAt,
+      snapshotId: latestRunPerTask.snapshotId,
       inferenceCostMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
     })
     .from(latestRunPerTask)
@@ -253,10 +321,22 @@ export async function getFastSessionTasks(
       latestRunPerTask.latestRunId,
       latestRunPerTask.status,
       latestRunPerTask.taskPhase,
+      latestRunPerTask.machineDomain,
+      latestRunPerTask.machineDomains,
+      latestRunPerTask.initialPaths,
+      latestRunPerTask.primaryPortName,
+      latestRunPerTask.sleepRequestedAt,
+      latestRunPerTask.snapshotRequestedAt,
+      latestRunPerTask.snapshotCreatedAt,
+      latestRunPerTask.snapshotFailedAt,
+      latestRunPerTask.snapshotId,
     )
     .orderBy(desc(latestRunPerTask.latestRunId));
 
   const taskIds = rows.map((row) => row.taskId);
+  const previewConfig = taskIds.length
+    ? await getSessionPreviewProxyConfig()
+    : null;
   const artifactRows = taskIds.length
     ? await db
         .select({
@@ -286,6 +366,13 @@ export async function getFastSessionTasks(
     artifacts: artifactRows
       .filter((artifact) => artifact.taskId === row.taskId)
       .map(({ taskId: _taskId, ...artifact }) => artifact),
+    previews: previewConfig
+      ? buildSessionTaskPreviews(
+          row.taskId,
+          { ...row, id: row.latestRunId },
+          previewConfig,
+        )
+      : [],
     latestRun: {
       status: row.status,
       taskPhase: row.taskPhase,
@@ -329,26 +416,14 @@ export async function getFastSessionMessagesSince(
 }> {
   const rows = await db
     .select({
-      id: fastAgentMessages.id,
-      eventId: fastAgentMessages.eventId,
-      turnId: fastAgentMessages.turnId,
-      turnSeq: fastAgentMessages.turnSeq,
-      ts: fastAgentMessages.ts,
-      eventType: fastAgentMessages.eventType,
-      role: fastAgentMessages.role,
-      contentBlocks: fastAgentMessages.contentBlocks,
-      metadata: fastAgentMessages.metadata,
-      payload: fastAgentMessages.payload,
-      source: fastAgentMessages.source,
-      nativeSessionId: fastAgentMessages.nativeSessionId,
-      nativeMessageId: fastAgentMessages.nativeMessageId,
-      createdAt: fastAgentMessages.createdAt,
+      ...fastSessionMessageSelection,
       // Millisecond Dates truncate Postgres microsecond timestamps, which
       // would replay the newest row on every poll — keep the cursor as a
       // fractional epoch-millisecond float instead.
       updatedAtMs: sql<number>`extract(epoch from ${fastAgentMessages.updatedAt}) * 1000`,
     })
     .from(fastAgentMessages)
+    .leftJoin(users, fastSessionMessageUserJoin)
     .where(
       and(
         eq(fastAgentMessages.conversationId, sessionId),
@@ -444,23 +519,9 @@ export async function getFastSessionById(
   }
 
   const rows = await db
-    .select({
-      id: fastAgentMessages.id,
-      eventId: fastAgentMessages.eventId,
-      turnId: fastAgentMessages.turnId,
-      turnSeq: fastAgentMessages.turnSeq,
-      ts: fastAgentMessages.ts,
-      eventType: fastAgentMessages.eventType,
-      role: fastAgentMessages.role,
-      contentBlocks: fastAgentMessages.contentBlocks,
-      metadata: fastAgentMessages.metadata,
-      payload: fastAgentMessages.payload,
-      source: fastAgentMessages.source,
-      nativeSessionId: fastAgentMessages.nativeSessionId,
-      nativeMessageId: fastAgentMessages.nativeMessageId,
-      createdAt: fastAgentMessages.createdAt,
-    })
+    .select(fastSessionMessageSelection)
     .from(fastAgentMessages)
+    .leftJoin(users, fastSessionMessageUserJoin)
     .where(
       and(
         eq(fastAgentMessages.conversationId, session.id),

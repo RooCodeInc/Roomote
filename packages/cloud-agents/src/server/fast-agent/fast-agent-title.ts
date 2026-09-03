@@ -15,6 +15,7 @@ import {
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  SETUP_RECEIPT_INPUT_KIND,
   asRecord,
   extractAcpMessageText,
   extractVisibleAcpPromptText,
@@ -226,6 +227,7 @@ export async function refreshFastAgentSessionTitle({
             coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'
             or ${fastAgentMessages.metadata} ->> 'platformEventKind' = 'automation'
           )`,
+          sql`coalesce(${fastAgentMessages.metadata} ->> 'inputKind', 'message') <> ${SETUP_RECEIPT_INPUT_KIND}`,
         ),
       )
       .orderBy(asc(fastAgentMessages.ts), asc(fastAgentMessages.turnSeq))

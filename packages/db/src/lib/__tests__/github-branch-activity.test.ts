@@ -1,4 +1,6 @@
 import {
+  githubInstallationFactory,
+  repositoryFactory,
   runFactory,
   db,
   eq,
@@ -35,6 +37,7 @@ async function createPrLinkedTask({
   prSha,
   sourceControlProvider = 'github',
   host,
+  repositoryId,
 }: {
   repoFullName: string;
   prNumber: number;
@@ -42,6 +45,7 @@ async function createPrLinkedTask({
   prSha?: string;
   sourceControlProvider?: SourceControlProvider;
   host?: string | null;
+  repositoryId?: string | null;
 }) {
   const task = await taskFactory.create({
     initiatorUserId: userId,
@@ -56,6 +60,7 @@ async function createPrLinkedTask({
     prSha: prSha ?? null,
     sourceControlProvider,
     host: host ?? null,
+    repositoryId: repositoryId ?? null,
     status: 'open',
   });
 
@@ -733,6 +738,98 @@ describe('findActiveGitHubBranchWork', () => {
 });
 
 describe('findReusableGitHubPrFollowUpOwner', () => {
+  it('pins linkage matches to the exact repository row when repositoryId is given', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'owner/repo-reusable-owner-repo-pin';
+    const branchName = 'feature/repo-pin';
+    const installation = await githubInstallationFactory.create({
+      installedByUserId: user.id,
+    });
+    const reviewingRepo = await repositoryFactory.create({
+      installationId: installation.id,
+      linkedByUserId: user.id,
+      fullName: repoFullName,
+    });
+    const otherRepo = await repositoryFactory.create({
+      installationId: installation.id,
+      linkedByUserId: user.id,
+      fullName: repoFullName,
+      host: 'ghe-other.example.com',
+    });
+    const taskId = await createPrLinkedTask({
+      repoFullName,
+      prNumber: 905,
+      userId: user.id,
+      repositoryId: reviewingRepo.id,
+    });
+    await runFactory.create({
+      actingUserId: user.id,
+      taskId,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Pending,
+      payload: { repo: repoFullName, branch: branchName },
+    });
+
+    await expect(
+      findReusableGitHubPrFollowUpOwner({
+        repoFullName,
+        prNumber: 905,
+        branchName,
+        repositoryId: reviewingRepo.id,
+      }),
+    ).resolves.toMatchObject({ taskId });
+
+    await expect(
+      findReusableGitHubPrFollowUpOwner({
+        repoFullName,
+        prNumber: 905,
+        branchName,
+        repositoryId: otherRepo.id,
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('skips the branch fallback entirely for repository-pinned lookups', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'owner/repo-reusable-owner-repo-pin-fallback';
+    const branchName = 'feature/repo-pin-fallback';
+    const installation = await githubInstallationFactory.create({
+      installedByUserId: user.id,
+    });
+    const reviewingRepo = await repositoryFactory.create({
+      installationId: installation.id,
+      linkedByUserId: user.id,
+      fullName: repoFullName,
+    });
+    // No linkage row: only the payload-branch fallback could match this run,
+    // and a repository-pinned lookup must not take it.
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Pending,
+      payload: { repo: repoFullName, branch: branchName },
+    });
+
+    await expect(
+      findReusableGitHubPrFollowUpOwner({
+        repoFullName,
+        prNumber: 906,
+        branchName,
+      }),
+    ).resolves.toMatchObject({ taskId: task.id });
+
+    await expect(
+      findReusableGitHubPrFollowUpOwner({
+        repoFullName,
+        prNumber: 906,
+        branchName,
+        repositoryId: reviewingRepo.id,
+      }),
+    ).resolves.toBeNull();
+  });
+
   it('skips the branch fallback when no branch name is given', async () => {
     const { user } = await createActor();
     const repoFullName = 'owner/repo-reusable-owner-empty-branch';
