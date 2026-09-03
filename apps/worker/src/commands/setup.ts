@@ -247,13 +247,22 @@ export async function setup({
 
   if (workspaceOptions) {
     const runtimeEnv = workerEnv.getRuntimeEnv();
+    const explicitEnvironmentEnvVarNames = new Set(
+      workspaceOptions.workspace.type === 'environment'
+        ? Object.keys(workspaceOptions.workspace.environmentConfig.env ?? {})
+        : [],
+    );
     const workspaceEnv = Object.fromEntries(
       Object.entries(workspaceOptions.envVars).filter(([key, value]) => {
         if (value === undefined) {
           return false;
         }
 
-        return !(key in runtimeEnv) || runtimeEnv[key] !== value;
+        return (
+          explicitEnvironmentEnvVarNames.has(key) ||
+          !(key in runtimeEnv) ||
+          runtimeEnv[key] !== value
+        );
       }),
     );
 
