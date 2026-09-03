@@ -21,7 +21,10 @@ import {
   type SlackNotifier,
   type SlackReactionAddedEvent,
 } from '@roomote/slack';
-import { launchPinnedFastSessionTask } from '@roomote/cloud-agents/server';
+import {
+  fastAgentConversationRepository,
+  launchPinnedFastSessionTask,
+} from '@roomote/cloud-agents/server';
 import {
   and,
   claimWorkItem,
@@ -29,6 +32,7 @@ import {
   eq,
   finalizeWorkItemLaunched,
   releaseWorkItemClaim,
+  sessions,
   trackedMessages,
   workItems,
 } from '@roomote/db/server';
@@ -46,7 +50,6 @@ import {
 } from '../constants.js';
 import type { SlackWebhookContext } from '../context.js';
 import { isThumbsUpReaction } from '../helpers/event-normalization.js';
-import { postTaskSuggestionStartedMessage } from '../helpers/thread-posting.js';
 import { lookupSlackUserMapping } from '../helpers/user-mapping.js';
 import {
   runTaskSuggestionReactionContention,
@@ -167,6 +170,47 @@ const REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE =
   'I could not start this because your linked Roomote account was removed. Ask an admin to restore your access, then reconnect Slack.';
 const UNLINKED_SLACK_ACCOUNT_FAST_LAUNCH_FAILURE =
   'This suggestion starts in Fast mode, which needs a linked Roomote account. Link your account, then react again.';
+
+/**
+ * The Slack thread that hosts a suggestion's origin Session, when it has one
+ * in this workspace. A launch announces there, inside the automation's own
+ * report thread, instead of seeding a separate top-level thread.
+ */
+async function resolveOriginSessionSlackThread(input: {
+  originSessionId: string;
+  teamId: string;
+}): Promise<{ channelId: string; threadTs: string } | null> {
+  try {
+    const session = await db.query.sessions.findFirst({
+      where: eq(sessions.id, input.originSessionId),
+      columns: { fastConversationId: true },
+    });
+    if (!session?.fastConversationId) {
+      return null;
+    }
+    const record = await fastAgentConversationRepository.findById({
+      id: session.fastConversationId,
+    });
+    const conversation = record?.conversation;
+    if (
+      !conversation ||
+      conversation.surface !== 'slack' ||
+      conversation.workspaceId !== input.teamId
+    ) {
+      return null;
+    }
+    return {
+      channelId: conversation.replyTarget.channelId,
+      threadTs:
+        conversation.replyTarget.threadId ?? conversation.conversationId,
+    };
+  } catch (error) {
+    apiLogger.warn(
+      `[SlackReactions] Could not resolve the origin Session thread for ${input.originSessionId}: ${formatErrorForLog(error)}`,
+    );
+    return null;
+  }
+}
 
 async function launchTaskSuggestionTaskFromReaction({
   teamId,
@@ -511,12 +555,22 @@ async function launchTaskSuggestionTaskFromReaction({
       : null,
   });
 
-  let seededThreadTs: string | undefined;
+  let announceMessageTs: string | undefined;
+  let announceChannelId = channelId;
   let taskRun: { id: number | null; taskId: string | null } | null = null;
-  const directWorkspaceName = suggestionWorkspace?.workspaceDisplayName ?? null;
+  const originSessionId = await resolveSuggestionOriginSessionId(
+    workItem.sourceTaskId,
+  );
+  // The Session that produced the suggestion announces the launch in its own
+  // thread; only a suggestion with no Slack-visible origin seeds a new one.
+  const originThread = originSessionId
+    ? await resolveOriginSessionSlackThread({ originSessionId, teamId })
+    : null;
   try {
-    seededThreadTs = await slack.postMessage({
-      channel: channelId,
+    announceChannelId = originThread?.channelId ?? channelId;
+    announceMessageTs = await slack.postMessage({
+      channel: announceChannelId,
+      ...(originThread ? { thread_ts: originThread.threadTs } : {}),
       text: seededSuggestionSlackText,
       blocks: [
         {
@@ -526,14 +580,14 @@ async function launchTaskSuggestionTaskFromReaction({
       ],
     });
 
-    if (!seededThreadTs) {
+    if (!announceMessageTs) {
       await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
       apiLogger.debug(
-        `${logPrefix} failed to seed top-level Slack message; launch canceled`,
+        `${logPrefix} failed to post the Slack launch announcement; launch canceled`,
       );
       return false;
     }
-    const launchThreadTs = seededThreadTs;
+    const launchThreadTs = originThread?.threadTs ?? announceMessageTs;
 
     const initiator = {
       kind: 'user' as const,
@@ -563,11 +617,11 @@ async function launchTaskSuggestionTaskFromReaction({
           const fastStart = await startFastAgentResponse({
             event: {
               type: 'app_mention',
-              channel: channelId,
+              channel: announceChannelId,
               user: reactionEvent.user,
               text: `${workItem.title}\n\n${suggestionBrief}`,
               agentContext: suggestionTaskPrompt,
-              ts: launchThreadTs,
+              ts: announceMessageTs!,
               thread_ts: launchThreadTs,
             },
             slackInstallation,
@@ -603,9 +657,6 @@ async function launchTaskSuggestionTaskFromReaction({
             reason: UNLINKED_SLACK_ACCOUNT_FAST_LAUNCH_FAILURE,
           };
         }
-        const originSessionId = await resolveSuggestionOriginSessionId(
-          workItem.sourceTaskId,
-        );
         const pinned = await launchPinnedFastSessionTask({
           userId: launchOwnerUserId,
           ...(originSessionId ? { originSessionId } : {}),
@@ -613,7 +664,10 @@ async function launchTaskSuggestionTaskFromReaction({
             surface: 'slack',
             workspaceId: teamId,
             conversationId: launchThreadTs,
-            replyTarget: { channelId, threadId: launchThreadTs },
+            replyTarget: {
+              channelId: announceChannelId,
+              threadId: launchThreadTs,
+            },
           },
           launchId: `slack-suggestion:${workItemId}:${launchThreadTs}`,
           prompt: suggestionSlackText,
@@ -628,9 +682,9 @@ async function launchTaskSuggestionTaskFromReaction({
               ...(slackInstallation.teamDomain
                 ? { teamDomain: slackInstallation.teamDomain }
                 : {}),
-              channelId,
+              channelId: announceChannelId,
               threadTs: launchThreadTs,
-              messageId: launchThreadTs,
+              messageId: announceMessageTs,
               initiator,
               repoForPayload:
                 launchTarget.kind === 'all_repositories'
@@ -668,7 +722,7 @@ async function launchTaskSuggestionTaskFromReaction({
       launchResult.status === 'failed'
     ) {
       await slack
-        .deleteMessage({ channel: channelId, ts: seededThreadTs })
+        .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
         .catch(() => {});
       await postSuggestionLaunchFailureMessage({
         slack,
@@ -691,7 +745,7 @@ async function launchTaskSuggestionTaskFromReaction({
         `${logPrefix} failed to finalize work item ${workItemId}; task ${launchResult.taskId ?? 'null'} (run ${launchResult.runId ?? 'null'}) — ${launchResult.cancelNote}`,
       );
       await slack
-        .deleteMessage({ channel: channelId, ts: seededThreadTs })
+        .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
         .catch(() => {});
       return true;
     }
@@ -707,34 +761,14 @@ async function launchTaskSuggestionTaskFromReaction({
         );
       });
 
-    if (
-      launchResult.mode === 'coding' &&
-      !usesRouterLaunch &&
-      directWorkspaceName
-    ) {
-      await postTaskSuggestionStartedMessage({
-        slack,
-        channelId,
-        threadTs: seededThreadTs,
-        workspaceName: directWorkspaceName,
-        runId: taskRun.id,
-        initiatingSlackUserId: reactionEvent.user,
-        taskId: taskRun.taskId,
-      }).catch((error) => {
-        apiLogger.warn(
-          `${logPrefix} failed to post started message: ${formatErrorForLog(error)}`,
-        );
-      });
-    }
-
     apiLogger.debug(
-      `${logPrefix} completed reaction launch lifecycle taskId=${taskRun.taskId ?? 'null'} launchedThreadTs=${seededThreadTs}`,
+      `${logPrefix} completed reaction launch lifecycle taskId=${taskRun.taskId ?? 'null'} launchedThreadTs=${launchThreadTs}`,
     );
     return true;
   } catch (error) {
-    if (seededThreadTs) {
+    if (announceMessageTs) {
       await slack
-        .deleteMessage({ channel: channelId, ts: seededThreadTs })
+        .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
         .catch(() => {});
     }
     await releaseWorkItemClaim(db, { id: workItemId, claimedAt }).catch(

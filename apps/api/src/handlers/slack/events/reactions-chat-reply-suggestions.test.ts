@@ -10,10 +10,11 @@ const mocks = vi.hoisted(() => ({
   lookupSlackUserMapping: vi.fn(),
   launchPinned: vi.fn(),
   getSessionForTask: vi.fn(),
+  sessionsFindFirst: vi.fn(),
+  conversationFindById: vi.fn(),
   liveTaskLauncher: vi.fn(),
   launchTask: vi.fn(),
   startFastAgentResponse: vi.fn(),
-  postStartedMessage: vi.fn(),
   getConfiguration: vi.fn(),
   routeFastReaction: vi.fn(),
 }));
@@ -96,10 +97,12 @@ vi.mock('@roomote/db/server', () => ({
   getSessionForTask: mocks.getSessionForTask,
   finalizeWorkItemLaunched: mocks.finalizeWorkItemLaunched,
   releaseWorkItemClaim: mocks.releaseWorkItemClaim,
+  sessions: { id: 'sessions.id' },
   db: {
     query: {
       trackedMessages: { findFirst: mocks.trackedMessageFindFirst },
       deploymentSettings: { findFirst: vi.fn() },
+      sessions: { findFirst: mocks.sessionsFindFirst },
     },
     select: () => createWorkItemSelectBuilder(),
     update: () => updateBuilder,
@@ -116,6 +119,7 @@ vi.mock('@roomote/slack', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   launchPinnedFastSessionTask: mocks.launchPinned,
+  fastAgentConversationRepository: { findById: mocks.conversationFindById },
 }));
 
 vi.mock('../helpers/suggestion-workspace.js', () => ({
@@ -131,10 +135,6 @@ vi.mock('../helpers/suggestion-workspace.js', () => ({
 
 vi.mock('../helpers/user-mapping.js', () => ({
   lookupSlackUserMapping: mocks.lookupSlackUserMapping,
-}));
-
-vi.mock('../helpers/thread-posting.js', () => ({
-  postTaskSuggestionStartedMessage: mocks.postStartedMessage,
 }));
 
 vi.mock('../../call-roomote-via-emoji.js', () => ({
@@ -182,7 +182,6 @@ describe('chat reply suggestion reactions', () => {
     mocks.claimWorkItem.mockResolvedValue({ launchClaimedAt: claimedAt });
     mocks.finalizeWorkItemLaunched.mockResolvedValue(true);
     mocks.releaseWorkItemClaim.mockResolvedValue(true);
-    mocks.postStartedMessage.mockResolvedValue(undefined);
     mocks.resolveWorkspace.mockResolvedValue({
       workspace: {
         repoForPayload: 'acme/app',
@@ -346,8 +345,84 @@ describe('chat reply suggestion reactions', () => {
     );
   });
 
+  it("announces a pinned launch in the origin Session's own thread instead of seeding one", async () => {
+    mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
+    mocks.sessionsFindFirst.mockResolvedValue({
+      fastConversationId: 'fast-origin',
+    });
+    mocks.conversationFindById.mockResolvedValue({
+      id: 'fast-origin',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T1',
+        conversationId: 'report-thread-ts',
+        replyTarget: { channelId: 'C_REPORTS', threadId: 'report-thread-ts' },
+      },
+    });
+    mocks.trackedMessageFindFirst.mockResolvedValue({
+      id: 'tracked-message-1',
+      workItemId: 'work-item-1',
+      metadata: { suggestionType: 'suggested_tasks' },
+    });
+    mocks.lookupSlackUserMapping.mockResolvedValue({
+      hasInactiveMapping: false,
+      activeMapping: { userId: 'user-1' },
+    });
+    const postMessage = vi.fn(async () => 'announce-ts');
+    const slack = {
+      postMessage,
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    // The announcement is a reply in the automation's report thread.
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C_REPORTS',
+        thread_ts: 'report-thread-ts',
+      }),
+    );
+    expect(mocks.launchPinned).toHaveBeenCalledWith(
+      expect.objectContaining({
+        originSessionId: 'session-origin',
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'T1',
+          conversationId: 'report-thread-ts',
+          replyTarget: {
+            channelId: 'C_REPORTS',
+            threadId: 'report-thread-ts',
+          },
+        },
+      }),
+    );
+    expect(mocks.liveTaskLauncher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'C_REPORTS',
+        threadTs: 'report-thread-ts',
+        messageId: 'announce-ts',
+      }),
+    );
+  });
+
   it('launches a pinned automation suggestion through the owning Session without a Fast turn', async () => {
     mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
+    mocks.sessionsFindFirst.mockResolvedValue(null);
     mocks.trackedMessageFindFirst.mockResolvedValue({
       id: 'tracked-message-1',
       workItemId: 'work-item-1',
@@ -417,9 +492,6 @@ describe('chat reply suggestion reactions', () => {
     expect(mocks.finalizeWorkItemLaunched).toHaveBeenCalledWith(
       expect.anything(),
       { id: 'work-item-1', taskId: 'task-new', claimedAt },
-    );
-    expect(mocks.postStartedMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ workspaceName: 'Acme', taskId: 'task-new' }),
     );
   });
 

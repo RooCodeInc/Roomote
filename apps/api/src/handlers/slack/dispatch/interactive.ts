@@ -26,7 +26,6 @@ import {
   handleSlackPrReviewActionDismiss,
   handleSlackPrReviewActionYes,
 } from './pr-review-action.js';
-import { handleTaskCancellation } from './task-cancellation.js';
 import { handleThreadReplyDetailsToggle } from './thread-reply-details-toggle.js';
 
 function getInteractiveButtonNonce(
@@ -181,9 +180,6 @@ export async function handleSlackInteractivePayload(
   }
 
   switch (true) {
-    case actionId === 'cancel_task':
-      await handleTaskCancellation(interactivePayload);
-      break;
     case actionId === 'connect_account':
       await handleConnectAccount(interactivePayload);
       break;
@@ -213,7 +209,6 @@ export async function handleSlackInteractivePayload(
       break;
     case actionId === 'agent_selection':
     case actionId === 'workspace_selection':
-    case actionId === 'follow_task':
       break;
     case actionId?.startsWith('followup_answer_'):
     case actionId?.startsWith('request_user_input_answer_'):

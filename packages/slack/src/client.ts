@@ -9,7 +9,6 @@ export {
   convertMarkdownLinksToSlack,
 } from './markdown-converter';
 
-export { buildStartedBlocks } from './started-message-blocks';
 export {
   buildSlackAnsweredRequestUserInputBlocks,
   buildSlackCancelledRequestUserInputBlocks,
