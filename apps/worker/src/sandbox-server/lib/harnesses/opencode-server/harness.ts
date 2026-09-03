@@ -337,7 +337,7 @@ const FALLBACK_OPENCODE_STOP_HOOK_REMINDER =
   'Before finalizing, post a terminal chat-visible reply for the current turn.';
 const ROOMOTE_OPENCODE_VISUAL_AGENT_NAME = 'visual';
 const CAPTURE_VISUAL_PROOF_SKILL = 'capture-visual-proof';
-export const VISUAL_PROOF_ATTEMPT_STATE_PATH =
+const VISUAL_PROOF_ATTEMPT_STATE_PATH =
   '/tmp/roomote-visual-proof-attempt.json';
 const formatVisualProofTimeoutRecoveryPrompt = (attemptId: string | null) => {
   const attemptPath = attemptId
