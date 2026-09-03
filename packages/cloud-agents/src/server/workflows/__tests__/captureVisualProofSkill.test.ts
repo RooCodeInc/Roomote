@@ -110,6 +110,12 @@ describe('Capture visual proof skill', () => {
       "Every simulation, mock, source modification, or hardcoded state must be disclosed explicitly in the proof brief, each affected artifact's proof metadata, and the final proof report",
     );
     expect(skillContent).toContain(
+      'Do not add a blanket prohibition on source modifications, simulated payloads, or DOM/rendered-state setup to the delegated proof brief; scope and disclose any simulation instead.',
+    );
+    expect(skillContent).not.toContain(
+      'Do not create source modifications or simulate payload/DOM state.',
+    );
+    expect(skillContent).toContain(
       'does not prove the real data flow, authorization, backend behavior, network integration, or end-to-end correctness',
     );
     expect(skillContent).toContain(
