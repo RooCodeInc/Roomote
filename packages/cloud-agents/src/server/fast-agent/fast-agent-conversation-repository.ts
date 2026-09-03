@@ -285,10 +285,20 @@ export async function loadFastAgentTurnAttemptSummary(
       // process died between starting the call and recording its outcome.
       const toolCallId = String(payload.toolCallId ?? '');
       if (!toolCallId) continue;
-      const rawInput = payload.rawInput as { arguments?: unknown } | undefined;
+      // Native and MCP calls wrap their input as `rawInput.arguments`;
+      // subagent task calls persist the input object directly.
+      const rawInput = payload.rawInput as
+        | { arguments?: unknown }
+        | Record<string, unknown>
+        | undefined;
       const action: FastAgentTurnAttemptAction = {
         tool: String(payload.toolName ?? payload.title ?? 'tool'),
-        arguments: rawInput?.arguments ?? null,
+        arguments:
+          rawInput && typeof rawInput === 'object'
+            ? 'arguments' in rawInput
+              ? rawInput.arguments
+              : rawInput
+            : null,
         status:
           row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall
             ? 'unknown'

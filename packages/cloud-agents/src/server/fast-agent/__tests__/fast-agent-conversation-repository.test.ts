@@ -1306,6 +1306,18 @@ describe('Fast conversation repository', () => {
       toolName: 'save_memory',
       rawInput: { arguments: { content: 'Prefers bullets.' } },
     });
+    // A subagent task call persists its input directly, without the
+    // `arguments` wrapper the native tools use.
+    await tool(
+      4,
+      'roomote_runtime.tool_result',
+      {
+        toolName: 'task',
+        status: 'failed',
+        rawInput: { prompt: 'Audit the queue', subagent_type: 'explore' },
+      },
+      'Subagent exited early.',
+    );
     // Rows from another turn and hidden or terminal assistant rows are not
     // part of the attempt.
     await write({
@@ -1358,6 +1370,12 @@ describe('Fast conversation repository', () => {
           tool: 'save_memory',
           arguments: { content: 'Prefers bullets.' },
           status: 'unknown',
+        },
+        {
+          tool: 'task',
+          arguments: { prompt: 'Audit the queue', subagent_type: 'explore' },
+          status: 'failed',
+          result: 'Subagent exited early.',
         },
       ],
     });
