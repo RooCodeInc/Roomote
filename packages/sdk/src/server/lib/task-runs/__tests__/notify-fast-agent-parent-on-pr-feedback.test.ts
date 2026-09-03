@@ -22,6 +22,15 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   getTaskUrl: mocks.getTaskUrl,
 }));
 
+vi.mock('@roomote/types', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/types')>()),
+  getFastAgentParentFromPayload: (payload: Record<string, unknown>) =>
+    payload.fastAgentParent,
+  isPrReviewPayload: (payload: { type?: string }) =>
+    payload.type === 'github_pr_review' ||
+    payload.type === 'github_pr_review_sync',
+}));
+
 vi.mock('../../fast-agent-parent-event-queue', () => ({
   enqueueFastAgentParentEvent: mocks.enqueueParentEvent,
 }));
