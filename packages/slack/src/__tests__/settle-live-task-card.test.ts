@@ -278,4 +278,28 @@ describe('settleSlackLiveTaskCardForRun', () => {
     expect(mocks.clearPendingCleanup).not.toHaveBeenCalled();
     expect(mocks.removeSlackThreadActiveTaskByTaskId).not.toHaveBeenCalled();
   });
+
+  it('deregisters after Slack deletion even when clearing Redis state fails', async () => {
+    mocks.getSlackLiveTaskStreamData.mockResolvedValue({
+      ...cardData,
+      pendingOldMessageTs: 'stale-card-ts',
+    });
+    mocks.clearPendingCleanup.mockRejectedValue(new Error('redis unavailable'));
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(
+      renderSlackLiveTaskCard({ taskId: 'task-1', status: 'complete' }),
+    ).resolves.toEqual({ card: true, updated: true });
+
+    expect(mocks.deleteMessage).toHaveBeenCalledWith({
+      channel: 'C123',
+      ts: 'stale-card-ts',
+    });
+    expect(mocks.removeSlackThreadActiveTaskByTaskId).toHaveBeenCalledWith(
+      'task-1',
+    );
+    expect(warning).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to clear deleted predecessor'),
+    );
+  });
 });

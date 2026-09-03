@@ -139,11 +139,17 @@ export async function renderSlackLiveTaskCard(input: {
               ts: oldMessageTs,
             });
             if (pendingCleanupComplete) {
-              await clearSlackLiveTaskPendingCleanup({
-                taskId: input.taskId,
-                currentMessageTs: data.messageTs,
-                oldMessageTs,
-              });
+              try {
+                await clearSlackLiveTaskPendingCleanup({
+                  taskId: input.taskId,
+                  currentMessageTs: data.messageTs,
+                  oldMessageTs,
+                });
+              } catch (error) {
+                console.warn(
+                  `[renderSlackLiveTaskCard] Failed to clear deleted predecessor ${oldMessageTs} for task ${input.taskId}: ${error instanceof Error ? error.message : String(error)}`,
+                );
+              }
             }
           }
           try {
