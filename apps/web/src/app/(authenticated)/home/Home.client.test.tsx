@@ -454,7 +454,7 @@ describe('Home', () => {
     }
   });
 
-  it('starts a Fast session for Auto submissions without an environment', async () => {
+  it('starts a Fast session without an environment', async () => {
     currentEnvironments = [];
 
     render(<Home initialPlaceholderIndex={0} />);

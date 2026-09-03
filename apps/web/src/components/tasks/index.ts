@@ -1,4 +1,3 @@
-export { AUTO_WORKSPACE_VALUE } from './constants';
 export { SelectWorkspace } from './SelectWorkspace';
 export { TaskPromptInput } from './TaskPromptInput';
 export { ModelSelect } from './ModelSelect';
