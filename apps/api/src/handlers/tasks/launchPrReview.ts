@@ -8,6 +8,7 @@ import {
 import { and, db, eq, inArray, repositories } from '@roomote/db/server';
 import {
   buildFastAgentSessionAttachment,
+  getFastAgentParentFromPayload,
   sourceControlProviderDescriptors,
   TaskPayloadKind,
   type FastAgentParent,
@@ -130,6 +131,18 @@ export async function handlePrReviewLaunch(
     if (!record) {
       return c.json({ error: 'The requesting Session was not found.' }, 404);
     }
+    // Chat and source-control conversations are shared surfaces where any
+    // member can already trigger Session events; a web conversation is one
+    // person's chat, so only its owner may bind work to it.
+    if (
+      record.conversation.surface === 'web' &&
+      record.userId !== auth.userId
+    ) {
+      return c.json(
+        { error: 'The requesting Session belongs to another user.' },
+        403,
+      );
+    }
     parent = { sessionId: record.id, conversation: record.conversation };
   }
 
@@ -168,6 +181,16 @@ export async function handlePrReviewLaunch(
     },
   });
 
+  // An already-active review run for this PR is returned as-is by the queue:
+  // this launch's payload (and its Session binding) never lands, so the
+  // caller must not promise a settle announcement into the Session.
+  const launchedParentSessionId = getFastAgentParentFromPayload(
+    launch.payload,
+  )?.sessionId;
+  const alreadyRunning = Boolean(
+    parent && launchedParentSessionId !== parent.sessionId,
+  );
+
   return c.json({
     success: true,
     taskId: launch.taskId,
@@ -178,5 +201,6 @@ export async function handlePrReviewLaunch(
     }),
     prUrl: pullRequest.url,
     ...(pullRequest.title ? { prTitle: pullRequest.title } : {}),
+    ...(alreadyRunning ? { alreadyRunning: true } : {}),
   });
 }

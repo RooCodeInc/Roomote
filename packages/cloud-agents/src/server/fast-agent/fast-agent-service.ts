@@ -3581,6 +3581,16 @@ export async function answerFastAgentQuestion({
             if (result.taskId) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
             }
+            // A reused already-active review keeps its original payload, so
+            // this Session will not hear its settle: skip the kickoff and let
+            // the reply set expectations instead of promising a callback.
+            if (result.alreadyRunning) {
+              return {
+                ...result,
+                guidance:
+                  'A review of that pull request is already running; its results will post on the pull request itself, not back into this conversation. Tell the user that and link the pull request.',
+              };
+            }
             const kickoffMessage = [
               args.kickoffMessage,
               result.taskUrl && !args.kickoffMessage.includes(result.taskUrl)

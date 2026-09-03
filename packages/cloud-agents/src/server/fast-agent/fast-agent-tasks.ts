@@ -239,6 +239,9 @@ export async function launchFastAgentPrReview(
     taskUrl?: string;
     prUrl?: string;
     prTitle?: string;
+    /** True when an already-active review was reused: that run keeps its
+     * original Session binding, so this Session gets no settle event. */
+    alreadyRunning?: boolean;
   }
 > {
   return callFastAgentTaskApi({

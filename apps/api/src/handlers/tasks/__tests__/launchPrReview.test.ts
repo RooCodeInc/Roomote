@@ -82,7 +82,13 @@ describe('handlePrReviewLaunch', () => {
       userId: 'user-1',
       conversation: fastParent.conversation,
     });
-    mocks.enqueueTask.mockResolvedValue({ id: 900, taskId: 'review-task' });
+    mocks.enqueueTask.mockImplementation(
+      async (input: { task: { payload: unknown } }) => ({
+        id: 900,
+        taskId: 'review-task',
+        payload: input.task.payload,
+      }),
+    );
   });
 
   it('requires a repository and pull request number', async () => {
@@ -173,6 +179,56 @@ describe('handlePrReviewLaunch', () => {
       prUrl: 'https://github.com/acme/api/pull/42',
       prTitle: 'Ship it',
     });
+  });
+
+  it("rejects binding to another user's web Session", async () => {
+    mocks.findConversationById.mockResolvedValue({
+      id: fastParent.sessionId,
+      userId: 'someone-else',
+      conversation: { ...fastParent.conversation, surface: 'web' },
+    });
+    const { c, json } = makeContext();
+
+    await handlePrReviewLaunch(
+      c,
+      { userId: 'user-1' },
+      {
+        repo: 'acme/api',
+        prNumber: 42,
+        fastConversationId: fastParent.sessionId,
+      },
+    );
+
+    expect(json).toHaveBeenCalledWith(
+      { error: 'The requesting Session belongs to another user.' },
+      403,
+    );
+    expect(mocks.enqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('reports an already-running review instead of promising a settle', async () => {
+    mocks.enqueueTask.mockResolvedValue({
+      id: 900,
+      taskId: 'review-task',
+      // The reused active run keeps its original payload without this
+      // launch's Session binding.
+      payload: { repo: 'acme/api', prNumber: 42 },
+    });
+    const { c, json } = makeContext();
+
+    await handlePrReviewLaunch(
+      c,
+      { userId: 'user-1' },
+      {
+        repo: 'acme/api',
+        prNumber: 42,
+        fastConversationId: fastParent.sessionId,
+      },
+    );
+
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({ success: true, alreadyRunning: true }),
+    );
   });
 
   it('fails cleanly when the pull request cannot be resolved', async () => {
