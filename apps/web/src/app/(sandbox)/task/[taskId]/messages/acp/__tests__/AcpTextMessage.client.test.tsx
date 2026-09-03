@@ -204,6 +204,34 @@ describe('AcpTextMessage', () => {
     ).toBeVisible();
   });
 
+  it.each([
+    ['+1', '👍'],
+    ['exploding_head', '🤯'],
+    ['flag-gb', '🇬🇧'],
+    ['thumbsup::skin-tone-6', '👍🏿'],
+    ['female-technologist::skin-tone-3', '👩🏼‍💻'],
+    ['ship_it', ':ship_it:'],
+  ])('renders reaction receipt %s as %s', (reaction, expected) => {
+    render(
+      <AcpTextMessage
+        msg={{
+          id: 'reaction-1',
+          ts: 123,
+          role: 'assistant',
+          kind: 'text',
+          partial: false,
+          sessionId: 'session-1',
+          updateType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+          text: `[Reacted with :${reaction}:]`,
+          data: { reaction, purpose: 'closeout' },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('message-response')).toHaveTextContent(expected);
+    expect(screen.queryByText(/Reacted with/)).not.toBeInTheDocument();
+  });
+
   it('passes a permalink anchor id to the timestamp', () => {
     render(
       <AcpTextMessage
