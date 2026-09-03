@@ -87,9 +87,12 @@ describe('Fast Slack reaction input', () => {
   });
 
   it('admits a reaction turn durably so an interruption resumes it with the same reaction', async () => {
+    // The row was still pending from an earlier attempt (a redelivered
+    // event), so this run is a resumption.
     mocks.persistAdmission.mockResolvedValueOnce({
       id: 'row-1',
       eventKey: 'key-1',
+      resumed: true,
     });
     const slack = {
       getMessage: vi.fn(async () => ({
@@ -142,6 +145,7 @@ describe('Fast Slack reaction input', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         durableAdmission: { eventId: 'row-1' },
+        resumedAfterInterruption: true,
         adapter: expect.objectContaining({
           requestDurableResume: expect.any(Function),
           requestDurableRetry: expect.any(Function),

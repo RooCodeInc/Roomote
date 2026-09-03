@@ -140,6 +140,7 @@ async function processFastAgentReaction(params: {
       signal: releaseTurnLock.signal,
       input: { type: 'reaction', externalInput: reactionInput },
       ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
+      ...(durableTurn?.resumed ? { resumedAfterInterruption: true } : {}),
       adapter: {
         ...(durableTurn
           ? {

@@ -305,6 +305,10 @@ async function runWebFastAgentTurn({
       currentMessageId: turnMessageId,
       signal: release.signal,
       ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
+      // A row admission found still pending is an interrupted earlier
+      // attempt (a kickoff re-scheduled after a restart); run it as a
+      // resumption so recorded actions are not repeated.
+      ...(durableTurn?.resumed ? { resumedAfterInterruption: true } : {}),
       model,
       reasoningEffort,
       senderDisplayName,
