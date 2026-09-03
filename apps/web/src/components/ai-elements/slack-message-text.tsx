@@ -3,6 +3,7 @@
 import { Fragment, useMemo, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
+  SLACK_RESOLVE_CHANNELS_MAX_IDS,
   SLACK_RESOLVE_USERS_MAX_IDS,
   extractSlackChannelMentionIds,
   extractSlackUserMentionIds,
@@ -191,7 +192,10 @@ export function SlackMessageText({ text }: { text: string }) {
   );
   const channelIds = useMemo(
     () =>
-      extractSlackChannelMentionIds(text).slice(0, SLACK_RESOLVE_USERS_MAX_IDS),
+      extractSlackChannelMentionIds(text).slice(
+        0,
+        SLACK_RESOLVE_CHANNELS_MAX_IDS,
+      ),
     [text],
   );
   const { scope } = useSlackMentionContext();

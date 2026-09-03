@@ -1,4 +1,8 @@
-import { SlackNotifier, shouldResumeSlackAuthThread } from '@roomote/slack';
+import {
+  SlackChannelInfoCache,
+  SlackNotifier,
+  shouldResumeSlackAuthThread,
+} from '@roomote/slack';
 import {
   enqueueSlackAccountLinkEducation,
   recordSlackConversationMessageBestEffort,
@@ -959,11 +963,14 @@ export async function resolveSlackUsersCommand(
   }
 
   const unresolved = userIds.filter((userId) => !users[userId]);
+  // The channel-info cache is Redis-backed, so a channel name is fetched
+  // from Slack once per TTL across every transcript view, not per render.
   const slack = installation?.botAccessToken
     ? new SlackNotifier(installation.botAccessToken, {
         botUserId: installation.botUserId,
         botName: installation.botName,
         appName: installation.appName,
+        channelInfoCache: new SlackChannelInfoCache(teamId),
       })
     : null;
   if (unresolved.length > 0 && slack) {

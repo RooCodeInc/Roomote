@@ -211,6 +211,12 @@ export type SlackMessageToken =
 
 /** Upper bound on Slack user IDs resolved in one `slack.resolveUsers` call. */
 export const SLACK_RESOLVE_USERS_MAX_IDS = 50;
+/**
+ * Upper bound on Slack channel IDs resolved in one `slack.resolveUsers` call.
+ * Channel names come from `conversations.info`, one call per cold ID, so this
+ * stays small to keep a single transcript message well under Slack's quota.
+ */
+export const SLACK_RESOLVE_CHANNELS_MAX_IDS = 10;
 
 // Each pattern is anchored and applied only to the bounded text between one
 // `<` and the next `>`, so parsing stays linear in the message length even
