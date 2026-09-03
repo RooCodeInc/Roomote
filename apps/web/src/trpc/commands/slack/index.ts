@@ -825,6 +825,8 @@ export async function completePendingSlackAuthenticationCommand(
 
 const SLACK_USER_ID_PATTERN = /^[UW][A-Z0-9]+$/;
 const SLACK_CHANNEL_ID_PATTERN = /^[CDG][A-Z0-9]+$/;
+/** Parallel `conversations.info` calls per resolve request, kept well under Slack's per-method quota. */
+const SLACK_CHANNEL_LOOKUP_CONCURRENCY = 4;
 
 /**
  * Slack team a transcript belongs to, derived server-side from the task run
@@ -978,23 +980,33 @@ export async function resolveSlackUsersCommand(
   }
 
   if (channelIds.length > 0 && slack) {
-    await Promise.all(
-      channelIds.map(async (slackChannelId) => {
-        const name = await slack
-          .getChannelName(slackChannelId)
-          .catch(() => null);
-        if (name) {
-          channels[slackChannelId] = {
-            name,
-            url: buildSlackChannelUrl({
-              slackChannelId,
-              slackTeamId: teamId,
-              slackWorkspaceDomain: teamDomain,
-            }),
-          };
-        }
-      }),
-    );
+    for (
+      let start = 0;
+      start < channelIds.length;
+      start += SLACK_CHANNEL_LOOKUP_CONCURRENCY
+    ) {
+      const batch = channelIds.slice(
+        start,
+        start + SLACK_CHANNEL_LOOKUP_CONCURRENCY,
+      );
+      await Promise.all(
+        batch.map(async (slackChannelId) => {
+          const name = await slack
+            .getChannelName(slackChannelId)
+            .catch(() => null);
+          if (name) {
+            channels[slackChannelId] = {
+              name,
+              url: buildSlackChannelUrl({
+                slackChannelId,
+                slackTeamId: teamId,
+                slackWorkspaceDomain: teamDomain,
+              }),
+            };
+          }
+        }),
+      );
+    }
   }
 
   return { users, channels };
