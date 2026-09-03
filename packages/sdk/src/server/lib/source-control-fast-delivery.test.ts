@@ -1,5 +1,8 @@
 const mocks = vi.hoisted(() => ({
   createFastAgentTaskLauncher: vi.fn(),
+  resolveFastSessionLivePreviewUrl: vi.fn(
+    async (): Promise<string | null> => null,
+  ),
   repositoriesFindMany: vi.fn(),
   getInstallationOctokit: vi.fn(),
   gitlabCreateIssueNote: vi.fn(),
@@ -33,8 +36,17 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/communication', () => ({
-  buildFastSessionReplyFooterText: ({ provider }: { provider: string }) =>
-    `[footer:${provider}]`,
+  buildFastSessionReplyFooterText: ({
+    provider,
+    livePreviewUrl,
+  }: {
+    provider: string;
+    livePreviewUrl?: string | null;
+  }) =>
+    livePreviewUrl
+      ? `[footer:${provider}:${livePreviewUrl}]`
+      : `[footer:${provider}]`,
+  resolveFastSessionLivePreviewUrl: mocks.resolveFastSessionLivePreviewUrl,
 }));
 
 vi.mock('@roomote/github', () => ({
@@ -364,6 +376,64 @@ describe('GitHub Fast delivery', () => {
         sha: 'abc123',
       },
     });
+  });
+
+  it('includes the session live preview link in the comment footer when one exists', async () => {
+    mocks.resolveFastSessionLivePreviewUrl.mockResolvedValueOnce(
+      'https://preview.example/app',
+    );
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    const adapter = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+    });
+
+    await adapter.postReply({ message: 'On it.' });
+
+    expect(mocks.resolveFastSessionLivePreviewUrl).toHaveBeenCalledWith(
+      'fast-1',
+    );
+    expect(createComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: 'On it.\n\n[footer:github:https://preview.example/app]',
+      }),
+    );
+  });
+
+  it('still posts the comment when the live preview lookup fails', async () => {
+    mocks.resolveFastSessionLivePreviewUrl.mockRejectedValueOnce(
+      new Error('db down'),
+    );
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    const adapter = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+    });
+
+    await expect(adapter.postReply({ message: 'On it.' })).resolves.toEqual({
+      messageId: '5001',
+    });
+    expect(createComment).toHaveBeenCalledWith(
+      expect.objectContaining({ body: 'On it.\n\n[footer:github]' }),
+    );
   });
 
   it('edits the turn comment in place for later replies instead of posting again', async () => {

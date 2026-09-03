@@ -5,7 +5,10 @@ import {
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
 import { and, db, eq, repositories } from '@roomote/db/server';
-import { buildFastSessionReplyFooterText } from '@roomote/communication';
+import {
+  buildFastSessionReplyFooterText,
+  resolveFastSessionLivePreviewUrl,
+} from '@roomote/communication';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
@@ -842,6 +845,10 @@ export function buildSourceControlFastAdapter(params: {
       const footer = buildFastSessionReplyFooterText({
         provider: discussion.provider,
         sessionId: params.sessionId,
+        // The preview link is a nicety; its lookup never blocks the comment.
+        livePreviewUrl: await resolveFastSessionLivePreviewUrl(
+          params.sessionId,
+        ).catch(() => null),
       });
       // One comment per turn: the first reply opens it, later replies append
       // by editing it in place, so a turn never stacks comments on the
@@ -870,6 +877,9 @@ export function buildSourceControlFastAdapter(params: {
             const footer = buildFastSessionReplyFooterText({
               provider: discussion.provider,
               sessionId: params.sessionId,
+              livePreviewUrl: await resolveFastSessionLivePreviewUrl(
+                params.sessionId,
+              ).catch(() => null),
             });
             await params.delivery.updateCommentById!({
               discussion,
