@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useState, useCallback, useEffect, type Ref } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -12,16 +11,13 @@ import {
   DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
 } from '@roomote/types';
 
-import { SETTINGS_PATHS } from '@/lib/settings';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 
-import { useEnvironments } from '@/hooks/environments';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { useStartFastSession } from '@/hooks/task-runs';
 
-import { Alert, ArrowRight, VectorSquare } from '@/components/system';
 import type { PromptInputMessage } from '@/components/ai-elements';
 import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
 import { useTaskLaunchConfig } from '@/components/tasks/TaskLaunchConfig';
@@ -49,8 +45,7 @@ export function NewTaskForm({
 }: NewTaskFormProps) {
   const { defaultComputeProvider } = useTaskLaunchConfig();
   const router = useRouter();
-  const environments = useEnvironments();
-  const { isAdmin, managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
+  const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
     useAuthorizedUser();
 
   const searchParams = useSearchParams();
@@ -161,9 +156,6 @@ export function NewTaskForm({
 
   const isBusy = startFastSessionMutation.isPending;
 
-  const hasAnyEnvironments = (environments.data?.length ?? 0) > 0;
-  const showNoEnvironmentsWarning =
-    isAdmin && !environments.isPending && !hasAnyEnvironments;
   const submitDisabledReason = getTaskLaunchDisabledReason(managedAccess);
 
   const handleSubmit = useCallback(
@@ -222,56 +214,32 @@ export function NewTaskForm({
   );
 
   return (
-    <>
-      <div
-        ref={promptContainerRef}
-        className="animate-[enter-down_1s_1_100ms_backwards]"
-      >
-        <TaskPromptInput
-          promptKey={promptParam}
-          isBusy={isBusy}
-          promptText={promptText}
-          onPromptTextChange={setPromptText}
-          onSubmit={handleSubmit}
-          placeholder={placeholder}
-          autoFocus
-          textareaMaxHeight={textareaMaxHeight}
-          animateContainer={false}
-          submitWithMetaKey={false}
-          submitDisabledReason={submitDisabledReason}
-          tools={
-            <SessionModelSwitcher
-              model={selectedModelOverrideId ?? ''}
-              onModelChange={setSelectedModelOverrideId}
-              reasoningEffort={selectedReasoningEffort ?? null}
-              onReasoningEffortChange={setSelectedReasoningEffort}
-              defaultModelId={defaultModelId}
-            />
-          }
-        />
-      </div>
-
-      {showNoEnvironmentsWarning && (
-        <Alert
-          variant="light"
-          className="mt-2 animate-[enter-down_1s_1_300ms_backwards]"
-        >
-          <VectorSquare />
-          <p>
-            <span>You haven&apos;t created any environments yet. </span>
-            <span className="block md:inline">
-              Roomote can work directly on your repos, but it can&apos;t verify
-              its work.{' '}
-            </span>
-            <Link
-              href={SETTINGS_PATHS.newEnvironment}
-              className="text-primary font-semibold underline hover:no-underline block md:inline"
-            >
-              Create your first <ArrowRight className="inline size-4" />
-            </Link>
-          </p>
-        </Alert>
-      )}
-    </>
+    <div
+      ref={promptContainerRef}
+      className="animate-[enter-down_1s_1_100ms_backwards]"
+    >
+      <TaskPromptInput
+        promptKey={promptParam}
+        isBusy={isBusy}
+        promptText={promptText}
+        onPromptTextChange={setPromptText}
+        onSubmit={handleSubmit}
+        placeholder={placeholder}
+        autoFocus
+        textareaMaxHeight={textareaMaxHeight}
+        animateContainer={false}
+        submitWithMetaKey={false}
+        submitDisabledReason={submitDisabledReason}
+        tools={
+          <SessionModelSwitcher
+            model={selectedModelOverrideId ?? ''}
+            onModelChange={setSelectedModelOverrideId}
+            reasoningEffort={selectedReasoningEffort ?? null}
+            onReasoningEffortChange={setSelectedReasoningEffort}
+            defaultModelId={defaultModelId}
+          />
+        }
+      />
+    </div>
   );
 }

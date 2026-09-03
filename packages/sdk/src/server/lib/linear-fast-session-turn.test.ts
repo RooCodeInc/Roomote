@@ -107,6 +107,53 @@ describe('buildLinearFastTurn', () => {
     expect(turn.agentContext).toContain('Prefer small PRs.');
   });
 
+  it("treats Linear's delegation stub comment as work on the issue", () => {
+    const payload = makePayload({
+      agentSession: {
+        id: 'session-1',
+        issue,
+        comment: {
+          id: 'comment-stub',
+          body: 'This thread is for an agent session with roomoteroomoteroomote.',
+        },
+        previousComments: [
+          {
+            id: 'c-stub',
+            body: 'This thread is for an agent session with roomoteroomoteroomote.',
+            user: { id: 'u-bot', name: 'roomote' },
+          },
+          {
+            id: 'c-real',
+            body: 'Seen in production twice.',
+            user: { id: 'u-2', name: 'Sam' },
+          },
+        ],
+        createdAt: '2026-09-02T00:00:00.000Z',
+        updatedAt: '2026-09-02T00:00:00.000Z',
+      },
+      agentActivity: {
+        id: 'activity-1',
+        createdAt: '2026-09-02T00:00:00.000Z',
+        updatedAt: '2026-09-02T00:00:00.000Z',
+        agentSessionId: 'session-1',
+        content: {
+          type: 'prompt',
+          body: 'This thread is for an agent session with roomoteroomoteroomote.',
+        },
+      },
+    });
+
+    const turn = buildLinearFastTurn({
+      payload,
+      agentSession: payload.agentSession,
+    });
+
+    expect(turn.question).toBe('Work on ENG-123: Fix API retries');
+    expect(turn.agentContext).toContain('Retries never back off.');
+    expect(turn.agentContext).toContain('Seen in production twice.');
+    expect(turn.agentContext).not.toContain('agent session with');
+  });
+
   it('describes a delegation with no comment as work on the issue', () => {
     const payload = makePayload({
       agentSession: {

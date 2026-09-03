@@ -5,8 +5,6 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { DiscordLogoIcon } from '@radix-ui/react-icons';
 
 import { cn } from '@/lib/utils';
-import { useEnvironments } from '@/hooks/environments';
-import { useAuthorizedUser } from '@/hooks/useUser';
 import {
   Button,
   Calendar,
@@ -57,8 +55,6 @@ type HomeProps = {
 };
 
 export function Home({ initialPlaceholderIndex }: HomeProps) {
-  const environments = useEnvironments();
-  const { isAdmin } = useAuthorizedUser();
   const [isExiting, setIsExiting] = useState(false);
   const [isBottomSheetExpanded, setIsBottomSheetExpanded] = useState(false);
   const [isFeedbackPromptVisible, setIsFeedbackPromptVisible] = useState(false);
@@ -179,9 +175,6 @@ export function Home({ initialPlaceholderIndex }: HomeProps) {
   }, []);
 
   const shouldDimMainForm = isBottomSheetExpanded && isShortViewport;
-  const hasAnyEnvironments = (environments.data?.length ?? 0) > 0;
-  const showNoEnvironmentsWarning =
-    isAdmin && !environments.isPending && !hasAnyEnvironments;
 
   return (
     <>
@@ -210,9 +203,9 @@ export function Home({ initialPlaceholderIndex }: HomeProps) {
               promptContainerRef={promptCardRef}
             />
 
-            <div className="flex flex-col md:flex-row flex-wrap md:items-center gap-2 animate-[fade-in_1s_1_750ms_backwards]">
-              {!showNoEnvironmentsWarning && <OnboardingCard />}
-              {!showNoEnvironmentsWarning && isFeedbackPromptVisible ? (
+            <div className="flex flex-col flex-wrap gap-2 md:flex-row md:flex-nowrap md:items-center animate-[fade-in_1s_1_750ms_backwards]">
+              <OnboardingCard />
+              {isFeedbackPromptVisible ? (
                 <button
                   type="button"
                   onClick={() => setIsFeedbackDialogOpen(true)}
