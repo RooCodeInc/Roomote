@@ -1745,8 +1745,8 @@ describe('runTask', () => {
     expect(proofConfigCall).toBeUndefined();
     expect(createHarnessMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        runtimeEnv: expect.objectContaining({
-          ROOMOTE_PROOF_BROWSER_TARGET: 'http://localhost:3000/auth/dev-login',
+        runtimeEnv: expect.not.objectContaining({
+          ROOMOTE_PROOF_BROWSER_TARGET: expect.any(String),
         }),
       }),
     );
