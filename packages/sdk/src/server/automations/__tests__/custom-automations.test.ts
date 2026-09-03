@@ -258,7 +258,7 @@ describe('customAutomationsJob', () => {
 
     const result = await customAutomationsJob();
 
-    expect(result.completed).toBe(true);
+    expect(result).toMatchObject({ queued: true, completed: false });
     expect(enqueueTask).not.toHaveBeenCalled();
     expect(fastMocks.getSession).toHaveBeenCalledWith({
       userId: 'user-1',
@@ -408,7 +408,7 @@ describe('customAutomationsJob', () => {
 
     const result = await customAutomationsJob();
 
-    expect(result.completed).toBe(true);
+    expect(result).toMatchObject({ queued: true, completed: false });
     expect(fastMocks.createDiscordThread).toHaveBeenCalledWith({
       channelId: 'discord-channel-1',
       name: 'Flaky tests',
@@ -478,7 +478,7 @@ describe('customAutomationsJob', () => {
 
     const result = await customAutomationsJob();
 
-    expect(result.completed).toBe(true);
+    expect(result).toMatchObject({ queued: true, completed: false });
     expect(findUserDirectMessageDestination).toHaveBeenCalledWith(
       'slack',
       'user-1',
@@ -616,7 +616,7 @@ describe('customAutomationsJob', () => {
 
       const result = await customAutomationsJob();
 
-      expect(result.completed).toBe(true);
+      expect(result).toMatchObject({ queued: true, completed: false });
       expect(fastMocks.getSession).toHaveBeenCalledWith({
         userId: 'user-1',
         conversation: expect.objectContaining({
@@ -920,7 +920,11 @@ describe('customAutomationsJob', () => {
 
   it('passes a model override through to the launch', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
-      { ...automation, model: 'anthropic/claude-sonnet-5' } as never,
+      {
+        ...automation,
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'high',
+      } as never,
     ]);
 
     await customAutomationsJob();
@@ -933,6 +937,7 @@ describe('customAutomationsJob', () => {
             harnessModelOverrides: {
               'opencode-server': 'anthropic/claude-sonnet-5',
             },
+            reasoningEffort: 'high',
           }),
         }),
       }),
@@ -1310,11 +1315,13 @@ describe('runCustomAutomationNow', () => {
       environmentId: null,
       target: {},
       createdByUserId: 'user-1',
+      model: 'anthropic/claude-sonnet-5',
+      reasoningEffort: 'xhigh',
     } as never);
 
     const result = await runCustomAutomationNow(automation.id);
 
-    expect(result).toEqual({ outcome: 'completed' });
+    expect(result).toEqual({ outcome: 'queued' });
     expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
@@ -1322,6 +1329,8 @@ describe('runCustomAutomationNow', () => {
           automationId: automation.id,
           launchClaimedAt: expect.any(String),
           trigger: 'manual',
+          defaultTaskModel: 'anthropic/claude-sonnet-5',
+          defaultTaskReasoningEffort: 'xhigh',
         }),
       }),
     );
@@ -1391,7 +1400,7 @@ describe('runCustomAutomationNow', () => {
 
     const result = await runCustomAutomationNow(automation.id);
 
-    expect(result).toEqual({ outcome: 'completed' });
+    expect(result).toEqual({ outcome: 'queued' });
     expect(fastMocks.getSession).toHaveBeenCalledWith({
       userId: 'user-1',
       conversation: {
@@ -1420,7 +1429,7 @@ describe('runCustomAutomationNow', () => {
 
     const result = await runCustomAutomationNow(automation.id);
 
-    expect(result).toEqual({ outcome: 'completed' });
+    expect(result).toEqual({ outcome: 'queued' });
     expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({

@@ -47,17 +47,48 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
       staleTime: 30_000,
     }),
   );
+  const { data: setupSessionStatus, isLoading: isSetupSessionLoading } =
+    useQuery(
+      trpc.setup.sessionStatus.queryOptions(undefined, {
+        enabled: shouldCheckSetup && setupStatus?.setupCompletedAt == null,
+        staleTime: 10_000,
+      }),
+    );
   const setupRedirectPath =
-    shouldCheckSetup && !isSetupError && setupStatus != null
+    shouldCheckSetup &&
+    !isSetupError &&
+    setupStatus != null &&
+    setupSessionStatus?.completed !== true
       ? getSetupRedirectPath(setupStatus)
       : null;
+  const setupSessionPath = setupSessionStatus?.sessionId
+    ? `/sessions/${setupSessionStatus.sessionId}`
+    : null;
+  const isOnKnownSetupSession =
+    setupSessionPath !== null &&
+    (pathname === setupSessionPath ||
+      pathname.startsWith(`${setupSessionPath}/`));
+  const isSettingsRoute =
+    pathname === '/settings' || pathname.startsWith('/settings/');
+  // An incomplete administrator must not briefly see another authenticated
+  // page while we look up their setup Session. A known setup Session remains
+  // accessible during a background refresh.
+  const isSetupSessionLookupPending =
+    setupRedirectPath !== null &&
+    isSetupSessionLoading &&
+    !isSettingsRoute &&
+    !isOnKnownSetupSession;
+  const effectiveSetupRedirectPath =
+    setupRedirectPath === null ? null : (setupSessionPath ?? setupRedirectPath);
 
   // Treat the redirect target itself and any page beneath it as allowed so
   // setup can keep ownership of any remaining required bootstrap screens.
   const isRedirectingForSetup =
-    setupRedirectPath !== null &&
-    pathname !== setupRedirectPath &&
-    !pathname.startsWith(`${setupRedirectPath}/`);
+    !isSetupSessionLookupPending &&
+    effectiveSetupRedirectPath !== null &&
+    !isSettingsRoute &&
+    pathname !== effectiveSetupRedirectPath &&
+    !pathname.startsWith(`${effectiveSetupRedirectPath}/`);
   const isRedirectingForOnboarding =
     shouldCheckOnboarding &&
     !isOnboardingLoading &&
@@ -67,8 +98,8 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
   useRedirectToSignIn(authStatus === 'signed-out');
 
   useEffect(() => {
-    if (isRedirectingForSetup && setupRedirectPath) {
-      router.replace(setupRedirectPath);
+    if (isRedirectingForSetup && effectiveSetupRedirectPath) {
+      router.replace(effectiveSetupRedirectPath);
     } else if (isRedirectingForOnboarding) {
       router.replace('/onboarding');
     }
@@ -76,7 +107,7 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
     isRedirectingForOnboarding,
     isRedirectingForSetup,
     router,
-    setupRedirectPath,
+    effectiveSetupRedirectPath,
   ]);
 
   if (!isSignedIn) {
@@ -84,7 +115,10 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
   }
 
   if (
-    (shouldCheckSetup && (isSetupLoading || isRedirectingForSetup)) ||
+    (shouldCheckSetup &&
+      (isSetupLoading ||
+        isSetupSessionLookupPending ||
+        isRedirectingForSetup)) ||
     (shouldCheckOnboarding &&
       (isOnboardingLoading || isRedirectingForOnboarding))
   ) {
@@ -105,7 +139,7 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="flex min-h-0 flex-1">
-          <SideNav />
+          <SideNav setupIncomplete={setupRedirectPath !== null} />
 
           <FramedSurface variant="basic">{children}</FramedSurface>
         </div>

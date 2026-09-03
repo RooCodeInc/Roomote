@@ -11,6 +11,7 @@ import {
   getFastAgentParentFromPayload,
   type PullRequestStatus,
   type SourceControlProvider,
+  isPrReviewRun,
 } from '@roomote/types';
 
 import {
@@ -82,7 +83,7 @@ function getPayloadBranchName(payload: TaskRun['payload']): string {
 
 /** Pass triaged PR feedback to the Fast conversation that delegated the task. */
 export async function notifyFastAgentParentOnPrFeedback(params: {
-  run: Pick<TaskRun, 'id' | 'taskId' | 'payload'>;
+  run: Pick<TaskRun, 'id' | 'taskId' | 'payload' | 'payloadKind'>;
   reviewTaskId?: string;
   reviewHeadSha?: string;
   pullRequest: {
@@ -110,6 +111,13 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
 }): Promise<boolean> {
   const parent = getFastAgentParentFromPayload(params.run.payload);
   if (!parent) {
+    return false;
+  }
+
+  // Review-pipeline runs never forward PR events to their parent session:
+  // the PR's implementation task already delivers them, and a duplicate from
+  // the attached review task would double-announce in the same session.
+  if (isPrReviewRun(params.run)) {
     return false;
   }
 

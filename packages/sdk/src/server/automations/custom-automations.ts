@@ -453,6 +453,11 @@ async function runFastCustomAutomation(params: {
       ...(params.automation.model
         ? { defaultTaskModel: params.automation.model }
         : {}),
+      ...(params.automation.reasoningEffort
+        ? {
+            defaultTaskReasoningEffort: params.automation.reasoningEffort,
+          }
+        : {}),
       ...(rootMessageId ? { rootMessageId } : {}),
     };
     await enqueueFastAgentParentEvent({
@@ -744,7 +749,7 @@ async function launchCustomAutomationRow(
         launchClaimedAt,
         trigger: opts.manualTrigger ? 'manual' : 'schedule',
       });
-      result.completed = true;
+      result.queued = true;
       return result;
     }
 
@@ -788,6 +793,9 @@ async function launchCustomAutomationRow(
             : {}),
           ...(modelOverride?.harnessModelOverrides
             ? { harnessModelOverrides: modelOverride.harnessModelOverrides }
+            : {}),
+          ...(automation.reasoningEffort
+            ? { reasoningEffort: automation.reasoningEffort }
             : {}),
         },
       },
@@ -872,6 +880,9 @@ export async function customAutomationsJob(
       if (rowResult.launchedTaskId) {
         result.launchedTaskId ??= rowResult.launchedTaskId;
         processed++;
+      } else if (rowResult.queued) {
+        result.queued = true;
+        processed++;
       } else if (rowResult.completed) {
         result.completed = true;
         processed++;
@@ -936,6 +947,10 @@ export async function runCustomAutomationNow(
 
     if (result.skippedReason) {
       return { outcome: 'skipped', reason: result.skippedReason };
+    }
+
+    if (result.queued) {
+      return { outcome: 'queued' };
     }
 
     if (result.completed) {

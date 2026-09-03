@@ -125,6 +125,16 @@ service hooks for:
 Service hook webhook secrets are generated automatically. The deployment API
 must be reachable from Azure DevOps for those deliveries.
 
+## Mention Roomote on pull requests and work items
+
+Mention `@roomote` in a pull request comment or a work item comment to talk to
+Roomote about it. Each pull request or work item is a Roomote Session: Roomote
+reads the discussion, answers as a comment when no workspace is needed, and
+otherwise starts a task on the pull request's source branch (or the project's
+mapped repository for a work item) and reports back in the same discussion.
+Pull request replies stay in the comment thread the mention came from. The
+commenter must have a linked Azure DevOps account.
+
 ## Current limits
 
 Classic TFVC repositories and non-Git build repository types are not triaged.

@@ -169,7 +169,7 @@ describe('custom automations helpers', () => {
     await deleteCustomAutomation(created.id);
   });
 
-  it('persists a model override and rejects malformed model ids', async () => {
+  it('persists model and effort overrides and rejects invalid combinations', async () => {
     const [environment] = await db
       .insert(environments)
       .values({
@@ -184,10 +184,12 @@ describe('custom automations helpers', () => {
       enabled: true,
       scheduleMode: 'daily',
       model: 'anthropic/claude-sonnet-5',
+      reasoningEffort: 'high',
       environmentId: environment!.id,
       target: {},
     });
     expect(created.model).toBe('anthropic/claude-sonnet-5');
+    expect(created.reasoningEffort).toBe('high');
 
     const cleared = await updateCustomAutomation(created.id, {
       name: created.name,
@@ -195,10 +197,24 @@ describe('custom automations helpers', () => {
       enabled: true,
       scheduleMode: 'daily',
       model: null,
+      reasoningEffort: null,
       environmentId: environment!.id,
       target: {},
     });
     expect(cleared.model).toBeNull();
+    expect(cleared.reasoningEffort).toBeNull();
+
+    await expect(
+      updateCustomAutomation(created.id, {
+        name: created.name,
+        prompt: created.prompt,
+        enabled: true,
+        scheduleMode: 'daily',
+        reasoningEffort: 'medium',
+        environmentId: environment!.id,
+        target: {},
+      }),
+    ).rejects.toThrow('requires a model override');
 
     await expect(
       updateCustomAutomation(created.id, {

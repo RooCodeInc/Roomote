@@ -5,12 +5,15 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
+import { useMediaQuery } from 'usehooks-ts';
 import {
   getReasoningEffortLabel,
   isTaskExecutingTurn,
@@ -23,11 +26,8 @@ import {
   getUserDisplayName,
   humanizeFilename,
 } from '@/lib';
-import {
-  getSessionPullRequests,
-  type SessionPullRequest,
-} from '@/lib/session-pull-requests';
-import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
+import { getSessionPullRequests } from '@/lib/session-pull-requests';
+import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInferenceCostBreakdown';
 import { PullRequestBadge } from '@/components/sandbox';
 import {
   getSessionSurfaceBrandIcon,
@@ -39,6 +39,7 @@ import { useTRPC } from '@/trpc/client';
 import { FramedSurface, WorkspaceSurface } from '@/components/layout';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 import {
+  AppWindow,
   ArrowLeftFromLine,
   ArrowLeft,
   Avatar,
@@ -86,6 +87,12 @@ import {
 } from './session-task-panel-context';
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
 import { useArtifactByPath } from '../../task/[taskId]/hooks/use-artifact-by-path';
+import { PreviewPaneProvider } from '../../task/[taskId]/hooks/use-preview-pane';
+import { humanizePortName } from '../../task/[taskId]/preview-port-utils';
+import {
+  PreviewSidePanel,
+  type PreviewEntry,
+} from '../../task/[taskId]/sidebar-panels/PreviewSidePanel';
 
 const ArtifactViewerContent = dynamic(
   () =>
@@ -122,6 +129,7 @@ type SessionTaskSummary = {
     result: unknown;
   } | null;
   artifacts: SessionArtifact[];
+  previews: SessionTaskPreview[];
   pullRequests: Array<{
     id: string;
     url: string;
@@ -144,6 +152,14 @@ type SessionArtifact = {
   previewUrl?: string;
 };
 
+/** A live preview URL from a session-linked task, collated server-side. */
+type SessionTaskPreview = {
+  serviceName: string;
+  url: string;
+  isPrimary: boolean;
+  runId: number;
+};
+
 export type SessionInfo = {
   id: string;
   ownerName: string | null;
@@ -163,9 +179,10 @@ export type SessionInfo = {
   createdAt: Date;
   status: string | null;
   tasks: SessionTaskSummary[];
+  artifacts?: SessionArtifact[];
   taskSource?: 'unified' | 'fast';
   taskCards?: Array<
-    Pick<SessionTaskSummary, 'taskId' | 'title' | 'artifacts'> & {
+    Pick<SessionTaskSummary, 'taskId' | 'title' | 'artifacts' | 'previews'> & {
       inferenceCostMicroUsd?: number;
       latestRun: Pick<
         NonNullable<SessionTaskSummary['latestRun']>,
@@ -175,15 +192,17 @@ export type SessionInfo = {
   >;
 };
 
-const SessionPullRequestsContext = createContext<SessionPullRequest[]>([]);
+const SessionPullRequestsContext = createContext<
+  ReturnType<typeof getSessionPullRequests>
+>([]);
 
-export function SessionHeaderExtras({ status }: { status: string | null }) {
+export function SessionHeaderPullRequests() {
   const pullRequests = useContext(SessionPullRequestsContext);
 
-  if (pullRequests.length === 0 && !status) return null;
+  if (pullRequests.length === 0) return null;
 
   return (
-    <div className="flex max-w-full min-w-0 flex-wrap items-center justify-end gap-x-4 gap-y-2 text-xs text-muted-foreground">
+    <div className="flex max-w-full min-w-0 flex-wrap items-center justify-start gap-x-4 gap-y-2 text-xs text-muted-foreground">
       {pullRequests.map((pullRequest) => (
         <PullRequestBadge
           key={`${pullRequest.repository}:${pullRequest.number}`}
@@ -193,7 +212,6 @@ export function SessionHeaderExtras({ status }: { status: string | null }) {
           iconClassName="text-muted-foreground"
         />
       ))}
-      {status ? <SessionStatusBadge status={status} /> : null}
     </div>
   );
 }
@@ -219,7 +237,9 @@ function SessionArtifactCard({
       type="button"
       onClick={onOpen}
       title={taskTitle ? `${artifact.path} - ${taskTitle}` : artifact.path}
-      aria-label={taskTitle ? `Open ${label} from ${taskTitle}` : undefined}
+      aria-label={
+        taskTitle ? `Open ${label} from ${taskTitle}` : `Open ${label}`
+      }
       className="group block w-full min-w-0 cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-opacity hover:opacity-70"
     >
       <span className="flex aspect-video w-full items-center justify-center overflow-hidden bg-muted">
@@ -272,8 +292,8 @@ function SessionArtifactCard({
 }
 
 type SessionArtifactEntry = {
-  taskId: string;
-  taskTitle: string;
+  owner: { taskId: string } | { sessionId: string };
+  taskTitle?: string;
   artifact: SessionArtifact;
 };
 
@@ -284,6 +304,8 @@ type SessionArtifactTask = Pick<
 
 function getLatestSessionArtifacts(
   tasks: SessionArtifactTask[],
+  sessionId: string,
+  sessionArtifacts: SessionArtifact[],
 ): SessionArtifactEntry[] {
   const entries: SessionArtifactEntry[] = [];
 
@@ -296,8 +318,23 @@ function getLatestSessionArtifacts(
       }
     }
     for (const artifact of latestByPath.values()) {
-      entries.push({ taskId: task.taskId, taskTitle: task.title, artifact });
+      entries.push({
+        owner: { taskId: task.taskId },
+        taskTitle: task.title,
+        artifact,
+      });
     }
+  }
+
+  const latestSessionByPath = new Map<string, SessionArtifact>();
+  for (const artifact of sessionArtifacts) {
+    const current = latestSessionByPath.get(artifact.path);
+    if (!current || artifact.version > current.version) {
+      latestSessionByPath.set(artifact.path, artifact);
+    }
+  }
+  for (const artifact of latestSessionByPath.values()) {
+    entries.push({ owner: { sessionId }, taskTitle: 'Session', artifact });
   }
 
   return entries.sort(
@@ -315,7 +352,7 @@ function SessionArtifactViewer({
   onClose,
 }: {
   selection: {
-    taskId: string;
+    owner: { taskId: string } | { sessionId: string };
     path: string;
     version?: number;
   };
@@ -328,7 +365,7 @@ function SessionArtifactViewer({
     data: artifact,
     isPending,
     isError,
-  } = useArtifactByPath(selection.taskId, selection.path, selection.version);
+  } = useArtifactByPath(selection.owner, selection.path, selection.version);
 
   return (
     <>
@@ -373,7 +410,7 @@ function SessionArtifactViewer({
         ) : (
           <ArtifactViewerContent
             artifact={artifact}
-            taskId={selection.taskId}
+            owner={selection.owner}
             className="h-full border-0"
           />
         )}
@@ -384,14 +421,22 @@ function SessionArtifactViewer({
 
 function SessionArtifactsPanel({
   tasks,
+  sessionId,
+  sessionArtifacts,
   onClose,
 }: {
   tasks: SessionArtifactTask[];
+  sessionId: string;
+  sessionArtifacts: SessionArtifact[];
   onClose: () => void;
 }) {
   const [selectedArtifact, setSelectedArtifact] =
     useState<SessionArtifactEntry | null>(null);
-  const artifacts = getLatestSessionArtifacts(tasks);
+  const artifacts = getLatestSessionArtifacts(
+    tasks,
+    sessionId,
+    sessionArtifacts,
+  );
   const artifactSections = [
     {
       label: 'Screenshots',
@@ -423,7 +468,7 @@ function SessionArtifactsPanel({
       {selectedArtifact ? (
         <SessionArtifactViewer
           selection={{
-            taskId: selectedArtifact.taskId,
+            owner: selectedArtifact.owner,
             path: selectedArtifact.artifact.path,
             version: selectedArtifact.artifact.version,
           }}
@@ -456,7 +501,7 @@ function SessionArtifactsPanel({
                         <div className="grid grid-cols-2 gap-4 @[500px]:grid-cols-3">
                           {sectionArtifacts.map((entry) => (
                             <SessionArtifactCard
-                              key={`${entry.taskId}:${entry.artifact.path}`}
+                              key={`${'taskId' in entry.owner ? `task:${entry.owner.taskId}` : `session:${entry.owner.sessionId}`}:${entry.artifact.path}`}
                               artifact={entry.artifact}
                               taskTitle={entry.taskTitle}
                               onOpen={() => setSelectedArtifact(entry)}
@@ -471,6 +516,68 @@ function SessionArtifactsPanel({
           </div>
         </>
       )}
+    </FramedSurface>
+  );
+}
+
+type SessionPreviewEntry = {
+  taskId: string;
+  taskTitle: string;
+  preview: SessionTaskPreview;
+};
+
+type SessionPreviewTask = Pick<
+  SessionTaskSummary,
+  'taskId' | 'title' | 'previews'
+>;
+
+function getSessionPreviews(
+  tasks: SessionPreviewTask[],
+): SessionPreviewEntry[] {
+  // Cached payloads written before previews existed may omit the field.
+  return tasks.flatMap((task) =>
+    (task.previews ?? []).map((preview) => ({
+      taskId: task.taskId,
+      taskTitle: task.title,
+      preview,
+    })),
+  );
+}
+
+/**
+ * Session-level Live Preview: the task workspace's PreviewSidePanel fed with
+ * entries collated across every linked task. When more than one task exposes
+ * previews, entry labels carry the task title so the service picker
+ * disambiguates them.
+ */
+function SessionPreviewsPanel({
+  tasks,
+  onClose,
+}: {
+  tasks: SessionPreviewTask[];
+  onClose: () => void;
+}) {
+  const previews = getSessionPreviews(tasks);
+  const tasksWithPreviews = new Set(previews.map((entry) => entry.taskId)).size;
+  const entries: PreviewEntry[] = previews.map((entry) => ({
+    name: `${entry.taskId}:${entry.preview.serviceName}`,
+    label:
+      tasksWithPreviews > 1
+        ? `${humanizePortName(entry.preview.serviceName)} - ${entry.taskTitle}`
+        : humanizePortName(entry.preview.serviceName),
+    url: entry.preview.url,
+    isPrimary: entry.preview.isPrimary,
+    runId: entry.preview.runId,
+  }));
+
+  return (
+    <FramedSurface
+      frameClassName="p-0"
+      surfaceClassName="relative flex flex-col overflow-hidden"
+    >
+      <PreviewPaneProvider>
+        <PreviewSidePanel entries={entries} onClose={onClose} />
+      </PreviewPaneProvider>
     </FramedSurface>
   );
 }
@@ -584,40 +691,10 @@ function SessionInfoPanel({
                 collisionPadding={16}
                 className="max-h-80 w-[calc(100vw-2rem)] max-w-80 overflow-y-auto"
               >
-                <p className="mb-3 text-sm font-medium">
-                  Inference cost breakdown
-                </p>
-                <dl className="space-y-2 text-xs">
-                  <div className="flex items-start justify-between gap-4">
-                    <dt className="text-muted-foreground">Direct session</dt>
-                    <dd className="shrink-0 font-medium tabular-nums">
-                      $
-                      {formatInferenceCost(
-                        session.inferenceCostBreakdown
-                          .directInferenceCostMicroUsd,
-                      )}
-                    </dd>
-                  </div>
-                  {session.inferenceCostBreakdown.tasks.map((task) => (
-                    <div
-                      key={task.taskId}
-                      className="flex items-start justify-between gap-4"
-                    >
-                      <dt className="min-w-0 break-words text-muted-foreground">
-                        {task.title}
-                      </dt>
-                      <dd className="shrink-0 font-medium tabular-nums">
-                        ${formatInferenceCost(task.inferenceCostMicroUsd)}
-                      </dd>
-                    </div>
-                  ))}
-                  <div className="flex items-start justify-between gap-4 border-t pt-2">
-                    <dt className="font-medium">Total</dt>
-                    <dd className="shrink-0 font-medium tabular-nums">
-                      ${inferenceCostLabel}
-                    </dd>
-                  </div>
-                </dl>
+                <SessionInferenceCostBreakdown
+                  breakdown={session.inferenceCostBreakdown}
+                  totalInferenceCostMicroUsd={session.inferenceCostMicroUsd}
+                />
               </PopoverContent>
             </Popover>
           </SandboxInfoRow>
@@ -643,11 +720,6 @@ function SessionInfoPanel({
               <span className="truncate">{surfaceLabel}</span>
             </span>
           </SandboxInfoRow>
-          {session.status ? (
-            <SandboxInfoRow label="Status">
-              <SessionStatusBadge status={session.status} />
-            </SandboxInfoRow>
-          ) : null}
         </SandboxInfoTable>
       </SandboxInfoPanel>
     </FramedSurface>
@@ -656,8 +728,9 @@ function SessionInfoPanel({
 
 type BaseWorkspacePanel =
   | { kind: 'info' }
-  | { kind: 'tasks' }
+  | { kind: 'tasks'; autoOpened?: boolean }
   | { kind: 'artifacts' }
+  | { kind: 'previews' }
   | { kind: 'nested'; taskId: string };
 
 type WorkspacePanel =
@@ -713,6 +786,7 @@ export function SessionWorkspace({
   const taskCards = isFastTaskSource ? fastTasks : sessionTasks;
   const artifactTasks = isFastTaskSource ? fastTasks : sessionTasks;
   const sessionPullRequests = getSessionPullRequests(sessionTasks);
+  const sessionPreviewCount = getSessionPreviews(taskCards).length;
   const runningTasks = taskCards.filter((task) =>
     isTaskExecutingTurn(task.latestRun?.status, task.latestRun?.taskPhase),
   );
@@ -726,6 +800,32 @@ export function SessionWorkspace({
   const selectedTaskId = searchParams.get('task');
   const selectedTask = taskCards.find((task) => task.taskId === selectedTaskId);
   const panelOpen = panel !== null || Boolean(selectedTask);
+  const isMdOrLarger = useMediaQuery('(min-width: 768px)', {
+    initializeWithValue: false,
+  });
+  const previousTaskStateRef = useRef<{
+    taskCount: number;
+    runningTaskCount: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const previousTaskState = previousTaskStateRef.current;
+    if (
+      isMdOrLarger &&
+      previousTaskState?.taskCount === 1 &&
+      previousTaskState.runningTaskCount > 0 &&
+      taskCards.length >= 2 &&
+      panel === null &&
+      !selectedTask
+    ) {
+      setPanel({ kind: 'tasks', autoOpened: true });
+    }
+
+    previousTaskStateRef.current = {
+      taskCount: taskCards.length,
+      runningTaskCount,
+    };
+  }, [isMdOrLarger, panel, runningTaskCount, selectedTask, taskCards.length]);
 
   const selectTask = useCallback(
     (taskId: string | null) => {
@@ -761,7 +861,7 @@ export function SessionWorkspace({
     setPanel(null);
     selectTask(null);
   };
-  const togglePanel = (kind: 'info' | 'tasks' | 'artifacts') => {
+  const togglePanel = (kind: 'info' | 'tasks' | 'artifacts' | 'previews') => {
     setPanel((previous) => (previous?.kind === kind ? null : { kind }));
     selectTask(null);
   };
@@ -772,7 +872,11 @@ export function SessionWorkspace({
         surfaceClassName="relative flex flex-col overflow-hidden"
       >
         <SessionArtifactViewer
-          selection={panel}
+          selection={{
+            owner: { taskId: panel.taskId },
+            path: panel.path,
+            version: panel.version,
+          }}
           backLabel="Back to task"
           closeLabel="Close artifact"
           onBack={() => setPanel(panel.returnTo)}
@@ -782,6 +886,8 @@ export function SessionWorkspace({
     ) : selectedTask ? (
       <NestedTaskSidePanel
         taskId={selectedTask.taskId}
+        tasks={taskCards}
+        onSelectTask={(taskId) => selectTask(taskId)}
         onClose={closePanel}
         onOpenArtifact={(path, version) =>
           setPanel({
@@ -796,6 +902,8 @@ export function SessionWorkspace({
     ) : panel?.kind === 'nested' ? (
       <NestedTaskSidePanel
         taskId={panel.taskId}
+        tasks={taskCards}
+        onSelectTask={(taskId) => setPanel({ kind: 'nested', taskId })}
         onClose={closePanel}
         onOpenArtifact={(path, version) =>
           setPanel({
@@ -814,7 +922,14 @@ export function SessionWorkspace({
         onClose={closePanel}
       />
     ) : panel?.kind === 'artifacts' ? (
-      <SessionArtifactsPanel tasks={artifactTasks} onClose={closePanel} />
+      <SessionArtifactsPanel
+        tasks={artifactTasks}
+        sessionId={session.id}
+        sessionArtifacts={session.artifacts ?? []}
+        onClose={closePanel}
+      />
+    ) : panel?.kind === 'previews' ? (
+      <SessionPreviewsPanel tasks={taskCards} onClose={closePanel} />
     ) : (
       <SessionInfoPanel session={session} onClose={closePanel} />
     );
@@ -836,6 +951,15 @@ export function SessionWorkspace({
                 disabled={taskCards.length === 0}
                 icon={Rows4}
                 onClick={() => togglePanel('tasks')}
+              />
+              <SideNavItem
+                side="right"
+                label="Live Preview"
+                tooltip="Live Preview"
+                active={panel?.kind === 'previews' && !selectedTask}
+                disabled={sessionPreviewCount === 0}
+                icon={AppWindow}
+                onClick={() => togglePanel('previews')}
               />
               <SideNavItem
                 side="right"
@@ -871,6 +995,12 @@ export function SessionWorkspace({
       >
         <ResponsiveWorkspacePanels
           isPanelOpen={panelOpen}
+          mainSize={
+            panel?.kind === 'tasks' && panel.autoOpened ? 66.6667 : undefined
+          }
+          panelSize={
+            panel?.kind === 'tasks' && panel.autoOpened ? 33.3333 : undefined
+          }
           main={
             <SessionPullRequestsContext.Provider value={sessionPullRequests}>
               <SessionRunningTaskCountContext.Provider value={runningTaskCount}>

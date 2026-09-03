@@ -3,6 +3,7 @@ import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   buildFastAgentReactionExternalInputQuestion,
+  FastAgentDurableRetryScheduledError,
   fastAgentConversationRepository,
   getActiveFastAgentTasks,
   type FastAgentReactionExternalInput,
@@ -274,6 +275,13 @@ export async function maybeRouteFastAgentReaction(params: {
         onRejected,
       }),
     onError: (error) => {
+      if (error instanceof FastAgentDurableRetryScheduledError) {
+        // Not a failure: the queue re-runs this turn at the scheduled time.
+        console.info(
+          `[SlackWebhook] Fast reaction turn parked for a durable retry: ${error.message}`,
+        );
+        return;
+      }
       console.error(
         `[SlackWebhook] Fast reaction input failed for ${event.item.channel}:${event.item.ts}:`,
         error instanceof Error ? error.message : String(error),

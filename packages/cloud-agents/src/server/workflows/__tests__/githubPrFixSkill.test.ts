@@ -28,7 +28,7 @@ describe('implement-changes PR fixer appendix', () => {
       'When a candidate finding is dismissed as invalid, stale, or out of scope, patch the canonical summary entry into a struck-through bullet with a brief factual reason, reply on the corresponding GitHub review thread or comment, do not describe it as fixed, and leave the thread unresolved by default.',
     );
     expect(skillContent).toContain(
-      'Let `fix-pr` own any required delegated `capture-visual-proof` handoff after repository-file-changing fixes and before PR metadata refresh so this parent path never improvises browser capture for PR feedback runs.',
+      'Let `fix-pr` own any required `capture-visual-proof` step after repository-file-changing fixes and before PR metadata refresh so this parent path never runs proof for PR feedback runs itself.',
     );
     expect(skillContent).toContain(
       'Pass through any supplied PR, review-thread, `fixId`, `review_comment_id`, `review_comment_url`, `task_link_follow`, `task_link_see`, or `revert_commit_base_url` context so `fix-pr` can recover the live target cleanly.',
@@ -112,7 +112,7 @@ describe('implement-changes PR fixer appendix', () => {
     );
   });
 
-  it('requires fix-pr itself to own delegated visual-proof handoff before PR metadata refresh', () => {
+  it('requires fix-pr itself to own the visual-proof step before PR metadata refresh', () => {
     const thisFilePath = fileURLToPath(import.meta.url);
     const thisDirPath = path.dirname(thisFilePath);
     const skillPath = path.resolve(
@@ -122,22 +122,22 @@ describe('implement-changes PR fixer appendix', () => {
     const skillContent = fs.readFileSync(skillPath, 'utf8');
 
     expect(skillContent).toContain(
-      'run a delegated visual-proof handoff for repository-file-changing fixes before PR metadata refresh',
+      'run the `capture-visual-proof` step for repository-file-changing fixes before PR metadata refresh',
     );
     expect(skillContent).toContain(
       'After the fixes are committed and pushed, check whether the final pushed fixer result changed repository files, including newly added files.',
     );
     expect(skillContent).toContain(
-      'If repository files changed, continue in the current task/session by transitioning into `capture-visual-proof` and pass forward the final shipped fixer result for proof planning and capture before PR metadata refresh continues. Do not launch a separate task for this handoff.',
+      'If repository files changed, continue in the current task/session by loading `capture-visual-proof` and following it for the final shipped fixer result before PR metadata refresh continues. Do not launch a separate task or subagent for this step.',
     );
     expect(skillContent).toContain(
-      'Once repository-file-changing fixes require this proof handoff, do not substitute fixer-owned or parent-owned visual-proof capture such as local screenshots, local screencasts, ad hoc localhost scripts, direct browser capture, Playwright capture, manual browser use, or any other improvised visual-proof procedure in this workflow.',
+      'Do not substitute Playwright, browser devtools, ad hoc localhost scripts, or any other browser automation for the `agent-browser` path defined in `capture-visual-proof`.',
     );
     expect(skillContent).toContain(
-      'The pushed fixer result ends with either an in-task delegated proof handoff for repository-file changes or an honest no-op result before PR metadata refresh continues.',
+      'The pushed fixer result ends with either an in-task `capture-visual-proof` step for repository-file changes or an honest no-op result before PR metadata refresh continues.',
     );
     expect(skillContent).toContain(
-      'When the pushed fixer result changed repository files, the workflow continued in the current task/session by handing that shipped result to `capture-visual-proof`, kept browser tooling contained inside that delegated proof path, and carried the delegated proof result or blocker honestly into PR metadata refresh.',
+      'When the pushed fixer result changed repository files, the workflow continued in the current task/session by loading `capture-visual-proof` for that shipped result, kept browser capture inside that step on the `agent-browser` path, and carried the proof result or blocker honestly into PR metadata refresh.',
     );
   });
 

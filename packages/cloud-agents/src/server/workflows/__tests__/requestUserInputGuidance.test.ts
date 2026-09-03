@@ -188,7 +188,7 @@ describe('request_user_input guidance in workflow prompts', () => {
       'In Autonomous mode, repository-changing runs keep the active `implement-changes` workflow open so that, after implementation and before delivery, any repository-file change transitions into `capture-visual-proof`, then finish through the delegated `create-draft-pr` skill so it owns commit, push, draft-PR create-or-refresh execution, and PR result reporting.',
     );
     expect(harnessInstructions).toContain(
-      "If the run later transitions into `fix-pr`, that child skill owns branch push state, any required delegated `capture-visual-proof` handoff before PR metadata refresh, PR metadata refresh itself, and PR-fixer closeout instead of inheriting the parent workflow's default PR-delivery finish.",
+      "If the run later transitions into `fix-pr`, that child skill owns branch push state, any required `capture-visual-proof` step before PR metadata refresh, PR metadata refresh itself, and PR-fixer closeout instead of inheriting the parent workflow's default PR-delivery finish.",
     );
     expect(harnessInstructions).toContain(
       'After validation and self-review, the next required action for repository-changing work is delegated delivery, not final reporting.',

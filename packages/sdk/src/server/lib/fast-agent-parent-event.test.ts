@@ -1056,6 +1056,7 @@ describe('deliverFastAgentParentEvent', () => {
         prompt: 'Find actionable regressions.',
         trigger: 'schedule',
         defaultTaskModel: 'openai/gpt-5.6-luna',
+        defaultTaskReasoningEffort: 'high',
       },
     });
 
@@ -1072,6 +1073,7 @@ describe('deliverFastAgentParentEvent', () => {
           harnessModelOverrides: {
             'opencode-server': 'openai/gpt-5.6-luna',
           },
+          reasoningEffort: 'high',
         }),
       }),
     });
@@ -1151,6 +1153,11 @@ describe('deliverFastAgentParentEvent', () => {
       event,
     });
 
+    // The adapter hands back the posted message so a later edit (a retry
+    // notice becoming the answer) can target it, also from a resumed run.
+    await expect(
+      mocks.answerQuestion.mock.results.at(-1)!.value,
+    ).resolves.toEqual({ messageId: 'message-1' });
     expect(mocks.discordPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: 'channel-1',
@@ -1507,6 +1514,7 @@ describe('deliverFastAgentParentEvent', () => {
           prompt: 'Fix the follow-up regression',
           environmentId: null,
           model: 'anthropic/claude-sonnet-5',
+          reasoningEffort: 'high',
           parentSessionId: parent.sessionId,
           postKickoff,
         }),
@@ -1537,6 +1545,7 @@ describe('deliverFastAgentParentEvent', () => {
             harnessModelOverrides: {
               'opencode-server': 'anthropic/claude-sonnet-5',
             },
+            reasoningEffort: 'high',
             communicationContextInherited: true,
             fastAgentSessionId: parent.sessionId,
             fastAgentParent: {
@@ -1589,6 +1598,7 @@ describe('deliverFastAgentParentEvent', () => {
             prompt: 'Fix the follow-up regression',
             environmentId: null,
             model: null,
+            reasoningEffort: 'xhigh',
             parentSessionId: parent.sessionId,
             postKickoff: vi.fn().mockResolvedValue(undefined),
           }),
@@ -1625,6 +1635,7 @@ describe('deliverFastAgentParentEvent', () => {
               ...(serviceUrl ? { communicationServiceUrl: serviceUrl } : {}),
               communicationContextInherited: true,
               fastAgentSessionId: parent.sessionId,
+              reasoningEffort: 'xhigh',
             }),
           }),
         }),
@@ -1681,6 +1692,12 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id).toBe(
       firstClientMessageId,
     );
+    // The adapter hands back the posted message so the turn (or a run the
+    // queue resumes) can edit it later, for example a retry notice that
+    // becomes the answer.
+    await expect(
+      mocks.answerQuestion.mock.results.at(-1)!.value,
+    ).resolves.toEqual({ messageId: '101.001' });
   });
 
   it('delivers pull request feedback as a platform event with a stable idempotency key', async () => {

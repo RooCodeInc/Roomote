@@ -13,7 +13,6 @@ import { processDiscordAttachments } from './attachments.js';
 import {
   claimUndeliveredDiscordThreadMessages,
   markDiscordThreadMessagesDelivered,
-  releaseClaimedDiscordThreadMessages,
 } from './thread-delivery.js';
 
 export type DiscordThreadHistoryMessage = {
@@ -540,27 +539,4 @@ export async function buildDiscordContinuationPrompt(input: {
     claimedMessageIds: claimedIds,
     channelId: input.channelId,
   };
-}
-
-export async function releaseDiscordContinuationClaim(
-  claim: Pick<
-    DiscordContinuationPromptResult,
-    'channelId' | 'claimedMessageIds'
-  > | null,
-): Promise<void> {
-  if (!claim || claim.claimedMessageIds.length === 0) {
-    return;
-  }
-  try {
-    await releaseClaimedDiscordThreadMessages(
-      claim.channelId,
-      claim.claimedMessageIds,
-    );
-  } catch (error) {
-    console.warn(
-      `[discord] Failed to release claimed thread messages for ${claim.channelId}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
 }

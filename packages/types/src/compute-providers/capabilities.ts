@@ -22,6 +22,11 @@ export interface ComputeProviderCapabilities {
   supportsDockerProjects: boolean;
 }
 
+export type ComputeProviderCommandOutputSource =
+  | 'central'
+  | 'provider'
+  | 'none';
+
 export const DOCKER_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCreateInstance: false,
   supportsDestroyInstance: false,
@@ -143,4 +148,14 @@ export function getComputeProviderCapabilities(
       throw new Error(`Unsupported provider: ${_exhaustive}`);
     }
   }
+}
+
+export function getComputeProviderCommandOutputSource(
+  provider: ComputeProvider,
+): ComputeProviderCommandOutputSource {
+  if (provider === 'roomote') return 'central';
+
+  return getComputeProviderCapabilities(provider).supportsCommandOutputLookup
+    ? 'provider'
+    : 'none';
 }

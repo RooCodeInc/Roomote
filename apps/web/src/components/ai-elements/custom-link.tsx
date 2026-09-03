@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useArtifactLink } from '@/app/(sandbox)/task/[taskId]/hooks/ArtifactLinkProvider';
 
 const ARTIFACT_MARKER_PREFIX = 'https://__artifact__/';
-const TASK_ARTIFACT_PATH_PATTERN = /^\/task\/([^/]+)\/artifacts\/(.+)$/;
+const TASK_ARTIFACT_PATH_PATTERN = /^\/task\/([^/]+)\/artifacts(?:\/(.+))?$/;
 
 interface ParsedTaskArtifactUrl {
   taskId: string;
@@ -61,18 +61,26 @@ function parseTaskArtifactUrl(href: string): ParsedTaskArtifactUrl | null {
   }
 
   const match = parsedUrl.pathname.match(TASK_ARTIFACT_PATH_PATTERN);
-  if (!match || !match[1] || !match[2]) {
+  if (!match || !match[1]) {
     return null;
   }
 
   let taskId: string;
-  let path: string;
   try {
     taskId = decodeURIComponent(match[1]);
-    path = decodeURIComponent(match[2]);
   } catch {
     return null;
   }
+
+  let path = parsedUrl.searchParams.get('path');
+  if (match[2]) {
+    try {
+      path = decodeURIComponent(match[2]);
+    } catch {
+      return null;
+    }
+  }
+  if (!path) return null;
 
   const versionParam = parsedUrl.searchParams.get('v');
   const parsedVersion = versionParam

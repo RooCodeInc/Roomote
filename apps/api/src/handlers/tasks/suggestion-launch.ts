@@ -2,6 +2,7 @@ import {
   db,
   finalizeWorkItemLaunched,
   releaseWorkItemClaim,
+  getSessionForTask,
 } from '@roomote/db/server';
 import { isDeploymentReadOnlyError } from '@roomote/types';
 
@@ -60,7 +61,11 @@ export function resolveSuggestedTaskLaunchMode(input: {
   fastEligible: boolean;
   userDefaultEnabled: boolean;
   fastAvailable: boolean;
+  requiredMode?: SuggestedTaskLaunchMode;
 }): SuggestedTaskLaunchMode {
+  if (input.requiredMode) {
+    return input.requiredMode;
+  }
   if (!input.fastEligible) {
     return 'coding';
   }
@@ -80,6 +85,7 @@ export async function launchClaimedSuggestedTask(input: {
     fastEligible: boolean;
     userDefaultEnabled: boolean;
     fastAvailable: boolean;
+    requiredMode?: SuggestedTaskLaunchMode;
   };
   launch: (
     mode: SuggestedTaskLaunchMode,
@@ -173,4 +179,26 @@ export async function launchClaimedSuggestedTask(input: {
     taskId: attempt.taskId,
     cancelNote,
   };
+}
+
+/**
+ * The Session that owns the task which produced a suggestion, so a launch
+ * lands next to that scan instead of opening a new Session. Null when the
+ * suggestion has no source task or that task has no Session.
+ */
+export async function resolveSuggestionOriginSessionId(
+  sourceTaskId: string | null | undefined,
+): Promise<string | null> {
+  if (!sourceTaskId) {
+    return null;
+  }
+  try {
+    const session = await getSessionForTask(db, sourceTaskId);
+    return session?.id ?? null;
+  } catch (error) {
+    console.warn(
+      `[suggestion-launch] Could not resolve the origin Session for task ${sourceTaskId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
 }

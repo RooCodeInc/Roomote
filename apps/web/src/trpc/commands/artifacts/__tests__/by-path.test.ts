@@ -2,21 +2,33 @@ import type { UserAuthSuccess } from '@/types';
 
 const {
   mockGetArtifactByPath,
+  mockGetArtifactBySessionPath,
   mockGenerateDownloadUrl,
+  mockGenerateOwnedDownloadUrl,
   mockSignArtifactId,
   mockCurrentEpochSeconds,
+  mockFindAccessibleSession,
 } = vi.hoisted(() => ({
   mockGetArtifactByPath: vi.fn(),
+  mockGetArtifactBySessionPath: vi.fn(),
   mockGenerateDownloadUrl: vi.fn(),
+  mockGenerateOwnedDownloadUrl: vi.fn(),
   mockSignArtifactId: vi.fn(),
   mockCurrentEpochSeconds: vi.fn(),
+  mockFindAccessibleSession: vi.fn(),
 }));
 
 vi.mock('@/lib/server', () => ({
   getArtifactByPath: mockGetArtifactByPath,
+  getArtifactBySessionPath: mockGetArtifactBySessionPath,
   generateDownloadUrl: mockGenerateDownloadUrl,
+  generateOwnedDownloadUrl: mockGenerateOwnedDownloadUrl,
   signArtifactId: mockSignArtifactId,
   currentEpochSeconds: mockCurrentEpochSeconds,
+}));
+
+vi.mock('@/lib/server/sessions', () => ({
+  findAccessibleSession: mockFindAccessibleSession,
 }));
 
 import { getArtifactByPathCommand } from '../by-path';
@@ -55,8 +67,12 @@ describe('getArtifactByPathCommand', () => {
 
     mockGetArtifactByPath.mockResolvedValue(createArtifact());
     mockGenerateDownloadUrl.mockResolvedValue('https://example.test/download');
+    mockGenerateOwnedDownloadUrl.mockResolvedValue(
+      'https://example.test/session-download',
+    );
     mockSignArtifactId.mockReturnValue('sig');
     mockCurrentEpochSeconds.mockReturnValue(1_700_000_000);
+    mockFindAccessibleSession.mockResolvedValue({ id: 'session-1' });
   });
 
   afterEach(() => {
@@ -99,6 +115,38 @@ describe('getArtifactByPathCommand', () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(result?.content).toBe('small text');
+  });
+
+  it('loads Session-owned artifacts from the Session storage namespace', async () => {
+    mockGetArtifactBySessionPath.mockResolvedValue(
+      createArtifact({
+        taskId: null,
+        sessionId: '11111111-1111-4111-8111-111111111111',
+      }),
+    );
+    mockFetch.mockResolvedValue(new Response('session text'));
+
+    const result = await getArtifactByPathCommand(auth, {
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      path: 'logs/output.txt',
+    });
+
+    expect(mockGetArtifactBySessionPath).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: '11111111-1111-4111-8111-111111111111',
+      }),
+    );
+    expect(mockGenerateOwnedDownloadUrl).toHaveBeenCalledWith(
+      { sessionId: '11111111-1111-4111-8111-111111111111' },
+      'artifact-1',
+      'logs/output.txt',
+      1,
+    );
+    expect(result).toMatchObject({
+      taskId: null,
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      content: 'session text',
+    });
   });
 
   it.each([

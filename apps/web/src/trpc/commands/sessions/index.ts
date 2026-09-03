@@ -88,24 +88,28 @@ export async function getSessionByIdCommand(
   // and getSessionTasks inner-joins live tasks only — the previous per-task
   // access resolution had no additional predicate and cost ~5 queries per
   // task on the workspace's polling path.
+  const hydrateArtifact = <T extends { id: string; contentType: string }>(
+    artifact: T,
+  ) => {
+    const isImage = artifact.contentType.startsWith('image/');
+    const isVideo = artifact.contentType.startsWith('video/');
+    const previewUrl =
+      isImage || isVideo
+        ? `/api/artifacts/${artifact.id}/raw?sig=${signArtifactId(artifact.id, artifactSignatureTimestamp)}&ts=${artifactSignatureTimestamp}`
+        : undefined;
+    return {
+      ...artifact,
+      thumbnailUrl: isImage ? previewUrl : undefined,
+      previewUrl: isVideo ? previewUrl : undefined,
+    };
+  };
+
   return {
     ...session,
+    artifacts: (session.artifacts ?? []).map(hydrateArtifact),
     tasks: session.tasks.map((task) => ({
       ...task,
-      artifacts: task.artifacts.map((artifact) => {
-        const isImage = artifact.contentType.startsWith('image/');
-        const isVideo = artifact.contentType.startsWith('video/');
-        const previewUrl =
-          isImage || isVideo
-            ? `/api/artifacts/${artifact.id}/raw?sig=${signArtifactId(artifact.id, artifactSignatureTimestamp)}&ts=${artifactSignatureTimestamp}`
-            : undefined;
-
-        return {
-          ...artifact,
-          thumbnailUrl: isImage ? previewUrl : undefined,
-          previewUrl: isVideo ? previewUrl : undefined,
-        };
-      }),
+      artifacts: task.artifacts.map(hydrateArtifact),
       canAccessDetails: true as const,
     })),
   };

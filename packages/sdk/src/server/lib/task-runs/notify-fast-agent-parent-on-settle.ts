@@ -1,6 +1,10 @@
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { canRetryFailedStart, getTaskUrl } from '@roomote/cloud-agents/server';
-import { RunStatus, getFastAgentParentFromPayload } from '@roomote/types';
+import {
+  RunStatus,
+  getFastAgentParentFromPayload,
+  isPrReviewRun,
+} from '@roomote/types';
 import {
   type TaskRun,
   and,
@@ -50,6 +54,22 @@ export async function notifyFastAgentParentOnSettle(
 ): Promise<void> {
   const parent = getFastAgentParentFromPayload(run.payload);
   if (!parent) {
+    return;
+  }
+
+  // A review child is attached to the session for visibility only: its
+  // outcome reaches the session through the PR feedback relay and the PR
+  // summary comment, so only failures announce here. Reviews the session
+  // itself requested are the exception: the requester is waiting on this
+  // conversation for the outcome.
+  const sessionRequestedReview =
+    (run.payload as { fastParentRequestedReview?: boolean } | null)
+      ?.fastParentRequestedReview === true;
+  if (
+    isPrReviewRun(run) &&
+    status !== RunStatus.Failed &&
+    !sessionRequestedReview
+  ) {
     return;
   }
 

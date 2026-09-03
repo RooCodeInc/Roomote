@@ -34,9 +34,13 @@ interface ResolvedToolPolicy {
 
 const CONSEQUENTIAL_RECEIPTS = new Set([
   'launch_task',
+  'review_pull_request',
   'cancel_task',
   'retry_task_start',
   'send_task_message',
+  'send_chat_reply',
+  'post_to_channel',
+  'send_chat_reaction_emoji',
   'save_memory',
 ]);
 
@@ -61,6 +65,11 @@ export function resolveToolPresentationPolicy(
   const consequentialReceipt =
     presentation.identity.toolName !== null &&
     CONSEQUENTIAL_RECEIPTS.has(presentation.identity.toolName);
+  const keepConsequentialReceiptVisible =
+    consequentialReceipt &&
+    (presentation.identity.toolName !== 'send_chat_reply' ||
+      options.displayMode === 'narration' ||
+      presentation.phase === 'failed');
 
   let rowVisibility: ResolvedToolPolicy['rowVisibility'] = 'visible';
   if (shouldHideAcpMessage(msg)) {
@@ -104,7 +113,7 @@ export function resolveToolPresentationPolicy(
       hasPreview ||
       isArtifact ||
       renderAs === 'delegated-task-card' ||
-      consequentialReceipt
+      keepConsequentialReceiptVisible
         ? 'keep-visible'
         : 'collapsible',
     renderAs,

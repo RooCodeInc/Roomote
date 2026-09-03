@@ -23,10 +23,12 @@ import {
 import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
+  REASONING_EFFORT_VALUES,
   getCommunicationAutomationTargetKind,
   type BackgroundAutomationProvider,
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
+  type ReasoningEffort,
 } from '@roomote/types';
 import { isBackgroundAutomationUserTargetKind } from '@roomote/types';
 import { toActivationAutomationDestinationProvider } from '@roomote/telemetry';
@@ -60,6 +62,7 @@ const writeSchema = z.object({
   enabled: z.boolean().default(true),
   schedule: z.string().trim().min(1).max(500),
   model: modelSchema.optional(),
+  reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
   environmentId: environmentTargetSchema,
   targetProvider: z.enum(['slack', 'discord', 'teams', 'telegram']).optional(),
   targetMode: z.enum(['channel', 'direct_message']).optional(),
@@ -72,6 +75,7 @@ const updateSchema = z.object({
   enabled: z.boolean().optional(),
   schedule: z.string().trim().min(1).max(500).optional(),
   model: modelSchema.nullable().optional(),
+  reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
   environmentId: environmentTargetSchema.optional(),
   targetProvider: z
     .enum(['slack', 'discord', 'teams', 'telegram'])
@@ -156,6 +160,8 @@ const VALIDATION_ERROR_PATTERNS: RegExp[] = [
   /^Model must be at most \d+ characters\.$/,
   /^Model must use provider\/model format\.$/,
   /^Model ".+" is not enabled for new tasks\.$/,
+  /^Model ".+" does not support configurable reasoning effort\.$/,
+  /^Reasoning effort requires a model override\.$/,
   /^Environment is required\.$/,
   /^Selected environment was not found\.$/,
   /^Custom automation was not found\.$/,
@@ -284,12 +290,26 @@ function adminId(c: {
   return c.get('customAutomationAdminId');
 }
 
-async function assertEnabledModel(model: string | null | undefined) {
-  if (!model) return;
+async function assertEnabledModel(
+  model: string | null | undefined,
+  reasoningEffort?: ReasoningEffort | null,
+) {
+  if (!model) {
+    if (reasoningEffort) {
+      throw new Error('Reasoning effort requires a model override.');
+    }
+    return;
+  }
 
   const { models } = await getDeploymentTaskModelOptions();
-  if (!models.some((option) => option.id === model)) {
+  const option = models.find((candidate) => candidate.id === model);
+  if (!option) {
     throw new Error(`Model "${model}" is not enabled for new tasks.`);
+  }
+  if (reasoningEffort && option.metadata?.supportsReasoning === false) {
+    throw new Error(
+      `Model "${model}" does not support configurable reasoning effort.`,
+    );
   }
 }
 
@@ -344,7 +364,7 @@ customAutomationsRouter.post('/', async (c) => {
   const parsed = writeSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
   try {
-    await assertEnabledModel(parsed.data.model);
+    await assertEnabledModel(parsed.data.model, parsed.data.reasoningEffort);
     const schedule = await resolveWriteSchedule(
       parsed.data.schedule,
       adminId(c),
@@ -368,6 +388,7 @@ customAutomationsRouter.post('/', async (c) => {
       scheduleMode: schedule.scheduleMode,
       cronExpression: schedule.cronExpression,
       model: parsed.data.model ?? null,
+      reasoningEffort: parsed.data.reasoningEffort ?? null,
       environmentId: parsed.data.environmentId,
       target: buildTarget(parsed.data, adminId(c)),
       createdByUserId: adminId(c),
@@ -398,9 +419,13 @@ customAutomationsRouter.patch('/:id', async (c) => {
     return c.json({ error: 'Custom automation was not found.' }, 404);
   }
   try {
-    if (typeof parsed.data.model === 'string') {
-      await assertEnabledModel(parsed.data.model);
-    }
+    const model =
+      parsed.data.model === null ? null : (parsed.data.model ?? existing.model);
+    const reasoningEffort =
+      parsed.data.model === null || parsed.data.reasoningEffort === null
+        ? null
+        : (parsed.data.reasoningEffort ?? existing.reasoningEffort);
+    await assertEnabledModel(model, reasoningEffort);
     const schedule = parsed.data.schedule
       ? await resolveWriteSchedule(parsed.data.schedule, adminId(c))
       : {
@@ -468,10 +493,9 @@ customAutomationsRouter.patch('/:id', async (c) => {
       scheduleMode: schedule.scheduleMode,
       cronExpression: schedule.cronExpression,
       // Explicit null clears the override; omitted keeps the existing value.
-      model:
-        parsed.data.model === null
-          ? null
-          : (parsed.data.model ?? existing.model),
+      model,
+      // Explicit null clears the override; omitted keeps the existing value.
+      reasoningEffort,
       environmentId:
         parsed.data.environmentId ??
         (existing.executionMode === 'fast'

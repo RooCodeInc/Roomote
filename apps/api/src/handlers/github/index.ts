@@ -10,6 +10,7 @@ import {
 import {
   handleMergeAnnouncerPush,
   recordPrStatusChangeInTaskHistory,
+  retirePendingPrReviewActionsForPullRequest,
   updateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook,
 } from '@roomote/sdk/server';
@@ -24,6 +25,8 @@ import { handlePrOpen } from './handlePrOpen';
 import { handlePrReadyForReview } from './handlePrReadyForReview';
 import { handlePrReopen } from './handlePrReopen';
 import { handlePrSynchronize } from './handlePrSynchronize';
+import { getCurrentGitHubPrHeadSha } from './currentPrHead';
+import type { WebhookPullRequestSynchronize } from './types';
 import { handlePrComment } from './handlePrComment';
 import { handleGitHubIssueComment } from './handleGitHubIssueComment';
 import { handleGitHubIssueFixer } from './handleGitHubIssueFixer';
@@ -138,6 +141,49 @@ function syncPullRequestFact(params: {
       }`,
     ),
   );
+}
+
+/**
+ * Retires review offers whose controls belong to an older head once a PR
+ * receives a new commit. The live head is resolved from GitHub rather than
+ * trusted from the payload, so a late or redelivered `synchronize` for an
+ * older commit cannot dismiss offers for the actual current head. Runs
+ * best-effort in the background: the offers are cosmetic, and failing here
+ * must not block fact sync, mergeability checks, or review-on-commit.
+ */
+function retireStalePrReviewActions(
+  payload: WebhookPullRequestSynchronize,
+): void {
+  const repository = payload.repository.full_name;
+  const prNumber = payload.pull_request.number;
+  const installationId = payload.installation?.id;
+  if (!installationId) return;
+
+  void (async () => {
+    const currentHeadSha = await getCurrentGitHubPrHeadSha({
+      installationId,
+      repository,
+      prNumber,
+    });
+    if (!currentHeadSha) {
+      apiLogger.warn(
+        `[retireStalePrReviewActions] Skipping ${repository}#${prNumber}: live head unavailable`,
+      );
+      return;
+    }
+    await retirePendingPrReviewActionsForPullRequest({
+      sourceControlProvider: 'github',
+      repository,
+      prNumber,
+      currentHeadSha,
+    });
+  })().catch((error) => {
+    apiLogger.error(
+      `[retireStalePrReviewActions] Failed for ${repository}#${prNumber}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
 }
 
 // Resolve through the deployment env resolver so a secret saved into
@@ -407,6 +453,7 @@ github.post('/', async (c) => {
           },
         });
         await queueTrackedPullRequestMergeabilityCheck(payload);
+        retireStalePrReviewActions(payload);
 
         if (isRepoSkipped(payload.repository.full_name)) {
           return {

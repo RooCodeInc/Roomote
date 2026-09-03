@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   postMessage: vi.fn(),
   postMessageDetailed: vi.fn(),
   updateMessage: vi.fn(),
+  normalizeIncomingText: vi.fn(async (text: string) => text),
   settleSlackLiveTaskCardForRun: vi.fn(),
   taskUrl: 'https://roomote.example/task/task-1',
 }));
@@ -91,6 +92,7 @@ function createLauncher() {
       postMessage: mocks.postMessage,
       postMessageDetailed: mocks.postMessageDetailed,
       updateMessage: mocks.updateMessage,
+      normalizeIncomingText: mocks.normalizeIncomingText,
     },
     userId: 'user-1',
     teamId: 'T123',
@@ -109,6 +111,9 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     mocks.getSlackLiveTaskStreamData.mockResolvedValue(null);
     mocks.postMessageDetailed.mockResolvedValue({ ts: 'card-ts' });
     mocks.postMessage.mockResolvedValue('fallback-ts');
+    mocks.normalizeIncomingText.mockImplementation(async (text: string) =>
+      text.replace('<@U456>', '@Readable Name'),
+    );
     mocks.setSlackLiveTaskStreamData.mockResolvedValue(undefined);
     mocks.updateMessage.mockResolvedValue(true);
     mocks.settleSlackLiveTaskCardForRun.mockResolvedValue(undefined);
@@ -191,6 +196,51 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       rendersTaskLink: true,
       environmentId: 'env-1',
     });
+  });
+
+  it('normalizes Slack links but keeps raw mentions before launching the child task', async () => {
+    await createLauncher()({
+      prompt: 'Ask <@U456> about the regression',
+      environmentId: 'env-1',
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff: vi.fn(),
+    });
+
+    expect(mocks.normalizeIncomingText).toHaveBeenCalledWith(
+      'Ask <@U456> about the regression',
+      { preserveMentions: true },
+    );
+    expect(mocks.setSlackLiveTaskStreamData).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        title: 'Ask @Readable Name about the regression',
+      }),
+    );
+  });
+
+  it('launches with the original prompt when Slack normalization fails', async () => {
+    mocks.normalizeIncomingText.mockRejectedValueOnce(
+      new Error('Slack failed'),
+    );
+
+    await expect(
+      createLauncher()({
+        prompt: 'Ask <@U456> about the regression',
+        environmentId: 'env-1',
+        parentSessionId: '11111111-1111-4111-8111-111111111111',
+        postKickoff: vi.fn(),
+      }),
+    ).resolves.toEqual({
+      success: true,
+      taskId: 'task-1',
+      taskUrl: 'https://roomote.example/task/task-1',
+    });
+    expect(mocks.setSlackLiveTaskStreamData).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        title: 'Ask <@U456> about the regression',
+      }),
+    );
   });
 
   it('links the card to the session when the task already has one', async () => {

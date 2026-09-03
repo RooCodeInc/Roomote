@@ -20,6 +20,10 @@ vi.mock('./TodoList', () => ({
   TodoList: () => <div data-testid="todo-list" />,
 }));
 
+vi.mock('./ActiveSubtasksList', () => ({
+  ActiveSubtasksList: () => <div data-testid="active-subtasks" />,
+}));
+
 vi.mock('./PendingEnvVarRequestPanel', () => ({
   PendingEnvVarRequestPanel: () => <div data-testid="pending-env-var" />,
 }));
@@ -29,7 +33,9 @@ vi.mock('./QueuedMessages', () => ({
 }));
 
 vi.mock('./prompt-input', () => ({
-  PromptInput: () => <div data-testid="prompt-input" />,
+  PromptInput: ({ placeholder }: { placeholder?: string }) => (
+    <div data-testid="prompt-input" data-placeholder={placeholder} />
+  ),
 }));
 
 import { TaskInputStack } from './TaskInputStack';
@@ -91,9 +97,42 @@ describe('TaskInputStack', () => {
         onFileSearchOpen={() => {}}
         onCommandSearchOpen={() => {}}
         scrollToBottom={() => {}}
+        promptPlaceholder="Message task, / for commands"
       />,
     );
 
     expect(screen.getByTestId('prompt-input')).toBeInTheDocument();
+    expect(screen.getByTestId('prompt-input')).toHaveAttribute(
+      'data-placeholder',
+      'Message task, / for commands',
+    );
+    expect(screen.getByTestId('todo-list')).toBeInTheDocument();
+    expect(screen.getByTestId('active-subtasks')).toBeInTheDocument();
+    expect(screen.getByTestId('pending-user-input')).toBeInTheDocument();
+    expect(screen.getByTestId('pending-env-var')).toBeInTheDocument();
+    expect(screen.getByTestId('queued-messages')).toBeInTheDocument();
+  });
+
+  it('keeps pending task activity visible while an option request hides the freeform prompt', () => {
+    usePendingUserInputRequestStateMock.mockReturnValue({
+      shouldHidePromptInput: true,
+    });
+
+    render(
+      <TaskInputStack
+        session={baseSession}
+        promptInputRef={{ current: null }}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+        scrollToBottom={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId('pending-user-input')).toBeInTheDocument();
+    expect(screen.getByTestId('todo-list')).toBeInTheDocument();
+    expect(screen.getByTestId('queued-messages')).toBeInTheDocument();
+    expect(screen.getByTestId('prompt-input').parentElement).toHaveClass(
+      'hidden',
+    );
   });
 });

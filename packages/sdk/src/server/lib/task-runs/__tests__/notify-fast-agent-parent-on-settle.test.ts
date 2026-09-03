@@ -1,5 +1,5 @@
 import type { TaskRun } from '@roomote/db/server';
-import { RunStatus, TaskRunErrorCode } from '@roomote/types';
+import { RunStatus, TaskPayloadKind, TaskRunErrorCode } from '@roomote/types';
 
 const mocks = vi.hoisted(() => ({
   claimReturning: vi.fn(),
@@ -61,6 +61,7 @@ function makeRun(
   payload: Record<string, unknown>,
   overrides: Partial<TaskRun> = {},
 ): TaskRun {
+  // Persisted runs store the bare payload; the kind lives in payloadKind.
   return {
     id: 200,
     taskId: 'child-task',
@@ -81,6 +82,57 @@ describe('notifyFastAgentParentOnSettle', () => {
     mocks.listPullRequests.mockResolvedValue([]);
     mocks.recordLifecycle.mockResolvedValue(undefined);
     mocks.canRetryFailedStart.mockResolvedValue(false);
+  });
+
+  it('stays quiet for a successful review child settle', async () => {
+    await notifyFastAgentParentOnSettle(
+      makeRun(
+        { fastAgentParent: fastParent },
+        { payloadKind: TaskPayloadKind.GithubPrReview },
+      ),
+      RunStatus.Idle,
+      'Review acme/app#42',
+    );
+
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+    expect(mocks.updateSet).not.toHaveBeenCalled();
+  });
+
+  it('announces a successful review settle when the session requested it', async () => {
+    await notifyFastAgentParentOnSettle(
+      makeRun(
+        { fastAgentParent: fastParent, fastParentRequestedReview: true },
+        { payloadKind: TaskPayloadKind.GithubPrReview },
+      ),
+      RunStatus.Idle,
+      'Review acme/app#42',
+    );
+
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ type: 'task_settled' }),
+      }),
+    );
+  });
+
+  it('still announces a failed review child settle', async () => {
+    await notifyFastAgentParentOnSettle(
+      makeRun(
+        { fastAgentParent: fastParent },
+        { payloadKind: TaskPayloadKind.GithubPrReviewSync },
+      ),
+      RunStatus.Failed,
+      'Review acme/app#42',
+    );
+
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          type: 'task_settled',
+          status: RunStatus.Failed,
+        }),
+      }),
+    );
   });
 
   it('queues child lifecycle state and settles the source claim immediately', async () => {

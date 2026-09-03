@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MANAGE_CUSTOM_AUTOMATIONS_ACTIONS,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  buildManageCustomAutomationsRequest,
   compactManageCustomAutomationsResult,
   manageCustomAutomationsInputSchema,
 } from './manage-custom-automations-tool';
@@ -25,6 +26,9 @@ describe('manage custom automations tool contract', () => {
     );
     expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
       'run the automation in Fast mode',
+    );
+    expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
+      'report it as queued or started, never completed',
     );
     expect(
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.environmentId.description,
@@ -228,5 +232,51 @@ describe('manage custom automations tool contract', () => {
         automation,
       }),
     ).toEqual({ outcome: 'failed', error: 'Automation is disabled.' });
+  });
+
+  it('preserves explicit reasoning-effort clears while omitting unspecified values', () => {
+    expect(
+      buildManageCustomAutomationsRequest({
+        action: 'update',
+        automationId: 'automation-1',
+        reasoningEffort: null,
+      }),
+    ).toEqual({
+      ok: true,
+      request: {
+        path: '/automation-1',
+        method: 'PATCH',
+        body: { reasoningEffort: null },
+      },
+    });
+
+    expect(
+      buildManageCustomAutomationsRequest({
+        action: 'update',
+        automationId: 'automation-1',
+      }),
+    ).toEqual({
+      ok: true,
+      request: {
+        path: '/automation-1',
+        method: 'PATCH',
+        body: {},
+      },
+    });
+  });
+
+  it('accepts only canonical reasoning-effort values', () => {
+    expect(
+      manageCustomAutomationsInputSchema.parse({
+        action: 'create',
+        reasoningEffort: 'xhigh',
+      }).reasoningEffort,
+    ).toBe('xhigh');
+    expect(() =>
+      manageCustomAutomationsInputSchema.parse({
+        action: 'create',
+        reasoningEffort: 'turbo',
+      }),
+    ).toThrow();
   });
 });

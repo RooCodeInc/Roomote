@@ -7,12 +7,29 @@ const transcriptVisibilityState = vi.hoisted(() => ({
 }));
 const reviewActionMutate = vi.hoisted(() => vi.fn());
 
+const slackUsersState = vi.hoisted(() => ({
+  users: {} as Record<string, { name: string; profileUrl: string | null }>,
+}));
+
 vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
     sandboxSession: {
       handlePrReviewNotificationAction: { mutate: reviewActionMutate },
     },
   }),
+  useTRPC: () => ({
+    slack: {
+      resolveUsers: {
+        queryOptions: (input: unknown) => ({
+          queryKey: ['slack.resolveUsers', input],
+        }),
+      },
+    },
+  }),
+}));
+
+vi.mock('@tanstack/react-query', () => ({
+  useQuery: () => ({ data: { users: slackUsersState.users } }),
 }));
 
 vi.mock('@/components/ai-elements', () => ({
@@ -128,6 +145,7 @@ describe('AcpTextMessage', () => {
   beforeEach(() => {
     transcriptVisibilityState.enabled = false;
     reviewActionMutate.mockReset();
+    slackUsersState.users = {};
   });
 
   const reviewOfferMessage = (status = 'pending') => ({
@@ -202,6 +220,34 @@ describe('AcpTextMessage', () => {
     expect(
       screen.getByRole('button', { name: 'new-task:Done!' }),
     ).toBeVisible();
+  });
+
+  it.each([
+    ['+1', '👍'],
+    ['exploding_head', '🤯'],
+    ['flag-gb', '🇬🇧'],
+    ['thumbsup::skin-tone-6', '👍🏿'],
+    ['female-technologist::skin-tone-3', '👩🏼‍💻'],
+    ['ship_it', ':ship_it:'],
+  ])('renders reaction receipt %s as %s', (reaction, expected) => {
+    render(
+      <AcpTextMessage
+        msg={{
+          id: 'reaction-1',
+          ts: 123,
+          role: 'assistant',
+          kind: 'text',
+          partial: false,
+          sessionId: 'session-1',
+          updateType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+          text: `[Reacted with :${reaction}:]`,
+          data: { reaction, purpose: 'closeout' },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('message-response')).toHaveTextContent(expected);
+    expect(screen.queryByText(/Reacted with/)).not.toBeInTheDocument();
   });
 
   it('passes a permalink anchor id to the timestamp', () => {
@@ -393,6 +439,44 @@ describe('AcpTextMessage', () => {
     expect(
       screen.getByRole('button', { name: 'new-task:Continue' }),
     ).toBeVisible();
+  });
+
+  it('renders raw Slack mention tokens in user text as linked names', () => {
+    slackUsersState.users = {
+      U0BJNE7FC12: {
+        name: 'Roomote',
+        profileUrl: 'https://acme.slack.com/team/U0BJNE7FC12',
+      },
+    };
+
+    render(
+      <AcpTextMessage
+        msg={{
+          id: 'message-1',
+          ts: 123,
+          role: 'user',
+          kind: 'text',
+          partial: false,
+          sessionId: 'session-1',
+          updateType: 'roomote_runtime.user_prompt',
+          text: '<@U0BJNE7FC12> determine why the mobile app cannot handle the link',
+          data: {},
+        }}
+      />,
+    );
+
+    const mention = screen.getByTestId('slack-mention');
+    expect(mention).toHaveTextContent('@Roomote');
+    expect(mention).toHaveAttribute(
+      'href',
+      'https://acme.slack.com/team/U0BJNE7FC12',
+    );
+    expect(screen.getByTestId('message-plain-text')).toHaveTextContent(
+      '@Roomote determine why the mobile app cannot handle the link',
+    );
+    expect(screen.getByTestId('message-plain-text')).not.toHaveTextContent(
+      '<@U0BJNE7FC12>',
+    );
   });
 
   it('renders user text as plain text instead of markdown', () => {

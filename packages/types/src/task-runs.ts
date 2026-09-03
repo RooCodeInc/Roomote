@@ -537,6 +537,24 @@ export function shouldUseAppTokenOnly(type: TaskPayloadKind): boolean {
 }
 
 /**
+ * Review-pipeline runs carry a Fast parent only for session visibility:
+ * review outcomes reach the session through the reviewed PR's feedback relay
+ * and the PR summary comment, so review runs stay quiet on the parent-event
+ * channel except for failures.
+ *
+ * Runs persist the bare payload with the kind in their own `payloadKind`
+ * column, so this reads the run's kind and never `payload.type`.
+ */
+export function isPrReviewRun(run: {
+  payloadKind?: TaskPayloadKind | string | null;
+}): boolean {
+  return (
+    run.payloadKind === TaskPayloadKind.GithubPrReview ||
+    run.payloadKind === TaskPayloadKind.GithubPrReviewSync
+  );
+}
+
+/**
  * CodingHarness
  */
 
@@ -1053,6 +1071,9 @@ const sharedTaskPayloadSchema = z.object({
   liveTaskStream: z.boolean().optional(),
   /** Runless Fast conversation that delegated this task on any chat provider. */
   fastAgentSessionId: z.string().uuid().optional(),
+  /** A Session explicitly requested this review, so its settle announces
+   * there even though automatic review settles stay quiet. */
+  fastParentRequestedReview: z.boolean().optional(),
   /** Provider event that caused this fresh launch; used for idempotent retries. */
   communicationSourceEventId: z.string().optional(),
   /**

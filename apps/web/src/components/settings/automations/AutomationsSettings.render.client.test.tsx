@@ -20,7 +20,8 @@ const state = vi.hoisted(() => ({
     enabled: boolean;
     scheduleMode: 'daily' | 'weekly' | 'cron';
     cronExpression: string | null;
-    model: null;
+    model: string | null;
+    reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
     executionMode?: 'sandbox_task' | 'fast';
     environmentId: string;
     target: {
@@ -347,6 +348,7 @@ vi.mock('@tanstack/react-query', () => ({
               id: 'anthropic/claude-sonnet-5',
               displayName: 'Claude Sonnet 5',
               isDefault: true,
+              metadata: { supportsReasoning: true },
             },
           ],
         },
@@ -1270,7 +1272,8 @@ describe('AutomationsSettings', () => {
         enabled: true,
         scheduleMode: 'daily',
         cronExpression: null,
-        model: null,
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'high',
         executionMode: 'fast',
         environmentId: '__fast__',
         target: {},
@@ -1301,6 +1304,10 @@ describe('AutomationsSettings', () => {
       screen.getByRole('button', { name: 'Configure Fast daily digest' }),
     );
     expect(screen.getByText('Delegated task model')).toBeInTheDocument();
+    expect(screen.getByText('Effort')).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Automation effort' }),
+    ).toHaveTextContent('High');
     expect(
       screen.getByText(
         'This run is stored as a Fast conversation without posting to chat.',
@@ -1310,6 +1317,15 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByRole('option', { name: 'Fast (no sandbox)' }),
     ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: 'Fast (no sandbox)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(mutations.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'automation-fast',
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'high',
+      }),
+    );
   });
 
   it('humanizes custom schedules and shows the last run when available', async () => {

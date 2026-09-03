@@ -1,8 +1,11 @@
-const { findFirstMock, updateMock, updateWhereMock } = vi.hoisted(() => ({
-  findFirstMock: vi.fn(),
-  updateMock: vi.fn(),
-  updateWhereMock: vi.fn(),
-}));
+const { findFirstMock, setMock, updateMock, updateWhereMock } = vi.hoisted(
+  () => ({
+    findFirstMock: vi.fn(),
+    setMock: vi.fn(),
+    updateMock: vi.fn(),
+    updateWhereMock: vi.fn(),
+  }),
+);
 
 vi.mock('@roomote/db/server', () => ({
   db: {
@@ -23,15 +26,56 @@ vi.mock('@roomote/db/encryption', () => ({
   decryptText: vi.fn((value: string) => value),
 }));
 
-import { getClientInformation, getValidAccessToken } from './data';
+import { getClientInformation, getValidAccessToken, storeTokens } from './data';
+
+describe('storeTokens', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    updateWhereMock.mockResolvedValue(undefined);
+    setMock.mockReturnValue({ where: updateWhereMock });
+    updateMock.mockReturnValue({ set: setMock });
+  });
+
+  it('clears a stale refresh token when a stored token response omits one', async () => {
+    await storeTokens('conn-1', {
+      access_token: 'fresh-access-token',
+      token_type: 'Bearer',
+      expires_in: 3600,
+      scope: 'read write',
+    });
+
+    expect(setMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: 'fresh-access-token',
+        refreshToken: null,
+        authStatus: 'authenticated',
+        enabled: true,
+        scopes: ['read', 'write'],
+      }),
+    );
+  });
+
+  it('stores a replacement refresh token when one is supplied', async () => {
+    await storeTokens('conn-1', {
+      access_token: 'fresh-access-token',
+      token_type: 'Bearer',
+      refresh_token: 'replacement-refresh-token',
+    });
+
+    expect(setMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        refreshToken: 'replacement-refresh-token',
+      }),
+    );
+  });
+});
 
 describe('getClientInformation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     updateWhereMock.mockResolvedValue(undefined);
-    updateMock.mockReturnValue({
-      set: vi.fn(() => ({ where: updateWhereMock })),
-    });
+    setMock.mockReturnValue({ where: updateWhereMock });
+    updateMock.mockReturnValue({ set: setMock });
   });
 
   afterEach(() => {
@@ -120,7 +164,6 @@ describe('getClientInformation', () => {
       ok: true,
       json: vi.fn().mockResolvedValue({
         access_token: 'fresh-access-token',
-        refresh_token: 'fresh-refresh-token',
         expires_in: 86_400,
         scope: 'read,write',
       }),
@@ -134,6 +177,9 @@ describe('getClientInformation', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       'https://api.linear.app/oauth/token',
       expect.objectContaining({ method: 'POST' }),
+    );
+    expect(setMock).toHaveBeenCalledWith(
+      expect.objectContaining({ refreshToken: 'refresh-token' }),
     );
   });
 });
