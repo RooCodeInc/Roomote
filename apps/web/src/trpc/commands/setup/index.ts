@@ -11,6 +11,7 @@ import {
   inArray,
   invalidateBrainEnabledCache,
   sql,
+  type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
   TaskPayloadKind,
@@ -421,13 +422,17 @@ export async function completeSetupCommand(
     anonymousAnalyticsEnabled?: boolean;
     productUpdatesEnabled?: boolean;
   },
+  options?: {
+    requireIncomplete?: boolean;
+    validateBeforeCompletion?: (tx: DatabaseOrTransaction) => Promise<boolean>;
+  },
 ) {
   assertAdmin(auth);
   const { userId } = auth;
 
   const now = new Date();
 
-  const defaultedBrainEnabled = await db.transaction(async (tx) => {
+  const completion = await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext('setup-complete'))`,
     );
@@ -447,6 +452,21 @@ export async function completeSetupCommand(
         brainEnabled: true,
       },
     });
+    if (
+      options?.requireIncomplete &&
+      existingSettings?.setupCompletedAt != null
+    ) {
+      return {
+        state: 'already_completed' as const,
+        defaultedBrainEnabled: false,
+      };
+    }
+    if (
+      options?.validateBeforeCompletion &&
+      !(await options.validateBeforeCompletion(tx))
+    ) {
+      return { state: 'not_ready' as const, defaultedBrainEnabled: false };
+    }
     const recommendationsWereReviewed =
       normalizeSetupNewState(existingSettings?.setupNewState ?? {})
         .automationRecommendations?.status === 'ready';
@@ -514,10 +534,17 @@ export async function completeSetupCommand(
       await ensureManagedReviewerEnabledByDefaultInTx(tx, auth);
     }
 
-    return brainEnabledDefault === true;
+    return {
+      state: 'completed' as const,
+      defaultedBrainEnabled: brainEnabledDefault === true,
+    };
   });
 
-  if (defaultedBrainEnabled) {
+  if (completion.state !== 'completed') {
+    return { success: true as const, completionState: completion.state };
+  }
+
+  if (completion.defaultedBrainEnabled) {
     invalidateBrainEnabledCache();
   }
 
@@ -547,7 +574,7 @@ export async function completeSetupCommand(
     void subscribeToProductUpdates(auth.primaryEmail, 'setup');
   }
 
-  return { success: true as const };
+  return { success: true as const, completionState: 'completed' as const };
 }
 
 // --- Queries ---

@@ -15,8 +15,8 @@ import { SetupSessionActionCard } from './SetupSessionActionCard';
 /**
  * Inline sandbox setup for the conversational setup session. Runtime/env-var
  * configured providers make the compute status ready and therefore never show
- * this card. Otherwise, starter work remains persisted as intent while this
- * trusted provider/configuration UI is completed.
+ * this card. Otherwise, this trusted provider/configuration UI remains
+ * available before or after the administrator optionally selects starter work.
  */
 export function SetupSandboxCard() {
   const trpc = useTRPC();
@@ -42,9 +42,6 @@ export function SetupSandboxCard() {
   );
 
   const computeSetup = statusQuery.data?.computeSetup;
-  const setupSessionHasStarterSelection = Boolean(
-    statusQuery.data?.setupNewState.setupSession?.starterTaskSelection,
-  );
   const computeReady = computeSetup?.setupSatisfied === true;
 
   // A provisioning completion can make the card disappear on the next status
@@ -55,7 +52,7 @@ export function SetupSandboxCard() {
     void queryClient.fetchQuery(trpc.setup.sessionStatus.queryOptions());
   }, [computeReady, queryClient, trpc.setup.sessionStatus]);
 
-  if (!computeSetup || computeReady || !setupSessionHasStarterSelection) {
+  if (!computeSetup || computeReady) {
     return null;
   }
 
@@ -64,7 +61,7 @@ export function SetupSandboxCard() {
 
   return (
     <SetupSessionActionCard
-      title="I need a sandbox to run this task"
+      title="I need a sandbox to run tasks"
       icon={<Container />}
       intro="Tasks run in isolated VMs called sandboxes, where I can verify my work."
     >
