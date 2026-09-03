@@ -1351,7 +1351,7 @@ describe('canonical PR review notification ownership', () => {
   });
 
   it.each(['claimed', 'prepared'] as const)(
-    'leaves an older-head delivery that has not posted yet in the %s state',
+    'fences an older-head delivery in the %s state without discarding it',
     async (state) => {
       const task = await taskFactory.create();
       const repository = `owner/${state}-new-commit-${task.id}`;
@@ -1390,13 +1390,52 @@ describe('canonical PR review notification ownership', () => {
 
       await expect(deliveryStatusOf(claim.deliveryId)).resolves.toBe(state);
       await expect(
+        db.query.prReviewNotificationDeliveries.findFirst({
+          where: eq(prReviewNotificationDeliveries.id, claim.deliveryId),
+          columns: { actionClaimedAt: true },
+        }),
+      ).resolves.toEqual({ actionClaimedAt: expect.any(Date) });
+      if (state === 'claimed') {
+        await expect(
+          transitionCanonicalPrReviewDelivery({
+            deliveryId: claim.deliveryId,
+            leaseToken: claim.leaseToken,
+            expected: 'claimed',
+            status: 'prepared',
+          }),
+        ).resolves.toBe(true);
+      }
+      await expect(
         transitionCanonicalPrReviewDelivery({
           deliveryId: claim.deliveryId,
           leaseToken: claim.leaseToken,
-          expected: state,
-          status: state === 'claimed' ? 'prepared' : 'prompt_posting',
+          expected: 'prepared',
+          status: 'prompt_posting',
         }),
-      ).resolves.toBe(true);
+      ).resolves.toBe(false);
+      await expect(
+        transitionCanonicalPrReviewDelivery({
+          deliveryId: claim.deliveryId,
+          leaseToken: claim.leaseToken,
+          expected: 'prepared',
+          status: 'auto_dispatch_pending',
+        }),
+      ).resolves.toBe(false);
+      await expect(deliveryStatusOf(claim.deliveryId)).resolves.toBe(
+        'prepared',
+      );
+      await expect(
+        claimForRepository(
+          repository,
+          new Date(CLAIM_AT.getTime() + 11 * 60 * 1000),
+        ),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          deliveryId: claim.deliveryId,
+          state: 'prepared',
+          reviewActionSuperseded: true,
+        }),
+      ]);
     },
   );
 

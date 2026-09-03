@@ -164,6 +164,7 @@ export const prReviewNotificationRequestSchema = z.object({
     ])
     .optional(),
   followUpPrompt: z.string().nullable().optional(),
+  reviewActionSuperseded: z.boolean().optional(),
   targetTaskId: z.string().nullable().optional(),
   actingUserId: z.string().nullable().optional(),
   routeProvider: z
@@ -761,6 +762,7 @@ export async function dispatchDuePrReviewNotifications(): Promise<number> {
               repositoryId: claim.repositoryId,
               deliveryState: claim.state,
               followUpPrompt: claim.followUpPrompt,
+              reviewActionSuperseded: claim.reviewActionSuperseded,
               targetTaskId: claim.targetTaskId,
               actingUserId: claim.actingUserId,
               routeProvider: claim.routeProvider,

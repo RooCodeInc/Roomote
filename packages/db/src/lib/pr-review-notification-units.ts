@@ -69,6 +69,7 @@ export type CanonicalPrReviewDeliveryClaim = {
   deferrals: number;
   events: Record<string, unknown>[];
   followUpPrompt: string | null;
+  reviewActionSuperseded: boolean;
   targetTaskId: string | null;
   actingUserId: string | null;
   routeProvider: 'slack' | 'teams' | 'telegram' | 'discord' | null;
@@ -710,6 +711,7 @@ export async function claimDueCanonicalPrReviewDeliveries(
       episode_id: string;
       event: Record<string, unknown>;
       follow_up_prompt: string | null;
+      action_claimed_at: Date | null;
       target_task_id: string | null;
       acting_user_id: string | null;
       route_provider: 'slack' | 'teams' | 'telegram' | 'discord' | null;
@@ -789,6 +791,7 @@ export async function claimDueCanonicalPrReviewDeliveries(
              u.episode_id,
              e.event,
              d.follow_up_prompt,
+             d.action_claimed_at,
              d.target_task_id,
              d.acting_user_id,
              d.route_provider,
@@ -867,6 +870,9 @@ export async function claimDueCanonicalPrReviewDeliveries(
         deferrals: row.deferrals,
         events: [row.event],
         followUpPrompt: row.follow_up_prompt,
+        reviewActionSuperseded:
+          row.status !== 'auto_dispatch_pending' &&
+          row.action_claimed_at !== null,
         targetTaskId: row.target_task_id,
         actingUserId: row.acting_user_id,
         routeProvider: row.route_provider,
@@ -938,6 +944,10 @@ export async function transitionCanonicalPrReviewDelivery(input: {
       and(
         canonicalClaimWhere(input),
         inArray(prReviewNotificationDeliveries.status, expected),
+        input.status === 'prompt_posting' ||
+          input.status === 'auto_dispatch_pending'
+          ? isNull(prReviewNotificationDeliveries.actionClaimedAt)
+          : undefined,
       ),
     )
     .returning({ id: prReviewNotificationDeliveries.id });
@@ -1538,6 +1548,30 @@ export async function retireCanonicalPrReviewActionsForPullRequest(input: {
       ),
     );
   const rows = await db.transaction(async (tx) => {
+    // A worker can already have read the old live head while it is still
+    // preparing the notification. Fence its later action transition without
+    // discarding the reviewer text; a reclaimed delivery carries this marker
+    // and is delivered without an action offer.
+    await tx
+      .update(prReviewNotificationDeliveries)
+      .set({
+        actionClaimedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          inArray(prReviewNotificationDeliveries.status, [
+            'claimed',
+            'prepared',
+          ]),
+          isNull(prReviewNotificationDeliveries.actionClaimedAt),
+          inArray(
+            prReviewNotificationDeliveries.notificationUnitId,
+            matchingUnits,
+          ),
+        ),
+      );
+
     const retired = await tx
       .update(prReviewNotificationDeliveries)
       .set({
@@ -1551,10 +1585,9 @@ export async function retireCanonicalPrReviewActionsForPullRequest(input: {
       .where(
         and(
           // Only offers whose controls are posted (or being posted) are
-          // superseded. Deliveries that have not posted yet still carry the
-          // reviewer's text and are head-filtered at prepare time instead, and
-          // text-only routes hold no posting fence that could stop a stale
-          // post if their lease were revoked here.
+          // superseded. Claimed/prepared deliveries are fenced above so a
+          // retry can still publish their reviewer text without stale
+          // controls.
           inArray(prReviewNotificationDeliveries.status, [
             'prompt_posting',
             'awaiting_user_action',

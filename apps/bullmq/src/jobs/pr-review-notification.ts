@@ -619,7 +619,9 @@ export const prReviewNotificationJob = async (
     }
 
     const followUp =
-      delivery.followUpQuestion && delivery.followUpPrompt
+      !data.reviewActionSuperseded &&
+      delivery.followUpQuestion &&
+      delivery.followUpPrompt
         ? {
             question: delivery.followUpQuestion,
             prompt: delivery.followUpPrompt,

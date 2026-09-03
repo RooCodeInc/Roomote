@@ -805,6 +805,50 @@ describe('prReviewNotificationJob', () => {
     );
   });
 
+  it('delivers superseded pre-post feedback without actionable controls', async () => {
+    const deliveryId = '77777777-7777-4777-8777-777777777777';
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+
+    await prReviewNotificationJob(
+      makeJob({
+        ownershipVersion: 'canonical',
+        deliveryId,
+        notificationUnitId: '88888888-8888-4888-8888-888888888888',
+        deliveryState: 'prepared',
+        reviewActionSuperseded: true,
+        destinationKey: 'task-1',
+        dispatchKey: `pr-review-delivery:${deliveryId}`,
+        deliveryIds: [deliveryId],
+        leaseToken: '99999999-9999-4999-8999-999999999999',
+        events,
+      }) as never,
+    );
+
+    expect(mockBeginCanonicalPrompt).not.toHaveBeenCalled();
+    expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Review feedback remains.',
+        blocks: [{ type: 'markdown', text: 'Review feedback remains.' }],
+      }),
+    );
+    expect(mockRecordDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Review feedback remains.' }),
+    );
+    expect(mockFinalize).toHaveBeenCalled();
+  });
+
   it('retires a canonical Slack prompt that loses its posting fence', async () => {
     const deliveryId = '77777777-7777-4777-8777-777777777777';
     mockPrepareDelivery.mockResolvedValue({
