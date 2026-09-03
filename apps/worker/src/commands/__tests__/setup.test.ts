@@ -462,6 +462,41 @@ describe('setup mode behavior', () => {
     });
   });
 
+  it('retains explicit environment values that initially equal runtime values', async () => {
+    mockGetRuntimeEnv.mockReturnValueOnce({
+      R_VISION_MODEL: 'openai/shared-model',
+    });
+    mockInitializeWorkspaceRepositories.mockImplementationOnce(
+      async (_logger, options) => {
+        options.envVars.R_VISION_MODEL = 'openai/shared-model';
+        return { workspacePath: '/tmp/workspace' };
+      },
+    );
+
+    await setup({
+      mode: 'directDispatch',
+      workspace: {
+        ...environmentWorkspaceOptions,
+        workspace: {
+          ...environmentWorkspaceOptions.workspace,
+          environmentConfig: {
+            ...environmentWorkspaceOptions.workspace.environmentConfig,
+            env: { R_VISION_MODEL: 'openai/shared-model' },
+          },
+        },
+        envVars: { R_VISION_MODEL: 'openai/shared-model' },
+      },
+      logger,
+      workerEnv: mockWorkerEnv,
+    });
+
+    expect(mockSetUserEnv).toHaveBeenCalledWith(
+      expect.objectContaining({
+        R_VISION_MODEL: 'openai/shared-model',
+      }),
+    );
+  });
+
   it('keeps environment repository commands fatal for snapshot creation setup', async () => {
     await setup({
       mode: 'full',

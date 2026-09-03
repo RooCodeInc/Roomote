@@ -52,7 +52,11 @@ import {
 } from '../setup/workspace/types';
 
 import { BackgroundEnvironmentSetupController } from './background-environment-setup-controller';
-import { injectEnvVars, writeBashrc } from './env-vars';
+import {
+  buildEnvironmentShellEnvVars,
+  injectEnvVars,
+  writeBashrc,
+} from './env-vars';
 import { resolveRepositoryProvidersFromPayload } from './repository-providers';
 import { buildServiceContextForPreviewProxy } from './service-context';
 import { finalizeJob, handleTaskRunError } from './task-run-lifecycle';
@@ -419,6 +423,8 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       previewProxyBaseUrl: workerEnv.previewProxyBaseUrl,
       previewProxySubdomainSuffix: workerEnv.previewProxySubdomainSuffix,
       sourceControlToken: jobContext.sourceControlToken,
+      omitInheritedModelRuntimeEnvFromShell:
+        taskWorkspace.type === 'environment',
     });
 
     if (taskRun.canceledAt) {
@@ -663,7 +669,15 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       }
     }
 
-    writeBashrc(workerEnv.buildUserFacingEnv());
+    const userFacingEnv = workerEnv.buildUserFacingEnv();
+    writeBashrc(
+      workspace.type === 'environment'
+        ? buildEnvironmentShellEnvVars(
+            userFacingEnv,
+            Object.keys(workspace.environmentConfig.env ?? {}),
+          )
+        : userFacingEnv,
+    );
 
     if (taskRun.canceledAt) {
       await backgroundEnvironmentSetupController.flush();

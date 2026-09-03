@@ -17,7 +17,6 @@ import {
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   TASK_MODEL_COSTS_ENV_VAR_NAME,
-  TASK_MODEL_ROLE_DESCRIPTORS,
   TaskPayloadKind,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
@@ -26,6 +25,7 @@ import { ExecutionError } from '../command-executor';
 import type { WorkerEnv } from '../env';
 import { resolveWorkerCodingHarness } from '../lib/resolve-worker-coding-harness';
 import type { StartupLogger } from '../logging';
+import { INHERITED_MODEL_RUNTIME_ENV_VAR_NAMES } from './utils/env-vars';
 
 import {
   type EnvironmentSetupWarning,
@@ -116,15 +116,7 @@ function buildBackgroundEnvironmentSetupWarning(): string {
   return 'Environment setup is still running in the background. Docker projects may still be building or waiting for health checks, and repository setup commands may still be installing dependencies or preparing services.';
 }
 
-const INHERITED_MODEL_RUNTIME_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
-  ...Object.values(TASK_MODEL_ROLE_DESCRIPTORS).flatMap((descriptor) => [
-    descriptor.modelEnvVar,
-    descriptor.reasoningEnvVar,
-    `ROOMOTE_${descriptor.modelEnvVar.slice(2)}`,
-    `ROOMOTE_${descriptor.reasoningEnvVar.slice(2)}`,
-  ]),
-  'R_MODEL_ENV_KEYS',
-  'ROOMOTE_MODEL_ENV_KEYS',
+const INHERITED_MODEL_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   TASK_MODEL_COSTS_ENV_VAR_NAME,
@@ -150,6 +142,7 @@ function buildEnvironmentWorkspaceEnvVars(
       name !== SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME &&
       !name.startsWith('R_INFERENCE_GATEWAY_') &&
       !INHERITED_MODEL_RUNTIME_ENV_VAR_NAMES.has(name) &&
+      !INHERITED_MODEL_PROVIDER_ENV_VAR_NAMES.has(name) &&
       !configuredProviderEnvVarNames.has(name)
     ) {
       nestedEnvironmentEnvVars[name] = value;
@@ -254,13 +247,22 @@ export async function setup({
 
   if (workspaceOptions) {
     const runtimeEnv = workerEnv.getRuntimeEnv();
+    const explicitEnvironmentEnvVarNames = new Set(
+      workspaceOptions.workspace.type === 'environment'
+        ? Object.keys(workspaceOptions.workspace.environmentConfig.env ?? {})
+        : [],
+    );
     const workspaceEnv = Object.fromEntries(
       Object.entries(workspaceOptions.envVars).filter(([key, value]) => {
         if (value === undefined) {
           return false;
         }
 
-        return !(key in runtimeEnv) || runtimeEnv[key] !== value;
+        return (
+          explicitEnvironmentEnvVarNames.has(key) ||
+          !(key in runtimeEnv) ||
+          runtimeEnv[key] !== value
+        );
       }),
     );
 

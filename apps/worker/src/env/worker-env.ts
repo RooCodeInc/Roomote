@@ -367,6 +367,10 @@ export class WorkerEnv {
     return { ...this.runtimeEnv };
   }
 
+  getUserEnv(): Record<string, string> {
+    return { ...this.userEnv };
+  }
+
   /** Set a single system base var. */
   setSystemBase(key: string, value: string): void {
     this.systemBase[key] = value;
