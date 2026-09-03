@@ -758,11 +758,6 @@ export const runTask = async ({
         ROOMOTE_AUTH_BYPASS_HEADER_NAME:
           unsanitizedEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME,
       }),
-      // Consumed (and removed) by generateOpenCodeConfig, which registers the
-      // hidden proof-runner subagent only when a browser surface exists.
-      ...(environmentConfig?.initialUrl && {
-        ROOMOTE_PROOF_BROWSER_TARGET: environmentConfig.initialUrl,
-      }),
     };
     // Strip credentials for disabled providers as defense in depth, even if a
     // stale worker/dequeue payload still contains them.
