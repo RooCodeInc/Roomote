@@ -111,6 +111,72 @@ describe('Fast conversation repository', () => {
     },
   );
 
+  it('binds a new conversation to the Session it was created for', async () => {
+    const user = await createUser();
+    const [origin] = await db
+      .insert(sessions)
+      .values({
+        title: 'Weekly scan',
+        ownerKind: 'user',
+        ownerUserId: user.id,
+        sourceSurface: 'web',
+        sourceTrigger: 'manual',
+        visibility: 'visible',
+        activityAt: Math.floor(Date.now() / 1000),
+        cachedStatus: 'ready',
+      })
+      .returning({ id: sessions.id });
+    const conversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-origin-test',
+      conversationId: `thread-origin-${origin!.id}`,
+      replyTarget: {
+        channelId: 'channel-origin-test',
+        threadId: `thread-origin-${origin!.id}`,
+      },
+    };
+
+    const created = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+      sessionId: origin!.id,
+    });
+    const [bound] = await db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(eq(sessions.fastConversationId, created.id));
+    expect(bound?.id).toBe(origin!.id);
+
+    // A second Session cannot claim a conversation that already exists.
+    const [other] = await db
+      .insert(sessions)
+      .values({
+        title: 'Another scan',
+        ownerKind: 'user',
+        ownerUserId: user.id,
+        sourceSurface: 'web',
+        sourceTrigger: 'manual',
+        visibility: 'visible',
+        activityAt: Math.floor(Date.now() / 1000),
+        cachedStatus: 'ready',
+      })
+      .returning({ id: sessions.id });
+    const reused = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+      sessionId: other!.id,
+    });
+    expect(reused.id).toBe(created.id);
+    const [otherRow] = await db
+      .select({ fastConversationId: sessions.fastConversationId })
+      .from(sessions)
+      .where(eq(sessions.id, other!.id));
+    expect(otherRow?.fastConversationId).toBeNull();
+    await db
+      .delete(sessions)
+      .where(inArray(sessions.id, [origin!.id, other!.id]));
+  });
+
   it('converges concurrent creation on one provider-neutral row', async () => {
     const user = await createUser();
     const sessions = await Promise.all(

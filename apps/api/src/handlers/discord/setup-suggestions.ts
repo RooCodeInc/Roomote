@@ -53,6 +53,8 @@ type DiscordSuggestionLaunchClaim = {
   /** The card's explicit launch target, kept even when its environment FK was cleared. */
   launchTarget?: string;
   usesRouterLaunch: boolean;
+  /** The scan or onboarding task that produced the suggestion. */
+  sourceTaskId: string | null;
   launchClaimedAt: Date;
 };
 
@@ -226,6 +228,7 @@ export async function claimDiscordSuggestionLaunch(input: {
       ? { launchTarget: trackedCard.metadata.launchTarget }
       : {}),
     usesRouterLaunch: routed,
+    sourceTaskId: claimed.sourceTaskId,
     launchClaimedAt: claimed.launchClaimedAt,
   };
 }

@@ -29,7 +29,10 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { startAcceptedFastAgentTurn } from '../fast-agent-entry.js';
-import { launchClaimedSuggestedTask } from '../tasks/suggestion-launch.js';
+import {
+  launchClaimedSuggestedTask,
+  resolveSuggestionOriginSessionId,
+} from '../tasks/suggestion-launch.js';
 import {
   resolveSuggestedTaskLaunchTarget,
   resolveSuggestedTaskPinnedEnvironmentId,
@@ -383,11 +386,15 @@ async function handleSuggestionLaunchCallback(params: {
           threadId,
           forceNewTopic: true,
         });
+        const originSessionId = await resolveSuggestionOriginSessionId(
+          suggestion.sourceTaskId,
+        );
         let launchedRunId: number | null = null;
         const pinned = await launchPinnedFastSessionTask({
           userId: senderUserId,
           senderDisplayName: queuedMessage.user,
           conversation,
+          ...(originSessionId ? { originSessionId } : {}),
           launchId: `telegram-suggestion:${params.suggestionId}:${messageId}`,
           prompt: promptText,
           surface: 'telegram',

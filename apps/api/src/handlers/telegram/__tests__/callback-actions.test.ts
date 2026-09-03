@@ -23,6 +23,7 @@ const {
   resolveTelegramWorkspaceMock,
   launchTelegramTaskMock,
   launchPinnedMock,
+  getSessionForTaskMock,
   continueFastAgentSurfaceReplyMock,
   getOrCreateFastAgentSessionMock,
   fastAbortMock,
@@ -40,6 +41,7 @@ const {
   resolveTelegramWorkspaceMock: vi.fn(),
   launchTelegramTaskMock: vi.fn(),
   launchPinnedMock: vi.fn(),
+  getSessionForTaskMock: vi.fn(),
   continueFastAgentSurfaceReplyMock: vi.fn(),
   getOrCreateFastAgentSessionMock: vi.fn(),
   fastAbortMock: vi.fn(),
@@ -73,6 +75,7 @@ vi.mock('@roomote/db/server', () => ({
   db: { query: { taskRuns: { findFirst: vi.fn() } } },
   finalizeWorkItemLaunched: finalizeWorkItemLaunchedMock,
   releaseWorkItemClaim: releaseWorkItemClaimMock,
+  getSessionForTask: getSessionForTaskMock,
 }));
 
 vi.mock('../../../logging.js', () => ({ apiLogger: apiLoggerMock }));
@@ -149,6 +152,7 @@ beforeEach(() => {
     investigationContext: null,
     targetRepositoryFullName: '__all_repositories__',
     launchTarget: '__all_repositories__',
+    sourceTaskId: 'scan-task-1',
     launchClaimedAt: CLAIMED_AT,
   });
   findCurrentThreadSuggestionIdByMessageMock.mockResolvedValue(WORK_ITEM_ID);
@@ -161,9 +165,11 @@ beforeEach(() => {
       investigationContext: null,
       targetRepositoryFullName: '__all_repositories__',
       launchTarget: '__all_repositories__',
+      sourceTaskId: 'scan-task-1',
       launchClaimedAt: CLAIMED_AT,
     },
   });
+  getSessionForTaskMock.mockResolvedValue({ id: 'session-origin' });
   finalizeWorkItemLaunchedMock.mockResolvedValue(true);
   launchTelegramTaskMock.mockResolvedValue({ id: 7, taskId: 'task-1' });
   // The pinned-launch primitive runs the surface launcher inside a Session.
@@ -264,6 +270,14 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
 
   it('starts a suggestion in a fresh topic while preserving its source topic for fallback', async () => {
     await handleTelegramCallbackQuery(buildSuggestionQuery(44));
+
+    expect(getSessionForTaskMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'scan-task-1',
+    );
+    expect(launchPinnedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ originSessionId: 'session-origin' }),
+    );
 
     expect(launchTelegramTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -35,7 +35,10 @@ import {
 
 import { apiLogger } from '../../../logging.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../../call-roomote-via-emoji.js';
-import { launchClaimedSuggestedTask } from '../../tasks/suggestion-launch.js';
+import {
+  launchClaimedSuggestedTask,
+  resolveSuggestionOriginSessionId,
+} from '../../tasks/suggestion-launch.js';
 import { resolveSuggestedTaskLaunchTarget } from '../../tasks/suggestion-launch-target.js';
 import {
   SLACK_SETUP_SUGGESTION_LOCK_PREFIX,
@@ -271,6 +274,7 @@ async function launchTaskSuggestionTaskFromReaction({
       readinessMessage: workItems.readinessMessage,
       sortOrder: workItems.sortOrder,
       status: workItems.status,
+      sourceTaskId: workItems.sourceTaskId,
     })
     .from(workItems)
     .where(eq(workItems.id, workItemId))
@@ -599,8 +603,12 @@ async function launchTaskSuggestionTaskFromReaction({
             reason: UNLINKED_SLACK_ACCOUNT_FAST_LAUNCH_FAILURE,
           };
         }
+        const originSessionId = await resolveSuggestionOriginSessionId(
+          workItem.sourceTaskId,
+        );
         const pinned = await launchPinnedFastSessionTask({
           userId: launchOwnerUserId,
+          ...(originSessionId ? { originSessionId } : {}),
           conversation: {
             surface: 'slack',
             workspaceId: teamId,
