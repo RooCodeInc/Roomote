@@ -8,7 +8,9 @@ import {
 } from '@roomote/communication';
 import {
   ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
+  relocateSlackThreadActiveTaskCards,
   updateSlackThreadMessageWithFooterText,
+  withSlackThreadReplyFooterLock,
   type SlackNotifier,
 } from '@roomote/slack';
 
@@ -30,6 +32,8 @@ export function createSlackFastReplyStream(params: {
     | 'deleteMessage'
     | 'updateMessage'
     | 'getMessageBlocks'
+    | 'getRawMessage'
+    | 'postMessage'
   >;
   conversation: FastAgentConversation;
   channelId: string;
@@ -52,12 +56,29 @@ export function createSlackFastReplyStream(params: {
       if (!messageTs) {
         if (opened) return;
         opened = true;
-        messageTs = await params.slack.startMessageStream({
+        messageTs = await withSlackThreadReplyFooterLock({
           channel: params.channelId,
           threadTs: params.threadTs,
-          recipientTeamId: params.recipientTeamId,
-          recipientUserId: params.recipientUserId,
-          markdownText: text,
+          fn: async () => {
+            try {
+              await relocateSlackThreadActiveTaskCards({
+                slack: params.slack,
+                channel: params.channelId,
+                threadTs: params.threadTs,
+              });
+            } catch (error) {
+              console.warn(
+                `[Fast Agent] Failed to relocate active Slack task cards before streaming: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+            return params.slack.startMessageStream({
+              channel: params.channelId,
+              threadTs: params.threadTs,
+              recipientTeamId: params.recipientTeamId,
+              recipientUserId: params.recipientUserId,
+              markdownText: text,
+            });
+          },
         });
         if (!messageTs) failed = true;
         return;

@@ -17,8 +17,7 @@ import {
 } from './live-task-stream';
 import type { SlackNotifier } from './slack-notifier';
 import { settleSlackLiveTaskCardForRun } from './settle-live-task-card';
-import { setSlackThreadActiveTask } from './thread-active-tasks';
-import { refreshSlackThreadActiveTaskFooter } from './thread-reply-footer-ops';
+import { registerSlackThreadActiveTaskAndMoveFooter } from './thread-reply-footer-ops';
 
 type SlackLiveTaskCardNotifier = Pick<
   SlackNotifier,
@@ -27,6 +26,8 @@ type SlackLiveTaskCardNotifier = Pick<
   | 'postMessageDetailed'
   | 'updateMessage'
   | 'getMessageBlocks'
+  | 'getRawMessage'
+  | 'deleteMessage'
 >;
 
 const PREPARING_WORKSPACE_TITLE = 'Preparing workspace…';
@@ -82,26 +83,18 @@ export function createFastAgentSlackLiveTaskLauncher(
     const taskUpdateId = `roomote-task-${taskRun.taskId}`;
     let messageTs: string | undefined;
     let destinationUrl = context.taskUrl;
-    const pinActiveTask = async (): Promise<void> => {
+    const registerActiveTask = async (): Promise<void> => {
       try {
-        await setSlackThreadActiveTask({
+        await registerSlackThreadActiveTaskAndMoveFooter({
+          slack,
           teamId: launcherParams.teamId,
           channel: launcherParams.channelId,
           threadTs: launcherParams.threadTs,
-          task: {
-            taskId: taskRun.taskId,
-            title: buildSlackLiveTaskTitle(context.prompt),
-            taskUrl: destinationUrl,
-          },
-        });
-        await refreshSlackThreadActiveTaskFooter({
-          slack,
-          channel: launcherParams.channelId,
-          threadTs: launcherParams.threadTs,
+          taskId: taskRun.taskId,
         });
       } catch (error) {
         console.warn(
-          `[Fast Agent] Failed to pin task ${taskRun.taskId} above the Slack thread footer: ${describeError(error)}`,
+          `[Fast Agent] Failed to register task ${taskRun.taskId} for Slack card relocation: ${describeError(error)}`,
         );
       }
     };
@@ -119,7 +112,7 @@ export function createFastAgentSlackLiveTaskLauncher(
       // relaunch of the same task); keep updating it instead of posting
       // a second card in the thread.
       if (await getSlackLiveTaskStreamData(taskRun.taskId)) {
-        await pinActiveTask();
+        await registerActiveTask();
         return;
       }
 
@@ -162,7 +155,7 @@ export function createFastAgentSlackLiveTaskLauncher(
         title: buildSlackLiveTaskTitle(context.prompt),
         taskUrl: destinationUrl,
       });
-      await pinActiveTask();
+      await registerActiveTask();
     } catch (error) {
       console.error(
         `[Fast Agent] Failed to post the Slack task card for run ${taskRun.id}: ${describeError(error)}`,

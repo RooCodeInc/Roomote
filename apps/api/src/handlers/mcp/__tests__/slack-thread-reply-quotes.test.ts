@@ -16,6 +16,7 @@ const {
   isAppInChannelMock,
   maybeSendCommunicationThreadReplyMock,
   postMessageDetailedMock,
+  relocateSlackThreadActiveTaskCardsMock,
   resolveAutomationResultSubtitleMock,
   slackInstallationFindFirstMock,
   slackInstallationFindManyMock,
@@ -34,6 +35,7 @@ const {
   isAppInChannelMock: vi.fn(),
   maybeSendCommunicationThreadReplyMock: vi.fn(),
   postMessageDetailedMock: vi.fn(),
+  relocateSlackThreadActiveTaskCardsMock: vi.fn(),
   resolveAutomationResultSubtitleMock: vi.fn(),
   slackInstallationFindFirstMock: vi.fn(),
   slackInstallationFindManyMock: vi.fn(),
@@ -90,6 +92,7 @@ vi.mock('@roomote/slack', async (importOriginal) => {
     getActiveSlackRunReplyTarget: getActiveSlackRunReplyTargetMock,
     getSlackThreadReplyFooterMessageTs: vi.fn().mockResolvedValue(null),
     removeSlackThreadReplyFooter: vi.fn(),
+    relocateSlackThreadActiveTaskCards: relocateSlackThreadActiveTaskCardsMock,
     resolveSlackThreadFooterContext: vi.fn().mockResolvedValue({
       linkedPrs: [],
       livePreviewUrl: null,
@@ -225,6 +228,7 @@ describe('Slack thread reply quotes', () => {
       },
     ]);
     postMessageDetailedMock.mockResolvedValue({ ts: '333.444' });
+    relocateSlackThreadActiveTaskCardsMock.mockResolvedValue(undefined);
     clearLatestUserMessageForReplyQuoteIfIdMock.mockResolvedValue(true);
     clearNextSlackReplyQuoteSuppressionIfIdMock.mockResolvedValue(true);
     suppressNextSlackReplyQuoteMock.mockResolvedValue('suppression-1');
@@ -240,6 +244,9 @@ describe('Slack thread reply quotes', () => {
     });
 
     expect(response.status).toBe(200);
+    expect(
+      relocateSlackThreadActiveTaskCardsMock.mock.invocationCallOrder[0],
+    ).toBeLessThan(postMessageDetailedMock.mock.invocationCallOrder[0]!);
     expect(postMessageDetailedMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'C123',
@@ -260,6 +267,23 @@ describe('Slack thread reply quotes', () => {
       42,
       'quote-image',
     );
+  });
+
+  it('keeps the primary reply isolated from relocation failure', async () => {
+    buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+    relocateSlackThreadActiveTaskCardsMock.mockRejectedValueOnce(
+      new Error('redis unavailable'),
+    );
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Still deliver this' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(postMessageDetailedMock).toHaveBeenCalledOnce();
   });
 
   it('consumes an older pending quote without rendering it when the turn is suppressed', async () => {
