@@ -6,6 +6,11 @@ export const fastAgentSurfaces = [
   'teams',
   'telegram',
   'linear',
+  'github',
+  'gitlab',
+  'bitbucket',
+  'ado',
+  'gitea',
   'automation',
   'web',
 ] as const;
@@ -60,6 +65,37 @@ export const fastAgentConversationSchema = z.discriminatedUnion('surface', [
      */
     replyTarget: fastAgentReplyTargetSchema,
   }),
+  /**
+   * Source-control surfaces: a pull request or issue discussion.
+   * `workspaceId` is `<host>/<owner>/<repo>`, `conversationId` and
+   * `replyTarget.channelId` are `pull/<number>` or `issues/<number>`, and
+   * `replyTarget.threadId` is the review comment a reply threads under.
+   */
+  z.object({
+    surface: z.literal('github'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('gitlab'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('bitbucket'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('ado'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('gitea'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
   z.object({
     surface: z.literal('automation'),
     ...fastAgentConversationIdentitySchema,
@@ -71,6 +107,30 @@ export const fastAgentConversationSchema = z.discriminatedUnion('surface', [
 ]);
 
 export type FastAgentConversation = z.infer<typeof fastAgentConversationSchema>;
+
+export const fastAgentSourceControlSurfaces = [
+  'github',
+  'gitlab',
+  'bitbucket',
+  'ado',
+  'gitea',
+] as const;
+
+export type FastAgentSourceControlSurface =
+  (typeof fastAgentSourceControlSurfaces)[number];
+
+export type FastAgentSourceControlConversation = Extract<
+  FastAgentConversation,
+  { surface: FastAgentSourceControlSurface }
+>;
+
+export function isFastAgentSourceControlConversation(
+  conversation: FastAgentConversation,
+): conversation is FastAgentSourceControlConversation {
+  return (fastAgentSourceControlSurfaces as readonly string[]).includes(
+    conversation.surface,
+  );
+}
 
 export type FastAgentCommunicationConversation = Extract<
   FastAgentConversation,

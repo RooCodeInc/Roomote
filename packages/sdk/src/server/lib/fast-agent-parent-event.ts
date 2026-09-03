@@ -59,6 +59,7 @@ import {
   type TaskRunErrorCode,
   type SourceControlProvider,
   type StandardTask,
+  isFastAgentSourceControlConversation,
 } from '@roomote/types';
 
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
@@ -67,6 +68,10 @@ import {
   createFastAgentLinearTaskLauncher,
   resolveLinearFastSessionClient,
 } from './linear-fast-session';
+import {
+  buildSourceControlFastAdapter,
+  buildSourceControlFastDelivery,
+} from './source-control-fast-delivery';
 import { buildCustomAutomationSlackMessage } from './manager-slack';
 import {
   appendFastAutomationSuggestionInstruction,
@@ -1569,6 +1574,56 @@ async function createLinearFastAgentParentTurn(params: {
   };
 }
 
+/**
+ * A pull request or issue discussion: child outcomes post as comments the
+ * same way the Session's own replies do.
+ */
+async function createSourceControlFastAgentParentTurn(params: {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  actorUserId?: string;
+  onReplyPosted: () => void;
+}): Promise<FastAgentParentTurn> {
+  const fallbackConversation = params.parent.conversation;
+  if (!isFastAgentSourceControlConversation(fallbackConversation)) {
+    throw new Error('Expected a source-control Fast parent conversation.');
+  }
+  const session = await fastAgentConversationRepository.findById({
+    id: params.parent.sessionId,
+    fallbackConversation,
+  });
+  const conversation = session?.conversation;
+  if (
+    !session ||
+    !conversation ||
+    !isFastAgentSourceControlConversation(conversation)
+  ) {
+    throw new FastAgentParentEventDeliveryError(
+      'Fast source-control parent session was not found.',
+      { replyPosted: false, permanent: true },
+    );
+  }
+  const delivery = await buildSourceControlFastDelivery(conversation);
+  if (!delivery) {
+    throw new FastAgentParentEventDeliveryError(
+      'The repository for this Fast parent session is not connected.',
+      { replyPosted: false, permanent: true },
+    );
+  }
+  const actorUserId = params.actorUserId ?? session.userId;
+  return {
+    userId: actorUserId,
+    conversation,
+    adapter: buildSourceControlFastAdapter({
+      conversation,
+      delivery,
+      userId: actorUserId,
+      sessionId: session.id,
+      onReplyPosted: params.onReplyPosted,
+    }),
+  };
+}
+
 async function createFastAgentParentTurn(params: {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
@@ -1583,6 +1638,9 @@ async function createFastAgentParentTurn(params: {
   }
   if (params.parent.conversation.surface === 'linear') {
     return createLinearFastAgentParentTurn(params);
+  }
+  if (isFastAgentSourceControlConversation(params.parent.conversation)) {
+    return createSourceControlFastAgentParentTurn(params);
   }
 
   const pullRequest =
