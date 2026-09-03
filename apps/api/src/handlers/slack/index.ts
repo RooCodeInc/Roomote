@@ -26,8 +26,50 @@ import {
 } from './helpers/event-normalization.js';
 import type { SlackWebhookBody } from './types.js';
 import { verifySlackRequest } from './verifySlackRequest.js';
+import { resumePendingSlackAuthRequest } from './events/auth-resume.js';
 
 export const slack = new Hono();
+
+slack.post('/auth/resume', async (c) => {
+  let rawBody: unknown;
+
+  try {
+    rawBody = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: 'invalid_json' }, { status: 400 });
+  }
+
+  const stateToken =
+    rawBody &&
+    typeof rawBody === 'object' &&
+    !Array.isArray(rawBody) &&
+    typeof (rawBody as { state?: unknown }).state === 'string'
+      ? (rawBody as { state: string }).state.trim()
+      : '';
+
+  if (!stateToken) {
+    return c.json(
+      { success: false, error: 'missing_state_token' },
+      { status: 400 },
+    );
+  }
+
+  const result = await resumePendingSlackAuthRequest(stateToken);
+
+  if (result.success) {
+    return c.json(result);
+  }
+
+  const status =
+    result.error === 'account_link_required' ||
+    result.error === 'fast_session_not_accepted'
+      ? 409
+      : result.error === 'invalid_or_expired_auth_token'
+        ? 404
+        : 400;
+
+  return c.json(result, { status });
+});
 
 slack.post('/', async (c) => {
   const headers = c.req.header();

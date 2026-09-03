@@ -1,8 +1,4 @@
-import {
-  SlackNotifier,
-  shouldResumeSlackAuthThread,
-  showTaskConfiguration,
-} from '@roomote/slack';
+import { SlackNotifier, shouldResumeSlackAuthThread } from '@roomote/slack';
 import {
   enqueueSlackAccountLinkEducation,
   recordSlackConversationMessageBestEffort,
@@ -327,7 +323,7 @@ async function handleSlackAuthentication({
   userId: string;
   authToken: SlackAuthToken;
 }) {
-  await bootstrapWebRuntimeEnv();
+  const env = await bootstrapWebRuntimeEnv();
   await ensureSlackMappingUserExists(userId);
 
   const { userMapping, status } = await upsertSlackUserMapping({
@@ -361,19 +357,21 @@ async function handleSlackAuthentication({
   );
 
   if (resumedOriginalThread) {
-    await showTaskConfiguration({
-      event: {
-        type: 'app_mention',
-        channel: authToken.channel,
-        user: authToken.slackUserId,
-        text: authToken.originalText,
-        ts: authToken.threadTs,
-        thread_ts: undefined,
-      },
-      slackInstallation,
-      userMapping,
-      slack,
+    const apiUrl = new URL(
+      'api/webhooks/slack/auth/resume',
+      env.TRPC_URL.endsWith('/') ? env.TRPC_URL : `${env.TRPC_URL}/`,
+    );
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ state: authToken.token }),
     });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to resume pending Slack request: HTTP ${response.status}`,
+      );
+    }
   }
 
   try {
