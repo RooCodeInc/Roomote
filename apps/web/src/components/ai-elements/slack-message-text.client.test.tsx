@@ -79,6 +79,15 @@ describe('SlackMessageText', () => {
     expect(resolveUsersState.lastEnabled).toBe(true);
   });
 
+  it('caps the lookup at the resolver limit and leaves overflow raw', () => {
+    const text = Array.from({ length: 60 }, (_, i) => `<@U${i}>`).join(' ');
+
+    render(<SlackMessageText text={text} />);
+
+    expect(resolveUsersState.lastInput?.userIds).toHaveLength(50);
+    expect(screen.getAllByTestId('slack-mention')).toHaveLength(60);
+  });
+
   it('falls back to the inline label or raw id while unresolved', () => {
     render(
       <SlackMessageText text="<@U1|jane> and <@U2> in <#C1|general> <!here>" />,

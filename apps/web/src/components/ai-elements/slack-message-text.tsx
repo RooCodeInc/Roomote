@@ -3,6 +3,7 @@
 import { Fragment, useMemo, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
+  SLACK_RESOLVE_USERS_MAX_IDS,
   extractSlackUserMentionIds,
   parseSlackMessageTokens,
   type SlackMessageToken,
@@ -87,7 +88,13 @@ function renderToken(
  */
 export function SlackMessageText({ text }: { text: string }) {
   const tokens = useMemo(() => parseSlackMessageTokens(text), [text]);
-  const userIds = useMemo(() => extractSlackUserMentionIds(text), [text]);
+  // Resolve at most the first N distinct users; any overflow stays as the
+  // raw token rather than failing the whole lookup.
+  const userIds = useMemo(
+    () =>
+      extractSlackUserMentionIds(text).slice(0, SLACK_RESOLVE_USERS_MAX_IDS),
+    [text],
+  );
   const { slackTeamId } = useSlackMentionContext();
   const trpc = useTRPC();
   const { data } = useQuery({

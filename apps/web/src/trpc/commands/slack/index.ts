@@ -815,15 +815,6 @@ export async function completePendingSlackAuthenticationCommand(
   }
 }
 
-interface ResolvedSlackUser {
-  name: string;
-  profileUrl: string | null;
-}
-
-interface ResolveSlackUsersResult {
-  users: Record<string, ResolvedSlackUser>;
-}
-
 const SLACK_USER_ID_PATTERN = /^[UW][A-Z0-9]{2,}$/;
 
 /**
@@ -836,7 +827,9 @@ const SLACK_USER_ID_PATTERN = /^[UW][A-Z0-9]{2,}$/;
 export async function resolveSlackUsersCommand(
   _auth: UserAuthSuccess,
   input: { teamId?: string | null; userIds: string[] },
-): Promise<ResolveSlackUsersResult> {
+): Promise<{
+  users: Record<string, { name: string; profileUrl: string | null }>;
+}> {
   const userIds = [
     ...new Set(
       input.userIds
@@ -844,7 +837,7 @@ export async function resolveSlackUsersCommand(
         .filter((userId) => SLACK_USER_ID_PATTERN.test(userId)),
     ),
   ];
-  const users: Record<string, ResolvedSlackUser> = {};
+  const users: Record<string, { name: string; profileUrl: string | null }> = {};
   if (userIds.length === 0) {
     return { users };
   }

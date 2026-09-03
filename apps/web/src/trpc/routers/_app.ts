@@ -5,6 +5,7 @@ import {
 } from '@roomote/auth';
 
 import {
+  SLACK_RESOLVE_USERS_MAX_IDS,
   ALL_REPOSITORIES,
   FAST_EXECUTION,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
@@ -1360,7 +1361,9 @@ export const appRouter = createRouter({
       .input(
         z.object({
           teamId: z.string().trim().max(64).nullable().optional(),
-          userIds: z.array(z.string().trim().min(1).max(64)).max(50),
+          userIds: z
+            .array(z.string().trim().min(1).max(64))
+            .max(SLACK_RESOLVE_USERS_MAX_IDS),
         }),
       )
       .query(({ ctx: { auth }, input }) =>

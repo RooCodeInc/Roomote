@@ -32,6 +32,20 @@ describe('parseSlackMessageTokens', () => {
     ]);
   });
 
+  it('parses malformed reference fragments in linear time', () => {
+    const malformed = '<@U0|'.repeat(20_000);
+    const started = performance.now();
+    const tokens = parseSlackMessageTokens(malformed);
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(tokens).toEqual([{ type: 'text', text: malformed }]);
+
+    expect(parseSlackMessageTokens('<@U1|<@U2|jane> tail')).toEqual([
+      { type: 'text', text: '<@U1|' },
+      { type: 'user', userId: 'U2', label: 'jane' },
+      { type: 'text', text: ' tail' },
+    ]);
+  });
+
   it('leaves unrelated angle-bracket text alone', () => {
     expect(
       parseSlackMessageTokens('<https://example.com|link> and <b>bold</b>'),
