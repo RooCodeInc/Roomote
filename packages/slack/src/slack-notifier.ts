@@ -1300,6 +1300,77 @@ export class SlackNotifier {
    * Uses conversations.replies to find thread replies (the started message
    * is always posted as a thread reply with thread_ts).
    */
+  /**
+   * Message streaming (`chat.startStream` / `appendStream` / `stopStream`):
+   * one reply that renders as it is written. Every method reports failure
+   * instead of throwing so a caller can fall back to a normal post.
+   */
+  public async startMessageStream(params: {
+    channel: string;
+    threadTs: string;
+    recipientTeamId: string;
+    recipientUserId: string;
+    markdownText: string;
+  }): Promise<string | null> {
+    try {
+      const response = await this.getClient().chat.startStream({
+        channel: params.channel,
+        thread_ts: params.threadTs,
+        recipient_team_id: params.recipientTeamId,
+        recipient_user_id: params.recipientUserId,
+        markdown_text: params.markdownText,
+      });
+      return response.ok && typeof response.ts === 'string'
+        ? response.ts
+        : null;
+    } catch (error) {
+      console.error(
+        `[startMessageStream] Slack chat.startStream failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  public async appendMessageStream(params: {
+    channel: string;
+    ts: string;
+    markdownText: string;
+  }): Promise<boolean> {
+    try {
+      const response = await this.getClient().chat.appendStream({
+        channel: params.channel,
+        ts: params.ts,
+        markdown_text: params.markdownText,
+      });
+      return response.ok === true;
+    } catch (error) {
+      console.error(
+        `[appendMessageStream] Slack chat.appendStream failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  }
+
+  public async stopMessageStream(params: {
+    channel: string;
+    ts: string;
+    markdownText?: string;
+  }): Promise<boolean> {
+    try {
+      const response = await this.getClient().chat.stopStream({
+        channel: params.channel,
+        ts: params.ts,
+        ...(params.markdownText ? { markdown_text: params.markdownText } : {}),
+      });
+      return response.ok === true;
+    } catch (error) {
+      console.error(
+        `[stopMessageStream] Slack chat.stopStream failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  }
+
   public async getMessageBlocks({
     channel,
     messageTs,
@@ -2427,22 +2498,7 @@ export class SlackNotifier {
         matches.map((match) => match[1]).filter((id): id is string => !!id),
       ),
     ];
-
-    const botNameOverrides = new Map<string, string>();
-    if (this.botUserId && this.botName && userIds.includes(this.botUserId)) {
-      botNameOverrides.set(this.botUserId, this.botName);
-    }
-
-    // Fetch display names that are not already known from installation metadata.
-    const unresolvedUserIds = userIds.filter(
-      (userId) => !botNameOverrides.has(userId),
-    );
-    const usernameMap = unresolvedUserIds.length
-      ? await this.getUsersInfo(unresolvedUserIds)
-      : new Map<string, string>();
-    for (const [userId, botName] of botNameOverrides) {
-      usernameMap.set(userId, botName);
-    }
+    const usernameMap = await this.getUserDisplayNames(userIds);
 
     // Replace each mention with the user's display name
     let result = text;
@@ -2463,13 +2519,52 @@ export class SlackNotifier {
   }
 
   /**
+   * Resolves Slack user IDs to display names. The installation's own bot
+   * user resolves from stored metadata without a Slack API call; every other
+   * ID goes through `users.info`. IDs that cannot be resolved are omitted.
+   */
+  public async getUserDisplayNames(
+    userIds: string[],
+  ): Promise<Map<string, string>> {
+    const uniqueUserIds = [...new Set(userIds)];
+    const botNameOverrides = new Map<string, string>();
+    if (
+      this.botUserId &&
+      this.botName &&
+      uniqueUserIds.includes(this.botUserId)
+    ) {
+      botNameOverrides.set(this.botUserId, this.botName);
+    }
+
+    const unresolvedUserIds = uniqueUserIds.filter(
+      (userId) => !botNameOverrides.has(userId),
+    );
+    const usernameMap = unresolvedUserIds.length
+      ? await this.getUsersInfo(unresolvedUserIds)
+      : new Map<string, string>();
+    for (const [userId, botName] of botNameOverrides) {
+      usernameMap.set(userId, botName);
+    }
+
+    return usernameMap;
+  }
+
+  /**
    * Normalizes inbound Slack text for internal model/web consumption.
-   * - Expands user mentions to readable names.
+   * - Expands user mentions to readable names unless `preserveMentions` is
+   *   set, in which case raw `<@U…>` tokens stay in the text so the stored
+   *   message matches what the sender typed and the web transcript can
+   *   render them as linked mentions.
    * - Converts Slack mrkdwn links to standard markdown/plain URLs.
    */
-  public async normalizeIncomingText(text: string): Promise<string> {
+  public async normalizeIncomingText(
+    text: string,
+    options: { preserveMentions?: boolean } = {},
+  ): Promise<string> {
     return convertSlackLinksToMarkdown(
-      await this.replaceMentionsWithNames(text),
+      options.preserveMentions
+        ? text
+        : await this.replaceMentionsWithNames(text),
     );
   }
 }

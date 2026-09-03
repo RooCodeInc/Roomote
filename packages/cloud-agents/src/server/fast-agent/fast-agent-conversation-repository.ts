@@ -10,6 +10,7 @@ import {
   fastAgentParentEvents,
   ensureSessionForFastConversation,
   advanceSessionNotifiedCursor,
+  attachFastConversationToSession,
   advanceSessionReadCursor,
   getSessionForFastConversation,
   gt,
@@ -390,6 +391,78 @@ export async function revokeFastAgentDurableTurnReplay(
   return rows.length > 0;
 }
 
+/**
+ * Park the turn for a durable inference retry: the owner gives up its claim
+ * and the queue re-runs the row once `retryAt` arrives, on whichever process
+ * is alive then. The consumed retry count travels with the row so the
+ * per-turn cap holds across owners. False once the row is no longer pending
+ * (superseded or already withdrawn), in which case the caller keeps the
+ * retry in process.
+ */
+export async function scheduleFastAgentDurableTurnRetry(
+  id: string,
+  params: { retryAt: Date; inferenceRetries: number; reason: string },
+): Promise<boolean> {
+  const rows = await db
+    .update(fastAgentParentEvents)
+    .set({
+      claimedUntil: null,
+      retryAt: params.retryAt,
+      inferenceRetries: params.inferenceRetries,
+      lastError: params.reason,
+      updatedAt: new Date(),
+    })
+    .where(pendingDurableTurnWhere(id))
+    .returning({ id: fastAgentParentEvents.id });
+  return rows.length > 0;
+}
+
+export type FastAgentActiveInferenceRetryNotice = {
+  eventId: string;
+  ts: number;
+  text: string;
+  platformMessageId: string | null;
+};
+
+/**
+ * The retry notice a previous execution of this same turn left active, so a
+ * resumed run can keep editing that notice instead of reconciling it into
+ * an interruption and posting its answer beside a stale "retrying" message.
+ */
+export async function findFastAgentActiveInferenceRetryNotice(
+  conversationId: string,
+  turnId: string,
+): Promise<FastAgentActiveInferenceRetryNotice | null> {
+  const [notice] = await db
+    .select({
+      eventId: fastAgentMessages.eventId,
+      ts: fastAgentMessages.ts,
+      contentBlocks: fastAgentMessages.contentBlocks,
+      metadata: fastAgentMessages.metadata,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.turnId, turnId),
+        activeInferenceRetryNoticeWhere(),
+      ),
+    )
+    .orderBy(desc(fastAgentMessages.ts))
+    .limit(1);
+  if (!notice) return null;
+  const platformMessageId = notice.metadata?.platformMessageId;
+  return {
+    eventId: notice.eventId,
+    ts: notice.ts,
+    text: notice.contentBlocks
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('\n'),
+    platformMessageId:
+      typeof platformMessageId === 'string' ? platformMessageId : null,
+  };
+}
+
 /** The turn produced its outcome; nothing is left to recover. */
 export async function markFastAgentDurableTurnDelivered(
   id: string,
@@ -446,6 +519,19 @@ export async function reconcileExpiredFastAgentInferenceRetryNotices(
           isNull(sessions.respondingUntil),
           lt(sessions.respondingUntil, new Date()),
         ),
+        // A durably scheduled retry (or a live inline claim) means the turn
+        // is still owned by recovery, not orphaned: its notice will be
+        // edited by the resumed run, so an expired lease must not turn it
+        // into an interruption in the meantime.
+        sql`not exists (
+          select 1 from ${fastAgentParentEvents}
+          where ${fastAgentParentEvents.conversationId} = ${fastAgentMessages.conversationId}
+            and ${fastAgentParentEvents.admission} = 'inline'
+            and ${fastAgentParentEvents.deliveredAt} is null
+            and ${fastAgentParentEvents.discardedAt} is null
+            and (${fastAgentParentEvents.retryAt} > now()
+              or ${fastAgentParentEvents.claimedUntil} > now())
+        )`,
       ),
     )
     .limit(limit);
@@ -470,6 +556,12 @@ export interface FastAgentConversationRepository {
   getOrCreate(input: {
     userId: string;
     conversation: FastAgentConversation;
+    /**
+     * Session to bind a newly created conversation to, when that Session has
+     * no conversation yet. A conversation that already exists keeps its own
+     * Session.
+     */
+    sessionId?: string;
   }): Promise<FastAgentConversationGetOrCreateResult>;
   findById(input: {
     id: string;
@@ -609,7 +701,7 @@ async function loadConversationRecord(
 
 export const fastAgentConversationRepository: FastAgentConversationRepository =
   {
-    async getOrCreate({ userId, conversation }) {
+    async getOrCreate({ userId, conversation, sessionId }) {
       return db.transaction(async (tx) => {
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${buildIdentityKey(conversation)}, 0))`,
@@ -625,6 +717,26 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           record = await tx.query.fastAgentConversations.findFirst({
             where: replyTargetWhere,
           });
+        }
+
+        // Launches into one Session with different conversation identities
+        // must agree on a single conversation. Serialize on the Session and
+        // reuse the conversation a concurrent launch already bound to it.
+        if (!record && sessionId) {
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-session-binding:${sessionId}`}, 0))`,
+          );
+          const [bound] = await tx
+            .select({ fastConversationId: sessions.fastConversationId })
+            .from(sessions)
+            .where(eq(sessions.id, sessionId))
+            .limit(1);
+          if (bound?.fastConversationId) {
+            return {
+              ...(await loadConversationRecord(tx, bound.fastConversationId)),
+              created: false,
+            };
+          }
         }
 
         if (!record) {
@@ -684,10 +796,20 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           .where(eq(fastAgentConversations.id, record.id))
           .returning();
 
-        await ensureSessionForFastConversation(tx, updated?.id ?? record.id);
+        const conversationId = updated?.id ?? record.id;
+        const attached =
+          created && sessionId
+            ? await attachFastConversationToSession(tx, {
+                sessionId,
+                fastConversationId: conversationId,
+              })
+            : null;
+        if (!attached) {
+          await ensureSessionForFastConversation(tx, conversationId);
+        }
 
         return {
-          ...(await loadConversationRecord(tx, updated?.id ?? record.id)),
+          ...(await loadConversationRecord(tx, conversationId)),
           created,
         };
       });

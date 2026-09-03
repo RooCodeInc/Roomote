@@ -207,9 +207,7 @@ async function fetchSandboxRpcResponseOrThrowIfNotReady(
   });
 }
 
-export async function getTrackedUserDisplayName(
-  userId: string,
-): Promise<string> {
+async function getTrackedUserDisplayName(userId: string): Promise<string> {
   const user = await db.query.users.findFirst({
     where: eq(users.id, userId),
     columns: {

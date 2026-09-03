@@ -4,6 +4,7 @@ import { configureAuthClientEnv } from '@roomote/auth/client';
 import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   parseModelProviderEnvKeys,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
 } from '@roomote/types';
 
 /**
@@ -58,6 +59,7 @@ const BLOCKED_USER_FACING_ENV_KEYS = new Set([
   'PREVIEW_AUTH_COOKIE_NAME',
   'PREVIEW_PROXY_BASE_URL',
   'PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
 ]);
 const MODEL_RUNTIME_ENV_KEYS = [
   'R_MODEL',

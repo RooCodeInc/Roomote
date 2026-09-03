@@ -22,7 +22,7 @@ import {
   listMcpTools,
   type McpToolDefinition,
 } from '../mcp-tool-client';
-import { isRouterMcpServerEnabled } from '../router/mcp-policy';
+import { isRouterMcpServerEnabled } from '../mcp-policy';
 import { resolveApiBaseUrl } from '../shared-utils';
 import {
   getFastAgentConversationStorageWorkspaceId,

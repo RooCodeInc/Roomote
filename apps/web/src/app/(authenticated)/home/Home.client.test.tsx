@@ -25,8 +25,6 @@ const {
   mockToastError,
   mockToastSuccess,
   mockProcessImageFiles,
-  mockUseCreateStandardTaskRun,
-  mockCreateStandardTaskRun,
   mockUseLaunchTaskModels,
   mockPreparePromptAttachments,
   mockStartFastSession,
@@ -36,8 +34,6 @@ const {
   mockToastError: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockProcessImageFiles: vi.fn(),
-  mockUseCreateStandardTaskRun: vi.fn(),
-  mockCreateStandardTaskRun: vi.fn(),
   mockUseLaunchTaskModels: vi.fn(),
   mockPreparePromptAttachments: vi.fn(),
   mockStartFastSession: vi.fn(),
@@ -89,7 +85,6 @@ vi.mock('@/hooks/environments', () => ({
 }));
 
 vi.mock('@/hooks/task-runs', () => ({
-  useCreateStandardTaskRun: mockUseCreateStandardTaskRun,
   useStartFastSession: () => ({
     isPending: false,
     mutateAsync: mockStartFastSession,
@@ -321,15 +316,9 @@ describe('Home', () => {
     mockPreparePromptAttachments.mockImplementation(
       ({ text }: { text: string }) => Promise.resolve({ text }),
     );
-    mockStartFastSession.mockResolvedValue({ sessionId: 'fast-session-1' });
-    mockCreateStandardTaskRun.mockResolvedValue({
-      success: true,
-      id: 4,
+    mockStartFastSession.mockResolvedValue({
+      sessionId: 'fast-session-1',
       taskId: 'task-4',
-    });
-    mockUseCreateStandardTaskRun.mockReturnValue({
-      isPending: false,
-      mutateAsync: mockCreateStandardTaskRun,
     });
     mockUseLaunchTaskModels.mockReturnValue({
       data: {
@@ -368,7 +357,6 @@ describe('Home', () => {
     expect(screen.getByTestId('selected-model-id')).toHaveTextContent(
       'openrouter/anthropic/claude-haiku-4.5',
     );
-    expect(mockUseCreateStandardTaskRun).toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Use auto workspace' }));
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
@@ -381,7 +369,7 @@ describe('Home', () => {
       });
     });
 
-    expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
+    expect(mockStartFastSession).toHaveBeenCalledTimes(1);
     expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
   });
 
@@ -607,21 +595,20 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+      expect(mockStartFastSession).toHaveBeenCalledWith(
         expect.objectContaining({
+          text: 'Test prompt',
           model: 'openrouter/z-ai/glm-5.2',
-          payload: expect.objectContaining({
+          pinnedLaunch: expect.objectContaining({
             repo: ALL_REPOSITORIES,
             environmentId: 'env-single',
-            description: 'Test prompt',
-            blank: false,
           }),
         }),
       );
     });
   });
 
-  it('always uses createStandardTaskRun for explicit environment launches', async () => {
+  it('always pins explicit environment launches through the Session launcher', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(
@@ -630,15 +617,14 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+      expect(mockStartFastSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          computeProvider: 'docker',
-          harness: 'opencode-server',
-          payload: expect.objectContaining({
+          text: 'Test prompt',
+          pinnedLaunch: expect.objectContaining({
             repo: ALL_REPOSITORIES,
             environmentId: 'env-single',
-            description: 'Test prompt',
-            blank: false,
+            harness: 'opencode-server',
+            computeProvider: 'docker',
           }),
         }),
       );
@@ -646,21 +632,10 @@ describe('Home', () => {
   });
 
   it('opens the task view for a direct environment launch', async () => {
-    mockUseCreateStandardTaskRun.mockImplementation(
-      (options: { onSuccess: (result: unknown) => void }) => ({
-        isPending: false,
-        mutateAsync: async () => {
-          const result = {
-            success: true,
-            id: 4,
-            taskId: 'task-4',
-            sessionId: 'session-1',
-          };
-          options.onSuccess(result);
-          return result;
-        },
-      }),
-    );
+    mockStartFastSession.mockResolvedValue({
+      sessionId: 'session-1',
+      taskId: 'task-4',
+    });
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(
@@ -682,9 +657,11 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+      expect(mockStartFastSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          harness: 'opencode-server',
+          pinnedLaunch: expect.objectContaining({
+            harness: 'opencode-server',
+          }),
         }),
       );
     });
@@ -713,9 +690,11 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+      expect(mockStartFastSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          harness: 'opencode-server',
+          pinnedLaunch: expect.objectContaining({
+            harness: 'opencode-server',
+          }),
         }),
       );
     });
@@ -730,9 +709,11 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+      expect(mockStartFastSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          harness: 'opencode-server',
+          pinnedLaunch: expect.objectContaining({
+            harness: 'opencode-server',
+          }),
         }),
       );
     });
@@ -770,9 +751,11 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+      expect(mockStartFastSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          harness: 'opencode-server',
+          pinnedLaunch: expect.objectContaining({
+            harness: 'opencode-server',
+          }),
         }),
       );
     });
@@ -787,9 +770,11 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+      expect(mockStartFastSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          computeProvider: 'modal',
+          pinnedLaunch: expect.objectContaining({
+            computeProvider: 'modal',
+          }),
         }),
       );
     });
@@ -805,15 +790,14 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+      expect(mockStartFastSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          computeProvider: 'docker',
-          payload: expect.objectContaining({
+          text: 'Test prompt',
+          pinnedLaunch: expect.objectContaining({
             repo: ALL_REPOSITORIES,
             branch: undefined,
             environmentId: 'env-single',
-            description: 'Test prompt',
-            blank: false,
+            computeProvider: 'docker',
           }),
         }),
       );
@@ -829,13 +813,13 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+      expect(mockStartFastSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          computeProvider: 'docker',
-          payload: expect.objectContaining({
+          pinnedLaunch: expect.objectContaining({
             repo: ALL_REPOSITORIES,
             branch: undefined,
             environmentId: 'env-single',
+            computeProvider: 'docker',
           }),
         }),
       );
@@ -879,9 +863,11 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+      expect(mockStartFastSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          computeProvider: 'modal',
+          pinnedLaunch: expect.objectContaining({
+            computeProvider: 'modal',
+          }),
         }),
       );
     });
@@ -904,9 +890,11 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+      expect(mockStartFastSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          computeProvider: 'modal',
+          pinnedLaunch: expect.objectContaining({
+            computeProvider: 'modal',
+          }),
         }),
       );
     });
@@ -932,9 +920,11 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+      expect(mockStartFastSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          computeProvider: 'e2b',
+          pinnedLaunch: expect.objectContaining({
+            computeProvider: 'e2b',
+          }),
         }),
       );
     });
@@ -956,48 +946,13 @@ describe('Home', () => {
         model: undefined,
       });
     });
-    expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
+    expect(mockStartFastSession).toHaveBeenCalledTimes(1);
   });
 
-  it('does not show the empty-environments warning while environments are loading', () => {
-    currentEnvironments = undefined;
-    currentEnvironmentsPending = true;
-
+  it('renders onboarding guidance on Home', () => {
     render(<Home initialPlaceholderIndex={0} />);
 
-    expect(
-      screen.queryByText(/You haven't created any environments yet/i),
-    ).not.toBeInTheDocument();
-  });
-
-  it('shows the empty-environments warning only after load completes with none', () => {
-    currentEnvironments = undefined;
-    currentEnvironmentsPending = true;
-
-    const { rerender } = render(<Home initialPlaceholderIndex={0} />);
-
-    expect(
-      screen.queryByText(/You haven't created any environments yet/i),
-    ).not.toBeInTheDocument();
-
-    currentEnvironments = [];
-    currentEnvironmentsPending = false;
-    rerender(<Home initialPlaceholderIndex={0} />);
-
-    expect(
-      screen.getByText(/You haven't created any environments yet/i),
-    ).toBeInTheDocument();
-  });
-
-  it('does not show the empty-environments warning to members', () => {
-    currentIsAdmin = false;
-    currentEnvironments = [];
-
-    render(<Home initialPlaceholderIndex={0} />);
-
-    expect(
-      screen.queryByText(/You haven't created any environments yet/i),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText('Onboarding')).toBeInTheDocument();
   });
 
   it('allows all-repositories launches when no environments exist', async () => {
@@ -1015,13 +970,12 @@ describe('Home', () => {
     fireEvent.click(submitButton);
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+      expect(mockStartFastSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          payload: expect.objectContaining({
+          text: 'Test prompt',
+          pinnedLaunch: expect.objectContaining({
             repo: ALL_REPOSITORIES,
             environmentId: undefined,
-            description: 'Test prompt',
-            blank: false,
           }),
         }),
       );
@@ -1037,13 +991,12 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+      expect(mockStartFastSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          payload: expect.objectContaining({
+          text: 'Test prompt',
+          pinnedLaunch: expect.objectContaining({
             repo: ALL_REPOSITORIES,
             environmentId: undefined,
-            description: 'Test prompt',
-            blank: false,
           }),
         }),
       );

@@ -446,11 +446,17 @@ export async function findActiveGitHubPrReviewTask({
   prNumber,
   headSha,
   sourceControlProvider,
+  host,
 }: {
   repoFullName: string;
   prNumber: number;
   headSha: string;
   sourceControlProvider?: SourceControlProvider;
+  /**
+   * When given, only review rows on this host (or legacy rows with no host)
+   * match, so a same-named PR on another self-hosted instance never does.
+   */
+  host?: string | null;
 }): Promise<ActiveGitHubBranchWork | null> {
   const reviewRows = await db
     .select(ACTIVE_WORK_COLUMNS)
@@ -466,6 +472,9 @@ export async function findActiveGitHubPrReviewTask({
         eq(taskPullRequests.prSha, headSha),
         ...(sourceControlProvider
           ? [eq(taskPullRequests.sourceControlProvider, sourceControlProvider)]
+          : []),
+        ...(host
+          ? [or(eq(taskPullRequests.host, host), isNull(taskPullRequests.host))]
           : []),
       ),
     )

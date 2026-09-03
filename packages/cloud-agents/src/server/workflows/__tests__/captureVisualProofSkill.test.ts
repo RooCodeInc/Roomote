@@ -95,6 +95,28 @@ describe('Capture visual proof skill', () => {
     );
   });
 
+  it('prefers real state but allows disclosed simulation without permitting fabricated evidence', () => {
+    const skillContent = read(
+      '../skills/standard/capture-visual-proof/SKILL.md',
+    );
+
+    expect(skillContent).toContain(
+      'Prefer genuine application, database, authentication, feature-flag, fixture, test-record, or form-submission state when it is practical to establish',
+    );
+    expect(skillContent).toContain(
+      'transparent simulation may modify application source, hardcode a condition, role, feature state, or network response, mock UI or network responses, or arrange DOM or rendered component state',
+    );
+    expect(skillContent).toContain(
+      "Every simulation, mock, source modification, or hardcoded state must be disclosed explicitly in the proof brief, each affected artifact's proof metadata, and the final proof report",
+    );
+    expect(skillContent).toContain(
+      'does not prove the real data flow, authorization, backend behavior, network integration, or end-to-end correctness',
+    );
+    expect(skillContent).toContain(
+      'Never fabricate or alter screenshot pixels, invent artifact provenance, conceal how a state was produced',
+    );
+  });
+
   it('blocks proof honestly when the proof-runner subagent is unavailable', () => {
     const skillContent = read(
       '../skills/standard/capture-visual-proof/SKILL.md',
@@ -142,7 +164,7 @@ describe('Capture visual proof skill', () => {
     );
 
     expect(skillContent).toContain(
-      "include each screenshot's `artifactId`, `viewUrl`, `rawUrl`, and one short sentence explaining what the still proves",
+      "include each screenshot's `artifactId`, `viewUrl`, `rawUrl`, state provenance, and short `Proves` and `Does not prove` statements",
     );
     expect(skillContent).toContain(
       "every retained keyframe's `artifactId`, `viewUrl`, and `rawUrl`",

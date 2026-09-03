@@ -631,54 +631,60 @@ describe('route policy enforcement', () => {
       });
     });
 
-    it('keys the Teams auth resume limit on the state token, not the caller', async () => {
-      const app = createApiApp();
+    it.each(['teams', 'slack'])(
+      'keys the %s auth resume limit on the state token, not the caller',
+      async (provider) => {
+        const app = createApiApp();
 
-      const requestResume = (state: string) =>
-        app.request('http://localhost/api/webhooks/teams/auth/resume', {
-          method: 'POST',
-          body: JSON.stringify({ state }),
-          headers: { 'content-type': 'application/json' },
-        });
+        const requestResume = (state: string) =>
+          app.request(`http://localhost/api/webhooks/${provider}/auth/resume`, {
+            method: 'POST',
+            body: JSON.stringify({ state }),
+            headers: { 'content-type': 'application/json' },
+          });
 
-      // Hammering one token trips its 10/min bucket...
-      for (let attempt = 1; attempt <= 10; attempt += 1) {
-        const response = await requestResume('repeated-token');
+        // Hammering one token trips its 10/min bucket...
+        for (let attempt = 1; attempt <= 10; attempt += 1) {
+          const response = await requestResume('repeated-token');
 
-        // The mocked Redis has no pending token stored, so admitted
-        // requests reach the handler and fail there with 404.
-        expect(response.status).toBe(404);
-      }
+          // The mocked Redis has no pending token stored, so admitted
+          // requests reach the handler and fail there with 404.
+          expect(response.status).toBe(404);
+        }
 
-      const throttled = await requestResume('repeated-token');
-      expect(throttled.status).toBe(429);
+        const throttled = await requestResume('repeated-token');
+        expect(throttled.status).toBe(429);
 
-      // ...while other tokens (concurrent legitimate users arriving from
-      // the same web-app egress with no client headers) stay unaffected.
-      const otherToken = await requestResume('different-token');
-      expect(otherToken.status).toBe(404);
-    });
+        // ...while other tokens (concurrent legitimate users arriving from
+        // the same web-app egress with no client headers) stay unaffected.
+        const otherToken = await requestResume('different-token');
+        expect(otherToken.status).toBe(404);
+      },
+    );
 
-    it('applies a high global client ceiling to Teams auth resume', async () => {
-      seedRateLimitBucket(
-        'webhook-teams-auth-resume',
-        'client',
-        'unknown',
-        60,
-        100_000,
-      );
+    it.each(['teams', 'slack'])(
+      'applies a high global client ceiling to %s auth resume',
+      async (provider) => {
+        seedRateLimitBucket(
+          `webhook-${provider}-auth-resume`,
+          'client',
+          'unknown',
+          60,
+          100_000,
+        );
 
-      const response = await createApiApp().request(
-        'http://localhost/api/webhooks/teams/auth/resume',
-        {
-          method: 'POST',
-          body: JSON.stringify({ state: 'fresh-token' }),
-          headers: { 'content-type': 'application/json' },
-        },
-      );
+        const response = await createApiApp().request(
+          `http://localhost/api/webhooks/${provider}/auth/resume`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ state: 'fresh-token' }),
+            headers: { 'content-type': 'application/json' },
+          },
+        );
 
-      expect(response.status).toBe(429);
-    });
+        expect(response.status).toBe(429);
+      },
+    );
 
     it('fails open when the rate limit backend errors', async () => {
       redisState.shouldThrow = true;

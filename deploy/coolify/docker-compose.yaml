@@ -65,6 +65,7 @@ x-roomote-shared-env: &roomote-shared-env
   R_APP_URL: ${SERVICE_URL_WEB}
   R_PUBLIC_URL: ${SERVICE_URL_WEB}
   R_INSTANCE_ID: ${R_INSTANCE_ID:-}
+  R_SANDBOX_OPENROUTER_API_KEY: ${R_SANDBOX_OPENROUTER_API_KEY:-}
   TRPC_URL: ${SERVICE_URL_API}
   R_DISCORD_BOT_TOKEN: ${R_DISCORD_BOT_TOKEN:-}
   S3_ENDPOINT: http://minio:9000
@@ -100,11 +101,11 @@ services:
       POSTGRES_PASSWORD: ${SERVICE_PASSWORD_POSTGRES}
       POSTGRES_DB: roomote
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 5s
       timeout: 30s
       retries: 5
-      start_period: 30s
+      start_period: 120s
 
   redis:
     image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99

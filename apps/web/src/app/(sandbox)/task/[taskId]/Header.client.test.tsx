@@ -26,15 +26,6 @@ vi.mock('./TaskSessionReadTracker', () => ({
 }));
 
 vi.mock('@/components/sandbox', () => ({
-  WorkspaceBadge: ({
-    environmentId,
-    repo,
-  }: {
-    environmentId?: string;
-    repo?: string;
-  }) => (
-    <span>{environmentId ? `Workspace ${environmentId}` : `Repo ${repo}`}</span>
-  ),
   PullRequestBadge: ({
     repo,
     prNumber,
@@ -167,16 +158,14 @@ describe('Header', () => {
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument();
   });
 
-  it('always queries the parent session and renders its links', async () => {
+  it('replaces breadcrumbs with a back-to-session control', async () => {
     renderHeader();
 
     expect(
-      await screen.findByRole('link', { name: 'Parent Session' }),
+      await screen.findByRole('link', { name: 'Back to session' }),
     ).toHaveAttribute('href', '/sessions/session-1?task=task-123');
-    expect(screen.getByRole('link', { name: /Go to session/ })).toHaveAttribute(
-      'href',
-      '/sessions/session-1?task=task-123',
-    );
+    expect(screen.queryByText('Parent Session')).not.toBeInTheDocument();
+    expect(screen.queryByText('Workspace env-1')).not.toBeInTheDocument();
     expect(parentSessionQueryMock).toHaveBeenCalled();
   });
 
@@ -194,8 +183,28 @@ describe('Header', () => {
     });
 
     expect(
-      await screen.findByRole('link', { name: /Go to session/ }),
+      await screen.findByRole('link', { name: 'Back to session' }),
     ).toHaveAttribute('href', '/sessions/00000000-0000-4000-8000-000000000001');
+  });
+
+  it('preserves pull request badges without the environment badge', async () => {
+    renderHeader({
+      taskRun: {
+        payload: { environmentId: 'env-1' },
+        pullRequests: [
+          {
+            repository: 'RooCodeInc/Roomote',
+            prNumber: 42,
+            prUrl: 'https://github.com/RooCodeInc/Roomote/pull/42',
+          },
+        ],
+      } as never,
+    });
+
+    expect(
+      await screen.findByText('RooCodeInc/Roomote#42'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Workspace env-1')).not.toBeInTheDocument();
   });
 
   it('refreshes task lists after renaming a task', async () => {

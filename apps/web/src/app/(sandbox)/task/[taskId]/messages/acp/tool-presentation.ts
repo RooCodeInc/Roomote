@@ -302,6 +302,21 @@ function resolveReceiptLanguage(
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),
       object: 'Task Message',
     };
+  if (toolName === 'send_chat_reply')
+    return {
+      verb: byPhase('Sending', 'Sent', 'Failed to Send'),
+      object: 'Chat Reply',
+    };
+  if (toolName === 'post_to_channel')
+    return {
+      verb: byPhase('Posting', 'Posted', 'Failed to Post'),
+      object: 'Channel Message',
+    };
+  if (toolName === 'send_chat_reaction_emoji')
+    return {
+      verb: byPhase('Adding', 'Added', 'Failed to Add'),
+      object: 'Chat Reaction',
+    };
   if (toolName === 'save_memory')
     return {
       verb: byPhase('Saving', 'Saved', 'Failed to Save'),

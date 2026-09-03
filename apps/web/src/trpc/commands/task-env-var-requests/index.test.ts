@@ -10,7 +10,10 @@ import { TaskPayloadKind } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
-import { markTaskEnvVarRequestFulfilledCommand } from './index';
+import {
+  fulfillTaskEnvVarRequestCommand,
+  markTaskEnvVarRequestFulfilledCommand,
+} from './index';
 
 function buildAdminAuth(userId: string): UserAuthSuccess {
   return {
@@ -20,7 +23,6 @@ function buildAdminAuth(userId: string): UserAuthSuccess {
     name: 'Admin',
     primaryEmail: 'admin@example.com',
     isAdmin: true,
-    featureFlags: {},
     anonymousAnalyticsEnabled: false,
     cloudEnabled: false,
     cookieConsentedAt: null,
@@ -41,6 +43,26 @@ function buildAdminAuth(userId: string): UserAuthSuccess {
 }
 
 const CLIENT_MESSAGE_ID = 'env-var-request-fulfilled:test-marker';
+
+describe('fulfillTaskEnvVarRequestCommand', () => {
+  it('rejects control-plane secrets requested by a sandbox task', async () => {
+    await expect(
+      fulfillTaskEnvVarRequestCommand(buildAdminAuth('admin-1'), {
+        taskId: 'task-1',
+        clientMessageId: CLIENT_MESSAGE_ID,
+        names: ['R_SANDBOX_OPENROUTER_API_KEY'],
+        values: [
+          {
+            name: 'R_SANDBOX_OPENROUTER_API_KEY',
+            value: 'must-not-be-saved',
+          },
+        ],
+      }),
+    ).rejects.toThrow(
+      '"R_SANDBOX_OPENROUTER_API_KEY" is a reserved deployment variable and cannot be requested by a task.',
+    );
+  });
+});
 
 describe('markTaskEnvVarRequestFulfilledCommand', () => {
   it('persists a durable hidden fulfillment envelope for the active run', async () => {

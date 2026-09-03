@@ -7,6 +7,7 @@ import {
   getFastAgentParentFromPayload,
   RunStatus,
   type SourceControlProvider,
+  isFastAgentSourceControlConversation,
 } from '@roomote/types';
 
 import { db, type DatabaseOrTransaction } from '../db';
@@ -245,9 +246,15 @@ function fastDestination(
     conversation.conversationId,
   ]);
 
-  if (conversation.surface === 'automation' || conversation.surface === 'web') {
-    // Identity-only surfaces have no reply channel; delivery resolves the
-    // Fast conversation itself.
+  if (
+    conversation.surface === 'automation' ||
+    conversation.surface === 'web' ||
+    conversation.surface === 'linear' ||
+    isFastAgentSourceControlConversation(conversation)
+  ) {
+    // Surfaces without a chat route (identity-only, or a Linear agent
+    // session) have no reply channel; delivery resolves the Fast
+    // conversation itself.
     return {
       destinationKey,
       routeProvider: null,

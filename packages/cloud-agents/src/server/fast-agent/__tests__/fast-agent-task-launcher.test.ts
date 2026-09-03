@@ -67,6 +67,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
         branch: 'feature/source-branch',
         launchIdempotencyKey: 'artifact-build:launch-1',
         model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'high',
         parentSessionId: '11111111-1111-4111-8111-111111111111',
         postKickoff,
       }),
@@ -111,6 +112,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
             harnessModelOverrides: {
               'opencode-server': 'anthropic/claude-sonnet-5',
             },
+            reasoningEffort: 'high',
           },
         },
         initiator: { kind: 'user', userId: 'user-1' },
@@ -416,6 +418,7 @@ describe('createFastAgentWebTaskLauncher', () => {
       environmentId: null,
       branch: 'feature/source-branch',
       launchIdempotencyKey: 'artifact-build:launch-1',
+      reasoningEffort: 'xhigh',
       parentSessionId: '11111111-1111-4111-8111-111111111111',
       postKickoff,
     });
@@ -431,6 +434,7 @@ describe('createFastAgentWebTaskLauncher', () => {
           payload: expect.objectContaining({
             branch: 'feature/source-branch',
             launchIdempotencyKey: 'artifact-build:launch-1',
+            reasoningEffort: 'xhigh',
           }),
         }),
       }),

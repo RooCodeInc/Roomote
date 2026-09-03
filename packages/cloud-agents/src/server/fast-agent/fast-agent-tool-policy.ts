@@ -1,6 +1,7 @@
 import {
   FAST_AGENT_NATIVE_TOOL_NAMES,
   getFastAgentNativeAcpKind,
+  type FastAgentSurface,
   isMemoryMcpServer,
   ROOMOTE_MCP_ID,
   type FastAgentNativeToolName,
@@ -48,9 +49,13 @@ export function isFastAgentNativeIntegration(integrationId: string): boolean {
 
 export function buildFastAgentToolFilter(
   integrationIds: string[],
+  options: { surface?: FastAgentSurface } = {},
 ): Record<string, boolean> {
   return {
     ...FAST_AGENT_NATIVE_TOOL_FILTER,
+    ...(options.surface && options.surface !== 'web'
+      ? { [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: false }
+      : {}),
     ...Object.fromEntries(integrationIds.map((id) => [`${id}_*`, true])),
   };
 }

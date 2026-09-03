@@ -1,15 +1,13 @@
 import {
   buildSlackAccountLinkConnectMessage,
-  buildRoutingConfirmBlocks,
-  buildStartedBlocks,
-  buildTaskFailedBlocks,
   postSlackAccountLinkThreadReply,
-} from '../block-kit';
+} from '../account-link';
+import { buildStartedBlocks } from '../started-message-blocks';
 import type { SlackNotifier } from '../slack-notifier';
 
-function getPrimarySectionText(
-  blocks: ReturnType<typeof buildRoutingConfirmBlocks>,
-): string {
+type Blocks = ReturnType<typeof buildStartedBlocks>;
+
+function getPrimarySectionText(blocks: Blocks): string {
   const block = blocks.find((candidate) => candidate.type === 'section');
 
   if (!block || block.type !== 'section' || !('text' in block) || !block.text) {
@@ -19,9 +17,7 @@ function getPrimarySectionText(
   return block.text.text;
 }
 
-function getActionsElements(
-  blocks: ReturnType<typeof buildRoutingConfirmBlocks>,
-): Record<string, unknown>[] {
+function getActionsElements(blocks: Blocks): Record<string, unknown>[] {
   const block = blocks.find((candidate) => candidate.type === 'actions');
 
   if (!block || block.type !== 'actions' || !('elements' in block)) {
@@ -31,9 +27,7 @@ function getActionsElements(
   return block.elements!;
 }
 
-function getFirstContextText(
-  blocks: ReturnType<typeof buildRoutingConfirmBlocks>,
-): string {
+function getFirstContextText(blocks: Blocks): string {
   const block = blocks.find((candidate) => candidate.type === 'context');
 
   if (!block || block.type !== 'context' || !('elements' in block)) {
@@ -48,63 +42,7 @@ function getFirstContextText(
   return element.text;
 }
 
-describe('Slack routing blocks', () => {
-  it('keeps the routing confirmation copy neutral about environments', () => {
-    const blocks = buildRoutingConfirmBlocks('App', undefined, {
-      threadId: 'thread-1',
-      confirmNonce: 'nonce-1',
-    });
-
-    expect(getPrimarySectionText(blocks)).toBe(
-      "I'll get started in `App`, OK?",
-    );
-  });
-
-  it('keeps the same routing confirmation copy across repeated calls', () => {
-    const blocks = buildRoutingConfirmBlocks('App', undefined, {
-      threadId: 'thread-1',
-      confirmNonce: 'nonce-1',
-    });
-
-    expect(getPrimarySectionText(blocks)).toBe(
-      "I'll get started in `App`, OK?",
-    );
-  });
-
-  it('mentions the selected model in routing confirmations when present', () => {
-    const blocks = buildRoutingConfirmBlocks('App', 'GLM 5.2', {
-      threadId: 'thread-1',
-      confirmNonce: 'nonce-1',
-    });
-
-    expect(getPrimarySectionText(blocks)).toBe(
-      "I'll get started in `App` using `GLM 5.2`, OK?",
-    );
-  });
-
-  it('embeds both thread id and nonce in routing confirmation buttons', () => {
-    const blocks = buildRoutingConfirmBlocks('App', undefined, {
-      threadId: 'thread-1',
-      confirmNonce: 'nonce-1',
-    });
-
-    const actionElements = getActionsElements(blocks);
-    expect(actionElements).toEqual([
-      expect.objectContaining({
-        value: JSON.stringify({
-          threadId: 'thread-1',
-          confirmNonce: 'nonce-1',
-        }),
-      }),
-      expect.objectContaining({
-        value: JSON.stringify({
-          threadId: 'thread-1',
-          confirmNonce: 'nonce-1',
-        }),
-      }),
-    ]);
-  });
-
+describe('Slack started and failed message blocks', () => {
   it('keeps the started message copy neutral about environments', () => {
     const blocks = buildStartedBlocks({
       workspaceDisplayName: 'App',
@@ -268,46 +206,6 @@ describe('Slack routing blocks', () => {
         }),
       ]),
     );
-  });
-
-  it('builds a retryable failed-task message', () => {
-    const blocks = buildTaskFailedBlocks({
-      runId: 123,
-    });
-    const actionElements = getActionsElements(blocks);
-
-    expect(getPrimarySectionText(blocks)).toBe(
-      "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
-    );
-    expect(actionElements).toEqual([
-      expect.objectContaining({
-        action_id: 'retry_failed_task',
-        value: JSON.stringify({
-          runId: 123,
-        }),
-      }),
-    ]);
-  });
-
-  it('builds a retryable failed-task message with runtime-failure copy', () => {
-    const blocks = buildTaskFailedBlocks({
-      runId: 123,
-      messageText:
-        "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.",
-    });
-    const actionElements = getActionsElements(blocks);
-
-    expect(getPrimarySectionText(blocks)).toBe(
-      "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.",
-    );
-    expect(actionElements).toEqual([
-      expect.objectContaining({
-        action_id: 'retry_failed_task',
-        value: JSON.stringify({
-          runId: 123,
-        }),
-      }),
-    ]);
   });
 });
 

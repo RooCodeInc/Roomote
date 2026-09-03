@@ -117,6 +117,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'list_skills.js'),
       'utf8',
     );
+    const requestUserInputSource = await readFile(
+      join(toolsDirectory, 'request_user_input.js'),
+      'utf8',
+    );
 
     expect(installedToolFiles.sort()).toEqual(
       Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)
@@ -126,6 +130,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain('export default {');
     expect(replySource).toContain('invoke("send_chat_reply"');
     expect(replySource).toContain('suggestions: z.array');
+    expect(replySource).toContain('environmentId: z.string().min(1)');
+    expect(replySource).toContain('__all_repositories__');
+    expect(replySource).toContain('__fast__');
     expect(replySource).toContain('Launchable follow-ups');
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(launchTaskSource).toContain('deployment-enabled model ID');
@@ -198,6 +205,16 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(skillListSource).toContain('Omit scope and name');
     expect(skillListSource).toContain(
       'exactly one of environmentId or repositoryId',
+    );
+    // OpenCode wraps `args` in z.object itself; a bare union there produces
+    // a schema OpenAI rejects, which takes every Fast turn down on its models.
+    expect(requestUserInputSource).toContain('args: {');
+    expect(requestUserInputSource).not.toContain('z.union');
+    expect(requestUserInputSource).toContain('questions: z.array');
+    expect(requestUserInputSource).toContain('.max(4).optional()');
+    expect(requestUserInputSource).toContain('preset: z.enum');
+    expect(requestUserInputSource).toContain(
+      'questions are ignored when a preset is set',
     );
     expect(skillSource).toContain('Exact skill ID returned by list_skills');
     expect(skillSource).not.toContain('"explore-and-act"');
@@ -720,6 +737,23 @@ describe('Fast native OpenCode tool bridge', () => {
     } finally {
       unbind();
     }
+  });
+
+  it('omits web-only structured input from non-web runtimes', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'non-web-native-tools',
+      [],
+      { surface: 'slack' },
+    );
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    ) as {
+      agent: { build: { tools: Record<string, boolean> } };
+    };
+
+    expect(
+      config.agent.build.tools[FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput],
+    ).toBe(false);
   });
 
   it('registers only native servers with OpenCode and keeps on-demand servers off the request', async () => {

@@ -13,8 +13,10 @@ import {
 
 import {
   fastAgentConversationRepository,
+  findFastAgentActiveInferenceRetryNotice,
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+  scheduleFastAgentDurableTurnRetry,
   markFastAgentDurableTurnDelivered,
   releaseFastAgentDurableTurnClaim,
   renewFastAgentDurableTurnClaim,
@@ -108,6 +110,122 @@ describe('Fast conversation repository', () => {
       ).resolves.toMatchObject({ conversation });
     },
   );
+
+  it('binds a new conversation to the Session it was created for', async () => {
+    const user = await createUser();
+    const [origin] = await db
+      .insert(sessions)
+      .values({
+        title: 'Weekly scan',
+        ownerKind: 'user',
+        ownerUserId: user.id,
+        sourceSurface: 'web',
+        sourceTrigger: 'manual',
+        visibility: 'visible',
+        activityAt: Math.floor(Date.now() / 1000),
+        cachedStatus: 'ready',
+      })
+      .returning({ id: sessions.id });
+    const conversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-origin-test',
+      conversationId: `thread-origin-${origin!.id}`,
+      replyTarget: {
+        channelId: 'channel-origin-test',
+        threadId: `thread-origin-${origin!.id}`,
+      },
+    };
+
+    const created = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+      sessionId: origin!.id,
+    });
+    const [bound] = await db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(eq(sessions.fastConversationId, created.id));
+    expect(bound?.id).toBe(origin!.id);
+
+    // A second Session cannot claim a conversation that already exists.
+    const [other] = await db
+      .insert(sessions)
+      .values({
+        title: 'Another scan',
+        ownerKind: 'user',
+        ownerUserId: user.id,
+        sourceSurface: 'web',
+        sourceTrigger: 'manual',
+        visibility: 'visible',
+        activityAt: Math.floor(Date.now() / 1000),
+        cachedStatus: 'ready',
+      })
+      .returning({ id: sessions.id });
+    const reused = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+      sessionId: other!.id,
+    });
+    expect(reused.id).toBe(created.id);
+    const [otherRow] = await db
+      .select({ fastConversationId: sessions.fastConversationId })
+      .from(sessions)
+      .where(eq(sessions.id, other!.id));
+    expect(otherRow?.fastConversationId).toBeNull();
+    await db
+      .delete(sessions)
+      .where(inArray(sessions.id, [origin!.id, other!.id]));
+  });
+
+  it('converges concurrent launches into one Session on the conversation that bound first', async () => {
+    const user = await createUser();
+    const [origin] = await db
+      .insert(sessions)
+      .values({
+        title: 'Weekly scan',
+        ownerKind: 'user',
+        ownerUserId: user.id,
+        sourceSurface: 'web',
+        sourceTrigger: 'manual',
+        visibility: 'visible',
+        activityAt: Math.floor(Date.now() / 1000),
+        cachedStatus: 'ready',
+      })
+      .returning({ id: sessions.id });
+    const identity = (index: number) => ({
+      surface: 'slack' as const,
+      workspaceId: 'team-origin-race-test',
+      conversationId: `thread-origin-race-${origin!.id}-${index}`,
+      replyTarget: {
+        channelId: 'channel-origin-race-test',
+        threadId: `thread-origin-race-${origin!.id}-${index}`,
+      },
+    });
+
+    const results = await Promise.all(
+      Array.from({ length: 6 }, (_, index) =>
+        fastAgentConversationRepository.getOrCreate({
+          userId: user.id,
+          conversation: identity(index),
+          sessionId: origin!.id,
+        }),
+      ),
+    );
+
+    expect(new Set(results.map(({ id }) => id)).size).toBe(1);
+    expect(results.filter(({ created }) => created)).toHaveLength(1);
+    const [bound] = await db
+      .select({ fastConversationId: sessions.fastConversationId })
+      .from(sessions)
+      .where(eq(sessions.id, origin!.id));
+    expect(bound?.fastConversationId).toBe(results[0]!.id);
+    const rows = await db
+      .select({ id: fastAgentConversations.id })
+      .from(fastAgentConversations)
+      .where(eq(fastAgentConversations.workspaceId, 'team-origin-race-test'));
+    expect(rows).toHaveLength(1);
+    await db.delete(sessions).where(eq(sessions.id, origin!.id));
+  });
 
   it('converges concurrent creation on one provider-neutral row', async () => {
     const user = await createUser();
@@ -1175,6 +1293,183 @@ describe('Fast conversation repository', () => {
     await expect(
       revokeFastAgentDurableTurnReplay(completed, 'late'),
     ).resolves.toBe(false);
+  });
+
+  it('parks a durable turn for a scheduled retry and lets a resumed run find its notice', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const parent = { sessionId: session.id, conversation: slackConversation };
+    const [row] = await db
+      .insert(fastAgentParentEvents)
+      .values({
+        conversationId: session.id,
+        eventKey: 'durable-retry',
+        parent,
+        event: { type: 'human_follow_up', eventId: 'durable-retry' },
+        admission: 'inline',
+        claimedUntil: new Date(Date.now() + 1_000),
+      })
+      .returning({ id: fastAgentParentEvents.id });
+    const readRow = async () => {
+      const [current] = await db
+        .select({
+          claimedUntil: fastAgentParentEvents.claimedUntil,
+          retryAt: fastAgentParentEvents.retryAt,
+          inferenceRetries: fastAgentParentEvents.inferenceRetries,
+          lastError: fastAgentParentEvents.lastError,
+        })
+        .from(fastAgentParentEvents)
+        .where(eq(fastAgentParentEvents.id, row!.id));
+      return current!;
+    };
+
+    // Parking releases the owner's claim and records when and why.
+    const retryAt = new Date(Date.now() + 45_000);
+    await expect(
+      scheduleFastAgentDurableTurnRetry(row!.id, {
+        retryAt,
+        inferenceRetries: 2,
+        reason: 'Inference retry 2/6 scheduled (timeout).',
+      }),
+    ).resolves.toBe(true);
+    const parked = await readRow();
+    expect(parked).toMatchObject({
+      claimedUntil: null,
+      inferenceRetries: 2,
+      lastError: 'Inference retry 2/6 scheduled (timeout).',
+    });
+    expect(parked.retryAt?.getTime()).toBe(retryAt.getTime());
+
+    // A settled row can no longer be parked.
+    await expect(markFastAgentDurableTurnDelivered(row!.id)).resolves.toBe(
+      true,
+    );
+    await expect(
+      scheduleFastAgentDurableTurnRetry(row!.id, {
+        retryAt,
+        inferenceRetries: 3,
+        reason: 'late',
+      }),
+    ).resolves.toBe(false);
+    expect((await readRow()).inferenceRetries).toBe(2);
+
+    // The resumed run finds the notice its predecessor left active for this
+    // turn, and only while it is still active.
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-retry:retry-notice:0',
+        turnId: 'turn-retry',
+        turnSeq: 1,
+        ts: 100,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying in 45s' }],
+        metadata: {
+          visibleInTranscript: true,
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
+          platformMessageId: 'notice-1',
+        },
+        payload: { purpose: 'progress' },
+        source: 'slack',
+      },
+    });
+    await expect(
+      findFastAgentActiveInferenceRetryNotice(session.id, 'turn-retry'),
+    ).resolves.toEqual({
+      eventId: 'turn-retry:retry-notice:0',
+      ts: 100,
+      text: 'Retrying in 45s',
+      platformMessageId: 'notice-1',
+    });
+    await expect(
+      findFastAgentActiveInferenceRetryNotice(session.id, 'turn-other'),
+    ).resolves.toBeNull();
+    await reconcileFastAgentInferenceRetryNotices(
+      session.id,
+      'turn_settled_reconcile',
+    );
+    await expect(
+      findFastAgentActiveInferenceRetryNotice(session.id, 'turn-retry'),
+    ).resolves.toBeNull();
+  });
+
+  it('does not reconcile an expired lease while a durable retry is scheduled', async () => {
+    const user = await createUser();
+    const conversation = {
+      surface: 'web' as const,
+      workspaceId: user.id,
+      conversationId: crypto.randomUUID(),
+    };
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-1:retry-notice:0',
+        turnId: 'turn-1',
+        turnSeq: 1,
+        ts: 100,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying in 45s' }],
+        metadata: {
+          visibleInTranscript: true,
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
+        },
+        payload: { purpose: 'progress' },
+        source: 'web',
+      },
+    });
+    await db
+      .update(sessions)
+      .set({ respondingUntil: new Date(Date.now() - 1_000) })
+      .where(eq(sessions.fastConversationId, session.id));
+    await db.insert(fastAgentParentEvents).values({
+      conversationId: session.id,
+      eventKey: `scheduled-retry-${session.id}`,
+      parent: { sessionId: session.id, conversation },
+      event: { type: 'human_follow_up', eventId: 'scheduled-retry' },
+      admission: 'inline',
+      retryAt: new Date(Date.now() + 60_000),
+    });
+    const readNotice = async () => {
+      const [notice] = await db
+        .select({ metadata: fastAgentMessages.metadata })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(fastAgentMessages.conversationId, session.id),
+            eq(fastAgentMessages.eventId, 'turn-1:retry-notice:0'),
+          ),
+        );
+      return notice!.metadata;
+    };
+
+    // The lease is inactive, but the scheduled retry still owns the notice.
+    await reconcileExpiredFastAgentInferenceRetryNotices();
+    expect(await readNotice()).toMatchObject({ inferenceRetryActive: true });
+
+    // Once the row is settled, the same notice is an orphan again.
+    await db
+      .update(fastAgentParentEvents)
+      .set({ deliveredAt: new Date() })
+      .where(eq(fastAgentParentEvents.conversationId, session.id));
+    await reconcileExpiredFastAgentInferenceRetryNotices();
+    expect(await readNotice()).toMatchObject({
+      inferenceRetryActive: false,
+      purpose: 'closeout',
+      interruptionReason: 'expired_lease_reconcile',
+    });
   });
 
   it('renews only a live responding lease', async () => {

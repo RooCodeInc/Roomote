@@ -505,6 +505,27 @@
       "when": 1788299034844,
       "tag": "0071_remarkable_surge",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1788330125016,
+      "tag": "0072_nice_triathlon",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1788362851471,
+      "tag": "0073_smooth_excalibur",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1788393553090,
+      "tag": "0074_modern_leo",
+      "breakpoints": true
     }
   ]
 }

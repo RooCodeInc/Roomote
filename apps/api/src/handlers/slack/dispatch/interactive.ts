@@ -8,11 +8,6 @@ import {
   handleFollowupAnswer,
   handleManagerMcpSetupConfigure,
   handleManagerMcpSetupNoThanks,
-  handleNevermind,
-  handleRoutingConfirmOk,
-  handleRoutingRejectNo,
-  handleRetryFailedTask,
-  handleTaskConfiguration,
   MANAGER_MCP_SETUP_CONFIGURE_ACTION_ID,
   MANAGER_MCP_SETUP_NO_THANKS_ACTION_ID,
   PR_REVIEW_ACTION_AUTO_ACTION_ID,
@@ -186,23 +181,11 @@ export async function handleSlackInteractivePayload(
   }
 
   switch (true) {
-    case actionId === 'submit_task':
-      await handleTaskConfiguration(interactivePayload);
-      break;
     case actionId === 'cancel_task':
       await handleTaskCancellation(interactivePayload);
       break;
-    case actionId === 'retry_failed_task':
-      await handleRetryFailedTask(interactivePayload);
-      break;
     case actionId === 'connect_account':
       await handleConnectAccount(interactivePayload);
-      break;
-    case actionId === 'routing_confirm_ok':
-      await handleRoutingConfirmOk(interactivePayload);
-      break;
-    case actionId === 'routing_confirm_no':
-      await handleRoutingRejectNo(interactivePayload);
       break;
     case actionId === MANAGER_MCP_SETUP_CONFIGURE_ACTION_ID:
       await handleManagerMcpSetupConfigure(interactivePayload);
@@ -227,9 +210,6 @@ export async function handleSlackInteractivePayload(
       break;
     case actionId === PR_REVIEW_ACTION_DISMISS_ACTION_ID:
       await handleSlackPrReviewActionDismiss(interactivePayload);
-      break;
-    case actionId === 'nevermind_task':
-      await handleNevermind(interactivePayload);
       break;
     case actionId === 'agent_selection':
     case actionId === 'workspace_selection':

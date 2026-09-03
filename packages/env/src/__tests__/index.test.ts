@@ -447,6 +447,15 @@ describe('Env', () => {
     expect(env.R_MODEL_ENV_KEYS).toBe('CUSTOM_PROVIDER_API_KEY');
   });
 
+  it('accepts the parent-only sandbox OpenRouter key', () => {
+    const env = createRoomoteEnv({
+      ...process.env,
+      R_SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+    });
+
+    expect(env.R_SANDBOX_OPENROUTER_API_KEY).toBe('sandbox-openrouter-key');
+  });
+
   it('supplies self-hosted local defaults outside production', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv: NodeJS.ProcessEnv = {

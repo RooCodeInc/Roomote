@@ -76,8 +76,12 @@ GITLAB_WEBHOOK_SECRET=<legacy-secret-token>
 ## Enable merge request comment triggers (recommended)
 
 Once the application is configured, users can link their personal GitLab
-accounts in Roomote's Personal settings and trigger tasks by mentioning
-`@roomote` in merge request comments.
+accounts in Roomote's Personal settings and talk to Roomote by mentioning
+`@roomote` in merge request or issue notes. Each merge request or issue is a
+Roomote Session: Roomote reads the discussion, answers as a note when no
+workspace is needed, and otherwise starts a task on the merge request's source
+branch (or the issue's repository) and reports back in the same discussion.
+Mention it again to redirect it, ask a follow-up, or steer a running task.
 
 ## Enable review automation
 

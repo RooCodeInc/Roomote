@@ -5,12 +5,15 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
+import { useMediaQuery } from 'usehooks-ts';
 import {
   getReasoningEffortLabel,
   isTaskExecutingTurn,
@@ -23,11 +26,8 @@ import {
   getUserDisplayName,
   humanizeFilename,
 } from '@/lib';
-import {
-  getSessionPullRequests,
-  type SessionPullRequest,
-} from '@/lib/session-pull-requests';
-import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
+import { getSessionPullRequests } from '@/lib/session-pull-requests';
+import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInferenceCostBreakdown';
 import { PullRequestBadge } from '@/components/sandbox';
 import {
   getSessionSurfaceBrandIcon,
@@ -175,15 +175,17 @@ export type SessionInfo = {
   >;
 };
 
-const SessionPullRequestsContext = createContext<SessionPullRequest[]>([]);
+const SessionPullRequestsContext = createContext<
+  ReturnType<typeof getSessionPullRequests>
+>([]);
 
-export function SessionHeaderExtras({ status }: { status: string | null }) {
+export function SessionHeaderPullRequests() {
   const pullRequests = useContext(SessionPullRequestsContext);
 
-  if (pullRequests.length === 0 && !status) return null;
+  if (pullRequests.length === 0) return null;
 
   return (
-    <div className="flex max-w-full min-w-0 flex-wrap items-center justify-end gap-x-4 gap-y-2 text-xs text-muted-foreground">
+    <div className="flex max-w-full min-w-0 flex-wrap items-center justify-start gap-x-4 gap-y-2 text-xs text-muted-foreground">
       {pullRequests.map((pullRequest) => (
         <PullRequestBadge
           key={`${pullRequest.repository}:${pullRequest.number}`}
@@ -193,7 +195,6 @@ export function SessionHeaderExtras({ status }: { status: string | null }) {
           iconClassName="text-muted-foreground"
         />
       ))}
-      {status ? <SessionStatusBadge status={status} /> : null}
     </div>
   );
 }
@@ -584,40 +585,10 @@ function SessionInfoPanel({
                 collisionPadding={16}
                 className="max-h-80 w-[calc(100vw-2rem)] max-w-80 overflow-y-auto"
               >
-                <p className="mb-3 text-sm font-medium">
-                  Inference cost breakdown
-                </p>
-                <dl className="space-y-2 text-xs">
-                  <div className="flex items-start justify-between gap-4">
-                    <dt className="text-muted-foreground">Direct session</dt>
-                    <dd className="shrink-0 font-medium tabular-nums">
-                      $
-                      {formatInferenceCost(
-                        session.inferenceCostBreakdown
-                          .directInferenceCostMicroUsd,
-                      )}
-                    </dd>
-                  </div>
-                  {session.inferenceCostBreakdown.tasks.map((task) => (
-                    <div
-                      key={task.taskId}
-                      className="flex items-start justify-between gap-4"
-                    >
-                      <dt className="min-w-0 break-words text-muted-foreground">
-                        {task.title}
-                      </dt>
-                      <dd className="shrink-0 font-medium tabular-nums">
-                        ${formatInferenceCost(task.inferenceCostMicroUsd)}
-                      </dd>
-                    </div>
-                  ))}
-                  <div className="flex items-start justify-between gap-4 border-t pt-2">
-                    <dt className="font-medium">Total</dt>
-                    <dd className="shrink-0 font-medium tabular-nums">
-                      ${inferenceCostLabel}
-                    </dd>
-                  </div>
-                </dl>
+                <SessionInferenceCostBreakdown
+                  breakdown={session.inferenceCostBreakdown}
+                  totalInferenceCostMicroUsd={session.inferenceCostMicroUsd}
+                />
               </PopoverContent>
             </Popover>
           </SandboxInfoRow>
@@ -643,11 +614,6 @@ function SessionInfoPanel({
               <span className="truncate">{surfaceLabel}</span>
             </span>
           </SandboxInfoRow>
-          {session.status ? (
-            <SandboxInfoRow label="Status">
-              <SessionStatusBadge status={session.status} />
-            </SandboxInfoRow>
-          ) : null}
         </SandboxInfoTable>
       </SandboxInfoPanel>
     </FramedSurface>
@@ -656,7 +622,7 @@ function SessionInfoPanel({
 
 type BaseWorkspacePanel =
   | { kind: 'info' }
-  | { kind: 'tasks' }
+  | { kind: 'tasks'; autoOpened?: boolean }
   | { kind: 'artifacts' }
   | { kind: 'nested'; taskId: string };
 
@@ -726,6 +692,32 @@ export function SessionWorkspace({
   const selectedTaskId = searchParams.get('task');
   const selectedTask = taskCards.find((task) => task.taskId === selectedTaskId);
   const panelOpen = panel !== null || Boolean(selectedTask);
+  const isMdOrLarger = useMediaQuery('(min-width: 768px)', {
+    initializeWithValue: false,
+  });
+  const previousTaskStateRef = useRef<{
+    taskCount: number;
+    runningTaskCount: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const previousTaskState = previousTaskStateRef.current;
+    if (
+      isMdOrLarger &&
+      previousTaskState?.taskCount === 1 &&
+      previousTaskState.runningTaskCount > 0 &&
+      taskCards.length >= 2 &&
+      panel === null &&
+      !selectedTask
+    ) {
+      setPanel({ kind: 'tasks', autoOpened: true });
+    }
+
+    previousTaskStateRef.current = {
+      taskCount: taskCards.length,
+      runningTaskCount,
+    };
+  }, [isMdOrLarger, panel, runningTaskCount, selectedTask, taskCards.length]);
 
   const selectTask = useCallback(
     (taskId: string | null) => {
@@ -782,6 +774,8 @@ export function SessionWorkspace({
     ) : selectedTask ? (
       <NestedTaskSidePanel
         taskId={selectedTask.taskId}
+        tasks={taskCards}
+        onSelectTask={(taskId) => selectTask(taskId)}
         onClose={closePanel}
         onOpenArtifact={(path, version) =>
           setPanel({
@@ -796,6 +790,8 @@ export function SessionWorkspace({
     ) : panel?.kind === 'nested' ? (
       <NestedTaskSidePanel
         taskId={panel.taskId}
+        tasks={taskCards}
+        onSelectTask={(taskId) => setPanel({ kind: 'nested', taskId })}
         onClose={closePanel}
         onOpenArtifact={(path, version) =>
           setPanel({
@@ -871,6 +867,12 @@ export function SessionWorkspace({
       >
         <ResponsiveWorkspacePanels
           isPanelOpen={panelOpen}
+          mainSize={
+            panel?.kind === 'tasks' && panel.autoOpened ? 66.6667 : undefined
+          }
+          panelSize={
+            panel?.kind === 'tasks' && panel.autoOpened ? 33.3333 : undefined
+          }
           main={
             <SessionPullRequestsContext.Provider value={sessionPullRequests}>
               <SessionRunningTaskCountContext.Provider value={runningTaskCount}>

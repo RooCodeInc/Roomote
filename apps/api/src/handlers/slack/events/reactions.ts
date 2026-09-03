@@ -1,6 +1,6 @@
 import { acquireRedisLock } from '@roomote/redis';
 import {
-  AGENT_DISPLAY_NAME,
+  ALL_REPOSITORIES,
   formatErrorForLog,
   normalizeSetupNewState,
 } from '@roomote/types';
@@ -16,12 +16,12 @@ import {
   type SuggestionLaunchWorkspace,
 } from '../helpers/suggestion-workspace.js';
 import {
+  createFastAgentSlackLiveTaskLauncher,
   resolveSlackReactionNames,
-  startAutoRoutedSlackTask,
-  startSlackAppMentionTask,
   type SlackNotifier,
   type SlackReactionAddedEvent,
 } from '@roomote/slack';
+import { launchPinnedFastSessionTask } from '@roomote/cloud-agents/server';
 import {
   and,
   claimWorkItem,
@@ -35,7 +35,11 @@ import {
 
 import { apiLogger } from '../../../logging.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../../call-roomote-via-emoji.js';
-import { launchClaimedSuggestedTask } from '../../tasks/suggestion-launch.js';
+import {
+  launchClaimedSuggestedTask,
+  resolveSuggestionOriginSessionId,
+} from '../../tasks/suggestion-launch.js';
+import { resolveSuggestedTaskLaunchTarget } from '../../tasks/suggestion-launch-target.js';
 import {
   SLACK_SETUP_SUGGESTION_LOCK_PREFIX,
   TASK_SUGGESTION_TYPES,
@@ -161,6 +165,8 @@ async function finalizeSuggestionLaunch(params: {
 
 const REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE =
   'I could not start this because your linked Roomote account was removed. Ask an admin to restore your access, then reconnect Slack.';
+const UNLINKED_SLACK_ACCOUNT_FAST_LAUNCH_FAILURE =
+  'This suggestion starts in Fast mode, which needs a linked Roomote account. Link your account, then react again.';
 
 async function launchTaskSuggestionTaskFromReaction({
   teamId,
@@ -168,14 +174,12 @@ async function launchTaskSuggestionTaskFromReaction({
   slack,
   reactionEvent,
   ackEmoji,
-  completionEmoji,
 }: {
   teamId: string;
   slackInstallation: SlackWebhookContext['slackInstallation'];
   slack: SlackNotifier;
   reactionEvent: SlackReactionAddedEvent;
   ackEmoji: string;
-  completionEmoji: string;
 }): Promise<TaskSuggestionReactionLaunchResult> {
   if (reactionEvent.item.type !== 'message') {
     return false;
@@ -270,6 +274,7 @@ async function launchTaskSuggestionTaskFromReaction({
       readinessMessage: workItems.readinessMessage,
       sortOrder: workItems.sortOrder,
       status: workItems.status,
+      sourceTaskId: workItems.sourceTaskId,
     })
     .from(workItems)
     .where(eq(workItems.id, workItemId))
@@ -298,6 +303,18 @@ async function launchTaskSuggestionTaskFromReaction({
   const usesRouterLaunch =
     suggestionType === 'suggested_tasks' &&
     suggestionCard.metadata?.launchRouting === 'router';
+  const explicitLaunchTarget =
+    suggestionType === 'suggested_tasks' &&
+    typeof suggestionCard.metadata?.launchTarget === 'string'
+      ? suggestionCard.metadata.launchTarget
+      : null;
+  const launchTarget = resolveSuggestedTaskLaunchTarget({
+    launchTarget: explicitLaunchTarget,
+    usesRouterLaunch,
+    targetEnvironmentId: workItem.targetEnvironmentId,
+    targetRepositoryFullName: workItem.targetRepositoryFullName,
+  });
+  const usesFastLaunchTarget = launchTarget.kind === 'fast';
 
   let suggestionWorkspace: SuggestionLaunchWorkspace | null = null;
   let launchFailureReason: string | null = null;
@@ -368,10 +385,20 @@ async function launchTaskSuggestionTaskFromReaction({
         workspaceDisplayName: matchingEnvironment.name,
       };
     }
-  } else if (suggestionType === 'suggested_tasks' && !usesRouterLaunch) {
+  } else if (
+    suggestionType === 'suggested_tasks' &&
+    !usesRouterLaunch &&
+    !usesFastLaunchTarget
+  ) {
     const resolved = await resolveSuggestionLaunchWorkspaceFromMetadata({
       targetRepositoryFullName: workItem.targetRepositoryFullName,
-      targetEnvironmentId: workItem.targetEnvironmentId,
+      // An explicit environment target survives the work item's column being
+      // cleared (environment deleted), so the resolver reports it unavailable
+      // instead of "no target repository".
+      targetEnvironmentId:
+        launchTarget.kind === 'environment'
+          ? launchTarget.environmentId
+          : workItem.targetEnvironmentId,
       readinessMessage: workItem.readinessMessage,
     });
     suggestionWorkspace = resolved.workspace;
@@ -401,6 +428,26 @@ async function launchTaskSuggestionTaskFromReaction({
     return true;
   }
 
+  // A card that Fast decides for has no direct-launch fallback and a Fast turn
+  // needs a linked user, so an unlinked reactor gets the link prompt before
+  // any claim (the other chat surfaces gate on account linking the same way).
+  if (
+    (usesFastLaunchTarget || usesRouterLaunch) &&
+    !reactingUserMapping.activeMapping
+  ) {
+    await postSuggestionLaunchFailureMessage({
+      slack,
+      channelId,
+      title: `${buildSuggestionBadgePrefix({
+        category: workItem.category,
+        priority: workItem.priority,
+      })}${workItem.title}`,
+      brief: suggestionBrief,
+      reason: UNLINKED_SLACK_ACCOUNT_FAST_LAUNCH_FAILURE,
+    });
+    return true;
+  }
+
   const claimedWorkItem = await claimWorkItem(db, { id: workItemId });
 
   if (!claimedWorkItem) {
@@ -412,7 +459,7 @@ async function launchTaskSuggestionTaskFromReaction({
   // reclaimed cannot stomp the new claimant's state.
   const claimedAt = claimedWorkItem.launchClaimedAt;
 
-  if (!usesRouterLaunch && !suggestionWorkspace) {
+  if (!usesRouterLaunch && !usesFastLaunchTarget && !suggestionWorkspace) {
     await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
 
     apiLogger.warn(
@@ -458,7 +505,9 @@ async function launchTaskSuggestionTaskFromReaction({
     category: workItem.category,
     priority: workItem.priority,
     targetRepositoryFullName: !usesRouterLaunch
-      ? workItem.targetRepositoryFullName
+      ? launchTarget.kind === 'legacy_pinned'
+        ? workItem.targetRepositoryFullName
+        : null
       : null,
   });
 
@@ -495,14 +544,16 @@ async function launchTaskSuggestionTaskFromReaction({
     };
 
     const activeUserMapping = reactingUserMapping.activeMapping;
+    // Cards without a pinned workspace let Fast decide; pinned cards delegate
+    // through the owning Session without a model turn.
+    const usesFastTurn = usesFastLaunchTarget || usesRouterLaunch;
     const launchResult = await launchClaimedSuggestedTask({
       suggestion: { id: workItemId, launchClaimedAt: claimedAt },
       policy: {
-        // Pinned scan suggestions still enter Fast; the pin only selects the
-        // verified workspace if this launch falls back to coding.
-        fastEligible: suggestionType === 'suggested_tasks',
-        userDefaultEnabled: Boolean(activeUserMapping),
+        fastEligible: usesFastTurn,
+        userDefaultEnabled: usesFastTurn,
         fastAvailable: Boolean(activeUserMapping),
+        requiredMode: usesFastTurn ? ('fast' as const) : ('coding' as const),
       },
       launch: async (launchMode) => {
         if (launchMode === 'fast') {
@@ -538,68 +589,70 @@ async function launchTaskSuggestionTaskFromReaction({
             : fastStart;
         }
 
-        if (usesRouterLaunch) {
-          const routedLaunch = await startAutoRoutedSlackTask({
-            slackInstallation,
-            slack,
-            initiator,
-            trigger: 'manual',
-            launchUserId: activeUserMapping?.userId,
-            slackUserId: reactionEvent.user,
-            persistedSlackUserId: reactionEvent.user,
-            initiatingSlackUserId: reactionEvent.user,
-            channel: channelId,
-            prompt: `${workItem.title}\n\n${suggestionBrief}`,
-            threadTs: launchThreadTs,
-            originMessageTs: launchThreadTs,
-            agentPromptTextOverride: suggestionTaskPrompt,
-            skipMcpSetupSuggestion: true,
-          });
-          return routedLaunch.status === 'started'
-            ? {
-                accepted: true,
-                runId: routedLaunch.runId,
-                taskId: routedLaunch.taskId,
-              }
-            : {
-                accepted: false,
-                reason:
-                  routedLaunch.message ||
-                  "I couldn't determine which workspace should run this suggestion.",
-              };
-        }
-
         if (!suggestionWorkspace) {
           throw new Error('Setup suggestion workspace was not resolved.');
         }
-        const directLaunch = await startSlackAppMentionTask({
+        // The card already names the workspace, so the owning Session
+        // delegates the task straight away, without a Fast turn. The seeded
+        // thread is the Session's home in Slack.
+        const workspace = suggestionWorkspace;
+        const launchOwnerUserId = activeUserMapping?.userId ?? null;
+        if (!launchOwnerUserId) {
+          return {
+            accepted: false,
+            reason: UNLINKED_SLACK_ACCOUNT_FAST_LAUNCH_FAILURE,
+          };
+        }
+        const originSessionId = await resolveSuggestionOriginSessionId(
+          workItem.sourceTaskId,
+        );
+        const pinned = await launchPinnedFastSessionTask({
+          userId: launchOwnerUserId,
+          ...(originSessionId ? { originSessionId } : {}),
+          conversation: {
+            surface: 'slack',
+            workspaceId: teamId,
+            conversationId: launchThreadTs,
+            replyTarget: { channelId, threadId: launchThreadTs },
+          },
+          launchId: `slack-suggestion:${workItemId}:${launchThreadTs}`,
+          prompt: suggestionSlackText,
+          surface: 'slack',
           initiator,
-          trigger: 'manual',
-          channel: channelId,
-          teamId,
-          slackUserId: reactionEvent.user,
-          text: suggestionSlackText,
-          agentPromptText: suggestionTaskPrompt,
-          ts: launchThreadTs,
-          threadTs: launchThreadTs,
-          repo: suggestionWorkspace.repoForPayload,
-          environmentId: suggestionWorkspace.environmentId,
-          readinessMessage: suggestionWorkspace.readinessMessage ?? undefined,
-          webPath: suggestionType === 'setup_onboarding' ? '/setup' : undefined,
-          ackEmoji,
-          completionEmoji,
-          queuedStartedMessage: {
-            ts: launchThreadTs,
-            agentName: AGENT_DISPLAY_NAME,
-            initiatingSlackUserId: reactionEvent.user,
-            workspaceDisplayName: suggestionWorkspace.workspaceDisplayName,
-            workspaceOnly: false,
+          kickoffMessage: `Started a task in ${workspace.workspaceDisplayName}.`,
+          launch: async ({ parent, launchIdempotencyKey, postKickoff }) => {
+            const launchTask = createFastAgentSlackLiveTaskLauncher({
+              slack,
+              userId: launchOwnerUserId,
+              teamId,
+              ...(slackInstallation.teamDomain
+                ? { teamDomain: slackInstallation.teamDomain }
+                : {}),
+              channelId,
+              threadTs: launchThreadTs,
+              messageId: launchThreadTs,
+              initiator,
+              repoForPayload:
+                launchTarget.kind === 'all_repositories'
+                  ? ALL_REPOSITORIES
+                  : workspace.repoForPayload,
+            });
+            return launchTask({
+              prompt: suggestionTaskPrompt,
+              environmentId: workspace.environmentId ?? null,
+              model: null,
+              parentSessionId: parent.sessionId,
+              launchIdempotencyKey,
+              postKickoff: async () => {
+                await postKickoff();
+              },
+            });
           },
         });
         return {
           accepted: true,
-          runId: directLaunch.id,
-          taskId: directLaunch.taskId,
+          runId: pinned.runId,
+          taskId: pinned.taskId,
         };
       },
       finalize: (taskId) =>
@@ -809,7 +862,6 @@ export async function handleReactionAddedEvent(params: {
             slack: context.slack,
             reactionEvent: event,
             ackEmoji: reactionNames.ackEmoji,
-            completionEmoji: reactionNames.completionEmoji,
           }),
       },
     );

@@ -26,6 +26,8 @@ import {
   FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS,
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
+  type FastAgentSurface,
+  FAST_EXECUTION,
 } from '@roomote/types';
 import { z } from 'zod';
 
@@ -262,14 +264,15 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Post a user-visible reply. Fast automation reports may attach launchable suggested tasks on Slack or Discord.",
+  description: "Deliver a user-visible reply. Write the reply as ordinary assistant text first, then call this with its purpose; the text you wrote since your last reply is delivered. Fast automation reports may attach launchable suggested tasks on Slack or Discord.",
   args: {
-    message: z.string().min(1).describe("Markdown reply text"),
+    message: z.string().min(1).optional().describe("Markdown reply text. Omit to deliver the assistant text written since the last reply; pass it only when the reply was not written as text."),
     purpose: z.enum(["ack", "progress", "closeout", "clarification"]),
     imageArtifactIds: z.array(z.string()).optional(),
     suggestions: z.array(z.object({
       title: z.string().min(1).max(140),
       brief: z.string().min(1).max(2000),
+      environmentId: z.string().min(1).optional().describe(${JSON.stringify(`Exact environment ID from the system prompt, "${ALL_REPOSITORIES}" for all repositories, or "${FAST_EXECUTION}" for Fast mode. Omit to use normal workspace routing.`)}),
     })).max(10).optional().describe("Launchable follow-ups for a Slack or Discord automation report only"),
   },
   execute: (args, context) => invoke("send_chat_reply", args, context),
@@ -476,6 +479,31 @@ export default {
     offset: z.number().int().nonnegative().optional(),
   },
   execute: (args, context) => invoke("spill_grep", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Ask structured questions, or use a trusted setup preset whose options Roomote supplies. Pass a preset alone when setup instructions name one; questions are ignored when a preset is set. Multiple-choice questions require explicit submission. The turn resumes from the persisted answer.",
+  args: {
+    questions: z.array(z.object({
+      id: z.string().min(1).max(80),
+      header: z.string().min(1).max(60),
+      question: z.string().min(1).max(500),
+      isOther: z.boolean().optional().describe("Allow a free-text Other answer"),
+      isSecret: z.boolean().optional().describe("Mask the answer in user-visible history"),
+      options: z.array(z.object({
+        label: z.string().min(1).max(140),
+        description: z.string().min(1).max(500),
+      })).min(1).max(12).optional().describe("Present options as choices; omit for free-text"),
+      multiple: z.boolean().optional().describe("Allow more than one option; defaults to false"),
+    })).min(1).max(4).optional().describe("Structured questions to ask; omit when using a preset"),
+    preset: z.enum(["setup_starter_tasks"]).optional().describe("Use the trusted starter-task preset instead of questions"),
+  },
+  execute: (args, context) => invoke("request_user_input", args, context),
 }
 `,
   };
@@ -882,7 +910,6 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
         });
         return;
       }
-
       const call = {
         sessionId: parsed.sessionID,
         name: parsed.tool,
@@ -1183,6 +1210,7 @@ function pruneSessionRuntimes(): void {
 export async function getFastAgentNativeToolRuntime(
   sessionId: string,
   integrations: FastAgentIntegration[],
+  options: { surface?: FastAgentSurface } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
   const bridge = await bridgePromise;
@@ -1236,6 +1264,7 @@ export async function getFastAgentNativeToolRuntime(
         build: {
           tools: buildFastAgentToolFilter(
             nativeIntegrations.map((integration) => integration.id),
+            { surface: options.surface ?? 'web' },
           ),
         },
       },

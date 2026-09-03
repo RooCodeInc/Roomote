@@ -1228,6 +1228,9 @@ importers:
       '@types/node':
         specifier: ^24.10.13
         version: 24.13.1
+      emoji-datasource:
+        specifier: 16.0.0
+        version: 16.0.0
       vitest:
         specifier: ^4.1.1
         version: 4.1.1(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.5(@types/node@24.13.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.20.4)(yaml@2.9.0))
@@ -1385,13 +1388,6 @@ importers:
         version: 4.1.1(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.5(@types/node@24.12.4)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.20.4)(yaml@2.9.0))
 
   packages/feature-flags:
-    dependencies:
-      '@roomote/db':
-        specifier: workspace:^
-        version: link:../db
-      ioredis:
-        specifier: 5.10.1
-        version: 5.10.1
     devDependencies:
       '@roomote/config-typescript':
         specifier: workspace:^
@@ -1575,9 +1571,6 @@ importers:
       '@roomote/env':
         specifier: workspace:*
         version: link:../env
-      '@roomote/feature-flags':
-        specifier: workspace:^
-        version: link:../feature-flags
       '@roomote/gitea':
         specifier: workspace:^
         version: link:../gitea
@@ -7653,6 +7646,9 @@ packages:
 
   electron-to-chromium@1.5.363:
     resolution: {integrity: sha512-VjUKPyWzGnT1fujlkEGC/BvN70Hh70KXtAqcmniXviYlJC/ivcT+BWGPyxWVbJZLfvtKR6dqg1L7T7pgAMBtWA==}
+
+  emoji-datasource@16.0.0:
+    resolution: {integrity: sha512-/qHKqK5Nr3+8zhgO6kHmF43Fm5C8HNn0AaFRIpgw8HF3+uF0Vfc8jgLI1ZQS5ba1vBzksS8NBCjHejwLb2D/Sg==}
 
   emoji-regex@10.4.0:
     resolution: {integrity: sha512-EC+0oUMY1Rqm4O6LLrgjtYDvcVYTy7chDnM4Q7030tP4Kwj3u/pR6gP9ygnp2CJMK5Gq+9Q2oqmrFJAz01DXjw==}
@@ -18286,6 +18282,8 @@ snapshots:
       jake: 10.9.2
 
   electron-to-chromium@1.5.363: {}
+
+  emoji-datasource@16.0.0: {}
 
   emoji-regex@10.4.0: {}
 

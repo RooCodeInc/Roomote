@@ -21,7 +21,12 @@ export type FastSessionFooterProvider =
   | 'slack'
   | 'discord'
   | 'teams'
-  | 'telegram';
+  | 'telegram'
+  | 'github'
+  | 'gitlab'
+  | 'bitbucket'
+  | 'ado'
+  | 'gitea';
 
 export type FastSessionPullRequestReference = {
   number: number | null;

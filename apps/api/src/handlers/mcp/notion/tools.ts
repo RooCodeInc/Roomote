@@ -19,6 +19,11 @@ const WRITE_ANNOTATIONS = {
   readOnlyHint: false,
 } as const;
 
+const DESTRUCTIVE_WRITE_ANNOTATIONS = {
+  ...WRITE_ANNOTATIONS,
+  destructiveHint: true,
+} as const;
+
 const nonEmptyStringSchema = z.string().trim().min(1);
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 const paginationSchema = {
@@ -42,6 +47,83 @@ const pageParentSchema = z.union([
     type: z.literal('data_source_id'),
     data_source_id: nonEmptyStringSchema,
   }),
+]);
+const databaseParentSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('page_id'),
+    page_id: nonEmptyStringSchema,
+  }),
+  z.object({
+    type: z.literal('workspace'),
+    workspace: z.literal(true),
+  }),
+]);
+const dataSourceParentSchema = z.object({
+  type: z.literal('database_id'),
+  database_id: nonEmptyStringSchema,
+});
+const viewPositionSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('start') }),
+  z.object({ type: z.literal('end') }),
+  z.object({
+    type: z.literal('after_view'),
+    view_id: nonEmptyStringSchema,
+  }),
+]);
+const viewPlacementSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('new_row'),
+    row_index: z.number().int().min(0).optional(),
+  }),
+  z.object({
+    type: z.literal('existing_row'),
+    row_index: z.number().int().min(0),
+  }),
+]);
+const viewParentSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('database_id'),
+      database_id: nonEmptyStringSchema,
+      position: viewPositionSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('view_id'),
+      view_id: nonEmptyStringSchema,
+      placement: viewPlacementSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('create_database'),
+      create_database: z.object({
+        parent: z.object({
+          type: z.literal('page_id'),
+          page_id: nonEmptyStringSchema,
+        }),
+        position: z
+          .object({
+            type: z.literal('after_block'),
+            block_id: nonEmptyStringSchema,
+          })
+          .optional(),
+      }),
+    })
+    .strict(),
+]);
+const viewTypeSchema = z.enum([
+  'table',
+  'board',
+  'list',
+  'calendar',
+  'timeline',
+  'gallery',
+  'form',
+  'chart',
+  'map',
+  'dashboard',
 ]);
 const markdownOperationSchema = z.discriminatedUnion('type', [
   z.object({
@@ -292,6 +374,360 @@ function registerCreatePagesTool(
   );
 }
 
+function registerCreateDatabaseTool(
+  server: McpServer,
+  config: McpConnectionNotionConfig,
+) {
+  const toolName = 'notion-create-database';
+  server.registerTool(
+    toolName,
+    {
+      title: 'Create Notion Database',
+      description:
+        'Create a database, its initial data source, and its first table view beneath a shared page or as a private workspace page. Requires Insert content capability and access to the parent page.',
+      inputSchema: {
+        parent: databaseParentSchema.describe(
+          'A shared page parent, or the workspace for a private database.',
+        ),
+        title: z
+          .array(jsonObjectSchema)
+          .max(100)
+          .optional()
+          .describe('Notion rich-text objects for the database title.'),
+        description: z
+          .array(jsonObjectSchema)
+          .max(100)
+          .optional()
+          .describe('Notion rich-text objects for the database description.'),
+        is_inline: z
+          .boolean()
+          .optional()
+          .describe('Display the database inline in its parent page.'),
+        initial_data_source: z
+          .object({ properties: jsonObjectSchema.optional() })
+          .optional()
+          .describe(
+            'Optional initial data source schema, with property names mapped to Notion property configuration objects.',
+          ),
+        icon: jsonObjectSchema.optional(),
+        cover: jsonObjectSchema.optional(),
+      },
+      outputSchema: z.object({}).passthrough(),
+      annotations: WRITE_ANNOTATIONS,
+    },
+    async ({
+      parent,
+      title,
+      description,
+      is_inline: isInline,
+      initial_data_source: initialDataSource,
+      icon,
+      cover,
+    }) => {
+      const database = await notionApiRequestJson<Record<string, unknown>>({
+        config,
+        path: 'databases',
+        method: 'POST',
+        body: {
+          parent,
+          ...(title ? { title } : {}),
+          ...(description ? { description } : {}),
+          ...(isInline !== undefined ? { is_inline: isInline } : {}),
+          ...(initialDataSource
+            ? { initial_data_source: initialDataSource }
+            : {}),
+          ...(icon ? { icon } : {}),
+          ...(cover ? { cover } : {}),
+        },
+      });
+      return toMcpToolResult({ database });
+    },
+  );
+}
+
+function registerUpdateDatabaseTool(
+  server: McpServer,
+  config: McpConnectionNotionConfig,
+) {
+  const toolName = 'notion-update-database';
+  server.registerTool(
+    toolName,
+    {
+      title: 'Update Notion Database',
+      description:
+        'Update a database title, description, icon, cover, inline display, parent, lock state, or trash state. Requires Update content capability and access to the database and any new parent.',
+      inputSchema: {
+        database_id: nonEmptyStringSchema,
+        parent: databaseParentSchema.optional(),
+        title: z.array(jsonObjectSchema).max(100).optional(),
+        description: z.array(jsonObjectSchema).max(100).optional(),
+        is_inline: z.boolean().optional(),
+        icon: jsonObjectSchema.optional(),
+        cover: jsonObjectSchema.optional(),
+        in_trash: z.boolean().optional(),
+        is_locked: z.boolean().optional(),
+      },
+      outputSchema: z.object({}).passthrough(),
+      annotations: WRITE_ANNOTATIONS,
+    },
+    async ({
+      database_id: databaseId,
+      parent,
+      title,
+      description,
+      is_inline: isInline,
+      icon,
+      cover,
+      in_trash: inTrash,
+      is_locked: isLocked,
+    }) => {
+      if (
+        parent === undefined &&
+        title === undefined &&
+        description === undefined &&
+        isInline === undefined &&
+        icon === undefined &&
+        cover === undefined &&
+        inTrash === undefined &&
+        isLocked === undefined
+      ) {
+        throw new Error('Specify at least one database update');
+      }
+
+      const database = await notionApiRequestJson<Record<string, unknown>>({
+        config,
+        path: `databases/${encodeURIComponent(databaseId)}`,
+        method: 'PATCH',
+        body: {
+          ...(parent ? { parent } : {}),
+          ...(title ? { title } : {}),
+          ...(description ? { description } : {}),
+          ...(isInline !== undefined ? { is_inline: isInline } : {}),
+          ...(icon ? { icon } : {}),
+          ...(cover ? { cover } : {}),
+          ...(inTrash !== undefined ? { in_trash: inTrash } : {}),
+          ...(isLocked !== undefined ? { is_locked: isLocked } : {}),
+        },
+      });
+      return toMcpToolResult({ database });
+    },
+  );
+}
+
+function registerUpdateDataSourceTool(
+  server: McpServer,
+  config: McpConnectionNotionConfig,
+) {
+  const toolName = 'notion-update-data-source';
+  server.registerTool(
+    toolName,
+    {
+      title: 'Update Notion Data Source',
+      description:
+        'Update a data source title, icon, parent, trash state, or property schema. In properties, use a new property name with a configuration object to add it, an existing property name or ID with { name } to rename it, or null to delete it.',
+      inputSchema: {
+        data_source_id: nonEmptyStringSchema,
+        title: z.array(jsonObjectSchema).max(100).optional(),
+        icon: jsonObjectSchema.nullable().optional(),
+        properties: z
+          .record(z.string(), jsonObjectSchema.nullable())
+          .refine((value) => Object.keys(value).length > 0, {
+            message: 'Specify at least one property update',
+          })
+          .optional(),
+        parent: dataSourceParentSchema.optional(),
+        in_trash: z.boolean().optional(),
+      },
+      outputSchema: z.object({}).passthrough(),
+      annotations: WRITE_ANNOTATIONS,
+    },
+    async ({
+      data_source_id: dataSourceId,
+      title,
+      icon,
+      properties,
+      parent,
+      in_trash: inTrash,
+    }) => {
+      if (
+        title === undefined &&
+        icon === undefined &&
+        properties === undefined &&
+        parent === undefined &&
+        inTrash === undefined
+      ) {
+        throw new Error('Specify at least one data source update');
+      }
+
+      const dataSource = await notionApiRequestJson<Record<string, unknown>>({
+        config,
+        path: `data_sources/${encodeURIComponent(dataSourceId)}`,
+        method: 'PATCH',
+        body: {
+          ...(title ? { title } : {}),
+          ...(icon !== undefined ? { icon } : {}),
+          ...(properties ? { properties } : {}),
+          ...(parent ? { parent } : {}),
+          ...(inTrash !== undefined ? { in_trash: inTrash } : {}),
+        },
+      });
+      return toMcpToolResult({ data_source: dataSource });
+    },
+  );
+}
+
+function registerCreateViewTool(
+  server: McpServer,
+  config: McpConnectionNotionConfig,
+) {
+  const toolName = 'notion-create-view';
+  server.registerTool(
+    toolName,
+    {
+      title: 'Create Notion View',
+      description:
+        'Create a view in a database, a widget in a dashboard view, or a view in a new linked database block. Requires Insert content and Update content capabilities.',
+      inputSchema: {
+        parent: viewParentSchema,
+        data_source_id: nonEmptyStringSchema,
+        name: nonEmptyStringSchema,
+        type: viewTypeSchema,
+        filter: jsonObjectSchema.optional(),
+        sorts: z.array(jsonObjectSchema).max(100).optional(),
+        quick_filters: z.record(z.string(), jsonObjectSchema).optional(),
+        configuration: jsonObjectSchema.optional(),
+      },
+      outputSchema: z.object({}).passthrough(),
+      annotations: WRITE_ANNOTATIONS,
+    },
+    async ({
+      parent,
+      data_source_id: dataSourceId,
+      name,
+      type,
+      filter,
+      sorts,
+      quick_filters: quickFilters,
+      configuration,
+    }) => {
+      const view = await notionApiRequestJson<Record<string, unknown>>({
+        config,
+        path: 'views',
+        method: 'POST',
+        body: {
+          ...(parent.type === 'database_id'
+            ? {
+                database_id: parent.database_id,
+                ...(parent.position ? { position: parent.position } : {}),
+              }
+            : parent.type === 'view_id'
+              ? {
+                  view_id: parent.view_id,
+                  ...(parent.placement ? { placement: parent.placement } : {}),
+                }
+              : { create_database: parent.create_database }),
+          data_source_id: dataSourceId,
+          name,
+          type,
+          ...(filter ? { filter } : {}),
+          ...(sorts ? { sorts } : {}),
+          ...(quickFilters ? { quick_filters: quickFilters } : {}),
+          ...(configuration ? { configuration } : {}),
+        },
+      });
+      return toMcpToolResult({ view });
+    },
+  );
+}
+
+function registerUpdateViewTool(
+  server: McpServer,
+  config: McpConnectionNotionConfig,
+) {
+  const toolName = 'notion-update-view';
+  server.registerTool(
+    toolName,
+    {
+      title: 'Update Notion View',
+      description:
+        'Update a view name, filter, property sorts, quick filters, or presentation configuration. Pass null for filter, sorts, or quick_filters to clear them.',
+      inputSchema: {
+        view_id: nonEmptyStringSchema,
+        name: nonEmptyStringSchema.optional(),
+        filter: jsonObjectSchema.nullable().optional(),
+        sorts: z.array(jsonObjectSchema).max(100).nullable().optional(),
+        quick_filters: z
+          .record(z.string(), jsonObjectSchema.nullable())
+          .nullable()
+          .optional(),
+        configuration: jsonObjectSchema.optional(),
+      },
+      outputSchema: z.object({}).passthrough(),
+      annotations: WRITE_ANNOTATIONS,
+    },
+    async ({
+      view_id: viewId,
+      name,
+      filter,
+      sorts,
+      quick_filters: quickFilters,
+      configuration,
+    }) => {
+      if (
+        name === undefined &&
+        filter === undefined &&
+        sorts === undefined &&
+        quickFilters === undefined &&
+        configuration === undefined
+      ) {
+        throw new Error('Specify at least one view update');
+      }
+
+      const view = await notionApiRequestJson<Record<string, unknown>>({
+        config,
+        path: `views/${encodeURIComponent(viewId)}`,
+        method: 'PATCH',
+        body: {
+          ...(name !== undefined ? { name } : {}),
+          ...(filter !== undefined ? { filter } : {}),
+          ...(sorts !== undefined ? { sorts } : {}),
+          ...(quickFilters !== undefined
+            ? { quick_filters: quickFilters }
+            : {}),
+          ...(configuration ? { configuration } : {}),
+        },
+      });
+      return toMcpToolResult({ view });
+    },
+  );
+}
+
+function registerDeleteViewTool(
+  server: McpServer,
+  config: McpConnectionNotionConfig,
+) {
+  const toolName = 'notion-delete-view';
+  server.registerTool(
+    toolName,
+    {
+      title: 'Delete Notion View',
+      description:
+        'Delete a view from a database. Notion does not allow deleting the last remaining view.',
+      inputSchema: { view_id: nonEmptyStringSchema },
+      outputSchema: z.object({}).passthrough(),
+      annotations: DESTRUCTIVE_WRITE_ANNOTATIONS,
+    },
+    async ({ view_id: viewId }) => {
+      const view = await notionApiRequestJson<Record<string, unknown>>({
+        config,
+        path: `views/${encodeURIComponent(viewId)}`,
+        method: 'DELETE',
+      });
+      return toMcpToolResult({ view });
+    },
+  );
+}
+
 function registerUpdatePageTool(
   server: McpServer,
   config: McpConnectionNotionConfig,
@@ -499,6 +935,12 @@ export function registerNotionTools(
   registerQueryDataSourceTool(server, config);
   registerGetCommentsTool(server, config);
   registerCreatePagesTool(server, config);
+  registerCreateDatabaseTool(server, config);
+  registerUpdateDatabaseTool(server, config);
+  registerUpdateDataSourceTool(server, config);
+  registerCreateViewTool(server, config);
+  registerUpdateViewTool(server, config);
+  registerDeleteViewTool(server, config);
   registerUpdatePageTool(server, config);
   registerGetAsyncTaskTool(server, config);
   registerMovePagesTool(server, config);

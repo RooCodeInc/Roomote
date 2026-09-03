@@ -1,4 +1,5 @@
 import { Env } from '@roomote/env';
+import type { FastAgentReplyStream } from '@roomote/cloud-agents/server';
 import { AGENT_DISPLAY_NAME, formatErrorForLog } from '@roomote/types';
 import {
   findSlackConversationSubjectByUserId,
@@ -174,4 +175,44 @@ export async function postTaskSuggestionStartedMessage(params: {
       `[SlackWebhook] Failed to post task suggestion started message for ${channelId}:${threadTs}: ${formatErrorForLog(error)}`,
     );
   }
+}
+
+/**
+ * Applies the deleted-source rule to a streamed reply: the stream opens only
+ * while the triggering message is still in the thread, and a source deleted
+ * mid-stream ends it without a delivery so the regular post path suppresses
+ * the reply exactly as it would have.
+ */
+export function guardReplyStreamBySourceMessage(
+  stream: FastAgentReplyStream,
+  params: {
+    slack: Pick<SlackNotifier, 'hasMessageInThread'>;
+    channel: string;
+    threadTs: string;
+    sourceMessageTs: string;
+  },
+): FastAgentReplyStream {
+  const sourceMessagePresent = async () =>
+    (await params.slack.hasMessageInThread({
+      channel: params.channel,
+      threadTs: params.threadTs,
+      messageTs: params.sourceMessageTs,
+    })) !== false;
+  let presentAtOpen: Promise<boolean> | undefined;
+
+  return {
+    append: async (text) => {
+      presentAtOpen ??= sourceMessagePresent();
+      if (await presentAtOpen) await stream.append(text);
+    },
+    finish: async (reply) => {
+      if (await sourceMessagePresent()) return stream.finish(reply);
+      apiLogger.debug(
+        `[SlackWebhook] Ending the streamed fast-agent reply because source message ${params.sourceMessageTs} is no longer in thread ${params.threadTs}`,
+      );
+      await stream.abort();
+      return undefined;
+    },
+    abort: () => stream.abort(),
+  };
 }

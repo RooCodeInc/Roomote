@@ -14,17 +14,17 @@ automations, and the web dashboard.
 
 ## Start a Session from the dashboard
 
-On the home page, leave the workspace selector on **Auto** to start a
+On the home page, leave the workspace selector on **Fast** to start a
 conversation. Roomote answers directly when it can and delegates execution
 when the request needs a repository workspace. Selecting an environment or
-repository starts the execution directly and opens its task workspace. Roomote
-still creates the owning Session so the execution remains part of the same
-shared history.
+repository still starts a Session: the Session records your request, delegates
+the task into that workspace right away without a model turn, and opens the
+task workspace. You can return to the Session at any time to continue the
+conversation around that task.
 
-Fast is the default for **Auto** and other unpinned requests across the web
-dashboard and supported chat providers. Choose an environment or repository
-explicitly when the request should skip conversation-first routing and start a
-coding task immediately.
+Fast is the default for unpinned requests across the web dashboard and
+supported chat providers. Choose an environment or repository explicitly when
+you already know where the work should run.
 
 Select **New Session** in the navigation to open the same launcher from any
 dashboard page.
@@ -36,8 +36,10 @@ conversation to execution to review without changing identity.
 
 A Session timeline shows prompts, replies, and delegated execution activity.
 Execution cards show their status, workspace, pull requests, artifacts, latest
-error, and cost. Select a card to open the lightweight details panel, or choose
-**Open full workspace** for terminal, logs, diff, and preview tools.
+error, and cost. Select a card to open its details panel. For a live nested
+task, you can reply, attach files, use commands, answer pending requests, cancel
+work, or wake a sleeping task without leaving the Session. Choose **Open full
+workspace** for terminal, logs, diff, and preview tools.
 
 When delegated tasks keep working after the conversation becomes idle, the
 timeline shows the live task count. Select that activity to open the **Tasks**
@@ -68,7 +70,9 @@ several are active. A Session link with a selected task opens that task's full
 workspace while keeping the Session conversation alongside it on desktop.
 
 The transcript renders prompts, replies, and tool activity in real time with a
-generated title that updates as the Session evolves.
+generated title that updates as the Session evolves. Replies appear as the
+model writes them, then settle into the saved message once the reply is
+delivered.
 
 Fast sessions can also render presentational widgets such as status cards,
 tables, and plans directly in the transcript. Widget HTML is sanitized and
@@ -92,7 +96,8 @@ posting a duplicate acknowledgement.
 Fast replies across Slack, Discord, Microsoft Teams, and Telegram link back to
 the Session view and can resume the same Session directly from chat. Roomote
 verifies the provider installation, conversation, and linked user before it
-accepts the follow-up.
+accepts the follow-up. On Slack, a longer reply streams into the thread as the
+model writes it and settles into the finished message.
 
 Follow-ups sent while Fast is responding are retained before Roomote reports
 that they were accepted. A correction from the same person can steer the active
@@ -101,18 +106,23 @@ for a separate turn under that participant's identity. This keeps shared
 conversations ordered without losing instructions that arrive during active
 work.
 
+Replay-safe Fast turns also survive API or worker interruptions. Roomote
+durably admits the turn before acknowledging it, then resumes unfinished work
+on a live process without repeating the acknowledgement or already-completed
+side effects. If an inference provider asks Roomote to retry later, replay-safe
+turns can wait durably and resume at the scheduled time; longer waits use one
+visible retry notice that the eventual answer replaces.
+
 ### Message Suggestions
 
-Admins can enable **Message Suggestions** under **Settings > Experimental**.
-When enabled, an empty task or Session composer can show one contextual
-follow-up after an agent turn completes. Press **Tab** or select the suggestion
-to insert it, press **Escape** to dismiss it, or start typing to replace it with
-your own message.
+An empty task or Session composer can show one contextual follow-up after an
+agent turn completes. Press **Tab** or select the suggestion to insert it, press
+**Escape** to dismiss it, or start typing to replace it with your own message.
 
 Roomote generates each suggestion with the deployment's helper model using a
 bounded view of visible conversation history. This adds one small inference
 call per completed turn for each task or Session where the suggestion is
-requested. The setting is off by default.
+requested.
 
 In shared Slack and Discord conversations, Fast can stay silent when linked
 participants are talking to each other. A direct reply to Roomote, a mention,

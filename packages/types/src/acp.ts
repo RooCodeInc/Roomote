@@ -74,6 +74,13 @@ export function normalizeAcpReasoningText(text: string): string {
 
 export const ACP_LOGICAL_EVENT_ID_KEY = 'logicalEventId' as const;
 
+/**
+ * Canonical transcript-only record of a trusted setup-card action. These
+ * messages are visible as user choices but are never submitted to the model
+ * or mirrored into Fast Agent compatibility history.
+ */
+export const SETUP_RECEIPT_INPUT_KIND = 'setup_receipt' as const;
+
 export interface AcpLogicalEventIdParts {
   sessionId: string | null | undefined;
   turnId?: string | null | undefined;
@@ -168,6 +175,8 @@ export interface AcpRequestUserInputQuestion {
   isOther: boolean;
   isSecret: boolean;
   options?: AcpRequestUserInputQuestionOption[];
+  /** Multiple-choice questions default to one selection when absent. */
+  multiple?: boolean;
 }
 
 export type AcpRequestUserInputAnswers = Record<
@@ -176,6 +185,43 @@ export type AcpRequestUserInputAnswers = Record<
     answers: string[];
   }
 >;
+
+export function getAcpRequestUserInputValidationError(
+  questions: AcpRequestUserInputQuestion[],
+  answers: AcpRequestUserInputAnswers,
+  resolution: 'submitted' | 'cancelled' = 'submitted',
+): string | null {
+  const questionIds = new Set(questions.map((question) => question.id));
+  if (Object.keys(answers).some((questionId) => !questionIds.has(questionId))) {
+    return 'One or more answers do not belong to this request.';
+  }
+  if (resolution === 'cancelled') return null;
+
+  for (const question of questions) {
+    const submitted = answers[question.id]?.answers ?? [];
+    if (new Set(submitted).size !== submitted.length) {
+      return 'Duplicate answers are not allowed.';
+    }
+    if (submitted.length === 0) {
+      return 'Answer every question before submitting.';
+    }
+    if (!question.multiple && submitted.length > 1) {
+      return 'This question accepts a single answer.';
+    }
+    if (question.options?.length) {
+      const optionLabels = new Set(
+        question.options.map((option) => option.label),
+      );
+      const customAnswerCount = submitted.filter(
+        (answer) => !optionLabels.has(answer),
+      ).length;
+      if (customAnswerCount > (question.isOther ? 1 : 0)) {
+        return 'One or more selections are not valid options.';
+      }
+    }
+  }
+  return null;
+}
 
 export interface AcpRequestUserInputRequestParams {
   sessionId: string;
@@ -187,6 +233,7 @@ export interface AcpRequestUserInputRequestParams {
 export interface AcpRequestUserInputPayload extends AcpRequestUserInputRequestParams {
   requestId: string;
   status: 'pending';
+  preset?: 'setup_starter_tasks';
 }
 
 export interface AcpRequestUserInputResponsePayload {
@@ -263,7 +310,7 @@ function parseAcpRequestUserInputQuestionOption(
   return { label, description };
 }
 
-function parseAcpRequestUserInputQuestion(
+export function parseAcpRequestUserInputQuestion(
   value: unknown,
 ): AcpRequestUserInputQuestion | null {
   const record = asRecordOrNull(value);
@@ -291,6 +338,7 @@ function parseAcpRequestUserInputQuestion(
     isOther: record?.isOther === true,
     isSecret: record?.isSecret === true,
     ...(options ? { options } : {}),
+    ...(record?.multiple === true ? { multiple: true } : {}),
   };
 }
 
@@ -356,6 +404,8 @@ export function parseAcpRequestUserInputPayload(
 ): AcpRequestUserInputPayload | null {
   const requestId = asStringOrNull(payload?.requestId);
   const request = parseAcpRequestUserInputRequestParams(payload);
+  const preset =
+    payload?.preset === 'setup_starter_tasks' ? payload.preset : undefined;
 
   if (!requestId || !request) {
     return null;
@@ -365,6 +415,7 @@ export function parseAcpRequestUserInputPayload(
     requestId,
     ...request,
     status: 'pending',
+    ...(preset ? { preset } : {}),
   };
 }
 

@@ -184,14 +184,20 @@ vi.mock('./SideNavItem', () => ({
     onClick,
     tooltip,
     expanded,
+    disabled,
   }: {
     href?: string;
     onClick?: () => void;
     tooltip: string;
     expanded?: boolean;
+    disabled?: boolean;
   }) =>
     href ? (
-      <div data-testid={`nav-${href}`} data-expanded={String(expanded)} />
+      <div
+        data-testid={`nav-${href}`}
+        data-expanded={String(expanded)}
+        data-disabled={String(disabled ?? false)}
+      />
     ) : (
       <button
         type="button"
@@ -483,5 +489,30 @@ describe('SideNav recent sessions', () => {
 
     expect(screen.getByTestId('nav-/settings')).toBeInTheDocument();
     expect(screen.queryByTestId('nav-/automations')).not.toBeInTheDocument();
+  });
+
+  it('disables inaccessible destinations during setup while keeping Settings enabled', () => {
+    render(<SideNav setupIncomplete />);
+
+    expect(screen.getByTestId('nav-/')).toHaveAttribute(
+      'data-disabled',
+      'true',
+    );
+    expect(screen.getByTestId('nav-/automations')).toHaveAttribute(
+      'data-disabled',
+      'true',
+    );
+    expect(screen.getByTestId('nav-/analytics')).toHaveAttribute(
+      'data-disabled',
+      'true',
+    );
+    expect(screen.getByTestId('nav-/sessions')).toHaveAttribute(
+      'data-disabled',
+      'false',
+    );
+    expect(screen.getByTestId('nav-/settings')).toHaveAttribute(
+      'data-disabled',
+      'false',
+    );
   });
 });

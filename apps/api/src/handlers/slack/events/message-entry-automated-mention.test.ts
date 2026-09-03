@@ -34,7 +34,6 @@ vi.mock('@roomote/redis', async (importOriginal) => ({
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
   createFastAgentSlackLiveTaskLauncher: mocks.liveTaskLauncher,
-  startAutoRoutedSlackTask: mocks.startTask,
 }));
 
 vi.mock('../helpers/attachments.js', () => ({
@@ -149,7 +148,7 @@ describe('automated Slack message mentions', () => {
     expect(mocks.startTask).not.toHaveBeenCalled();
   }, 30000);
 
-  it('falls back to an automation task when the Fast turn is not accepted', async () => {
+  it('releases the routing lock and launches nothing when the Fast turn is not accepted', async () => {
     mocks.processFastAgentMessage.mockImplementation(
       async ({ onRejected }: { onRejected?: () => void }) => {
         onRejected?.();
@@ -182,19 +181,11 @@ describe('automated Slack message mentions', () => {
       },
     });
 
-    await vi.waitFor(() => expect(mocks.startTask).toHaveBeenCalledTimes(1));
-    expect(mocks.startTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        initiator: {
-          kind: 'automation',
-          key: 'slack_channel_auto_start',
-          actor: { externalId: 'U_WORKFLOW' },
-        },
-        channel: 'C123',
-        prompt: '<@U_ROOMOTE> investigate this deployment',
-        slackUserId: 'U_INSTALLER',
-        threadTs: '1712345678.000200',
-      }),
+    await vi.waitFor(() =>
+      expect(mocks.redis.del).toHaveBeenCalledWith(
+        expect.stringContaining('1712345678.000200'),
+      ),
     );
+    expect(mocks.startTask).not.toHaveBeenCalled();
   }, 30000);
 });

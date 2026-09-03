@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   launchTask: vi.fn(),
   surfaceLaunchTask: vi.fn(),
   notifyArtifactBuild: vi.fn(),
+  startPinnedLaunch: vi.fn(),
   getOrCreateSession: vi.fn(),
   getUnifiedSession: vi.fn(),
   isNull: vi.fn(),
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   dbSelect: vi.fn(),
   dbInnerJoin: vi.fn(),
   dbSelectLimit: vi.fn(),
+  sql: vi.fn(),
 }));
 
 vi.mock('next/server', () => ({ after: mocks.after }));
@@ -80,6 +82,10 @@ vi.mock('@/lib/server/pr-review-actions', () => ({
 
 vi.mock('../task-runs', () => ({
   notifySourceTaskArtifactBuild: mocks.notifyArtifactBuild,
+}));
+
+vi.mock('./pinned-launch', () => ({
+  startPinnedFastSessionLaunch: mocks.startPinnedLaunch,
 }));
 
 import {
@@ -308,6 +314,43 @@ describe('startFastSessionCommand', () => {
     expect(mocks.after).toHaveBeenCalledOnce();
   });
 
+  it('delegates a pinned launch without scheduling a Fast turn', async () => {
+    mocks.startPinnedLaunch.mockResolvedValue({
+      sessionId: 'session-9',
+      fastConversationId: 'fast-9',
+      taskId: 'task-9',
+    });
+
+    const pinnedLaunch = {
+      launchId: '44444444-4444-4444-8444-444444444444',
+      repo: 'acme/api',
+      branch: 'main',
+      environmentId: '33333333-3333-4333-8333-333333333333',
+    };
+    const result = await startFastSessionCommand(auth, {
+      text: 'Fix the flaky test',
+      images: ['data:image/png;base64,AAAA'],
+      attachmentTexts: ['notes'],
+      model: 'model-1',
+      pinnedLaunch,
+    });
+
+    expect(result).toEqual({
+      sessionId: 'session-9',
+      fastConversationId: 'fast-9',
+      taskId: 'task-9',
+    });
+    expect(mocks.startPinnedLaunch).toHaveBeenCalledWith(auth, {
+      text: 'Fix the flaky test',
+      images: ['data:image/png;base64,AAAA'],
+      attachmentTexts: ['notes'],
+      model: 'model-1',
+      pinnedLaunch,
+    });
+    expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+
   it('launches an attributed artifact build in the artifact task parent Session', async () => {
     let scheduled: (() => Promise<void>) | undefined;
     mocks.after.mockImplementation((callback) => {
@@ -520,7 +563,7 @@ describe('startSetupFastSessionCommand', () => {
     expect(mocks.dbSelect).not.toHaveBeenCalled();
   });
 
-  it('skips a scheduled kickoff whose transcript gained messages before the turn lock', async () => {
+  it('skips a scheduled kickoff completed before the turn lock', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: true,
@@ -537,8 +580,8 @@ describe('startSetupFastSessionCommand', () => {
     await startSetupFastSessionCommand(auth, input);
     expect(scheduled).toBeDefined();
 
-    // A concurrent submit's kickoff persisted its prompt row first: the
-    // re-check under the turn lock sees the kickoff event and skips.
+    // A concurrent submit completed its kickoff first. The re-check under the
+    // turn lock sees its terminal output and skips duplicate inference.
     mocks.dbSelectLimit.mockResolvedValue([{ id: 'message-1' }]);
     await scheduled?.();
 
@@ -546,7 +589,7 @@ describe('startSetupFastSessionCommand', () => {
     expect(release).toHaveBeenCalledOnce();
   });
 
-  it('runs a scheduled kickoff whose transcript is still empty at the turn lock', async () => {
+  it('runs a scheduled kickoff that has no terminal output at the turn lock', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: true,
@@ -575,7 +618,7 @@ describe('startSetupFastSessionCommand', () => {
     expect(release).toHaveBeenCalledOnce();
   });
 
-  it('recovers a lost kickoff when reusing a conversation with an empty transcript', async () => {
+  it('recovers a lost or failed kickoff when no terminal output exists', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: false,
@@ -590,7 +633,7 @@ describe('startSetupFastSessionCommand', () => {
     expect(mocks.after).toHaveBeenCalledOnce();
   });
 
-  it('does not schedule a second kickoff once the kickoff event row exists', async () => {
+  it('does not schedule a second kickoff once the kickoff has terminal output', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: false,

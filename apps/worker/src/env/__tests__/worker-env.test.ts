@@ -140,6 +140,7 @@ describe('WorkerEnv', () => {
         R_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
         OPENROUTER_API_KEY: 'openrouter-key',
         CUSTOM_PROVIDER_API_KEY: 'custom-key',
+        R_SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
         JOB_AUTH_PRIVATE_KEY: 'do-not-forward',
       } as NodeJS.ProcessEnv);
 
@@ -176,6 +177,7 @@ describe('WorkerEnv', () => {
       expect(openCodeEnv.R_MODEL_ENV_KEYS).toBe('CUSTOM_PROVIDER_API_KEY');
       expect(openCodeEnv.OPENROUTER_API_KEY).toBe('openrouter-key');
       expect(openCodeEnv.CUSTOM_PROVIDER_API_KEY).toBe('custom-key');
+      expect(openCodeEnv).not.toHaveProperty('R_SANDBOX_OPENROUTER_API_KEY');
       expect(openCodeEnv).not.toHaveProperty('JOB_AUTH_PRIVATE_KEY');
     });
   });

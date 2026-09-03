@@ -132,6 +132,10 @@ const serverSchema = {
   // run inline without a persisted claim, so an interrupted turn is not
   // resumed by the parent-event queue (the pre-durable-admission behavior).
   R_FAST_DURABLE_ADMISSION_DISABLED: optInBoolean(),
+  // Kill switch for durable retry scheduling. When set, a replay-safe Fast
+  // turn waits out inference retry backoff inside its owning process (the
+  // pre-scheduling behavior) instead of parking the turn for the queue.
+  R_FAST_DURABLE_RETRY_DISABLED: optInBoolean(),
   // Operator kill switch for admin-configured custom MCP servers. Deliberately
   // independent of R_CURATED_INTEGRATIONS_DISABLED: operators who disable the
   // curated catalog are the primary custom-server audience.
@@ -207,7 +211,6 @@ const serverSchema = {
   R_SLACK_SIGNING_SECRET: z.string().min(1).optional(),
   SLACK_API_BASE_URL: z.string().url().default('https://slack.com/api/'),
   SLACK_UNFURL_ALLOWED_DOMAINS: z.string().optional(),
-  ROUTER_DEBUG_CHANNEL_ID: z.string().optional(),
   // When adding an integration/instance secret below, also add it to
   // CONTROL_PLANE_ENV_VAR_NAMES (packages/types/src/control-plane-env-vars.ts)
   // unless it is already a `secret` field in a setup catalog, or it leaks into
@@ -382,6 +385,10 @@ const serverSchema = {
   // stored key still exists. Served through the inference gateway like any
   // other provider key, so it never reaches a sandbox.
   R_TRIAL_OPENROUTER_API_KEY: z.string().min(1).optional(),
+  // Dedicated capped OpenRouter key used only by the parent inference gateway
+  // for Roomote deployments running inside task sandboxes. The raw key must
+  // never be forwarded to workers or task environments.
+  R_SANDBOX_OPENROUTER_API_KEY: z.string().min(1).optional(),
   // Optional self-run inference upstreams for the Brain gateway. When set,
   // the gateway routes that path's requests there instead of the configured
   // model provider — embeddings can move to a local or fleet
@@ -544,6 +551,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_BRAIN_OPENROUTER_API_KEY',
   'R_BRAIN_OPENAI_API_KEY',
   'R_TRIAL_OPENROUTER_API_KEY',
+  'R_SANDBOX_OPENROUTER_API_KEY',
   'R_BRAIN_EMBEDDINGS_UPSTREAM_URL',
   'R_BRAIN_INFERENCE_UPSTREAM_API_KEY',
   'R_BRAIN_GATEWAY_TOKEN',
@@ -574,7 +582,6 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',
   'SLACK_UNFURL_ALLOWED_DOMAINS',
-  'ROUTER_DEBUG_CHANNEL_ID',
   'R_TEAMS_BOT_APP_ID',
   'R_TEAMS_BOT_APP_PASSWORD',
   'R_TEAMS_BOT_TENANT_ID',

@@ -84,7 +84,6 @@ import {
 } from './github-pr-review-check';
 import {
   SlackNotifier,
-  buildTaskFailedMessage,
   getSlackStartedMessageTs,
   refreshAutomationRootFooter,
   SLACK_RUNTIME_FAILURE_TEXT,
@@ -1196,15 +1195,12 @@ async function sendSlackFailureNotification(
       ? `\n\n*Error details:* ${escapedError}`
       : '';
 
-    const failureMessage =
-      run.payloadKind === TaskPayloadKind.SlackAppMention
-        ? buildTaskFailedMessage({
-            runId: run.id,
-            messageText: `${retryableFailureText}${failureDetails}`,
-          })
-        : {
-            text: `${restartFailureText}${failureDetails}`,
-          };
+    const failureMessage = {
+      text:
+        run.payloadKind === TaskPayloadKind.SlackAppMention
+          ? `${retryableFailureText}${failureDetails}`
+          : `${restartFailureText}${failureDetails}`,
+    };
 
     const shouldUpdateStartedMessage =
       slackStartedMessageTs != null && !runtimeAlreadyStarted;
