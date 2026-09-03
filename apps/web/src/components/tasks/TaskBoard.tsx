@@ -130,7 +130,7 @@ function BoardTaskCard({ task }: { task: Task }) {
                 <span className="flex size-6 items-center justify-center rounded-full border border-border bg-muted ring-2 ring-card">
                   <TaskAutomationIcon
                     automationKey={task.initiatorAutomation}
-                    className="size-3 text-muted-foreground"
+                    className="size-5"
                   />
                 </span>
               </TooltipTrigger>
