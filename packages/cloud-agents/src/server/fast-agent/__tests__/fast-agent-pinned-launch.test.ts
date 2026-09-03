@@ -1,4 +1,6 @@
 const mocks = vi.hoisted(() => ({
+  acquireRedisLock: vi.fn(),
+  releaseLock: vi.fn(),
   enqueueTask: vi.fn(),
   getTaskUrl: vi.fn(() => 'https://roomote.example/task/task-1'),
   getOrCreateFastAgentSession: vi.fn(),
@@ -6,6 +8,10 @@ const mocks = vi.hoisted(() => ({
   findById: vi.fn(),
   taskRunsFindFirst: vi.fn(),
   getSessionForFastConversation: vi.fn(),
+}));
+
+vi.mock('@roomote/redis', () => ({
+  acquireRedisLock: mocks.acquireRedisLock,
 }));
 
 vi.mock('../../task-run-queue', () => ({
@@ -99,6 +105,12 @@ describe('launchPinnedFastSessionTask', () => {
     );
     mocks.taskRunsFindFirst.mockResolvedValue({ id: 7 });
     mocks.getSessionForFastConversation.mockResolvedValue({ id: 'session-1' });
+    mocks.releaseLock.mockResolvedValue(undefined);
+    mocks.acquireRedisLock.mockResolvedValue(mocks.releaseLock);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('creates a web session, records the request and kickoff, and delegates the task', async () => {
@@ -284,6 +296,121 @@ describe('launchPinnedFastSessionTask', () => {
       }),
       expect.anything(),
     );
+  });
+
+  it('serializes launches that must discover their Session behind a per-launch lock', async () => {
+    await launchPinnedFastSessionTask({
+      userId: 'user-1',
+      launchId: 'launch-1',
+      prompt: 'Fix the flaky test',
+      task,
+      surface: 'api',
+      kickoffMessage: 'Started a task.',
+    });
+
+    expect(mocks.acquireRedisLock).toHaveBeenCalledWith(
+      'pinned-launch:launch-1:lock',
+      { ttlSeconds: 60 },
+    );
+    expect(mocks.releaseLock).toHaveBeenCalledOnce();
+    // The queue lookup happens under the lock, so a concurrent retry that
+    // waited sees the first attempt's run before creating anything.
+    expect(mocks.acquireRedisLock.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.taskRunsFindFirst.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('waits for a concurrent attempt to finish, then replays into its Session', async () => {
+    vi.useFakeTimers();
+    mocks.acquireRedisLock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(mocks.releaseLock);
+    mocks.taskRunsFindFirst
+      .mockResolvedValueOnce({
+        payload: {
+          fastAgentParent: {
+            sessionId: '66666666-6666-4666-8666-666666666666',
+            conversation: {
+              surface: 'web',
+              workspaceId: 'user-1',
+              conversationId: 'conv-first',
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({ id: 7 });
+    mocks.findById.mockResolvedValue({
+      id: '66666666-6666-4666-8666-666666666666',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'conv-first',
+      },
+    });
+
+    const pending = launchPinnedFastSessionTask({
+      userId: 'user-1',
+      launchId: 'launch-1',
+      prompt: 'Fix the flaky test',
+      task,
+      surface: 'api',
+      kickoffMessage: 'Started a task.',
+    });
+    await vi.advanceTimersByTimeAsync(250);
+    const result = await pending;
+
+    expect(result.fastConversationId).toBe(
+      '66666666-6666-4666-8666-666666666666',
+    );
+    expect(mocks.acquireRedisLock).toHaveBeenCalledTimes(2);
+    expect(mocks.getOrCreateFastAgentSession).not.toHaveBeenCalled();
+  });
+
+  it('gives up when another attempt holds the launch for too long', async () => {
+    vi.useFakeTimers();
+    mocks.acquireRedisLock.mockResolvedValue(null);
+
+    const pending = launchPinnedFastSessionTask({
+      userId: 'user-1',
+      launchId: 'launch-1',
+      prompt: 'Fix the flaky test',
+      task,
+      surface: 'api',
+      kickoffMessage: 'Started a task.',
+    });
+    const outcome = pending.then(
+      () => 'resolved',
+      (error: Error) => error.message,
+    );
+    await vi.advanceTimersByTimeAsync(16_000);
+
+    await expect(outcome).resolves.toBe(
+      'Another attempt at this launch is still in progress. Retry in a moment.',
+    );
+    expect(mocks.enqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('skips the lock when the caller already names the Session', async () => {
+    mocks.findById.mockResolvedValue({
+      id: 'fast-parent',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'conv-parent',
+      },
+    });
+
+    await launchPinnedFastSessionTask({
+      userId: 'user-1',
+      fastConversationId: 'fast-parent',
+      launchId: 'launch-2',
+      prompt: 'Fix it',
+      task,
+      surface: 'api',
+      kickoffMessage: 'Started a task.',
+    });
+
+    expect(mocks.acquireRedisLock).not.toHaveBeenCalled();
   });
 
   it('rejects a launch into a Fast conversation that does not exist', async () => {

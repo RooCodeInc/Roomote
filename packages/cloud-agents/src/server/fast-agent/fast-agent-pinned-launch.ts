@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 
+import { acquireRedisLock } from '@roomote/redis';
 import {
   and,
   db,
@@ -130,6 +132,42 @@ async function resolveConversationTarget(
   return { id: created.id, conversation: created.conversation };
 }
 
+const LAUNCH_LOCK_TTL_SECONDS = 60;
+const LAUNCH_LOCK_WAIT_MS = 15_000;
+const LAUNCH_LOCK_POLL_MS = 200;
+
+/**
+ * Concurrent retries of one launch must agree on the Session before either
+ * reaches the queue's per-key lock, or the loser creates a second Session and
+ * is then refused. Serialize launches that have to discover their Session.
+ */
+async function withLaunchLock<T>(
+  launchIdempotencyKey: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const key = `${launchIdempotencyKey}:lock`;
+  const deadline = Date.now() + LAUNCH_LOCK_WAIT_MS;
+  let release = await acquireRedisLock(key, {
+    ttlSeconds: LAUNCH_LOCK_TTL_SECONDS,
+  });
+  while (!release && Date.now() < deadline) {
+    await sleep(LAUNCH_LOCK_POLL_MS);
+    release = await acquireRedisLock(key, {
+      ttlSeconds: LAUNCH_LOCK_TTL_SECONDS,
+    });
+  }
+  if (!release) {
+    throw new Error(
+      'Another attempt at this launch is still in progress. Retry in a moment.',
+    );
+  }
+  try {
+    return await run();
+  } finally {
+    await release().catch(() => undefined);
+  }
+}
+
 /**
  * Launches a task with a workspace the person already chose, inside a Fast
  * Session, without spending a model turn. The Session records the request
@@ -140,6 +178,18 @@ export async function launchPinnedFastSessionTask(
   input: PinnedFastSessionLaunchInput,
 ): Promise<PinnedFastSessionLaunchResult> {
   const turnId = `pinned-launch:${input.launchId}`;
+  // A caller that names the Session cannot disagree with a concurrent retry;
+  // the queue's own per-key lock covers the task itself.
+  if (input.fastConversationId) {
+    return launchInSession(input, turnId);
+  }
+  return withLaunchLock(turnId, () => launchInSession(input, turnId));
+}
+
+async function launchInSession(
+  input: PinnedFastSessionLaunchInput,
+  turnId: string,
+): Promise<PinnedFastSessionLaunchResult> {
   const target = await resolveConversationTarget(input, turnId);
   const prompt = input.prompt.trim();
   const images = input.images ?? [];
