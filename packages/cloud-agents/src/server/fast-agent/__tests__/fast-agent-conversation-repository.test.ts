@@ -1364,26 +1364,31 @@ describe('Fast conversation repository', () => {
     await expect(
       loadFastAgentTurnAttemptSummary(session.id, 'turn-a'),
     ).resolves.toEqual({
-      replies: ['Starting on it.'],
-      actions: [
+      // Transcript order: the reply, then each call with its outcome.
+      events: [
+        { kind: 'reply', text: 'Starting on it.' },
         {
+          kind: 'action',
           tool: 'launch_task',
           arguments: { prompt: 'Fix the bug' },
           status: 'completed',
           result: '{"success":true,"taskId":"task-1"}',
         },
         {
+          kind: 'action',
           tool: 'send_task_message',
           arguments: { taskId: 'task-1', message: 'hi' },
           status: 'failed',
           result: '{"success":false,"error":"Task is not accepting messages."}',
         },
         {
+          kind: 'action',
           tool: 'save_memory',
           arguments: { content: 'Prefers bullets.' },
           status: 'unknown',
         },
         {
+          kind: 'action',
           tool: 'task',
           arguments: { prompt: 'Audit the queue', subagent_type: 'explore' },
           status: 'failed',
@@ -1404,8 +1409,7 @@ describe('Fast conversation repository', () => {
     await expect(
       loadFastAgentTurnAttemptSummary(session.id, 'turn-none'),
     ).resolves.toEqual({
-      replies: [],
-      actions: [],
+      events: [],
       next: {
         assistantOrdinal: 0,
         toolOrdinal: 0,

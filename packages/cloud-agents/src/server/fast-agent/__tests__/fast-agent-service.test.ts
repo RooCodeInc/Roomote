@@ -439,8 +439,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.scheduleDurableRetry.mockResolvedValue(true);
     mocks.findActiveRetryNotice.mockResolvedValue(null);
     mocks.loadTurnAttempt.mockResolvedValue({
-      replies: [],
-      actions: [],
+      events: [],
       next: {
         assistantOrdinal: 0,
         toolOrdinal: 0,
@@ -3976,15 +3975,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     it('tells a resumed run what the earlier attempt already did', async () => {
       mocks.loadTurnAttempt.mockResolvedValueOnce({
-        replies: ['Starting on it.'],
-        actions: [
+        events: [
+          { kind: 'reply', text: 'Starting on it.' },
           {
+            kind: 'action',
             tool: 'launch_task',
             arguments: { prompt: 'Fix the bug' },
             status: 'completed',
             result: '{"success":true,"taskId":"task-1"}',
           },
           {
+            kind: 'action',
             tool: 'save_memory',
             arguments: { content: 'Prefers bullets.' },
             status: 'unknown',
@@ -4050,23 +4051,50 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.any(String),
       );
       const call = mocks.generateText.mock.calls[0]?.[0];
-      expect(call.prompt).toContain('<previous_attempt>');
-      expect(call.prompt).toContain('task-1');
-      expect(call.prompt).toContain('Starting on it.');
-      // Completed work is to be used, not redone; unknown work is to be
-      // checked before it is repeated.
-      expect(call.prompt).toContain('use their results instead of repeating');
-      expect(call.prompt).toContain('check whether they happened');
-      expect(call.prompt.indexOf('<previous_attempt>')).toBeLessThan(
+      // The attempt is replayed as a transcript, in order, with the call the
+      // process died on given a synthetic lost result that only the model
+      // ever sees.
+      const block = call.prompt.slice(
+        call.prompt.indexOf('<previous_attempt_transcript>'),
+        call.prompt.indexOf('</previous_attempt_transcript>'),
+      );
+      expect(block).toContain('[ASSISTANT]\nStarting on it.');
+      expect(block).toContain('[TOOL_CALL launch_task]');
+      expect(block).toContain('[TOOL_RESULT completed]');
+      expect(block).toContain('task-1');
+      expect(block).toContain('[TOOL_CALL save_memory]');
+      expect(block).toContain(
+        '[TOOL_RESULT lost]\nTool result lost due to restart.',
+      );
+      expect(block.indexOf('[ASSISTANT]')).toBeLessThan(
+        block.indexOf('[TOOL_CALL launch_task]'),
+      );
+      expect(block.indexOf('[TOOL_CALL launch_task]')).toBeLessThan(
+        block.indexOf('[TOOL_CALL save_memory]'),
+      );
+      expect(call.prompt).toContain('Continue from the last entry');
+      expect(
+        mocks.upsertMessage.mock.calls.map(([input]) => input.message),
+      ).not.toContainEqual(
+        expect.objectContaining({
+          contentBlocks: expect.arrayContaining([
+            expect.objectContaining({
+              text: expect.stringContaining('lost due to restart'),
+            }),
+          ]),
+        }),
+      );
+      expect(call.prompt.indexOf('<previous_attempt_transcript>')).toBeLessThan(
         call.prompt.indexOf('What does this service do?'),
       );
     });
 
     it('keeps the previous-attempt block bounded however large the attempt was', async () => {
       mocks.loadTurnAttempt.mockResolvedValueOnce({
-        replies: ['x'.repeat(50_000)],
-        actions: [
+        events: [
+          { kind: 'reply', text: 'x'.repeat(50_000) },
           {
+            kind: 'action',
             tool: 'create_artifact',
             arguments: { content: 'y'.repeat(130_000) },
             status: 'completed',
@@ -4090,8 +4118,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
 
       const call = mocks.generateText.mock.calls[0]?.[0];
-      const start = call.prompt.indexOf('<previous_attempt>');
-      const end = call.prompt.indexOf('</previous_attempt>');
+      const start = call.prompt.indexOf('<previous_attempt_transcript>');
+      const end = call.prompt.indexOf('</previous_attempt_transcript>');
       expect(start).toBeGreaterThan(-1);
       // Replies and arguments are clipped individually, so the block stays
       // far under the cap even for a 130 KiB artifact body.
@@ -4109,7 +4137,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
       const resumed = mocks.generateText.mock.calls[0]?.[0];
       expect(resumed.prompt).toContain('<resumed_turn>');
-      expect(resumed.prompt).not.toContain('<previous_attempt>');
+      expect(resumed.prompt).not.toContain('<previous_attempt_transcript>');
 
       mocks.generateText.mockClear();
       mocks.loadTurnAttempt.mockClear();
