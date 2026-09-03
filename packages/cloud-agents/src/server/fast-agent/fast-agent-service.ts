@@ -146,6 +146,7 @@ import {
 } from './fast-agent-integration-broker';
 import {
   cancelFastAgentTask,
+  launchFastAgentPrReview,
   sendFastAgentTaskMessage,
 } from './fast-agent-tasks';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
@@ -401,6 +402,46 @@ const launchTaskArgsSchema = z.object({
   includeAttachments: z.boolean().optional().default(false),
   kickoffMessage: z.string().trim().min(1),
 });
+
+const reviewPullRequestArgsSchema = z.object({
+  repository: z.string().trim().min(1).optional(),
+  pullRequestNumber: z.number().int().positive().optional(),
+  kickoffMessage: z.string().trim().min(1),
+});
+
+/**
+ * The pull request a source-control Session is already discussing, so
+ * review_pull_request can omit its target there. The workspaceId encodes
+ * host/owner/name and the conversationId encodes pull/<number>.
+ */
+function getConversationPullRequestTarget(conversation: {
+  surface: string;
+  workspaceId: string;
+  conversationId: string;
+}): { repository: string; pullRequestNumber: number } | null {
+  const sourceControlSurfaces = new Set([
+    'github',
+    'gitlab',
+    'bitbucket',
+    'ado',
+    'gitea',
+  ]);
+  if (!sourceControlSurfaces.has(conversation.surface)) {
+    return null;
+  }
+  const match = /^pull\/(\d+)$/.exec(conversation.conversationId);
+  if (!match) {
+    return null;
+  }
+  const [, ...repositoryParts] = conversation.workspaceId.split('/');
+  if (repositoryParts.length < 2) {
+    return null;
+  }
+  return {
+    repository: repositoryParts.join('/'),
+    pullRequestNumber: Number(match[1]),
+  };
+}
 const taskMessageArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
   message: z.string().trim().min(1),
@@ -3491,6 +3532,83 @@ export async function answerFastAgentQuestion({
                 await deliverKickoff(result);
               }
             }
+            return result;
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest: {
+            const args = reviewPullRequestArgsSchema.parse(call.args);
+            const conversationTarget =
+              getConversationPullRequestTarget(conversation);
+            const repository =
+              args.repository ?? conversationTarget?.repository;
+            const pullRequestNumber =
+              args.pullRequestNumber ?? conversationTarget?.pullRequestNumber;
+            if (!repository || !pullRequestNumber) {
+              return {
+                success: false,
+                error:
+                  'Name the repository (owner/name) and pull request number to review.',
+              };
+            }
+            const signature = `review_pull_request:${repository}#${pullRequestNumber}`;
+            if (completedTaskActions.has(signature)) {
+              return {
+                success: false,
+                error:
+                  'A review of that pull request was already started in this turn.',
+              };
+            }
+            completedTaskActions.add(signature);
+            throwIfTurnCancelled();
+            let result: Awaited<ReturnType<typeof launchFastAgentPrReview>>;
+            try {
+              result = await launchFastAgentPrReview(
+                { userId, apiBaseUrl },
+                {
+                  repository,
+                  pullRequestNumber,
+                  fastConversationId: session.id,
+                },
+              );
+            } catch (error) {
+              completedTaskActions.delete(signature);
+              throw error;
+            }
+            if (!result.success) {
+              completedTaskActions.delete(signature);
+              return result;
+            }
+            // A reused already-active review keeps its original payload, so
+            // this Session will not hear its settle: skip the kickoff and let
+            // the reply set expectations instead of promising a callback. It
+            // also belongs to another launch (often an automation), so it is
+            // never registered as this turn's task — that would expose it to
+            // cancel_task and send_task_message here.
+            if (result.alreadyRunning) {
+              return {
+                ...result,
+                guidance:
+                  'A review of that pull request is already running; its results will post on the pull request itself, not back into this conversation. Tell the user that and link the pull request.',
+              };
+            }
+            if (result.taskId) {
+              currentTasks.set(result.taskId, { taskId: result.taskId });
+            }
+            const kickoffMessage = [
+              args.kickoffMessage,
+              result.taskUrl && !args.kickoffMessage.includes(result.taskUrl)
+                ? `[Open in Roomote](${result.taskUrl})`
+                : undefined,
+            ]
+              .filter((part): part is string => Boolean(part))
+              .join('\n\n');
+            throwIfTurnCancelled();
+            await postReply(
+              { purpose: 'progress', message: kickoffMessage, kickoff: true },
+              true,
+            );
+            visibleUpdatePosted = true;
+            substantiveWorkAcknowledged = true;
             return result;
           }
 

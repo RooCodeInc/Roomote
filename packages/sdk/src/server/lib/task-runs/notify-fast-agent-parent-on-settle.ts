@@ -3,7 +3,7 @@ import { canRetryFailedStart, getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   RunStatus,
   getFastAgentParentFromPayload,
-  isPrReviewPayload,
+  isPrReviewRun,
 } from '@roomote/types';
 import {
   type TaskRun,
@@ -59,8 +59,17 @@ export async function notifyFastAgentParentOnSettle(
 
   // A review child is attached to the session for visibility only: its
   // outcome reaches the session through the PR feedback relay and the PR
-  // summary comment, so only failures announce here.
-  if (isPrReviewPayload(run.payload) && status !== RunStatus.Failed) {
+  // summary comment, so only failures announce here. Reviews the session
+  // itself requested are the exception: the requester is waiting on this
+  // conversation for the outcome.
+  const sessionRequestedReview =
+    (run.payload as { fastParentRequestedReview?: boolean } | null)
+      ?.fastParentRequestedReview === true;
+  if (
+    isPrReviewRun(run) &&
+    status !== RunStatus.Failed &&
+    !sessionRequestedReview
+  ) {
     return;
   }
 

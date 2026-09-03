@@ -9,7 +9,7 @@ import {
 import {
   getFastAgentParentFromPayload,
   type SourceControlProvider,
-  isPrReviewPayload,
+  isPrReviewRun,
 } from '@roomote/types';
 
 import {
@@ -34,7 +34,7 @@ function buildNotifiedResultKey(params: {
 
 /** Pass a durable PR conflict transition to the Fast conversation that delegated it. */
 export async function notifyFastAgentParentOnPullRequestConflict(params: {
-  run: Pick<TaskRun, 'id' | 'taskId' | 'payload'>;
+  run: Pick<TaskRun, 'id' | 'taskId' | 'payload' | 'payloadKind'>;
   pullRequest: {
     provider: SourceControlProvider;
     host?: string | null;
@@ -51,7 +51,7 @@ export async function notifyFastAgentParentOnPullRequestConflict(params: {
   // Review-pipeline runs never forward PR events to their parent session:
   // the PR's implementation task already delivers them, and a duplicate from
   // the attached review task would double-announce in the same session.
-  if (isPrReviewPayload(params.run.payload)) {
+  if (isPrReviewRun(params.run)) {
     return false;
   }
 
