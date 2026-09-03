@@ -367,17 +367,21 @@ describe('SessionWorkspace', () => {
     };
   });
 
-  it('orders panel controls as tasks, artifacts, then session info', () => {
+  it('orders panel controls as tasks, preview, artifacts, then session info', () => {
     renderWorkspace({
       isMobile: false,
       sessionOverride: { tasks: [singleTask] },
     });
 
     const tasks = screen.getByRole('button', { name: 'Tasks' });
+    const preview = screen.getByRole('button', { name: 'Live Preview' });
     const artifacts = screen.getByRole('button', { name: 'Artifacts' });
     const sessionInfo = screen.getByRole('button', { name: 'Session info' });
 
-    expect(tasks.compareDocumentPosition(artifacts)).toBe(
+    expect(tasks.compareDocumentPosition(preview)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(preview.compareDocumentPosition(artifacts)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
     expect(artifacts.compareDocumentPosition(sessionInfo)).toBe(
