@@ -7,7 +7,9 @@ import {
 } from './live-task-card-blocks';
 import {
   buildSlackLiveTaskTitle,
+  clearSlackLiveTaskPendingCleanup,
   getSlackLiveTaskStreamData,
+  stopSlackLiveTaskRelocation,
 } from './live-task-stream';
 import { SlackNotifier } from './slack-notifier';
 import {
@@ -107,6 +109,12 @@ export async function renderSlackLiveTaskCard(input: {
         return { card: false, updated: false };
       }
 
+      if (terminal) {
+        await stopSlackLiveTaskRelocation({
+          taskId: input.taskId,
+          currentMessageTs: data.messageTs,
+        });
+      }
       let updated = false;
       try {
         updated = await slack.updateMessage({
@@ -123,8 +131,25 @@ export async function renderSlackLiveTaskCard(input: {
         });
       } finally {
         if (terminal) {
+          let pendingCleanupComplete = !data.pendingOldMessageTs;
+          if (data.pendingOldMessageTs) {
+            const oldMessageTs = data.pendingOldMessageTs;
+            pendingCleanupComplete = await slack.deleteMessage({
+              channel: data.channel,
+              ts: oldMessageTs,
+            });
+            if (pendingCleanupComplete) {
+              await clearSlackLiveTaskPendingCleanup({
+                taskId: input.taskId,
+                currentMessageTs: data.messageTs,
+                oldMessageTs,
+              });
+            }
+          }
           try {
-            await removeSlackThreadActiveTaskByTaskId(input.taskId);
+            if (pendingCleanupComplete) {
+              await removeSlackThreadActiveTaskByTaskId(input.taskId);
+            }
           } catch (error) {
             console.warn(
               `[renderSlackLiveTaskCard] Failed to remove active task ${input.taskId}: ${error instanceof Error ? error.message : String(error)}`,

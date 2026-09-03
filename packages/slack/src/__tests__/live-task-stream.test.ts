@@ -11,6 +11,7 @@ vi.mock('@roomote/redis', () => ({ getRedis: () => redis }));
 import {
   clearSlackLiveTaskPendingCleanup,
   compareAndSwapSlackLiveTaskMessageTs,
+  stopSlackLiveTaskRelocation,
 } from '../live-task-stream';
 
 describe('live-task-stream atomic relocation state', () => {
@@ -64,5 +65,21 @@ describe('live-task-stream atomic relocation state', () => {
         nextMessageTs: 'new-ts',
       }),
     ).resolves.toBe(false);
+  });
+
+  it('marks only the current canonical card as stopped for relocation', async () => {
+    await expect(
+      stopSlackLiveTaskRelocation({
+        taskId: 'task-1',
+        currentMessageTs: 'new-ts',
+      }),
+    ).resolves.toBe(true);
+
+    expect(redis.eval).toHaveBeenCalledWith(
+      expect.stringContaining('data.relocationStopped = true'),
+      1,
+      'slack:live_task_stream:task:task-1',
+      'new-ts',
+    );
   });
 });

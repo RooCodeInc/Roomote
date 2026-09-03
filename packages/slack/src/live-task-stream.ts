@@ -23,6 +23,15 @@ data.pendingOldMessageTs = nil
 redis.call('set', KEYS[1], cjson.encode(data), 'KEEPTTL')
 return 1
 `;
+const STOP_SLACK_LIVE_TASK_RELOCATION_SCRIPT = `
+local raw = redis.call('get', KEYS[1])
+if not raw then return 0 end
+local data = cjson.decode(raw)
+if data.messageTs ~= ARGV[1] then return 0 end
+data.relocationStopped = true
+redis.call('set', KEYS[1], cjson.encode(data), 'KEEPTTL')
+return 1
+`;
 
 export interface SlackLiveTaskStreamData {
   /** Workspace that owns the card; every update must use this team's bot token. */
@@ -36,6 +45,8 @@ export interface SlackLiveTaskStreamData {
   taskUrl?: string;
   /** Old canonical copy whose deletion failed after a successful handoff. */
   pendingOldMessageTs?: string;
+  /** Terminal cards remain registered only while an old duplicate needs cleanup. */
+  relocationStopped?: boolean;
 }
 
 // Keyed by task id: runs are replaced on snapshot resume, but the card in the
@@ -123,6 +134,20 @@ export async function clearSlackLiveTaskPendingCleanup(params: {
       getSlackLiveTaskStreamKey(params.taskId),
       params.currentMessageTs,
       params.oldMessageTs,
+    )) === 1
+  );
+}
+
+export async function stopSlackLiveTaskRelocation(params: {
+  taskId: string;
+  currentMessageTs: string;
+}): Promise<boolean> {
+  return (
+    (await getRedis().eval(
+      STOP_SLACK_LIVE_TASK_RELOCATION_SCRIPT,
+      1,
+      getSlackLiveTaskStreamKey(params.taskId),
+      params.currentMessageTs,
     )) === 1
   );
 }

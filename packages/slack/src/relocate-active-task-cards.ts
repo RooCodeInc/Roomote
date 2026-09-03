@@ -4,7 +4,10 @@ import {
   getSlackLiveTaskStreamData,
 } from './live-task-stream';
 import type { SlackNotifier } from './slack-notifier';
-import { getSlackThreadActiveTaskIds } from './thread-active-tasks';
+import {
+  getSlackThreadActiveTaskIds,
+  removeSlackThreadActiveTaskByTaskId,
+} from './thread-active-tasks';
 
 type RelocationSlack = Pick<
   SlackNotifier,
@@ -48,6 +51,11 @@ export async function relocateSlackThreadActiveTaskCards(params: {
           // Keep the single cleanup pointer until this duplicate is gone.
           continue;
         }
+      }
+
+      if (data.relocationStopped) {
+        await removeSlackThreadActiveTaskByTaskId(taskId);
+        continue;
       }
 
       const rawMessage = await params.slack.getRawMessage({

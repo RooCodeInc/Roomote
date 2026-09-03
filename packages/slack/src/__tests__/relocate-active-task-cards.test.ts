@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getTaskIds: vi.fn(),
+  removeTask: vi.fn(),
   getData: vi.fn(),
   casMessageTs: vi.fn(),
   clearPendingCleanup: vi.fn(),
@@ -9,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../thread-active-tasks', () => ({
   getSlackThreadActiveTaskIds: mocks.getTaskIds,
+  removeSlackThreadActiveTaskByTaskId: mocks.removeTask,
 }));
 vi.mock('../live-task-stream', () => ({
   getSlackLiveTaskStreamData: mocks.getData,
@@ -85,6 +87,7 @@ describe('relocateSlackThreadActiveTaskCards', () => {
     mocks.getData.mockResolvedValue(cardData());
     mocks.casMessageTs.mockResolvedValue(true);
     mocks.clearPendingCleanup.mockResolvedValue(true);
+    mocks.removeTask.mockResolvedValue({});
   });
 
   it('reposts the exact canonical payload, hands off the pointer, then deletes the old card', async () => {
@@ -211,6 +214,29 @@ describe('relocateSlackThreadActiveTaskCards', () => {
       channel: 'C1',
       ts: 'old-ts',
     });
+    expect(slack.getRawMessage).not.toHaveBeenCalled();
+    expect(slack.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('cleans a terminal pending duplicate without relocating the terminal card', async () => {
+    mocks.getData.mockResolvedValue({
+      ...cardData('task-1', 'new-ts'),
+      pendingOldMessageTs: 'old-ts',
+      relocationStopped: true,
+    });
+    const slack = slackMock();
+
+    await relocateSlackThreadActiveTaskCards({
+      slack: slack as never,
+      channel: 'C1',
+      threadTs: 'root-ts',
+    });
+
+    expect(slack.deleteMessage).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: 'old-ts',
+    });
+    expect(mocks.removeTask).toHaveBeenCalledWith('task-1');
     expect(slack.getRawMessage).not.toHaveBeenCalled();
     expect(slack.postMessage).not.toHaveBeenCalled();
   });
