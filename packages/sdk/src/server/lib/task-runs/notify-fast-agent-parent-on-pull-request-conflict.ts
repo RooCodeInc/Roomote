@@ -11,14 +11,12 @@ import {
   type SourceControlProvider,
 } from '@roomote/types';
 
-import {
-  deliverFastAgentParentEvent,
-  type FastAgentPullRequestContext,
-} from '../fast-agent-parent-event';
+import { type FastAgentPullRequestContext } from '../fast-agent-parent-event';
+import { enqueueFastAgentParentEventAndWait } from '../fast-agent-parent-event-queue';
 import { deliverFastAgentParentPrEvent } from './deliver-fast-agent-parent-pr-event';
 import { buildPullRequestConflictMessage } from './pull-request-mergeability-check';
 
-const PR_CONFLICT_DELIVERY_LOCK_WAIT_MS = 30_000;
+const PR_CONFLICT_DELIVERY_WAIT_TIMEOUT_MS = 30_000;
 
 function buildNotifiedResultKey(params: {
   prUrl: string;
@@ -66,28 +64,30 @@ export async function notifyFastAgentParentOnPullRequestConflict(params: {
     deliveryKey,
     logPrefix: 'notifyFastAgentParentOnPullRequestConflict',
     deliver: () =>
-      deliverFastAgentParentEvent({
-        parent,
-        event: {
-          type: 'pull_request_conflict_detected',
-          taskId: params.run.taskId,
-          runId: params.run.id,
-          taskUrl: getTaskUrl({
+      enqueueFastAgentParentEventAndWait(
+        {
+          parent,
+          event: {
+            type: 'pull_request_conflict_detected',
             taskId: params.run.taskId,
-            utm: {
-              source: parent.conversation.surface,
-              campaign: 'fast-delegation-pr-conflict',
-            },
-          }),
-          pullRequest,
-          conflictDetectedAt: params.conflictDetectedAt.toISOString(),
-          message: buildPullRequestConflictMessage({
-            title: params.pullRequest.title,
-            url: params.pullRequest.url,
-          }),
+            runId: params.run.id,
+            taskUrl: getTaskUrl({
+              taskId: params.run.taskId,
+              utm: {
+                source: parent.conversation.surface,
+                campaign: 'fast-delegation-pr-conflict',
+              },
+            }),
+            pullRequest,
+            conflictDetectedAt: params.conflictDetectedAt.toISOString(),
+            message: buildPullRequestConflictMessage({
+              title: params.pullRequest.title,
+              url: params.pullRequest.url,
+            }),
+          },
         },
-        lockWaitMs: PR_CONFLICT_DELIVERY_LOCK_WAIT_MS,
-      }),
+        { timeoutMs: PR_CONFLICT_DELIVERY_WAIT_TIMEOUT_MS },
+      ),
     recordLifecycle: () =>
       recordTaskRunLifecycleEvent(db, {
         runId: params.run.id,

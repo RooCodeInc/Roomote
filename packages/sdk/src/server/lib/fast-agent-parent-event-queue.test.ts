@@ -124,6 +124,7 @@ import {
   buildFastAgentParentEventKey,
   drainFastAgentParentEvents,
   enqueueFastAgentParentEvent,
+  enqueueFastAgentParentEventAndWait,
   enqueueFastAgentParentEventForRun,
   FastAgentParentBusyError,
   recoverPendingFastAgentParentEvents,
@@ -232,6 +233,63 @@ describe('Fast parent event durable queue', () => {
 
     expect(mocks.insertOnConflict).toHaveBeenCalledOnce();
     expect(mocks.queueAdd).toHaveBeenCalledOnce();
+  });
+
+  it('waits for a durably admitted event to reach its delivered state', async () => {
+    mocks.findPending.mockResolvedValueOnce({
+      deliveredAt: new Date(),
+      discardedAt: null,
+    });
+
+    await expect(
+      enqueueFastAgentParentEventAndWait(
+        { parent, event },
+        { timeoutMs: 30_000 },
+      ),
+    ).resolves.toBe('delivered');
+
+    expect(mocks.insertOnConflict).toHaveBeenCalledOnce();
+    expect(mocks.queueAdd).toHaveBeenCalledOnce();
+  });
+
+  it('reports a durably admitted event discarded by the queue as skipped', async () => {
+    mocks.findPending.mockResolvedValueOnce({
+      deliveredAt: null,
+      discardedAt: new Date(),
+    });
+
+    await expect(
+      enqueueFastAgentParentEventAndWait(
+        { parent, event },
+        { timeoutMs: 30_000 },
+      ),
+    ).resolves.toBe('skipped');
+  });
+
+  it('times out without withdrawing the durable event', async () => {
+    vi.useFakeTimers();
+    mocks.findPending.mockResolvedValue({
+      deliveredAt: null,
+      discardedAt: null,
+    });
+
+    try {
+      const delivery = enqueueFastAgentParentEventAndWait(
+        { parent, event },
+        { timeoutMs: 100, pollIntervalMs: 25 },
+      );
+      const rejected = expect(delivery).rejects.toMatchObject({
+        message:
+          'Timed out waiting for the queued Fast parent event to be delivered.',
+        replyPosted: false,
+      });
+      await vi.advanceTimersByTimeAsync(100);
+
+      await rejected;
+      expect(mocks.insertOnConflict).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('builds a stable BullMQ-safe idempotency key', () => {

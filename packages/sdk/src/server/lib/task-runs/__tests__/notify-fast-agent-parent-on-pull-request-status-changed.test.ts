@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
     recordLifecycle: vi.fn(),
     deliverParentEvent: vi.fn(),
     enqueueParentEvent: vi.fn(),
+    enqueueParentEventAndWait: vi.fn(),
     getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
     FastAgentParentEventDeliveryError,
   };
@@ -69,6 +70,7 @@ vi.mock('../../fast-agent-parent-event', () => ({
 
 vi.mock('../../fast-agent-parent-event-queue', () => ({
   enqueueFastAgentParentEvent: mocks.enqueueParentEvent,
+  enqueueFastAgentParentEventAndWait: mocks.enqueueParentEventAndWait,
 }));
 
 import { notifyFastAgentParentOnPullRequestStatusChanged } from '../notify-fast-agent-parent-on-pull-request-status-changed';
@@ -115,6 +117,7 @@ describe('notifyFastAgentParentOnPullRequestStatusChanged', () => {
       eventKey: 'pr-status-event',
       queued: true,
     });
+    mocks.enqueueParentEventAndWait.mockResolvedValue('delivered');
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
 
@@ -177,7 +180,7 @@ describe('notifyFastAgentParentOnPullRequestConflict', () => {
     vi.clearAllMocks();
     mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
     mocks.findClaimRun.mockResolvedValue({ id: 200 });
-    mocks.deliverParentEvent.mockResolvedValue('delivered');
+    mocks.enqueueParentEventAndWait.mockResolvedValue('delivered');
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
 
@@ -197,21 +200,23 @@ describe('notifyFastAgentParentOnPullRequestConflict', () => {
     });
 
     expect(delivered).toBe(true);
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith({
-      parent: fastParent,
-      lockWaitMs: 30_000,
-      event: expect.objectContaining({
-        type: 'pull_request_conflict_detected',
-        taskId: 'child-task',
-        runId: 200,
-        conflictDetectedAt: conflictDetectedAt.toISOString(),
-        message:
-          '[Fix review feedback](https://github.com/acme/web/pull/42) now has merge conflicts. Update the branch or ask Roomote to resolve them.',
-        pullRequest: expect.objectContaining({
-          repository: 'acme/web',
-          number: 42,
+    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledWith(
+      {
+        parent: fastParent,
+        event: expect.objectContaining({
+          type: 'pull_request_conflict_detected',
+          taskId: 'child-task',
+          runId: 200,
+          conflictDetectedAt: conflictDetectedAt.toISOString(),
+          message:
+            '[Fix review feedback](https://github.com/acme/web/pull/42) now has merge conflicts. Update the branch or ask Roomote to resolve them.',
+          pullRequest: expect.objectContaining({
+            repository: 'acme/web',
+            number: 42,
+          }),
         }),
-      }),
-    });
+      },
+      { timeoutMs: 30_000 },
+    );
   });
 });

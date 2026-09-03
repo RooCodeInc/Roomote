@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => {
     findClaimRun: vi.fn(),
     updateSet: vi.fn(),
     recordLifecycle: vi.fn(),
-    deliverParentEvent: vi.fn(),
+    enqueueParentEventAndWait: vi.fn(),
     getTaskUrl: vi.fn(
       ({ taskId }: { taskId: string }) =>
         `https://roomote.example/task/${taskId}`,
@@ -73,8 +73,11 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('../../fast-agent-parent-event', () => ({
-  deliverFastAgentParentEvent: mocks.deliverParentEvent,
   FastAgentParentEventDeliveryError: mocks.FastAgentParentEventDeliveryError,
+}));
+
+vi.mock('../../fast-agent-parent-event-queue', () => ({
+  enqueueFastAgentParentEventAndWait: mocks.enqueueParentEventAndWait,
 }));
 
 import { notifyFastAgentParentOnPrFeedback } from '../notify-fast-agent-parent-on-pr-feedback';
@@ -148,7 +151,7 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
       runId: 200,
     });
     mocks.findClaimRun.mockResolvedValue({ id: 200 });
-    mocks.deliverParentEvent.mockResolvedValue('delivered');
+    mocks.enqueueParentEventAndWait.mockResolvedValue('delivered');
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
 
@@ -160,21 +163,23 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
       }),
     ).resolves.toBe(true);
 
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith({
-      parent: fastParent,
-      lockWaitMs: 30_000,
-      event: {
-        type: 'pull_request_feedback',
-        feedbackId: expect.stringMatching(/^[a-f0-9]{24}$/),
-        taskId: 'child-task',
-        runId: 200,
-        taskUrl: 'https://roomote.example/task/child-task',
-        pullRequest: input.pullRequest,
-        summary: input.summary,
-        suggestedActionQuestion: input.suggestedActionQuestion,
-        suggestedActionPrompt: input.suggestedActionPrompt,
+    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledWith(
+      {
+        parent: fastParent,
+        event: {
+          type: 'pull_request_feedback',
+          feedbackId: expect.stringMatching(/^[a-f0-9]{24}$/),
+          taskId: 'child-task',
+          runId: 200,
+          taskUrl: 'https://roomote.example/task/child-task',
+          pullRequest: input.pullRequest,
+          summary: input.summary,
+          suggestedActionQuestion: input.suggestedActionQuestion,
+          suggestedActionPrompt: input.suggestedActionPrompt,
+        },
       },
-    });
+      { timeoutMs: 30_000 },
+    );
     expect(mocks.recordLifecycle).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -194,7 +199,7 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
       }),
     ).resolves.toBe(false);
 
-    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
+    expect(mocks.enqueueParentEventAndWait).not.toHaveBeenCalled();
   });
 
   it('uses the same feedback identity regardless of source event order', async () => {
@@ -211,7 +216,7 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
     });
 
     expect(claimedFeedbackIds()[1]).toBe(claimedFeedbackIds()[0]);
-    expect(mocks.deliverParentEvent).toHaveBeenCalledOnce();
+    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledOnce();
   });
 
   it('uses stable source events instead of generated summary text for fallback identity', async () => {
@@ -230,7 +235,7 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
     });
 
     expect(claimedFeedbackIds()[1]).toBe(claimedFeedbackIds()[0]);
-    expect(mocks.deliverParentEvent).toHaveBeenCalledOnce();
+    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledOnce();
   });
 
   it('delivers once across linked tasks sharing a conversation', async () => {
@@ -250,7 +255,7 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
     await notifyFastAgentParentOnPrFeedback({ run: olderRun, ...input });
     await notifyFastAgentParentOnPrFeedback({ run: newerRun, ...input });
 
-    expect(mocks.deliverParentEvent).toHaveBeenCalledOnce();
+    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledOnce();
     expect(mocks.claimConversationDelivery).toHaveBeenCalledTimes(2);
   });
 
@@ -272,8 +277,8 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
       }),
     ).resolves.toBe(true);
 
-    expect(mocks.deliverParentEvent).toHaveBeenCalledOnce();
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
+    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledOnce();
+    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
           taskId: 'newer-task',
@@ -281,6 +286,7 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
           taskUrl: 'https://roomote.example/task/newer-task',
         }),
       }),
+      { timeoutMs: 30_000 },
     );
   });
 
@@ -294,7 +300,7 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
       ...input,
     });
 
-    expect(mocks.deliverParentEvent).toHaveBeenCalledOnce();
+    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledOnce();
     expect(mocks.completeConversationDelivery).not.toHaveBeenCalled();
   });
 
@@ -316,7 +322,7 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
     });
 
     expect(claimedFeedbackIds()[1]).toBe(claimedFeedbackIds()[0]);
-    expect(mocks.deliverParentEvent).toHaveBeenCalledOnce();
+    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledOnce();
   });
 
   it('preserves structured terminal review metadata in the Fast event', async () => {
@@ -334,16 +340,17 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
       reviewResult,
     });
 
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
+    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({ reviewResult }),
       }),
+      { timeoutMs: 30_000 },
     );
   });
 
   it('does nothing for a task without a Fast parent', async () => {
     await notifyFastAgentParentOnPrFeedback({ run: makeRun({}), ...input });
 
-    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
+    expect(mocks.enqueueParentEventAndWait).not.toHaveBeenCalled();
   });
 });

@@ -9,10 +9,8 @@ import {
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 
-import {
-  FastAgentParentEventDeliveryError,
-  deliverFastAgentParentEvent,
-} from '../fast-agent-parent-event';
+import { FastAgentParentEventDeliveryError } from '../fast-agent-parent-event';
+import { enqueueFastAgentParentEventAndWait } from '../fast-agent-parent-event-queue';
 import {
   buildFastAgentDeliveringMarker,
   buildFastAgentDeliveryClaimPredicate,
@@ -27,9 +25,9 @@ export type FastArtifactNotificationResult =
   | 'skipped'
   | 'failed';
 
-/** Fail the turn-lock wait well below the worker's request timeout so the
- * caller can 503 and the worker's confirmUpload retry does the waiting. */
-const ARTIFACT_DELIVERY_LOCK_WAIT_MS = 30_000;
+/** Bound queue completion below the worker's request timeout so the caller can
+ * return 503 and let confirmUpload retry while durable delivery continues. */
+const ARTIFACT_DELIVERY_WAIT_TIMEOUT_MS = 30_000;
 
 function buildArtifactViewUrl(input: {
   taskId: string;
@@ -107,22 +105,28 @@ export async function notifyFastAgentParentOnArtifact(input: {
   let delivered = false;
 
   try {
-    await deliverFastAgentParentEvent({
-      parent,
-      event: {
-        type: 'artifact_published',
-        taskId: input.taskId,
-        runId: run.id,
-        artifact: {
-          id: input.id,
-          path: input.path,
-          version: input.version,
-          contentType: input.contentType,
-          viewUrl: buildArtifactViewUrl(input),
+    const delivery = await enqueueFastAgentParentEventAndWait(
+      {
+        parent,
+        event: {
+          type: 'artifact_published',
+          taskId: input.taskId,
+          runId: run.id,
+          artifact: {
+            id: input.id,
+            path: input.path,
+            version: input.version,
+            contentType: input.contentType,
+            viewUrl: buildArtifactViewUrl(input),
+          },
         },
       },
-      lockWaitMs: ARTIFACT_DELIVERY_LOCK_WAIT_MS,
-    });
+      { timeoutMs: ARTIFACT_DELIVERY_WAIT_TIMEOUT_MS },
+    );
+    if (delivery === 'skipped') {
+      await writeDeliveryMarker('skipped');
+      return 'skipped';
+    }
     delivered = true;
 
     await writeDeliveryMarker('delivered');
