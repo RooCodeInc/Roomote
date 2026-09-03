@@ -65,7 +65,6 @@ x-roomote-shared-env: &roomote-shared-env
   R_APP_URL: ${SERVICE_URL_WEB}
   R_PUBLIC_URL: ${SERVICE_URL_WEB}
   R_INSTANCE_ID: ${R_INSTANCE_ID:-}
-  R_SANDBOX_OPENROUTER_API_KEY: ${R_SANDBOX_OPENROUTER_API_KEY:-}
   TRPC_URL: ${SERVICE_URL_API}
   R_DISCORD_BOT_TOKEN: ${R_DISCORD_BOT_TOKEN:-}
   S3_ENDPOINT: http://minio:9000
@@ -290,6 +289,7 @@ services:
     networks: [default, docker-api]
     environment:
       <<: *roomote-shared-env
+      SANDBOX_OPENROUTER_API_KEY: ${SANDBOX_OPENROUTER_API_KEY:-}
       DOCKER_HOST: tcp://docker-proxy:2375
       # The worker release archive is baked into the app image; the
       # controller reads the worker release version from the VERSION file inside

@@ -467,7 +467,7 @@ describe('environmentConfigSchema', () => {
     {
       label: 'top-level env',
       config: {
-        env: { R_SANDBOX_OPENROUTER_API_KEY: 'must-not-be-stored' },
+        env: { SANDBOX_OPENROUTER_API_KEY: 'must-not-be-stored' },
       },
     },
     {
@@ -481,7 +481,7 @@ describe('environmentConfigSchema', () => {
                 name: 'start',
                 run: 'pnpm dev',
                 env: {
-                  R_SANDBOX_OPENROUTER_API_KEY: 'must-not-be-stored',
+                  SANDBOX_OPENROUTER_API_KEY: 'must-not-be-stored',
                 },
               },
             ],
@@ -498,7 +498,7 @@ describe('environmentConfigSchema', () => {
             repository: 'owner/repo',
             type: 'compose',
             files: ['compose.yml'],
-            env: { R_SANDBOX_OPENROUTER_API_KEY: 'must-not-be-stored' },
+            env: { SANDBOX_OPENROUTER_API_KEY: 'must-not-be-stored' },
           },
         ],
       },
@@ -509,7 +509,7 @@ describe('environmentConfigSchema', () => {
         mcpServers: {
           local: {
             command: 'node',
-            env: { R_SANDBOX_OPENROUTER_API_KEY: 'must-not-be-stored' },
+            env: { SANDBOX_OPENROUTER_API_KEY: 'must-not-be-stored' },
           },
         },
       },

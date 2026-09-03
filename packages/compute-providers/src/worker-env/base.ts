@@ -131,6 +131,7 @@ export function buildBaseWorkerEnv({
   authToken,
   sandboxExpiresAtMs,
   extraEnv,
+  environmentId,
 }: BuildWorkerEnvOptions): Record<string, string> {
   const previewProxyBaseUrl = process.env.PREVIEW_PROXY_BASE_URL;
 
@@ -181,5 +182,10 @@ export function buildBaseWorkerEnv({
     }),
     ...buildOperatorModelProviderEnv(),
     ...filterWorkerExtraEnv(extraEnv),
+    ...(environmentId &&
+      process.env[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME] && {
+        [SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME]:
+          process.env[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME],
+      }),
   };
 }

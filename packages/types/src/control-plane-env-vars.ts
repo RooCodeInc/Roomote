@@ -6,7 +6,7 @@ import {
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
 } from './model-provider-config';
-import { SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME } from './sandbox-openrouter';
+import { SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME } from './sandbox-preview-inference';
 
 /**
  * Per-repo source-control access tokens. A task legitimately receives the
@@ -155,8 +155,8 @@ export const CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set<string>(
     // Hosting-managed Roomote inference is served only through the inference
     // gateway, never configured through the generic environment editor.
     ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
-    // A dedicated capped key for nested Roomote preview deployments. The
-    // parent gateway serves it to run-scoped callers without exposing it.
+    // Launcher-only source for the capped key mapped into environment
+    // workspaces as OPENROUTER_API_KEY.
     SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   ],
 );

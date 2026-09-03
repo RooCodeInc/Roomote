@@ -202,9 +202,6 @@ services:
       # Settings after boot. Either works, and Settings needs no redeploy.
       R_BRAIN_OPENROUTER_API_KEY: ''
       R_BRAIN_OPENAI_API_KEY: ''
-      # Optional capped key for nested Roomote preview deployments. It remains
-      # on the parent API and is served only through run-scoped gateway calls.
-      R_SANDBOX_OPENROUTER_API_KEY: ''
       # Shared secret the Brain presents to /api/brain/inference. Never an
       # upstream provider key: the gateway swaps it for the configured one.
       R_BRAIN_GATEWAY_TOKEN: ${{secret(48)}}
@@ -302,6 +299,8 @@ services:
     public_domain: no
     env:
       <<: *app_service_env
+      # Optional capped OpenRouter key mapped into nested Roomote deployments.
+      SANDBOX_OPENROUTER_API_KEY: ''
       # The worker release archive is baked into the app image; the
       # controller uploads it into hosted sandboxes at spawn time.
       # The version-less name works because the controller reads the release

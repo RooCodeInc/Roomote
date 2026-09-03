@@ -122,6 +122,25 @@ describe('ecosystem.config.js', () => {
     });
   });
 
+  it('passes the preview inference launcher key only to the controller', () => {
+    process.env = {
+      ...originalEnv,
+      SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+    };
+
+    const apps = loadEcosystemApps();
+
+    expect(
+      apps.find((app) => app.name === 'roomote-controller')?.env
+        ?.SANDBOX_OPENROUTER_API_KEY,
+    ).toBe('sandbox-openrouter-key');
+    expect(
+      apps
+        .filter((app) => app.name !== 'roomote-controller')
+        .every((app) => app.env?.SANDBOX_OPENROUTER_API_KEY === undefined),
+    ).toBe(true);
+  });
+
   it('uses R_PUBLIC_URL as the local app callback base', () => {
     process.env = {
       ...originalEnv,
