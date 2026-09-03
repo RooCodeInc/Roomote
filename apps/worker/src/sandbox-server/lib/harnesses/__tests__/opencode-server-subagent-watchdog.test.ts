@@ -1072,6 +1072,47 @@ describe('OpenCode visual proof deadline', () => {
     }
   });
 
+  it('clears proof attempt state after a terminal provider error', async () => {
+    const client = new FakeOpenCodeServerClient();
+    const { harness } = createHarness(client, {
+      visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+    });
+
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part: createSkillToolPart('capture-visual-proof') },
+      });
+
+      await expect(
+        fs.readFile(VISUAL_PROOF_ATTEMPT_STATE_PATH, 'utf8'),
+      ).resolves.toContain('attemptId');
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'APIError',
+            data: {
+              message: 'Provider rejected the request.',
+              statusCode: 403,
+              isRetryable: false,
+            },
+          },
+        },
+      });
+
+      await expect(
+        fs.readFile(VISUAL_PROOF_ATTEMPT_STATE_PATH, 'utf8'),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('does not reset the deadline for a delegated capture retry', async () => {
     const client = new FakeOpenCodeServerClient();
     const { harness } = createHarness(client, {

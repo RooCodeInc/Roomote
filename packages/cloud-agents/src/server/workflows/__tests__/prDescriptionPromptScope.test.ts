@@ -189,14 +189,18 @@ describe('PR description prompt scope', () => {
       fixPrSkill,
     ]) {
       expect(skillContent).toContain(
-        'read `/tmp/roomote-visual-proof-attempt.json`, then call the Roomote MCP tool `mcp__roomote__manage_artifacts` with `action: "list"` and `artifactType: "visual-proof"`',
+        'read the actual `attemptId` value from `/tmp/roomote-visual-proof-attempt.json`, then call the Roomote MCP tool `mcp__roomote__manage_artifacts` with `action: "list"` and `artifactType: "visual-proof"`',
       );
       expect(skillContent).toContain(
-        'only listed artifacts whose path starts with `tmp/capture-visual-proof/&lt;attemptId&gt;/` belong to that attempt',
+        'Build the expected artifact path prefix by appending that value and a trailing slash to `tmp/capture-visual-proof/`.',
       );
       expect(skillContent).toContain(
         'use those records to recover uploads after a lost child result and refresh their signed URLs',
       );
+      expect(skillContent).not.toMatch(
+        /(?:&(?:amp;)?lt;|&#0*60;|&#x0*3c;)attemptId(?:&(?:amp;)?gt;|&#0*62;|&#x0*3e;)/i,
+      );
+      expect(skillContent).not.toContain('<attemptId>');
       expect(skillContent).toContain(
         'delete `/tmp/roomote-visual-proof-attempt.json`',
       );

@@ -42,20 +42,19 @@ describe('Capture visual proof skill', () => {
 
   it('keeps browser output out of the transcript and leaves image review to the judge', () => {
     expect(skillContent).toContain(
-      'save captures under `/tmp/capture-visual-proof/&lt;attemptId&gt;/`',
+      'The capture directory is `/tmp/capture-visual-proof/` plus that value and a trailing slash',
     );
-    expect(skillContent).toContain(
-      'Never print or read image bytes; the judge reviews them.',
-    );
+    expect(skillContent).toContain('Never print or read image bytes.');
   });
 
   it('uses attempt-scoped artifact paths for timeout recovery', () => {
     expect(skillContent).toContain('/tmp/roomote-visual-proof-attempt.json');
-    expect(skillContent).toContain(
-      '/tmp/capture-visual-proof/&lt;attemptId&gt;/',
+    expect(skillContent).not.toMatch(
+      /(?:&(?:amp;)?lt;|&#0*60;|&#x0*3c;)attemptId(?:&(?:amp;)?gt;|&#0*62;|&#x0*3e;)/i,
     );
+    expect(skillContent).not.toContain('<attemptId>');
     expect(skillContent).toContain(
-      'so timeout recovery identifies current uploads',
+      'save all captures there for timeout recovery',
     );
     expect(skillContent).toContain(
       'Invalid state means `proof runtime unavailable`; do not upload.',
