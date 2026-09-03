@@ -135,7 +135,7 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
         <div
           className={`md:hidden sticky top-0 ${zIndex('NAV_HEADER')} w-full bg-card`}
         >
-          <NavbarHeader />
+          <NavbarHeader setupIncomplete={setupRedirectPath !== null} />
         </div>
 
         <div className="flex min-h-0 flex-1">

@@ -138,8 +138,8 @@ export const SideNav = ({
       .filter((session): session is NonNullable<typeof session> => !!session);
   }, [recentSessionIdsForQuery, recentSessionsResult?.sessions]);
   const visibleNavItems = useMemo(
-    () => getVisiblePrimaryNavItems({ isAdmin }),
-    [isAdmin],
+    () => getVisiblePrimaryNavItems({ isAdmin, setupIncomplete }),
+    [isAdmin, setupIncomplete],
   );
 
   return (
@@ -226,12 +226,6 @@ export const SideNav = ({
               href={href}
               tooltip={label}
               description={description}
-              disabled={
-                setupIncomplete &&
-                (href === '/' ||
-                  href === '/automations' ||
-                  href === '/analytics')
-              }
               expanded={isSideNavExpanded}
               active={
                 matchExact

@@ -13,11 +13,20 @@ import { UserMenu } from '../UserMenu';
 
 import { NavbarDrawer } from './NavbarDrawer';
 
-type NavbarHeaderProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'children'>;
+type NavbarHeaderProps = Omit<
+  React.HTMLAttributes<HTMLDivElement>,
+  'children'
+> & {
+  setupIncomplete?: boolean;
+};
 
 const MOBILE_HEADER_LOGO_SRC = '/logos/r.svg';
 
-export const NavbarHeader = ({ className, ...props }: NavbarHeaderProps) => {
+export const NavbarHeader = ({
+  className,
+  setupIncomplete = false,
+  ...props
+}: NavbarHeaderProps) => {
   const { setOpen: openCommandPalette } = useCommandPalette();
   useAuthorizedUser();
 
@@ -29,7 +38,7 @@ export const NavbarHeader = ({ className, ...props }: NavbarHeaderProps) => {
       )}
       {...props}
     >
-      <NavbarDrawer />
+      <NavbarDrawer setupIncomplete={setupIncomplete} />
       <Link href="/" className="shrink-0">
         <Image
           src={MOBILE_HEADER_LOGO_SRC}

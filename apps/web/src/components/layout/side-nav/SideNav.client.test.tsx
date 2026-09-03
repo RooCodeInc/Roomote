@@ -491,21 +491,12 @@ describe('SideNav recent sessions', () => {
     expect(screen.queryByTestId('nav-/automations')).not.toBeInTheDocument();
   });
 
-  it('disables inaccessible destinations during setup while keeping Settings enabled', () => {
+  it('hides inaccessible destinations during setup while keeping Settings enabled', () => {
     render(<SideNav setupIncomplete />);
 
-    expect(screen.getByTestId('nav-/')).toHaveAttribute(
-      'data-disabled',
-      'true',
-    );
-    expect(screen.getByTestId('nav-/automations')).toHaveAttribute(
-      'data-disabled',
-      'true',
-    );
-    expect(screen.getByTestId('nav-/analytics')).toHaveAttribute(
-      'data-disabled',
-      'true',
-    );
+    expect(screen.queryByTestId('nav-/')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('nav-/automations')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('nav-/analytics')).not.toBeInTheDocument();
     expect(screen.getByTestId('nav-/sessions')).toHaveAttribute(
       'data-disabled',
       'false',
