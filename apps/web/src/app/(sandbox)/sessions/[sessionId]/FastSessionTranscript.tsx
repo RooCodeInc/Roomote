@@ -34,7 +34,10 @@ import {
   MessageUiOptionsProvider,
   Shimmer,
 } from '@/components/ai-elements';
-import { SlackMentionProvider } from '@/components/ai-elements/slack-mention-context';
+import {
+  SlackMentionProvider,
+  type SlackMentionScope,
+} from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
 import {
   SessionPromptInput,
@@ -283,7 +286,6 @@ export function FastSessionTranscript({
   owner,
   headerExtras,
   timelineExtras,
-  slackTeamId = null,
 }: {
   sessionId: string;
   initialMessages: FastSessionMessage[];
@@ -298,8 +300,6 @@ export function FastSessionTranscript({
   owner?: TranscriptOwner;
   headerExtras?: ReactNode;
   timelineExtras?: ReactNode;
-  /** Slack team the session's raw `<@U…>` mention tokens belong to. */
-  slackTeamId?: string | null;
 }) {
   const trpcClient = useTRPCClient();
   const openTaskPanel = useOpenSessionTaskPanel();
@@ -308,6 +308,10 @@ export function FastSessionTranscript({
   const taskStateRevision = useSessionTaskStateRevision();
   const { enabled: narrationModeEnabled } = useNarrationMode();
   const displayMode = narrationModeEnabled ? 'narration' : 'default';
+  const slackMentionScope = useMemo<SlackMentionScope>(
+    () => ({ kind: 'session', sessionId }),
+    [sessionId],
+  );
   const [serverMessages, setServerMessages] = useState<
     Map<string, TranscriptMessage>
   >(
@@ -739,7 +743,7 @@ export function FastSessionTranscript({
     <MessageUiOptionsProvider
       value={{ displayMode, hidePrReviewActions: true }}
     >
-      <SlackMentionProvider slackTeamId={slackTeamId}>
+      <SlackMentionProvider scope={slackMentionScope}>
         <WorkspaceHeader
           className="py-4.25"
           contentClassName={SESSION_HEADER_CONTENT_CLASS_NAME}

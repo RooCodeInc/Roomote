@@ -7,7 +7,7 @@ const resolveUsersState = vi.hoisted(() => ({
   data: undefined as
     | { users: Record<string, { name: string; profileUrl: string | null }> }
     | undefined,
-  lastInput: null as { teamId: string | null; userIds: string[] } | null,
+  lastInput: null as { scope: unknown; userIds: string[] } | null,
   lastEnabled: null as boolean | null,
 }));
 
@@ -22,7 +22,7 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     slack: {
       resolveUsers: {
-        queryOptions: (input: { teamId: string | null; userIds: string[] }) => {
+        queryOptions: (input: { scope: unknown; userIds: string[] }) => {
           resolveUsersState.lastInput = input;
           return { queryKey: ['slack.resolveUsers', input] };
         },
@@ -57,7 +57,7 @@ describe('SlackMessageText', () => {
     };
 
     render(
-      <SlackMentionProvider slackTeamId="T123">
+      <SlackMentionProvider scope={{ kind: 'session', sessionId: 'session-1' }}>
         <SlackMessageText text="<@U0BJNE7FC12> determine why the link fails" />
       </SlackMentionProvider>,
     );
@@ -73,16 +73,27 @@ describe('SlackMessageText', () => {
       screen.getByText(/determine why the link fails/),
     ).toBeInTheDocument();
     expect(resolveUsersState.lastInput).toEqual({
-      teamId: 'T123',
+      scope: { kind: 'session', sessionId: 'session-1' },
       userIds: ['U0BJNE7FC12'],
     });
     expect(resolveUsersState.lastEnabled).toBe(true);
   });
 
+  it('does not query without a transcript scope', () => {
+    render(<SlackMessageText text="<@U1> hi" />);
+
+    expect(resolveUsersState.lastEnabled).toBe(false);
+    expect(screen.getByTestId('slack-mention')).toHaveTextContent('@U1');
+  });
+
   it('caps the lookup at the resolver limit and leaves overflow raw', () => {
     const text = Array.from({ length: 60 }, (_, i) => `<@U${i}>`).join(' ');
 
-    render(<SlackMessageText text={text} />);
+    render(
+      <SlackMentionProvider scope={{ kind: 'task', taskId: 'task-1' }}>
+        <SlackMessageText text={text} />
+      </SlackMentionProvider>,
+    );
 
     expect(resolveUsersState.lastInput?.userIds).toHaveLength(50);
     expect(screen.getAllByTestId('slack-mention')).toHaveLength(60);

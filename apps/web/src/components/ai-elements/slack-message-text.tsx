@@ -95,11 +95,14 @@ export function SlackMessageText({ text }: { text: string }) {
       extractSlackUserMentionIds(text).slice(0, SLACK_RESOLVE_USERS_MAX_IDS),
     [text],
   );
-  const { slackTeamId } = useSlackMentionContext();
+  const { scope } = useSlackMentionContext();
   const trpc = useTRPC();
   const { data } = useQuery({
-    ...trpc.slack.resolveUsers.queryOptions({ teamId: slackTeamId, userIds }),
-    enabled: userIds.length > 0,
+    ...trpc.slack.resolveUsers.queryOptions({
+      scope: scope ?? { kind: 'task', taskId: '' },
+      userIds,
+    }),
+    enabled: scope !== null && userIds.length > 0,
     staleTime: 10 * 60 * 1000,
   });
   const users = data?.users ?? {};

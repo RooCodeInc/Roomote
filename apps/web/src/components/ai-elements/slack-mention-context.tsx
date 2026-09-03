@@ -2,13 +2,20 @@
 
 import { createContext, useContext, type ReactNode } from 'react';
 
+/**
+ * Transcript a Slack mention belongs to. The server derives the Slack team
+ * from this resource; the browser never names a workspace directly.
+ */
+export type SlackMentionScope =
+  | { kind: 'task'; taskId: string }
+  | { kind: 'session'; sessionId: string };
+
 interface SlackMentionContextValue {
-  /** Slack team the surrounding transcript came from, when known. */
-  slackTeamId: string | null;
+  scope: SlackMentionScope | null;
 }
 
 const DEFAULT_SLACK_MENTION_CONTEXT: SlackMentionContextValue = {
-  slackTeamId: null,
+  scope: null,
 };
 
 const SlackMentionContext = createContext<SlackMentionContextValue>(
@@ -16,18 +23,18 @@ const SlackMentionContext = createContext<SlackMentionContextValue>(
 );
 
 /**
- * Tells transcript messages which Slack workspace their raw `<@U…>` mention
+ * Tells transcript messages which task or session their raw `<@U…>` mention
  * tokens belong to so they can be resolved to names and profile links.
  */
 export function SlackMentionProvider({
   children,
-  slackTeamId,
+  scope,
 }: {
   children: ReactNode;
-  slackTeamId: string | null | undefined;
+  scope: SlackMentionScope | null | undefined;
 }) {
   return (
-    <SlackMentionContext.Provider value={{ slackTeamId: slackTeamId ?? null }}>
+    <SlackMentionContext.Provider value={{ scope: scope ?? null }}>
       {children}
     </SlackMentionContext.Provider>
   );

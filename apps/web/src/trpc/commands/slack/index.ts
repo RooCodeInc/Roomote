@@ -3,7 +3,11 @@ import {
   enqueueSlackAccountLinkEducation,
   recordSlackConversationMessageBestEffort,
 } from '@roomote/sdk/server';
-import { PRODUCT_NAME, buildSlackUserProfileUrl } from '@roomote/types';
+import {
+  PRODUCT_NAME,
+  buildSlackUserProfileUrl,
+  getSlackTeamIdFromTaskPayload,
+} from '@roomote/types';
 import {
   type SlackAuthToken,
   type SlackInstallation,
@@ -24,6 +28,8 @@ import {
 
 import type { UserAuthSuccess } from '@/types';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
+import { findAccessibleFastSession } from '@/lib/server/fast-sessions';
+import { getLatestTaskRunsByTaskId } from '@/lib/server/task-runs';
 import { getSlackRedirectUri } from '@/lib/server/slack-redirect-uri';
 import { syncUser } from '@/lib/server/sync-internal';
 import { buildSlackInstallUrl } from '@/lib/slack-install-url';
@@ -815,7 +821,32 @@ export async function completePendingSlackAuthenticationCommand(
   }
 }
 
-const SLACK_USER_ID_PATTERN = /^[UW][A-Z0-9]{2,}$/;
+const SLACK_USER_ID_PATTERN = /^[UW][A-Z0-9]+$/;
+
+/**
+ * Slack team a transcript belongs to, derived server-side from the task run
+ * payload or the Fast conversation so the browser never chooses which
+ * workspace's directory and bot token answer a lookup.
+ */
+async function resolveSlackMentionScopeTeamId(
+  auth: UserAuthSuccess,
+  scope:
+    | { kind: 'task'; taskId: string }
+    | { kind: 'session'; sessionId: string },
+): Promise<string | null> {
+  if (scope.kind === 'session') {
+    const session = await findAccessibleFastSession(
+      { userId: auth.userId, isAdmin: auth.isAdmin },
+      scope.sessionId,
+    );
+    return session?.surface === 'slack' ? (session.workspaceId ?? null) : null;
+  }
+
+  const taskRun = (await getLatestTaskRunsByTaskId([scope.taskId]))[
+    scope.taskId
+  ];
+  return taskRun ? getSlackTeamIdFromTaskPayload(taskRun.payload) : null;
+}
 
 /**
  * Resolves raw Slack user IDs referenced by `<@U…>` tokens in persisted
@@ -825,8 +856,13 @@ const SLACK_USER_ID_PATTERN = /^[UW][A-Z0-9]{2,}$/;
  * are omitted so the caller can fall back to the raw token.
  */
 export async function resolveSlackUsersCommand(
-  _auth: UserAuthSuccess,
-  input: { teamId?: string | null; userIds: string[] },
+  auth: UserAuthSuccess,
+  input: {
+    scope:
+      | { kind: 'task'; taskId: string }
+      | { kind: 'session'; sessionId: string };
+    userIds: string[];
+  },
 ): Promise<{
   users: Record<string, { name: string; profileUrl: string | null }>;
 }> {
@@ -842,23 +878,24 @@ export async function resolveSlackUsersCommand(
     return { users };
   }
 
-  const teamId = input.teamId?.trim() || null;
+  const teamId = await resolveSlackMentionScopeTeamId(auth, input.scope);
+  if (!teamId) {
+    return { users };
+  }
+
   const installation =
     (await db.query.slackInstallations.findFirst({
-      where: teamId
-        ? and(
-            eq(slackInstallations.isActive, true),
-            eq(slackInstallations.teamId, teamId),
-          )
-        : eq(slackInstallations.isActive, true),
+      where: and(
+        eq(slackInstallations.isActive, true),
+        eq(slackInstallations.teamId, teamId),
+      ),
       orderBy: [desc(slackInstallations.updatedAt)],
     })) ?? null;
-  const resolvedTeamId = installation?.teamId ?? teamId;
   const teamDomain = installation?.teamDomain ?? null;
   const toProfileUrl = (slackUserId: string) =>
     buildSlackUserProfileUrl({
       slackUserId,
-      slackTeamId: resolvedTeamId,
+      slackTeamId: teamId,
       slackWorkspaceDomain: teamDomain,
     });
 
@@ -874,7 +911,7 @@ export async function resolveSlackUsersCommand(
   }
 
   const unresolvedAfterBot = userIds.filter((userId) => !users[userId]);
-  if (unresolvedAfterBot.length > 0 && resolvedTeamId) {
+  if (unresolvedAfterBot.length > 0) {
     const directoryRows = await db
       .select({
         slackUserId: slackDirectoryUsers.slackUserId,
@@ -885,7 +922,7 @@ export async function resolveSlackUsersCommand(
       .from(slackDirectoryUsers)
       .where(
         and(
-          eq(slackDirectoryUsers.slackTeamId, resolvedTeamId),
+          eq(slackDirectoryUsers.slackTeamId, teamId),
           inArray(slackDirectoryUsers.slackUserId, unresolvedAfterBot),
         ),
       );

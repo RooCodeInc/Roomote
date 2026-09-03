@@ -8,7 +8,6 @@ import {
   type MutableRefObject,
 } from 'react';
 import type { ScrollToBottom } from 'use-stick-to-bottom';
-import { getSlackTeamIdFromTaskPayload } from '@roomote/types';
 
 import {
   Conversation,
@@ -22,7 +21,10 @@ import {
   MessageUiOptionsProvider,
   type MessageUiOptions,
 } from '@/components/ai-elements/message-ui-options';
-import { SlackMentionProvider } from '@/components/ai-elements/slack-mention-context';
+import {
+  SlackMentionProvider,
+  type SlackMentionScope,
+} from '@/components/ai-elements/slack-mention-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { useMindReaderMode } from '@/hooks/useMindReaderMode';
 import { Lightbulb, Skeleton } from '@/components/system';
@@ -163,11 +165,14 @@ const MessagesBase = ({
     taskPhase === 'running' &&
     !hasVisibleAssistantOutput(renderBlocks);
 
-  const slackTeamId = getSlackTeamIdFromTaskPayload(session.taskRun?.payload);
+  const slackMentionScope = useMemo<SlackMentionScope>(
+    () => ({ kind: 'task', taskId: session.taskId }),
+    [session.taskId],
+  );
 
   return (
     <MessageUiOptionsProvider value={resolvedMessageUiOptions}>
-      <SlackMentionProvider slackTeamId={slackTeamId}>
+      <SlackMentionProvider scope={slackMentionScope}>
         <Conversation
           className="min-h-0 flex-1"
           initial={hasAnchor ? false : initialScrollBehavior}

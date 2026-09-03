@@ -1360,7 +1360,16 @@ export const appRouter = createRouter({
     resolveUsers: protectedProcedure
       .input(
         z.object({
-          teamId: z.string().trim().max(64).nullable().optional(),
+          scope: z.discriminatedUnion('kind', [
+            z.object({
+              kind: z.literal('task'),
+              taskId: z.string().trim().min(1).max(64),
+            }),
+            z.object({
+              kind: z.literal('session'),
+              sessionId: z.string().trim().min(1).max(64),
+            }),
+          ]),
           userIds: z
             .array(z.string().trim().min(1).max(64))
             .max(SLACK_RESOLVE_USERS_MAX_IDS),

@@ -162,9 +162,6 @@ export default async function SessionDetailPage({
                   sessionReasoningEffort={session.reasoningEffort}
                   defaultModelId={defaultModelId}
                   defaultReasoningEffort={defaultReasoningEffort}
-                  slackTeamId={
-                    session.surface === 'slack' ? session.workspaceId : null
-                  }
                   {...(unifiedSession.ownerUserId
                     ? {
                         owner: {
@@ -254,7 +251,6 @@ export default async function SessionDetailPage({
           sessionReasoningEffort={session.reasoningEffort}
           defaultModelId={defaultModelId}
           defaultReasoningEffort={defaultReasoningEffort}
-          slackTeamId={session.surface === 'slack' ? session.workspaceId : null}
           owner={{
             userId: session.userId,
             name: session.ownerName,
