@@ -14,6 +14,11 @@ const mocks = vi.hoisted(() => ({
   adoCreateWorkItemComment: vi.fn(),
   adoGetPullRequest: vi.fn(),
   adoListRepositories: vi.fn(),
+  gitlabUpdateNote: vi.fn(),
+  giteaUpdateComment: vi.fn(),
+  bitbucketUpdateComment: vi.fn(),
+  adoUpdatePullRequestComment: vi.fn(),
+  adoUpdateWorkItemComment: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -40,17 +45,20 @@ vi.mock('@roomote/gitlab', () => ({
   createGitLabIssueNote: mocks.gitlabCreateIssueNote,
   createGitLabMergeRequestNote: mocks.gitlabCreateMergeRequestNote,
   getGitLabMergeRequest: mocks.gitlabGetMergeRequest,
+  updateGitLabNote: mocks.gitlabUpdateNote,
 }));
 
 vi.mock('@roomote/gitea', () => ({
   createGiteaIssueComment: mocks.giteaCreateIssueComment,
   createGiteaPullRequestComment: mocks.giteaCreatePullRequestComment,
   getGiteaPullRequest: mocks.giteaGetPullRequest,
+  updateGiteaComment: mocks.giteaUpdateComment,
 }));
 
 vi.mock('@roomote/bitbucket', () => ({
   createBitbucketPullRequestComment: mocks.bitbucketCreateComment,
   getBitbucketPullRequest: mocks.bitbucketGetPullRequest,
+  updateBitbucketPullRequestComment: mocks.bitbucketUpdateComment,
 }));
 
 vi.mock('@roomote/ado', () => ({
@@ -58,6 +66,8 @@ vi.mock('@roomote/ado', () => ({
   createAdoWorkItemComment: mocks.adoCreateWorkItemComment,
   getAdoPullRequest: mocks.adoGetPullRequest,
   listAdoRepositories: mocks.adoListRepositories,
+  updateAdoPullRequestComment: mocks.adoUpdatePullRequestComment,
+  updateAdoWorkItemComment: mocks.adoUpdateWorkItemComment,
   parseAdoRepositoryFullName: (fullName: string) => {
     const [organization, project, repository] = fullName.split('/');
     return { organization, project, repository };
@@ -354,6 +364,53 @@ describe('GitHub Fast delivery', () => {
         sha: 'abc123',
       },
     });
+  });
+
+  it('edits the turn comment in place for later replies instead of posting again', async () => {
+    const updateComment = vi.fn().mockResolvedValue({});
+    mocks.getInstallationOctokit.mockResolvedValue({
+      rest: {
+        issues: {
+          createComment: createComment.mockResolvedValue({
+            data: { id: 6001 },
+          }),
+          updateComment,
+        },
+        pulls: { get: pullsGet },
+      },
+      request,
+    });
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    const adapter = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+    });
+
+    await adapter.postReply({ message: 'On it.' });
+    const second = await adapter.postReply({
+      message: 'Rebased; running checks.',
+    });
+
+    expect(createComment).toHaveBeenCalledTimes(1);
+    expect(updateComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        comment_id: 6001,
+        body: expect.stringContaining('On it.\n\nRebased; running checks.'),
+      }),
+    );
+    // Footer appears once, at the bottom of the edited body.
+    const body = updateComment.mock.calls[0]?.[0].body as string;
+    expect(body.match(/footer:github/g)).toHaveLength(1);
+    expect(second).toEqual({ messageId: '6001' });
   });
 
   it('threads replies under the review comment the mention came from', async () => {

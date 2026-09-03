@@ -1268,3 +1268,46 @@ export async function getGiteaPullRequest({
 
   return data;
 }
+
+/** Replaces the body of an existing issue or pull request comment. */
+export async function updateGiteaComment({
+  repositoryFullName,
+  commentId,
+  body,
+  token,
+  baseUrl,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryFullName: string;
+  commentId: number;
+  body: string;
+  token?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const giteaToken = token ?? (await resolveGiteaToken());
+
+  if (!giteaToken?.trim()) {
+    throw new Error('A Gitea token is required to update comments.');
+  }
+
+  const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
+
+  if (!resolvedBaseUrl?.trim() && !apiBaseUrl?.trim()) {
+    throw new Error('A Gitea base URL is required to update comments.');
+  }
+
+  const { owner, repo } = splitGiteaRepositoryFullName(repositoryFullName);
+  await requestGiteaJson({
+    apiBaseUrl: apiBaseUrl ?? buildGiteaApiBaseUrl(resolvedBaseUrl!),
+    fetchImpl,
+    method: 'PATCH',
+    path: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/comments/${commentId}`,
+    params: {},
+    token: giteaToken,
+    body: { body },
+    schema: z.object({ id: z.number() }).passthrough(),
+  });
+}

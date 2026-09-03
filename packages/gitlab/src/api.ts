@@ -1425,3 +1425,41 @@ export async function getGitLabMergeRequest({
 
   return data;
 }
+
+/** Replaces the body of an existing merge request or issue note. */
+export async function updateGitLabNote({
+  projectId,
+  noteableType,
+  noteableIid,
+  noteId,
+  body,
+  token,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  projectId: string | number;
+  noteableType: 'merge_requests' | 'issues';
+  noteableIid: number;
+  noteId: number;
+  body: string;
+  token?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const gitLabToken = token ?? (await resolveGitLabToken());
+
+  if (!gitLabToken?.trim()) {
+    throw new Error('A GitLab token is required to update notes.');
+  }
+
+  await requestGitLabJson({
+    apiBaseUrl,
+    fetchImpl,
+    method: 'PUT',
+    path: `/projects/${encodeURIComponent(String(projectId))}/${noteableType}/${noteableIid}/notes/${noteId}`,
+    params: {},
+    token: gitLabToken,
+    body: { body },
+    schema: z.object({ id: z.number() }).passthrough(),
+  });
+}

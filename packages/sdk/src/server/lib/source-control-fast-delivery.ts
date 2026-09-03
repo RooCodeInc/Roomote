@@ -201,10 +201,20 @@ export function createFastAgentSourceControlTaskLauncher(params: {
   };
 }
 
+export type SourceControlPostedComment = {
+  messageId: string;
+  /**
+   * Replaces the comment's whole body in place. A turn's later replies edit
+   * the comment it opened with instead of stacking new comments on the
+   * discussion.
+   */
+  update?: (body: string) => Promise<void>;
+};
+
 export type SourceControlFastReplyPoster = (input: {
   discussion: SourceControlFastDiscussion;
   body: string;
-}) => Promise<{ messageId: string }>;
+}) => Promise<SourceControlPostedComment>;
 
 /**
  * Delivery for one discussion: how replies post and how delegated tasks
@@ -258,7 +268,18 @@ async function buildGitHubFastDelivery(
             body,
           },
         );
-        return { messageId: String(response.data.id) };
+        const commentId = response.data.id;
+        return {
+          messageId: String(commentId),
+          update: async (nextBody) => {
+            await octokit.rest.pulls.updateReviewComment({
+              owner,
+              repo,
+              comment_id: commentId,
+              body: nextBody,
+            });
+          },
+        };
       }
       const response = await octokit.rest.issues.createComment({
         owner,
@@ -266,7 +287,18 @@ async function buildGitHubFastDelivery(
         issue_number: target.number,
         body,
       });
-      return { messageId: String(response.data.id) };
+      const commentId = response.data.id;
+      return {
+        messageId: String(commentId),
+        update: async (nextBody) => {
+          await octokit.rest.issues.updateComment({
+            owner,
+            repo,
+            comment_id: commentId,
+            body: nextBody,
+          });
+        },
+      };
     },
     resolveTarget: async () => {
       if (discussion.kind === 'issues') {
@@ -367,9 +399,14 @@ async function buildGitLabFastDelivery(
     createGitLabIssueNote,
     createGitLabMergeRequestNote,
     getGitLabMergeRequest,
+    updateGitLabNote,
   } = await import('@roomote/gitlab');
   return {
     postComment: async ({ discussion: target, body }) => {
+      const noteableType =
+        target.kind === 'pull'
+          ? ('merge_requests' as const)
+          : ('issues' as const);
       const note =
         target.kind === 'pull'
           ? await createGitLabMergeRequestNote({
@@ -382,7 +419,18 @@ async function buildGitLabFastDelivery(
               issueIid: target.number,
               body,
             });
-      return { messageId: String(note.id) };
+      return {
+        messageId: String(note.id),
+        update: async (nextBody) => {
+          await updateGitLabNote({
+            projectId: target.repositoryFullName,
+            noteableType,
+            noteableIid: target.number,
+            noteId: note.id,
+            body: nextBody,
+          });
+        },
+      };
     },
     resolveTarget: async () => {
       if (discussion.kind === 'issues') {
@@ -420,8 +468,11 @@ async function buildBitbucketFastDelivery(
   if (!repository || discussion.kind !== 'pull') {
     return null;
   }
-  const { createBitbucketPullRequestComment, getBitbucketPullRequest } =
-    await import('@roomote/bitbucket');
+  const {
+    createBitbucketPullRequestComment,
+    getBitbucketPullRequest,
+    updateBitbucketPullRequestComment,
+  } = await import('@roomote/bitbucket');
   return {
     postComment: async ({ discussion: target, body }) => {
       const comment = await createBitbucketPullRequestComment({
@@ -429,7 +480,17 @@ async function buildBitbucketFastDelivery(
         pullRequestNumber: target.number,
         body,
       });
-      return { messageId: String(comment.id) };
+      return {
+        messageId: String(comment.id),
+        update: async (nextBody) => {
+          await updateBitbucketPullRequestComment({
+            repositoryFullName: target.repositoryFullName,
+            pullRequestNumber: target.number,
+            commentId: comment.id,
+            body: nextBody,
+          });
+        },
+      };
     },
     resolveTarget: async () => {
       const pullRequest = await getBitbucketPullRequest({
@@ -462,6 +523,7 @@ async function buildGiteaFastDelivery(
     createGiteaIssueComment,
     createGiteaPullRequestComment,
     getGiteaPullRequest,
+    updateGiteaComment,
   } = await import('@roomote/gitea');
   return {
     postComment: async ({ discussion: target, body }) => {
@@ -477,7 +539,16 @@ async function buildGiteaFastDelivery(
               issueNumber: target.number,
               body,
             });
-      return { messageId: String(comment.id) };
+      return {
+        messageId: String(comment.id),
+        update: async (nextBody) => {
+          await updateGiteaComment({
+            repositoryFullName: target.repositoryFullName,
+            commentId: comment.id,
+            body: nextBody,
+          });
+        },
+      };
     },
     resolveTarget: async () => {
       if (discussion.kind === 'issues') {
@@ -519,6 +590,8 @@ async function buildAdoFastDelivery(
     getAdoPullRequest,
     listAdoRepositories,
     parseAdoRepositoryFullName,
+    updateAdoPullRequestComment,
+    updateAdoWorkItemComment,
   } = await import('@roomote/ado');
   const parsed = parseAdoRepositoryFullName(discussion.repositoryFullName);
   // Azure DevOps addresses pull requests by repository GUID, which the
@@ -551,6 +624,19 @@ async function buildAdoFastDelivery(
         return {
           messageId:
             comment.commentId ?? `ado-work-item-comment:${randomUUID()}`,
+          ...(comment.commentId
+            ? {
+                update: async (nextBody: string) => {
+                  await updateAdoWorkItemComment({
+                    project: parsed.project,
+                    workItemId: target.number,
+                    commentId: comment.commentId!,
+                    body: nextBody,
+                    organization: parsed.organization,
+                  });
+                },
+              }
+            : {}),
         };
       }
       const adoRepositoryId = await resolveAdoRepositoryId();
@@ -572,6 +658,21 @@ async function buildAdoFastDelivery(
       });
       return {
         messageId: comment.commentId ?? `ado-thread:${comment.threadId}`,
+        ...(comment.commentId
+          ? {
+              update: async (nextBody: string) => {
+                await updateAdoPullRequestComment({
+                  repositoryFullName: target.repositoryFullName,
+                  repositoryId: adoRepositoryId,
+                  pullRequestNumber: target.number,
+                  threadId: comment.threadId,
+                  commentId: comment.commentId!,
+                  body: nextBody,
+                  organization: parsed.organization,
+                });
+              },
+            }
+          : {}),
       };
     },
     resolveTarget: async () => {
@@ -629,6 +730,8 @@ export function buildSourceControlFastAdapter(params: {
   postReply: (reply: { message: string }) => Promise<{ messageId: string }>;
 } {
   const discussion = parseSourceControlFastConversation(params.conversation);
+  let turnComment: SourceControlPostedComment | null = null;
+  let turnBody = '';
   return {
     launchTask: createFastAgentSourceControlTaskLauncher({
       userId: params.userId,
@@ -645,12 +748,23 @@ export function buildSourceControlFastAdapter(params: {
         provider: discussion.provider,
         sessionId: params.sessionId,
       });
+      // One comment per turn: the first reply opens it, later replies append
+      // by editing it in place, so a turn never stacks comments on the
+      // discussion.
+      if (turnComment?.update) {
+        turnBody = `${turnBody}\n\n${message}`;
+        await turnComment.update(`${turnBody}\n\n${footer}`);
+        params.onReplyPosted?.();
+        return { messageId: turnComment.messageId };
+      }
+      turnBody = message;
       const posted = await params.delivery.postComment({
         discussion,
         body: `${message}\n\n${footer}`,
       });
+      turnComment = posted;
       params.onReplyPosted?.();
-      return posted;
+      return { messageId: posted.messageId };
     },
   };
 }
