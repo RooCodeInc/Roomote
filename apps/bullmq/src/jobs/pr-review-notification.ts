@@ -837,23 +837,10 @@ export const prReviewNotificationJob = async (
               actingUserId: autoHandleUserId,
               route: autoHandleRoute!,
             });
-      if (
-        data.deliveryState !== 'auto_dispatch_pending' &&
-        !(await beginAutoDispatch())
-      ) {
+      if (!(await beginAutoDispatch())) {
         await retrySupersededPrReviewAction(data);
         console.log(
           `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its automatic-dispatch fence, skipping`,
-        );
-        return;
-      }
-      if (
-        data.deliveryState !== 'auto_dispatch_pending' &&
-        !(await beginAutoDispatch())
-      ) {
-        await retrySupersededPrReviewAction(data);
-        console.log(
-          `[PrReviewNotification] Canonical delivery ${data.deliveryId} was superseded before automatic dispatch, skipping`,
         );
         return;
       }

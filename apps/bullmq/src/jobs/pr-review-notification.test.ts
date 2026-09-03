@@ -1078,7 +1078,7 @@ describe('prReviewNotificationJob', () => {
     );
   });
 
-  it('retries an automatic dispatch superseded after its initial transition', async () => {
+  it('fences a reclaimed automatic dispatch before remediation starts', async () => {
     const deliveryId = '56565656-5656-4656-8656-565656565656';
     mockPrepareDelivery.mockResolvedValue({
       post: true,
@@ -1097,15 +1097,13 @@ describe('prReviewNotificationJob', () => {
       userId: 'user-1',
       destinationKey: 'task-1',
     });
-    mockBeginCanonicalAutoDispatch
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false);
+    mockBeginCanonicalAutoDispatch.mockResolvedValue(false);
     mockRetrySupersededPrReviewAction.mockResolvedValue(true);
     const job = makeJob({
       ownershipVersion: 'canonical',
       deliveryId,
       notificationUnitId: '57575757-5757-4757-8757-575757575757',
-      deliveryState: 'claimed',
+      deliveryState: 'auto_dispatch_pending',
       destinationKey: 'task-1',
       dispatchKey: `pr-review-delivery:${deliveryId}`,
       deliveryIds: [deliveryId],
@@ -1115,7 +1113,7 @@ describe('prReviewNotificationJob', () => {
 
     await prReviewNotificationJob(job as never);
 
-    expect(mockBeginCanonicalAutoDispatch).toHaveBeenCalledTimes(2);
+    expect(mockBeginCanonicalAutoDispatch).toHaveBeenCalledTimes(1);
     expect(mockRetrySupersededPrReviewAction).toHaveBeenCalledWith(job.data);
     expect(mockDispatchFollowUp).not.toHaveBeenCalled();
   });
