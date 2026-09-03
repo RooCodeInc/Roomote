@@ -209,13 +209,15 @@ export function createFastAgentSourceControlTaskLauncher(params: {
 export function buildSourceControlReplyQuote(params: {
   text: string;
 }): string | null {
-  const trimmed = params.text.trim();
-  if (!trimmed) {
+  if (!params.text.trim()) {
     return null;
   }
-  return trimmed
+  // Quote the text verbatim: indentation and blank lines are meaningful
+  // Markdown (code blocks, paragraph breaks) and GitHub preserves them.
+  return params.text
+    .replace(/\r\n/g, '\n')
     .split('\n')
-    .map((line) => (line.trim() ? `> ${line}` : '>'))
+    .map((line) => (line.length > 0 ? `> ${line}` : '>'))
     .join('\n');
 }
 

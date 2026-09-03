@@ -672,6 +672,10 @@ describe('buildSourceControlReplyQuote', () => {
         text: '@roomote please rebase\n\nand rerun the checks',
       }),
     ).toBe('> @roomote please rebase\n>\n> and rerun the checks');
+    // Indentation and outer blank lines are preserved verbatim.
+    expect(
+      buildSourceControlReplyQuote({ text: '    indented code\nplain\n' }),
+    ).toBe('>     indented code\n> plain\n>');
     expect(buildSourceControlReplyQuote({ text: '   ' })).toBeNull();
   });
 });
