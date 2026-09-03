@@ -122,11 +122,8 @@ function getArtifactViewUrl(
   path: string,
   version: number,
 ): string {
-  const encodedPath = path
-    .split('/')
-    .map((segment) => encodeURIComponent(segment))
-    .join('/');
-  return `${origin}/task/${encodeURIComponent(taskId)}/artifacts/${encodedPath}?v=${version}`;
+  const search = new URLSearchParams({ path, v: String(version) });
+  return `${origin}/task/${encodeURIComponent(taskId)}/artifacts?${search}`;
 }
 
 interface ArtifactViewerContentProps {

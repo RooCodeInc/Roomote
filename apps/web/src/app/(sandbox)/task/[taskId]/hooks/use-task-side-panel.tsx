@@ -120,7 +120,8 @@ function parseViewFromPathname(
   // /task/[id]/artifacts/[...path]?v=N
   const artifactMatch = pathname.match(/\/artifacts(?:\/(.+))?$/);
   if (artifactMatch) {
-    const path = artifactMatch[1] ?? null;
+    const routePath = artifactMatch[1];
+    const path = routePath ? decodeURIComponent(routePath) : search.get('path');
     const versionParam = search.get('v');
     const parsed = versionParam ? parseInt(versionParam, 10) : undefined;
     const version = Number.isNaN(parsed) ? undefined : parsed;
@@ -128,7 +129,7 @@ function parseViewFromPathname(
     return {
       view: 'artifacts',
       artifactsMode: path ? 'detail' : 'browser',
-      artifactPath: path ? decodeURIComponent(path) : null,
+      artifactPath: path,
       artifactVersion: version,
       previewServiceName: null,
       previewPath: null,

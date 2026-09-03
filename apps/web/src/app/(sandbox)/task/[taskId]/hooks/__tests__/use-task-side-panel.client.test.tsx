@@ -70,6 +70,23 @@ describe('useTaskSidePanel URL sync', () => {
     });
   });
 
+  it('parses query-based artifact paths without browser normalization', async () => {
+    pathname = '/task/task-1/artifacts';
+    searchParams = new URLSearchParams('path=plans%2F.%2Fdraft.md&v=2');
+    replaceLocation(`${pathname}?${searchParams.toString()}`);
+
+    const { result } = renderHook(() => useTaskSidePanel(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeView).toBe('artifacts');
+      expect(result.current.artifactsMode).toBe('detail');
+      expect(result.current.selectedArtifactPath).toBe('plans/./draft.md');
+      expect(result.current.selectedArtifactVersion).toBe(2);
+    });
+  });
+
   it('parses the terminal route as an active side panel view', async () => {
     pathname = '/task/task-1/terminal';
     searchParams = new URLSearchParams();
