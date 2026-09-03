@@ -16,6 +16,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   buildFastAgentChildTaskMetadata,
   getFastAgentParentFromPayload,
+  type FastAgentParent,
   type StandardTask,
   type TaskInitiator,
   type TaskSurface,
@@ -37,9 +38,15 @@ export type PinnedFastSessionLaunchInput = {
   senderDisplayName?: string | null;
   /**
    * Launch inside this existing Fast conversation. Omit it to create a new
-   * web session owned by `userId`.
+   * web session owned by `userId`, or pass `conversation` to get or create a
+   * conversation by its surface identity instead.
    */
   fastConversationId?: string | null;
+  /**
+   * Surface identity to get or create the Fast conversation from, for chat
+   * surfaces that bind the Session to a channel or thread.
+   */
+  conversation?: FastAgentConversation;
   /**
    * Idempotency key for the launch. Replays with the same id reuse the task
    * the first attempt created and never write a second transcript entry.
@@ -51,8 +58,21 @@ export type PinnedFastSessionLaunchInput = {
   /**
    * The fully built task. The launch stamps the Fast parent metadata and the
    * idempotency key onto its payload; everything else is the caller's.
+   * Surfaces with their own launcher pass `launch` instead.
    */
-  task: StandardTask;
+  task?: StandardTask;
+  /**
+   * Surface-specific launcher. It must attach the task to `parent` and call
+   * `postKickoff` before the child becomes runnable, the way a Fast delegate
+   * does.
+   */
+  launch?: (context: {
+    parent: FastAgentParent;
+    launchIdempotencyKey: string;
+    postKickoff: () => Promise<void>;
+  }) => Promise<
+    { success: true; taskId: string } | { success: false; error: string }
+  >;
   surface: TaskSurface;
   trigger?: TaskTrigger;
   initiator?: TaskInitiator;
@@ -142,7 +162,7 @@ async function resolveConversationTarget(
 
   const created = await getOrCreateFastAgentSession({
     userId: input.userId,
-    conversation: {
+    conversation: input.conversation ?? {
       surface: 'web',
       workspaceId: input.userId,
       conversationId: randomUUID(),
@@ -247,51 +267,66 @@ async function launchInSession(
     });
   }
 
-  const launchTask = createFastAgentTaskLauncher({
-    userId: input.userId,
-    surface: input.surface,
-    ...(input.initiator ? { initiator: input.initiator } : {}),
-    trigger: input.trigger ?? 'manual',
-    taskUrlCampaign: 'pinned-launch',
-    // The Session timeline renders the task card itself.
-    rendersTaskLink: true,
-    buildTask: ({ parentSessionId }) => ({
-      ...input.task,
-      payload: {
-        ...input.task.payload,
-        ...buildFastAgentChildTaskMetadata({
-          sessionId: parentSessionId,
-          conversation: target.conversation,
-        }),
+  const postKickoff = async () => {
+    await upsertFastAgentMessage({
+      sessionId: target.id,
+      message: {
+        eventId: `${turnId}:kickoff`,
+        turnId,
+        turnSeq: 1,
+        ts: Date.now(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: input.kickoffMessage }],
+        metadata: { visibleInTranscript: true, purpose: 'progress' },
+        payload: { purpose: 'progress', kickoff: true },
+        source: target.conversation.surface,
+        nativeSessionId: null,
       },
-    }),
-  });
+    });
+  };
+  const parent: FastAgentParent = {
+    sessionId: target.id,
+    conversation: target.conversation,
+  };
 
-  const launch = await launchTask({
-    prompt,
-    environmentId: input.task.payload.environmentId ?? null,
-    model: null,
-    parentSessionId: target.id,
-    launchIdempotencyKey: turnId,
-    postKickoff: async () => {
-      await upsertFastAgentMessage({
-        sessionId: target.id,
-        message: {
-          eventId: `${turnId}:kickoff`,
-          turnId,
-          turnSeq: 1,
-          ts: Date.now(),
-          eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-          role: 'assistant',
-          contentBlocks: [{ type: 'text', text: input.kickoffMessage }],
-          metadata: { visibleInTranscript: true, purpose: 'progress' },
-          payload: { purpose: 'progress', kickoff: true },
-          source: target.conversation.surface,
-          nativeSessionId: null,
+  let launch: Awaited<ReturnType<NonNullable<typeof input.launch>>>;
+  if (input.launch) {
+    launch = await input.launch({
+      parent,
+      launchIdempotencyKey: turnId,
+      postKickoff,
+    });
+  } else {
+    const task = input.task;
+    if (!task) {
+      throw new Error('A pinned launch needs a task or a launcher.');
+    }
+    const launchTask = createFastAgentTaskLauncher({
+      userId: input.userId,
+      surface: input.surface,
+      ...(input.initiator ? { initiator: input.initiator } : {}),
+      trigger: input.trigger ?? 'manual',
+      taskUrlCampaign: 'pinned-launch',
+      // The Session timeline renders the task card itself.
+      rendersTaskLink: true,
+      buildTask: () => ({
+        ...task,
+        payload: {
+          ...task.payload,
+          ...buildFastAgentChildTaskMetadata(parent),
         },
-      });
-    },
-  });
+      }),
+    });
+    launch = await launchTask({
+      prompt,
+      environmentId: task.payload.environmentId ?? null,
+      model: null,
+      parentSessionId: target.id,
+      launchIdempotencyKey: turnId,
+      postKickoff,
+    });
+  }
 
   if (!launch.success) {
     throw new Error(launch.error);

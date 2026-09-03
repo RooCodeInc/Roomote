@@ -15,6 +15,11 @@ const mocks = vi.hoisted(() => ({
   releaseWorkItem: vi.fn(),
   handlePrReviewAction: vi.fn(),
   processFastAgentMessage: vi.fn(),
+  launchPinned: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  launchPinnedFastSessionTask: mocks.launchPinned,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -38,10 +43,6 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('../../tasks/task-stop.js', () => ({ stopTaskRun: mocks.stopTaskRun }));
 vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
-vi.mock('../routing-confirmation.js', () => ({
-  parseDiscordRouteCallbackData: () => null,
-  handleDiscordRoutingCallback: vi.fn(),
-}));
 vi.mock('@roomote/sdk/server', () => ({
   findDiscordMappedUserId: mocks.findMappedUser,
 }));
@@ -70,7 +71,16 @@ vi.mock('../fast-agent.js', () => ({
 vi.mock('../task-launch.js', () => ({
   resolveDiscordChannelContext: mocks.resolveChannel,
   resolveDiscordWorkspace: mocks.resolveWorkspace,
-  discordMetadataForChannel: vi.fn(),
+  discordMetadataForChannel: vi.fn(
+    (input: { channel: { channelId: string; parentChannelId?: string } }) => ({
+      communicationProvider: 'discord',
+      communicationChannelId:
+        input.channel.parentChannelId ?? input.channel.channelId,
+      ...(input.channel.parentChannelId
+        ? { communicationThreadId: input.channel.channelId }
+        : {}),
+    }),
+  ),
 }));
 vi.mock('../../tasks/orphaned-work-item-run.js', () => ({
   cancelOrphanedWorkItemRunBestEffort: vi.fn(),
@@ -96,6 +106,33 @@ describe('Discord component callbacks', () => {
     mocks.findSuggestionByMessage.mockResolvedValue('suggestion-1');
     mocks.processFastAgentMessage.mockResolvedValue({ accepted: true });
     mocks.releaseWorkItem.mockResolvedValue(true);
+    // The pinned-launch primitive runs the surface launcher inside a Session.
+    mocks.launchPinned.mockImplementation(
+      async (input: {
+        launchId: string;
+        conversation: unknown;
+        launch: (context: {
+          parent: { sessionId: string; conversation: unknown };
+          launchIdempotencyKey: string;
+          postKickoff: () => Promise<void>;
+        }) => Promise<
+          { success: true; taskId: string } | { success: false; error: string }
+        >;
+      }) => {
+        const result = await input.launch({
+          parent: { sessionId: 'fast-1', conversation: input.conversation },
+          launchIdempotencyKey: `pinned-launch:${input.launchId}`,
+          postKickoff: async () => {},
+        });
+        if (!result.success) throw new Error(result.error);
+        return {
+          sessionId: 'session-1',
+          fastConversationId: 'fast-1',
+          taskId: result.taskId,
+          runId: 42,
+        };
+      },
+    );
     mocks.resolveWorkspace.mockResolvedValue({
       environmentId: 'env-1',
       repoForPayload: 'acme/app',
@@ -415,7 +452,10 @@ describe('Discord component callbacks', () => {
     });
 
     expect(mocks.startNewTask).toHaveBeenCalledWith(
-      expect.objectContaining({ workspaceOverride: target.expectedWorkspace }),
+      expect.objectContaining({
+        workspace: target.expectedWorkspace,
+        fastAgentParent: expect.objectContaining({ sessionId: 'fast-1' }),
+      }),
     );
     expect(mocks.processFastAgentMessage).not.toHaveBeenCalled();
   });
@@ -815,7 +855,7 @@ describe('Discord component callbacks', () => {
     expect(mocks.startNewTask).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: dmChannel,
-        workspaceOverride: expect.objectContaining({ environmentId: 'env-1' }),
+        workspace: expect.objectContaining({ environmentId: 'env-1' }),
       }),
     );
     expect(mocks.resolveWorkspace).toHaveBeenCalledWith({
