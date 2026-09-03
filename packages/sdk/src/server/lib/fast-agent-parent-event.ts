@@ -71,6 +71,7 @@ import {
 import {
   buildSourceControlFastAdapter,
   buildSourceControlFastDelivery,
+  buildSourceControlReplyQuote,
 } from './source-control-fast-delivery';
 import { buildCustomAutomationSlackMessage } from './manager-slack';
 import {
@@ -1619,6 +1620,12 @@ async function createSourceControlFastAgentParentTurn(params: {
       delivery,
       userId: actorUserId,
       sessionId: session.id,
+      // Mentions reach this turn through the durable queue, so the quote of
+      // the answered comment has to come from the queued event itself.
+      quote:
+        params.event.type === 'human_follow_up'
+          ? buildSourceControlReplyQuote({ text: params.event.question })
+          : null,
       onReplyPosted: params.onReplyPosted,
     }),
   };
