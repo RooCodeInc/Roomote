@@ -239,6 +239,7 @@ export async function handleAdoComment(
     prNumber: pullRequest.pullRequestId,
     branchName,
     headSha,
+    host: target.repo.host ?? null,
   });
 
   const started = await startSourceControlFastSessionTurn({

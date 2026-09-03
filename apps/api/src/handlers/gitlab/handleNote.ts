@@ -278,6 +278,7 @@ async function handleGitLabMergeRequestNote({
     prNumber: mergeRequest.iid,
     branchName,
     headSha,
+    host: target.repo.host ?? null,
   });
 
   const started = await startSourceControlFastSessionTurn({

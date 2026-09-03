@@ -156,6 +156,36 @@ describe('handleAdoComment', () => {
     expect(mocks.createAdoPullRequestComment).not.toHaveBeenCalled();
   });
 
+  it('scopes the owner lookup to the repository host when it has one', async () => {
+    mocks.getAdoAutomationTargets.mockResolvedValue({
+      status: 'ok',
+      targets: [
+        {
+          id: 'ado:pr_review:repo-1',
+          settings: null,
+          repo: { id: 'repo-1', host: 'ado.internal.example' },
+          repositoryIds: ['repo-1'],
+          userId: 'user-1',
+        },
+      ],
+    });
+
+    await handleAdoComment(makeCommentPayload());
+
+    expect(mocks.findReusableGitHubPrFollowUpOwner).toHaveBeenCalledWith({
+      repoFullName: 'acme/Platform/backend',
+      prNumber: 42,
+      branchName: 'feature/test',
+      sourceControlProvider: 'ado',
+      host: 'ado.internal.example',
+    });
+    expect(mocks.startSourceControlFastSessionTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        discussion: expect.objectContaining({ host: 'ado.internal.example' }),
+      }),
+    );
+  });
+
   it('asks an unlinked commenter to link their account in the same thread', async () => {
     mocks.getAdoAutomationTargets.mockResolvedValue({
       status: 'error',

@@ -365,6 +365,7 @@ async function handleGiteaPullRequestComment({
     prNumber: pullRequest.number,
     branchName,
     headSha,
+    host: target.repo.host ?? null,
   });
 
   const started = await startSourceControlFastSessionTurn({
