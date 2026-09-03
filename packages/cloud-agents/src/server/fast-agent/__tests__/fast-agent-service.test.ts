@@ -7764,6 +7764,30 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('does not retry non-retryable platform inference failures', async () => {
+    mocks.generateText.mockRejectedValue({
+      name: 'APIError',
+      data: {
+        message:
+          'This request requires more credits than your account balance.',
+        statusCode: 402,
+        isRetryable: false,
+        responseBody: JSON.stringify({
+          error: { metadata: { limit_source: 'openrouter_credits' } },
+        }),
+      },
+    });
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        turnSource: 'platform_event',
+        adapter: callbacks(),
+      }),
+    ).rejects.toMatchObject({ name: 'FastAgentInferenceError' });
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+  });
+
   it('rethrows native prompt failures for platform event retry', async () => {
     mocks.generateText.mockRejectedValue(new Error('OpenCode unavailable'));
     const activity = {

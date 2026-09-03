@@ -5,6 +5,7 @@ import { Queue } from 'bullmq';
 import {
   acquireFastAgentTurnLock,
   findFastAgentDurableRetryScheduledError,
+  isNonRetryableFastAgentInferenceError,
 } from '@roomote/cloud-agents/server';
 import {
   and,
@@ -443,6 +444,11 @@ export async function drainFastAgentParentEvents(
         if (deliveryError?.permanent) {
           await finalizeAutomationLaunch(row.event, 'failed', deliveryError);
           await markDiscarded(row.id, deliveryError);
+          continue;
+        }
+        if (isNonRetryableFastAgentInferenceError(error)) {
+          await finalizeAutomationLaunch(row.event, 'failed', error);
+          await markDiscarded(row.id, error);
           continue;
         }
 

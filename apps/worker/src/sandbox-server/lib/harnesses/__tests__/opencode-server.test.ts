@@ -3182,7 +3182,7 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('terminates an OpenCode retry loop from a structured 4xx status without a message', async () => {
+  it('terminates an OpenCode retry loop for an explicit OpenRouter credit limit', async () => {
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
@@ -3227,6 +3227,20 @@ describe('OpenCodeServerHarness', () => {
             type: 'retry',
             attempt: 1,
             statusCode: 402,
+            message: JSON.stringify({
+              name: 'APIError',
+              data: {
+                message:
+                  'This request requires more credits than your account balance.',
+                statusCode: 402,
+                isRetryable: false,
+                responseBody: JSON.stringify({
+                  error: {
+                    metadata: { limit_source: 'openrouter_credits' },
+                  },
+                }),
+              },
+            }),
             next: Date.now() + 2_000,
           },
         },
@@ -3248,7 +3262,7 @@ describe('OpenCodeServerHarness', () => {
           (envelope) =>
             envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
             String(envelope.payload.text ?? '').includes(
-              'Provider request failed with a non-retryable error.',
+              'This request requires more credits than your account balance.',
             ),
         ),
       ).toBe(true);

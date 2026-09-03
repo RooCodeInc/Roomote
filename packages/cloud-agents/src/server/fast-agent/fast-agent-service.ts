@@ -709,6 +709,10 @@ class FastAgentInferenceError extends Error {
   }
 }
 
+export function isNonRetryableFastAgentInferenceError(error: unknown): boolean {
+  return error instanceof FastAgentInferenceError && !error.failure.retryable;
+}
+
 function resolveFastAgentInferenceMaxRetries(
   failure: FastAgentInferenceFailure,
 ): number {
