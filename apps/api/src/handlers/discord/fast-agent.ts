@@ -35,6 +35,7 @@ import {
   wakeFastAgentParentEventNow,
   type FastAgentDurableTurn,
 } from '@roomote/sdk/server';
+import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import { ALL_REPOSITORIES, type TaskInitiator } from '@roomote/types';
 
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
@@ -92,6 +93,15 @@ type DiscordFastAgentSource =
 export async function processDiscordFastAgentMessage(
   input: {
     question: string;
+    /** Base64 image data URLs attached to the current message. */
+    images?: string[];
+    /** Extracted text of non-image attachments on the current message. */
+    attachmentTexts?: string[];
+    /**
+     * Surface context the model should read with this message, for example
+     * the instructions configured for an auto-respond channel.
+     */
+    agentContext?: string;
     sender: DiscordUser;
     senderUserId: string;
     provider: DiscordCommunicationProvider;
@@ -115,6 +125,11 @@ export async function processDiscordFastAgentMessage(
 ): Promise<boolean> {
   const message = input.event ? getDiscordMessageCreate(input.event) : null;
   const eventId = 'eventId' in input ? input.eventId : input.event.eventId;
+  const question = appendAttachmentTextsToPromptText({
+    text: input.question,
+    attachmentTexts: input.attachmentTexts,
+  });
+  const images = input.images ?? [];
   if (!eventId) {
     throw new Error('Discord Fast entry requires a source event id.');
   }
@@ -187,7 +202,8 @@ export async function processDiscordFastAgentMessage(
       eventId,
       currentMessageId: anchorMessageId ?? eventId,
       userId: input.senderUserId,
-      question: input.question,
+      question,
+      ...(images.length ? { images } : {}),
       senderDisplayName:
         input.interaction?.interaction.member?.nick ??
         input.sender.global_name ??
@@ -294,7 +310,14 @@ export async function processDiscordFastAgentMessage(
     let didSendVisibleResponse = false;
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
     const response = await answerFastAgentQuestion({
-      question: input.question,
+      question,
+      ...(images.length ? { images } : {}),
+      ...(input.attachmentTexts?.length
+        ? { attachmentTexts: input.attachmentTexts }
+        : {}),
+      ...(input.agentContext
+        ? { currentMessageAgentContext: input.agentContext }
+        : {}),
       threadContext: history.map((entry) => ({
         user: entry.user,
         username: entry.username,
@@ -354,7 +377,7 @@ export async function processDiscordFastAgentMessage(
           parentSessionId,
           postKickoff,
         }) => {
-          const workspaceOverride =
+          const workspace =
             environmentId && environmentId !== ALL_REPOSITORIES
               ? await resolveDiscordWorkspace({
                   type: 'environment',
@@ -365,7 +388,7 @@ export async function processDiscordFastAgentMessage(
                   repoForPayload: ALL_REPOSITORIES,
                   workspaceDisplayName: 'all repos',
                 };
-          if (!workspaceOverride) {
+          if (!workspace) {
             return {
               success: false,
               error: 'The selected environment is unavailable.',
@@ -404,9 +427,8 @@ export async function processDiscordFastAgentMessage(
               sessionId: parentSessionId,
               conversation,
             },
-            skipRoutingConfirmation: true,
             model,
-            workspaceOverride,
+            workspace,
             beforeEnqueueKickoff: postKickoff,
           });
           if (started.status === 'started') {
@@ -416,17 +438,11 @@ export async function processDiscordFastAgentMessage(
               taskUrl: started.taskUrl,
             };
           }
-          if (started.status === 'already_started') {
-            return {
-              success: true,
-              taskId: started.existingRun.taskId,
-              taskUrl: started.taskUrl,
-              kickoffDelivered: true,
-            };
-          }
           return {
-            success: false,
-            error: `Task launch stopped with status ${started.status}.`,
+            success: true,
+            taskId: started.existingRun.taskId,
+            taskUrl: started.taskUrl,
+            kickoffDelivered: true,
           };
         },
         postReply: async ({ message: text }) => {

@@ -71,12 +71,12 @@ gives a clear answer or next step without pretending code was changed.
 
 ## Choosing an environment
 
-In chat, Roomote can suggest the right environment and ask for confirmation when
-needed. In Slack, Telegram, and Discord, you can use the confirmation controls
-or reply naturally to accept, cancel, or correct that suggestion. When you
-start from the dashboard, choose the environment yourself or use **Auto** when
-you want Roomote to route the task. Linear can also suggest an environment from
-issue context.
+In chat, Roomote's Fast Session decides whether a request needs a workspace
+and which environment fits, and it says so before delegating. In Slack and
+Telegram, some requests still show a confirmation card you can accept, cancel,
+or correct by replying naturally. When you start from the dashboard, choose
+the environment yourself or leave the selector on **Fast** to let the Session
+decide. Linear can also suggest an environment from issue context.
 
 If a Slack request is ambiguous, Roomote shows the environment picker so you can
 choose where the task should run. If automatic routing is temporarily

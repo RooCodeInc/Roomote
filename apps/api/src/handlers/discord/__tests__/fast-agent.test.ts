@@ -612,7 +612,7 @@ describe('processDiscordFastAgentMessage', () => {
     expect(mocks.resolveWorkspace).not.toHaveBeenCalled();
     expect(mocks.startTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        workspaceOverride: {
+        workspace: {
           repoForPayload: ALL_REPOSITORIES,
           workspaceDisplayName: 'all repos',
         },
