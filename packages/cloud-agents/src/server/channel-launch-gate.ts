@@ -3,7 +3,7 @@ import { z } from 'zod';
 import {
   generateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES,
-} from '../non-task-provider-usage';
+} from './non-task-provider-usage';
 
 const MAX_GATE_MESSAGE_LENGTH = 4_000;
 

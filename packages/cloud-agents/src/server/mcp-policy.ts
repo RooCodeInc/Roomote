@@ -1,9 +1,6 @@
 import {
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
-  parseDiscordMessagePermalink,
-  parseSlackChannelPermalink,
-  parseSlackMessagePermalink,
 } from '@roomote/types';
 
 export const ROUTER_MCP_ENABLED_SERVER_IDS = [
@@ -41,29 +38,6 @@ interface RouterMcpServerPolicy {
   requiredToolGroups?: readonly RouterMcpToolGroup[];
   upstreamConstraints?: RouterMcpUpstreamConstraints;
 }
-
-const ROUTER_MCP_TOOL_GROUPS: Record<RouterMcpToolGroup, readonly string[]> = {
-  'roomote-platform-context': ['get_about_me'],
-  'roomote-chat-context': [
-    CHAT_MESSAGE_CONTEXT_TOOL.name,
-    CHAT_CHANNEL_MESSAGES_TOOL.name,
-  ],
-  'linear-issue-context': ['get_issue', 'list_issues'],
-  'linear-comment-context': ['list_comments'],
-  'github-pr-context': [
-    'get_pull_request',
-    'pull_request_read',
-    'list_pull_requests',
-    'search_pull_requests',
-  ],
-  'github-issue-context': ['issue_read', 'get_issue'],
-  'github-repo-context': [
-    'get_file_contents',
-    'search_code',
-    'get_commit',
-    'list_commits',
-  ],
-};
 
 const ROUTER_ROOMOTE_ALLOWED_TOOLS = [
   'get_about_me',
@@ -159,63 +133,8 @@ export function getAllowedRouterMcpToolNames(
   return getRouterMcpServerPolicy(serverId).allowedTools;
 }
 
-export function isRouterMcpToolAllowed(
-  serverId: RouterMcpServerId,
-  toolName: string,
-): boolean {
-  return getAllowedRouterMcpToolNames(serverId).includes(toolName);
-}
-
-export function getRouterMcpToolGroupToolNames(
-  group: RouterMcpToolGroup,
-): readonly string[] {
-  return ROUTER_MCP_TOOL_GROUPS[group];
-}
-
-export function getRequiredRouterMcpToolGroups(
-  serverId: RouterMcpServerId,
-): readonly RouterMcpToolGroup[] {
-  return getRouterMcpServerPolicy(serverId).requiredToolGroups ?? [];
-}
-
 export function getRouterMcpUpstreamConstraints(
   serverId: RouterMcpServerId,
 ): RouterMcpUpstreamConstraints | undefined {
   return getRouterMcpServerPolicy(serverId).upstreamConstraints;
-}
-
-export function getMissingRequiredRouterMcpToolGroups(
-  serverId: RouterMcpServerId,
-  availableToolNames: readonly string[],
-): RouterMcpToolGroup[] {
-  const availableToolSet = new Set(availableToolNames);
-
-  return getRequiredRouterMcpToolGroups(serverId).filter(
-    (group) =>
-      !getRouterMcpToolGroupToolNames(group).some((toolName) =>
-        availableToolSet.has(toolName),
-      ),
-  );
-}
-
-export function shouldIncludeRoomoteRouterLookup(
-  externalReference: string | null,
-): boolean {
-  if (!externalReference) {
-    return false;
-  }
-
-  const candidates = [
-    externalReference,
-    ...(externalReference.match(/https?:\/\/[^\s<>'"\])}]+/gi) ?? []),
-  ];
-
-  return candidates.some((candidate) => {
-    const normalized = candidate.replace(/[.,;:!?]+$/, '');
-    return (
-      parseSlackMessagePermalink(normalized) !== null ||
-      parseSlackChannelPermalink(normalized) !== null ||
-      parseDiscordMessagePermalink(normalized) !== null
-    );
-  });
 }

@@ -37,11 +37,6 @@
     "dev": "pnpm --silent --filter @roomote/dev dev",
     "doctor": "pnpm --filter @roomote/dev run doctor",
     "storybook": "pnpm --filter @roomote/web storybook",
-    "evals": "pnpm eval:router && pnpm eval:router:followup",
-    "eval:router": "pnpm --filter @roomote/cloud-agents eval:router",
-    "eval:router:followup": "pnpm --filter @roomote/cloud-agents eval:router:followup",
-    "eval:router:view": "pnpm --filter @roomote/cloud-agents eval:router:view",
-    "eval:router:share": "pnpm --filter @roomote/cloud-agents eval:router:share",
     "changeset": "changeset",
     "version": "node scripts/release/apply-version.mjs",
     "test:release-scripts": "node --test scripts/release/__tests__/*.test.mjs"

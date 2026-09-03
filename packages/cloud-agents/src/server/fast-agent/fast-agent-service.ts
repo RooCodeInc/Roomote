@@ -63,7 +63,10 @@ import {
   type SlackThreadPromptMessage,
 } from '../../utils';
 import { resolveRoomoteReleaseVersion } from '../../release-version';
-import { getAvailableEnvironments, type RoutableEnvironment } from '../router';
+import {
+  getAvailableEnvironments,
+  type RoutableEnvironment,
+} from '../available-environments';
 import {
   FAST_AGENT_MODEL_ROLE,
   FAST_RESPONDING_LEASE_MS,

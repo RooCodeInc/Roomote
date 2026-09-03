@@ -211,7 +211,6 @@ const serverSchema = {
   R_SLACK_SIGNING_SECRET: z.string().min(1).optional(),
   SLACK_API_BASE_URL: z.string().url().default('https://slack.com/api/'),
   SLACK_UNFURL_ALLOWED_DOMAINS: z.string().optional(),
-  ROUTER_DEBUG_CHANNEL_ID: z.string().optional(),
   // When adding an integration/instance secret below, also add it to
   // CONTROL_PLANE_ENV_VAR_NAMES (packages/types/src/control-plane-env-vars.ts)
   // unless it is already a `secret` field in a setup catalog, or it leaks into
@@ -583,7 +582,6 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',
   'SLACK_UNFURL_ALLOWED_DOMAINS',
-  'ROUTER_DEBUG_CHANNEL_ID',
   'R_TEAMS_BOT_APP_ID',
   'R_TEAMS_BOT_APP_PASSWORD',
   'R_TEAMS_BOT_TENANT_ID',
