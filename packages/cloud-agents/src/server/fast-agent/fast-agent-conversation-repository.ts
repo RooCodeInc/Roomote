@@ -214,6 +214,7 @@ export async function markFastAgentInferenceRetryNoticeInterruption(
 
 /** One action the interrupted attempt of a turn took, as the transcript recorded it. */
 export type FastAgentTurnAttemptAction = {
+  kind: 'action';
   tool: string;
   arguments: unknown;
   /** 'unknown' when the call was recorded but the process died before its result. */
@@ -221,10 +222,19 @@ export type FastAgentTurnAttemptAction = {
   result?: string;
 };
 
+export type FastAgentTurnAttemptReply = {
+  kind: 'reply';
+  /** A visible assistant reply the attempt already posted. */
+  text: string;
+};
+
+export type FastAgentTurnAttemptEvent =
+  | FastAgentTurnAttemptReply
+  | FastAgentTurnAttemptAction;
+
 export type FastAgentTurnAttemptSummary = {
-  /** Visible assistant replies the attempt already posted, in order. */
-  replies: string[];
-  actions: FastAgentTurnAttemptAction[];
+  /** Everything the attempt did, in transcript order, up to where it was cut. */
+  events: FastAgentTurnAttemptEvent[];
   /**
    * Where the resumed run must continue numbering its canonical events so
    * its rows extend the transcript instead of overwriting the attempt's.
@@ -285,8 +295,10 @@ export async function loadFastAgentTurnAttemptSummary(
           .join('')
       : '';
 
-  const replies: string[] = [];
-  const actions = new Map<string, FastAgentTurnAttemptAction>();
+  const events: FastAgentTurnAttemptEvent[] = [];
+  // A call and its result share one canonical event, so normally only one row
+  // per call survives; when both are present the later row wins in place.
+  const actionIndexByCallId = new Map<string, number>();
   const next = {
     assistantOrdinal: 0,
     toolOrdinal: 0,
@@ -337,6 +349,7 @@ export async function loadFastAgentTurnAttemptSummary(
         | Record<string, unknown>
         | undefined;
       const action: FastAgentTurnAttemptAction = {
+        kind: 'action',
         tool: String(payload.toolName ?? payload.title ?? 'tool'),
         arguments:
           rawInput && typeof rawInput === 'object'
@@ -360,7 +373,13 @@ export async function loadFastAgentTurnAttemptSummary(
               : output;
         }
       }
-      actions.set(toolCallId, action);
+      const index = actionIndexByCallId.get(toolCallId);
+      if (index === undefined) {
+        actionIndexByCallId.set(toolCallId, events.length);
+        events.push(action);
+      } else {
+        events[index] = action;
+      }
     } else if (
       row.role === 'assistant' &&
       row.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
@@ -368,10 +387,10 @@ export async function loadFastAgentTurnAttemptSummary(
       metadata.interruptionReason === undefined
     ) {
       const reply = text(row.contentBlocks).trim();
-      if (reply) replies.push(reply);
+      if (reply) events.push({ kind: 'reply', text: reply });
     }
   }
-  return { replies, actions: [...actions.values()], next, prompt };
+  return { events, next, prompt };
 }
 
 export type FastAgentUnresolvedRequest = {
