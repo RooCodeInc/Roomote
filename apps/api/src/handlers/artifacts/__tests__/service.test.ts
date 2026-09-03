@@ -1,4 +1,4 @@
-import { listArtifactsByTask } from '../service';
+import { listArtifactsByTask, validateArtifactPath } from '../service';
 
 const { andMock, ascMock, descMock, eqMock, orderByMock, mockSelect } =
   vi.hoisted(() => ({
@@ -82,5 +82,17 @@ describe('listArtifactsByTask', () => {
       'taskArtifacts.artifactType',
       'visual-proof',
     );
+  });
+});
+
+describe('validateArtifactPath', () => {
+  it('rejects dot-only path segments without rejecting dots in filenames', () => {
+    expect(validateArtifactPath('plans/./report.md')).toEqual({
+      valid: false,
+      error: 'Invalid path: dot segments are not allowed',
+    });
+    expect(validateArtifactPath('plans/report.final.md')).toEqual({
+      valid: true,
+    });
   });
 });

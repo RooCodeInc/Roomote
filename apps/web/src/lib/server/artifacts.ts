@@ -206,6 +206,14 @@ export function validateArtifactPath(path: string): {
     return { valid: false, error: 'Invalid path: path traversal detected' };
   }
 
+  const dotSegmentPattern = /(?:^|[/\\])\.(?:$|[/\\])/;
+  if (dotSegmentPattern.test(path)) {
+    return {
+      valid: false,
+      error: 'Invalid path: dot segments are not allowed',
+    };
+  }
+
   // Check for absolute paths (should be relative)
   if (path.startsWith('/')) {
     return {

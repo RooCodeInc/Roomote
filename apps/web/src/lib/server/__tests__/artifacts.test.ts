@@ -55,6 +55,21 @@ describe('validateArtifactPath', () => {
     });
   });
 
+  it('should reject paths with dot-only segments', () => {
+    const invalidPaths = [
+      '.',
+      './report.md',
+      'plans/./report.md',
+      'plans\\.\\report.md',
+    ];
+
+    invalidPaths.forEach((path) => {
+      const result = validateArtifactPath(path);
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('Invalid path: dot segments are not allowed');
+    });
+  });
+
   it('should reject paths starting with /', () => {
     const maliciousPaths = ['/etc/passwd', '/root/secret.txt', '/file.txt'];
 
