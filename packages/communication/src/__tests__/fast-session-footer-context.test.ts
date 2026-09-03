@@ -16,17 +16,21 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
-        innerJoin: vi.fn(() => ({ where: selectWhereMock })),
+        innerJoin: vi.fn(() => ({
+          where: vi.fn(() => ({ orderBy: selectWhereMock })),
+        })),
       })),
     })),
   },
   and: vi.fn((...args: unknown[]) => ({ and: args })),
+  asc: vi.fn((value: unknown) => ({ asc: value })),
   eq: vi.fn((...args: unknown[]) => ({ eq: args })),
   getSessionForFastConversation: getSessionForFastConversationMock,
   isNull: vi.fn((value: unknown) => ({ isNull: value })),
   sessionTasks: {
     sessionId: 'sessionId',
     taskId: 'taskId',
+    attachedAt: 'attachedAt',
   },
   tasks: {
     id: 'id',

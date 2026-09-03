@@ -1,6 +1,7 @@
 import { Env } from '@roomote/env';
 import {
   and,
+  asc,
   db,
   eq,
   getSessionForFastConversation,
@@ -79,6 +80,9 @@ async function getFastSessionLinkedTaskIds(
         .where(
           and(eq(sessionTasks.sessionId, session.id), isNull(tasks.deletedAt)),
         )
+        // Deterministic ordering so "the first task with a preview" is stable
+        // across footer rebuilds.
+        .orderBy(asc(sessionTasks.attachedAt), asc(sessionTasks.taskId))
     : [];
   return linkedTasks.map(({ taskId }) => taskId);
 }
