@@ -144,6 +144,28 @@ describe('settleSlackLiveTaskCardForRun', () => {
     ).resolves.toEqual({ card: false, updated: false });
   });
 
+  it('refreshes the visible footer after updating an in-progress summary', async () => {
+    await renderSlackLiveTaskCard({
+      taskId: 'task-1',
+      status: 'in_progress',
+      taskTitle: 'Generated title',
+    });
+
+    expect(mocks.setSlackThreadActiveTask).toHaveBeenCalledWith({
+      teamId: 'T123',
+      channel: 'C123',
+      threadTs: '100.001',
+      task: {
+        taskId: 'task-1',
+        title: 'Generated title',
+        taskUrl: 'https://roomote.example/task/task-1',
+      },
+    });
+    expect(mocks.refreshSlackThreadActiveTaskFooter).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'C123', threadTs: '100.001' }),
+    );
+  });
+
   it('does nothing for runs without a card', async () => {
     await settleSlackLiveTaskCardForRun({
       taskId: 'task-1',

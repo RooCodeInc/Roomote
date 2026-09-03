@@ -55,6 +55,7 @@ export async function renderSlackLiveTaskCard(input: {
 }): Promise<SlackLiveTaskCardRenderResult> {
   const terminal = input.status !== 'in_progress';
   let removedRoute: SlackThreadActiveTaskRoute | null = null;
+  let activeTaskUpdated = false;
   if (terminal) {
     try {
       removedRoute = await removeSlackThreadActiveTaskByTaskId(input.taskId);
@@ -85,6 +86,7 @@ export async function renderSlackLiveTaskCard(input: {
             ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
           },
         });
+        activeTaskUpdated = true;
       }
     } catch (error) {
       console.warn(
@@ -128,7 +130,7 @@ export async function renderSlackLiveTaskCard(input: {
     }),
   });
 
-  if (terminal) {
+  if (terminal || activeTaskUpdated) {
     await refreshSlackThreadActiveTaskFooter({
       slack,
       channel: data.channel,
