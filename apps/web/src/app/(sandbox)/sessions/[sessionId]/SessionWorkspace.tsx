@@ -878,6 +878,10 @@ export function SessionWorkspace({
     (taskId: string) => {
       setUtilityPanel(null);
       if (taskId === selectedTask?.taskId) return;
+      if (selectedTask && taskPanelCapacity === 1) {
+        selectTask(taskId);
+        return;
+      }
 
       setTaskPanels((previous) => {
         const withoutTask = previous.filter((panel) => panel.taskId !== taskId);
@@ -894,7 +898,7 @@ export function SessionWorkspace({
         return withoutTask;
       });
     },
-    [selectedTask, taskPanelCapacity],
+    [selectedTask, selectTask, taskPanelCapacity],
   );
   const openTasksPanel = useCallback(() => {
     if (singleRunningTaskId) {

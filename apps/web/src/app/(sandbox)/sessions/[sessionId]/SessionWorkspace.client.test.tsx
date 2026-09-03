@@ -946,6 +946,26 @@ describe('SessionWorkspace', () => {
     expect(screen.getByText('Nested panel task-1')).toBeInTheDocument();
   });
 
+  it('replaces the URL-selected task when a task card opens at one-panel capacity', () => {
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1024,
+      sessionOverride: { tasks: [singleTask, secondTask] },
+      selectedTaskId: singleTask.taskId,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'View coding task: Review homepage accessibility',
+      }),
+    );
+
+    expect(routerReplaceMock).toHaveBeenCalledWith(
+      '/sessions/session-1?task=task-2',
+    );
+  });
+
   it('navigates to an empty session Artifacts panel and back', () => {
     renderWorkspace({ isMobile: false });
 
