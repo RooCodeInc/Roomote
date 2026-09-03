@@ -1767,14 +1767,22 @@ async function withSourceControlReplyTarget(
           discussion: discussionHandle,
         });
       },
-      ...(turn.adapter.replaceReply || homeHoldsNoMessages
+      // Replacement is offered whenever either side can honor it. A home that
+      // holds messages but cannot edit them (Linear) still receives the
+      // replacement as a fresh reply, the same outcome it has without a
+      // routed target, while the discussion comment is edited in place.
+      ...(turn.adapter.replaceReply ||
+      discussionAdapter.replaceReply ||
+      homeHoldsNoMessages
         ? {
             replaceReply: async (handle, reply) => {
               const parts = decodeRoutedReplyHandle(handle);
               const [homeHandle, discussionHandle] = await Promise.all([
                 parts.home && turn.adapter.replaceReply
                   ? turn.adapter.replaceReply(parts.home, reply)
-                  : Promise.resolve(undefined),
+                  : homeHoldsNoMessages
+                    ? Promise.resolve(undefined)
+                    : turn.adapter.postReply(reply),
                 replaceOnDiscussion(parts.discussion, reply.message),
               ]);
               return encodeRoutedReplyHandle({

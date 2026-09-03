@@ -48,6 +48,7 @@ const mocks = vi.hoisted(() => ({
   buildSourceControlFastDelivery: vi.fn(),
   postSourceControlComment: vi.fn(),
   updateSourceControlComment: vi.fn(),
+  linearEmitResponse: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -198,6 +199,15 @@ vi.mock('./fast-agent-provider-message', () => ({
 
 vi.mock('../routers/mcp-connections', () => ({
   resolveUserMcpServerConfigs: mocks.resolveUserMcpServerConfigs,
+}));
+
+vi.mock('./linear-fast-session', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./linear-fast-session')>()),
+  resolveLinearFastSessionClient: vi.fn(async () => ({
+    emitResponse: mocks.linearEmitResponse,
+    getAgentSessionIssue: vi.fn(),
+  })),
+  createFastAgentLinearTaskLauncher: vi.fn(() => mocks.launchTask),
 }));
 
 vi.mock('./fast-automation-suggestions', () => ({
@@ -2470,6 +2480,93 @@ describe('deliverFastAgentParentEvent', () => {
     );
     expect(mocks.updateMessage).toHaveBeenCalledWith(
       expect.objectContaining({ ts: '101.001' }),
+    );
+  });
+
+  it('edits the mirrored pull request comment for a Linear home that cannot replace its own reply', async () => {
+    const linearParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'linear' as const,
+        workspaceId: 'linear-org',
+        conversationId: 'agent-session-1',
+        replyTarget: { channelId: 'agent-session-1' },
+      },
+    };
+    mocks.linearEmitResponse.mockResolvedValue({ success: true });
+    mocks.buildSourceControlFastDelivery.mockResolvedValue({
+      postComment: async (input: unknown) => {
+        mocks.postSourceControlComment(input);
+        return { messageId: 'comment-1' };
+      },
+      updateCommentById: async (input: unknown) => {
+        mocks.updateSourceControlComment(input);
+      },
+      resolveTarget: async () => ({
+        repositoryId: 'repo-1',
+        branch: 'feature/ship',
+        pullRequest: { url: 'https://github.com/acme/api/pull/42' },
+      }),
+    });
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: {
+          postReply: (reply: unknown) => Promise<unknown>;
+          replaceReply?: (handle: unknown, reply: unknown) => Promise<unknown>;
+        };
+      }) => {
+        const notice = await adapter.postReply({
+          purpose: 'progress',
+          message: 'Inference is being retried.',
+        });
+        expect(adapter.replaceReply).toBeDefined();
+        await adapter.replaceReply!(notice, {
+          purpose: 'closeout',
+          message: 'Done from Linear.',
+        });
+        return 'Done';
+      },
+    );
+
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent: linearParent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'github:comment:903',
+          currentMessageId: 'github:comment:903',
+          userId: 'user-2',
+          question: 'Please retry that.',
+          senderDisplayName: 'alice',
+          sourceControlReplyTarget: {
+            provider: 'github',
+            host: 'github.com',
+            repositoryFullName: 'acme/api',
+            kind: 'pull',
+            number: 42,
+            url: 'https://github.com/acme/api/pull/42',
+          },
+        },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    // Linear cannot edit, so it receives the final reply as a new response,
+    // the same as it would without a routed target; the pull request comment
+    // is edited in place rather than duplicated.
+    expect(mocks.linearEmitResponse).toHaveBeenCalledTimes(2);
+    expect(mocks.linearEmitResponse.mock.calls[1]?.[1]).toContain(
+      'Done from Linear.',
+    );
+    expect(mocks.postSourceControlComment).toHaveBeenCalledOnce();
+    expect(mocks.updateSourceControlComment).toHaveBeenCalledOnce();
+    expect(mocks.updateSourceControlComment.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        messageId: 'comment-1',
+        body: expect.stringContaining('Done from Linear.'),
+      }),
     );
   });
 });
