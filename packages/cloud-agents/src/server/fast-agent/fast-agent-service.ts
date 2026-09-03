@@ -1044,7 +1044,7 @@ function wrapFastAgentResumedTurn(
   }
   return [
     `<resumed_turn>${reason}`,
-    'Your previous attempt at this request produced the transcript below, ending where it was cut off. It is already part of this conversation: the replies were delivered to the user and the completed tool calls ran. Continue from the last entry as if you had just received it. Do not send those replies again or repeat calls that completed. A call whose result is marked failed did not take effect and may be retried if the request still needs it.',
+    'Your previous attempt at this request produced the transcript below, ending where it was cut off. It is already part of this conversation: the replies were delivered to the user and the completed tool calls ran. Continue from the last entry as if you had just received it. Do not send those replies again or repeat calls that completed. A call whose result is marked failed returned an error; read that error before deciding whether to retry, because a timeout or a lost response can mean the call actually took effect.',
     `<previous_attempt_transcript>\n${transcript}\n</previous_attempt_transcript>`,
     '</resumed_turn>',
   ].join('\n');

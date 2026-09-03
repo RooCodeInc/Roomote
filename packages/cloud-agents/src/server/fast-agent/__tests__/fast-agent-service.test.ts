@@ -4081,11 +4081,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         block.indexOf('[TOOL_CALL save_memory]'),
       );
       expect(call.prompt).toContain('Continue from the last entry');
-      // A failed call is replayed as failed and explicitly left retryable, so
-      // a transient failure is not mistaken for finished work.
+      // A failed call is replayed with its error so the model can judge a
+      // retry; "failed" is not asserted to mean "had no effect", since a lost
+      // response to a write is recorded the same way.
       expect(block).toContain('[TOOL_RESULT failed]');
+      expect(block).toContain('Task is not accepting messages yet.');
       expect(call.prompt).toContain(
-        'marked failed did not take effect and may be retried',
+        'read that error before deciding whether to retry',
       );
       expect(
         mocks.upsertMessage.mock.calls.map(([input]) => input.message),
