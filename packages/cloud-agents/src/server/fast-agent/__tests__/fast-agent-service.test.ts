@@ -103,6 +103,8 @@ vi.mock('../fast-agent-conversation-repository', () => ({
     'The inference retry was interrupted before it completed. Please send the request again.',
   RESTARTED_ACTIVE_TURN_MESSAGE:
     'Roomote restarted while working on this request. Please send it again.',
+  DELEGATED_TURN_RESTART_MESSAGE:
+    'Roomote restarted while working on this request, but the task it started is still running and will report back here.',
   reconcileFastAgentInferenceRetryNotices: mocks.reconcileRetryNotices,
   markFastAgentInferenceRetryNoticeInterruption:
     mocks.markRetryNoticeInterruption,
@@ -3869,7 +3871,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
     });
 
-    it('posts the restart closeout when the interrupted turn already acted', async () => {
+    it('tells the user the started task continues instead of asking for a resend', async () => {
       const controller = new AbortController();
       const shutdown = new FastAgentProcessShutdownError('SIGTERM');
       const requestDurableResume = vi.fn().mockResolvedValue(undefined);
@@ -3890,7 +3892,68 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await expect(
         answerFastAgentQuestion({
           ...baseParams,
-          adapter: callbacks({ postReply, requestDurableResume }),
+          adapter: callbacks({
+            postReply,
+            requestDurableResume,
+            launchTask: vi.fn<LaunchFastAgentTask>(async () => ({
+              success: true,
+              taskId: 'task-1',
+            })),
+          }),
+          signal: controller.signal,
+          durableAdmission,
+        }),
+      ).rejects.toBe(shutdown);
+
+      // The turn already started a task, so "send it again" would start a
+      // second one. The closeout says the task continues, and its marker names
+      // the task so the next message does not treat the request as owed.
+      expect(postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message:
+          'Roomote restarted while working on this request, but the task it started is still running and will report back here.',
+      });
+      const closeoutWrite = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .find((message) => message.metadata?.purpose === 'closeout');
+      expect(closeoutWrite?.metadata).toMatchObject({
+        interruptionReason: 'api_shutdown',
+        delegatedTaskIds: ['task-1'],
+      });
+      expect(mocks.releaseDurableClaim).not.toHaveBeenCalled();
+      expect(requestDurableResume).not.toHaveBeenCalled();
+    });
+
+    it('still asks for a resend when the interrupted turn acted but no task exists', async () => {
+      const controller = new AbortController();
+      const shutdown = new FastAgentProcessShutdownError('SIGTERM');
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          // Replay is withdrawn before the launch is attempted, so the turn
+          // has acted, but the launch failed and nothing is running for the
+          // user: a resend is the right instruction here.
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix the bug',
+            environmentId: 'env-1',
+            kickoffMessage: 'Starting.',
+          });
+          controller.abort(shutdown);
+          throw shutdown;
+        },
+      );
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({
+            postReply,
+            launchTask: vi.fn<LaunchFastAgentTask>(async () => ({
+              success: false,
+              error: 'Launch failed.',
+            })),
+          }),
           signal: controller.signal,
           durableAdmission,
         }),
@@ -3901,8 +3964,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         message:
           'Roomote restarted while working on this request. Please send it again.',
       });
-      expect(mocks.releaseDurableClaim).not.toHaveBeenCalled();
-      expect(requestDurableResume).not.toHaveBeenCalled();
+      const closeoutWrite = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .find((message) => message.metadata?.purpose === 'closeout');
+      expect(closeoutWrite?.metadata).not.toHaveProperty('delegatedTaskIds');
     });
 
     it('does not resume a deliberately cancelled turn', async () => {

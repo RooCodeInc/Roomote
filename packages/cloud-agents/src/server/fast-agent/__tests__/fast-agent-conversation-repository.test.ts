@@ -1212,6 +1212,17 @@ describe('Fast conversation repository', () => {
       findFastAgentUnresolvedRequest(session.id),
     ).resolves.toBeNull();
 
+    // A turn interrupted after it had already started a task is not owed
+    // either: the task keeps running and its result settles the request.
+    await prompt('turn-3b', 350, 'Investigate the queue bypass');
+    await closeout('turn-3b', 360, {
+      interruptionReason: 'api_shutdown',
+      delegatedTaskIds: ['task-1'],
+    });
+    await expect(
+      findFastAgentUnresolvedRequest(session.id),
+    ).resolves.toBeNull();
+
     // An interrupted platform-event turn is not a request the user is owed.
     await prompt('turn-4', 400, '<platform_event>{}</platform_event>', {
       visibleInTranscript: false,

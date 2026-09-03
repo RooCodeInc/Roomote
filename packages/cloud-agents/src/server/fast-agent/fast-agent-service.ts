@@ -121,6 +121,7 @@ import {
   scheduleFastAgentDurableTurnRetry,
   reconcileFastAgentInferenceRetryNotices,
   renewFastSessionRespondingLease,
+  DELEGATED_TURN_RESTART_MESSAGE,
   RESTARTED_ACTIVE_TURN_MESSAGE,
   type FastAgentInterruptionReason,
   type FastAgentUnresolvedRequest,
@@ -1375,6 +1376,10 @@ export async function answerFastAgentQuestion({
     instructionVersion = currentInstructionVersion,
   ) => closedInstructionVersions.has(instructionVersion);
   let inferenceRetryReply: FastAgentReplyHandle | undefined;
+  // Tasks this turn itself started, as opposed to ones already active in the
+  // session. An interruption after a launch is not a lost request: the task
+  // keeps running and reports back through the queue.
+  const tasksLaunchedThisTurn = new Set<string>();
   let inferenceRetryMessageIndex: number | undefined;
   let inferenceRetryCanonicalEvent:
     | { eventId: string; turnSeq: number }
@@ -1950,6 +1955,7 @@ export async function answerFastAgentQuestion({
     inferenceRetryNotice = false,
     visibleInTranscript = true,
     interruptionReason,
+    delegatedTaskIds,
     ts,
   }: {
     reply: FastAgentReply;
@@ -1959,6 +1965,8 @@ export async function answerFastAgentQuestion({
     inferenceRetryNotice?: boolean;
     visibleInTranscript?: boolean;
     interruptionReason?: FastAgentInterruptionReason;
+    /** Tasks the turn started before it was interrupted; see the closeout. */
+    delegatedTaskIds?: string[];
     /** Explicit event time; retry notices pin it to the episode start. */
     ts?: number;
   }) =>
@@ -1983,6 +1991,7 @@ export async function answerFastAgentQuestion({
               }
             : {}),
           ...(interruptionReason ? { interruptionReason } : {}),
+          ...(delegatedTaskIds?.length ? { delegatedTaskIds } : {}),
           ...(platformMessageId ? { platformMessageId } : {}),
         },
         payload: {
@@ -2177,6 +2186,7 @@ export async function answerFastAgentQuestion({
     bestEffort = false,
     onDelivered?: () => void,
     interruptionReason?: FastAgentInterruptionReason,
+    delegatedTaskIds?: string[],
   ): Promise<boolean> => {
     if (!inferenceRetryCanonicalEvent) {
       return false;
@@ -2203,6 +2213,7 @@ export async function answerFastAgentQuestion({
         inferenceRetryNotice: true,
         visibleInTranscript: false,
         interruptionReason,
+        delegatedTaskIds,
         ts: noticeTs,
       });
       return false;
@@ -2238,6 +2249,7 @@ export async function answerFastAgentQuestion({
         inferenceRetryNotice: true,
         visibleInTranscript: false,
         interruptionReason,
+        delegatedTaskIds,
         ts: noticeTs,
       });
       return false;
@@ -2254,6 +2266,7 @@ export async function answerFastAgentQuestion({
         platformMessageId: inferenceRetryReply.messageId,
         inferenceRetryNotice: true,
         interruptionReason,
+        delegatedTaskIds,
         ts: noticeTs,
       });
     }
@@ -3381,6 +3394,7 @@ export async function answerFastAgentQuestion({
             }
             if (result.success) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
+              tasksLaunchedThisTurn.add(result.taskId);
               if (result.kickoffDelivered) {
                 visibleUpdatePosted = true;
                 substantiveWorkAcknowledged = true;
@@ -4303,27 +4317,37 @@ export async function answerFastAgentQuestion({
             : await revokeDurableTurnReplay(
                 `Turn interrupted without replay (${interruptionReason}).`,
               );
+        // A turn that already started a task must not ask the user to
+        // resend: that would start a second one. The task keeps running and
+        // reports back through the queue, and the closeout records which
+        // task(s) so the next message does not treat this as owed.
+        const delegatedTaskIds = [...tasksLaunchedThisTurn];
+        const delegated = delegatedTaskIds.length > 0;
+        const closeoutMessage = delegated
+          ? DELEGATED_TURN_RESTART_MESSAGE
+          : shutdownInterrupted
+            ? // A shutdown is a restart the user can see through honestly;
+              // other aborts keep the generic retry-interruption wording.
+              RESTARTED_ACTIVE_TURN_MESSAGE
+            : INTERRUPTED_INFERENCE_RETRY_MESSAGE;
         if (!terminalCloseoutAllowed) {
           // Resumable turns and unrevoked rows fall through to the rethrow
           // below without a user-facing closeout.
         } else if (!lockOwnershipLost && inferenceRetryReply) {
           await replaceInferenceRetryReply(
-            {
-              purpose: 'closeout',
-              // A shutdown is a restart the user can see through honestly;
-              // other aborts keep the generic retry-interruption wording.
-              message: shutdownInterrupted
-                ? RESTARTED_ACTIVE_TURN_MESSAGE
-                : INTERRUPTED_INFERENCE_RETRY_MESSAGE,
-            },
+            { purpose: 'closeout', message: closeoutMessage },
             true,
             undefined,
             interruptionReason,
+            delegated ? delegatedTaskIds : undefined,
           );
-        } else if (shutdownInterrupted && !isInstructionClosed()) {
+        } else if (
+          (shutdownInterrupted || delegated) &&
+          !isInstructionClosed()
+        ) {
           const reply = {
             purpose: 'closeout' as const,
-            message: RESTARTED_ACTIVE_TURN_MESSAGE,
+            message: closeoutMessage,
           };
           try {
             const posted =
@@ -4339,6 +4363,7 @@ export async function answerFastAgentQuestion({
               platformMessageId: posted?.messageId,
               inferenceRetryNotice: Boolean(retryEvent),
               interruptionReason,
+              delegatedTaskIds: delegated ? delegatedTaskIds : undefined,
             });
           } catch (postError) {
             console.error(

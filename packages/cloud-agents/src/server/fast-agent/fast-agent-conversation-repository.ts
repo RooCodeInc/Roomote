@@ -69,6 +69,14 @@ export const RESTARTED_ACTIVE_TURN_MESSAGE =
   'Roomote restarted while working on this request. Please send it again.';
 
 /**
+ * Closeout for a turn interrupted after it had already handed its work to a
+ * task. Telling the user to resend would launch a second task; the one that
+ * exists keeps running and its result reaches the thread through the queue.
+ */
+export const DELEGATED_TURN_RESTART_MESSAGE =
+  'Roomote restarted while working on this request, but the task it started is still running and will report back here.';
+
+/**
  * Why an accepted Fast turn ended without a real answer. Stamped into the
  * terminal message's metadata by every writer so occurrence counts can be
  * attributed per cause instead of investigated per incident.
@@ -289,6 +297,9 @@ export async function findFastAgentUnresolvedRequest(
         eq(fastAgentMessages.turnId, latestPrompt.turnId),
         eq(fastAgentMessages.role, 'assistant'),
         sql`${fastAgentMessages.metadata}->>'interruptionReason' IS NOT NULL`,
+        // A turn that already delegated its work to a task is not owed a
+        // redo: the task's own result settles it.
+        sql`${fastAgentMessages.metadata}->>'delegatedTaskIds' IS NULL`,
       ),
     )
     .limit(1);
