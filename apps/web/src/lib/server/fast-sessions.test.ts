@@ -275,6 +275,7 @@ describe('Fast session queries', () => {
               version: 2,
             }),
           ],
+          previews: [],
           latestRun: {
             status: RunStatus.Running,
             taskPhase: 'running',
@@ -285,6 +286,7 @@ describe('Fast session queries', () => {
           title: 'Zero cost task',
           inferenceCostMicroUsd: 0,
           artifacts: [],
+          previews: [],
           latestRun: {
             status: RunStatus.Completed,
             taskPhase: null,
@@ -292,6 +294,75 @@ describe('Fast session queries', () => {
         },
       ]),
     );
+  });
+
+  it('collates live preview URLs from awake delegated task runs', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'preview-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const awakeTask = await taskFactory.create({
+      title: 'Awake task',
+      state: 'active',
+    });
+    const awakeRun = await runFactory.create({
+      taskId: awakeTask.id,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      machineDomains: {
+        WEB_APP: 'web.internal',
+        API: 'api.internal',
+        SANDBOX_SERVER: 'sandbox.internal',
+      },
+      initialPaths: { WEB_APP: '/dashboard' },
+      primaryPortName: 'WEB_APP',
+      payload: {
+        repo: 'acme/widgets',
+        description: 'Awake Fast task',
+        fastAgentSessionId: session.id,
+      },
+    });
+    const sleepingTask = await taskFactory.create({
+      title: 'Sleeping task',
+      state: 'active',
+    });
+    await runFactory.create({
+      taskId: sleepingTask.id,
+      status: RunStatus.Idle,
+      machineDomains: { WEB_APP: 'sleeping.internal' },
+      snapshotId: 'snapshot-1',
+      payload: {
+        repo: 'acme/widgets',
+        description: 'Sleeping Fast task',
+        fastAgentSessionId: session.id,
+      },
+    });
+
+    const result = await getFastSessionTasks(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    const awake = result?.find((task) => task.taskId === awakeTask.id);
+    expect(awake?.previews).toEqual([
+      {
+        serviceName: 'WEB_APP',
+        url: expect.stringContaining(`${awakeTask.id}-web-app`),
+        isPrimary: true,
+        runId: awakeRun.id,
+      },
+      {
+        serviceName: 'API',
+        url: expect.stringContaining(`${awakeTask.id}-api`),
+        isPrimary: false,
+        runId: awakeRun.id,
+      },
+    ]);
+    expect(awake?.previews[0]?.url).toContain('/dashboard');
+    const sleeping = result?.find((task) => task.taskId === sleepingTask.id);
+    expect(sleeping?.previews).toEqual([]);
   });
 
   it('keeps task-linked usage out of the legacy Fast direct cost', async () => {
