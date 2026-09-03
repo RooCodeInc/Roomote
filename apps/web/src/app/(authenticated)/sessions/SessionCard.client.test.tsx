@@ -1,9 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import { SessionCard } from './SessionCard';
 
 describe('SessionCard', () => {
-  it('links to the transcript without repository or execution metadata', () => {
+  it('links to the transcript without repository or execution metadata', async () => {
     render(
       <SessionCard
         viewerUserId="user-1"
@@ -21,6 +21,7 @@ describe('SessionCard', () => {
           cachedStatus: 'active',
           executionCount: 1,
           inferenceCostMicroUsd: 10_000,
+          directInferenceCostMicroUsd: 4_000,
           unread: false,
           pullRequests: [
             {
@@ -32,8 +33,10 @@ describe('SessionCard', () => {
           tasks: [
             {
               taskId: 'task-1',
+              title: 'Implement session totals',
               workflow: 'standard',
               repositoryName: 'RooCodeInc/Roomote',
+              inferenceCostMicroUsd: 6_000,
             },
           ],
         }}
@@ -46,7 +49,15 @@ describe('SessionCard', () => {
     expect(screen.getByText('Test User')).toBeInTheDocument();
     expect(screen.getByText('started a session')).toBeInTheDocument();
     expect(screen.getByText('Web')).toBeInTheDocument();
-    expect(screen.getByText('$0.01')).toBeInTheDocument();
+    expect(screen.getByText('0.01')).toBeInTheDocument();
+    fireEvent.focus(screen.getByText('0.01'));
+    expect(
+      (await screen.findAllByText('Inference cost breakdown')).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText('Direct session').length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText('Implement session totals').length,
+    ).toBeGreaterThan(0);
     expect(screen.getByRole('link', { name: 'Roomote#1939' })).toHaveAttribute(
       'href',
       'https://github.com/RooCodeInc/Roomote/pull/1939',
@@ -74,6 +85,7 @@ describe('SessionCard', () => {
           cachedStatus: 'ready',
           executionCount: 0,
           inferenceCostMicroUsd: 0,
+          directInferenceCostMicroUsd: 0,
           unread: false,
           pullRequests: [],
           searchSnippet: '...preserve the Heliotrope detail before release.',
@@ -104,6 +116,7 @@ describe('SessionCard', () => {
       cachedStatus: 'ready' as const,
       executionCount: 0,
       inferenceCostMicroUsd: 0,
+      directInferenceCostMicroUsd: 0,
       unread: true,
       pullRequests: [],
       tasks: [],
@@ -133,6 +146,7 @@ describe('SessionCard', () => {
       cachedStatus: 'active' as const,
       executionCount: 0,
       inferenceCostMicroUsd: 0,
+      directInferenceCostMicroUsd: 0,
       unread: false,
       pullRequests: [],
       tasks: [],
@@ -188,6 +202,7 @@ describe('SessionCard', () => {
           cachedStatus: 'ready',
           executionCount: 1,
           inferenceCostMicroUsd: 0,
+          directInferenceCostMicroUsd: 0,
           unread: false,
           pullRequests: [],
           tasks: [],
@@ -197,5 +212,38 @@ describe('SessionCard', () => {
 
     expect(screen.getByText('Sentry Triage')).toBeInTheDocument();
     expect(screen.getByText('started a session')).toBeInTheDocument();
+    expect(screen.getByLabelText('Sentry Triage')).toBeInTheDocument();
+  });
+
+  it('removes crowded attribution and source metadata only in board view', () => {
+    render(
+      <SessionCard
+        view="board"
+        viewerUserId="user-1"
+        session={{
+          id: 'session-board',
+          title: 'Board session',
+          ownerKind: 'user',
+          ownerAutomation: null,
+          ownerName: 'Test User',
+          ownerEmail: 'test@example.com',
+          ownerImageUrl: null,
+          ownerUserId: 'user-1',
+          sourceSurface: 'slack',
+          activityAt: Date.now() / 1000,
+          cachedStatus: 'ready',
+          executionCount: 0,
+          inferenceCostMicroUsd: 0,
+          directInferenceCostMicroUsd: 0,
+          unread: false,
+          pullRequests: [],
+          tasks: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Test User')).toBeInTheDocument();
+    expect(screen.queryByText('started a session')).not.toBeInTheDocument();
+    expect(screen.queryByText('Slack')).not.toBeInTheDocument();
   });
 });

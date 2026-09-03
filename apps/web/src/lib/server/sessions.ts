@@ -501,6 +501,7 @@ type HydratedLinkedTask = {
   repositoryName: string | null;
   model: string | null;
   activityAt: number;
+  inferenceCostMicroUsd?: number;
 };
 
 async function hydrateSessionRows(
@@ -589,13 +590,14 @@ async function hydrateSessionRows(
     db
       .select({
         sessionId: sessionTasks.sessionId,
+        taskId: sessionTasks.taskId,
         costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
       })
       .from(sessionTasks)
       .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
       .innerJoin(llmUsageEvents, eq(llmUsageEvents.taskId, sessionTasks.taskId))
       .where(and(inArray(sessionTasks.sessionId, ids), isNull(tasks.deletedAt)))
-      .groupBy(sessionTasks.sessionId),
+      .groupBy(sessionTasks.sessionId, sessionTasks.taskId),
     db
       .select({
         sessionId: sessions.id,
@@ -680,13 +682,20 @@ async function hydrateSessionRows(
         legacyFastDirectUsage.find((event) => event.sessionId === row.id)
           ?.costMicroUsd ?? 0,
       );
-    const taskInferenceCostMicroUsd = Number(
-      attachedTaskUsage.find((event) => event.sessionId === row.id)
-        ?.costMicroUsd ?? 0,
+    const tasksWithUsage = tasksForSession.map((task) => ({
+      ...task,
+      inferenceCostMicroUsd: Number(
+        attachedTaskUsage.find((event) => event.taskId === task.taskId)
+          ?.costMicroUsd ?? 0,
+      ),
+    }));
+    const taskInferenceCostMicroUsd = tasksWithUsage.reduce(
+      (total, task) => total + task.inferenceCostMicroUsd,
+      0,
     );
     return {
       ...row,
-      tasks: tasksForSession,
+      tasks: tasksWithUsage,
       pullRequests: getSessionPullRequests([
         {
           pullRequests: linkedPullRequests

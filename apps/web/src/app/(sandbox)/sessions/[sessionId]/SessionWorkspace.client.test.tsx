@@ -494,7 +494,7 @@ describe('SessionWorkspace', () => {
     expect(
       screen.getByRole('heading', { name: 'Session Info' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('needs input')).toBeInTheDocument();
+    expect(screen.queryByText('needs input')).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Close session info' }),
     ).toBeNull();
