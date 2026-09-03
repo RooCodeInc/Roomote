@@ -3,6 +3,7 @@ import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   isTaskModelIdDisabled,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
@@ -21,6 +22,7 @@ const BLOCKED_WORKER_ENV_KEYS = new Set([
   // The hosting-managed Roomote inference key is gateway-served. Block it so
   // no env passthrough can ever ship it into a sandbox.
   'R_TRIAL_OPENROUTER_API_KEY',
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
 ]);
 

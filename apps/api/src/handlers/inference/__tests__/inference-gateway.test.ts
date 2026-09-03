@@ -128,7 +128,10 @@ describe('inference gateway', () => {
     // The Roomote trial key resolution is cached with a TTL; drop it so each
     // test observes its own mockResolveModelProviderEnvValue behavior.
     resetRoomoteInferenceKeyCache();
-    mockFindTaskRun.mockResolvedValue({ id: 42 });
+    mockFindTaskRun.mockResolvedValue({
+      id: 42,
+      payload: { environmentId: 'environment-1' },
+    });
     mockGetGitHubCopilotAccessToken.mockResolvedValue(null);
     mockGetFreshXaiAccessToken.mockResolvedValue(null);
     mockResolveModelProviderEnvValue.mockImplementation(
@@ -228,13 +231,16 @@ describe('inference gateway', () => {
     const fetchMock = stubUpstreamFetch();
     const app = createApp(createRunToken());
 
-    const [anthropicResponse, openRouterResponse] = await Promise.all([
-      postMessages(app, '/api/inference/anthropic/v1/messages/batches'),
-      postMessages(app, '/api/inference/openrouter/v1/key'),
-    ]);
+    const [anthropicResponse, openRouterResponse, sandboxResponse] =
+      await Promise.all([
+        postMessages(app, '/api/inference/anthropic/v1/messages/batches'),
+        postMessages(app, '/api/inference/openrouter/v1/key'),
+        postMessages(app, '/api/inference/sandbox-openrouter/v1/key'),
+      ]);
 
     expect(anthropicResponse.status).toBe(403);
     expect(openRouterResponse.status).toBe(403);
+    expect(sandboxResponse.status).toBe(403);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -286,6 +292,62 @@ describe('inference gateway', () => {
         'Bearer provider-secret-key',
       );
     }
+  });
+
+  it('routes sandbox preview inference through only the dedicated capped key', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/sandbox-openrouter/v1/chat/completions',
+      { model: 'google/gemini-3.8-flash', messages: [] },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith([
+      'R_SANDBOX_OPENROUTER_API_KEY',
+    ]);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      'Bearer provider-secret-key',
+    );
+  });
+
+  it('does not fall back to another OpenRouter key for sandbox preview inference', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+        return nameList.includes('R_SANDBOX_OPENROUTER_API_KEY')
+          ? undefined
+          : 'other-provider-key';
+      },
+    );
+    vi.stubEnv('OPENROUTER_API_KEY', 'normal-openrouter-key');
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'trial-openrouter-key');
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/sandbox-openrouter/v1/chat/completions',
+      { model: 'google/gemini-3.8-flash', messages: [] },
+    );
+
+    expect(response.status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects sandbox preview inference from non-environment task runs', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, payload: {} });
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/sandbox-openrouter/v1/chat/completions',
+      { model: 'google/gemini-3.8-flash', messages: [] },
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('routes Roomote models through OpenRouter with only the managed key', async () => {

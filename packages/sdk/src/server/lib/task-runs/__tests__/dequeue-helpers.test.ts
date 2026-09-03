@@ -945,6 +945,7 @@ describe('redactControlPlaneEnvVars', () => {
         DASHBOARD_PASSWORD: 'dash',
         DATABASE_URL: 'postgres://x',
         S3_SECRET_ACCESS_KEY: 's3',
+        R_SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
         // Derived from the source-control secret catalog.
         GITLAB_WEBHOOK_SECRET: 'gl-webhook',
         GITLAB_CLIENT_SECRET: 'gl-client',

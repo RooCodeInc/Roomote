@@ -91,5 +91,16 @@ describe('environment-variables commands', () => {
         'is a reserved communications provider variable. Configure it under Settings → Communications.',
       );
     });
+
+    it('rejects the sandbox OpenRouter control-plane key', async () => {
+      await expect(
+        createEnvVarCommand(buildMockAuth(), {
+          name: 'R_SANDBOX_OPENROUTER_API_KEY',
+          value: 'must-not-be-saved',
+        }),
+      ).rejects.toThrow(
+        '"R_SANDBOX_OPENROUTER_API_KEY" is a reserved deployment variable and cannot be set here.',
+      );
+    });
   });
 });

@@ -126,6 +126,8 @@ const logger = {
 
 const mockWorkerEnv = {
   buildUserFacingEnv: vi.fn(() => ({ BASE: 'base' })),
+  trpcUrl: 'https://api.roomote.example',
+  authToken: 'run-token',
   getRuntimeEnv: mockGetRuntimeEnv,
   refreshSystemEnv: vi.fn(),
   setUserEnv: mockSetUserEnv,
@@ -137,7 +139,10 @@ const workspaceOptions = {
     repository: 'owner/repo',
     branch: 'main',
   },
-  envVars: { FOO: 'bar' },
+  envVars: {
+    FOO: 'bar',
+    R_SANDBOX_OPENROUTER_API_KEY: 'must-not-reach-environment-setup',
+  },
   taskRunType: TaskPayloadKind.StandardTask,
 };
 
@@ -150,7 +155,10 @@ const environmentWorkspaceOptions = {
       repositories: [{ repository: 'owner/repo' }],
     },
   },
-  envVars: { FOO: 'bar' },
+  envVars: {
+    FOO: 'bar',
+    R_SANDBOX_OPENROUTER_API_KEY: 'must-not-reach-environment-setup',
+  },
   taskRunType: TaskPayloadKind.StandardTask,
 };
 
@@ -332,7 +340,14 @@ describe('setup mode behavior', () => {
 
     expect(mockSetupOrganizationEnvironment).toHaveBeenCalledWith(logger, {
       environment: environmentWorkspaceOptions.workspace,
-      envVars: { BASE: 'base', FOO: 'bar' },
+      envVars: {
+        BASE: 'base',
+        FOO: 'bar',
+        ROOMOTE_PLATFORM_API_URL: 'https://api.roomote.example',
+        ROOMOTE_CLOUD_TOKEN: 'run-token',
+        ROOMOTE_SANDBOX_OPENROUTER_BASE_URL:
+          'https://api.roomote.example/api/inference/sandbox-openrouter/v1',
+      },
       userEnvVars: undefined,
       preparedWorkspace: {
         workspacePath: '/tmp/workspace',
@@ -365,11 +380,25 @@ describe('setup mode behavior', () => {
       ...environmentWorkspaceOptions,
       cleanupLegacyPaths: true,
       taskRunType: TaskPayloadKind.SnapshotEnvironment,
-      envVars: { BASE: 'base', FOO: 'bar' },
+      envVars: {
+        BASE: 'base',
+        FOO: 'bar',
+        ROOMOTE_PLATFORM_API_URL: 'https://api.roomote.example',
+        ROOMOTE_CLOUD_TOKEN: 'run-token',
+        ROOMOTE_SANDBOX_OPENROUTER_BASE_URL:
+          'https://api.roomote.example/api/inference/sandbox-openrouter/v1',
+      },
     });
     expect(mockSetupOrganizationEnvironment).toHaveBeenCalledWith(logger, {
       environment: environmentWorkspaceOptions.workspace,
-      envVars: { BASE: 'base', FOO: 'bar' },
+      envVars: {
+        BASE: 'base',
+        FOO: 'bar',
+        ROOMOTE_PLATFORM_API_URL: 'https://api.roomote.example',
+        ROOMOTE_CLOUD_TOKEN: 'run-token',
+        ROOMOTE_SANDBOX_OPENROUTER_BASE_URL:
+          'https://api.roomote.example/api/inference/sandbox-openrouter/v1',
+      },
       userEnvVars: undefined,
       preparedWorkspace: {
         workspacePath: '/tmp/workspace',
