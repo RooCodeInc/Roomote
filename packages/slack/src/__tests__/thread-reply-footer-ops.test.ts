@@ -7,7 +7,7 @@ const {
   mockBuildFooterText,
   mockRedisSet,
   mockRedisEval,
-  mockRedisHgetall,
+  mockRelocate,
 } = vi.hoisted(() => ({
   mockGetFooterTs: vi.fn(),
   mockSetFooterTs: vi.fn(),
@@ -15,7 +15,7 @@ const {
   mockBuildFooterText: vi.fn(),
   mockRedisSet: vi.fn(),
   mockRedisEval: vi.fn(),
-  mockRedisHgetall: vi.fn(),
+  mockRelocate: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -26,8 +26,11 @@ vi.mock('@roomote/redis', () => ({
   getRedis: () => ({
     set: mockRedisSet,
     eval: mockRedisEval,
-    hgetall: mockRedisHgetall,
   }),
+}));
+
+vi.mock('../relocate-active-task-cards', () => ({
+  relocateSlackThreadActiveTaskCards: mockRelocate,
 }));
 
 vi.mock('../slack-messages', () => ({
@@ -42,9 +45,8 @@ vi.mock('../thread-footer', () => ({
 
 import {
   isSlackThreadReplyFooterBlock,
-  postSlackThreadMessageWithFooterText,
   postSlackThreadMessageWithStickyFooter,
-  refreshSlackThreadActiveTaskFooter,
+  registerSlackThreadActiveTaskAndMoveFooter,
   removeSlackThreadReplyFooter,
   updateSlackThreadMessageWithFooterText,
 } from '../thread-reply-footer-ops';
@@ -54,7 +56,7 @@ describe('thread-reply-footer-ops', () => {
     vi.clearAllMocks();
     mockRedisSet.mockResolvedValue('OK');
     mockRedisEval.mockResolvedValue(1);
-    mockRedisHgetall.mockResolvedValue({});
+    mockRelocate.mockResolvedValue(undefined);
     mockGetFooterTs.mockResolvedValue('111.000');
     mockSetFooterTs.mockResolvedValue(undefined);
     mockResolveFooterContext.mockResolvedValue({
@@ -108,6 +110,8 @@ describe('thread-reply-footer-ops', () => {
         },
       ]),
       updateMessage: vi.fn().mockResolvedValue(true),
+      getRawMessage: vi.fn(),
+      deleteMessage: vi.fn().mockResolvedValue(true),
     };
 
     const ts = await postSlackThreadMessageWithStickyFooter({
@@ -170,30 +174,11 @@ describe('thread-reply-footer-ops', () => {
     );
   });
 
-  it('moves one bounded task summary immediately above the footer', async () => {
-    mockRedisHgetall.mockResolvedValue({
-      active: JSON.stringify({
-        taskId: 'active',
-        title: 'Active task',
-        taskUrl: 'https://app.example.com/task/active',
-        updatedAt: 1,
-      }),
-      activeNewest: JSON.stringify({
-        taskId: 'active-newest',
-        title: 'Newest active task',
-        updatedAt: 4,
-      }),
-    });
-    const priorSummary = {
-      type: 'section',
-      block_id: 'roomote_thread_active_task_list',
-      text: { type: 'mrkdwn', text: 'stale tasks' },
-    };
+  it('relocates canonical cards before posting the footer carrier', async () => {
     const slack = {
       postMessage: vi.fn().mockResolvedValue('222.000'),
       getMessageBlocks: vi.fn().mockResolvedValue([
         { type: 'markdown', text: 'old body' },
-        priorSummary,
         {
           type: 'context',
           block_id: 'roomote_thread_reply_footer',
@@ -201,6 +186,8 @@ describe('thread-reply-footer-ops', () => {
         },
       ]),
       updateMessage: vi.fn().mockResolvedValue(true),
+      getRawMessage: vi.fn(),
+      deleteMessage: vi.fn().mockResolvedValue(true),
     };
 
     await postSlackThreadMessageWithStickyFooter({
@@ -211,18 +198,15 @@ describe('thread-reply-footer-ops', () => {
       text: 'new reply',
     });
 
-    const postedBlocks = slack.postMessage.mock.calls[0]?.[0]?.blocks;
-    expect(postedBlocks).toHaveLength(3);
-    expect(postedBlocks[1]).toMatchObject({
-      block_id: 'roomote_thread_active_task_list',
-    });
-    const summary = postedBlocks[1].text.text as string;
-    expect(summary.indexOf('Newest active task')).toBeLessThan(
-      summary.indexOf('Active task'),
+    expect(mockRelocate).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'C1', threadTs: '100.000' }),
     );
-    expect(summary).not.toContain('Complete');
-    expect(summary).not.toContain('Stopped');
-    expect(postedBlocks[2]).toMatchObject({
+    expect(mockRelocate.mock.invocationCallOrder[0]).toBeLessThan(
+      slack.postMessage.mock.invocationCallOrder[0]!,
+    );
+    const postedBlocks = slack.postMessage.mock.calls[0]?.[0]?.blocks;
+    expect(postedBlocks).toHaveLength(2);
+    expect(postedBlocks[1]).toMatchObject({
       block_id: 'roomote_thread_reply_footer',
     });
     expect(slack.updateMessage).toHaveBeenCalledWith({
@@ -232,129 +216,15 @@ describe('thread-reply-footer-ops', () => {
     });
   });
 
-  it('compacts many active tasks within Slack section limits', async () => {
-    mockRedisHgetall.mockResolvedValue(
-      Object.fromEntries(
-        Array.from({ length: 100 }, (_, index) => [
-          `task-${index}`,
-          JSON.stringify({
-            taskId: `task-${index}`,
-            title: `Task ${index} ${'x'.repeat(150)}`,
-            updatedAt: index,
-          }),
-        ]),
-      ),
-    );
-    const slack = {
-      postMessage: vi.fn().mockResolvedValue('222.000'),
-      getMessageBlocks: vi.fn().mockResolvedValue([]),
-      updateMessage: vi.fn().mockResolvedValue(true),
-    };
-
-    await postSlackThreadMessageWithStickyFooter({
-      slack,
-      channel: 'C1',
-      threadTs: '100.000',
-      taskId: 'task-1',
-      text: 'new reply',
-    });
-
-    const blocks = slack.postMessage.mock.calls[0]?.[0]?.blocks;
-    expect(blocks).toHaveLength(3);
-    const summary = blocks[1].text.text as string;
-    expect(summary.length).toBeLessThanOrEqual(2900);
-    expect(summary).toContain('Task 99');
-    expect(summary).toMatch(/_\d+ additional active tasks not shown_$/);
-  });
-
-  it('keeps the Slack message at 50 blocks when the reply body uses 49', async () => {
-    mockRedisHgetall.mockResolvedValue({
-      active: JSON.stringify({
-        taskId: 'active',
-        title: 'Active task',
-        updatedAt: 1,
-      }),
-    });
-    const slack = {
-      postMessage: vi.fn().mockResolvedValue('222.000'),
-      getMessageBlocks: vi.fn().mockResolvedValue([]),
-      updateMessage: vi.fn().mockResolvedValue(true),
-    };
-
-    await postSlackThreadMessageWithFooterText({
-      slack,
-      channel: 'C1',
-      threadTs: '100.000',
-      text: 'large reply',
-      bodyBlocks: Array.from({ length: 49 }, (_, index) => ({
-        type: 'markdown',
-        text: `part ${index}`,
-      })),
-      footerText: 'footer',
-    });
-
-    const blocks = slack.postMessage.mock.calls[0]?.[0]?.blocks;
-    expect(blocks).toHaveLength(50);
-    expect(blocks).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          block_id: 'roomote_thread_active_task_list',
-        }),
-      ]),
-    );
-    expect(mockRedisHgetall).not.toHaveBeenCalled();
-  });
-
-  it('removes the task summary from the footer carrier after settlement', async () => {
-    mockRedisHgetall.mockResolvedValue({
-      remaining: JSON.stringify({
-        taskId: 'remaining',
-        title: 'Remaining active task',
-        updatedAt: 2,
-      }),
-    });
-    const slack = {
-      getMessageBlocks: vi.fn().mockResolvedValue([
-        { type: 'markdown', text: 'final result' },
-        {
-          type: 'section',
-          block_id: 'roomote_thread_active_task_list',
-          text: {
-            type: 'mrkdwn',
-            text: 'Completed task\nRemaining active task',
-          },
-        },
-        {
-          type: 'context',
-          block_id: 'roomote_thread_reply_footer',
-          elements: [{ type: 'mrkdwn', text: 'footer' }],
-        },
-      ]),
-      updateMessage: vi.fn().mockResolvedValue(true),
-    };
-
-    await refreshSlackThreadActiveTaskFooter({
-      slack,
-      channel: 'C1',
-      threadTs: '100.000',
-    });
-
-    const blocks = slack.updateMessage.mock.calls[0]?.[0]?.message.blocks;
-    expect(blocks).toHaveLength(3);
-    expect(blocks[1].text.text).toContain('Remaining active task');
-    expect(blocks[1].text.text).not.toContain('Completed task');
-    expect(blocks[2]).toMatchObject({
-      block_id: 'roomote_thread_reply_footer',
-    });
-  });
-
-  it('posts the primary reply when task-summary state is unavailable', async () => {
-    mockRedisHgetall.mockRejectedValueOnce(new Error('redis unavailable'));
+  it('posts the primary reply when card relocation state is unavailable', async () => {
+    mockRelocate.mockRejectedValueOnce(new Error('redis unavailable'));
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const slack = {
       postMessage: vi.fn().mockResolvedValue('222.000'),
       getMessageBlocks: vi.fn().mockResolvedValue([]),
       updateMessage: vi.fn().mockResolvedValue(true),
+      getRawMessage: vi.fn(),
+      deleteMessage: vi.fn().mockResolvedValue(true),
     };
 
     await expect(
@@ -368,8 +238,55 @@ describe('thread-reply-footer-ops', () => {
     ).resolves.toBe('222.000');
     expect(slack.postMessage).toHaveBeenCalledOnce();
     expect(warning).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to load active tasks'),
+      expect.stringContaining('Failed to relocate active task cards'),
     );
+  });
+
+  it('moves an existing exact footer into a footer-only carrier after registration', async () => {
+    const footerBlock = {
+      type: 'context',
+      block_id: 'roomote_thread_reply_footer',
+      elements: [{ type: 'mrkdwn', text: '_Exact footer._' }],
+    };
+    const slack = {
+      postMessage: vi.fn().mockResolvedValue('footer-new'),
+      getMessageBlocks: vi
+        .fn()
+        .mockResolvedValue([
+          { type: 'markdown', text: 'prior body' },
+          footerBlock,
+        ]),
+      updateMessage: vi.fn().mockResolvedValue(true),
+      getRawMessage: vi.fn(),
+      deleteMessage: vi.fn().mockResolvedValue(true),
+    };
+    mockRedisEval.mockResolvedValueOnce(
+      JSON.stringify({
+        teamId: 'T1',
+        channel: 'C1',
+        threadTs: '100.000',
+        version: 'v1',
+      }),
+    );
+
+    await registerSlackThreadActiveTaskAndMoveFooter({
+      slack,
+      teamId: 'T1',
+      channel: 'C1',
+      threadTs: '100.000',
+      taskId: 'task-1',
+    });
+
+    expect(mockRelocate.mock.invocationCallOrder[0]).toBeLessThan(
+      slack.postMessage.mock.invocationCallOrder[0]!,
+    );
+    expect(slack.postMessage).toHaveBeenCalledWith({
+      channel: 'C1',
+      thread_ts: '100.000',
+      text: '_Exact footer._',
+      blocks: [footerBlock],
+    });
+    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', 'footer-new');
   });
 
   it('rewrites an existing message into the footer carrier and strips the previous one', async () => {
@@ -383,6 +300,8 @@ describe('thread-reply-footer-ops', () => {
         },
       ]),
       updateMessage: vi.fn().mockResolvedValue(true),
+      getRawMessage: vi.fn(),
+      deleteMessage: vi.fn().mockResolvedValue(true),
     };
 
     await expect(

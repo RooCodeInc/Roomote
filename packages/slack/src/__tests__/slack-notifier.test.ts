@@ -1412,6 +1412,41 @@ describe('SlackNotifier', () => {
     });
   });
 
+  describe('getRawMessage', () => {
+    it('returns exact text, blocks, and attachments from the requested reply', async () => {
+      const blocks = [
+        {
+          type: 'actions',
+          elements: [{ type: 'button', action_id: 'answer', value: 'state' }],
+        },
+      ];
+      const attachments = [{ fallback: 'attachment' }];
+      getGlobalWithFetch().fetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          messages: [
+            { ts: 'root-ts', text: 'root' },
+            {
+              ts: 'card-ts',
+              text: 'exact text',
+              blocks,
+              attachments,
+            },
+          ],
+        }),
+      });
+
+      await expect(
+        notifier.getRawMessage({
+          channel: 'C123',
+          threadTs: 'root-ts',
+          messageTs: 'card-ts',
+        }),
+      ).resolves.toEqual({ text: 'exact text', blocks, attachments });
+    });
+  });
+
   describe('getMessageMetadata', () => {
     it('returns message metadata when Slack includes it on the message', async () => {
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({

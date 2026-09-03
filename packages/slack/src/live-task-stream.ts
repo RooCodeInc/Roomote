@@ -4,6 +4,25 @@ import { truncateWithEllipsis } from './truncate';
 
 const SLACK_LIVE_TASK_STREAM_TTL_SECONDS = 7 * 24 * 60 * 60;
 const SLACK_LIVE_TASK_TITLE_MAX_LENGTH = 160;
+const CAS_SLACK_LIVE_TASK_MESSAGE_TS_SCRIPT = `
+local raw = redis.call('get', KEYS[1])
+if not raw then return 0 end
+local data = cjson.decode(raw)
+if data.messageTs ~= ARGV[1] then return 0 end
+data.messageTs = ARGV[2]
+data.pendingOldMessageTs = ARGV[1]
+redis.call('set', KEYS[1], cjson.encode(data), 'KEEPTTL')
+return 1
+`;
+const CLEAR_PENDING_SLACK_LIVE_TASK_CLEANUP_SCRIPT = `
+local raw = redis.call('get', KEYS[1])
+if not raw then return 0 end
+local data = cjson.decode(raw)
+if data.messageTs ~= ARGV[1] or data.pendingOldMessageTs ~= ARGV[2] then return 0 end
+data.pendingOldMessageTs = nil
+redis.call('set', KEYS[1], cjson.encode(data), 'KEEPTTL')
+return 1
+`;
 
 export interface SlackLiveTaskStreamData {
   /** Workspace that owns the card; every update must use this team's bot token. */
@@ -15,6 +34,8 @@ export interface SlackLiveTaskStreamData {
   threadTs: string;
   title: string;
   taskUrl?: string;
+  /** Old canonical copy whose deletion failed after a successful handoff. */
+  pendingOldMessageTs?: string;
 }
 
 // Keyed by task id: runs are replaced on snapshot resume, but the card in the
@@ -72,4 +93,36 @@ export async function getSlackLiveTaskStreamData(
   } catch {
     return null;
   }
+}
+
+export async function compareAndSwapSlackLiveTaskMessageTs(params: {
+  taskId: string;
+  expectedMessageTs: string;
+  nextMessageTs: string;
+}): Promise<boolean> {
+  return (
+    (await getRedis().eval(
+      CAS_SLACK_LIVE_TASK_MESSAGE_TS_SCRIPT,
+      1,
+      getSlackLiveTaskStreamKey(params.taskId),
+      params.expectedMessageTs,
+      params.nextMessageTs,
+    )) === 1
+  );
+}
+
+export async function clearSlackLiveTaskPendingCleanup(params: {
+  taskId: string;
+  currentMessageTs: string;
+  oldMessageTs: string;
+}): Promise<boolean> {
+  return (
+    (await getRedis().eval(
+      CLEAR_PENDING_SLACK_LIVE_TASK_CLEANUP_SCRIPT,
+      1,
+      getSlackLiveTaskStreamKey(params.taskId),
+      params.currentMessageTs,
+      params.oldMessageTs,
+    )) === 1
+  );
 }

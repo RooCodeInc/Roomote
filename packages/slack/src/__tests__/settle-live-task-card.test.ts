@@ -2,9 +2,7 @@ const mocks = vi.hoisted(() => ({
   getSlackLiveTaskStreamData: vi.fn(),
   findInstallation: vi.fn(),
   updateMessage: vi.fn(),
-  setSlackThreadActiveTask: vi.fn(),
   removeSlackThreadActiveTaskByTaskId: vi.fn(),
-  refreshSlackThreadActiveTaskFooter: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -31,13 +29,16 @@ vi.mock('../slack-notifier', () => ({
 }));
 
 vi.mock('../thread-active-tasks', () => ({
-  setSlackThreadActiveTask: mocks.setSlackThreadActiveTask,
   removeSlackThreadActiveTaskByTaskId:
     mocks.removeSlackThreadActiveTaskByTaskId,
 }));
 
 vi.mock('../thread-reply-footer-ops', () => ({
-  refreshSlackThreadActiveTaskFooter: mocks.refreshSlackThreadActiveTaskFooter,
+  withSlackThreadReplyFooterLock: async ({
+    fn,
+  }: {
+    fn: () => Promise<unknown>;
+  }) => fn(),
 }));
 
 import { RunStatus } from '@roomote/types';
@@ -64,14 +65,12 @@ describe('settleSlackLiveTaskCardForRun', () => {
     mocks.getSlackLiveTaskStreamData.mockResolvedValue(cardData);
     mocks.findInstallation.mockResolvedValue({ botAccessToken: 'xoxb-test' });
     mocks.updateMessage.mockResolvedValue(true);
-    mocks.setSlackThreadActiveTask.mockResolvedValue(undefined);
     mocks.removeSlackThreadActiveTaskByTaskId.mockResolvedValue({
       teamId: 'T123',
       channel: 'C123',
       threadTs: '100.001',
       version: 'route-version',
     });
-    mocks.refreshSlackThreadActiveTaskFooter.mockResolvedValue(undefined);
   });
 
   it('marks a canceled task card as an error with the owning team token', async () => {
@@ -114,14 +113,6 @@ describe('settleSlackLiveTaskCardForRun', () => {
     expect(mocks.removeSlackThreadActiveTaskByTaskId).toHaveBeenCalledWith(
       'task-1',
     );
-    expect(mocks.refreshSlackThreadActiveTaskFooter).toHaveBeenCalledWith(
-      expect.objectContaining({ channel: 'C123', threadTs: '100.001' }),
-    );
-    expect(
-      mocks.removeSlackThreadActiveTaskByTaskId.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.refreshSlackThreadActiveTaskFooter.mock.invocationCallOrder[0]!,
-    );
   });
 
   it('reports whether a card exists and whether Slack accepted the render', async () => {
@@ -144,26 +135,30 @@ describe('settleSlackLiveTaskCardForRun', () => {
     ).resolves.toEqual({ card: false, updated: false });
   });
 
-  it('refreshes the visible footer after updating an in-progress summary', async () => {
+  it('re-reads the canonical timestamp inside the footer lock', async () => {
+    mocks.getSlackLiveTaskStreamData
+      .mockResolvedValueOnce(cardData)
+      .mockResolvedValueOnce({ ...cardData, messageTs: 'relocated-ts' });
+
+    await renderSlackLiveTaskCard({
+      taskId: 'task-1',
+      status: 'in_progress',
+      details: 'Working.',
+    });
+
+    expect(mocks.updateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ ts: 'relocated-ts' }),
+    );
+  });
+
+  it('does not touch the movement registry during an in-progress update', async () => {
     await renderSlackLiveTaskCard({
       taskId: 'task-1',
       status: 'in_progress',
       taskTitle: 'Generated title',
     });
 
-    expect(mocks.setSlackThreadActiveTask).toHaveBeenCalledWith({
-      teamId: 'T123',
-      channel: 'C123',
-      threadTs: '100.001',
-      task: {
-        taskId: 'task-1',
-        title: 'Generated title',
-        taskUrl: 'https://roomote.example/task/task-1',
-      },
-    });
-    expect(mocks.refreshSlackThreadActiveTaskFooter).toHaveBeenCalledWith(
-      expect.objectContaining({ channel: 'C123', threadTs: '100.001' }),
-    );
+    expect(mocks.removeSlackThreadActiveTaskByTaskId).not.toHaveBeenCalled();
   });
 
   it('does nothing for runs without a card', async () => {
@@ -193,9 +188,6 @@ describe('settleSlackLiveTaskCardForRun', () => {
       'task-1',
     );
     expect(mocks.findInstallation).toHaveBeenCalledOnce();
-    expect(mocks.refreshSlackThreadActiveTaskFooter).toHaveBeenCalledWith(
-      expect.objectContaining({ channel: 'C123', threadTs: '100.001' }),
-    );
     expect(mocks.updateMessage).not.toHaveBeenCalled();
   });
 
@@ -211,7 +203,7 @@ describe('settleSlackLiveTaskCardForRun', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('keeps canonical card updates working when pinned task state fails', async () => {
+  it('keeps canonical card updates working when registry cleanup fails', async () => {
     mocks.removeSlackThreadActiveTaskByTaskId.mockRejectedValueOnce(
       new Error('redis unavailable'),
     );
@@ -224,6 +216,18 @@ describe('settleSlackLiveTaskCardForRun', () => {
     expect(mocks.updateMessage).toHaveBeenCalledOnce();
     expect(warning).toHaveBeenCalledWith(
       expect.stringContaining('Failed to remove active task'),
+    );
+  });
+
+  it('removes a terminal card from movement even when the final Slack update throws', async () => {
+    mocks.updateMessage.mockRejectedValueOnce(new Error('Slack unavailable'));
+
+    await expect(
+      renderSlackLiveTaskCard({ taskId: 'task-1', status: 'complete' }),
+    ).rejects.toThrow('Slack unavailable');
+
+    expect(mocks.removeSlackThreadActiveTaskByTaskId).toHaveBeenCalledWith(
+      'task-1',
     );
   });
 });
