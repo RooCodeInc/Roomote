@@ -251,6 +251,7 @@ export async function handleBitbucketPullRequest(
           prNumber: prNumber,
           branchName: reviewBranch,
           sourceControlProvider: 'bitbucket',
+          repositoryId: target.repo.id,
           // Legacy repository rows may lack a host; fall back to the
           // webhook's own host so a same-named repository on another
           // instance can never supply this review's session.

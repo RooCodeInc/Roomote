@@ -255,6 +255,7 @@ export async function findReusableGitHubPrFollowUpOwner({
   branchName,
   sourceControlProvider = 'github',
   host,
+  repositoryId,
   fastAgentConversation,
 }: {
   repoFullName: string;
@@ -262,6 +263,13 @@ export async function findReusableGitHubPrFollowUpOwner({
   branchName: string;
   sourceControlProvider?: SourceControlProvider;
   host?: string | null;
+  /**
+   * When set, the linkage-row match requires this exact repositories-row FK.
+   * Unlike the host predicate (which tolerates legacy null-host rows), this
+   * pins the lookup to one connected repository, so a same-named repository
+   * on another self-managed instance can never match.
+   */
+  repositoryId?: string | null;
   fastAgentConversation?: Pick<
     FastAgentConversation,
     'surface' | 'workspaceId' | 'conversationId'
@@ -291,6 +299,9 @@ export async function findReusableGitHubPrFollowUpOwner({
         eq(taskPullRequests.prNumber, prNumber),
         ...(host
           ? [or(eq(taskPullRequests.host, host), isNull(taskPullRequests.host))]
+          : []),
+        ...(repositoryId
+          ? [eq(taskPullRequests.repositoryId, repositoryId)]
           : []),
       ),
     )

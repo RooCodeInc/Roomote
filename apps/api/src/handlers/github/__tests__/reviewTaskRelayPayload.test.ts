@@ -1,10 +1,12 @@
 const mocks = vi.hoisted(() => ({
   getRelayState: vi.fn(),
   getSettings: vi.fn(),
+  getPrOriginFastAgentParent: vi.fn(async (): Promise<unknown> => null),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   getLinkedTaskRelayState: mocks.getRelayState,
+  getPrOriginFastAgentParent: mocks.getPrOriginFastAgentParent,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -42,7 +44,7 @@ describe('getReviewTaskRelayPayload', () => {
     });
   });
 
-  it('attaches the PR-origin session when the opening task has a Fast parent', async () => {
+  it('attaches the PR-origin session pinned to the reviewing repository row', async () => {
     const fastParent = {
       sessionId: 'a3a5e5f5-9c9e-4a37-9a06-000000000001',
       conversation: {
@@ -56,14 +58,16 @@ describe('getReviewTaskRelayPayload', () => {
       linkedTaskId: 'implementation-task',
       relayEnabled: true,
       handoffTarget: 'fast_parent',
-      fastAgentParent: fastParent,
     });
+    mocks.getPrOriginFastAgentParent.mockResolvedValueOnce(fastParent);
 
     await expect(
       getReviewTaskRelayPayload({
         repository: 'acme/app',
         prNumber: 42,
         branchName: 'feature/test',
+        repositoryId: 'repo-1',
+        host: 'github.com',
       }),
     ).resolves.toEqual({
       relayReviewResultsToTask: true,
@@ -72,6 +76,29 @@ describe('getReviewTaskRelayPayload', () => {
       fastAgentSessionId: fastParent.sessionId,
       fastAgentParent: fastParent,
     });
+    expect(mocks.getPrOriginFastAgentParent).toHaveBeenCalledWith({
+      repository: 'acme/app',
+      prNumber: 42,
+      branchName: 'feature/test',
+      repositoryId: 'repo-1',
+      host: 'github.com',
+    });
+  });
+
+  it('skips the session attachment when no repository row id is supplied', async () => {
+    mocks.getRelayState.mockResolvedValue({
+      linkedTaskId: null,
+      relayEnabled: false,
+    });
+
+    await expect(
+      getReviewTaskRelayPayload({
+        repository: 'acme/app',
+        prNumber: 42,
+        branchName: 'feature/test',
+      }),
+    ).resolves.toEqual({ relayReviewResultsToTask: false });
+    expect(mocks.getPrOriginFastAgentParent).not.toHaveBeenCalled();
   });
 
   it('keeps the late owner lookup eligible when ordinary relay is disabled', async () => {

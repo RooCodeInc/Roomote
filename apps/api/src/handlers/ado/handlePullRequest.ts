@@ -433,6 +433,7 @@ export async function handleAdoPullRequest(
           prNumber: pullRequest.pullRequestId,
           branchName: reviewBranch,
           sourceControlProvider: 'ado',
+          repositoryId: target.repo.id,
           // Legacy repository rows may lack a host; fall back to the
           // webhook's own host so a same-named repository on another
           // instance can never supply this review's session.

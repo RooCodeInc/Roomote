@@ -19,8 +19,6 @@ export type LinkedTaskRelayState = {
   relayEnabled: boolean;
   handoffTarget?: 'fast_parent' | 'implementation_task';
   ownerLookupPending?: true;
-  /** The Fast parent of the task that opened the PR, when it has one. */
-  fastAgentParent?: FastAgentParent;
 };
 
 function getRelayEligibleCreatorIds(
@@ -87,16 +85,15 @@ export async function getLinkedTaskRelayState({
     orderBy: [desc(taskRuns.createdAt)],
     columns: { payload: true },
   });
-  const fastParent = getFastAgentParentFromPayload(latestRun?.payload);
-  const hasFastParent = Boolean(fastParent);
+  const hasFastParent = Boolean(
+    getFastAgentParentFromPayload(latestRun?.payload),
+  );
 
   if (!linkedTask.initiatorUserId) {
     return {
       linkedTaskId: linkedTask.id,
       relayEnabled: hasFastParent,
-      ...(fastParent
-        ? { handoffTarget: 'fast_parent' as const, fastAgentParent: fastParent }
-        : {}),
+      ...(hasFastParent ? { handoffTarget: 'fast_parent' as const } : {}),
     };
   }
 
@@ -107,8 +104,8 @@ export async function getLinkedTaskRelayState({
   return {
     linkedTaskId: linkedTask.id,
     relayEnabled: hasFastParent || creatorRelayEnabled,
-    ...(fastParent
-      ? { handoffTarget: 'fast_parent' as const, fastAgentParent: fastParent }
+    ...(hasFastParent
+      ? { handoffTarget: 'fast_parent' as const }
       : creatorRelayEnabled
         ? { handoffTarget: 'implementation_task' as const }
         : {}),
@@ -146,12 +143,19 @@ export async function getPrOriginFastAgentParent({
   branchName,
   sourceControlProvider = 'github',
   host,
+  repositoryId,
 }: {
   repository: string;
   prNumber: number;
   branchName: string;
   sourceControlProvider?: SourceControlProvider;
   host?: string | null;
+  /**
+   * The reviewing repository's own row id. Required so legacy null-host
+   * linkage rows on another instance can never supply the session; the
+   * origin task must be linked to this exact connected repository.
+   */
+  repositoryId: string;
 }): Promise<FastAgentParent | null> {
   const owner = await findReusableGitHubPrFollowUpOwner({
     repoFullName: repository,
@@ -159,6 +163,7 @@ export async function getPrOriginFastAgentParent({
     branchName,
     sourceControlProvider,
     ...(host ? { host } : {}),
+    repositoryId,
   });
   if (!owner?.taskId) {
     return null;

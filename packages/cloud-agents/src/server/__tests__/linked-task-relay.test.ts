@@ -64,7 +64,6 @@ describe('getLinkedTaskRelayState', () => {
       linkedTaskId: 'implementation-task',
       relayEnabled: true,
       handoffTarget: 'fast_parent',
-      fastAgentParent: fastParent,
     });
   });
 
@@ -102,6 +101,7 @@ describe('getPrOriginFastAgentParent', () => {
         branchName: 'feature/test',
         sourceControlProvider: 'gitlab',
         host: 'git.example.com',
+        repositoryId: 'repo-1',
       }),
     ).resolves.toEqual(fastParent);
     expect(mocks.findOwner).toHaveBeenCalledWith({
@@ -110,6 +110,7 @@ describe('getPrOriginFastAgentParent', () => {
       branchName: 'feature/test',
       sourceControlProvider: 'gitlab',
       host: 'git.example.com',
+      repositoryId: 'repo-1',
     });
   });
 
@@ -121,6 +122,7 @@ describe('getPrOriginFastAgentParent', () => {
         repository: 'acme/app',
         prNumber: 42,
         branchName: 'feature/test',
+        repositoryId: 'repo-1',
       }),
     ).resolves.toBeNull();
   });
@@ -133,6 +135,7 @@ describe('getPrOriginFastAgentParent', () => {
         repository: 'acme/app',
         prNumber: 42,
         branchName: 'feature/test',
+        repositoryId: 'repo-1',
       }),
     ).resolves.toBeNull();
   });

@@ -240,6 +240,7 @@ export async function handleGiteaPullRequest(
           prNumber: payload.number,
           branchName: reviewBranch,
           sourceControlProvider: 'gitea',
+          repositoryId: target.repo.id,
           // Legacy repository rows may lack a host; fall back to the
           // webhook's own host so a same-named repository on another
           // instance can never supply this review's session.
