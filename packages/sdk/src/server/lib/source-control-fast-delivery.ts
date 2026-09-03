@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   createFastAgentTaskLauncher,
   type LaunchFastAgentTask,
@@ -23,6 +25,11 @@ export type SourceControlFastDiscussion = {
   number: number;
   /** Review comment a reply threads under, when the mention came from one. */
   reviewCommentId?: string;
+  /**
+   * The comment a reply answers inside that thread, for providers that
+   * nest replies under a parent (Azure DevOps).
+   */
+  replyCommentId?: string;
 };
 
 /**
@@ -35,15 +42,20 @@ export function buildSourceControlFastConversation(
   discussion: SourceControlFastDiscussion,
 ): FastAgentSourceControlConversation {
   const discussionId = `${discussion.kind}/${discussion.number}`;
+  // The reply thread is one target field; a nested parent comment rides
+  // along after a colon so both survive the reply target's single thread id.
+  const threadId = discussion.reviewCommentId
+    ? discussion.replyCommentId
+      ? `${discussion.reviewCommentId}:${discussion.replyCommentId}`
+      : discussion.reviewCommentId
+    : undefined;
   return {
     surface: discussion.provider,
     workspaceId: `${discussion.host}/${discussion.repositoryFullName}`,
     conversationId: discussionId,
     replyTarget: {
       channelId: discussionId,
-      ...(discussion.reviewCommentId
-        ? { threadId: discussion.reviewCommentId }
-        : {}),
+      ...(threadId ? { threadId } : {}),
     },
   };
 }
@@ -58,15 +70,16 @@ export function parseSourceControlFastConversation(
   if (separator <= 0 || !repositoryFullName || !match) {
     return null;
   }
+  const [reviewCommentId, replyCommentId] =
+    conversation.replyTarget.threadId?.split(':') ?? [];
   return {
     provider: conversation.surface,
     host,
     repositoryFullName,
     kind: match[1] as SourceControlDiscussionKind,
     number: Number(match[2]),
-    ...(conversation.replyTarget.threadId
-      ? { reviewCommentId: conversation.replyTarget.threadId }
-      : {}),
+    ...(reviewCommentId ? { reviewCommentId } : {}),
+    ...(replyCommentId ? { replyCommentId } : {}),
   };
 }
 
@@ -305,9 +318,300 @@ export async function buildSourceControlFastDelivery(
   switch (discussion.provider) {
     case 'github':
       return buildGitHubFastDelivery(discussion);
-    default:
-      return null;
+    case 'gitlab':
+      return buildGitLabFastDelivery(discussion);
+    case 'bitbucket':
+      return buildBitbucketFastDelivery(discussion);
+    case 'gitea':
+      return buildGiteaFastDelivery(discussion);
+    case 'ado':
+      return buildAdoFastDelivery(discussion);
   }
+}
+
+async function findProviderRepository(discussion: SourceControlFastDiscussion) {
+  const rows = await db.query.repositories.findMany({
+    where: and(
+      eq(repositories.sourceControlProvider, discussion.provider),
+      eq(repositories.fullName, discussion.repositoryFullName),
+      eq(repositories.isActive, true),
+    ),
+  });
+  return (
+    rows.find((row) => row.host === discussion.host) ??
+    rows.find((row) => !row.host) ??
+    null
+  );
+}
+
+function pullRequestPageUrl(discussion: SourceControlFastDiscussion): string {
+  const base = `https://${discussion.host}/${discussion.repositoryFullName}`;
+  switch (discussion.provider) {
+    case 'gitlab':
+      return `${base}/-/${discussion.kind === 'pull' ? 'merge_requests' : 'issues'}/${discussion.number}`;
+    case 'bitbucket':
+      return `${base}/pull-requests/${discussion.number}`;
+    default:
+      return `${base}/${discussion.kind === 'pull' ? 'pulls' : 'issues'}/${discussion.number}`;
+  }
+}
+
+async function buildGitLabFastDelivery(
+  discussion: SourceControlFastDiscussion,
+): Promise<SourceControlFastDelivery | null> {
+  const repository = await findProviderRepository(discussion);
+  if (!repository) {
+    return null;
+  }
+  const {
+    createGitLabIssueNote,
+    createGitLabMergeRequestNote,
+    getGitLabMergeRequest,
+  } = await import('@roomote/gitlab');
+  return {
+    postComment: async ({ discussion: target, body }) => {
+      const note =
+        target.kind === 'pull'
+          ? await createGitLabMergeRequestNote({
+              projectId: target.repositoryFullName,
+              mergeRequestIid: target.number,
+              body,
+            })
+          : await createGitLabIssueNote({
+              projectId: target.repositoryFullName,
+              issueIid: target.number,
+              body,
+            });
+      return { messageId: String(note.id) };
+    },
+    resolveTarget: async () => {
+      if (discussion.kind === 'issues') {
+        return {
+          repositoryId: repository.id,
+          issue: {
+            identifier: String(discussion.number),
+            url: pullRequestPageUrl(discussion),
+          },
+        };
+      }
+      const mergeRequest = await getGitLabMergeRequest({
+        projectId: discussion.repositoryFullName,
+        mergeRequestIid: discussion.number,
+      }).catch(() => null);
+      return {
+        repositoryId: repository.id,
+        ...(mergeRequest?.source_branch
+          ? { branch: mergeRequest.source_branch }
+          : {}),
+        pullRequest: {
+          url: mergeRequest?.web_url ?? pullRequestPageUrl(discussion),
+          title: mergeRequest?.title ?? null,
+          sha: mergeRequest?.sha ?? null,
+        },
+      };
+    },
+  };
+}
+
+async function buildBitbucketFastDelivery(
+  discussion: SourceControlFastDiscussion,
+): Promise<SourceControlFastDelivery | null> {
+  const repository = await findProviderRepository(discussion);
+  if (!repository || discussion.kind !== 'pull') {
+    return null;
+  }
+  const { createBitbucketPullRequestComment, getBitbucketPullRequest } =
+    await import('@roomote/bitbucket');
+  return {
+    postComment: async ({ discussion: target, body }) => {
+      const comment = await createBitbucketPullRequestComment({
+        repositoryFullName: target.repositoryFullName,
+        pullRequestNumber: target.number,
+        body,
+      });
+      return { messageId: String(comment.id) };
+    },
+    resolveTarget: async () => {
+      const pullRequest = await getBitbucketPullRequest({
+        repositoryFullName: discussion.repositoryFullName,
+        pullRequestNumber: discussion.number,
+      }).catch(() => null);
+      return {
+        repositoryId: repository.id,
+        ...(pullRequest?.source?.branch?.name
+          ? { branch: pullRequest.source.branch.name }
+          : {}),
+        pullRequest: {
+          url: pullRequest?.links?.html?.href ?? pullRequestPageUrl(discussion),
+          title: pullRequest?.title ?? null,
+          sha: pullRequest?.source?.commit?.hash ?? null,
+        },
+      };
+    },
+  };
+}
+
+async function buildGiteaFastDelivery(
+  discussion: SourceControlFastDiscussion,
+): Promise<SourceControlFastDelivery | null> {
+  const repository = await findProviderRepository(discussion);
+  if (!repository) {
+    return null;
+  }
+  const {
+    createGiteaIssueComment,
+    createGiteaPullRequestComment,
+    getGiteaPullRequest,
+  } = await import('@roomote/gitea');
+  return {
+    postComment: async ({ discussion: target, body }) => {
+      const comment =
+        target.kind === 'pull'
+          ? await createGiteaPullRequestComment({
+              repositoryFullName: target.repositoryFullName,
+              pullRequestNumber: target.number,
+              body,
+            })
+          : await createGiteaIssueComment({
+              repositoryFullName: target.repositoryFullName,
+              issueNumber: target.number,
+              body,
+            });
+      return { messageId: String(comment.id) };
+    },
+    resolveTarget: async () => {
+      if (discussion.kind === 'issues') {
+        return {
+          repositoryId: repository.id,
+          issue: {
+            identifier: String(discussion.number),
+            url: pullRequestPageUrl(discussion),
+          },
+        };
+      }
+      const pullRequest = await getGiteaPullRequest({
+        repositoryFullName: discussion.repositoryFullName,
+        pullRequestNumber: discussion.number,
+      }).catch(() => null);
+      return {
+        repositoryId: repository.id,
+        ...(pullRequest?.head?.ref ? { branch: pullRequest.head.ref } : {}),
+        pullRequest: {
+          url: pullRequest?.html_url ?? pullRequestPageUrl(discussion),
+          title: pullRequest?.title ?? null,
+          sha: pullRequest?.head?.sha ?? null,
+        },
+      };
+    },
+  };
+}
+
+async function buildAdoFastDelivery(
+  discussion: SourceControlFastDiscussion,
+): Promise<SourceControlFastDelivery | null> {
+  const repository = await findProviderRepository(discussion);
+  if (!repository) {
+    return null;
+  }
+  const {
+    createAdoPullRequestComment,
+    createAdoWorkItemComment,
+    getAdoPullRequest,
+    listAdoRepositories,
+    parseAdoRepositoryFullName,
+  } = await import('@roomote/ado');
+  const parsed = parseAdoRepositoryFullName(discussion.repositoryFullName);
+  // Azure DevOps addresses pull requests by repository GUID, which the
+  // repository row does not keep; resolve it once from the organization.
+  let repositoryIdPromise: Promise<string | null> | undefined;
+  const resolveAdoRepositoryId = () =>
+    (repositoryIdPromise ??= listAdoRepositories({
+      organization: parsed.organization,
+    })
+      .then(
+        (repos) =>
+          repos.find(
+            (candidate) =>
+              candidate.project.name.toLowerCase() ===
+                parsed.project.toLowerCase() &&
+              candidate.name.toLowerCase() === parsed.repository.toLowerCase(),
+          )?.id ?? null,
+      )
+      .catch(() => null));
+
+  return {
+    postComment: async ({ discussion: target, body }) => {
+      if (target.kind === 'issues') {
+        const comment = await createAdoWorkItemComment({
+          project: parsed.project,
+          workItemId: target.number,
+          body,
+          organization: parsed.organization,
+        });
+        return {
+          messageId:
+            comment.commentId ?? `ado-work-item-comment:${randomUUID()}`,
+        };
+      }
+      const adoRepositoryId = await resolveAdoRepositoryId();
+      if (!adoRepositoryId) {
+        throw new Error(
+          `Azure DevOps repository ${target.repositoryFullName} could not be resolved.`,
+        );
+      }
+      const comment = await createAdoPullRequestComment({
+        repositoryFullName: target.repositoryFullName,
+        repositoryId: adoRepositoryId,
+        pullRequestNumber: target.number,
+        ...(target.reviewCommentId ? { threadId: target.reviewCommentId } : {}),
+        ...(target.replyCommentId
+          ? { parentCommentId: target.replyCommentId }
+          : {}),
+        body,
+        organization: parsed.organization,
+      });
+      return {
+        messageId: comment.commentId ?? `ado-thread:${comment.threadId}`,
+      };
+    },
+    resolveTarget: async () => {
+      if (discussion.kind === 'issues') {
+        return {
+          repositoryId: repository.id,
+          issue: {
+            identifier: String(discussion.number),
+            url: `https://${discussion.host}/${parsed.organization}/${parsed.project}/_workitems/edit/${discussion.number}`,
+          },
+        };
+      }
+      const adoRepositoryId = await resolveAdoRepositoryId();
+      const pullRequest = adoRepositoryId
+        ? await getAdoPullRequest({
+            repositoryId: adoRepositoryId,
+            pullRequestNumber: discussion.number,
+            organization: parsed.organization,
+          }).catch(() => null)
+        : null;
+      const details = pullRequest as {
+        title?: string;
+        sourceRefName?: string;
+        lastMergeSourceCommit?: { commitId?: string };
+        repository?: { webUrl?: string };
+      } | null;
+      const branch = details?.sourceRefName?.replace(/^refs\/heads\//, '');
+      return {
+        repositoryId: repository.id,
+        ...(branch ? { branch } : {}),
+        pullRequest: {
+          url: details?.repository?.webUrl
+            ? `${details.repository.webUrl}/pullrequest/${discussion.number}`
+            : `https://${discussion.host}/${parsed.organization}/${parsed.project}/_git/${parsed.repository}/pullrequest/${discussion.number}`,
+          title: details?.title ?? null,
+          sha: details?.lastMergeSourceCommit?.commitId ?? null,
+        },
+      };
+    },
+  };
 }
 
 /**

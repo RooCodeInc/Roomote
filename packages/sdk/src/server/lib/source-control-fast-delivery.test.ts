@@ -2,6 +2,18 @@ const mocks = vi.hoisted(() => ({
   createFastAgentTaskLauncher: vi.fn(),
   repositoriesFindMany: vi.fn(),
   getInstallationOctokit: vi.fn(),
+  gitlabCreateIssueNote: vi.fn(),
+  gitlabCreateMergeRequestNote: vi.fn(),
+  gitlabGetMergeRequest: vi.fn(),
+  giteaCreateIssueComment: vi.fn(),
+  giteaCreatePullRequestComment: vi.fn(),
+  giteaGetPullRequest: vi.fn(),
+  bitbucketCreateComment: vi.fn(),
+  bitbucketGetPullRequest: vi.fn(),
+  adoCreatePullRequestComment: vi.fn(),
+  adoCreateWorkItemComment: vi.fn(),
+  adoGetPullRequest: vi.fn(),
+  adoListRepositories: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -22,6 +34,34 @@ vi.mock('@roomote/communication', () => ({
 
 vi.mock('@roomote/github', () => ({
   getInstallationOctokit: mocks.getInstallationOctokit,
+}));
+
+vi.mock('@roomote/gitlab', () => ({
+  createGitLabIssueNote: mocks.gitlabCreateIssueNote,
+  createGitLabMergeRequestNote: mocks.gitlabCreateMergeRequestNote,
+  getGitLabMergeRequest: mocks.gitlabGetMergeRequest,
+}));
+
+vi.mock('@roomote/gitea', () => ({
+  createGiteaIssueComment: mocks.giteaCreateIssueComment,
+  createGiteaPullRequestComment: mocks.giteaCreatePullRequestComment,
+  getGiteaPullRequest: mocks.giteaGetPullRequest,
+}));
+
+vi.mock('@roomote/bitbucket', () => ({
+  createBitbucketPullRequestComment: mocks.bitbucketCreateComment,
+  getBitbucketPullRequest: mocks.bitbucketGetPullRequest,
+}));
+
+vi.mock('@roomote/ado', () => ({
+  createAdoPullRequestComment: mocks.adoCreatePullRequestComment,
+  createAdoWorkItemComment: mocks.adoCreateWorkItemComment,
+  getAdoPullRequest: mocks.adoGetPullRequest,
+  listAdoRepositories: mocks.adoListRepositories,
+  parseAdoRepositoryFullName: (fullName: string) => {
+    const [organization, project, repository] = fullName.split('/');
+    return { organization, project, repository };
+  },
 }));
 
 import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
@@ -341,5 +381,170 @@ describe('GitHub Fast delivery', () => {
       expect.objectContaining({ pull_number: 42, comment_id: 800 }),
     );
     expect(createComment).not.toHaveBeenCalled();
+  });
+});
+
+describe('other provider Fast deliveries', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.repositoriesFindMany.mockResolvedValue([
+      { id: 'repo-1', host: 'git.example.com' },
+    ]);
+  });
+
+  it('posts GitLab merge request notes by project path and resolves the source branch', async () => {
+    mocks.gitlabCreateMergeRequestNote.mockResolvedValue({ id: 71 });
+    mocks.gitlabGetMergeRequest.mockResolvedValue({
+      iid: 42,
+      title: 'Update backend',
+      web_url: 'https://git.example.com/acme/backend/-/merge_requests/42',
+      source_branch: 'feature/test',
+      sha: 'abc123',
+    });
+    const conversation = buildSourceControlFastConversation({
+      provider: 'gitlab',
+      host: 'git.example.com',
+      repositoryFullName: 'acme/backend',
+      kind: 'pull',
+      number: 42,
+    });
+
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    const adapter = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+    });
+
+    await expect(adapter.postReply({ message: 'On it.' })).resolves.toEqual({
+      messageId: '71',
+    });
+    expect(mocks.gitlabCreateMergeRequestNote).toHaveBeenCalledWith({
+      projectId: 'acme/backend',
+      mergeRequestIid: 42,
+      body: 'On it.\n\n[footer:gitlab]',
+    });
+    await expect(delivery!.resolveTarget()).resolves.toEqual({
+      repositoryId: 'repo-1',
+      branch: 'feature/test',
+      pullRequest: {
+        url: 'https://git.example.com/acme/backend/-/merge_requests/42',
+        title: 'Update backend',
+        sha: 'abc123',
+      },
+    });
+  });
+
+  it('posts Gitea issue comments and links the issue as the launch target', async () => {
+    mocks.giteaCreateIssueComment.mockResolvedValue({ id: 12 });
+    const conversation = buildSourceControlFastConversation({
+      provider: 'gitea',
+      host: 'git.example.com',
+      repositoryFullName: 'acme/backend',
+      kind: 'issues',
+      number: 7,
+    });
+
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    await delivery!.postComment({
+      discussion: {
+        provider: 'gitea',
+        host: 'git.example.com',
+        repositoryFullName: 'acme/backend',
+        kind: 'issues',
+        number: 7,
+      },
+      body: 'Looking.',
+    });
+
+    expect(mocks.giteaCreateIssueComment).toHaveBeenCalledWith({
+      repositoryFullName: 'acme/backend',
+      issueNumber: 7,
+      body: 'Looking.',
+    });
+    await expect(delivery!.resolveTarget()).resolves.toEqual({
+      repositoryId: 'repo-1',
+      issue: {
+        identifier: '7',
+        url: 'https://git.example.com/acme/backend/issues/7',
+      },
+    });
+  });
+
+  it('resolves the Azure DevOps repository GUID once and threads replies', async () => {
+    mocks.adoListRepositories.mockResolvedValue([
+      { id: 'guid-1', name: 'backend', project: { name: 'Platform' } },
+    ]);
+    mocks.adoCreatePullRequestComment.mockResolvedValue({
+      threadId: '5',
+      commentId: '901',
+    });
+    mocks.adoGetPullRequest.mockResolvedValue({
+      pullRequestId: 42,
+      title: 'Update backend',
+      sourceRefName: 'refs/heads/feature/test',
+      lastMergeSourceCommit: { commitId: 'abc123' },
+      repository: {
+        webUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
+      },
+    });
+    mocks.repositoriesFindMany.mockResolvedValue([
+      { id: 'repo-1', host: 'dev.azure.com' },
+    ]);
+    const conversation = buildSourceControlFastConversation({
+      provider: 'ado',
+      host: 'dev.azure.com',
+      repositoryFullName: 'acme/Platform/backend',
+      kind: 'pull',
+      number: 42,
+      reviewCommentId: '5',
+      replyCommentId: '900',
+    });
+    expect(conversation.replyTarget.threadId).toBe('5:900');
+
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    const adapter = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+    });
+    await adapter.postReply({ message: 'On it.' });
+    await delivery!.resolveTarget();
+
+    expect(mocks.adoListRepositories).toHaveBeenCalledTimes(1);
+    expect(mocks.adoCreatePullRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryId: 'guid-1',
+        pullRequestNumber: 42,
+        threadId: '5',
+        parentCommentId: '900',
+        organization: 'acme',
+      }),
+    );
+    await expect(delivery!.resolveTarget()).resolves.toEqual({
+      repositoryId: 'repo-1',
+      branch: 'feature/test',
+      pullRequest: {
+        url: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
+        title: 'Update backend',
+        sha: 'abc123',
+      },
+    });
+  });
+
+  it('returns null for a Bitbucket issue discussion', async () => {
+    await expect(
+      buildSourceControlFastDelivery(
+        buildSourceControlFastConversation({
+          provider: 'bitbucket',
+          host: 'bitbucket.org',
+          repositoryFullName: 'acme/repo',
+          kind: 'issues',
+          number: 3,
+        }),
+      ),
+    ).resolves.toBeNull();
   });
 });

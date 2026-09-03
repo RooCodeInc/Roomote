@@ -250,6 +250,7 @@ describe('handlePrComment', () => {
       repoFullName: 'acme/api',
       prNumber: 42,
       branchName: 'feature/ship',
+      host: 'github.com',
     });
     expect(mocks.startSourceControlFastSessionTurn).toHaveBeenCalledWith(
       expect.objectContaining({

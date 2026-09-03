@@ -622,17 +622,21 @@ async function resolvePullRequestActiveTasks({
   prNumber,
   branchName,
   headSha,
+  host,
 }: {
   repositoryFullName: string;
   prNumber: number;
   branchName: string;
   headSha: string;
+  /** The discussion's resolved host, which scopes the lookup to this instance. */
+  host: string;
 }): Promise<FastAgentActiveTask[]> {
   const [owner, review] = await Promise.all([
     findReusableGitHubPrFollowUpOwner({
       repoFullName: repositoryFullName,
       prNumber,
       branchName,
+      host,
     }).catch(() => null),
     headSha
       ? findActiveGitHubPrReviewTask({
@@ -640,6 +644,7 @@ async function resolvePullRequestActiveTasks({
           prNumber,
           headSha,
           sourceControlProvider: 'github',
+          host,
         }).catch(() => null)
       : Promise.resolve(null),
   ]);
@@ -791,6 +796,7 @@ export async function handlePrComment(
     prNumber: pr.number,
     branchName: details.branchName,
     headSha: details.headSha,
+    host,
   });
   const currentMessageId = isSubmittedReview
     ? `github:review:${rest.review.id}`
