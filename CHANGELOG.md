@@ -2,6 +2,18 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.2.3 (2026-09-03)
+
+Roomote 1.2.3 restores Fast Sessions for deployments that rely on the default task model.
+
+### Highlights
+
+- Start Fast Sessions with the default task model when no explicit model override is configured.
+
+### Patch changes
+
+- Use the task model catalog default for Fast sessions when no explicit orchestration or coding model override is configured.
+
 ## 1.2.2 (2026-09-03)
 
 Roomote 1.2.2 strengthens deployment and setup reliability while making Slack-driven Fast conversations clearer and more consistent.
