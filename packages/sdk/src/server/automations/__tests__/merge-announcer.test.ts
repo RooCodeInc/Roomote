@@ -210,6 +210,9 @@ describe('handleMergeAnnouncerPush', () => {
     );
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
+        text: expect.stringContaining(
+          'alice pushed 1 commit to develop in RooCodeInc/Roomote#1896.',
+        ),
         blocks: [
           expect.objectContaining({
             subtitle: {
@@ -636,7 +639,7 @@ describe('handleMergeAnnouncerPush', () => {
       expect.objectContaining({
         channelId: 'dm-123',
         text: expect.stringContaining(
-          '**fallback-pusher** pushed 2 commits to **main**',
+          '**fallback-pusher** pushed 2 commits to **main** in **acme/widgets#7**.',
         ),
         buttons: [
           [

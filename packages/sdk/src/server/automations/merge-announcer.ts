@@ -424,7 +424,7 @@ function buildMergeAnnouncerNotification(params: {
   const configureUrl = buildManagerSlackSettingsUrl(
     MERGE_ANNOUNCER_SETTINGS_HASH,
   );
-  const markdownNarrative = `**${params.pusher}** pushed ${commitLabel} to **${params.branch}** in **${params.repository.fullName}**.`;
+  const markdownNarrative = `**${params.pusher}** pushed ${commitLabel} to **${params.branch}** in **${repositoryLabel}**.`;
   const changesUrl =
     params.event.pullRequest?.url ??
     params.event.compareUrl ??
@@ -442,7 +442,7 @@ function buildMergeAnnouncerNotification(params: {
 
   return {
     fallbackText: escapeSlackMrkdwnText(
-      `${params.pusher} pushed ${commitLabel} to ${params.branch} in ${params.repository.fullName}. ${summary}`,
+      `${params.pusher} pushed ${commitLabel} to ${params.branch} in ${repositoryLabel}. ${summary}`,
     ),
     slackBlocks: buildAutomationResultBlocks({
       title: 'Merge Announcer',
