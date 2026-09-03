@@ -379,13 +379,13 @@ describe('setup mode behavior', () => {
         ...environmentWorkspaceOptions,
         envVars: {
           ...environmentWorkspaceOptions.envVars,
-          SANDBOX_OPENROUTER_API_KEY: 'stored-sandbox-openrouter-key',
           R_CODE_REVIEW_MODEL: 'roomote/openai/broken-review-model',
           ROOMOTE_PLANNING_MODEL: 'roomote/openai/broken-planning-model',
         },
       },
       logger,
       workerEnv: storedKeyWorkerEnv,
+      sandboxOpenRouterApiKey: 'stored-sandbox-openrouter-key',
     });
 
     expect(mockInitializeWorkspaceRepositories).toHaveBeenCalledWith(

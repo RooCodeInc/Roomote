@@ -70,6 +70,7 @@ interface SetupOptions {
   mode: SetupMode;
   logger: StartupLogger;
   workerEnv: WorkerEnv;
+  sandboxOpenRouterApiKey?: string;
   recordPhase?: PhaseRecorder;
   backgroundEnvironmentSetup?: boolean;
 }
@@ -171,6 +172,7 @@ export async function setup({
   mode,
   logger,
   workerEnv,
+  sandboxOpenRouterApiKey,
   recordPhase,
   backgroundEnvironmentSetup = false,
 }: SetupOptions): Promise<SetupResult> {
@@ -208,7 +210,7 @@ export async function setup({
       workspaceOpts.workspace.type === 'environment'
         ? buildEnvironmentWorkspaceEnvVars(
             inheritedWorkspaceEnvVars,
-            workerEnv.sandboxOpenRouterApiKey,
+            sandboxOpenRouterApiKey ?? workerEnv.sandboxOpenRouterApiKey,
           )
         : inheritedWorkspaceEnvVars,
   };
