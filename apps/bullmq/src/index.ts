@@ -53,7 +53,7 @@ import { startPullRequestMergeabilityCheckQueue } from './pull-request-mergeabil
 import { startTaskSleepQueue } from './task-sleep-queue';
 import { startAutomationRecommendationsQueue } from './automation-recommendations-queue';
 import { startFastAgentParentEventQueue } from './fast-agent-parent-event-queue';
-import { resolveBullMqHealth } from './health';
+import { readBullMqQueueHealth } from './health';
 
 // Deployments roll every service at once while migrations run only ahead
 // of the api service. A boot that reads a column the pending migration adds
@@ -287,11 +287,22 @@ app.use('/admin/*', createAdminDashboardMiddleware(adminDashboardAuth));
 
 app.get('/admin/health', async (c) => {
   try {
-    const jobCounts = await schedulerQueue.getJobCounts();
-    const sandboxOidcRefreshJobCounts =
-      await sandboxOidcRefreshQueue.getJobCounts();
     const redisStatus = redis?.status ?? 'unhealthy';
-    const health = resolveBullMqHealth(redisStatus);
+    const health = await readBullMqQueueHealth(redisStatus, async () => ({
+      scheduler: await schedulerQueue.getJobCounts(),
+      sandboxOidcRefresh: await sandboxOidcRefreshQueue.getJobCounts(),
+    }));
+
+    if (health.queueCounts === null) {
+      return c.json(
+        {
+          status: health.status,
+          timestamp: new Date().toISOString(),
+          services: { redis: redisStatus },
+        },
+        health.httpStatus,
+      );
+    }
 
     return c.json(
       {
@@ -301,20 +312,20 @@ app.get('/admin/health', async (c) => {
           redis: redisStatus,
           queues: {
             scheduler: {
-              waiting: jobCounts.waiting,
-              active: jobCounts.active,
-              completed: jobCounts.completed,
-              failed: jobCounts.failed,
-              delayed: jobCounts.delayed,
-              repeat: jobCounts.repeat,
+              waiting: health.queueCounts.scheduler.waiting,
+              active: health.queueCounts.scheduler.active,
+              completed: health.queueCounts.scheduler.completed,
+              failed: health.queueCounts.scheduler.failed,
+              delayed: health.queueCounts.scheduler.delayed,
+              repeat: health.queueCounts.scheduler.repeat,
             },
             sandboxOidcRefresh: {
-              waiting: sandboxOidcRefreshJobCounts.waiting,
-              active: sandboxOidcRefreshJobCounts.active,
-              completed: sandboxOidcRefreshJobCounts.completed,
-              failed: sandboxOidcRefreshJobCounts.failed,
-              delayed: sandboxOidcRefreshJobCounts.delayed,
-              repeat: sandboxOidcRefreshJobCounts.repeat,
+              waiting: health.queueCounts.sandboxOidcRefresh.waiting,
+              active: health.queueCounts.sandboxOidcRefresh.active,
+              completed: health.queueCounts.sandboxOidcRefresh.completed,
+              failed: health.queueCounts.sandboxOidcRefresh.failed,
+              delayed: health.queueCounts.sandboxOidcRefresh.delayed,
+              repeat: health.queueCounts.sandboxOidcRefresh.repeat,
             },
           },
         },

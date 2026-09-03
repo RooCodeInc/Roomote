@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { resolveBullMqHealth } from './health';
+import { readBullMqQueueHealth, resolveBullMqHealth } from './health';
 
 describe('resolveBullMqHealth', () => {
   it('reports healthy only when Redis is ready', () => {
@@ -19,4 +19,36 @@ describe('resolveBullMqHealth', () => {
       });
     },
   );
+});
+
+describe('readBullMqQueueHealth', () => {
+  it.each([undefined, 'connecting', 'reconnecting', 'end'])(
+    'does not read queue counts when Redis is %s',
+    async (redisStatus) => {
+      const readQueueCounts = vi.fn();
+
+      await expect(
+        readBullMqQueueHealth(redisStatus, readQueueCounts),
+      ).resolves.toEqual({
+        status: 'error',
+        httpStatus: 503,
+        queueCounts: null,
+      });
+      expect(readQueueCounts).not.toHaveBeenCalled();
+    },
+  );
+
+  it('reads queue counts when Redis is ready', async () => {
+    const queueCounts = { waiting: 1 };
+    const readQueueCounts = vi.fn().mockResolvedValue(queueCounts);
+
+    await expect(
+      readBullMqQueueHealth('ready', readQueueCounts),
+    ).resolves.toEqual({
+      status: 'ok',
+      httpStatus: 200,
+      queueCounts,
+    });
+    expect(readQueueCounts).toHaveBeenCalledOnce();
+  });
 });
