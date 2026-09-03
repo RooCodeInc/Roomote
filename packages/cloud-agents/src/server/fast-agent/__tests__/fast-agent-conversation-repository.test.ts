@@ -177,6 +177,56 @@ describe('Fast conversation repository', () => {
       .where(inArray(sessions.id, [origin!.id, other!.id]));
   });
 
+  it('converges concurrent launches into one Session on the conversation that bound first', async () => {
+    const user = await createUser();
+    const [origin] = await db
+      .insert(sessions)
+      .values({
+        title: 'Weekly scan',
+        ownerKind: 'user',
+        ownerUserId: user.id,
+        sourceSurface: 'web',
+        sourceTrigger: 'manual',
+        visibility: 'visible',
+        activityAt: Math.floor(Date.now() / 1000),
+        cachedStatus: 'ready',
+      })
+      .returning({ id: sessions.id });
+    const identity = (index: number) => ({
+      surface: 'slack' as const,
+      workspaceId: 'team-origin-race-test',
+      conversationId: `thread-origin-race-${origin!.id}-${index}`,
+      replyTarget: {
+        channelId: 'channel-origin-race-test',
+        threadId: `thread-origin-race-${origin!.id}-${index}`,
+      },
+    });
+
+    const results = await Promise.all(
+      Array.from({ length: 6 }, (_, index) =>
+        fastAgentConversationRepository.getOrCreate({
+          userId: user.id,
+          conversation: identity(index),
+          sessionId: origin!.id,
+        }),
+      ),
+    );
+
+    expect(new Set(results.map(({ id }) => id)).size).toBe(1);
+    expect(results.filter(({ created }) => created)).toHaveLength(1);
+    const [bound] = await db
+      .select({ fastConversationId: sessions.fastConversationId })
+      .from(sessions)
+      .where(eq(sessions.id, origin!.id));
+    expect(bound?.fastConversationId).toBe(results[0]!.id);
+    const rows = await db
+      .select({ id: fastAgentConversations.id })
+      .from(fastAgentConversations)
+      .where(eq(fastAgentConversations.workspaceId, 'team-origin-race-test'));
+    expect(rows).toHaveLength(1);
+    await db.delete(sessions).where(eq(sessions.id, origin!.id));
+  });
+
   it('converges concurrent creation on one provider-neutral row', async () => {
     const user = await createUser();
     const sessions = await Promise.all(

@@ -719,6 +719,26 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           });
         }
 
+        // Launches into one Session with different conversation identities
+        // must agree on a single conversation. Serialize on the Session and
+        // reuse the conversation a concurrent launch already bound to it.
+        if (!record && sessionId) {
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-session-binding:${sessionId}`}, 0))`,
+          );
+          const [bound] = await tx
+            .select({ fastConversationId: sessions.fastConversationId })
+            .from(sessions)
+            .where(eq(sessions.id, sessionId))
+            .limit(1);
+          if (bound?.fastConversationId) {
+            return {
+              ...(await loadConversationRecord(tx, bound.fastConversationId)),
+              created: false,
+            };
+          }
+        }
+
         if (!record) {
           const [inserted] = await tx
             .insert(fastAgentConversations)
