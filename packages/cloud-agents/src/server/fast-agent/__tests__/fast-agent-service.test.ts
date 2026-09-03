@@ -3762,6 +3762,38 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 
+    it('settles a resumed turn whose closeout replaced the retry notice, leaving the completed call as the last event', async () => {
+      // The replaced notice keeps its earlier sequence, so the closeout's
+      // reply row sits before the call that delivered it; the completed
+      // call is the proof of delivery.
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        ...attemptCounters,
+        events: [
+          { kind: 'reply', text: 'All done.', purpose: 'closeout' },
+          {
+            kind: 'action',
+            tool: nativeToolNames.sendChatReply,
+            arguments: { purpose: 'closeout', message: 'All done.' },
+            status: 'completed',
+            result: '{"success":true,"delivered":true}',
+          },
+        ],
+      });
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+
+      const result = await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      expect(result).toBe('All done.');
+      expect(mocks.generateText).not.toHaveBeenCalled();
+      expect(postReply).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
     it('posts the closeout again when the earlier attempt died inside the call before recording it', async () => {
       mocks.loadTurnAttempt.mockResolvedValueOnce({
         ...attemptCounters,

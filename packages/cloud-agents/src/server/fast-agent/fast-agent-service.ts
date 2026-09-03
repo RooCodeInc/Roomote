@@ -121,6 +121,7 @@ import {
   reconcileFastAgentInferenceRetryNotices,
   renewFastSessionRespondingLease,
   type FastAgentInterruptionReason,
+  type FastAgentTurnAttemptReply,
   type FastAgentTurnAttemptSummary,
   type FastAgentUnresolvedRequest,
   loadFastAgentTurnAttemptSummary,
@@ -1018,11 +1019,15 @@ type FastAgentRecordedCloseout =
 
 /**
  * What the transcript says about the closeout of an interrupted attempt.
- * 'delivered' means a closing reply row is on record, so the answer reached
- * the surface. 'lost' means the attempt was cut off inside a closing reply
- * call whose text is known but whose post was never recorded. Anything else
- * (no closeout yet, or one whose result the model can read) is left to the
- * resumed model request.
+ * 'delivered' means the answer reached the surface: either a closing reply
+ * row is the last event, or a closing reply call completed. The second form
+ * matters because a closeout that replaces the visible retry notice, or
+ * finalizes a streamed reply, writes its reply row under an earlier
+ * sequence, so the call's result row is what ends the attempt. 'lost' means
+ * the attempt was cut off inside a closing reply call whose text is known
+ * but whose post was never recorded. Anything else (no closeout yet, or a
+ * failed one whose error the model can read) is left to the resumed model
+ * request.
  */
 function findRecordedCloseout(
   events: FastAgentTurnAttemptSummary['events'],
@@ -1036,7 +1041,6 @@ function findRecordedCloseout(
   }
   if (
     last.tool !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply ||
-    last.status !== 'unknown' ||
     !last.arguments ||
     typeof last.arguments !== 'object'
   ) {
@@ -1048,6 +1052,15 @@ function findRecordedCloseout(
   };
   if (purpose !== 'closeout' && purpose !== 'clarification') return null;
   const text = typeof message === 'string' ? message.trim() : '';
+  if (last.status === 'completed') {
+    const lastReply = [...events]
+      .reverse()
+      .find(
+        (event): event is FastAgentTurnAttemptReply => event.kind === 'reply',
+      );
+    return { kind: 'delivered', text: text || lastReply?.text || '' };
+  }
+  if (last.status !== 'unknown') return null;
   return text ? { kind: 'lost', purpose, text } : null;
 }
 
