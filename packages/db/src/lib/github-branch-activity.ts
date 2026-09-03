@@ -512,7 +512,7 @@ export async function findActiveGitHubPrReviewTask({
   return pickActiveWork(reviewRows, 'task_pull_request');
 }
 
-export type GitHubPullRequestLinkedTask = {
+export type RoomoteOpenedPullRequestTask = {
   runId: number;
   taskId: string;
   type: TaskPayloadKind;
@@ -520,17 +520,17 @@ export type GitHubPullRequestLinkedTask = {
 };
 
 /**
- * The newest Roomote task durably linked to the pull request, other than the
- * review pipeline or a conflict resolver: the task that opened it or a
- * follow-up on it, whether or not a run is still active or resumable.
+ * The newest Roomote task that opened the pull request, whether or not a run
+ * is still active or resumable. Only linkage rows stamped `createdByRoomote`
+ * count: a pull request merely mentioned in a task transcript is also linked
+ * to that task, but Roomote did not open it. Review-pipeline and
+ * conflict-resolver tasks never open pull requests and are excluded.
  *
- * Review-feedback delivery keys on this linkage (every linked task's Fast
- * parent hears human review comments), so a caller deciding whether the
- * feedback pipeline already owns replies on the pull request must use this,
- * not the active-run lookups above, which return null once the task finishes
- * without a snapshot.
+ * Use this, not the active-run lookups above, when deciding whether a pull
+ * request is Roomote-opened: those return null once the task finishes
+ * without a snapshot, while the linkage is durable.
  */
-export async function findGitHubPullRequestLinkedTask({
+export async function findRoomoteOpenedPullRequestTask({
   repoFullName,
   prNumber,
   sourceControlProvider = 'github',
@@ -541,13 +541,14 @@ export async function findGitHubPullRequestLinkedTask({
   sourceControlProvider?: SourceControlProvider;
   /** When given, only rows on this host (or legacy rows with no host) match. */
   host?: string | null;
-}): Promise<GitHubPullRequestLinkedTask | null> {
+}): Promise<RoomoteOpenedPullRequestTask | null> {
   const [row] = await db
     .select(ACTIVE_WORK_COLUMNS)
     .from(taskRuns)
     .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, taskRuns.taskId))
     .where(
       and(
+        eq(taskPullRequests.createdByRoomote, true),
         notInArray(taskRuns.payloadKind, [
           ...ACTIVE_PR_REVIEW_TYPES,
           TaskPayloadKind.GithubPrConflictResolve,

@@ -2,7 +2,7 @@ const mocks = vi.hoisted(() => ({
   getGitHubAutomationTargets: vi.fn(),
   getInstallationOctokit: vi.fn(),
   findActiveGitHubPrReviewTask: vi.fn(),
-  findGitHubPullRequestLinkedTask: vi.fn(),
+  findRoomoteOpenedPullRequestTask: vi.fn(),
   findReusableGitHubPrFollowUpOwner: vi.fn(),
   startSourceControlFastSessionTurn: vi.fn(),
   fetchGitHubLinkedReferences: vi.fn(),
@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@roomote/db/server', () => ({
   findActiveGitHubPrReviewTask: mocks.findActiveGitHubPrReviewTask,
-  findGitHubPullRequestLinkedTask: mocks.findGitHubPullRequestLinkedTask,
+  findRoomoteOpenedPullRequestTask: mocks.findRoomoteOpenedPullRequestTask,
   findReusableGitHubPrFollowUpOwner: mocks.findReusableGitHubPrFollowUpOwner,
 }));
 
@@ -166,7 +166,7 @@ describe('handlePrComment', () => {
     });
     mocks.findActiveGitHubPrReviewTask.mockResolvedValue(null);
     mocks.findReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
-    mocks.findGitHubPullRequestLinkedTask.mockResolvedValue(null);
+    mocks.findRoomoteOpenedPullRequestTask.mockResolvedValue(null);
     mocks.fetchGitHubLinkedReferences.mockResolvedValue([]);
     mocks.startSourceControlFastSessionTurn.mockResolvedValue({
       status: 'queued',
@@ -361,7 +361,7 @@ describe('handlePrComment', () => {
           message: 'fast_session_queued',
         }),
       );
-      expect(mocks.findGitHubPullRequestLinkedTask).toHaveBeenCalledWith({
+      expect(mocks.findRoomoteOpenedPullRequestTask).toHaveBeenCalledWith({
         repoFullName: 'acme/api',
         prNumber: 42,
         host: 'github.com',
@@ -395,7 +395,7 @@ describe('handlePrComment', () => {
       // The opening task is done and has no resumable snapshot, so the
       // active-owner lookup finds nothing; the durable PR linkage still does.
       mocks.findReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
-      mocks.findGitHubPullRequestLinkedTask.mockResolvedValue({
+      mocks.findRoomoteOpenedPullRequestTask.mockResolvedValue({
         taskId: 'task-owner',
         runId: 5,
         type: 'standard_task',

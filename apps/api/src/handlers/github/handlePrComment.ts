@@ -1,6 +1,6 @@
 import {
   findActiveGitHubPrReviewTask,
-  findGitHubPullRequestLinkedTask,
+  findRoomoteOpenedPullRequestTask,
   findReusableGitHubPrFollowUpOwner,
 } from '@roomote/db/server';
 import {
@@ -677,11 +677,12 @@ async function resolvePullRequestActiveTasks({
 /**
  * A reply inside a review thread Roomote opened is addressed to Roomote the
  * way GitHub trains people to reply to a reviewer, so it counts as a mention
- * without the @-handle. Only pull requests no Roomote task is linked to
- * qualify: on a Roomote-opened pull request the review-feedback pipeline
- * already batches these replies into the owning Session with its Resolve /
- * Dismiss actions, and handling them here too would answer twice. The
- * linkage is durable, so a finished task still owns its pull request.
+ * without the @-handle. Only pull requests Roomote did not open qualify: on a
+ * Roomote-opened pull request the review-feedback pipeline already batches
+ * these replies into the owning Session with its Resolve / Dismiss actions,
+ * and handling them here too would answer twice. Opening is recorded on the
+ * durable linkage row, so a finished task still owns its pull request, while
+ * a pull request a task merely mentioned stays human-opened.
  */
 async function resolveImplicitReviewThreadMention({
   eventPayload,
@@ -715,7 +716,7 @@ async function resolveImplicitReviewThreadMention({
     return null;
   }
 
-  const linkedTask = await findGitHubPullRequestLinkedTask({
+  const linkedTask = await findRoomoteOpenedPullRequestTask({
     repoFullName: repository.full_name,
     prNumber: pullRequest.number,
     host: toHostFromUrl(pullRequest.html_url ?? '') ?? 'github.com',
