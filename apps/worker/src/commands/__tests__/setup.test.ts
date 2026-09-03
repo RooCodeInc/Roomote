@@ -24,9 +24,11 @@ const {
   mockEnvironmentSetupStatusWriter,
   mockTimedStep,
   mockGetRuntimeEnv,
+  mockSetRuntimeEnv,
   mockSetUserEnv,
 } = vi.hoisted(() => {
   const mockGetRuntimeEnv = vi.fn(() => ({}));
+  const mockSetRuntimeEnv = vi.fn();
   const mockSetUserEnv = vi.fn();
 
   return {
@@ -65,6 +67,7 @@ const {
       ): Promise<T> => run(),
     ),
     mockGetRuntimeEnv,
+    mockSetRuntimeEnv,
     mockSetUserEnv,
   };
 });
@@ -129,6 +132,7 @@ const mockWorkerEnv = {
   sandboxOpenRouterApiKey: 'sandbox-openrouter-key',
   getRuntimeEnv: mockGetRuntimeEnv,
   refreshSystemEnv: vi.fn(),
+  setRuntimeEnv: mockSetRuntimeEnv,
   setUserEnv: mockSetUserEnv,
 } as unknown as WorkerEnv;
 
@@ -398,6 +402,24 @@ describe('setup mode behavior', () => {
       BASE: 'base',
       FOO: 'bar',
       OPENROUTER_API_KEY: 'stored-sandbox-openrouter-key',
+    });
+  });
+
+  it('removes the sandbox OpenRouter source name from the worker runtime env', async () => {
+    mockGetRuntimeEnv.mockReturnValueOnce({
+      SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+      R_MODEL: 'roomote/openai/outer-model',
+    });
+
+    await setup({
+      mode: 'directDispatch',
+      workspace: environmentWorkspaceOptions,
+      logger,
+      workerEnv: mockWorkerEnv,
+    });
+
+    expect(mockSetRuntimeEnv).toHaveBeenCalledWith({
+      R_MODEL: 'roomote/openai/outer-model',
     });
   });
 

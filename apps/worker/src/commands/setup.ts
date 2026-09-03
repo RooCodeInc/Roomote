@@ -190,6 +190,12 @@ export async function setup({
   // Worker config values (auth keys, API URLs) are NOT re-read.
   workerEnv.refreshSystemEnv(process.env);
 
+  const runtimeEnv = workerEnv.getRuntimeEnv();
+  if (SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME in runtimeEnv) {
+    delete runtimeEnv[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
+    workerEnv.setRuntimeEnv(runtimeEnv);
+  }
+
   const inheritedWorkspaceEnvVars = {
     ...workerEnv.buildUserFacingEnv(),
     ...workspaceOpts.envVars,
