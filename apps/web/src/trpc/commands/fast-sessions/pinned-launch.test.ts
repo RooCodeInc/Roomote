@@ -74,6 +74,7 @@ describe('startPinnedFastSessionLaunch', () => {
       images: ['data:image/png;base64,AAAA'],
       attachmentTexts: ['stack trace'],
       model: 'openrouter/z-ai/glm-5.2',
+      reasoningEffort: 'high',
       pinnedLaunch: {
         launchId,
         repo: ALL_REPOSITORIES,
@@ -117,6 +118,7 @@ describe('startPinnedFastSessionLaunch', () => {
           harnessModelOverrides: {
             'opencode-server': 'openrouter/z-ai/glm-5.2',
           },
+          reasoningEffort: 'high',
         }),
       },
     });

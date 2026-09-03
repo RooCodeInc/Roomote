@@ -98,6 +98,9 @@ export function NewTaskForm({
   const defaultModelId = environmentIdParam
     ? launchTaskModels.data?.defaultModelId
     : launchTaskModels.data?.defaultFastModelId;
+  const defaultReasoningEffort = environmentIdParam
+    ? launchTaskModels.data?.defaultReasoningEffort
+    : launchTaskModels.data?.defaultFastReasoningEffort;
 
   // A launch into a chosen environment or repository still belongs to a
   // Session, but the workspace is decided, so the Session delegates the task
@@ -237,6 +240,7 @@ export function NewTaskForm({
             reasoningEffort={selectedReasoningEffort ?? null}
             onReasoningEffortChange={setSelectedReasoningEffort}
             defaultModelId={defaultModelId}
+            defaultReasoningEffort={defaultReasoningEffort}
           />
         }
       />

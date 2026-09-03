@@ -17,6 +17,7 @@ let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
 ];
 let currentEnvironmentsPending = false;
 let capturedSubmitWithMetaKey: boolean | undefined;
+let capturedDefaultReasoningEffort: string | null | undefined;
 
 const {
   mockPush,
@@ -186,25 +187,36 @@ vi.mock('@/components/tasks', async () => {
     SessionModelSwitcher: ({
       model,
       onModelChange,
+      onReasoningEffortChange,
       defaultModelId,
+      defaultReasoningEffort,
     }: {
       model: string;
       onModelChange: (value: string) => void;
+      onReasoningEffortChange: (value: 'high') => void;
       defaultModelId?: string;
-    }) => (
-      <div>
-        <span data-testid="selected-model-id">
-          {model || defaultModelId || ''}
-        </span>
-        <button
-          type="button"
-          aria-label="Model for this session"
-          onClick={() => onModelChange('openrouter/z-ai/glm-5.2')}
-        >
-          Use GLM 5.2 model
-        </button>
-      </div>
-    ),
+      defaultReasoningEffort?: string | null;
+    }) => {
+      capturedDefaultReasoningEffort = defaultReasoningEffort;
+
+      return (
+        <div>
+          <span data-testid="selected-model-id">
+            {model || defaultModelId || ''}
+          </span>
+          <button
+            type="button"
+            aria-label="Model for this session"
+            onClick={() => onModelChange('openrouter/z-ai/glm-5.2')}
+          >
+            Use GLM 5.2 model
+          </button>
+          <button type="button" onClick={() => onReasoningEffortChange('high')}>
+            Use high reasoning
+          </button>
+        </div>
+      );
+    },
   };
 });
 
@@ -218,6 +230,7 @@ describe('Home', () => {
     ];
     currentEnvironmentsPending = false;
     capturedSubmitWithMetaKey = undefined;
+    capturedDefaultReasoningEffort = undefined;
     localStorage.clear();
     vi.clearAllMocks();
 
@@ -232,7 +245,9 @@ describe('Home', () => {
     mockUseLaunchTaskModels.mockReturnValue({
       data: {
         defaultModelId: 'openrouter/openai/gpt-5.4',
+        defaultReasoningEffort: 'medium',
         defaultFastModelId: 'openrouter/anthropic/claude-haiku-4.5',
+        defaultFastReasoningEffort: 'low',
         models: [
           {
             id: 'openrouter/openai/gpt-5.4',
@@ -309,6 +324,12 @@ describe('Home', () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     expect(capturedSubmitWithMetaKey).toBe(false);
+  });
+
+  it('shows the deployment Fast reasoning default', () => {
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(capturedDefaultReasoningEffort).toBe('low');
   });
 
   it('keeps Home-only content out of the shared launch form', async () => {
@@ -529,6 +550,25 @@ describe('Home', () => {
       });
     });
     expect(mockPush).toHaveBeenCalledWith('/task/task-4');
+  });
+
+  it('passes selected reasoning to an environmentId URL launch', async () => {
+    currentSearchParams = 'environmentId=env-created';
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use high reasoning' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reasoningEffort: 'high',
+          pinnedLaunch: expect.objectContaining({
+            environmentId: 'env-created',
+          }),
+        }),
+      );
+    });
   });
 
   it('prefills editable prompt and model details from the URL', async () => {
