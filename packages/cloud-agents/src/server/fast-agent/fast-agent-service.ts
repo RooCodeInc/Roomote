@@ -962,6 +962,41 @@ const FAST_AGENT_RESUMED_TURN_REASON =
 const FAST_AGENT_RESUMED_RETRY_TURN_REASON =
   'The previous attempt at this request failed with a temporary inference provider error and is being retried automatically.';
 const PREVIOUS_ATTEMPT_MAX_CHARS = 12_000;
+const PREVIOUS_ATTEMPT_REPLY_MAX_CHARS = 600;
+const PREVIOUS_ATTEMPT_ARGUMENTS_MAX_CHARS = 800;
+
+function clipText(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/**
+ * Bound every free-form field of the attempt before it is serialized: a
+ * reply can be long and a single tool argument (an artifact body, a task
+ * prompt) can run to many kilobytes, and the resume envelope must stay a
+ * summary, not a copy of the transcript.
+ */
+function boundPreviousAttempt(attempt: FastAgentTurnAttemptSummary) {
+  return {
+    replies: attempt.replies.map((reply) =>
+      clipText(reply, PREVIOUS_ATTEMPT_REPLY_MAX_CHARS),
+    ),
+    actions: attempt.actions.map((action) => {
+      const serializedArguments = JSON.stringify(action.arguments ?? null);
+      return {
+        tool: action.tool,
+        arguments:
+          serializedArguments.length > PREVIOUS_ATTEMPT_ARGUMENTS_MAX_CHARS
+            ? clipText(
+                serializedArguments,
+                PREVIOUS_ATTEMPT_ARGUMENTS_MAX_CHARS,
+              )
+            : action.arguments,
+        status: action.status,
+        ...(action.result !== undefined ? { result: action.result } : {}),
+      };
+    }),
+  };
+}
 
 /**
  * The resumed-turn envelope. When the earlier attempt already did things, the
@@ -977,17 +1012,21 @@ function wrapFastAgentResumedTurn(
     previousAttempt &&
     (previousAttempt.actions.length > 0 || previousAttempt.replies.length > 0);
   if (!acted) return `<resumed_turn>${reason}</resumed_turn>`;
-  let attempt = escapeFastAgentEnvelopeText(JSON.stringify(previousAttempt));
+  const bounded = boundPreviousAttempt(previousAttempt);
+  let attempt = escapeFastAgentEnvelopeText(JSON.stringify(bounded));
   if (attempt.length > PREVIOUS_ATTEMPT_MAX_CHARS) {
+    // Results are the bulkiest field; drop them before anything else.
     attempt = escapeFastAgentEnvelopeText(
       JSON.stringify({
-        replies: previousAttempt.replies,
-        actions: previousAttempt.actions.map(
-          ({ result: _result, ...rest }) => rest,
-        ),
+        replies: bounded.replies,
+        actions: bounded.actions.map(({ result: _result, ...rest }) => rest),
         truncated: true,
       }),
     );
+  }
+  if (attempt.length > PREVIOUS_ATTEMPT_MAX_CHARS) {
+    // The hard cap holds no matter what the attempt contained.
+    attempt = `${attempt.slice(0, PREVIOUS_ATTEMPT_MAX_CHARS)}… [previous attempt truncated]`;
   }
   return [
     `<resumed_turn>${reason}`,

@@ -4062,6 +4062,44 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
     });
 
+    it('keeps the previous-attempt block bounded however large the attempt was', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        replies: ['x'.repeat(50_000)],
+        actions: [
+          {
+            tool: 'create_artifact',
+            arguments: { content: 'y'.repeat(130_000) },
+            status: 'completed',
+            result: 'z'.repeat(5_000),
+          },
+        ],
+        next: {
+          assistantOrdinal: 1,
+          toolOrdinal: 1,
+          retryNoticeOrdinal: 0,
+          turnSeq: 3,
+        },
+        prompt: null,
+      });
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      const call = mocks.generateText.mock.calls[0]?.[0];
+      const start = call.prompt.indexOf('<previous_attempt>');
+      const end = call.prompt.indexOf('</previous_attempt>');
+      expect(start).toBeGreaterThan(-1);
+      // Replies and arguments are clipped individually, so the block stays
+      // far under the cap even for a 130 KiB artifact body.
+      expect(end - start).toBeLessThan(12_000 + 200);
+      expect(call.prompt.slice(start, end)).toContain('create_artifact');
+      expect(call.prompt.slice(start, end)).toContain('…');
+    });
+
     it('adds no attempt block when nothing happened before the interruption', async () => {
       await answerFastAgentQuestion({
         ...baseParams,
