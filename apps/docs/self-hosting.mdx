@@ -18,8 +18,9 @@ your team needs them.
 
 <Tip>
   Asking a coding agent to install Roomote? Send it this page. Agents should
-  follow the [local Docker setup](/self-hosting/agent-installation) to start the
-  Compose stack and configure a temporary HTTPS callback URL.
+  follow the [agent installation guide](/self-hosting/agent-installation). It
+  uses the standard installer on Linux and creates a Linux VM plus temporary
+  HTTPS ingress when the current machine is macOS or Windows.
 </Tip>
 
 <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
@@ -54,7 +55,7 @@ in the repository.
 SSH into a fresh Ubuntu or Debian server (x86_64 or arm64, 4 GB+ RAM) and run:
 
 ```sh
-curl -fsSL https://get.roomote.dev | bash
+curl -fsSL https://get.roomote.dev | sudo bash
 ```
 
 The installer brings up the full stack from published images and prints a setup
@@ -236,7 +237,9 @@ start one from the starter list. A healthy deployment should let you:
   set). Set `NODE_OPTIONS=--max-old-space-size=<MB>` on a service to override
   the default, or on older images to add the cap manually.
 
-## Local Docker setup for agents
+## Agent-guided installation
 
-The [agent setup page](/self-hosting/agent-installation) is a short Docker
-Compose recipe for trying Roomote locally on macOS, Windows, or Linux.
+The [agent installation guide](/self-hosting/agent-installation) keeps the
+one-command Linux installer as the single deployment path. On macOS or Windows,
+an agent runs it inside a Linux VM and adds temporary HTTPS ingress for OAuth
+callbacks and webhooks.

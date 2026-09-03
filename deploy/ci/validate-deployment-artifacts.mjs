@@ -29,6 +29,13 @@ function assert(condition, message) {
 }
 
 assert(
+  installer.includes('--no-setup-url') &&
+    installer.includes("print_setup_url='false'") &&
+    installer.includes('sudo roomote setup-url'),
+  'installer: automated installs must be able to suppress the tokenized setup URL',
+);
+
+assert(
   installer.includes('preview_domain="$domain"') &&
     installer.includes(
       'preview_subdomain_suffix="${saved_preview_subdomain_suffix:-preview}"',

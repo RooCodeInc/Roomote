@@ -1,90 +1,185 @@
 ---
-title: Local Docker setup for agents
-description: Start Roomote locally with Docker Compose and a temporary HTTPS tunnel.
+title: Agent-guided installation
+description: Install Roomote with the standard installer, including from a local Linux VM.
 ---
 
-Use this page to try Roomote locally on macOS, Windows, or Linux. You need Git
-and Docker with the Compose plugin. Docker Desktop works on macOS and Windows.
+This page is the execution contract for an agent asked to follow the
+[self-hosting guide](/self-hosting). Use Roomote's standard Linux installer for
+both evaluation and production. Do not replace it with the repository's local
+development or Compose workflow.
 
-## Start Roomote
+Continue until a real Roomote task works. Running containers are an intermediate
+result, not a completed installation.
 
-Clone Roomote, open the repository root, and create an uncommitted `.env.local`:
+## Choose the Linux host
 
-```sh
-cp .env.local.example .env.local
-```
+Detect the current host before changing it, then use this default:
 
-Add a random setup token so the public setup page is not open to other visitors:
+| Current environment | Default path |
+| --- | --- |
+| Fresh Ubuntu or Debian server, VPS, or VM | Run the installer directly. |
+| macOS | Create or reuse a full Ubuntu VM, then run the same installer inside it. Multipass is the documented default. |
+| Windows | Create or reuse a full Ubuntu VM, then run the same installer inside it. Multipass is the documented default. |
+| WSL2 or a container | Do not assume it is a suitable deployment host. Use a full Ubuntu VM or VPS unless the user explicitly chooses an unsupported experiment. |
 
-```dotenv
-SETUP_TOKEN=<random-value>
-```
+Roomote publishes `amd64` and `arm64` images. The installer detects the Linux
+guest's architecture, generates and preserves deployment secrets, installs
+Docker when needed, starts the published images, and installs the `roomote` host
+CLI. Do not clone or build Roomote from source unless the user intends to
+develop Roomote itself.
 
-On an ARM machine, also set `DOCKER_WORKER_PLATFORM=linux/arm64`. The Compose
-overlay already defaults to `linux/amd64` on x86-64 machines.
+Before making changes, report the selected Linux host, whether it is new or
+already contains Roomote, and the public-ingress plan. Pause for approval before
+installing host software, creating a VM, using `sudo`, creating public ingress,
+or replacing an existing deployment setting. Never delete an existing VM,
+deployment, or volume to obtain a clean state without explicit approval.
 
-Start the local self-host stack:
+## Run the standard installer
 
-```sh
-docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.self-host.yml -f docker-compose.compute-docker.yml up -d --build
-```
-
-This starts the Roomote app, API, controller, queues, PostgreSQL, Redis, MinIO,
-preview proxy, and local Docker task runtime. Open
-`http://localhost:13000/setup` when no external HTTPS callback is needed.
-
-## Add temporary HTTPS
-
-OAuth and webhook providers need a public HTTPS URL. Create an uncommitted
-`docker-compose.cloudflared.yml`:
-
-```yaml
-services:
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel --no-autoupdate --url http://web:3000
-    depends_on:
-      - web
-```
-
-Start the tunnel and read its URL:
+On a Linux host with a stable public domain, use the normal production path:
 
 ```sh
-docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.self-host.yml -f docker-compose.compute-docker.yml -f docker-compose.cloudflared.yml up -d cloudflared
-docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.self-host.yml -f docker-compose.compute-docker.yml -f docker-compose.cloudflared.yml logs cloudflared
+curl -fsSL https://get.roomote.dev -o /tmp/roomote-install.sh
+sudo bash /tmp/roomote-install.sh \
+  --domain roomote.example.com \
+  --no-setup-url
 ```
 
-Find the generated `https://<random>.trycloudflare.com` URL in the logs. Set it
-in `.env.local`:
+Omit `--domain` only for a short evaluation on a Linux host with a directly
+reachable public IPv4 address. The installer then uses a temporary `sslip.io`
+hostname. For production, use stable app and wildcard DNS with public TCP ports
+80 and 443, or a named tunnel configured for the same stable hostnames.
 
-```dotenv
-R_PUBLIC_URL=https://<random>.trycloudflare.com
-```
-
-Recreate the stack so Roomote generates links and callbacks from that URL:
+`--no-setup-url` suppresses the tokenized first-admin link in captured agent
+output. After the installation is healthy, the user must obtain that link in a
+separate trusted terminal by running:
 
 ```sh
-docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.self-host.yml -f docker-compose.compute-docker.yml -f docker-compose.cloudflared.yml up -d --build
+sudo roomote setup-url
 ```
 
-Use the generated HTTPS origin in provider configuration. Common callbacks are:
+Do not run that command in a captured agent terminal, repeat its output, or ask
+the user to paste the link or token into chat.
 
-```text
-GitHub callback: <origin>/github/callback
-GitHub webhook:  <origin>/api/webhooks/github
-Slack callback:  <origin>/api/slack/callback
-Slack webhook:   <origin>/api/webhooks/slack
+## Local evaluation from macOS or Windows
+
+A local trial still uses the standard installer. The only additional pieces are
+a Linux VM for the deployment and temporary public HTTPS ingress for callbacks
+and webhooks. The tunnel may run on the host or inside the VM as long as it can
+reach the VM's Caddy ports.
+
+For macOS, the documented VM and tunnel clients are:
+
+```sh
+brew install --cask multipass
+brew install cloudflared
+multipass launch 24.04 --name roomote --cpus 4 --memory 6G --disk 40G
 ```
 
-Open `<origin>/setup` and enter the `SETUP_TOKEN` from `.env.local`. Complete
-provider sign-in and credentials in the browser, not in the agent conversation.
+For Windows, install Multipass and `cloudflared`, then create the same Ubuntu
+24.04 VM from PowerShell:
 
-Quick Tunnel URLs are temporary. If cloudflared creates a new URL, update
-`R_PUBLIC_URL`, recreate the stack, and update the provider callback URLs.
+```powershell
+winget install -e --id Canonical.Multipass
+multipass launch 24.04 --name roomote --cpus 4 --memory 6G --disk 40G
+```
 
-## Verify
+Installing these tools and creating the VM require approval. Reuse a suitable
+existing Linux VM when one is already available instead of creating another.
 
-Run the same Compose command with `ps` instead of `up -d --build`. Confirm the
-long-running services are running, healthchecked services are healthy, and
-`db-migrate` and `worker-image` exited successfully.
+### Give the VM temporary HTTPS ingress
+
+Get the VM's address from the host:
+
+```sh
+multipass exec roomote -- hostname -I
+```
+
+Start a Cloudflare Quick Tunnel on the host, replacing `<vm-ip>` with the first
+address returned above:
+
+```sh
+cloudflared tunnel --url https://<vm-ip>:443 --no-tls-verify
+```
+
+Keep this process running. It assigns a random
+`https://<name>.trycloudflare.com` origin. Starting the tunnel before Roomote is
+installed can produce temporary origin-connection errors; the public hostname
+is still the value needed by the installer.
+
+The private tunnel hop disables certificate verification because Caddy uses an
+internal certificate in this evaluation topology. The browser and provider
+connections to the public `trycloudflare.com` origin still use Cloudflare's
+publicly trusted HTTPS certificate.
+
+Open a shell in the VM and run the standard installer with the generated
+hostname:
+
+```sh
+multipass shell roomote
+curl -fsSL https://get.roomote.dev -o /tmp/roomote-install.sh
+sudo bash /tmp/roomote-install.sh \
+  --domain <name>.trycloudflare.com \
+  --tls-mode internal \
+  --no-setup-url
+```
+
+Do not use the repository's development Compose files inside or outside the VM.
+The installer remains responsible for secrets, images, persistent state,
+migrations, Caddy, Docker workers, and lifecycle commands.
+
+Quick Tunnels are intended only for evaluation. They have no uptime guarantee,
+do not provide Roomote's wildcard preview hostnames, and receive a new hostname
+when restarted. If the hostname changes, rerun the installer with the new
+`--domain`, then update every provider callback and webhook registration before
+continuing. Use a named tunnel or normal DNS for a durable deployment.
+
+## Browser setup
+
+Pause while the user opens the setup URL and completes the browser-owned steps:
+
+- create the first admin account
+- configure an inference provider or ChatGPT subscription
+- create and install the deployment's source-control app
+- select the repositories Roomote agents may access
+- validate the Docker sandbox provider
+- create the first environment
+
+For GitHub, the callback is `<origin>/github/callback` and the webhook is
+`<origin>/api/webhooks/github`. A loopback callback can support some OAuth
+flows, but GitHub cannot deliver webhooks to localhost; use the tunnel origin
+for the complete Roomote source-control workflow.
+
+The user must personally enter credentials and approve provider authorization.
+Do not request credentials, private keys, setup tokens, or tokenized URLs in the
+agent conversation.
+
+## Verify before declaring success
+
+After browser setup, continue until all applicable checks pass:
+
+1. `sudo roomote status` reports the deployment services healthy.
+2. The public origin reaches Roomote and presents a publicly trusted browser
+   certificate.
+3. Sign-in works and the expected repositories appear.
+4. **Settings → Sandboxes → Validate environment** succeeds for the selected
+   sandbox provider.
+5. A small Roomote task clones a repository and runs a harmless command.
+6. The task transcript, logs, and any generated artifact are accessible.
+7. Configured callbacks and webhooks work through the public origin.
+8. Branch or pull-request delivery works when the task requests repository
+   changes.
+9. A live preview works only when the chosen ingress provides the required
+   preview hostname coverage; do not require it from a Quick Tunnel.
+
+Leave the operator with the public Roomote URL, the fact that a Quick Tunnel
+must remain running when one is used, and these commands:
+
+```sh
+sudo roomote status
+sudo roomote logs [service...]
+sudo roomote restart [service...]
+sudo roomote backup
+sudo roomote upgrade
+sudo roomote rollback
+```

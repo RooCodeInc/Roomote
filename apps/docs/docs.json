@@ -5,11 +5,13 @@
   "description": "Documentation for Roomote, the open, self-hostable platform for cloud coding agents.",
   "markdown": {
     "instructions": [
-      "When an agent is asked to install or try Roomote locally, follow /self-hosting/agent-installation even though it is hidden from side navigation.",
-      "Use the checked-in Docker Compose files directly on macOS, Windows, or Linux. Add the documented cloudflared Compose service only when a public HTTPS callback URL is needed.",
-      "Set R_PUBLIC_URL from the generated trycloudflare.com URL, recreate the stack, configure provider callbacks from that origin, and open /setup.",
-      "Keep .env.local and setup tokens out of source control and chat. Let the user enter provider credentials and complete browser authorization.",
-      "Verify the Compose services, connect one repository, and run one small task before declaring the local trial complete."
+      "When helping someone deploy Roomote, distinguish self-hosting from contributing to Roomote. Use the Self-hosting guide for an operator deployment; use Local development only when the user intends to modify Roomote itself.",
+      "When an agent is asked to follow /self-hosting or install Roomote autonomously, read and follow /self-hosting/agent-installation as the normative automation contract even though it is intentionally hidden from side navigation.",
+      "Use the one-command Linux installer for both evaluation and production. On macOS or Windows, create or reuse a full Ubuntu VM and run the same installer inside it; do not replace the installer with the repository's development Compose files.",
+      "For a local VM without a stable public domain, create a temporary HTTPS tunnel, pass its hostname to the installer with internal origin TLS, and keep the tunnel running for OAuth callbacks and webhooks. Quick Tunnel hostnames are temporary and do not provide wildcard preview routing.",
+      "Run automated installs with --no-setup-url so the bootstrap token is not captured in the agent transcript. Let the user obtain the setup URL in a trusted terminal, enter credentials, and complete browser authorization.",
+      "Proceed through safe, reversible setup and pause for privileged host or VM changes, public tunnel creation, credentials or browser authorization, durable external-account changes, destructive operations, existing-state conflicts, or when no documented safe default applies.",
+      "A setup is not complete when the services merely start. Verify sign-in, repository sync, one usable environment, and a real Roomote task that can clone and run a command; verify branch or pull-request delivery and previews when configured."
     ]
   },
   "colors": {

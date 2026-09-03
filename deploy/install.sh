@@ -2,7 +2,7 @@
 #
 # Roomote one-command installer for a single self-managed host.
 #
-#   curl -fsSL https://get.roomote.dev | bash
+#   curl -fsSL https://get.roomote.dev | sudo bash
 #
 # get.roomote.dev serves this file and mirrors the release lookup and
 # deployment-file fetches (see deploy/get-roomote/README.md); GitHub is the
@@ -17,7 +17,7 @@
 #
 # Bring your own domain (recommended for production):
 #
-#   curl -fsSL https://get.roomote.dev | bash -s -- --domain roomote.example.com
+#   curl -fsSL https://get.roomote.dev | sudo bash -s -- --domain roomote.example.com
 #
 # Re-running is safe: an existing /opt/roomote/.env keeps its secrets and only
 # deployment-owned metadata (image tags, URLs) is refreshed.
@@ -43,6 +43,7 @@ Options:
                              (default: RooCodeInc/Roomote)
   --image-registry <host>    Image registry (default: ghcr.io)
   --image-namespace <ns>     Image namespace (default: roocodeinc)
+  --no-setup-url             Do not print the tokenized first-admin setup URL
   --help                     Show this help
 
 Environment overrides:
@@ -91,6 +92,7 @@ image_registry='ghcr.io'
 image_namespace='roocodeinc'
 source_dir="${ROOMOTE_INSTALL_SOURCE_DIR:-}"
 install_root='/opt/roomote'
+print_setup_url='true'
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -126,6 +128,10 @@ while [ "$#" -gt 0 ]; do
       image_namespace="${2:-}"
       shift 2
       ;;
+    --no-setup-url)
+      print_setup_url='false'
+      shift
+      ;;
     --help | -h)
       usage
       exit 0
@@ -151,8 +157,8 @@ fi
 # Before anything else (including the root check, so nobody sudo-pipes a
 # script for nothing): this installer manages Docker, systemd, and /opt on
 # the host, so it only runs on a Linux server. The non-Linux message is
-# OS-specific so macOS/Windows users get the Docker Compose local-evaluation
-# path instead of trying to adapt this dedicated-server installer.
+# OS-specific so macOS/Windows users run this same installer inside a Linux VM
+# instead of substituting the repository's development Compose files.
 host_kernel="$(uname -s)"
 if [ "$host_kernel" != 'Linux' ]; then
   case "$host_kernel" in
@@ -161,8 +167,9 @@ if [ "$host_kernel" != 'Linux' ]; then
 this installer sets up a Linux server (Ubuntu/Debian, x86_64 or arm64) and
 cannot run on macOS.
 
-For local evaluation on this Mac, use Docker Desktop and Roomote's checked-in
-Docker Compose files instead:
+For local evaluation on this Mac, create or reuse a full Ubuntu VM and run this
+same installer inside it. Add a temporary HTTPS tunnel when OAuth callbacks or
+webhooks must reach the VM:
 
   https://docs.roomote.dev/self-hosting/agent-installation
 
@@ -178,8 +185,9 @@ EOF
 this installer sets up a Linux server (Ubuntu/Debian, x86_64 or arm64) and
 cannot run on Windows.
 
-For local evaluation on this Windows machine, use Docker Desktop with Linux
-containers and Roomote's checked-in Docker Compose files instead:
+For local evaluation on this Windows machine, create or reuse a full Ubuntu VM
+and run this same installer inside it. Add a temporary HTTPS tunnel when OAuth
+callbacks or webhooks must reach the VM:
 
   https://docs.roomote.dev/self-hosting/agent-installation
 
@@ -642,9 +650,10 @@ docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-ti
 log "Downloading the task worker image in the background"
 nohup sh -c "docker pull $(printf '%q' "$worker_image") >>/var/log/roomote-worker-pull.log 2>&1" >/dev/null 2>&1 &
 
-setup_token="$(awk -F= '/^SETUP_TOKEN=/ { print $2; exit }' .env)"
+if [ "$print_setup_url" = 'true' ]; then
+  setup_token="$(awk -F= '/^SETUP_TOKEN=/ { print $2; exit }' .env)"
 
-cat <<EOF
+  cat <<EOF
 
 Roomote is up. One step left:
 
@@ -657,6 +666,17 @@ issued -- wait a minute and reload.
 
 Manage later with the roomote command: roomote status | logs | upgrade | backup
 EOF
+else
+  cat <<'EOF'
+
+Roomote is up. The tokenized setup URL was not printed.
+
+In a separate trusted terminal, run `sudo roomote setup-url` and open the
+result to create the first admin account.
+
+Manage later with the roomote command: roomote status | logs | upgrade | backup
+EOF
+fi
 
 }
 
