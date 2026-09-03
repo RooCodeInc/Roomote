@@ -3,7 +3,7 @@ import { canRetryFailedStart, getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   RunStatus,
   getFastAgentParentFromPayload,
-  isPrReviewPayload,
+  isPrReviewRun,
 } from '@roomote/types';
 import {
   type TaskRun,
@@ -66,7 +66,7 @@ export async function notifyFastAgentParentOnSettle(
     (run.payload as { fastParentRequestedReview?: boolean } | null)
       ?.fastParentRequestedReview === true;
   if (
-    isPrReviewPayload(run.payload) &&
+    isPrReviewRun(run) &&
     status !== RunStatus.Failed &&
     !sessionRequestedReview
   ) {

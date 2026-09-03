@@ -56,7 +56,7 @@ import {
   PR_REVIEW_ACTION_LABELS,
   isTaskExecutingTurn,
   getFastAgentParentFromPayload,
-  isPrReviewPayload,
+  isPrReviewRun,
   WORKER_HEARTBEAT_STALE_MS,
 } from '@roomote/types';
 
@@ -160,14 +160,14 @@ function isButtonRoute(
 }
 
 function getFastParentButtonRoute(
-  payload: unknown,
+  run: Pick<typeof taskRuns.$inferSelect, 'payload' | 'payloadKind'>,
 ): ButtonPrReviewNotificationRoute | null {
   // Review-pipeline runs carry a Fast parent for session visibility only;
   // their PR notifications must not route buttons into the parent thread.
-  if (isPrReviewPayload(payload)) {
+  if (isPrReviewRun(run)) {
     return null;
   }
-  const parent = getFastAgentParentFromPayload(payload);
+  const parent = getFastAgentParentFromPayload(run.payload);
   if (
     !parent ||
     parent.conversation.surface === 'automation' ||
@@ -643,7 +643,7 @@ export const prReviewNotificationJob = async (
     const roomoteReviewResult = events.find(
       (event) => event.reviewResult,
     )?.reviewResult;
-    const fallbackAutoHandleRoute = getFastParentButtonRoute(latestJob.payload);
+    const fallbackAutoHandleRoute = getFastParentButtonRoute(latestJob);
     const fastParent = getFastAgentParentFromPayload(latestJob.payload);
     const isWebFastParent = fastParent?.conversation.surface === 'web';
     const persistedAutoHandleRoute = getPersistedButtonRoute(data);

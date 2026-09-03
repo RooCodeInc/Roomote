@@ -61,6 +61,7 @@ function makeRun(
   payload: Record<string, unknown>,
   overrides: Partial<TaskRun> = {},
 ): TaskRun {
+  // Persisted runs store the bare payload; the kind lives in payloadKind.
   return {
     id: 200,
     taskId: 'child-task',
@@ -85,10 +86,10 @@ describe('notifyFastAgentParentOnSettle', () => {
 
   it('stays quiet for a successful review child settle', async () => {
     await notifyFastAgentParentOnSettle(
-      makeRun({
-        type: TaskPayloadKind.GithubPrReview,
-        fastAgentParent: fastParent,
-      }),
+      makeRun(
+        { fastAgentParent: fastParent },
+        { payloadKind: TaskPayloadKind.GithubPrReview },
+      ),
       RunStatus.Idle,
       'Review acme/app#42',
     );
@@ -99,11 +100,10 @@ describe('notifyFastAgentParentOnSettle', () => {
 
   it('announces a successful review settle when the session requested it', async () => {
     await notifyFastAgentParentOnSettle(
-      makeRun({
-        type: TaskPayloadKind.GithubPrReview,
-        fastAgentParent: fastParent,
-        fastParentRequestedReview: true,
-      }),
+      makeRun(
+        { fastAgentParent: fastParent, fastParentRequestedReview: true },
+        { payloadKind: TaskPayloadKind.GithubPrReview },
+      ),
       RunStatus.Idle,
       'Review acme/app#42',
     );
@@ -117,10 +117,10 @@ describe('notifyFastAgentParentOnSettle', () => {
 
   it('still announces a failed review child settle', async () => {
     await notifyFastAgentParentOnSettle(
-      makeRun({
-        type: TaskPayloadKind.GithubPrReviewSync,
-        fastAgentParent: fastParent,
-      }),
+      makeRun(
+        { fastAgentParent: fastParent },
+        { payloadKind: TaskPayloadKind.GithubPrReviewSync },
+      ),
       RunStatus.Failed,
       'Review acme/app#42',
     );

@@ -953,6 +953,7 @@ export async function sendMessageToTask({
           id: run.id,
           taskId,
           payload: run.payload,
+          payloadKind: run.payloadKind,
         },
         feedbackSourceIds: [feedbackSourceId],
         reviewTaskId: fastHandoff.reviewTaskId,
