@@ -29,6 +29,11 @@ import type { FastAgentMessage } from '@roomote/db';
 
 import type { UserAuthSuccess } from '@/types';
 import { COMPOSER_SUGGESTION_HISTORY_LIMIT } from './composer-suggestion-history';
+import {
+  buildSessionTaskPreviews,
+  getSessionPreviewProxyConfig,
+  type SessionTaskPreview,
+} from './session-task-previews';
 
 type FastSessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
 
@@ -45,6 +50,7 @@ type FastSessionTaskSummary = {
     size: number;
     createdAt: Date;
   }>;
+  previews: SessionTaskPreview[];
   latestRun: {
     status: (typeof taskRuns.$inferSelect)['status'];
     taskPhase: (typeof taskRuns.$inferSelect)['taskPhase'];
@@ -264,6 +270,15 @@ export async function getFastSessionTasks(
         latestRunId: taskRuns.id,
         status: taskRuns.status,
         taskPhase: taskRuns.taskPhase,
+        machineDomain: taskRuns.machineDomain,
+        machineDomains: taskRuns.machineDomains,
+        initialPaths: taskRuns.initialPaths,
+        primaryPortName: taskRuns.primaryPortName,
+        sleepRequestedAt: taskRuns.sleepRequestedAt,
+        snapshotRequestedAt: taskRuns.snapshotRequestedAt,
+        snapshotCreatedAt: taskRuns.snapshotCreatedAt,
+        snapshotFailedAt: taskRuns.snapshotFailedAt,
+        snapshotId: taskRuns.snapshotId,
       })
       .from(taskRuns)
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
@@ -281,8 +296,18 @@ export async function getFastSessionTasks(
     .select({
       taskId: latestRunPerTask.taskId,
       title: latestRunPerTask.title,
+      latestRunId: latestRunPerTask.latestRunId,
       status: latestRunPerTask.status,
       taskPhase: latestRunPerTask.taskPhase,
+      machineDomain: latestRunPerTask.machineDomain,
+      machineDomains: latestRunPerTask.machineDomains,
+      initialPaths: latestRunPerTask.initialPaths,
+      primaryPortName: latestRunPerTask.primaryPortName,
+      sleepRequestedAt: latestRunPerTask.sleepRequestedAt,
+      snapshotRequestedAt: latestRunPerTask.snapshotRequestedAt,
+      snapshotCreatedAt: latestRunPerTask.snapshotCreatedAt,
+      snapshotFailedAt: latestRunPerTask.snapshotFailedAt,
+      snapshotId: latestRunPerTask.snapshotId,
       inferenceCostMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
     })
     .from(latestRunPerTask)
@@ -296,10 +321,22 @@ export async function getFastSessionTasks(
       latestRunPerTask.latestRunId,
       latestRunPerTask.status,
       latestRunPerTask.taskPhase,
+      latestRunPerTask.machineDomain,
+      latestRunPerTask.machineDomains,
+      latestRunPerTask.initialPaths,
+      latestRunPerTask.primaryPortName,
+      latestRunPerTask.sleepRequestedAt,
+      latestRunPerTask.snapshotRequestedAt,
+      latestRunPerTask.snapshotCreatedAt,
+      latestRunPerTask.snapshotFailedAt,
+      latestRunPerTask.snapshotId,
     )
     .orderBy(desc(latestRunPerTask.latestRunId));
 
   const taskIds = rows.map((row) => row.taskId);
+  const previewConfig = taskIds.length
+    ? await getSessionPreviewProxyConfig()
+    : null;
   const artifactRows = taskIds.length
     ? await db
         .select({
@@ -329,6 +366,13 @@ export async function getFastSessionTasks(
     artifacts: artifactRows
       .filter((artifact) => artifact.taskId === row.taskId)
       .map(({ taskId: _taskId, ...artifact }) => artifact),
+    previews: previewConfig
+      ? buildSessionTaskPreviews(
+          row.taskId,
+          { ...row, id: row.latestRunId },
+          previewConfig,
+        )
+      : [],
     latestRun: {
       status: row.status,
       taskPhase: row.taskPhase,

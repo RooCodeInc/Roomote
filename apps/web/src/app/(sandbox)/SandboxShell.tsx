@@ -77,7 +77,9 @@ export function SandboxShell({
     ? `/sessions/${setupSessionStatus.sessionId}`
     : null;
   const needsAdminSetup =
-    user?.isAdmin === true && setupStatus?.setupCompletedAt == null;
+    user?.isAdmin === true &&
+    setupStatus?.setupCompletedAt == null &&
+    setupSessionStatus?.completed !== true;
   const isAllowedSetupSession =
     setupSessionPath !== null && pathname === setupSessionPath;
   const sandboxLayoutValue = useMemo(
@@ -131,7 +133,7 @@ export function SandboxShell({
 
       {/* Main layout with side nav on desktop */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {isSignedIn && <SideNav />}
+        {isSignedIn && <SideNav setupIncomplete={needsAdminSetup} />}
         <SandboxLayoutContext.Provider value={sandboxLayoutValue}>
           <div className="flex flex-1 min-h-0 min-w-0 md:rounded-l-sm md:shadow-md">
             <div className="flex flex-col min-h-0 min-w-0 flex-1">

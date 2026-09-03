@@ -29,6 +29,13 @@ function assert(condition, message) {
 }
 
 assert(
+  installer.includes('--no-setup-url') &&
+    installer.includes("print_setup_url='false'") &&
+    installer.includes('sudo roomote setup-url'),
+  'installer: automated installs must be able to suppress the tokenized setup URL',
+);
+
+assert(
   installer.includes('preview_domain="$domain"') &&
     installer.includes(
       'preview_subdomain_suffix="${saved_preview_subdomain_suffix:-preview}"',
@@ -93,6 +100,28 @@ assert(
   upgradeCompatibility.includes('COMPOSE_PROFILES=local-postgres,brain') &&
     upgradeCompatibility.includes('bullmq gbrain preview-proxy'),
   'upgrade compatibility: the Brain profile must boot gbrain explicitly',
+);
+assert(
+  upgradeCompatibility.includes(
+    'postgres_port="${DEPLOYMENT_CI_POSTGRES_PORT:-0}"',
+  ) &&
+    upgradeCompatibility.includes(
+      'postgres_endpoint="$(compose port postgres 5432)"',
+    ) &&
+    upgradeCompatibility.includes("'' | *[!0-9]*)") &&
+    upgradeCompatibility.includes(
+      'DATABASE_URL="postgres://postgres:roomote-postgres-password@127.0.0.1:$postgres_port/roomote"',
+    ),
+  'upgrade compatibility: Docker must allocate the default host Postgres port',
+);
+assert(
+  upgradeCompatibility.includes('trap finish EXIT') &&
+    upgradeCompatibility.includes('compose ps --all') &&
+    upgradeCompatibility.includes('Required service logs:') &&
+    upgradeCompatibility.includes(
+      'postgres redis minio minio-init docker-proxy db-migrate api web controller bullmq gbrain preview-proxy',
+    ),
+  'upgrade compatibility: startup failures must report Compose state and service logs',
 );
 
 function commandText(command) {

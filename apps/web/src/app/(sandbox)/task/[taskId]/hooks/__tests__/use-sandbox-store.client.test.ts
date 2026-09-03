@@ -484,6 +484,113 @@ describe('createSandboxStore', () => {
     ]);
   });
 
+  it('removes a startup follow-up from queued state when history confirms it was dequeued and delivered', () => {
+    const store = createAcpStore();
+    const queuedUpdate = acpQueuedMessagesUpdate(
+      [
+        {
+          id: 'queued-startup-follow-up',
+          text: 'follow up during startup',
+          clientMessageId: 'client-startup-follow-up',
+          timestamp: 5002,
+        },
+      ],
+      {
+        cause: 'enqueue',
+        sessionId: 'session-starting',
+        sequence: 1,
+        ts: 5002,
+      },
+    );
+
+    store.getState()._appendOptimisticQueuedMessage({
+      id: 'local:client-startup-follow-up',
+      text: 'follow up during startup',
+      clientMessageId: 'client-startup-follow-up',
+      timestamp: 5001,
+    });
+    emitAcp(store, queuedUpdate);
+
+    store.getState()._mergeAcpHistory([
+      acpEnvelope(queuedUpdate),
+      acpEnvelope(
+        acpQueuedMessagesUpdate([], {
+          cause: 'dequeue',
+          sessionId: 'session-starting',
+          sequence: 2,
+          ts: 5003,
+        }),
+      ),
+      acpEnvelope(
+        acpUserPrompt('follow up during startup', {
+          id: 'persisted:client-startup-follow-up',
+          sessionId: 'session-starting',
+          sequence: 3,
+          ts: 5004,
+          text: 'follow up during startup',
+          clientMessageId: 'client-startup-follow-up',
+        }),
+      ),
+    ]);
+
+    expect(store.getState().queuedMessages).toEqual([]);
+    expect(store.getState().runtimeQueuedMessages).toEqual([]);
+    expect(store.getState().optimisticQueuedMessages).toEqual([]);
+    expect(store.getState().messages).toMatchObject([
+      expect.objectContaining({
+        id: 'persisted:client-startup-follow-up',
+        clientMessageId: 'client-startup-follow-up',
+      }),
+    ]);
+  });
+
+  it('uses persisted delivery to clear startup queue state when the dequeue update was missed', () => {
+    const store = createAcpStore();
+
+    store.getState()._appendOptimisticQueuedMessage({
+      id: 'local:client-startup-follow-up',
+      text: 'follow up during startup',
+      clientMessageId: 'client-startup-follow-up',
+      timestamp: 5001,
+    });
+    emitAcp(
+      store,
+      acpQueuedMessagesUpdate(
+        [
+          {
+            id: 'queued-startup-follow-up',
+            text: 'follow up during startup',
+            clientMessageId: 'client-startup-follow-up',
+            timestamp: 5002,
+          },
+        ],
+        {
+          cause: 'enqueue',
+          sessionId: 'session-starting',
+          sequence: 1,
+          ts: 5002,
+        },
+      ),
+    );
+
+    store.getState()._mergeAcpHistory([
+      acpEnvelope(
+        acpUserPrompt('follow up during startup', {
+          id: 'persisted:client-startup-follow-up',
+          sessionId: 'session-starting',
+          sequence: 2,
+          ts: 5003,
+          text: 'follow up during startup',
+          clientMessageId: 'client-startup-follow-up',
+        }),
+      ),
+    ]);
+
+    expect(store.getState().queuedMessages).toEqual([]);
+    expect(store.getState().runtimeQueuedMessages).toEqual([]);
+    expect(store.getState().optimisticQueuedMessages).toEqual([]);
+  });
+
   it('reconstructs persisted queued messages separately from delivered prompts', () => {
     const store = createAcpStore();
     const queuedUpdate = acpQueuedMessagesUpdate(

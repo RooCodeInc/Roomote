@@ -28,7 +28,7 @@ vi.mock('@roomote/db/server', () => ({
   isNull: vi.fn(() => 'not-suspended-filter'),
 }));
 
-vi.mock('../../router/mcp-policy', () => ({
+vi.mock('../../mcp-policy', () => ({
   isRouterMcpServerEnabled: vi.fn(() => true),
 }));
 

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   launchTask: vi.fn(),
   surfaceLaunchTask: vi.fn(),
   notifyArtifactBuild: vi.fn(),
+  startPinnedLaunch: vi.fn(),
   getOrCreateSession: vi.fn(),
   getUnifiedSession: vi.fn(),
   isNull: vi.fn(),
@@ -81,6 +82,10 @@ vi.mock('@/lib/server/pr-review-actions', () => ({
 
 vi.mock('../task-runs', () => ({
   notifySourceTaskArtifactBuild: mocks.notifyArtifactBuild,
+}));
+
+vi.mock('./pinned-launch', () => ({
+  startPinnedFastSessionLaunch: mocks.startPinnedLaunch,
 }));
 
 import {
@@ -307,6 +312,45 @@ describe('startFastSessionCommand', () => {
     });
 
     expect(mocks.after).toHaveBeenCalledOnce();
+  });
+
+  it('delegates a pinned launch without scheduling a Fast turn', async () => {
+    mocks.startPinnedLaunch.mockResolvedValue({
+      sessionId: 'session-9',
+      fastConversationId: 'fast-9',
+      taskId: 'task-9',
+    });
+
+    const pinnedLaunch = {
+      launchId: '44444444-4444-4444-8444-444444444444',
+      repo: 'acme/api',
+      branch: 'main',
+      environmentId: '33333333-3333-4333-8333-333333333333',
+    };
+    const result = await startFastSessionCommand(auth, {
+      text: 'Fix the flaky test',
+      images: ['data:image/png;base64,AAAA'],
+      attachmentTexts: ['notes'],
+      model: 'model-1',
+      reasoningEffort: 'high',
+      pinnedLaunch,
+    });
+
+    expect(result).toEqual({
+      sessionId: 'session-9',
+      fastConversationId: 'fast-9',
+      taskId: 'task-9',
+    });
+    expect(mocks.startPinnedLaunch).toHaveBeenCalledWith(auth, {
+      text: 'Fix the flaky test',
+      images: ['data:image/png;base64,AAAA'],
+      attachmentTexts: ['notes'],
+      model: 'model-1',
+      reasoningEffort: 'high',
+      pinnedLaunch,
+    });
+    expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
+    expect(mocks.after).not.toHaveBeenCalled();
   });
 
   it('launches an attributed artifact build in the artifact task parent Session', async () => {

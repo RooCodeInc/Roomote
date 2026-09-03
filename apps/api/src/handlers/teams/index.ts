@@ -68,19 +68,21 @@ import {
   isDeploymentReadOnlyError,
   populateSnapshotResumeCommunicationMetadata,
   restoreSnapshotResumeVisiblePromptFields,
+  buildFastAgentChildTaskMetadata,
+  type FastAgentConversation,
+  type FastAgentParent,
 } from '@roomote/types';
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES,
-  buildTeamsRoutingContext,
   buildFastAgentReactionExternalInputQuestion,
   enqueueTask,
   formatAudioAttachmentWarning,
   formatAudioTranscriptionResult,
   getTaskUrl,
   getOrCreateFastAgentSession,
+  launchPinnedFastSessionTask,
   resolveAudioTranscriptionMimeType,
-  routeTask,
   transcribeAudioAttachment,
   type FastAgentReactionExternalInput,
   type RoutingWorkspace,
@@ -115,6 +117,7 @@ import {
   resolveAndClaimTeamsSuggestionReaction,
   type ClaimedTeamsSuggestion,
 } from './suggestion-start.js';
+import { resolveSuggestionOriginSessionId } from '../tasks/suggestion-launch.js';
 import { shouldRouteUnmentionedTeamsThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
 const TEAMS_ACTIVITY_DEDUP_PREFIX = 'teams:activity:';
@@ -152,7 +155,26 @@ async function resolveTeamsSuggestionWorkspace(
     suggestion,
   );
   if (!pinnedEnvironmentId) {
-    return { workspaceOverride: null, unavailableEnvironmentId: null };
+    // A card pinned to a bare repository keeps that repository; only cards
+    // with no target at all run against every repository.
+    const pinnedRepositoryFullName =
+      target.kind === 'legacy_pinned' &&
+      suggestion.targetRepositoryFullName &&
+      suggestion.targetRepositoryFullName !== ALL_REPOSITORIES
+        ? suggestion.targetRepositoryFullName
+        : null;
+    return {
+      workspaceOverride: pinnedRepositoryFullName
+        ? {
+            repoForPayload: pinnedRepositoryFullName,
+            workspaceDisplayName: pinnedRepositoryFullName,
+          }
+        : {
+            repoForPayload: ALL_REPOSITORIES,
+            workspaceDisplayName: 'all repos',
+          },
+      unavailableEnvironmentId: null,
+    };
   }
   const workspaceOverride = await resolveTeamsWorkspace({
     type: 'environment',
@@ -170,45 +192,64 @@ async function resolveTeamsSuggestionWorkspace(
  * turn completion) so the suggestion claim can be finalized immediately, and
  * returns an abort handle so a lost finalize can cancel the orphaned turn.
  */
-function startTeamsFastSuggestion(params: {
+/**
+ * The Fast conversation identity for a Teams activity: personal chats share
+ * one session per user (a DM has no threads, even though a reaction activity
+ * replies to a card), channel posts get one per root message.
+ */
+function resolveTeamsFastConversation(params: {
   activity: TeamsActivity;
   metadata: TeamsActivityCommunicationMetadata;
   mappedUserId: string;
-  prompt: string;
   currentMessageId: string;
-}): Promise<FastAgentStartResult> {
+}): Extract<FastAgentConversation, { surface: 'teams' }> | null {
   const tenantId = params.metadata.teamsTenantId;
   if (!tenantId) {
-    return Promise.resolve({
-      accepted: false,
-      reason: 'Fast mode is unavailable in this Teams conversation.',
-    });
+    return null;
   }
   const fastChannelId = getTeamsBaseConversationId(
     params.metadata.communicationChannelId,
   );
-  // Same session identity as the default Fast message path: personal chats
-  // share one session per user (a DM has no threads, even though the reaction
-  // activity replies to the card), channel posts get one per root message.
   const personalChat = isTeamsPersonalConversation(params.activity);
   const threadId = personalChat
     ? undefined
     : params.metadata.communicationThreadId;
   const providerConversationId =
     threadId ?? (personalChat ? fastChannelId : params.currentMessageId);
+  return {
+    surface: 'teams',
+    workspaceId: tenantId,
+    conversationId: `${providerConversationId}:user:${params.mappedUserId}`,
+    replyTarget: {
+      channelId: fastChannelId,
+      ...(threadId ? { threadId } : {}),
+    },
+  };
+}
+
+const TEAMS_FAST_UNAVAILABLE_MESSAGE =
+  "Roomote couldn't start a conversation right now. Please try again in a moment.";
+
+function startTeamsFastSuggestion(params: {
+  activity: TeamsActivity;
+  metadata: TeamsActivityCommunicationMetadata;
+  mappedUserId: string;
+  prompt: string;
+  currentMessageId: string;
+  images?: string[];
+}): Promise<FastAgentStartResult> {
+  const conversation = resolveTeamsFastConversation(params);
+  if (!conversation) {
+    return Promise.resolve({
+      accepted: false,
+      reason: 'Fast mode is unavailable in this Teams conversation.',
+    });
+  }
   return startAcceptedFastAgentTurn({
     run: async ({ onAccepted, onRejected }) => {
       const session = await getOrCreateFastAgentSession({
         userId: params.mappedUserId,
-        conversation: {
-          surface: 'teams',
-          workspaceId: tenantId,
-          conversationId: `${providerConversationId}:user:${params.mappedUserId}`,
-          replyTarget: {
-            channelId: fastChannelId,
-            ...(threadId ? { threadId } : {}),
-          },
-        },
+        conversation,
       });
       return continueFastAgentSurfaceReply({
         sessionId: session.id,
@@ -216,6 +257,7 @@ function startTeamsFastSuggestion(params: {
         senderDisplayName: params.activity.from?.name?.trim() || null,
         question: params.prompt,
         currentMessageId: params.currentMessageId,
+        ...(params.images?.length ? { images: params.images } : {}),
         onAccepted,
         onRejected,
       });
@@ -1438,106 +1480,22 @@ async function fetchTeamsThreadGraphMessagesBestEffort(input: {
 }
 
 /**
- * Best-effort Graph-backed thread history for routing context. Returns the
- * earlier thread messages (oldest first) for channel-thread mentions, or null
- * when history is unavailable so routing falls back to the single triggering
- * message.
+ * Enqueue a Teams task into a workspace that is already decided and post the
+ * task-started acknowledgement. Used by pinned suggestion launches that run
+ * inside a Fast Session.
  */
-async function fetchTeamsThreadMessagesBestEffort(input: {
-  metadata: TeamsActivityCommunicationMetadata;
-  userId: string;
-}): Promise<Array<{ id: string; user: string; text: string }> | null> {
-  const graphMessages = await fetchTeamsThreadGraphMessagesBestEffort(input);
-
-  if (!graphMessages) {
-    return null;
-  }
-
-  const messages = graphMessages
-    .filter((message) => message.text.trim().length > 0)
-    .map((message) => ({
-      id: message.id,
-      user: message.author,
-      text: message.text,
-    }));
-
-  return messages.length > 0 ? messages : null;
-}
-
-async function startNewTeamsTask(input: {
-  activity: TeamsActivity;
+async function launchTeamsTask(input: {
   mappedUserId: string;
   queuedMessage: QueuedTeamsCommunicationMessage;
   metadata: TeamsActivityCommunicationMetadata;
-  workspaceOverride?: TeamsWorkspaceSelection;
+  workspace: TeamsWorkspaceSelection;
+  /** The Fast Session that owns this task; its transcript gets the kickoff. */
+  fastAgentParent?: FastAgentParent;
+  /** Runs inside the launch gate before the child becomes runnable. */
+  beforeEnqueue?: (taskRun: { id: number; taskId: string }) => Promise<void>;
 }) {
   const launchUserId = input.mappedUserId;
-  const threadHistory = await fetchTeamsThreadMessagesBestEffort({
-    metadata: input.metadata,
-    userId: launchUserId,
-  });
-  const triggeringMessage = {
-    user: input.queuedMessage.user,
-    text: input.queuedMessage.text,
-  };
-  // Dedupe by activity id: Graph channel message ids match Bot Framework
-  // activity ids, while text comparison fails because the queued text has the
-  // bot mention stripped and the Graph copy keeps it as `@Bot ...`.
-  const historyMessages = (threadHistory ?? []).map(({ user, text }) => ({
-    user,
-    text,
-  }));
-  const threadMessages =
-    threadHistory &&
-    threadHistory.some((message) => message.id === input.queuedMessage.ts)
-      ? historyMessages
-      : [...historyMessages, triggeringMessage];
-
-  const routingContext = await buildTeamsRoutingContext({
-    userId: launchUserId,
-    taskDescription: input.queuedMessage.text,
-    teamName: input.activity.channelData?.team?.name,
-    channelName:
-      input.activity.channelData?.channel?.name ??
-      input.activity.conversation.name,
-    threadMessages,
-    ...(input.queuedMessage.images?.length
-      ? { images: input.queuedMessage.images }
-      : {}),
-    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-  });
-  const routingDecision = await routeTask(routingContext);
-
-  if (
-    routingDecision.status === 'platform_answer' &&
-    !input.workspaceOverride
-  ) {
-    await postTeamsMessageBestEffort({
-      conversationId: input.metadata.communicationChannelId,
-      threadId: input.metadata.communicationThreadId,
-      serviceUrl: input.metadata.communicationServiceUrl,
-      text: routingDecision.result.answer,
-    });
-
-    return {
-      status: 'replied_inline' as const,
-      routingDecision,
-    };
-  }
-
-  const workspace =
-    input.workspaceOverride ??
-    (routingDecision.status === 'routed'
-      ? await resolveTeamsWorkspace(routingDecision.result.workspace)
-      : {
-          repoForPayload: ALL_REPOSITORIES,
-          workspaceDisplayName: 'all repos',
-        });
-
-  if (!workspace) {
-    throw new Error('Teams task routing selected an unavailable workspace.');
-  }
-
+  const workspace = input.workspace;
   const task: Extract<TaskSpec, { type: typeof TaskPayloadKind.StandardTask }> =
     {
       type: TaskPayloadKind.StandardTask,
@@ -1551,6 +1509,9 @@ async function startNewTeamsTask(input: {
           ? { images: input.queuedMessage.images }
           : {}),
         ...input.metadata,
+        ...(input.fastAgentParent
+          ? buildFastAgentChildTaskMetadata(input.fastAgentParent)
+          : {}),
       },
     };
   const launchResult = await enqueueTask(
@@ -1563,6 +1524,7 @@ async function startNewTeamsTask(input: {
     },
     {
       launchClass: 'human',
+      ...(input.beforeEnqueue ? { beforeEnqueue: input.beforeEnqueue } : {}),
     },
   );
 
@@ -1584,15 +1546,71 @@ async function startNewTeamsTask(input: {
   return {
     status: 'started' as const,
     launchResult,
-    routingDecision,
     workspace,
+  };
+}
+
+/**
+ * A pinned suggestion card already names its workspace, so the owning Fast
+ * Session delegates the task straight away, without a model turn.
+ */
+async function launchPinnedTeamsSuggestionTask(input: {
+  activity: TeamsActivity;
+  metadata: TeamsActivityCommunicationMetadata;
+  mappedUserId: string;
+  suggestionId: string;
+  /** The task that produced the suggestion; its Session hosts the launch. */
+  sourceTaskId?: string | null;
+  queuedMessage: QueuedTeamsCommunicationMessage;
+  workspace: TeamsWorkspaceSelection;
+}) {
+  const conversation = resolveTeamsFastConversation({
+    activity: input.activity,
+    metadata: input.metadata,
+    mappedUserId: input.mappedUserId,
+    currentMessageId: input.queuedMessage.ts,
+  });
+  if (!conversation) {
+    throw new Error('Fast mode is unavailable in this Teams conversation.');
+  }
+  const originSessionId = await resolveSuggestionOriginSessionId(
+    input.sourceTaskId,
+  );
+  let launchResult: { id: number; taskId: string } | null = null;
+  const pinned = await launchPinnedFastSessionTask({
+    userId: input.mappedUserId,
+    senderDisplayName: input.activity.from?.name?.trim() || null,
+    conversation,
+    ...(originSessionId ? { originSessionId } : {}),
+    launchId: `teams-suggestion:${input.suggestionId}:${input.queuedMessage.ts}`,
+    prompt: input.queuedMessage.text,
+    surface: 'teams',
+    kickoffMessage: `Started a task in ${input.workspace.workspaceDisplayName}.`,
+    launch: async ({ parent, postKickoff }) => {
+      const launched = await launchTeamsTask({
+        mappedUserId: input.mappedUserId,
+        queuedMessage: input.queuedMessage,
+        metadata: input.metadata,
+        workspace: input.workspace,
+        fastAgentParent: parent,
+        beforeEnqueue: async () => {
+          await postKickoff();
+        },
+      });
+      launchResult = launched.launchResult;
+      return { success: true, taskId: launched.launchResult.taskId };
+    },
+  });
+  return {
+    status: 'started' as const,
+    launchResult: launchResult ?? { id: pinned.runId, taskId: pinned.taskId },
   };
 }
 
 type ResumePendingTeamsAuthResult =
   | {
       success: true;
-      status: 'queued' | 'resumed' | 'started' | 'replied_inline';
+      status: 'queued' | 'resumed' | 'fast' | 'replied_inline';
       runId?: number;
       taskId?: string;
       taskUrl?: string;
@@ -1602,7 +1620,8 @@ type ResumePendingTeamsAuthResult =
       error:
         | 'invalid_or_expired_auth_token'
         | 'account_link_required'
-        | 'unsupported_activity';
+        | 'unsupported_activity'
+        | 'fast_session_not_accepted';
     };
 
 async function resumePendingTeamsAuthToken(
@@ -1756,49 +1775,25 @@ async function resumePendingTeamsAuthToken(
     }
   }
 
-  let launch: Awaited<ReturnType<typeof startNewTeamsTask>>;
-  try {
-    launch = await startNewTeamsTask({
-      activity: claimedPending.activity,
-      mappedUserId,
-      queuedMessage: queuedMessageWithImages,
-      metadata,
-    });
-  } catch (error) {
-    if (isDeploymentReadOnlyError(error)) {
-      await postTeamsMessageBestEffort({
-        conversationId: metadata.communicationChannelId,
-        threadId: metadata.communicationThreadId,
-        serviceUrl: metadata.communicationServiceUrl,
-        text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
-      });
+  const fastStart = await startTeamsFastSuggestion({
+    activity: claimedPending.activity,
+    metadata,
+    mappedUserId,
+    prompt: queuedMessageWithImages.text.trim(),
+    currentMessageId: queuedMessageWithImages.ts,
+    ...(queuedMessageWithImages.images?.length
+      ? { images: queuedMessageWithImages.images }
+      : {}),
+  });
 
-      return {
-        success: true,
-        status: 'replied_inline',
-      };
-    }
-
-    throw error;
+  if (!fastStart.accepted) {
+    apiLogger.warn(
+      `[teams] Pending Teams auth request was not accepted by Fast: ${fastStart.reason}`,
+    );
+    return { success: false, error: 'fast_session_not_accepted' };
   }
 
-  if (launch.status === 'replied_inline') {
-    return {
-      success: true,
-      status: 'replied_inline',
-    };
-  }
-
-  return {
-    success: true,
-    status: 'started',
-    runId: launch.launchResult!.id,
-    taskId: launch.launchResult!.taskId,
-    taskUrl: getTaskUrl({
-      taskId: launch.launchResult!.taskId,
-      utm: { source: 'teams', campaign: 'teams.thread_start' },
-    }),
-  };
+  return { success: true, status: 'fast' };
 }
 
 export const teams = new Hono();
@@ -1834,7 +1829,8 @@ teams.post('/auth/resume', async (c) => {
   }
 
   const status =
-    result.error === 'account_link_required'
+    result.error === 'account_link_required' ||
+    result.error === 'fast_session_not_accepted'
       ? 409
       : result.error === 'invalid_or_expired_auth_token'
         ? 404
@@ -2142,15 +2138,17 @@ teams.post('/', async (c) => {
     const suggestionLaunch = await launchClaimedTeamsSuggestion({
       suggestion: claimedSuggestionReaction,
       launchTask: (promptText) =>
-        startNewTeamsTask({
+        launchPinnedTeamsSuggestionTask({
           activity,
+          metadata,
           mappedUserId: mappedUserId!,
+          suggestionId: claimedSuggestionReaction.id,
+          sourceTaskId: claimedSuggestionReaction.sourceTaskId,
           queuedMessage: {
             ...queuedMessage!,
             text: promptText,
           } as QueuedTeamsCommunicationMessage,
-          metadata,
-          ...(workspaceOverride ? { workspaceOverride } : {}),
+          workspace: workspaceOverride!,
         }),
       launchFast: (promptText) =>
         startTeamsFastSuggestion({
@@ -2395,12 +2393,14 @@ teams.post('/', async (c) => {
         const suggestionLaunch = await launchClaimedTeamsSuggestion({
           suggestion: resolution.suggestion,
           launchTask: (promptText) =>
-            startNewTeamsTask({
+            launchPinnedTeamsSuggestionTask({
               activity,
-              mappedUserId,
-              queuedMessage: { ...queuedMessage!, text: promptText },
               metadata,
-              ...(workspaceOverride ? { workspaceOverride } : {}),
+              mappedUserId,
+              suggestionId: resolution.suggestion.id,
+              sourceTaskId: resolution.suggestion.sourceTaskId,
+              queuedMessage: { ...queuedMessage!, text: promptText },
+              workspace: workspaceOverride!,
             }),
           launchFast: (promptText) =>
             startTeamsFastSuggestion({
@@ -2510,102 +2510,70 @@ teams.post('/', async (c) => {
       }
     }
 
-    if (tenantId) {
-      const providerConversationId =
-        metadata.communicationThreadId ??
-        (activity.conversation.conversationType === 'personal'
-          ? fastChannelId
-          : queuedMessage.ts);
-      const conversation = {
-        surface: 'teams' as const,
-        workspaceId: tenantId,
-        conversationId: `${providerConversationId}:user:${mappedUserId}`,
-        replyTarget: {
-          channelId: fastChannelId,
-          ...(metadata.communicationThreadId
-            ? { threadId: metadata.communicationThreadId }
-            : {}),
-        },
-      };
+    const conversation = resolveTeamsFastConversation({
+      activity,
+      metadata,
+      mappedUserId,
+      currentMessageId: queuedMessage.ts,
+    });
+    if (!conversation) {
+      apiLogger.warn(
+        `[teams] Activity ${queuedMessage.ts} carries no tenant id, so no Fast conversation can own it`,
+      );
+      await postTeamsMessageBestEffort({
+        conversationId: metadata.communicationChannelId,
+        threadId: metadata.communicationThreadId,
+        serviceUrl: metadata.communicationServiceUrl,
+        text: TEAMS_FAST_UNAVAILABLE_MESSAGE,
+      });
+      return c.json({ ok: true, queued: false, fastUnavailable: true });
+    }
 
-      try {
-        const session = await getOrCreateFastAgentSession({
-          userId: mappedUserId,
-          conversation,
-        });
-        void continueFastAgentSurfaceReply({
-          sessionId: session.id,
-          userId: mappedUserId,
-          senderDisplayName: activity.from?.name?.trim() || null,
-          question: queuedMessage.text.trim(),
-          currentMessageId: queuedMessage.ts,
-          ...(queuedMessage.images ? { images: queuedMessage.images } : {}),
-        })
-          .then((continued) => {
-            if (!continued) {
-              apiLogger.warn(
-                `[teams] Default Fast session ${session.id} could not resolve an active delivery route`,
-              );
-            }
-          })
-          .catch((error) => {
-            apiLogger.error(
-              `[teams] Default Fast response failed: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            );
-          });
+    let session: Awaited<ReturnType<typeof getOrCreateFastAgentSession>>;
+    try {
+      session = await getOrCreateFastAgentSession({
+        userId: mappedUserId,
+        conversation,
+      });
+    } catch (error) {
+      apiLogger.error(
+        `[teams] Failed to initialize the Fast session for conversation ${metadata.communicationChannelId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      await postTeamsMessageBestEffort({
+        conversationId: metadata.communicationChannelId,
+        threadId: metadata.communicationThreadId,
+        serviceUrl: metadata.communicationServiceUrl,
+        text: TEAMS_FAST_UNAVAILABLE_MESSAGE,
+      });
+      return c.json({ ok: true, queued: false, fastUnavailable: true });
+    }
 
-        return c.json({ ok: true, fastAnswered: true, fastDefaulted: true });
-      } catch (error) {
-        apiLogger.warn(
-          `[teams] Failed to initialize the default Fast session; falling back to task routing: ${
+    void continueFastAgentSurfaceReply({
+      sessionId: session.id,
+      userId: mappedUserId,
+      senderDisplayName: activity.from?.name?.trim() || null,
+      question: queuedMessage.text.trim(),
+      currentMessageId: queuedMessage.ts,
+      ...(queuedMessage.images ? { images: queuedMessage.images } : {}),
+    })
+      .then((continued) => {
+        if (!continued) {
+          apiLogger.warn(
+            `[teams] Fast session ${session.id} could not resolve an active delivery route`,
+          );
+        }
+      })
+      .catch((error) => {
+        apiLogger.error(
+          `[teams] Fast response failed: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
-      }
-    }
-
-    let launch: Awaited<ReturnType<typeof startNewTeamsTask>>;
-    try {
-      launch = await startNewTeamsTask({
-        activity,
-        mappedUserId,
-        queuedMessage,
-        metadata,
       });
-    } catch (error) {
-      if (isDeploymentReadOnlyError(error)) {
-        await postTeamsMessageBestEffort({
-          conversationId: metadata.communicationChannelId,
-          threadId: metadata.communicationThreadId,
-          serviceUrl: metadata.communicationServiceUrl,
-          text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
-        });
 
-        return c.json({
-          ok: true,
-          queued: false,
-          repliedInline: true,
-        });
-      }
-
-      throw error;
-    }
-
-    if (launch.status === 'replied_inline') {
-      return c.json({
-        ok: true,
-        queued: false,
-        repliedInline: true,
-      });
-    }
-
-    return c.json({
-      ok: true,
-      started: true,
-      runId: launch.launchResult!.id,
-    });
+    return c.json({ ok: true, fastAnswered: true, fastDefaulted: true });
   }
 
   queuedMessage = await attachTeamsActivityMediaToQueuedMessage(

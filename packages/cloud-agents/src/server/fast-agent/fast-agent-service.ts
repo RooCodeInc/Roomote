@@ -24,7 +24,6 @@ import {
   truncateAcpOutputText,
   type ReasoningEffort,
   type RunStatus,
-  type TaskMessageContentBlock,
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
   matchIntegrationTools,
   type IntegrationToolCandidate,
@@ -64,12 +63,16 @@ import {
   type SlackThreadPromptMessage,
 } from '../../utils';
 import { resolveRoomoteReleaseVersion } from '../../release-version';
-import { getAvailableEnvironments, type RoutableEnvironment } from '../router';
+import {
+  getAvailableEnvironments,
+  type RoutableEnvironment,
+} from '../available-environments';
 import {
   FAST_AGENT_MODEL_ROLE,
   FAST_RESPONDING_LEASE_MS,
   FAST_RESPONDING_LEASE_RENEW_MS,
 } from './fast-agent-constants';
+import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import {
   appendFastAgentVisibleMessages,
@@ -347,22 +350,6 @@ function buildFastAgentTurnId({
   return `fallback:${digest}`;
 }
 
-function buildFastAgentUserContentBlocks(
-  text: string,
-  images: string[],
-): TaskMessageContentBlock[] {
-  const blocks: TaskMessageContentBlock[] = [{ type: 'text', text }];
-
-  for (const image of images) {
-    const match = /^data:(image\/[^;,]+);base64,(.+)$/i.exec(image.trim());
-    if (match?.[1] && match[2]) {
-      blocks.push({ type: 'image', mimeType: match[1], data: match[2] });
-    }
-  }
-
-  return blocks;
-}
-
 function serializeFastAgentToolOutput(result: unknown): {
   output: string;
   truncated: boolean;
@@ -478,14 +465,27 @@ const requestUserInputQuestionSchema = z.object({
   multiple: z.boolean().optional(),
 });
 const fastAgentInputPresetSchema = z.enum(['setup_starter_tasks']);
-const requestUserInputArgsSchema = z.union([
-  z
-    .object({
-      questions: z.array(requestUserInputQuestionSchema).min(1).max(4),
-    })
-    .strict(),
-  z.object({ preset: fastAgentInputPresetSchema }).strict(),
-]);
+// Some models fill every optional tool parameter, so a trusted preset may
+// arrive alongside placeholder questions. The preset wins: its questions are
+// server-supplied and model-provided ones are discarded rather than rejected.
+const requestUserInputArgsSchema = z
+  .object({
+    questions: z.array(requestUserInputQuestionSchema).min(1).max(4).optional(),
+    preset: fastAgentInputPresetSchema.optional(),
+  })
+  .transform(
+    (
+      args,
+    ):
+      | { preset: FastAgentInputPreset }
+      | { questions: z.output<typeof requestUserInputQuestionSchema>[] }
+      | null =>
+      args.preset
+        ? { preset: args.preset }
+        : args.questions
+          ? { questions: args.questions }
+          : null,
+  );
 
 function normalizeThreadText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -986,12 +986,27 @@ function buildSupplementalThreadContext({
 function wrapFastAgentMessage(
   text: string,
   sender?: { displayName?: string; githubLogin?: string },
+  agentContext?: string,
 ): string {
-  return `<current_message>\n${escapeFastAgentEnvelopeJson({
+  // Surface context (a Linear issue, a pull request, auto-respond channel
+  // instructions) travels beside the message on every surface, the way the
+  // Slack envelope carries it.
+  const normalizedAgentContext = agentContext?.trim();
+  const contextBlock = normalizedAgentContext
+    ? `<current_message_context>\n${escapeFastAgentEnvelopeText(normalizedAgentContext)}\n</current_message_context>\n\n`
+    : '';
+  return `${contextBlock}<current_message>\n${escapeFastAgentEnvelopeJson({
     ...(sender?.displayName ? { sender_name: sender.displayName } : {}),
     ...(sender?.githubLogin ? { sender_github: sender.githubLogin } : {}),
     text,
   })}\n</current_message>`;
+}
+
+function escapeFastAgentEnvelopeText(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
 
 function escapeFastAgentEnvelopeJson(value: Record<string, string>): string {
@@ -1101,7 +1116,11 @@ function buildFastAgentMessages({
           })
         : normalizedQuestion
       : turnSource === 'human'
-        ? wrapFastAgentMessage(normalizedQuestion, currentMessageSender)
+        ? wrapFastAgentMessage(
+            normalizedQuestion,
+            currentMessageSender,
+            currentMessageAgentContext,
+          )
         : normalizedQuestion;
   const currentUserMessageText = [
     explicitSkillInvocationContext,
@@ -1999,7 +2018,8 @@ export async function answerFastAgentQuestion({
     const toolCallId = `${turnId}:tool:${ordinal}`;
     const isMcp = Boolean(mcpServerName && mcpToolName);
     const visibleInTranscript =
-      title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply;
+      title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply &&
+      title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction;
     const canonicalEvent = allocateCanonicalEvent(`tool:${ordinal}`);
     await persistCanonicalMessage(
       {
@@ -2598,9 +2618,8 @@ export async function answerFastAgentQuestion({
         };
       }
       completedChatReactionSignatures.add(signature);
-      turnVisibleMessages.push(
-        buildAssistantTextMessage(`[Reacted with :${name}:]`),
-      );
+      const reactionText = `:${name}:`;
+      turnVisibleMessages.push(buildAssistantTextMessage(reactionText));
       await persistCanonicalMessage(
         {
           ...allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
@@ -2608,7 +2627,7 @@ export async function answerFastAgentQuestion({
           ts: Date.now(),
           eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
           role: 'assistant',
-          contentBlocks: [{ type: 'text', text: `[Reacted with :${name}:]` }],
+          contentBlocks: [{ type: 'text', text: reactionText }],
           metadata: { visibleInTranscript: true },
           payload: { reaction: name, purpose },
           source: conversation.surface,
@@ -3491,6 +3510,12 @@ export async function answerFastAgentQuestion({
               };
             }
             const args = requestUserInputArgsSchema.parse(call.args);
+            if (!args) {
+              return {
+                success: false,
+                error: 'Pass either questions to ask or a trusted preset name.',
+              };
+            }
             const preset = 'preset' in args ? args.preset : undefined;
             if (preset && (!setupSession || !adapter.resolveUserInputPreset)) {
               return {

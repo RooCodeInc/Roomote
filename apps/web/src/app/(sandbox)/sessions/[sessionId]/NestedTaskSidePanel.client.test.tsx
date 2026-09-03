@@ -148,14 +148,29 @@ vi.mock('../../task/[taskId]/sidebar-panels/SidePanelHeader', () => ({
   SidePanelHeader: ({
     title,
     actions,
+    titleAdornment,
   }: {
-    title: string;
+    title?: string;
     actions: ReactNode;
+    titleAdornment?: ReactNode;
   }) => (
     <header>
       {title}
+      {titleAdornment}
       {actions}
     </header>
+  ),
+}));
+
+vi.mock('@/components/sandbox', () => ({
+  WorkspaceBadge: ({
+    environmentId,
+    repo,
+  }: {
+    environmentId?: string;
+    repo?: string;
+  }) => (
+    <span>{environmentId ? `Workspace ${environmentId}` : `Repo ${repo}`}</span>
   ),
 }));
 
@@ -167,6 +182,7 @@ const baseSession = {
   task: { title: 'Fix checkout' },
   taskRun: {
     id: 42,
+    payload: { environmentId: 'env-1' },
     harness: 'opencode-server',
     status: RunStatus.Running,
     taskPhase: 'running',
@@ -196,7 +212,9 @@ describe('NestedTaskSidePanel', () => {
   it('renders the focused live transcript and full-task navigation without task chrome', () => {
     render(<NestedTaskSidePanel taskId="child-1" onClose={vi.fn()} />);
 
+    expect(screen.getByText('Task:')).toHaveClass('font-semibold');
     expect(screen.getByText('Fix checkout')).toBeInTheDocument();
+    expect(screen.getByText('Workspace env-1')).toBeInTheDocument();
     expect(screen.getByTestId('live-provider')).toBeInTheDocument();
     expect(screen.getByText('Child transcript')).toBeInTheDocument();
     expect(screen.getByTestId('pending-input-provider')).toHaveAttribute(
@@ -213,7 +231,7 @@ describe('NestedTaskSidePanel', () => {
     expect(screen.getByText('Task connection status')).toBeInTheDocument();
     expect(screen.getByText('Queued task messages')).toBeInTheDocument();
     expect(screen.getByText('Pending task requests')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Go to task/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Go to task' })).toHaveAttribute(
       'href',
       '/task/child-1',
     );
@@ -222,6 +240,32 @@ describe('NestedTaskSidePanel', () => {
       refetchInterval: 2_000,
     });
     expect(useSleepInvalidationMock).toHaveBeenCalledWith(baseSession.taskRun);
+  });
+
+  it('switches among tasks from the title dropdown', async () => {
+    const onSelectTask = vi.fn();
+    render(
+      <NestedTaskSidePanel
+        taskId="child-1"
+        tasks={[
+          { taskId: 'child-1', title: 'Fix checkout' },
+          { taskId: 'child-2', title: 'Review checkout' },
+        ]}
+        onSelectTask={onSelectTask}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole('button', {
+      name: /Task:.*Fix checkout/,
+    });
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    expect(
+      await screen.findByText('Tasks in this session'),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Review checkout'));
+
+    expect(onSelectTask).toHaveBeenCalledWith('child-2');
   });
 
   it('keeps task file and command controls available in the nested composer', () => {

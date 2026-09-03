@@ -51,6 +51,13 @@ vi.mock('@/trpc/client', () => ({
     },
   }),
   useTRPC: () => ({
+    slack: {
+      resolveUsers: {
+        queryOptions: (input: unknown) => ({
+          queryKey: ['slack.resolveUsers', input],
+        }),
+      },
+    },
     fastSessions: {
       composerSuggestion: {
         queryOptions: (input: unknown, options?: Record<string, unknown>) => ({
@@ -70,7 +77,7 @@ vi.mock('@tanstack/react-query', async (importOriginal) => ({
   useQuery: () => ({ data: composerSuggestionState.data }),
 }));
 
-vi.mock('./SessionModelSwitcher', () => ({
+vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
   SessionModelSwitcher: ({
     model,
     onModelChange,

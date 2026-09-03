@@ -1,17 +1,15 @@
 const {
   consumeMcpOauthReplayMock,
-  createLinearAgentRunMock,
   dbUpdateSetMock,
   dbUpdateMock,
   emitThoughtMock,
   getMcpOauthReplayMock,
   linearViewerMock,
   payload,
-  resolveLinearTaskDestinationMock,
+  startLinearFastSessionTurnMock,
   updateSessionExternalUrlsMock,
 } = vi.hoisted(() => ({
   consumeMcpOauthReplayMock: vi.fn(),
-  createLinearAgentRunMock: vi.fn(),
   dbUpdateSetMock: vi.fn(),
   dbUpdateMock: vi.fn(),
   emitThoughtMock: vi.fn(),
@@ -37,7 +35,7 @@ const {
       updatedAt: '2026-07-29T00:00:00.000Z',
     },
   },
-  resolveLinearTaskDestinationMock: vi.fn(),
+  startLinearFastSessionTurnMock: vi.fn(),
   updateSessionExternalUrlsMock: vi.fn(),
 }));
 
@@ -47,13 +45,6 @@ vi.mock('@linear/sdk', () => ({
       return linearViewerMock();
     }
   },
-}));
-
-vi.mock('@roomote/communication/chat-messages', () => ({
-  buildTaskStartingText: vi.fn(
-    ({ workspaceDisplayName }: { workspaceDisplayName: string }) =>
-      `Getting started on your task in ${workspaceDisplayName}`,
-  ),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -79,10 +70,10 @@ vi.mock('@roomote/sdk/server', () => ({
   getValidAccessToken: vi.fn().mockResolvedValue('deployment-token'),
   LINEAR_ORG_CONNECTION_ROLE: 'deployment',
   LINEAR_USER_CONNECTION_ROLE: 'user',
+  startLinearFastSessionTurn: startLinearFastSessionTurnMock,
 }));
 
 vi.mock('@roomote/linear', () => ({
-  createLinearAgentRun: createLinearAgentRunMock,
   createLinearClient: vi.fn().mockReturnValue({
     emitError: vi.fn(),
     emitResponse: vi.fn(),
@@ -96,19 +87,6 @@ vi.mock('@roomote/linear', () => ({
     success: true,
     data: payload,
   }),
-  resolveLinearTaskDestination: resolveLinearTaskDestinationMock,
-}));
-
-vi.mock('@/lib/server/env', () => ({
-  Env: {
-    TRPC_URL: 'https://api.roomote.example',
-    R_APP_URL: 'https://app.roomote.example',
-    R_PUBLIC_URL: 'https://public.roomote.example',
-  },
-}));
-
-vi.mock('@/lib/server/get-public-app-url', () => ({
-  getPublicAppUrl: vi.fn().mockReturnValue('https://public.roomote.example'),
 }));
 
 import { hydrateLinearMcpConnectionAfterOauth } from './mcp-linear';
@@ -201,7 +179,7 @@ describe('hydrateLinearMcpConnectionAfterOauth', () => {
     );
   });
 
-  it('routes the first replayed session before starting its task', async () => {
+  it('enters the replayed session into Fast under the linked user', async () => {
     const replay = {
       mcpId: 'linear',
       sessionId: 'session-1',
@@ -213,22 +191,11 @@ describe('hydrateLinearMcpConnectionAfterOauth', () => {
     };
     getMcpOauthReplayMock.mockResolvedValue(replay);
     consumeMcpOauthReplayMock.mockResolvedValue(replay);
-    resolveLinearTaskDestinationMock.mockResolvedValue({
-      status: 'routed',
-      destination: {
-        workspaceSelection: { environmentId: 'env-api' },
-        workspaceDisplayName: 'API',
-        workspaceType: 'environment',
-        kickoffMessage: 'I will inspect the retry path.',
-      },
-    });
-    createLinearAgentRunMock.mockResolvedValue({
-      status: 'ok',
-      runId: 42,
-      taskId: 'task-42',
+    startLinearFastSessionTurnMock.mockResolvedValue({
+      status: 'queued',
+      fastConversationId: 'fast-1',
     });
     emitThoughtMock.mockResolvedValue({ success: true });
-    updateSessionExternalUrlsMock.mockResolvedValue({ success: true });
 
     await hydrateLinearMcpConnectionAfterOauth({
       connection: {
@@ -241,37 +208,16 @@ describe('hydrateLinearMcpConnectionAfterOauth', () => {
       replayToken: 'replay-token',
     });
 
-    expect(resolveLinearTaskDestinationMock).toHaveBeenCalledWith({
-      payload,
-      agentSession: payload.agentSession,
-      userId: 'roomote-user-1',
-      linearClient: expect.any(Object),
-      apiBaseUrl: 'https://api.roomote.example',
-    });
-    expect(createLinearAgentRunMock).toHaveBeenCalledWith({
-      agentSession: payload.agentSession,
-      payload,
-      userId: 'roomote-user-1',
-      repo: undefined,
-      environmentId: 'env-api',
-    });
-    expect(emitThoughtMock).toHaveBeenNthCalledWith(
-      1,
+    expect(emitThoughtMock).toHaveBeenCalledWith(
       'session-1',
       'Getting started...',
       true,
     );
-    expect(emitThoughtMock).toHaveBeenNthCalledWith(
-      2,
-      'session-1',
-      'Getting started on your task in API',
-      true,
-    );
-    expect(updateSessionExternalUrlsMock).toHaveBeenCalledWith('session-1', [
-      {
-        label: 'Open task',
-        url: 'https://public.roomote.example/task/task-42',
-      },
-    ]);
+    expect(startLinearFastSessionTurnMock).toHaveBeenCalledWith({
+      payload,
+      agentSession: payload.agentSession,
+      userId: 'roomote-user-1',
+      linearClient: expect.any(Object),
+    });
   });
 });

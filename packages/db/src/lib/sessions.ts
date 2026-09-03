@@ -441,6 +441,30 @@ export async function ensureSessionForTask(
   return touchSessionActivity(tx, session.id, task.activityAt);
 }
 
+/**
+ * Binds a Fast conversation to a Session that has none yet, so a launch can
+ * land in the Session that produced the request instead of opening a new
+ * one. Returns null when the Session is missing or already has a
+ * conversation; the caller then keeps the conversation's own Session.
+ */
+export async function attachFastConversationToSession(
+  tx: DatabaseOrTransaction,
+  input: { sessionId: string; fastConversationId: string },
+): Promise<Session | null> {
+  const [updated] = await tx
+    .update(sessions)
+    .set({ fastConversationId: input.fastConversationId })
+    .where(
+      and(
+        eq(sessions.id, input.sessionId),
+        isNull(sessions.fastConversationId),
+      ),
+    )
+    .returning();
+
+  return updated ?? null;
+}
+
 export async function getSessionForTask(
   tx: DatabaseOrTransaction,
   taskId: string,

@@ -79,6 +79,8 @@ export type ClaimedTeamsSuggestion = {
   targetEnvironmentId?: string | null;
   usesRouterLaunch?: boolean;
   launchTarget?: string;
+  /** The scan or onboarding task that produced the suggestion. */
+  sourceTaskId?: string | null;
   launchClaimedAt: Date;
 };
 
@@ -206,6 +208,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       investigationContext: claimed.investigationContext,
       targetRepositoryFullName: claimed.targetRepositoryFullName,
       targetEnvironmentId: claimed.targetEnvironmentId,
+      sourceTaskId: claimed.sourceTaskId,
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };
@@ -252,10 +255,11 @@ function buildTeamsSuggestionTaskPromptText(
   ].join('\n');
 }
 
-/** Minimal structural view of startNewTeamsTask's launch outcomes. */
-type TeamsSuggestionLaunchOutcome =
-  | { status: 'started'; launchResult: { id: number; taskId: string } }
-  | { status: 'replied_inline' };
+/** Minimal structural view of a pinned suggestion launch outcome. */
+type TeamsSuggestionLaunchOutcome = {
+  status: 'started';
+  launchResult: { id: number; taskId: string };
+};
 
 type LaunchClaimedTeamsSuggestionResult =
   | { result: 'started'; runId: number | null }
@@ -282,7 +286,7 @@ type LaunchClaimedTeamsSuggestionResult =
  */
 export async function launchClaimedTeamsSuggestion(params: {
   suggestion: ClaimedTeamsSuggestion;
-  /** Launches the task from the suggestion prompt (startNewTeamsTask). */
+  /** Launches the task from the suggestion prompt inside the owning Session. */
   launchTask: (
     promptText: string,
     target: SuggestedTaskLaunchTarget,
@@ -298,17 +302,16 @@ export async function launchClaimedTeamsSuggestion(params: {
 }): Promise<LaunchClaimedTeamsSuggestionResult> {
   const { suggestion } = params;
   const target = resolveSuggestedTaskLaunchTarget(suggestion);
+  // Cards without a pinned workspace let Fast decide; pinned cards delegate
+  // through the owning Session without a model turn.
+  const usesFastTurn = target.kind === 'fast' || target.kind === 'router';
   const launchResult = await launchClaimedSuggestedTask({
     suggestion,
     policy: {
-      fastEligible: target.kind === 'fast',
-      userDefaultEnabled: target.kind === 'fast',
+      fastEligible: usesFastTurn,
+      userDefaultEnabled: usesFastTurn,
       fastAvailable: Boolean(params.launchFast),
-      ...(target.kind === 'fast'
-        ? { requiredMode: 'fast' as const }
-        : target.kind === 'environment' || target.kind === 'all_repositories'
-          ? { requiredMode: 'coding' as const }
-          : {}),
+      requiredMode: usesFastTurn ? ('fast' as const) : ('coding' as const),
     },
     launch: async (mode) => {
       const promptText = buildTeamsSuggestionTaskPromptText(suggestion);
@@ -327,13 +330,11 @@ export async function launchClaimedTeamsSuggestion(params: {
           : fastStart;
       }
       const launch = await params.launchTask(promptText, target);
-      return launch.status === 'started'
-        ? {
-            accepted: true,
-            runId: launch.launchResult.id,
-            taskId: launch.launchResult.taskId,
-          }
-        : { accepted: false };
+      return {
+        accepted: true,
+        runId: launch.launchResult.id,
+        taskId: launch.launchResult.taskId,
+      };
     },
   });
 

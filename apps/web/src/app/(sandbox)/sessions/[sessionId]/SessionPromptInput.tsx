@@ -28,10 +28,10 @@ import {
   usePromptInputAttachments,
 } from '@/components/ai-elements';
 import { BasicTooltip } from '@/components/system';
+import { SessionModelSwitcher } from '@/components/tasks/SessionModelSwitcher';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/AttachmentsDisplay';
-import { SessionModelSwitcher } from './SessionModelSwitcher';
 
 export type SessionPromptSubmission = PromptInputMessage & {
   model: string | null;

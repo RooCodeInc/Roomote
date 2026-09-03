@@ -5,7 +5,7 @@ shape (`/opt/roomote`, `compose/docker-compose.prod.yml`, Caddy,
 `roomote-compose.service`):
 
 - **Self-serve one-command install** — a user runs [`install.sh`](install.sh)
-  on their own server via `curl -fsSL https://get.roomote.dev | bash` and
+  on their own server via `curl -fsSL https://get.roomote.dev | sudo bash` and
   finishes setup in the browser. The [`host/roomote`](host/roomote) CLI is
   installed alongside it for day-2 operations (`status`, `logs`, `upgrade`,
   `backup`, `restore`). See the One-Command Install section in

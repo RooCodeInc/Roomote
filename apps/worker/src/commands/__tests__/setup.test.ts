@@ -126,6 +126,7 @@ const logger = {
 
 const mockWorkerEnv = {
   buildUserFacingEnv: vi.fn(() => ({ BASE: 'base' })),
+  sandboxOpenRouterApiKey: 'sandbox-openrouter-key',
   getRuntimeEnv: mockGetRuntimeEnv,
   refreshSystemEnv: vi.fn(),
   setUserEnv: mockSetUserEnv,
@@ -332,7 +333,11 @@ describe('setup mode behavior', () => {
 
     expect(mockSetupOrganizationEnvironment).toHaveBeenCalledWith(logger, {
       environment: environmentWorkspaceOptions.workspace,
-      envVars: { BASE: 'base', FOO: 'bar' },
+      envVars: {
+        BASE: 'base',
+        FOO: 'bar',
+        OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+      },
       userEnvVars: undefined,
       preparedWorkspace: {
         workspacePath: '/tmp/workspace',
@@ -365,11 +370,19 @@ describe('setup mode behavior', () => {
       ...environmentWorkspaceOptions,
       cleanupLegacyPaths: true,
       taskRunType: TaskPayloadKind.SnapshotEnvironment,
-      envVars: { BASE: 'base', FOO: 'bar' },
+      envVars: {
+        BASE: 'base',
+        FOO: 'bar',
+        OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+      },
     });
     expect(mockSetupOrganizationEnvironment).toHaveBeenCalledWith(logger, {
       environment: environmentWorkspaceOptions.workspace,
-      envVars: { BASE: 'base', FOO: 'bar' },
+      envVars: {
+        BASE: 'base',
+        FOO: 'bar',
+        OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+      },
       userEnvVars: undefined,
       preparedWorkspace: {
         workspacePath: '/tmp/workspace',

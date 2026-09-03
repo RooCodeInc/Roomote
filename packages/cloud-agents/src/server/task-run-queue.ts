@@ -95,7 +95,7 @@ import {
   isFallbackTaskTitle,
   LLM_TITLE_LOCKED_CHECKPOINT,
 } from './llm-task-title';
-import { resolveRequestedWorkKindDecision } from './router/requested-work-kind';
+import { resolveRequestedWorkKindDecision } from './requested-work-kind';
 
 enum TaskRunQueueKeys {
   // Keep the v2 layout during the debounce rollout. Old and new producers and

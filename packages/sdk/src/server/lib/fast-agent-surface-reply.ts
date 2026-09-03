@@ -6,11 +6,13 @@ import {
   fastAgentConversationRepository,
   getActiveFastAgentTasks,
   resolveApiBaseUrl,
+  type FastAgentActiveTask,
   type FastAgentConversation,
   type FastAgentReactionExternalInput,
   type FastAgentTurnAdapter,
 } from '@roomote/cloud-agents/server';
 import { and, db, eq, slackInstallations } from '@roomote/db/server';
+import { isFastAgentSourceControlConversation } from '@roomote/types';
 import {
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
@@ -51,6 +53,15 @@ import {
   wakeFastAgentParentEventNow,
 } from './fast-agent-parent-event-queue';
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
+import {
+  buildLinearFastReplyMessageId,
+  createFastAgentLinearTaskLauncher,
+  resolveLinearFastSessionClient,
+} from './linear-fast-session';
+import {
+  buildSourceControlFastAdapter,
+  buildSourceControlFastDelivery,
+} from './source-control-fast-delivery';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
 const DISCORD_QUOTE_MAX_LENGTH = 280;
@@ -128,9 +139,17 @@ type FastAgentSurfaceReplyParams = {
   userId: string;
   senderDisplayName: string | null;
   question: string;
+  /** Surface context the model reads with this message, for example the
+   * Linear issue a session belongs to. */
+  agentContext?: string;
   currentMessageId: string;
   replyToMessageId?: string;
   images?: string[];
+  /**
+   * Tasks the Session may steer on this turn beyond the ones it delegated,
+   * for example the task that already owns the pull request a comment is on.
+   */
+  activeTasks?: FastAgentActiveTask[];
   externalInput?: FastAgentReactionExternalInput;
   /**
    * Admission-time hooks for callers that must not block on the whole turn
@@ -254,10 +273,9 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                   recipientUserId: senderSubject.subjectSlackUserId,
                   sessionId: session.id,
                   footerContext,
-                  takeQuote: () => {
-                    const quote = pendingQuote;
+                  getQuote: () => pendingQuote,
+                  onDelivered: () => {
                     pendingQuote = null;
-                    return quote;
                   },
                 }),
             }
@@ -468,6 +486,51 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     };
   }
 
+  if (conversation.surface === 'linear') {
+    const linear = await resolveLinearFastSessionClient(
+      conversation.workspaceId,
+    );
+    if (!linear) {
+      return null;
+    }
+    const agentSessionId = conversation.replyTarget.channelId;
+    return {
+      conversation,
+      adapter: {
+        launchTask: createFastAgentLinearTaskLauncher({
+          userId: params.userId,
+          conversation,
+          resolveIssue: () => linear.getAgentSessionIssue(agentSessionId),
+        }),
+        postReply: async ({ message }) => {
+          const result = await linear.emitResponse(agentSessionId, message);
+          if (!result.success) {
+            throw new Error(
+              result.error ?? 'Linear did not accept the agent response.',
+            );
+          }
+          return { messageId: buildLinearFastReplyMessageId() };
+        },
+      },
+    };
+  }
+
+  if (isFastAgentSourceControlConversation(conversation)) {
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    if (!delivery) {
+      return null;
+    }
+    return {
+      conversation,
+      adapter: buildSourceControlFastAdapter({
+        conversation,
+        delivery,
+        userId: params.userId,
+        sessionId: session.id,
+      }),
+    };
+  }
+
   if (conversation.surface === 'telegram') {
     const provider =
       await createTelegramCommunicationProviderFromRuntimeCredentials();
@@ -584,8 +647,11 @@ async function runFastAgentSurfaceReply(
   const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
   try {
     const activeTasks = params.externalInput
-      ? await getActiveFastAgentTasks(params.sessionId)
-      : undefined;
+      ? [
+          ...(params.activeTasks ?? []),
+          ...(await getActiveFastAgentTasks(params.sessionId)),
+        ]
+      : params.activeTasks;
     // Durable admission for human turns (reactions are not replayable
     // requests): persisted under this owner's claim before the turn runs.
     const durableTurn = params.externalInput
@@ -624,6 +690,9 @@ async function runFastAgentSurfaceReply(
     await answerFastAgentQuestion({
       question: params.question,
       images: params.images,
+      ...(params.agentContext
+        ? { currentMessageAgentContext: params.agentContext }
+        : {}),
       userId: params.userId,
       apiBaseUrl,
       conversation: delivery.conversation,

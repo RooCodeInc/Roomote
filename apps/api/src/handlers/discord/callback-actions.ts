@@ -22,11 +22,15 @@ import type {
   DiscordUser,
 } from '@roomote/communication/discord-event';
 import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import { launchPinnedFastSessionTask } from '@roomote/cloud-agents/server';
 import { findDiscordMappedUserId } from '@roomote/sdk/server';
 import { parsePrReviewActionCallbackData } from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
-import { launchClaimedSuggestedTask } from '../tasks/suggestion-launch.js';
+import {
+  launchClaimedSuggestedTask,
+  resolveSuggestionOriginSessionId,
+} from '../tasks/suggestion-launch.js';
 import {
   resolveSuggestedTaskLaunchTarget,
   resolveSuggestedTaskPinnedEnvironmentId,
@@ -38,10 +42,6 @@ import {
 } from '../tasks/current-thread-suggestion-reaction.js';
 import { stopTaskRun } from '../tasks/task-stop.js';
 import { replyToDiscordEvent } from './replies.js';
-import {
-  handleDiscordRoutingCallback,
-  parseDiscordRouteCallbackData,
-} from './routing-confirmation.js';
 import {
   hasPendingDiscordRequestUserInputCallback,
   tryHandleDiscordRequestUserInputCallback,
@@ -398,46 +398,100 @@ async function launchClaimedDiscordSuggestion(input: {
           launchTarget,
           suggestion,
         );
-        const workspaceOverride =
-          launchTarget.kind === 'all_repositories'
+        // A card pinned to a bare repository keeps that repository; only
+        // cards with no target at all run against every repository.
+        const pinnedRepositoryFullName =
+          launchTarget.kind === 'legacy_pinned' &&
+          suggestion.targetRepositoryFullName &&
+          suggestion.targetRepositoryFullName !== ALL_REPOSITORIES
+            ? suggestion.targetRepositoryFullName
+            : null;
+        const workspace = pinnedEnvironmentId
+          ? await resolveDiscordWorkspace({
+              type: 'environment',
+              id: pinnedEnvironmentId,
+              name: pinnedEnvironmentId,
+            })
+          : pinnedRepositoryFullName
             ? {
+                repoForPayload: pinnedRepositoryFullName,
+                workspaceDisplayName: pinnedRepositoryFullName,
+              }
+            : {
                 repoForPayload: ALL_REPOSITORIES,
                 workspaceDisplayName: 'all repos',
-              }
-            : pinnedEnvironmentId
-              ? await resolveDiscordWorkspace({
-                  type: 'environment',
-                  id: pinnedEnvironmentId,
-                  name: pinnedEnvironmentId,
-                })
-              : undefined;
+              };
         // A pinned environment that no longer resolves must fail loudly
-        // rather than fall back to routing (legacy pinned cards included).
-        if (pinnedEnvironmentId && !workspaceOverride) {
+        // rather than launch somewhere else (legacy pinned cards included).
+        if (!workspace) {
           throw new Error('The suggestion target environment is unavailable.');
         }
-        const started = await startNewDiscordTask({
-          provider: input.provider,
-          applicationId: input.applicationId,
-          requesterDiscordUserId: input.sender.id,
-          launchOwnerUserId: input.senderUserId,
-          queuedMessage,
-          metadata: discordMetadataForChannel({
-            channel: launchChannel,
-            messageId: input.triggerId,
-          }),
+
+        // The card already names the workspace, so the owning Session
+        // delegates the task straight away, without a Fast turn.
+        const metadata = discordMetadataForChannel({
           channel: launchChannel,
-          skipRoutingConfirmation: true,
-          ...(workspaceOverride ? { workspaceOverride } : {}),
+          messageId: input.triggerId,
         });
-        if (started.status !== 'started') {
-          return { accepted: false };
-        }
-        taskUrl = started.taskUrl;
+        const originSessionId = await resolveSuggestionOriginSessionId(
+          suggestion.sourceTaskId,
+        );
+        let launchedRunId: number | null = null;
+        const pinned = await launchPinnedFastSessionTask({
+          userId: input.senderUserId,
+          senderDisplayName: queuedMessage.user,
+          ...(originSessionId ? { originSessionId } : {}),
+          conversation: {
+            surface: 'discord',
+            workspaceId: launchChannel.guildId ?? 'dm',
+            conversationId: getDiscordFastConversationId(
+              launchChannel,
+              input.triggerId,
+            ),
+            replyTarget: {
+              channelId: metadata.communicationChannelId,
+              ...(metadata.communicationThreadId
+                ? { threadId: metadata.communicationThreadId }
+                : {}),
+            },
+          },
+          launchId: input.triggerId,
+          prompt: promptText,
+          surface: 'discord',
+          kickoffMessage: `Started a task in ${workspace.workspaceDisplayName}.`,
+          launch: async ({ parent, postKickoff }) => {
+            const started = await startNewDiscordTask({
+              provider: input.provider,
+              applicationId: input.applicationId,
+              requesterDiscordUserId: input.sender.id,
+              launchOwnerUserId: input.senderUserId,
+              queuedMessage,
+              metadata,
+              channel: launchChannel,
+              workspace,
+              fastAgentSessionId: parent.sessionId,
+              fastAgentParent: parent,
+              beforeEnqueueKickoff: postKickoff,
+            });
+            if (started.status === 'started') {
+              taskUrl = started.taskUrl;
+              launchedRunId = started.launchResult.id;
+              return { success: true, taskId: started.launchResult.taskId };
+            }
+            if (started.status === 'already_started') {
+              taskUrl = started.taskUrl;
+              return { success: true, taskId: started.existingRun.taskId };
+            }
+            return {
+              success: false,
+              error: 'The suggestion did not start a task.',
+            };
+          },
+        });
         return {
           accepted: true,
-          runId: started.launchResult.id,
-          taskId: started.launchResult.taskId,
+          runId: launchedRunId ?? pinned.runId,
+          taskId: pinned.taskId,
         };
       },
     });
@@ -617,17 +671,6 @@ export async function handleDiscordComponentInteraction(input: {
   const cancelRunId = parseCancelCallbackData(customId);
   if (cancelRunId) {
     await handleCancelCallback({ ...input, runId: cancelRunId });
-    return 'handled';
-  }
-  const routeCallback = parseDiscordRouteCallbackData(customId);
-  if (routeCallback) {
-    await handleDiscordRoutingCallback({
-      provider: input.provider,
-      applicationId: input.applicationId,
-      interaction: input.interaction,
-      interactionDeferred: input.interactionDeferred,
-      callback: routeCallback,
-    });
     return 'handled';
   }
   const suggestionId = parseSuggestionCallbackData(customId);

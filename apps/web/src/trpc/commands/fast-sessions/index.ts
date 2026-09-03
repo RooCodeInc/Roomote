@@ -68,6 +68,8 @@ import {
   signArtifactId,
 } from '@/lib/server/artifact-signature';
 import { notifySourceTaskArtifactBuild } from '../task-runs';
+import type { PinnedFastSessionLaunchInput } from './input';
+import { startPinnedFastSessionLaunch } from './pinned-launch';
 
 const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
 
@@ -518,8 +520,24 @@ export async function startFastSessionCommand(
       sourceArtifactPath: string;
       sourceArtifactVersion: number;
     };
+    pinnedLaunch?: PinnedFastSessionLaunchInput;
   },
-): Promise<{ sessionId: string; fastConversationId?: string }> {
+): Promise<{
+  sessionId: string;
+  fastConversationId?: string;
+  taskId?: string;
+}> {
+  if (input.pinnedLaunch) {
+    return startPinnedFastSessionLaunch(auth, {
+      text: input.text,
+      images: input.images,
+      attachmentTexts: input.attachmentTexts,
+      model: input.model,
+      reasoningEffort: input.reasoningEffort,
+      pinnedLaunch: input.pinnedLaunch,
+    });
+  }
+
   if (input.artifactBuild) {
     return startArtifactBuildInParentSession(auth, {
       text: input.text,

@@ -869,6 +869,22 @@ export function createSandboxStore(
                 })
               : lastAssistantMessage?.isTurnCompletion === true,
           });
+          let queuedMessageState = createQueuedMessageState(
+            state.runtimeQueuedMessages,
+            state.optimisticQueuedMessages,
+          );
+
+          // Startup delivery can finish before the live subscription attaches.
+          // Persisted user prompts are authoritative acknowledgements too.
+          for (const message of rebuilt.acpMessages) {
+            if (message.role === 'user' && message.clientMessageId) {
+              queuedMessageState =
+                removeQueuedMessagesByClientMessageIdFromState(
+                  queuedMessageState,
+                  message.clientMessageId,
+                );
+            }
+          }
 
           const envelopeIds = new Set(sorted.map((envelope) => envelope.id));
           const coveredKeys = new Set<string>();
@@ -969,7 +985,11 @@ export function createSandboxStore(
 
           if (
             isSameRenderedMessageList(state.messages, normalized.messages) &&
-            isSameTodoList(state.todos, todos)
+            isSameTodoList(state.todos, todos) &&
+            state.runtimeQueuedMessages ===
+              queuedMessageState.runtimeQueuedMessages &&
+            state.optimisticQueuedMessages ===
+              queuedMessageState.optimisticQueuedMessages
           ) {
             // Nothing user-visible changed — keep the existing references
             // (no re-render), but leave the service indexes pointing at the
@@ -984,6 +1004,7 @@ export function createSandboxStore(
             ...state,
             messages: normalized.messages,
             todos,
+            ...queuedMessageState,
           };
         });
       },

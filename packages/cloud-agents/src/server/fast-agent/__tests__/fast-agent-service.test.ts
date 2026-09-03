@@ -116,7 +116,7 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   findFastAgentActiveInferenceRetryNotice: mocks.findActiveRetryNotice,
 }));
 
-vi.mock('../../router', () => ({
+vi.mock('../../available-environments', () => ({
   getAvailableEnvironments: mocks.getEnvironments,
 }));
 
@@ -713,24 +713,82 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('rejects request_user_input calls that mix questions with a trusted preset', async () => {
+  it('lets a trusted preset win when the model also passes placeholder questions', async () => {
+    const presetQuestions = [
+      {
+        id: 'setup-starter-tasks',
+        header: 'First work',
+        question: 'What should Roomote work on first?',
+        isOther: false,
+        isSecret: false,
+        multiple: true,
+        options: [
+          {
+            label: 'fix-flaky-tests',
+            description: 'Find and fix flaky tests.',
+          },
+        ],
+      },
+    ];
     let toolResult: unknown;
     const requestUserInput = vi.fn();
-    const resolveUserInputPreset = vi.fn();
+    const resolveUserInputPreset = vi.fn(async () => presetQuestions);
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
         options.onPromptStarted?.();
+        // Some models fill every optional parameter; the placeholder
+        // questions must be discarded, never rendered or used to reject.
         toolResult = await invokeTool(nativeToolNames.requestUserInput, {
           preset: 'setup_starter_tasks',
           questions: [
             {
-              id: 'starter-work',
-              header: 'First work',
-              question: 'What should I work on first?',
+              id: 'placeholder',
+              header: 'placeholder',
+              question: 'placeholder',
+              options: [{ label: 'placeholder', description: 'placeholder' }],
             },
           ],
         });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'setup-session-1',
+      },
+      turnSource: 'platform_event',
+      platformEventKind: 'setup',
+      platformEventVisibility: 'required',
+      setupSession: true,
+      adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+    });
+
+    expect(toolResult).toEqual({
+      success: true,
+      requestId: expect.any(String),
+      closed: true,
+    });
+    expect(resolveUserInputPreset).toHaveBeenCalledWith('setup_starter_tasks');
+    expect(requestUserInput).toHaveBeenCalledWith({
+      requestId: expect.any(String),
+      preset: 'setup_starter_tasks',
+      questions: presetQuestions,
+    });
+  });
+
+  it('rejects request_user_input calls with neither questions nor a preset', async () => {
+    let toolResult: unknown;
+    const requestUserInput = vi.fn();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        toolResult = await invokeTool(nativeToolNames.requestUserInput, {});
         return 'Please choose your first task.';
       },
     );
@@ -742,13 +800,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         workspaceId: 'deployment-1',
         conversationId: 'setup-session-1',
       },
+      turnSource: 'platform_event',
+      platformEventKind: 'setup',
+      platformEventVisibility: 'required',
       setupSession: true,
-      adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+      adapter: callbacks({ requestUserInput }),
     });
 
-    expect(toolResult).toMatchObject({ success: false });
+    expect(toolResult).toEqual({
+      success: false,
+      error: 'Pass either questions to ask or a trusted preset name.',
+    });
     expect(requestUserInput).not.toHaveBeenCalled();
-    expect(resolveUserInputPreset).not.toHaveBeenCalled();
   });
 
   it('lets a required setup platform event end with trusted structured input', async () => {
@@ -4972,14 +5035,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(results[2]).toMatchObject({ success: true });
     });
 
-    it('allows an emoji-only terminal reaction without a text acknowledgement', async () => {
+    it('records an emoji-only terminal reaction as Slack emoji markup', async () => {
       let reactionResult: unknown;
       const adapter = callbacks();
       mocks.generateText.mockImplementation(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
           reactionResult = await invokeTool(nativeToolNames.sendChatReaction, {
-            name: 'white_check_mark',
+            name: '+1',
             purpose: 'closeout',
           });
           return '';
@@ -4990,6 +5053,41 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       expect(reactionResult).toMatchObject({ success: true, closed: true });
       expect(adapter.postReply).not.toHaveBeenCalled();
+      const reactionToolWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter(
+          (message) => message.payload?.toolName === 'send_chat_reaction',
+        );
+      expect(
+        reactionToolWrites.map((message) => ({
+          eventType: message.eventType,
+          visibleInTranscript: message.metadata?.visibleInTranscript,
+        })),
+      ).toEqual([
+        {
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+          visibleInTranscript: false,
+        },
+        {
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+          visibleInTranscript: false,
+        },
+      ]);
+      expect(mocks.upsertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({
+            contentBlocks: [{ type: 'text', text: ':+1:' }],
+            metadata: { visibleInTranscript: true },
+            payload: { reaction: '+1', purpose: 'closeout' },
+          }),
+        }),
+      );
+      expect(mocks.appendVisibleMessages).toHaveBeenCalledWith({
+        sessionId: 'conversation-1',
+        messages: expect.arrayContaining([
+          { role: 'assistant', content: [{ type: 'text', text: ':+1:' }] },
+        ]),
+      });
     });
 
     it('does not gate platform-event turns', async () => {

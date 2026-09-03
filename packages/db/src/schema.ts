@@ -174,6 +174,9 @@ export const deploymentSettings = pgTable('deployment_settings', {
   workspaceRoutingSettings: jsonb(
     'workspace_routing_settings',
   ).$type<WorkspaceRoutingSettings>(),
+  // N-1 rollback: router diagnostics were removed with the LLM router. The
+  // previous release still reads and writes these four columns; drop them
+  // only after that release is no longer the supported rollback target.
   routerDebugProvider: text('router_debug_provider'),
   routerDebugChannelId: text('router_debug_channel_id'),
   routerDebugDisabled: boolean('router_debug_disabled')
@@ -3054,6 +3057,7 @@ export const slackAuthTokens = pgTable(
     slackTeamId: text('slack_team_id').notNull(),
     channel: text('channel').notNull(),
     threadTs: text('thread_ts').notNull(),
+    messageTs: text('message_ts'),
     originalText: text('original_text').notNull(),
     expiresAt: timestamp('expires_at').notNull(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -3538,6 +3542,12 @@ export const slackFastIntegrationCallsRelations = relations(
  * stores the workspace choices shown to the user.
  */
 
+/**
+ * N-1 rollback: no longer written since Linear sessions enter Fast Sessions
+ * (the workspace elicitation flow is gone). The previous release still reads
+ * and writes this table; drop it only after that release is no longer the
+ * supported rollback target.
+ */
 export const linearPendingSelections = pgTable(
   'linear_pending_selections',
   {

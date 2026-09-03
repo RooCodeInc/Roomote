@@ -487,8 +487,8 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Ask structured questions, or use a trusted setup preset whose options Roomote supplies. Multiple-choice questions require explicit submission. The turn resumes from the persisted answer.",
-  args: z.union([z.object({
+  description: "Ask structured questions, or use a trusted setup preset whose options Roomote supplies. Pass a preset alone when setup instructions name one; questions are ignored when a preset is set. Multiple-choice questions require explicit submission. The turn resumes from the persisted answer.",
+  args: {
     questions: z.array(z.object({
       id: z.string().min(1).max(80),
       header: z.string().min(1).max(60),
@@ -500,10 +500,9 @@ export default {
         description: z.string().min(1).max(500),
       })).min(1).max(12).optional().describe("Present options as choices; omit for free-text"),
       multiple: z.boolean().optional().describe("Allow more than one option; defaults to false"),
-    })).min(1).max(4),
-  }).strict(), z.object({
-    preset: z.enum(["setup_starter_tasks"]).describe("Use the trusted starter-task preset instead of questions"),
-  }).strict()]),
+    })).min(1).max(4).optional().describe("Structured questions to ask; omit when using a preset"),
+    preset: z.enum(["setup_starter_tasks"]).optional().describe("Use the trusted starter-task preset instead of questions"),
+  },
   execute: (args, context) => invoke("request_user_input", args, context),
 }
 `,
