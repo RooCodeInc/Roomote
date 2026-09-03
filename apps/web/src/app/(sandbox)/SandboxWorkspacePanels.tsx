@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import { useMediaQuery } from 'usehooks-ts';
 
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
@@ -62,20 +62,30 @@ interface ResponsiveWorkspacePanelsProps {
   isPanelOpen: boolean;
   main: ReactNode;
   panel: ReactNode;
+  panelId?: string;
+  additionalPanels?: Array<{ id: string; content: ReactNode }>;
   mainSize?: number;
   panelSize?: number;
+  mainMinSize?: number;
+  panelMinSize?: number;
 }
 
 export function ResponsiveWorkspacePanels({
   isPanelOpen,
   main,
   panel,
+  panelId = 'panel',
+  additionalPanels = [],
   mainSize = 50,
   panelSize = 50,
+  mainMinSize = 30,
+  panelMinSize = 20,
 }: ResponsiveWorkspacePanelsProps) {
   const isMdOrLarger = useMediaQuery('(min-width: 768px)', {
     initializeWithValue: false,
   });
+  const panelCount = isPanelOpen ? additionalPanels.length + 1 : 0;
+  const equalPanelSize = 100 / (panelCount + 1);
 
   if (!isMdOrLarger) {
     return (
@@ -89,8 +99,12 @@ export function ResponsiveWorkspacePanels({
     <div className="flex min-h-0 min-w-0 flex-1">
       <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
         <ResizablePanel
-          defaultSize={isPanelOpen ? mainSize : 100}
-          minSize={30}
+          id="main"
+          order={0}
+          defaultSize={
+            panelCount > 1 ? equalPanelSize : isPanelOpen ? mainSize : 100
+          }
+          minSize={mainMinSize}
           className="flex min-h-0 min-w-0 flex-col"
         >
           {main}
@@ -99,14 +113,32 @@ export function ResponsiveWorkspacePanels({
           <>
             <ResizableDivider />
             <ResizablePanel
-              defaultSize={panelSize}
-              minSize={20}
+              id={panelId}
+              order={1}
+              defaultSize={panelCount > 1 ? equalPanelSize : panelSize}
+              minSize={panelMinSize}
               className="flex min-h-0 min-w-0 flex-col border-l-2 border-card"
             >
               {panel}
             </ResizablePanel>
           </>
         ) : null}
+        {isPanelOpen
+          ? additionalPanels.map((additionalPanel, index) => (
+              <Fragment key={additionalPanel.id}>
+                <ResizableDivider />
+                <ResizablePanel
+                  id={additionalPanel.id}
+                  order={index + 2}
+                  defaultSize={equalPanelSize}
+                  minSize={panelMinSize}
+                  className="flex min-h-0 min-w-0 flex-col border-l-2 border-card"
+                >
+                  {additionalPanel.content}
+                </ResizablePanel>
+              </Fragment>
+            ))
+          : null}
       </ResizablePanelGroup>
     </div>
   );
