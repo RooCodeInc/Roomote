@@ -4,8 +4,6 @@ import Image from 'next/image';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { DiscordLogoIcon } from '@radix-ui/react-icons';
 
-import type { ComputeProvider } from '@roomote/types';
-
 import { cn } from '@/lib/utils';
 import {
   Button,
@@ -54,15 +52,9 @@ function persistFeedbackPromptDismissal(): void {
 
 type HomeProps = {
   initialPlaceholderIndex: number;
-  defaultComputeProvider?: ComputeProvider;
-  availableComputeProviders?: readonly ComputeProvider[];
 };
 
-export function Home({
-  initialPlaceholderIndex,
-  defaultComputeProvider,
-  availableComputeProviders,
-}: HomeProps) {
+export function Home({ initialPlaceholderIndex }: HomeProps) {
   const [isExiting, setIsExiting] = useState(false);
   const [isBottomSheetExpanded, setIsBottomSheetExpanded] = useState(false);
   const [isFeedbackPromptVisible, setIsFeedbackPromptVisible] = useState(false);
@@ -205,8 +197,6 @@ export function Home({
             </h1>
 
             <NewTaskForm
-              defaultComputeProvider={defaultComputeProvider}
-              availableComputeProviders={availableComputeProviders}
               onTaskStarted={handleTaskStarted}
               placeholder={activePromptPlaceholder}
               textareaMaxHeight={textareaMaxHeight}

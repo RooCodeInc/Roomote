@@ -533,6 +533,7 @@ export async function startFastSessionCommand(
       images: input.images,
       attachmentTexts: input.attachmentTexts,
       model: input.model,
+      reasoningEffort: input.reasoningEffort,
       pinnedLaunch: input.pinnedLaunch,
     });
   }

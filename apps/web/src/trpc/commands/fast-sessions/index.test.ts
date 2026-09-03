@@ -332,6 +332,7 @@ describe('startFastSessionCommand', () => {
       images: ['data:image/png;base64,AAAA'],
       attachmentTexts: ['notes'],
       model: 'model-1',
+      reasoningEffort: 'high',
       pinnedLaunch,
     });
 
@@ -345,6 +346,7 @@ describe('startFastSessionCommand', () => {
       images: ['data:image/png;base64,AAAA'],
       attachmentTexts: ['notes'],
       model: 'model-1',
+      reasoningEffort: 'high',
       pinnedLaunch,
     });
     expect(mocks.getOrCreateSession).not.toHaveBeenCalled();

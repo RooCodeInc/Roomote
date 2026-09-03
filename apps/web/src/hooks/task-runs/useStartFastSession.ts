@@ -1,6 +1,10 @@
 import { useMutation } from '@tanstack/react-query';
 
-import type { ComputeProvider, LaunchCodingHarness } from '@roomote/types';
+import type {
+  ComputeProvider,
+  LaunchCodingHarness,
+  ReasoningEffort,
+} from '@roomote/types';
 import { useTRPCClient } from '@/trpc/client';
 
 export function useStartFastSession(options?: {
@@ -30,7 +34,8 @@ type StartFastSessionVariables = {
   text: string;
   images?: string[];
   attachmentTexts?: string[];
-  model?: string;
+  model?: string | null;
+  reasoningEffort?: ReasoningEffort | null;
   /** Launch into a chosen workspace without a Fast decision. */
   pinnedLaunch?: {
     launchId: string;

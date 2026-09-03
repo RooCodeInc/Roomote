@@ -13,6 +13,7 @@ import {
   getUserDisplayName,
   resolveEvalHarnessSelection,
   TaskPayloadKind,
+  type ReasoningEffort,
   type StandardTask,
 } from '@roomote/types';
 
@@ -31,6 +32,7 @@ type StartPinnedFastSessionLaunchInput = {
   attachmentTexts?: string[];
   /** Task model override; the deployment default applies when omitted. */
   model?: string | null;
+  reasoningEffort?: ReasoningEffort | null;
   pinnedLaunch: PinnedFastSessionLaunchInput;
 };
 
@@ -120,6 +122,9 @@ export async function startPinnedFastSessionLaunch(
       ...(sourceControlProvider ? { sourceControlProvider } : {}),
       ...(evalSelection.harnessModelOverrides
         ? { harnessModelOverrides: evalSelection.harnessModelOverrides }
+        : {}),
+      ...(input.reasoningEffort
+        ? { reasoningEffort: input.reasoningEffort }
         : {}),
     },
   };
