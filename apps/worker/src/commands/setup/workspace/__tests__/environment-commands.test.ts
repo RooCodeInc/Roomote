@@ -104,6 +104,26 @@ describe('waitForPreviewPorts', () => {
       expect.objectContaining({ redirect: 'manual' }),
     );
   });
+
+  it('keeps network-path initial routes on the loopback authority', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 200 }));
+
+    await expect(
+      waitForPreviewPorts([
+        {
+          name: 'web',
+          port: 3000,
+          initial_path: '//example.com/path?view=preview#section',
+        },
+      ]),
+    ).resolves.toEqual([]);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'http://127.0.0.1:3000//example.com/path?view=preview#section',
+      expect.objectContaining({ redirect: 'manual' }),
+    );
+  });
 });
 
 describe('executeOrganizationEnvironmentRepositoryCommands', () => {

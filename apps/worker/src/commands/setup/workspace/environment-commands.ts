@@ -26,10 +26,14 @@ const PREVIEW_READINESS_POLL_INTERVAL_MS = 1_000;
 const PREVIEW_READINESS_PROBE_TIMEOUT_MS = 5_000;
 
 function previewUrl(port: NamedPort, host = '127.0.0.1'): string {
-  return new URL(
-    port.initial_path ?? '/',
-    `http://${host}:${port.port}`,
-  ).toString();
+  const url = new URL(`http://${host}:${port.port}`);
+  const initialPath = port.initial_path ?? '/';
+  const suffixIndex = initialPath.search(/[?#]/);
+
+  url.pathname =
+    suffixIndex === -1 ? initialPath : initialPath.slice(0, suffixIndex);
+
+  return `${url.origin}${url.pathname}${suffixIndex === -1 ? '' : initialPath.slice(suffixIndex)}`;
 }
 
 async function probePreview(
