@@ -10,6 +10,11 @@ import {
   getSlackLiveTaskStreamData,
 } from './live-task-stream';
 import { SlackNotifier } from './slack-notifier';
+import {
+  removeSlackThreadActiveTask,
+  setSlackThreadActiveTask,
+} from './thread-active-tasks';
+import { refreshSlackThreadActiveTaskFooter } from './thread-reply-footer-ops';
 
 export type SlackLiveTaskCardRenderStatus =
   | 'in_progress'
@@ -52,6 +57,32 @@ export async function renderSlackLiveTaskCard(input: {
     return { card: false, updated: false };
   }
 
+  const taskTitle = input.taskTitle?.trim();
+  const title = taskTitle ? buildSlackLiveTaskTitle(taskTitle) : data.title;
+  try {
+    if (input.status === 'in_progress') {
+      await setSlackThreadActiveTask({
+        channel: data.channel,
+        threadTs: data.threadTs,
+        task: {
+          taskId: data.taskId,
+          title,
+          ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
+        },
+      });
+    } else {
+      await removeSlackThreadActiveTask({
+        channel: data.channel,
+        threadTs: data.threadTs,
+        taskId: data.taskId,
+      });
+    }
+  } catch (error) {
+    console.warn(
+      `[renderSlackLiveTaskCard] Failed to synchronize active task ${data.taskId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
   const installation = await db.query.slackInstallations.findFirst({
     where: and(
       eq(slackInstallations.isActive, true),
@@ -63,21 +94,27 @@ export async function renderSlackLiveTaskCard(input: {
     return { card: false, updated: false };
   }
 
-  const taskTitle = input.taskTitle?.trim();
-  const updated = await new SlackNotifier(
-    installation.botAccessToken,
-  ).updateMessage({
+  const slack = new SlackNotifier(installation.botAccessToken);
+  const updated = await slack.updateMessage({
     channel: data.channel,
     ts: data.messageTs,
     message: buildSlackLiveTaskCardBlocks({
       taskUpdateId: data.taskUpdateId,
-      title: taskTitle ? buildSlackLiveTaskTitle(taskTitle) : data.title,
+      title,
       status: input.status,
       ...(input.details ? { details: input.details } : {}),
       ...(input.output ? { output: input.output } : {}),
       ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
     }),
   });
+
+  if (input.status !== 'in_progress') {
+    await refreshSlackThreadActiveTaskFooter({
+      slack,
+      channel: data.channel,
+      threadTs: data.threadTs,
+    });
+  }
 
   return { card: true, updated };
 }
