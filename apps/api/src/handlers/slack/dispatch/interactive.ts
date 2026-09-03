@@ -27,6 +27,57 @@ import {
   handleSlackPrReviewActionYes,
 } from './pr-review-action.js';
 import { handleThreadReplyDetailsToggle } from './thread-reply-details-toggle.js';
+import { apiLogger } from '../../../logging.js';
+
+/**
+ * Button action ids from pre-Fast-first Slack messages whose handlers were
+ * removed. Old messages still carry these buttons, so clicks must be answered
+ * with an ephemeral notice instead of silently falling through.
+ */
+export const RETIRED_SLACK_ACTION_IDS: ReadonlySet<string> = new Set([
+  'submit_task',
+  'routing_confirm_ok',
+  'routing_confirm_no',
+  'retry_failed_task',
+  'nevermind_task',
+  'cancel_task',
+  'follow_task',
+]);
+
+const RETIRED_SLACK_ACTION_NOTICE =
+  'That button came from an older Roomote message and no longer does anything. Mention Roomote in this thread to continue.';
+
+async function handleRetiredAction(
+  payload: SlackInteractivePayload,
+): Promise<void> {
+  const actionId = payload.actions[0]?.action_id;
+
+  apiLogger.info(
+    `[SlackInteractive] Retired action "${actionId}" clicked by ${payload.user.id} in channel ${payload.channel.id}; sending ephemeral notice`,
+  );
+
+  try {
+    const response = await fetch(payload.response_url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        response_type: 'ephemeral',
+        replace_original: false,
+        text: RETIRED_SLACK_ACTION_NOTICE,
+      }),
+    });
+
+    if (!response.ok) {
+      apiLogger.warn(
+        `[SlackInteractive] Failed to post retired-action notice for "${actionId}": ${response.status} ${response.statusText}`,
+      );
+    }
+  } catch (error) {
+    apiLogger.warn(
+      `[SlackInteractive] Failed to post retired-action notice for "${actionId}": ${formatErrorForLog(error)}`,
+    );
+  }
+}
 
 function getInteractiveButtonNonce(
   payload: SlackInteractivePayload,
@@ -209,6 +260,9 @@ export async function handleSlackInteractivePayload(
       break;
     case actionId === 'agent_selection':
     case actionId === 'workspace_selection':
+      break;
+    case actionId !== undefined && RETIRED_SLACK_ACTION_IDS.has(actionId):
+      await handleRetiredAction(interactivePayload);
       break;
     case actionId?.startsWith('followup_answer_'):
     case actionId?.startsWith('request_user_input_answer_'):
