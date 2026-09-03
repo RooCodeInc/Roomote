@@ -1,30 +1,18 @@
 'use client';
 
-import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Streamdown, defaultRemarkPlugins } from 'streamdown';
 import remarkBreaks from 'remark-breaks';
 import type { BundledLanguage } from 'shiki';
 import { toast } from 'sonner';
 
-import {
-  DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
-  type TaskPayload,
-} from '@roomote/types';
-
 import type { ArtifactWithContent } from '@/types';
 
-import { useTRPC } from '@/trpc/client';
+import { useTRPC, useTRPCClient } from '@/trpc/client';
 
-import { humanizeFilename } from '@/lib';
-import { generateClientUuid } from '@/lib/client-uuid';
-import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 import { cn } from '@/lib/utils';
-
-import { useAuthorizedUser } from '@/hooks/useUser';
-import { useTask } from '@/hooks/tasks';
-import { useStartFastSession } from '@/hooks/task-runs';
 
 import {
   Download,
@@ -46,8 +34,6 @@ import {
   remarkArtifactLinks,
   streamdownPlugins,
 } from '@/components/ai-elements';
-
-import { BuildArtifactConfirmDialog } from './BuildArtifactConfirmDialog';
 
 const extensionToLanguage: Record<string, BundledLanguage> = {
   json: 'json',
@@ -130,42 +116,6 @@ function isHtmlArtifact(contentType: string, path: string): boolean {
   );
 }
 
-/**
- * Build the prompt for a "Build this plan" task that implements a plan artifact.
- *
- * The plan content is embedded directly into the new task's prompt instead of
- * asking the new task to download it via `manage_artifacts`. The artifact
- * download/metadata endpoints allow cross-task reads for visible tasks, so
- * the new task could fetch it, but embedding makes the build deterministic
- * (exact content at creation time) and avoids depending on a download step.
- */
-export function buildArtifactPlanDescription({
-  artifactPath,
-  artifactVersion,
-  artifactContent,
-  environmentId,
-  modelId,
-}: {
-  artifactPath: string;
-  artifactVersion: number;
-  artifactContent?: string | null;
-  environmentId: string;
-  modelId: string;
-}): string {
-  const humanizedName = humanizeFilename(artifactPath);
-  const planContent = artifactContent ?? '';
-
-  return `Build the plan from ${humanizedName} (v${artifactVersion}).
-
-Start the implementation as a delegated task in Roomote environment ${environmentId} using model ${modelId}.
-
-The full plan content is included below. Implement it according to its specifications.
-
----
-${planContent}
----`;
-}
-
 interface ArtifactViewerContentProps {
   artifact: ArtifactWithContent | null;
   taskId: string;
@@ -182,33 +132,39 @@ export function ArtifactViewerContent({
   showToolbar = true,
 }: ArtifactViewerContentProps) {
   const trpc = useTRPC();
-  const { data: task } = useTask(taskId, false);
-  const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
-    useAuthorizedUser();
+  const trpcClient = useTRPCClient();
+  const pathname = usePathname();
+  const router = useRouter();
   const [isRaw, setIsRaw] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isUrlCopied, setIsUrlCopied] = useState(false);
   const [isRawUrlCopied, setIsRawUrlCopied] = useState(false);
-  const [isBuildDialogOpen, setIsBuildDialogOpen] = useState(false);
-  const artifactTitle = artifact ? humanizeFilename(artifact.path) : '';
+  const sendBuildMessage = useMutation({
+    mutationFn: async () => {
+      if (!artifact) return;
 
-  const buildSessionLaunchRef = useRef<{
-    key: string;
-    launchId: string;
-  } | null>(null);
-  const startFastSession = useStartFastSession({
-    onSuccess: (result, variables) => {
-      buildSessionLaunchRef.current = null;
-      const startedArtifactTitle = humanizeFilename(
-        variables.artifactBuild?.sourceArtifactPath ?? '',
-      );
-      toast.success(`Building ${startedArtifactTitle}.`, {
-        action: (
-          <Button asChild size="sm">
-            <Link href={`/sessions/${result.sessionId}`}>View Session</Link>
-          </Button>
-        ),
+      const parentSession = await trpcClient.sessions.forTask.query({ taskId });
+      if (!parentSession) {
+        throw new Error(
+          'The task that created this artifact is not attached to a Session.',
+        );
+      }
+
+      const url = `${window.location.origin}/task/${taskId}/artifacts/${artifact.path}?v=${artifact.version}`;
+      await trpcClient.fastSessions.reply.mutate({
+        sessionId: parentSession.sessionId,
+        text: `Build this ${url}`,
       });
+      return parentSession.sessionId;
+    },
+    onSuccess: (sessionId) => {
+      if (!sessionId) return;
+
+      toast.success('Sent to Session.');
+      const sessionPath = `/sessions/${sessionId}`;
+      if (pathname !== sessionPath) {
+        router.push(sessionPath);
+      }
     },
     onError: (error) => toast.error(error.message),
   });
@@ -274,64 +230,6 @@ export function ArtifactViewerContent({
     (isMarkdown && artifact.content) ||
     ((isImage || isVideo || isPDF) && artifact.downloadUrl);
 
-  const taskPayload = task?.taskRun?.payload as TaskPayload | undefined;
-  // Build requires the fetched plan content so the new task's prompt isn't
-  // silently empty. Content is only fetched for text artifacts within the
-  // preview byte cap (see getArtifactByPathCommand), so a plan larger than
-  // that cap has no content to embed and must not be buildable from here.
-  const canCreateTaskFromArtifact = isMarkdown && Boolean(artifact.content);
-  const taskLaunchDisabledReason = getTaskLaunchDisabledReason(managedAccess);
-
-  const handleCreateBuildTask = (values: {
-    repo: string;
-    branch?: string;
-    environmentId?: string;
-    modelId: string;
-  }) => {
-    if (taskLaunchDisabledReason) {
-      toast.error(taskLaunchDisabledReason);
-      return;
-    }
-
-    const description = buildArtifactPlanDescription({
-      artifactPath: artifact.path,
-      artifactVersion: artifact.version,
-      artifactContent: artifact.content,
-      environmentId: values.environmentId ?? '',
-      modelId: values.modelId,
-    });
-
-    const launchKey = JSON.stringify([
-      taskId,
-      artifact.id,
-      artifact.version,
-      values.environmentId,
-      values.branch,
-      values.modelId,
-    ]);
-    if (buildSessionLaunchRef.current?.key !== launchKey) {
-      buildSessionLaunchRef.current = {
-        key: launchKey,
-        launchId: generateClientUuid(),
-      };
-    }
-
-    toast.info(`Starting task in this Session to build ${artifactTitle}`);
-    startFastSession.mutate({
-      text: description,
-      artifactBuild: {
-        launchId: buildSessionLaunchRef.current.launchId,
-        environmentId: values.environmentId ?? '',
-        branch: values.branch,
-        taskModel: values.modelId,
-        sourceArtifactId: artifact.id,
-        sourceArtifactPath: artifact.path,
-        sourceArtifactVersion: artifact.version,
-      },
-    });
-    setIsBuildDialogOpen(false);
-  };
-
   const handleCopyToClipboard = async () => {
     if (!artifact.content) return;
 
@@ -369,18 +267,13 @@ export function ArtifactViewerContent({
         {showToolbar && (
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-background px-3 py-2">
             <div className="flex min-w-0 items-center gap-2">
-              {canCreateTaskFromArtifact && (
-                <BasicTooltip
-                  content={taskLaunchDisabledReason ?? 'Build this artifact'}
-                >
+              {isMarkdown && (
+                <BasicTooltip content="Build this artifact">
                   <Button
                     variant="ghost"
                     className="h-7 gap-1.5 px-2 text-sm font-medium hover:text-accent-foreground"
-                    onClick={() => setIsBuildDialogOpen(true)}
-                    disabled={
-                      startFastSession.isPending ||
-                      Boolean(taskLaunchDisabledReason)
-                    }
+                    onClick={() => sendBuildMessage.mutate()}
+                    disabled={sendBuildMessage.isPending}
                   >
                     <Hammer className="size-3.5" />
                     <span className="text-xs">Build this</span>
@@ -582,19 +475,6 @@ export function ArtifactViewerContent({
           )}
         </div>
       </div>
-
-      <BuildArtifactConfirmDialog
-        open={isBuildDialogOpen}
-        onOpenChange={setIsBuildDialogOpen}
-        artifactName={artifactTitle}
-        artifactVersion={artifact.version}
-        taskRepository={taskPayload?.repo || task?.repositoryName || undefined}
-        taskBranch={taskPayload?.branch}
-        taskEnvironmentId={taskPayload?.environmentId}
-        onConfirm={handleCreateBuildTask}
-        isPending={startFastSession.isPending}
-        taskLaunchDisabledReason={taskLaunchDisabledReason}
-      />
     </>
   );
 }

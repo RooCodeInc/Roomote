@@ -10,14 +10,10 @@ const mocks = vi.hoisted(() => ({
   buildReplyDelivery: vi.fn(),
   createWebTaskLauncher: vi.fn(),
   launchTask: vi.fn(),
-  surfaceLaunchTask: vi.fn(),
-  notifyArtifactBuild: vi.fn(),
   startPinnedLaunch: vi.fn(),
   getOrCreateSession: vi.fn(),
   getUnifiedSession: vi.fn(),
-  isNull: vi.fn(),
   getFastSessionTasks: vi.fn(),
-  getArtifactBuildParentSession: vi.fn(),
   currentEpochSeconds: vi.fn(),
   dbUpdate: vi.fn(),
   dbSet: vi.fn(),
@@ -48,13 +44,10 @@ vi.mock('@roomote/db/server', () => ({
   retireCanonicalPrReviewActionsForDestinationKey: mocks.retireReviewActions,
   and: vi.fn(),
   eq: vi.fn(),
-  isNull: mocks.isNull,
   sql: vi.fn(),
   fastAgentConversations: {},
   fastAgentMessages: {},
   sessions: {},
-  sessionTasks: {},
-  taskRuns: {},
   getSessionForFastConversation: mocks.getUnifiedSession,
 }));
 
@@ -66,10 +59,6 @@ vi.mock('@/lib/server/fast-sessions', () => ({
   updateFastSessionPrReviewOfferStatus: mocks.updateOfferStatus,
 }));
 
-vi.mock('@/lib/server/sessions', () => ({
-  getArtifactBuildParentSession: mocks.getArtifactBuildParentSession,
-}));
-
 vi.mock('@/lib/server/artifact-signature', () => ({
   currentEpochSeconds: mocks.currentEpochSeconds,
   signArtifactId: (artifactId: string, timestamp: number) =>
@@ -78,10 +67,6 @@ vi.mock('@/lib/server/artifact-signature', () => ({
 
 vi.mock('@/lib/server/pr-review-actions', () => ({
   handleWebPrReviewAction: mocks.handleReviewAction,
-}));
-
-vi.mock('../task-runs', () => ({
-  notifySourceTaskArtifactBuild: mocks.notifyArtifactBuild,
 }));
 
 vi.mock('./pinned-launch', () => ({
@@ -231,21 +216,10 @@ describe('startFastSessionCommand', () => {
     vi.clearAllMocks();
     mocks.createWebTaskLauncher.mockReturnValue(mocks.launchTask);
     mocks.launchTask.mockResolvedValue({ success: true, taskId: 'task-1' });
-    mocks.surfaceLaunchTask.mockResolvedValue({
-      success: true,
-      taskId: 'task-1',
-    });
     mocks.getUnifiedSession.mockResolvedValue({ id: 'unified-session-1' });
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'fast-session-1',
       created: true,
-    });
-    mocks.getArtifactBuildParentSession.mockResolvedValue({
-      sourceTaskId: 'source-task-1',
-      sourceArtifactPath: 'plans/widget.md',
-      sourceArtifactVersion: 3,
-      sessionId: 'unified-session-1',
-      fastConversationId: 'fast-session-1',
     });
     mocks.buildReplyDelivery.mockResolvedValue({
       conversation: {
@@ -253,7 +227,7 @@ describe('startFastSessionCommand', () => {
         workspaceId: 'user-1',
         conversationId: 'existing-conversation',
       },
-      adapter: { launchTask: mocks.surfaceLaunchTask, postReply: vi.fn() },
+      adapter: { launchTask: mocks.launchTask, postReply: vi.fn() },
     });
     mocks.dbSelect.mockReturnValue({
       from: () => ({
@@ -350,175 +324,6 @@ describe('startFastSessionCommand', () => {
       pinnedLaunch,
     });
     expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
-    expect(mocks.after).not.toHaveBeenCalled();
-  });
-
-  it('launches an attributed artifact build in the artifact task parent Session', async () => {
-    let scheduled: (() => Promise<void>) | undefined;
-    mocks.after.mockImplementation((callback) => {
-      scheduled = callback;
-    });
-    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
-      signal: new AbortController().signal,
-    });
-    mocks.acquireTurnLock.mockResolvedValue(release);
-
-    await startFastSessionCommand(auth, {
-      text: 'Build the plan',
-      artifactBuild: {
-        launchId: '11111111-1111-4111-8111-111111111111',
-        environmentId: '33333333-3333-4333-8333-333333333333',
-        branch: 'feature/source-branch',
-        taskModel: 'model-1',
-        sourceArtifactId: '22222222-2222-4222-8222-222222222222',
-        sourceArtifactPath: 'plans/widget.md',
-        sourceArtifactVersion: 3,
-      },
-    });
-    expect(mocks.getArtifactBuildParentSession).toHaveBeenCalledWith(
-      auth,
-      '22222222-2222-4222-8222-222222222222',
-    );
-    expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
-    expect(mocks.buildReplyDelivery).toHaveBeenCalledWith({
-      sessionId: 'fast-session-1',
-      userId: 'user-1',
-      senderDisplayName: 'User One',
-      question: 'Build the plan',
-    });
-    expect(mocks.createWebTaskLauncher).not.toHaveBeenCalled();
-    await scheduled?.();
-
-    const turnInput = mocks.answerQuestion.mock.calls[0]?.[0];
-    await turnInput.adapter.launchTask({
-      prompt: 'Build the plan',
-      environmentId: 'different-environment',
-      model: 'different-model',
-      parentSessionId: 'different-session',
-      postKickoff: vi.fn(),
-    });
-
-    expect(mocks.surfaceLaunchTask).toHaveBeenCalledWith({
-      prompt: 'Build the plan',
-      environmentId: '33333333-3333-4333-8333-333333333333',
-      branch: 'feature/source-branch',
-      launchIdempotencyKey:
-        'artifact-build:11111111-1111-4111-8111-111111111111',
-      model: 'model-1',
-      parentSessionId: 'fast-session-1',
-      postKickoff: expect.any(Function),
-    });
-
-    expect(mocks.notifyArtifactBuild).toHaveBeenCalledWith({
-      auth,
-      sourceTaskId: 'source-task-1',
-      sourceArtifactId: '22222222-2222-4222-8222-222222222222',
-      sourceArtifactPath: 'plans/widget.md',
-      sourceArtifactVersion: 3,
-      newTaskId: 'task-1',
-    });
-  });
-
-  it('recovers an artifact kickoff without a non-canceled matching task', async () => {
-    mocks.dbSelectLimit
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: 'message-1' }])
-      .mockResolvedValueOnce([]);
-
-    let scheduled: (() => Promise<void>) | undefined;
-    mocks.after.mockImplementation((callback) => {
-      scheduled = callback;
-    });
-    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
-      signal: new AbortController().signal,
-    });
-    mocks.acquireTurnLock.mockResolvedValue(release);
-    await startFastSessionCommand(auth, {
-      text: 'Build the plan',
-      artifactBuild: {
-        launchId: '11111111-1111-4111-8111-111111111111',
-        environmentId: '33333333-3333-4333-8333-333333333333',
-        taskModel: 'model-1',
-        sourceArtifactId: '22222222-2222-4222-8222-222222222222',
-        sourceArtifactPath: 'plans/widget.md',
-        sourceArtifactVersion: 3,
-      },
-    });
-    await scheduled?.();
-
-    expect(mocks.answerQuestion).toHaveBeenCalledOnce();
-    expect(mocks.isNull).toHaveBeenCalled();
-  });
-
-  it('rejects an artifact build when its owning task has no Session', async () => {
-    mocks.getArtifactBuildParentSession.mockResolvedValue({
-      sourceTaskId: 'source-task-1',
-      sourceArtifactPath: 'plans/widget.md',
-      sourceArtifactVersion: 3,
-      sessionId: null,
-      fastConversationId: null,
-    });
-
-    await expect(
-      startFastSessionCommand(auth, {
-        text: 'Build the plan',
-        artifactBuild: {
-          launchId: '11111111-1111-4111-8111-111111111111',
-          environmentId: '33333333-3333-4333-8333-333333333333',
-          taskModel: 'model-1',
-          sourceArtifactId: '22222222-2222-4222-8222-222222222222',
-          sourceArtifactPath: 'plans/widget.md',
-          sourceArtifactVersion: 3,
-        },
-      }),
-    ).rejects.toThrow(
-      'The task that created this artifact is not attached to a Session.',
-    );
-
-    expect(mocks.after).not.toHaveBeenCalled();
-  });
-
-  it('rejects an artifact build when its Session has no Fast parent', async () => {
-    mocks.getArtifactBuildParentSession.mockResolvedValue({
-      sourceTaskId: 'source-task-1',
-      sourceArtifactPath: 'plans/widget.md',
-      sourceArtifactVersion: 3,
-      sessionId: 'unified-session-1',
-      fastConversationId: null,
-    });
-
-    await expect(
-      startFastSessionCommand(auth, {
-        text: 'Build the plan',
-        artifactBuild: {
-          launchId: '11111111-1111-4111-8111-111111111111',
-          environmentId: '33333333-3333-4333-8333-333333333333',
-          taskModel: 'model-1',
-          sourceArtifactId: '22222222-2222-4222-8222-222222222222',
-          sourceArtifactPath: 'plans/widget.md',
-          sourceArtifactVersion: 3,
-        },
-      }),
-    ).rejects.toThrow("This artifact's Session cannot start a delegated task.");
-
-    expect(mocks.after).not.toHaveBeenCalled();
-  });
-
-  it('does not retry an artifact kickoff after its task is attached', async () => {
-    mocks.dbSelectLimit.mockResolvedValueOnce([{ taskId: 'task-1' }]);
-
-    await startFastSessionCommand(auth, {
-      text: 'Build the plan',
-      artifactBuild: {
-        launchId: '11111111-1111-4111-8111-111111111111',
-        environmentId: '33333333-3333-4333-8333-333333333333',
-        taskModel: 'model-1',
-        sourceArtifactId: '22222222-2222-4222-8222-222222222222',
-        sourceArtifactPath: 'plans/widget.md',
-        sourceArtifactVersion: 3,
-      },
-    });
-
     expect(mocks.after).not.toHaveBeenCalled();
   });
 });
