@@ -136,9 +136,9 @@ describe('Fast Slack reaction input', () => {
         },
       }),
     });
-    expect(
-      (mocks.releaseLock as { durableRowId?: string }).durableRowId,
-    ).toBe('row-1');
+    expect((mocks.releaseLock as { durableRowId?: string }).durableRowId).toBe(
+      'row-1',
+    );
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         durableAdmission: { eventId: 'row-1' },

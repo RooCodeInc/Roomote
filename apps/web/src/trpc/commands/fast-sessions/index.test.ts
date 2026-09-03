@@ -463,9 +463,8 @@ describe('startSetupFastSessionCommand', () => {
     );
     // The kickoff is admitted durably with its platform framing, so a
     // restart resumes it as a setup event rather than dropping it.
-    const { persistFastAgentInlineHumanTurn } = await import(
-      '@roomote/sdk/server'
-    );
+    const { persistFastAgentInlineHumanTurn } =
+      await import('@roomote/sdk/server');
     expect(vi.mocked(persistFastAgentInlineHumanTurn)).toHaveBeenCalledWith({
       parent: expect.objectContaining({ sessionId: 'setup-conversation-1' }),
       event: expect.objectContaining({

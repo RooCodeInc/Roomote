@@ -33,7 +33,8 @@ export type FastAgentPlatformEventKind =
   | 'input_response';
 
 /** Shared with the durable follow-up event so an admitted reaction resumes as the same input. */
-export type FastAgentReactionExternalInput = SharedFastAgentReactionExternalInput;
+export type FastAgentReactionExternalInput =
+  SharedFastAgentReactionExternalInput;
 
 export const FAST_AGENT_REACTION_INPUT_TYPE = 'reaction' as const;
 

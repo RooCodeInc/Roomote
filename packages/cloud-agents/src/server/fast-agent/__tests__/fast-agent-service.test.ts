@@ -3667,8 +3667,32 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
     });
 
-    it('posts the terminal closeout of a plain-text turn without withdrawing it from replay', async () => {
-      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+    // Records the order of a system-posted closeout's intent row, its
+    // surface post, and its result row.
+    const recordCloseoutOrder = (postReply: ReturnType<typeof vi.fn>) => {
+      const order: string[] = [];
+      postReply.mockImplementation(async () => {
+        order.push('post');
+        return { messageId: 'reply-1' };
+      });
+      mocks.upsertMessage.mockImplementation(async ({ message }) => {
+        const payload = message.payload as {
+          title?: string;
+          rawInput?: { arguments?: { purpose?: string; message?: string } };
+        };
+        if (payload.title === nativeToolNames.sendChatReply) {
+          order.push(
+            `${message.eventType === 'roomote_runtime.tool_call' ? 'call' : 'result'}:${payload.rawInput?.arguments?.message}`,
+          );
+        }
+        return { initialHumanTurn: false };
+      });
+      return order;
+    };
+
+    it('records the terminal closeout as a call before posting it and a result after', async () => {
+      const postReply = vi.fn();
+      const order = recordCloseoutOrder(postReply);
       mocks.generateText.mockResolvedValueOnce('All done.');
 
       await answerFastAgentQuestion({
@@ -3677,15 +3701,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         durableAdmission,
       });
 
+      // Same recorded intent as a model-authored closeout, so a resumed run
+      // finds it in the transcript whether or not the post completed.
+      expect(order).toEqual(['call:All done.', 'post', 'result:All done.']);
       expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
-      expect(postReply).toHaveBeenCalledWith(
-        expect.objectContaining({ purpose: 'closeout', message: 'All done.' }),
-      );
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 
-    it('posts the error closeout without withdrawing the turn from replay', async () => {
-      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+    it('records the error closeout as a call before posting it and a result after', async () => {
+      const postReply = vi.fn();
+      const order = recordCloseoutOrder(postReply);
       mocks.generateText.mockRejectedValueOnce(new Error('provider exploded'));
 
       await answerFastAgentQuestion({
@@ -3694,10 +3719,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         durableAdmission,
       });
 
+      expect(order).toHaveLength(3);
+      expect(order[0]).toMatch(/^call:/u);
+      expect(order[1]).toBe('post');
+      expect(order[2]).toMatch(/^result:/u);
       expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
-      expect(postReply).toHaveBeenCalledWith(
-        expect.objectContaining({ purpose: 'closeout' }),
-      );
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 

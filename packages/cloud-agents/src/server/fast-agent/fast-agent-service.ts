@@ -2195,6 +2195,34 @@ export async function answerFastAgentQuestion({
       true,
     );
   };
+  /**
+   * Post a closeout the service authors itself (terminal or error) under the
+   * same recorded intent a model-authored `send_chat_reply` gets: a call row
+   * before the post and a result row after it. A run that resumes this turn
+   * then reads the closeout from the transcript, delivered or cut off inside
+   * the post, exactly as it would a model-authored one (see
+   * findRecordedCloseout), so neither can be posted a second time after the
+   * user already saw it.
+   */
+  const postRecordedSystemCloseout = async (
+    message: string,
+    post: () => Promise<void>,
+  ) => {
+    const call = await beginCanonicalToolEvent({
+      title: FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
+      args: { purpose: 'closeout', message },
+    });
+    try {
+      await post();
+    } catch (error) {
+      await finishCanonicalToolEvent(call, {
+        success: false,
+        error: formatErrorForLog(error),
+      });
+      throw error;
+    }
+    await finishCanonicalToolEvent(call, { success: true, delivered: true });
+  };
   const canonicalSubagentEvents = new Map<
     string,
     { eventId: string; turnSeq: number }
@@ -4449,43 +4477,45 @@ export async function answerFastAgentQuestion({
       !isInstructionClosed(terminalInstructionVersion)
     ) {
       const message = resolveTerminalReplyText(promptText).trim();
-      // The terminal closeout stays inside replay: its reply row is recorded
-      // as soon as it posts, and a resumed run settles on that record
-      // instead of posting again.
+      // The terminal closeout stays inside replay: its intent is recorded
+      // before the post and its reply row right after, so a resumed run
+      // settles on that record instead of posting again.
       if (message) {
         const streamedEvent = await takeStreamedReplyEvent();
-        await postReply(
-          { purpose: 'closeout', message },
-          false,
-          completedOpenCodeMessage,
-          terminalInstructionVersion,
-          streamedEvent,
+        await postRecordedSystemCloseout(message, () =>
+          postReply(
+            { purpose: 'closeout', message },
+            false,
+            completedOpenCodeMessage,
+            terminalInstructionVersion,
+            streamedEvent,
+          ),
         );
       } else if (!visibleUpdatePosted) {
         // A delivered update is already a complete visible response. Stay
         // silent rather than append a generic closeout that contradicts it.
-        await postReply(
-          {
-            purpose: 'closeout',
-            message:
-              'I could not complete that request within the available turn.',
-          },
-          false,
-          undefined,
-          terminalInstructionVersion,
+        const fallback =
+          'I could not complete that request within the available turn.';
+        await postRecordedSystemCloseout(fallback, () =>
+          postReply(
+            { purpose: 'closeout', message: fallback },
+            false,
+            undefined,
+            terminalInstructionVersion,
+          ),
         );
       } else if (platformEvent && platformEventVisibility === 'required') {
         // A visibility-required platform event promises a closeout even when
         // an intro ack or launch kickoff already posted a visible update
         // (e.g. the setup kickoff ending on an empty terminal response).
-        await postReply(
-          {
-            purpose: 'closeout',
-            message: 'I will post updates here as this progresses.',
-          },
-          false,
-          undefined,
-          terminalInstructionVersion,
+        const fallback = 'I will post updates here as this progresses.';
+        await postRecordedSystemCloseout(fallback, () =>
+          postReply(
+            { purpose: 'closeout', message: fallback },
+            false,
+            undefined,
+            terminalInstructionVersion,
+          ),
         );
       }
     }
@@ -4623,16 +4653,20 @@ export async function answerFastAgentQuestion({
             inferenceRetryAttempted,
           )
         : 'I hit an error while handling that request. Please try again in a moment.';
-    // The error closeout is recorded like any other reply, so a run that
-    // resumes this turn sees it and does not post a second one.
+    // The error closeout is recorded like any other closeout: its intent
+    // before the post and its reply row right after, so a run that resumes
+    // this turn sees it and does not post a second one.
     if (!isInstructionClosed()) {
       try {
         const reply = { purpose: 'closeout' as const, message };
-        if (
-          !(await replaceInferenceRetryReply(reply, true, () =>
-            diagnostics.recordVisibleReply(),
-          ))
-        ) {
+        await postRecordedSystemCloseout(message, async () => {
+          if (
+            await replaceInferenceRetryReply(reply, true, () =>
+              diagnostics.recordVisibleReply(),
+            )
+          ) {
+            return;
+          }
           const posted =
             (await surfaceReplyStream.deliver(reply)) ??
             (await adapter.postReply(reply));
@@ -4645,7 +4679,7 @@ export async function answerFastAgentQuestion({
             ),
             platformMessageId: posted?.messageId,
           });
-        }
+        });
         inferenceRetryReply = undefined;
         inferenceRetryMessageIndex = undefined;
         inferenceRetryCanonicalEvent = undefined;
