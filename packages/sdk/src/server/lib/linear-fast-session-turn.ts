@@ -20,6 +20,26 @@ function formatLinearComment(comment: {
  * What the Session reads with a Linear event: the issue, the discussion so
  * far on the first turn, and any agent guidance the workspace configured.
  */
+/**
+ * Assigning an issue to the agent makes Linear author a stub comment such as
+ * "This thread is for an agent session with @roomote." That is plumbing, not
+ * a request: a Session handed the stub would acknowledge the thread instead
+ * of working the issue, so it falls through to the work-on-issue prompt.
+ */
+function isLinearDelegationStub(text: string): boolean {
+  return /^this thread is for an agent session\b/i.test(text);
+}
+
+function normalizeLinearRequestText(
+  text: string | undefined,
+): string | undefined {
+  const trimmed = text?.trim();
+  if (!trimmed || isLinearDelegationStub(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
+}
+
 export function buildLinearFastTurn(input: {
   payload: AgentSessionEventPayload;
   agentSession: AgentSessionEventPayload['agentSession'];
@@ -31,10 +51,14 @@ export function buildLinearFastTurn(input: {
 } {
   const { payload, agentSession } = input;
   const issue = agentSession.issue;
-  const promptBody = payload.agentActivity?.content?.body?.trim();
+  const promptBody = normalizeLinearRequestText(
+    payload.agentActivity?.content?.body,
+  );
   const firstTurn = payload.action !== 'prompted';
   const question =
-    (firstTurn ? agentSession.comment?.body?.trim() : promptBody) ||
+    (firstTurn
+      ? normalizeLinearRequestText(agentSession.comment?.body)
+      : promptBody) ||
     promptBody ||
     `Work on ${issue.identifier}: ${issue.title}`;
 
