@@ -123,6 +123,7 @@ function compactAutomation(
     'name',
     'enabled',
     'model',
+    'reasoningEffort',
     'environmentId',
   ]);
   if (options.includeLastError && typeof automation.lastError === 'string') {
@@ -206,7 +207,14 @@ export function compactManageCustomAutomationsResult(
         models: Array.isArray(result.models)
           ? result.models.map((model) => {
               const record = asRecord(model);
-              return record ? pickDefined(record, ['id', 'displayName']) : {};
+              if (!record) return {};
+              const metadata = asRecord(record.metadata);
+              return {
+                ...pickDefined(record, ['id', 'displayName']),
+                ...(typeof metadata?.supportsReasoning === 'boolean'
+                  ? { supportsReasoning: metadata.supportsReasoning }
+                  : {}),
+              };
             })
           : [],
         ...pickDefined(result, ['defaultModelId']),

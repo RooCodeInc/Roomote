@@ -53,6 +53,7 @@ describe('manage custom automations tool contract', () => {
             scheduleMode: 'cron',
             cronExpression: '0 9 * * 1-5',
             model: 'openai/gpt-5.6-luna',
+            reasoningEffort: 'high',
             environmentId: 'environment-1',
             target: {
               provider: 'slack',
@@ -75,6 +76,7 @@ describe('manage custom automations tool contract', () => {
           enabled: true,
           schedule: '0 9 * * 1-5',
           model: 'openai/gpt-5.6-luna',
+          reasoningEffort: 'high',
           environmentId: 'environment-1',
           targetProvider: 'slack',
           targetMode: 'channel',
@@ -121,6 +123,7 @@ describe('manage custom automations tool contract', () => {
       scheduleMode: 'daily',
       cronExpression: null,
       model: null,
+      reasoningEffort: 'high',
       environmentId: '__fast__',
       target: {
         provider: 'telegram',
@@ -146,14 +149,24 @@ describe('manage custom automations tool contract', () => {
             id: 'openai/gpt-5.6-luna',
             displayName: 'GPT 5.6 Luna',
             family: 'GPT',
-            metadata: { contextWindow: 1_000_000, inputPricePerToken: 1 },
+            metadata: {
+              contextWindow: 1_000_000,
+              inputPricePerToken: 1,
+              supportsReasoning: true,
+            },
           },
         ],
         defaultModelId: 'openai/gpt-5.6-luna',
         providerConfig: { secret: 'not-for-the-model' },
       }),
     ).toEqual({
-      models: [{ id: 'openai/gpt-5.6-luna', displayName: 'GPT 5.6 Luna' }],
+      models: [
+        {
+          id: 'openai/gpt-5.6-luna',
+          displayName: 'GPT 5.6 Luna',
+          supportsReasoning: true,
+        },
+      ],
       defaultModelId: 'openai/gpt-5.6-luna',
     });
     expect(
@@ -180,6 +193,7 @@ describe('manage custom automations tool contract', () => {
           enabled: false,
           schedule: 'daily',
           model: null,
+          reasoningEffort: 'high',
           environmentId: '__fast__',
           targetProvider: 'telegram',
           targetMode: 'direct_message',
