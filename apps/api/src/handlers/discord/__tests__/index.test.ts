@@ -2197,6 +2197,27 @@ describe('Discord Gateway event handler', () => {
         initialText: expect.stringContaining('Build a fresh dashboard'),
       }),
     );
+    // The slash command is acknowledged with a pointer; the answer itself
+    // lands in the new thread, not the invoking channel.
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        interaction: { interaction, interactionDeferred: true },
+        text: 'Started a new conversation in <#thread-new>.',
+        ephemeral: true,
+      }),
+    );
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: expect.objectContaining({ channelId: 'thread-new' }),
+        text: expect.stringContaining('A quick answer'),
+      }),
+    );
+    expect(mocks.reply).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        interaction: expect.anything(),
+        text: expect.stringContaining('A quick answer'),
+      }),
+    );
     expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({
         question: 'Build a fresh dashboard',

@@ -879,6 +879,12 @@ async function processDiscordGatewayEvent(
     // simply joins it.
     let fastChannel = channel;
     let fastMetadata = metadata;
+    // In a DM the interaction reply is the conversation, so Fast answers
+    // through it. In a server the answer belongs in the new thread, so the
+    // interaction only gets a pointer and Fast posts directly to the thread.
+    let fastInteraction:
+      | ReturnType<typeof interactionReplyContext>
+      | undefined = interactionReplyContext(event);
     if (!channel.isDirectMessage) {
       const parentId = channel.parentChannelId ?? channel.channelId;
       const thread = await resolved.provider.createTaskThread({
@@ -899,6 +905,15 @@ async function processDiscordGatewayEvent(
         communicationChannelId: thread.parentChannelId,
         communicationThreadId: thread.channelId,
       };
+      await replyToDiscordEvent({
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        channel,
+        interaction: fastInteraction,
+        text: `Started a new conversation in <#${thread.channelId}>.`,
+        ephemeral: true,
+      });
+      fastInteraction = undefined;
     }
     await processDiscordFastAgentMessage({
       event,
@@ -911,7 +926,7 @@ async function processDiscordGatewayEvent(
       metadata: fastMetadata,
       conversationId: getDiscordFastConversationId(fastChannel, interaction.id),
       createAnchoredThread: false,
-      interaction: interactionReplyContext(event),
+      ...(fastInteraction ? { interaction: fastInteraction } : {}),
       directedAtRoomote: true,
     });
     return { ok: true, fastAnswered: true, fastStartedNew: true };
