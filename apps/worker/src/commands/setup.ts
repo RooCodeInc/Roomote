@@ -10,7 +10,15 @@
  * needs to exist before this can run.
  */
 
-import { TaskPayloadKind } from '@roomote/types';
+import {
+  buildInferenceGatewayOpenCodeBaseUrl,
+  buildInferenceGatewayUrl,
+  CONTROL_PLANE_ENV_VAR_NAMES,
+  getInferenceGatewayProvider,
+  SANDBOX_OPENROUTER_GATEWAY_BASE_URL_ENV_VAR_NAME,
+  SANDBOX_OPENROUTER_GATEWAY_PROVIDER_ID,
+  TaskPayloadKind,
+} from '@roomote/types';
 
 import { ExecutionError } from '../command-executor';
 import type { WorkerEnv } from '../env';
@@ -119,6 +127,18 @@ export async function setup({
 }: SetupOptions): Promise<SetupResult> {
   const setupStartedAt = Date.now();
   const harness = resolveWorkerCodingHarness(workspaceOpts.harness);
+  const sandboxOpenRouterProvider = getInferenceGatewayProvider(
+    SANDBOX_OPENROUTER_GATEWAY_PROVIDER_ID,
+  );
+
+  if (!sandboxOpenRouterProvider) {
+    throw new Error('Sandbox OpenRouter gateway provider is not registered');
+  }
+  const workspaceRuntimeEnvVars = Object.fromEntries(
+    Object.entries(workspaceOpts.envVars).filter(
+      ([name]) => !CONTROL_PLANE_ENV_VAR_NAMES.has(name),
+    ),
+  );
 
   logger.userLog.log(`Setup started (harness: ${harness}, mode: ${mode})`);
 
@@ -139,7 +159,19 @@ export async function setup({
       workspaceOpts.taskRunType === TaskPayloadKind.SnapshotEnvironment,
     envVars: {
       ...workerEnv.buildUserFacingEnv(),
-      ...workspaceOpts.envVars,
+      ...workspaceRuntimeEnvVars,
+      ...(workspaceOpts.workspace.type === 'environment' && {
+        // Environment setup may start a nested Roomote deployment. Give it
+        // only the existing run-scoped gateway credentials, never provider
+        // keys held by the parent control plane.
+        ROOMOTE_PLATFORM_API_URL: workerEnv.trpcUrl,
+        ROOMOTE_CLOUD_TOKEN: workerEnv.authToken,
+        [SANDBOX_OPENROUTER_GATEWAY_BASE_URL_ENV_VAR_NAME]:
+          buildInferenceGatewayOpenCodeBaseUrl(
+            buildInferenceGatewayUrl(workerEnv.trpcUrl),
+            sandboxOpenRouterProvider,
+          ),
+      }),
     },
   };
   let result: PrepareWorkspaceResult | undefined;

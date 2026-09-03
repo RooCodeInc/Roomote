@@ -331,6 +331,10 @@ envVarGroups:
         generateValue: true
       - key: DASHBOARD_PASSWORD
         generateValue: true
+      # Optional capped key for Roomote deployments running in task sandboxes.
+      # The parent API serves it only through the run-token inference gateway.
+      - key: R_SANDBOX_OPENROUTER_API_KEY
+        sync: false
       # onrender.com domains are publicly reachable, so gate /setup by
       # default. Copy the value from this group in the Render dashboard.
       - key: SETUP_TOKEN

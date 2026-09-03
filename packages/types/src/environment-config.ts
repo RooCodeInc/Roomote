@@ -4,6 +4,17 @@ import { z } from 'zod';
 import { PRODUCT_NAME } from './constants';
 import { gitBranchNameSchema } from './git-ref';
 import { collectReservedEnvReferences } from './reserved-mcp-env-vars';
+import { SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME } from './sandbox-openrouter';
+
+const environmentEnvMapSchema = z.record(z.string()).superRefine((env, ctx) => {
+  if (SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME in env) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME],
+      message: `${SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME} is a reserved control-plane secret and cannot be stored in an environment definition`,
+    });
+  }
+});
 
 /**
  * Command
@@ -21,7 +32,7 @@ export const commandSchema = z.object({
    * Command-specific env vars take precedence over global ones.
    * @example { NODE_ENV: 'production', API_KEY: 'secret' }
    */
-  env: z.record(z.string()).optional(),
+  env: environmentEnvMapSchema.optional(),
   working_dir: z.string().optional(),
   cwd: z.string().optional(),
   timeout: z.number().positive().default(COMMAND_DEFAULT_TIMEOUT),
@@ -148,7 +159,7 @@ const dockerProjectCommonShape = {
       'Must reference a configured slash-separated repository name',
     ),
   working_dir: dockerProjectRelativePathSchema.optional(),
-  env: z.record(z.string()).optional(),
+  env: environmentEnvMapSchema.optional(),
   ports: z.array(dockerProjectPortSchema).optional(),
   required: z.boolean().optional(),
   startup_timeout_seconds: z.number().int().positive().max(3600).optional(),
@@ -168,7 +179,7 @@ export const dockerfileDockerProjectSchema = z.object({
   context: dockerProjectRelativePathSchema.optional(),
   dockerfile: dockerProjectRelativePathSchema.optional(),
   target: z.string().min(1).optional(),
-  build_args: z.record(z.string()).optional(),
+  build_args: environmentEnvMapSchema.optional(),
   command: z.array(z.string()).min(1).optional(),
 });
 
@@ -415,7 +426,7 @@ export const environmentMcpServerStreamableHttpSchema =
 const environmentMcpServerStdioInputSchema = z.object({
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
-  env: z.record(z.string()).optional(),
+  env: environmentEnvMapSchema.optional(),
   url: z.undefined().optional(),
   headers: z.undefined().optional(),
 });
@@ -701,7 +712,7 @@ export const environmentConfigSchema = z
      * @example { node: "22.14.0", python: "3.12.1" }
      */
     tool_versions: toolVersionsSchema.optional(),
-    env: z.record(z.string()).optional(),
+    env: environmentEnvMapSchema.optional(),
     services: z
       .array(serviceConfigSchema)
       .optional()

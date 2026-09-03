@@ -9,6 +9,10 @@ import {
   isOpenAiCompatibleProviderId,
   parseOpenAiCompatibleBaseUrlEnvVarName,
 } from './openai-compatible-providers';
+import {
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+  SANDBOX_OPENROUTER_GATEWAY_PROVIDER_ID,
+} from './sandbox-openrouter';
 
 /**
  * Sandbox-facing env var carrying the gateway base URL (e.g.
@@ -115,7 +119,8 @@ export interface InferenceGatewayProvider {
     | SetupModelProviderId
     | typeof BEDROCK_MANTLE_OPENCODE_PROVIDER_ID
     | typeof BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID
-    | typeof CHATGPT_GATEWAY_PROVIDER_ID;
+    | typeof CHATGPT_GATEWAY_PROVIDER_ID
+    | typeof SANDBOX_OPENROUTER_GATEWAY_PROVIDER_ID;
   name: string;
   /**
    * Deployment env vars holding the provider API key the gateway injects,
@@ -230,6 +235,15 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       id: 'roomote',
       name: 'Roomote inference',
       envVarNames: [ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME],
+      upstreamBaseUrl: 'https://openrouter.ai/api',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: SANDBOX_OPENROUTER_GATEWAY_PROVIDER_ID,
+      name: 'Sandbox OpenRouter',
+      envVarNames: [SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME],
       upstreamBaseUrl: 'https://openrouter.ai/api',
       authHeader: { name: 'authorization', scheme: 'bearer' },
       allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
