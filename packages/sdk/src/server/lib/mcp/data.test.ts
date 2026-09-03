@@ -36,7 +36,7 @@ describe('storeTokens', () => {
     updateMock.mockReturnValue({ set: setMock });
   });
 
-  it('preserves the stored refresh token when refresh_token is omitted', async () => {
+  it('clears a stale refresh token when a stored token response omits one', async () => {
     await storeTokens('conn-1', {
       access_token: 'fresh-access-token',
       token_type: 'Bearer',
@@ -47,12 +47,12 @@ describe('storeTokens', () => {
     expect(setMock).toHaveBeenCalledWith(
       expect.objectContaining({
         accessToken: 'fresh-access-token',
+        refreshToken: null,
         authStatus: 'authenticated',
         enabled: true,
         scopes: ['read', 'write'],
       }),
     );
-    expect(setMock.mock.calls[0]?.[0]).not.toHaveProperty('refreshToken');
   });
 
   it('stores a replacement refresh token when one is supplied', async () => {
@@ -164,7 +164,6 @@ describe('getClientInformation', () => {
       ok: true,
       json: vi.fn().mockResolvedValue({
         access_token: 'fresh-access-token',
-        refresh_token: 'fresh-refresh-token',
         expires_in: 86_400,
         scope: 'read,write',
       }),
@@ -178,6 +177,9 @@ describe('getClientInformation', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       'https://api.linear.app/oauth/token',
       expect.objectContaining({ method: 'POST' }),
+    );
+    expect(setMock).toHaveBeenCalledWith(
+      expect.objectContaining({ refreshToken: 'refresh-token' }),
     );
   });
 });

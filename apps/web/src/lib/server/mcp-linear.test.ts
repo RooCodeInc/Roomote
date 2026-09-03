@@ -63,9 +63,28 @@ vi.mock('@roomote/sdk/server', () => ({
     id: 'deployment-connection-1',
     authConfig: { linearOrganizationId: 'linear-org-1' },
   }),
-  getLinearDeploymentMetadata: vi.fn().mockReturnValue({
-    linearOrganizationId: 'linear-org-1',
-  }),
+  getLinearDeploymentMetadata: vi.fn(
+    (authConfig: Record<string, unknown> | null) =>
+      authConfig && typeof authConfig.linearOrganizationId === 'string'
+        ? {
+            linearOrganizationId: authConfig.linearOrganizationId,
+            appUserId:
+              typeof authConfig.appUserId === 'string'
+                ? authConfig.appUserId
+                : null,
+          }
+        : null,
+  ),
+  getLinearUserMetadata: vi.fn((authConfig: Record<string, unknown> | null) =>
+    authConfig &&
+    typeof authConfig.linearOrganizationId === 'string' &&
+    typeof authConfig.linearUserId === 'string'
+      ? {
+          linearOrganizationId: authConfig.linearOrganizationId,
+          linearUserId: authConfig.linearUserId,
+        }
+      : null,
+  ),
   getMcpOauthReplay: getMcpOauthReplayMock,
   getValidAccessToken: vi.fn().mockResolvedValue('deployment-token'),
   LINEAR_ORG_CONNECTION_ROLE: 'deployment',
@@ -179,30 +198,90 @@ describe('hydrateLinearMcpConnectionAfterOauth', () => {
     );
   });
 
-  it('preserves the stored refresh token when refresh_token is omitted', async () => {
-    await hydrateLinearMcpConnectionAfterOauth({
-      connection: {
-        id: 'connection-1',
-        connectionRole: 'user',
-        userId: 'roomote-user-1',
-        refreshToken: 'stored-refresh-token',
-      } as never,
-      tokens: {
-        access_token: 'replacement-access-token',
+  it.each([
+    {
+      name: 'user',
+      connectionRole: 'user',
+      authConfig: {
+        linearOrganizationId: 'linear-org-1',
+        linearUserId: 'linear-user-1',
       },
-    });
+    },
+    {
+      name: 'organization',
+      connectionRole: 'deployment',
+      authConfig: {
+        linearOrganizationId: 'linear-org-1',
+        appUserId: 'linear-user-1',
+      },
+    },
+  ])(
+    'preserves an omitted refresh token for the same Linear $name identity',
+    async ({ connectionRole, authConfig }) => {
+      await hydrateLinearMcpConnectionAfterOauth({
+        connection: {
+          id: 'connection-1',
+          connectionRole,
+          userId: 'roomote-user-1',
+          authConfig,
+          refreshToken: 'stored-refresh-token',
+        } as never,
+        tokens: {
+          access_token: 'replacement-access-token',
+        },
+      });
 
-    expect(dbUpdateSetMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        accessToken: 'replacement-access-token',
-        authStatus: 'authenticated',
-        enabled: true,
-      }),
-    );
-    expect(dbUpdateSetMock.mock.calls[0]?.[0]).not.toHaveProperty(
-      'refreshToken',
-    );
-  });
+      expect(dbUpdateSetMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accessToken: 'replacement-access-token',
+          authStatus: 'authenticated',
+          enabled: true,
+        }),
+      );
+      expect(dbUpdateSetMock.mock.calls[0]?.[0]).not.toHaveProperty(
+        'refreshToken',
+      );
+    },
+  );
+
+  it.each([
+    {
+      name: 'user',
+      connectionRole: 'user',
+      authConfig: {
+        linearOrganizationId: 'linear-org-1',
+        linearUserId: 'different-linear-user',
+      },
+    },
+    {
+      name: 'organization',
+      connectionRole: 'deployment',
+      authConfig: {
+        linearOrganizationId: 'linear-org-1',
+        appUserId: 'different-linear-user',
+      },
+    },
+  ])(
+    'clears an old refresh token when the Linear $name identity changes',
+    async ({ connectionRole, authConfig }) => {
+      await hydrateLinearMcpConnectionAfterOauth({
+        connection: {
+          id: 'connection-1',
+          connectionRole,
+          userId: 'roomote-user-1',
+          authConfig,
+          refreshToken: 'stored-refresh-token',
+        } as never,
+        tokens: {
+          access_token: 'replacement-access-token',
+        },
+      });
+
+      expect(dbUpdateSetMock).toHaveBeenCalledWith(
+        expect.objectContaining({ refreshToken: null }),
+      );
+    },
+  );
 
   it('enters the replayed session into Fast under the linked user', async () => {
     const replay = {
