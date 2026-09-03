@@ -103,8 +103,6 @@ vi.mock('../fast-agent-session', () => ({
 vi.mock('../fast-agent-conversation-repository', () => ({
   INTERRUPTED_INFERENCE_RETRY_MESSAGE:
     'The inference retry was interrupted before it completed. Please send the request again.',
-  RESTARTED_ACTIVE_TURN_MESSAGE:
-    'Roomote restarted while working on this request. Please send it again.',
   reconcileFastAgentInferenceRetryNotices: mocks.reconcileRetryNotices,
   markFastAgentInferenceRetryNoticeInterruption:
     mocks.markRetryNoticeInterruption,
@@ -4773,11 +4771,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('posts a terminal closeout when API shutdown interrupts silent retry backoff', async () => {
+  it('posts nothing when API shutdown cuts off an unadmitted turn during silent retry backoff', async () => {
+    // No durable row (the admission write failed) and no visible retry
+    // notice to correct: there is no restart notice any more, so the turn
+    // ends without a user-facing message.
     const controller = new AbortController();
     const shutdown = new FastAgentProcessShutdownError('SIGTERM');
-    const expectedCloseout =
-      'Roomote restarted while working on this request. Please send it again.';
     const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
     const originalSetTimeout = globalThis.setTimeout;
     let shouldAbort = true;
@@ -4804,35 +4803,22 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ).rejects.toBe(shutdown);
 
       expect(mocks.generateText).toHaveBeenCalledOnce();
-      expect(postReply).toHaveBeenCalledOnce();
-      expect(postReply).toHaveBeenCalledWith({
-        purpose: 'closeout',
-        message: expectedCloseout,
-      });
-      const retryWrites = mocks.upsertMessage.mock.calls
-        .map(([input]) => input.message)
-        .filter((message) => message.eventId === '100.2:retry-notice:0');
-      expect(retryWrites.at(-1)).toMatchObject({
-        contentBlocks: [
-          {
-            type: 'text',
-            text: expectedCloseout,
-          },
-        ],
-        metadata: {
-          visibleInTranscript: true,
-          purpose: 'closeout',
-          platformMessageId: 'closeout-1',
-          inferenceRetryNotice: true,
-          inferenceRetryActive: false,
-          interruptionReason: 'api_shutdown',
-        },
-      });
+      expect(postReply).not.toHaveBeenCalled();
+      const persisted = mocks.upsertMessage.mock.calls.map(
+        ([input]) => input.message,
+      );
       expect(
-        mocks.upsertMessage.mock.calls
-          .map(([input]) => input.message.eventId)
-          .filter((eventId) => eventId.startsWith('100.2:assistant:')),
+        persisted.filter((message) =>
+          message.eventId.startsWith('100.2:assistant:'),
+        ),
       ).toHaveLength(0);
+      expect(
+        persisted.some(
+          (message) =>
+            (message.metadata as { purpose?: string } | undefined)?.purpose ===
+            'closeout',
+        ),
+      ).toBe(false);
     } finally {
       timeout.mockRestore();
     }

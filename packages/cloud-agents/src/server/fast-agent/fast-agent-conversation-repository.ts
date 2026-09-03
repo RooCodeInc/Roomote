@@ -65,9 +65,6 @@ export type FastAgentMessageUpsertResult = {
 export const INTERRUPTED_INFERENCE_RETRY_MESSAGE =
   'The inference retry was interrupted before it completed. Please send the request again.';
 
-export const RESTARTED_ACTIVE_TURN_MESSAGE =
-  'Roomote restarted while working on this request. Please send it again.';
-
 /**
  * Why an accepted Fast turn ended without a real answer. Stamped into the
  * terminal message's metadata by every writer so occurrence counts can be

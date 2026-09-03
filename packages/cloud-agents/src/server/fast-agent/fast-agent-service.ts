@@ -120,7 +120,6 @@ import {
   scheduleFastAgentDurableTurnRetry,
   reconcileFastAgentInferenceRetryNotices,
   renewFastSessionRespondingLease,
-  RESTARTED_ACTIVE_TURN_MESSAGE,
   type FastAgentInterruptionReason,
   type FastAgentTurnAttemptSummary,
   type FastAgentUnresolvedRequest,
@@ -4571,44 +4570,19 @@ export async function answerFastAgentQuestion({
           // Resumable turns and unrevoked rows fall through to the rethrow
           // below without a user-facing closeout.
         } else if (!lockOwnershipLost && inferenceRetryReply) {
+          // A visible retry notice must not stay up claiming a retry that
+          // will never come: a deliberately cancelled turn, or the rare turn
+          // whose admission write failed and so has no row to resume from.
+          // Every admitted turn resumes instead and never reaches here.
           await replaceInferenceRetryReply(
             {
               purpose: 'closeout',
-              // A shutdown is a restart the user can see through honestly;
-              // other aborts keep the generic retry-interruption wording.
-              message: shutdownInterrupted
-                ? RESTARTED_ACTIVE_TURN_MESSAGE
-                : INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+              message: INTERRUPTED_INFERENCE_RETRY_MESSAGE,
             },
             true,
             undefined,
             interruptionReason,
           );
-        } else if (shutdownInterrupted && !isInstructionClosed()) {
-          const reply = {
-            purpose: 'closeout' as const,
-            message: RESTARTED_ACTIVE_TURN_MESSAGE,
-          };
-          try {
-            const posted =
-              (await surfaceReplyStream.deliver(reply)) ??
-              (await adapter.postReply(reply));
-            diagnostics.recordVisibleReply();
-            const retryEvent = inferenceRetryCanonicalEvent;
-            await persistAssistantReply({
-              reply,
-              event:
-                retryEvent ??
-                allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
-              platformMessageId: posted?.messageId,
-              inferenceRetryNotice: Boolean(retryEvent),
-              interruptionReason,
-            });
-          } catch (postError) {
-            console.error(
-              `[Fast Agent] Failed to post shutdown closeout: ${formatErrorForLog(postError)}`,
-            );
-          }
         } else if (
           lockOwnershipLost &&
           canonicalConversationId &&
