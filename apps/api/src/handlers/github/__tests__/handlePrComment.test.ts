@@ -14,7 +14,9 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/github', () => ({
   Schemas: {
-    isRoomoteGitHubLogin: vi.fn(() => false),
+    isRoomoteGitHubLogin: vi.fn(
+      (login: string) => login === 'roomote' || login === 'roomote[bot]',
+    ),
   },
   getEffectiveGitHubAppSlug: vi.fn(() => 'roomote'),
   isGitHubRoomoteMentionEnabled: vi.fn(() => true),
@@ -321,5 +323,117 @@ describe('handlePrComment', () => {
 
     expect(result).toEqual({ status: 'ok', message: 'no_mention' });
     expect(mocks.startSourceControlFastSessionTurn).not.toHaveBeenCalled();
+  });
+
+  describe('replies in a review thread Roomote opened', () => {
+    function makeRoomoteThreadReplyPayload(): WebhookPullRequestCommentCreated {
+      const payload = makeReviewCommentPayload();
+      payload.comment.body = 'Can you make this loop bounded instead?';
+      return payload;
+    }
+
+    beforeEach(() => {
+      request.mockImplementation(async (route: string) => {
+        if (route.startsWith('GET /repos/{owner}/{repo}/pulls/comments/')) {
+          return {
+            data: {
+              id: 800,
+              body: 'This loop never terminates.',
+              path: 'src/retry.ts',
+              diff_hunk: '@@ -1 +1 @@\n-old\n+new',
+              user: { login: 'roomote[bot]' },
+            },
+          };
+        }
+        return { data: {} };
+      });
+    });
+
+    it('enters the Session without an @mention when no task owns the pull request', async () => {
+      const result = await handlePrComment(makeRoomoteThreadReplyPayload());
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          status: 'ok',
+          message: 'fast_session_queued',
+        }),
+      );
+      expect(mocks.findReusableGitHubPrFollowUpOwner).toHaveBeenCalledWith({
+        repoFullName: 'acme/api',
+        prNumber: 42,
+        branchName: 'feature/ship',
+        host: 'github.com',
+      });
+      // The gate's fetch is reused for the context; the parent is not
+      // fetched a second time.
+      expect(
+        request.mock.calls.filter(([route]) =>
+          String(route).startsWith('GET /repos/{owner}/{repo}/pulls/comments/'),
+        ),
+      ).toHaveLength(1);
+      expect(createForPullRequestReviewComment).toHaveBeenCalledWith(
+        expect.objectContaining({ comment_id: 900, content: 'eyes' }),
+      );
+      expect(mocks.startSourceControlFastSessionTurn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          discussion: expect.objectContaining({
+            kind: 'pull',
+            number: 42,
+            reviewCommentId: '800',
+          }),
+          question: 'Can you make this loop bounded instead?',
+          agentContext: expect.stringContaining(
+            "alice replied to Roomote's review comment #800",
+          ),
+        }),
+      );
+    });
+
+    it('leaves replies on a Roomote-opened pull request to the review-feedback pipeline', async () => {
+      mocks.findReusableGitHubPrFollowUpOwner.mockResolvedValue({
+        taskId: 'task-owner',
+        runId: 5,
+        status: 'running',
+        taskPhase: null,
+        delivery: 'attach',
+      });
+
+      const result = await handlePrComment(makeRoomoteThreadReplyPayload());
+
+      expect(result).toEqual({ status: 'ok', message: 'no_mention' });
+      expect(mocks.startSourceControlFastSessionTurn).not.toHaveBeenCalled();
+      expect(createForPullRequestReviewComment).not.toHaveBeenCalled();
+    });
+
+    it('ignores replies to review comments written by people', async () => {
+      request.mockImplementation(async (route: string) => {
+        if (route.startsWith('GET /repos/{owner}/{repo}/pulls/comments/')) {
+          return {
+            data: {
+              id: 800,
+              body: 'This loop never terminates.',
+              user: { login: 'carol' },
+            },
+          };
+        }
+        return { data: {} };
+      });
+
+      const result = await handlePrComment(makeRoomoteThreadReplyPayload());
+
+      expect(result).toEqual({ status: 'ok', message: 'no_mention' });
+      expect(mocks.startSourceControlFastSessionTurn).not.toHaveBeenCalled();
+    });
+
+    it('ignores top-level review comments without a mention', async () => {
+      const payload = makeRoomoteThreadReplyPayload();
+      delete (payload.comment as { in_reply_to_id?: number }).in_reply_to_id;
+
+      const result = await handlePrComment(payload);
+
+      expect(result).toEqual({ status: 'ok', message: 'no_mention' });
+      expect(request).not.toHaveBeenCalled();
+      expect(mocks.startSourceControlFastSessionTurn).not.toHaveBeenCalled();
+    });
   });
 });

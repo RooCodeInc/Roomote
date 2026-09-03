@@ -2,7 +2,10 @@ import {
   findActiveGitHubPrReviewTask,
   findReusableGitHubPrFollowUpOwner,
 } from '@roomote/db/server';
-import { getInstallationOctokit } from '@roomote/github';
+import {
+  getInstallationOctokit,
+  Schemas as GitHubSchemas,
+} from '@roomote/github';
 import {
   startSourceControlFastSessionTurn,
   type SourceControlFastDiscussion,
@@ -357,11 +360,18 @@ function buildReviewReplyTriggeringComment({
   commentBody: string;
   parentComment: ReviewCommentSnapshot;
 }): string {
+  const parentIsRoomote = GitHubSchemas.isRoomoteGitHubLogin(
+    parentComment.userLogin,
+  );
   const lines = [
-    `${commenter} mentioned Roomote in a reply to review comment #${parentComment.id}:`,
+    parentIsRoomote
+      ? `${commenter} replied to Roomote's review comment #${parentComment.id}:`
+      : `${commenter} mentioned Roomote in a reply to review comment #${parentComment.id}:`,
     formatQuotedText(commentBody),
     '',
-    `${parentComment.userLogin} wrote the following review comment that this reply is in response to:`,
+    parentIsRoomote
+      ? `Roomote (${parentComment.userLogin}) wrote the following review comment that this reply is in response to:`
+      : `${parentComment.userLogin} wrote the following review comment that this reply is in response to:`,
     formatQuotedText(parentComment.body),
   ];
 
@@ -384,6 +394,7 @@ async function buildTriggeringCommentContext({
   repositoryFullName,
   commenter,
   commentBody,
+  parentComment: knownParentComment,
 }: {
   eventPayload:
     | WebhookPullRequestCommentCreated
@@ -393,16 +404,20 @@ async function buildTriggeringCommentContext({
   repositoryFullName: string;
   commenter: string;
   commentBody: string;
+  /** The review thread parent when the mention gate already fetched it. */
+  parentComment?: ReviewCommentSnapshot | null;
 }): Promise<string> {
   if ('comment' in eventPayload && 'pull_request' in eventPayload) {
     const reviewComment = eventPayload.comment;
 
     if (reviewComment.in_reply_to_id) {
-      const parentComment = await fetchReviewCommentSnapshot({
-        installationId,
-        repositoryFullName,
-        commentId: reviewComment.in_reply_to_id,
-      });
+      const parentComment =
+        knownParentComment ??
+        (await fetchReviewCommentSnapshot({
+          installationId,
+          repositoryFullName,
+          commentId: reviewComment.in_reply_to_id,
+        }));
 
       if (parentComment) {
         return buildReviewReplyTriggeringComment({
@@ -659,9 +674,63 @@ async function resolvePullRequestActiveTasks({
 }
 
 /**
+ * A reply inside a review thread Roomote opened is addressed to Roomote the
+ * way GitHub trains people to reply to a reviewer, so it counts as a mention
+ * without the @-handle. Only pull requests no Roomote task owns qualify: on a
+ * Roomote-opened pull request the review-feedback pipeline already batches
+ * these replies into the owning Session with its Resolve / Dismiss actions,
+ * and handling them here too would answer twice.
+ */
+async function resolveImplicitReviewThreadMention({
+  eventPayload,
+  installationId,
+}: {
+  eventPayload: PullRequestMentionEvent;
+  installationId: number;
+}): Promise<{ parentComment: ReviewCommentSnapshot } | null> {
+  if (!('comment' in eventPayload) || !('pull_request' in eventPayload)) {
+    return null;
+  }
+  const { comment, pull_request: pullRequest, repository } = eventPayload;
+  const commenterLogin = comment.user?.login;
+  if (
+    !comment.in_reply_to_id ||
+    !commenterLogin ||
+    GitHubSchemas.isRoomoteGitHubLogin(commenterLogin)
+  ) {
+    return null;
+  }
+
+  const parentComment = await fetchReviewCommentSnapshot({
+    installationId,
+    repositoryFullName: repository.full_name,
+    commentId: comment.in_reply_to_id,
+  });
+  if (
+    !parentComment ||
+    !GitHubSchemas.isRoomoteGitHubLogin(parentComment.userLogin)
+  ) {
+    return null;
+  }
+
+  const owner = await findReusableGitHubPrFollowUpOwner({
+    repoFullName: repository.full_name,
+    prNumber: pullRequest.number,
+    branchName: pullRequest.head?.ref ?? '',
+    host: toHostFromUrl(pullRequest.html_url ?? '') ?? 'github.com',
+  }).catch(() => null);
+  if (owner) {
+    return null;
+  }
+
+  return { parentComment };
+}
+
+/**
  * Every @mention on a pull request enters the pull request's Fast Session.
  * The Session reads the discussion, replies as a comment, and delegates work
- * to a task on the pull request's branch when the request needs one.
+ * to a task on the pull request's branch when the request needs one. A reply
+ * in a review thread Roomote opened enters the same way without an @mention.
  */
 export async function handlePrComment(
   eventPayload: PullRequestMentionEvent,
@@ -669,17 +738,26 @@ export async function handlePrComment(
   const { installation, repository, sender, ...rest } = eventPayload;
   const isSubmittedReview = 'review' in rest;
   const mention = isSubmittedReview ? rest.review : rest.comment;
+  const githubInstallationId = installation?.id;
 
-  if (
-    !isMention({
-      body: mention.body ?? '',
-      user: mention.user ? { login: mention.user.login } : null,
-    })
-  ) {
-    return { status: 'ok', message: 'no_mention' };
+  const explicitMention = isMention({
+    body: mention.body ?? '',
+    user: mention.user ? { login: mention.user.login } : null,
+  });
+  let reviewThreadParent: ReviewCommentSnapshot | null = null;
+  if (!explicitMention) {
+    const implicitMention = githubInstallationId
+      ? await resolveImplicitReviewThreadMention({
+          eventPayload,
+          installationId: githubInstallationId,
+        })
+      : null;
+    if (!implicitMention) {
+      return { status: 'ok', message: 'no_mention' };
+    }
+    reviewThreadParent = implicitMention.parentComment;
   }
 
-  const githubInstallationId = installation?.id;
   const mentionResponseTarget = getMentionResponseTarget(eventPayload);
 
   if (!githubInstallationId) {
@@ -771,6 +849,7 @@ export async function handlePrComment(
         repositoryFullName: repository.full_name,
         commenter: sender.login,
         commentBody: mention.body ?? '',
+        parentComment: reviewThreadParent,
       }),
     ]);
 
