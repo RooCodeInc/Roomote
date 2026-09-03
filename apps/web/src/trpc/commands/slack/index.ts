@@ -831,6 +831,34 @@ const SLACK_USER_ID_PATTERN = /^[UW][A-Z0-9]+$/;
 const SLACK_CHANNEL_ID_PATTERN = /^[CDG][A-Z0-9]+$/;
 /** Parallel `conversations.info` calls per resolve request, kept well under Slack's per-method quota. */
 const SLACK_CHANNEL_LOOKUP_CONCURRENCY = 4;
+/** How long one in-process channel-info cache serves a workspace before a fresh instance replaces it. */
+const SLACK_CHANNEL_INFO_CACHE_WINDOW_MS = 60_000;
+
+const channelInfoCachesByTeam = new Map<
+  string,
+  { cache: SlackChannelInfoCache; createdAt: number }
+>();
+
+/**
+ * One `SlackChannelInfoCache` per workspace, shared across concurrent resolve
+ * requests in this process so transcript messages that mount together
+ * coalesce on a single in-flight `conversations.info` call per channel
+ * instead of each racing the cold Redis layer. Instances are recycled on a
+ * short window so the in-memory memo cannot serve a renamed channel forever.
+ */
+function getSharedChannelInfoCache(teamId: string): SlackChannelInfoCache {
+  const now = Date.now();
+  const existing = channelInfoCachesByTeam.get(teamId);
+  if (
+    existing &&
+    now - existing.createdAt < SLACK_CHANNEL_INFO_CACHE_WINDOW_MS
+  ) {
+    return existing.cache;
+  }
+  const cache = new SlackChannelInfoCache(teamId);
+  channelInfoCachesByTeam.set(teamId, { cache, createdAt: now });
+  return cache;
+}
 
 /**
  * Slack team a transcript belongs to, derived server-side from the task run
@@ -963,14 +991,15 @@ export async function resolveSlackUsersCommand(
   }
 
   const unresolved = userIds.filter((userId) => !users[userId]);
-  // The channel-info cache is Redis-backed, so a channel name is fetched
-  // from Slack once per TTL across every transcript view, not per render.
+  // The channel-info cache is Redis-backed and shared across requests in
+  // this process, so a channel name is fetched from Slack once per TTL and
+  // concurrent cold lookups for the same channel collapse into one call.
   const slack = installation?.botAccessToken
     ? new SlackNotifier(installation.botAccessToken, {
         botUserId: installation.botUserId,
         botName: installation.botName,
         appName: installation.appName,
-        channelInfoCache: new SlackChannelInfoCache(teamId),
+        channelInfoCache: getSharedChannelInfoCache(teamId),
       })
     : null;
   if (unresolved.length > 0 && slack) {
