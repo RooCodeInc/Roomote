@@ -875,6 +875,58 @@ describe('Discord component callbacks', () => {
     );
   });
 
+  it('keeps a bare-repository suggestion on its saved repository', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+    mocks.claimSuggestion.mockResolvedValue({
+      id: 'suggestion-1',
+      title: 'Fix the flaky login test',
+      brief: null,
+      targetRepositoryFullName: 'acme/app',
+      targetEnvironmentId: null,
+      investigationContext: null,
+      launchClaimedAt: new Date(),
+    });
+    mocks.startNewTask.mockResolvedValue({
+      status: 'started',
+      launchResult: { id: 42, taskId: 'task-9' },
+      taskUrl: 'https://app.example.com/task/task-9',
+    });
+    mocks.finalizeWorkItem.mockResolvedValue({ id: 'suggestion-1' });
+
+    const result = await handleDiscordComponentInteraction({
+      provider: { postMessage } as never,
+      applicationId: 'app-1',
+      interaction: {
+        id: 'interaction-3',
+        application_id: 'app-1',
+        type: 3,
+        token: 'token-3',
+        channel_id: 'dm-1',
+        user: { id: 'discord-user-1', username: 'matt' },
+        data: { custom_id: 'idea:suggestion-1', component_type: 2 },
+      },
+      interactionDeferred: true,
+      channel: {
+        channelId: 'dm-1',
+        channelName: 'DM',
+        channelType: 1,
+        isDirectMessage: true,
+        isThread: false,
+      },
+    });
+
+    expect(result).toBe('handled');
+    expect(mocks.resolveWorkspace).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace: {
+          repoForPayload: 'acme/app',
+          workspaceDisplayName: 'acme/app',
+        },
+      }),
+    );
+  });
+
   it('posts the canonical read-only message when a suggestion launch is policy-blocked', async () => {
     const postMessage = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
     const provider = { postMessage } as never;

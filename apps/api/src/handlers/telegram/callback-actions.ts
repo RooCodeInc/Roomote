@@ -12,7 +12,10 @@ import {
   parsePrReviewActionCallbackData,
 } from '@roomote/types';
 import { continueFastAgentSurfaceReply } from '@roomote/sdk/server';
-import { getOrCreateFastAgentSession } from '@roomote/cloud-agents/server';
+import {
+  getOrCreateFastAgentSession,
+  launchPinnedFastSessionTask,
+} from '@roomote/cloud-agents/server';
 import {
   and,
   db,
@@ -37,23 +40,23 @@ import {
   type ClaimedCurrentThreadSuggestion,
 } from '../tasks/current-thread-suggestion-reaction.js';
 import { stopTaskRun } from '../tasks/task-stop.js';
-import {
-  parseCancelTaskCallbackData,
-  parseTelegramRouteCallbackData,
-} from './callback-data.js';
+import { parseCancelTaskCallbackData } from './callback-data.js';
 import { resolveTelegramSenderUserId } from './linked-user.js';
 import {
   answerTelegramCallbackQueryBestEffort,
   clearTelegramMessageButtonsBestEffort,
   postTelegramMessageBestEffort,
 } from './replies.js';
-import { handleTelegramRoutingCallback } from './routing-confirmation.js';
 import {
   claimTelegramSuggestionLaunch,
   parseTelegramSuggestionCallbackData,
 } from './setup-suggestions.js';
-import { startNewTelegramTask } from './task-orchestration.js';
-import { resolveTelegramWorkspace } from './task-launch.js';
+import {
+  launchTelegramTask,
+  resolveTelegramWorkspace,
+  shouldCreateTelegramTaskTopic,
+} from './task-launch.js';
+import { telegramPrivateTopicsEnabledBestEffort } from './replies.js';
 import type { QueuedTelegramCommunicationMessage } from './types.js';
 
 async function findCancelableTaskRun(runId: number, chatId: string) {
@@ -282,52 +285,62 @@ async function handleSuggestionLaunchCallback(params: {
       launchTarget,
       suggestion,
     );
-    const workspaceOverride =
-      launchTarget.kind === 'all_repositories'
+    // A card pinned to a bare repository keeps that repository; only cards
+    // with no target at all run against every repository.
+    const pinnedRepositoryFullName =
+      launchTarget.kind === 'legacy_pinned' &&
+      suggestion.targetRepositoryFullName &&
+      suggestion.targetRepositoryFullName !== ALL_REPOSITORIES
+        ? suggestion.targetRepositoryFullName
+        : null;
+    const workspace = pinnedEnvironmentId
+      ? await resolveTelegramWorkspace({
+          type: 'environment',
+          id: pinnedEnvironmentId,
+          name: pinnedEnvironmentId,
+        })
+      : pinnedRepositoryFullName
         ? {
+            repoForPayload: pinnedRepositoryFullName,
+            workspaceDisplayName: pinnedRepositoryFullName,
+          }
+        : {
             repoForPayload: ALL_REPOSITORIES,
             workspaceDisplayName: 'all repos',
-          }
-        : pinnedEnvironmentId
-          ? await resolveTelegramWorkspace({
-              type: 'environment',
-              id: pinnedEnvironmentId,
-              name: pinnedEnvironmentId,
-            })
-          : undefined;
+          };
     // A pinned environment that no longer resolves must fail loudly rather
-    // than fall back to routing (legacy pinned cards included).
-    if (pinnedEnvironmentId && !workspaceOverride) {
+    // than launch somewhere else (legacy pinned cards included).
+    if (!workspace) {
       throw new Error('The suggestion target environment is unavailable.');
     }
+    const providerConversationId =
+      threadId ?? (isTelegramPrivateChat(message) ? chatId : messageId);
+    const conversation = {
+      surface: 'telegram' as const,
+      workspaceId: chatId,
+      conversationId: `${providerConversationId}:user:${senderUserId}`,
+      replyTarget: {
+        channelId: chatId,
+        ...(threadId ? { threadId } : {}),
+      },
+    };
+    // Cards without a pinned workspace let Fast decide; pinned cards delegate
+    // through the owning Session without a model turn.
+    const usesFastTurn =
+      launchTarget.kind === 'fast' || launchTarget.kind === 'router';
     const launchResult = await launchClaimedSuggestedTask({
       suggestion: { id: params.suggestionId, launchClaimedAt: claimedAt },
       policy: {
-        fastEligible: launchTarget.kind === 'fast',
-        userDefaultEnabled: launchTarget.kind === 'fast',
+        fastEligible: usesFastTurn,
+        userDefaultEnabled: usesFastTurn,
         fastAvailable: true,
-        ...(launchTarget.kind === 'fast'
-          ? { requiredMode: 'fast' as const }
-          : launchTarget.kind === 'environment' ||
-              launchTarget.kind === 'all_repositories'
-            ? { requiredMode: 'coding' as const }
-            : {}),
+        requiredMode: usesFastTurn ? ('fast' as const) : ('coding' as const),
       },
       launch: async (mode) => {
         if (mode === 'fast') {
-          const providerConversationId =
-            threadId ?? (isTelegramPrivateChat(message) ? chatId : messageId);
           const session = await getOrCreateFastAgentSession({
             userId: senderUserId,
-            conversation: {
-              surface: 'telegram',
-              workspaceId: chatId,
-              conversationId: `${providerConversationId}:user:${senderUserId}`,
-              replyTarget: {
-                channelId: chatId,
-                ...(threadId ? { threadId } : {}),
-              },
-            },
+            conversation,
           });
           // Resolve on admission, not on turn completion: the claim is
           // finalized as soon as the Fast session accepts the follow-up, and
@@ -361,28 +374,50 @@ async function handleSuggestionLaunchCallback(params: {
               }
             : fastStart;
         }
-        const started = await startNewTelegramTask({
-          message,
-          launchOwnerUserId: senderUserId,
-          queuedMessage,
-          metadata: {
-            communicationProvider: 'telegram',
-            communicationChannelId: chatId,
-            ...(threadId ? { communicationThreadId: threadId } : {}),
-            communicationMessageId: messageId,
-          },
-          // The button click already is the explicit start signal.
-          skipRoutingConfirmation: true,
+        const createTopicForTask = shouldCreateTelegramTaskTopic({
+          chatType: message.chat.type,
+          isForum: message.chat.is_forum,
+          privateTopicsEnabled: isTelegramPrivateChat(message)
+            ? await telegramPrivateTopicsEnabledBestEffort()
+            : false,
+          threadId,
           forceNewTopic: true,
-          ...(workspaceOverride ? { workspaceOverride } : {}),
         });
-        return started.status === 'started'
-          ? {
-              accepted: true,
-              runId: started.launchResult.id,
-              taskId: started.launchResult.taskId,
-            }
-          : { accepted: false };
+        let launchedRunId: number | null = null;
+        const pinned = await launchPinnedFastSessionTask({
+          userId: senderUserId,
+          senderDisplayName: queuedMessage.user,
+          conversation,
+          launchId: `telegram-suggestion:${params.suggestionId}:${messageId}`,
+          prompt: promptText,
+          surface: 'telegram',
+          kickoffMessage: `Started a task in ${workspace.workspaceDisplayName}.`,
+          launch: async ({ parent, postKickoff }) => {
+            const launched = await launchTelegramTask({
+              launchOwnerUserId: senderUserId,
+              queuedMessage,
+              metadata: {
+                communicationProvider: 'telegram',
+                communicationChannelId: chatId,
+                ...(threadId ? { communicationThreadId: threadId } : {}),
+                communicationMessageId: messageId,
+              },
+              workspace,
+              createTopicForTask,
+              fastAgentParent: parent,
+              beforeEnqueue: async () => {
+                await postKickoff();
+              },
+            });
+            launchedRunId = launched.id;
+            return { success: true, taskId: launched.taskId };
+          },
+        });
+        return {
+          accepted: true,
+          runId: launchedRunId ?? pinned.runId,
+          taskId: pinned.taskId,
+        };
       },
     });
 
@@ -537,13 +572,6 @@ export async function handleTelegramCallbackQuery(
 
   if (suggestionId !== null) {
     await handleSuggestionLaunchCallback({ query, suggestionId });
-    return;
-  }
-
-  const routeAction = parseTelegramRouteCallbackData(data);
-
-  if (routeAction !== null) {
-    await handleTelegramRoutingCallback({ query, action: routeAction });
     return;
   }
 
