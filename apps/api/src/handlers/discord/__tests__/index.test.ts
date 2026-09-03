@@ -2197,14 +2197,17 @@ describe('Discord Gateway event handler', () => {
         initialText: expect.stringContaining('Build a fresh dashboard'),
       }),
     );
-    // The slash command is acknowledged with a pointer; the answer itself
-    // lands in the new thread, not the invoking channel.
+    // The slash command is acknowledged with a public pointer (the Gateway
+    // defers /new publicly); the answer itself lands in the new thread, not
+    // the invoking channel.
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         interaction: { interaction, interactionDeferred: true },
         text: 'Started a new conversation in <#thread-new>.',
-        ephemeral: true,
       }),
+    );
+    expect(mocks.reply).not.toHaveBeenCalledWith(
+      expect.objectContaining({ ephemeral: true }),
     );
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({

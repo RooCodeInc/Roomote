@@ -905,13 +905,15 @@ async function processDiscordGatewayEvent(
         communicationChannelId: thread.parentChannelId,
         communicationThreadId: thread.channelId,
       };
+      // The Gateway deferred this command publicly, so the pointer is a
+      // public message in the invoking channel, the way the old task starter
+      // acknowledgement was.
       await replyToDiscordEvent({
         provider: resolved.provider,
         applicationId: resolved.applicationId,
         channel,
         interaction: fastInteraction,
         text: `Started a new conversation in <#${thread.channelId}>.`,
-        ephemeral: true,
       });
       fastInteraction = undefined;
     }
