@@ -429,6 +429,35 @@ describe('ArtifactViewerContent', () => {
     });
   });
 
+  it('encodes artifact path segments in the sent URL', async () => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-2',
+          taskId: 'task-1',
+          path: 'plans/a?# b.md',
+          version: 2,
+          artifactType: 'plan',
+          contentType: 'text/markdown',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/widget-plan.md',
+          content: '# Widget plan',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Build this'));
+
+    await waitFor(() => {
+      expect(replyMutationMock).toHaveBeenCalledWith({
+        sessionId: 'parent-session-id',
+        text: `Build this ${window.location.origin}/task/task-1/artifacts/plans/a%3F%23%20b.md?v=2`,
+      });
+    });
+  });
+
   it('does not navigate when the parent Session is already visible', async () => {
     navigationState.pathname = '/sessions/parent-session-id';
     render(

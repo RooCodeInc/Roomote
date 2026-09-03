@@ -116,6 +116,19 @@ function isHtmlArtifact(contentType: string, path: string): boolean {
   );
 }
 
+function getArtifactViewUrl(
+  origin: string,
+  taskId: string,
+  path: string,
+  version: number,
+): string {
+  const encodedPath = path
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+  return `${origin}/task/${encodeURIComponent(taskId)}/artifacts/${encodedPath}?v=${version}`;
+}
+
 interface ArtifactViewerContentProps {
   artifact: ArtifactWithContent | null;
   taskId: string;
@@ -150,7 +163,12 @@ export function ArtifactViewerContent({
         );
       }
 
-      const url = `${window.location.origin}/task/${taskId}/artifacts/${artifact.path}?v=${artifact.version}`;
+      const url = getArtifactViewUrl(
+        window.location.origin,
+        taskId,
+        artifact.path,
+        artifact.version,
+      );
       await trpcClient.fastSessions.reply.mutate({
         sessionId: parentSession.sessionId,
         text: `Build this ${url}`,
@@ -240,7 +258,12 @@ export function ArtifactViewerContent({
   };
 
   const handleCopyUrl = async () => {
-    const url = `${window.location.origin}/task/${taskId}/artifacts/${artifact.path}?v=${artifact.version}`;
+    const url = getArtifactViewUrl(
+      window.location.origin,
+      taskId,
+      artifact.path,
+      artifact.version,
+    );
     await navigator.clipboard.writeText(url);
     setIsUrlCopied(true);
     toast.success('URL copied to clipboard');
