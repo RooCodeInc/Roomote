@@ -391,6 +391,38 @@ describe('buildAcpActivityRenderBlocks', () => {
     });
   });
 
+  it('collapses settled activity containing a chat reply receipt after a todo section', () => {
+    const entries = buildAcpActivityRenderBlocks([
+      messageBlock('todo-1', 1_000, 'todo_section'),
+      messageBlock('reasoning-1', 2_000, 'reasoning'),
+      toolResultBlock({ id: 'read-1', ts: 3_000 }),
+      toolResultBlock({
+        id: 'chat-reply-1',
+        ts: 4_000,
+        toolName: 'send_chat_reply',
+      }),
+      messageBlock('reasoning-2', 5_000, 'reasoning'),
+      textBlock('final-response', 10_000),
+    ]);
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'activity_group',
+      'message',
+    ]);
+    expect(entries[1]).toMatchObject({
+      kind: 'activity_group',
+      ts: 2_000,
+      endTs: 10_000,
+      blocks: [
+        { kind: 'message', msg: { id: 'reasoning-1' } },
+        { kind: 'message', msg: { id: 'read-1' } },
+        { kind: 'message', msg: { id: 'chat-reply-1' } },
+        { kind: 'message', msg: { id: 'reasoning-2' } },
+      ],
+    });
+  });
+
   it('keeps task cancellation visible and uses it as a boundary', () => {
     const entries = buildAcpActivityRenderBlocks([
       textBlock('text-1', 1_000),

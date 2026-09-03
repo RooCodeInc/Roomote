@@ -64,6 +64,10 @@ export function resolveToolPresentationPolicy(
   const consequentialReceipt =
     presentation.identity.toolName !== null &&
     CONSEQUENTIAL_RECEIPTS.has(presentation.identity.toolName);
+  const keepConsequentialReceiptVisible =
+    consequentialReceipt &&
+    (presentation.identity.toolName !== 'send_chat_reply' ||
+      options.displayMode === 'narration');
 
   let rowVisibility: ResolvedToolPolicy['rowVisibility'] = 'visible';
   if (shouldHideAcpMessage(msg)) {
@@ -107,7 +111,7 @@ export function resolveToolPresentationPolicy(
       hasPreview ||
       isArtifact ||
       renderAs === 'delegated-task-card' ||
-      consequentialReceipt
+      keepConsequentialReceiptVisible
         ? 'keep-visible'
         : 'collapsible',
     renderAs,

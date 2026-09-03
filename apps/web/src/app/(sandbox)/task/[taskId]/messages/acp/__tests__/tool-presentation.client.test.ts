@@ -163,6 +163,21 @@ describe('tool presentation policy', () => {
     ).toBe('keep-visible');
   });
 
+  it('collapses settled chat reply receipts outside narration mode', () => {
+    const message = toolMessage({
+      toolName: 'send_chat_reply',
+      kind: 'communication',
+    });
+
+    expect(resolveToolPresentationPolicy(message).activityMode).toBe(
+      'collapsible',
+    );
+    expect(
+      resolveToolPresentationPolicy(message, { displayMode: 'narration' })
+        .activityMode,
+    ).toBe('keep-visible');
+  });
+
   it('keeps delegated task cards visible in narration mode only on card-enabled surfaces', () => {
     const message = toolMessage({
       toolName: 'launch_task',
