@@ -52,8 +52,17 @@ describe('Capture visual proof skill', () => {
   it('snapshots the diff before capture so the judge can detect undisclosed drift', () => {
     // The snapshot must cover committed work too: fix-pr commits and pushes
     // before this step, so `git diff HEAD` alone would be empty there.
+    // Shared-root workspaces append one repository after another, so the
+    // file is initialized once and every diff uses `>>`.
     expect(skillContent).toContain(
-      'git diff "$(git merge-base HEAD origin/HEAD 2>/dev/null || git rev-parse --verify -q HEAD~1 || git hash-object -t tree /dev/null)" > /tmp/capture-visual-proof/diff-at-start.patch',
+      'mkdir -p /tmp/capture-visual-proof && : > /tmp/capture-visual-proof/diff-at-start.patch',
+    );
+    expect(skillContent).toContain(
+      'git diff "$(git merge-base HEAD origin/HEAD 2>/dev/null || git rev-parse --verify -q HEAD~1 || git hash-object -t tree /dev/null)" >> /tmp/capture-visual-proof/diff-at-start.patch',
+    );
+    expect(skillContent).not.toContain('" > /tmp/capture-visual-proof/');
+    expect(skillContent).toContain(
+      "a second repository must never truncate the first repository's snapshot",
     );
     expect(skillContent).toContain('Do not snapshot only `git diff HEAD`');
     // Untracked files must be captured by content, not as a path list, or a
