@@ -24,7 +24,6 @@ import {
   truncateAcpOutputText,
   type ReasoningEffort,
   type RunStatus,
-  type TaskMessageContentBlock,
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
   matchIntegrationTools,
   type IntegrationToolCandidate,
@@ -70,6 +69,7 @@ import {
   FAST_RESPONDING_LEASE_MS,
   FAST_RESPONDING_LEASE_RENEW_MS,
 } from './fast-agent-constants';
+import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import {
   appendFastAgentVisibleMessages,
@@ -345,22 +345,6 @@ function buildFastAgentTurnId({
     .digest('hex')
     .slice(0, 24);
   return `fallback:${digest}`;
-}
-
-function buildFastAgentUserContentBlocks(
-  text: string,
-  images: string[],
-): TaskMessageContentBlock[] {
-  const blocks: TaskMessageContentBlock[] = [{ type: 'text', text }];
-
-  for (const image of images) {
-    const match = /^data:(image\/[^;,]+);base64,(.+)$/i.exec(image.trim());
-    if (match?.[1] && match[2]) {
-      blocks.push({ type: 'image', mimeType: match[1], data: match[2] });
-    }
-  }
-
-  return blocks;
 }
 
 function serializeFastAgentToolOutput(result: unknown): {

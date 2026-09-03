@@ -1,21 +1,10 @@
 import {
-  ALL_REPOSITORIES,
   activeRunStatuses,
-  type TaskPayload,
-  type ComputeProvider,
-  type LaunchCodingHarness,
-  type StandardTask,
   type TaskGoal,
   RunStatus,
-  TaskPayloadKind,
   isExitedRunStatus,
-  resolveEvalHarnessSelection,
 } from '@roomote/types';
-import {
-  DeploymentReadOnlyError,
-  enqueueTask,
-  getTaskUrl,
-} from '@roomote/cloud-agents/server';
+import { getTaskUrl } from '@roomote/cloud-agents/server';
 import { captureTaskSettled } from '@roomote/telemetry/server';
 import {
   and,
@@ -25,7 +14,6 @@ import {
   inArray,
   markTaskStartParallelCountEndedAt,
   prepareTaskGoalActivation,
-  sessionTasks,
   slackInstallations,
   taskRuns,
   tasks,
@@ -33,18 +21,10 @@ import {
 import { SlackNotifier, settleSlackLiveTaskCardForRun } from '@roomote/slack';
 
 import type { UserAuthSuccess } from '@/types';
-import { getArtifactById, getRepositories } from '@/lib/server';
-import {
-  resolveEnvironmentSourceControlProvider,
-  resolveSelectedRepositorySourceControlProvider,
-} from '@/lib/server/source-control-provider';
+import { getArtifactById } from '@/lib/server';
 import { humanizeFilename } from '@/lib/task-utils';
 import { sendSandboxPromptCommand } from '../sandbox-session';
 import { resolveTaskByIdAccessCommand } from '../tasks/by-id';
-
-export type CreateTaskRunResult =
-  | { success: true; id: number; taskId: string; sessionId?: string }
-  | { success: false; error: string };
 
 export async function startTaskGoalCommand(
   auth: UserAuthSuccess,
@@ -111,31 +91,6 @@ export async function startTaskGoalCommand(
   }
 
   return { success: true, goal };
-}
-
-type CreateStandardTaskRunInput = {
-  harness?: LaunchCodingHarness;
-  model?: string;
-  computeProvider?: ComputeProvider;
-  sourceTaskId?: string;
-  sourceArtifactId?: string;
-  sourceArtifactPath?: string;
-  sourceArtifactVersion?: number;
-  payload: TaskPayload<typeof TaskPayloadKind.StandardTask>;
-};
-
-function getManualTaskRepositoryFullNames(
-  payload: TaskPayload<typeof TaskPayloadKind.StandardTask>,
-) {
-  if (payload.selectedRepositories?.length) {
-    return [...new Set(payload.selectedRepositories.filter(Boolean))];
-  }
-
-  if (payload.repo && payload.repo !== ALL_REPOSITORIES) {
-    return [payload.repo];
-  }
-
-  return [];
 }
 
 function getSlackChannelFromPayload(payload: unknown): string | undefined {
@@ -358,113 +313,6 @@ export async function notifySourceTaskArtifactBuild({
     artifactPath: source.artifactPath,
     artifactVersion: source.artifactVersion,
   });
-}
-
-export async function createStandardTaskRunCommand(
-  auth: UserAuthSuccess,
-  input: CreateStandardTaskRunInput,
-): Promise<CreateTaskRunResult> {
-  try {
-    if (!input.payload.environmentId && !input.payload.repo) {
-      return {
-        success: false,
-        error: 'Select an environment before starting a task.',
-      };
-    }
-
-    const evalSelection = resolveEvalHarnessSelection({
-      harness: input.harness,
-      model: input.model,
-    });
-
-    if (!evalSelection.ok) {
-      throw new Error(evalSelection.error);
-    }
-
-    const selectedRepositoryFullNames = getManualTaskRepositoryFullNames(
-      input.payload,
-    );
-    const availableRepositories =
-      selectedRepositoryFullNames.length === 0
-        ? []
-        : await getRepositories(auth);
-    const selectedRepositories = availableRepositories.filter((repository) =>
-      selectedRepositoryFullNames.includes(repository.fullName),
-    );
-    const sourceControlProvider =
-      input.payload.sourceControlProvider ??
-      resolveSelectedRepositorySourceControlProvider(
-        selectedRepositories,
-        selectedRepositoryFullNames,
-      ) ??
-      (await resolveEnvironmentSourceControlProvider(
-        input.payload.environmentId,
-      ));
-
-    const task: StandardTask = {
-      harness: evalSelection.harness ?? input.harness,
-      computeProvider: input.computeProvider,
-      type: TaskPayloadKind.StandardTask,
-      payload: {
-        ...input.payload,
-        ...(sourceControlProvider ? { sourceControlProvider } : {}),
-        ...(evalSelection.harnessModelOverrides
-          ? {
-              harnessModelOverrides: {
-                ...(input.payload.harnessModelOverrides ?? {}),
-                ...evalSelection.harnessModelOverrides,
-              },
-            }
-          : {}),
-      },
-    };
-
-    const launchResult = await enqueueTask({
-      task,
-      initiator: { kind: 'user', userId: auth.userId },
-      workflow: 'standard',
-      surface: 'web',
-      trigger: 'manual',
-    });
-    const linkedSession = await db.query.sessionTasks.findFirst({
-      where: eq(sessionTasks.taskId, launchResult.taskId),
-      columns: { sessionId: true },
-    });
-
-    try {
-      await notifySourceTaskArtifactBuild({
-        auth,
-        sourceTaskId: input.sourceTaskId,
-        sourceArtifactId: input.sourceArtifactId,
-        sourceArtifactPath: input.sourceArtifactPath,
-        sourceArtifactVersion: input.sourceArtifactVersion,
-        newTaskId: 'taskId' in launchResult ? launchResult.taskId : undefined,
-      });
-    } catch (error) {
-      console.error(
-        `[createStandardTaskRun] Failed to notify Slack threads for source task ${input.sourceTaskId ?? 'unknown'}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-
-    return {
-      success: true,
-      id: launchResult.id,
-      taskId: launchResult.taskId,
-      sessionId: linkedSession?.sessionId,
-    };
-  } catch (error) {
-    console.error(error);
-
-    if (error instanceof DeploymentReadOnlyError) {
-      return { success: false, error: error.code };
-    }
-
-    return error instanceof Error
-      ? { success: false, error: error.message }
-      : { success: false, error: 'An unknown error occurred.' };
-  }
 }
 
 export async function cancelTaskRunCommand(

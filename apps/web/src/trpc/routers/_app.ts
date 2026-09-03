@@ -9,7 +9,6 @@ import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
-  launchCodingHarnesses,
   computeProviders,
   environmentConfigSchema,
   workspaceRoutingSettingsSchema,
@@ -25,7 +24,6 @@ import {
   prActions,
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
-  standardTaskSchema,
   taskGoalInputSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
@@ -137,7 +135,6 @@ import {
   syncRepositoriesCommand,
 } from '../commands/source-control';
 import {
-  createStandardTaskRunCommand,
   cancelTaskRunCommand,
   retryFailedTaskStartCommand,
   startTaskGoalCommand,
@@ -373,7 +370,6 @@ import {
   listTaskSuggestionsCommand,
   listTaskSuggestionHistoryCommand,
   dismissTaskSuggestionCommand,
-  implementTaskSuggestionCommand,
   triggerTaskSuggestionsCommand,
 } from '../commands/task-suggestions';
 import {
@@ -484,7 +480,6 @@ import {
 } from '../commands/product-releases';
 import { getStatuspageIncident } from '@roomote/slack';
 
-const standardTaskPayloadSchema = standardTaskSchema.shape.payload;
 const stateRecordSchema = z.record(z.string());
 
 function assertAdmin(auth: { isAdmin: boolean }) {
@@ -1106,23 +1101,6 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         startTaskGoalCommand(auth, input),
-      ),
-
-    createStandardTask: protectedProcedure
-      .input(
-        z.object({
-          harness: z.enum(launchCodingHarnesses).optional(),
-          model: z.string().trim().min(1).optional(),
-          computeProvider: z.enum(computeProviders).optional(),
-          sourceTaskId: z.string().optional(),
-          sourceArtifactId: z.string().uuid().optional(),
-          sourceArtifactPath: z.string().optional(),
-          sourceArtifactVersion: z.number().int().optional(),
-          payload: standardTaskPayloadSchema,
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        createStandardTaskRunCommand(auth, input),
       ),
 
     cancel: protectedProcedure
@@ -2914,16 +2892,6 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         dismissTaskSuggestionCommand(auth, input),
-      ),
-
-    implement: protectedProcedure
-      .input(
-        z.object({
-          suggestionId: z.string().uuid(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        implementTaskSuggestionCommand(auth, input),
       ),
   }),
 

@@ -30,10 +30,7 @@ import {
   type WorkspaceSelection,
   useWorkspaceStorage,
 } from '@/hooks/useWorkspaceStorage';
-import {
-  useCreateStandardTaskRun,
-  useStartFastSession,
-} from '@/hooks/task-runs';
+import { useStartFastSession } from '@/hooks/task-runs';
 
 import {
   Alert,
@@ -61,7 +58,6 @@ type SubmissionSnapshot = {
   description?: string;
   images?: string[];
   attachmentTexts?: string[];
-  blank: boolean;
 };
 
 const DEFAULT_FORM_VALUES: CreateTaskFormValues = {
@@ -225,28 +221,6 @@ export function NewTaskForm({
     el.classList.add('animate-wiggle');
   }, []);
 
-  const navigateToTaskRun = (result: {
-    success: boolean;
-    taskId?: string;
-    sessionId?: string;
-    error?: string;
-  }) => {
-    if (result.success && 'taskId' in result) {
-      onTaskStarted?.();
-      // A direct launch into an environment or repository is a task, not a
-      // conversation — land on the task view even though a Session wraps it.
-      router.push(`/task/${result.taskId}`);
-    } else if ('error' in result) {
-      toast.error(result.error);
-    }
-  };
-
-  const mutationOptions = {
-    onSuccess: navigateToTaskRun,
-    onError: (error: Error) => toast.error(error.message),
-  };
-
-  const createStandardTaskRun = useCreateStandardTaskRun(mutationOptions);
   const startFastSessionMutation = useStartFastSession();
 
   const startFastSession = useCallback(
@@ -287,6 +261,9 @@ export function NewTaskForm({
       ? launchTaskModels.data?.defaultFastModelId
       : launchTaskModels.data?.defaultModelId);
 
+  // A launch into a chosen environment or repository still belongs to a
+  // Session, but the workspace is decided, so the Session delegates the task
+  // immediately and the page lands on the task view.
   const launchTask = useCallback(
     async (payload: {
       repo: string;
@@ -294,27 +271,50 @@ export function NewTaskForm({
       environmentId?: string;
       description?: string;
       images?: string[];
-      modelId?: string;
-      blank: boolean;
+      attachmentTexts?: string[];
     }): Promise<boolean> => {
+      if (startFastSessionMutation.isPending) {
+        return false;
+      }
       try {
-        const result = await createStandardTaskRun.mutateAsync({
-          harness: DEFAULT_LAUNCH_CODING_HARNESS,
-          model: payload.modelId ?? selectedModelId,
-          computeProvider: selectedComputeProvider,
-          payload,
+        const { taskId } = await startFastSessionMutation.mutateAsync({
+          text: payload.description ?? '',
+          images: payload.images,
+          attachmentTexts: payload.attachmentTexts,
+          model: selectedModelId,
+          pinnedLaunch: {
+            launchId: crypto.randomUUID(),
+            repo: payload.repo,
+            branch: payload.branch,
+            environmentId: payload.environmentId,
+            harness: DEFAULT_LAUNCH_CODING_HARNESS,
+            computeProvider: selectedComputeProvider,
+          },
         });
-
-        return result.success;
-      } catch {
+        if (!taskId) {
+          toast.error('The task did not start.');
+          return false;
+        }
+        onTaskStarted?.();
+        router.push(`/task/${taskId}`);
+        return true;
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : 'Failed to start task',
+        );
         return false;
       }
     },
-    [createStandardTaskRun, selectedComputeProvider, selectedModelId],
+    [
+      onTaskStarted,
+      router,
+      selectedComputeProvider,
+      selectedModelId,
+      startFastSessionMutation,
+    ],
   );
 
-  const isBusy =
-    createStandardTaskRun.isPending || startFastSessionMutation.isPending;
+  const isBusy = startFastSessionMutation.isPending;
 
   const hasAnyEnvironments = (environments.data?.length ?? 0) > 0;
   const showNoEnvironmentsWarning =
@@ -344,7 +344,6 @@ export function NewTaskForm({
           preparedPrompt.text.length > 0 ? preparedPrompt.text : undefined,
         images: preparedPrompt.images,
         attachmentTexts: preparedPrompt.attachmentTexts,
-        blank: preparedPrompt.text.length === 0,
       };
 
       if (repository === FAST_EXECUTION) {
@@ -379,7 +378,7 @@ export function NewTaskForm({
         environmentId,
         description: submission.description,
         images: submission.images,
-        blank: submission.blank,
+        attachmentTexts: submission.attachmentTexts,
       });
 
       if (!didLaunch) {
