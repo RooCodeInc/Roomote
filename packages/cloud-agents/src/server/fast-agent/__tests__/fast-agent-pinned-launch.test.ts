@@ -204,6 +204,7 @@ describe('launchPinnedFastSessionTask', () => {
   it('launches inside an existing Fast conversation and skips the request row for a blank workspace', async () => {
     mocks.findById.mockResolvedValue({
       id: 'fast-parent',
+      userId: 'user-1',
       conversation: {
         surface: 'web',
         workspaceId: 'user-1',
@@ -262,6 +263,7 @@ describe('launchPinnedFastSessionTask', () => {
       .mockResolvedValueOnce({ id: 7 });
     mocks.findById.mockResolvedValue({
       id: '66666666-6666-4666-8666-666666666666',
+      userId: 'user-1',
       conversation: {
         surface: 'web',
         workspaceId: 'user-1',
@@ -341,6 +343,7 @@ describe('launchPinnedFastSessionTask', () => {
       .mockResolvedValueOnce({ id: 7 });
     mocks.findById.mockResolvedValue({
       id: '66666666-6666-4666-8666-666666666666',
+      userId: 'user-1',
       conversation: {
         surface: 'web',
         workspaceId: 'user-1',
@@ -393,6 +396,7 @@ describe('launchPinnedFastSessionTask', () => {
   it('skips the lock when the caller already names the Session', async () => {
     mocks.findById.mockResolvedValue({
       id: 'fast-parent',
+      userId: 'user-1',
       conversation: {
         surface: 'web',
         workspaceId: 'user-1',
@@ -411,6 +415,45 @@ describe('launchPinnedFastSessionTask', () => {
     });
 
     expect(mocks.acquireRedisLock).not.toHaveBeenCalled();
+  });
+
+  it("refuses to replay a launch id that belongs to another user's Session", async () => {
+    mocks.taskRunsFindFirst.mockResolvedValueOnce({
+      payload: {
+        fastAgentParent: {
+          sessionId: '66666666-6666-4666-8666-666666666666',
+          conversation: {
+            surface: 'web',
+            workspaceId: 'user-1',
+            conversationId: 'conv-first',
+          },
+        },
+      },
+    });
+    mocks.findById.mockResolvedValue({
+      id: '66666666-6666-4666-8666-666666666666',
+      userId: 'user-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'conv-first',
+      },
+    });
+
+    await expect(
+      launchPinnedFastSessionTask({
+        userId: 'user-2',
+        launchId: 'launch-1',
+        prompt: 'Fix the flaky test',
+        task,
+        surface: 'api',
+        kickoffMessage: 'Started a task.',
+      }),
+    ).rejects.toThrow('This launch id already belongs to another Session.');
+    expect(mocks.getOrCreateFastAgentSession).not.toHaveBeenCalled();
+    expect(mocks.upsertFastAgentMessage).not.toHaveBeenCalled();
+    expect(mocks.enqueueTask).not.toHaveBeenCalled();
+    expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });
 
   it('rejects a launch into a Fast conversation that does not exist', async () => {

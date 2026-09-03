@@ -70,6 +70,7 @@ export type PinnedFastSessionLaunchResult = {
 
 type ConversationTarget = {
   id: string;
+  userId: string;
   conversation: FastAgentConversation;
 };
 
@@ -79,16 +80,25 @@ async function findConversationTargetById(
   const record = await fastAgentConversationRepository.findById({
     id: fastConversationId,
   });
-  return record ? { id: record.id, conversation: record.conversation } : null;
+  return record
+    ? {
+        id: record.id,
+        userId: record.userId,
+        conversation: record.conversation,
+      }
+    : null;
 }
 
 /**
  * A retry of an earlier launch must land in the Session that launch created,
  * or the queue will refuse the reused idempotency key as belonging to another
- * Session. The earlier task's Fast parent names that Session.
+ * Session. The earlier task's Fast parent names that Session. Only the person
+ * who owns that Session may replay into it; anyone else reusing the id is
+ * refused rather than handed someone else's task.
  */
 async function findConversationTargetForLaunchKey(
   launchIdempotencyKey: string,
+  userId: string,
 ): Promise<ConversationTarget | null> {
   const existingRun = await db.query.taskRuns.findFirst({
     where: and(
@@ -100,7 +110,14 @@ async function findConversationTargetForLaunchKey(
   const parentSessionId = getFastAgentParentFromPayload(
     existingRun?.payload,
   )?.sessionId;
-  return parentSessionId ? findConversationTargetById(parentSessionId) : null;
+  if (!parentSessionId) {
+    return null;
+  }
+  const target = await findConversationTargetById(parentSessionId);
+  if (target && target.userId !== userId) {
+    throw new Error('This launch id already belongs to another Session.');
+  }
+  return target;
 }
 
 async function resolveConversationTarget(
@@ -115,8 +132,10 @@ async function resolveConversationTarget(
     return target;
   }
 
-  const replayed =
-    await findConversationTargetForLaunchKey(launchIdempotencyKey);
+  const replayed = await findConversationTargetForLaunchKey(
+    launchIdempotencyKey,
+    input.userId,
+  );
   if (replayed) {
     return replayed;
   }
@@ -129,7 +148,11 @@ async function resolveConversationTarget(
       conversationId: randomUUID(),
     },
   });
-  return { id: created.id, conversation: created.conversation };
+  return {
+    id: created.id,
+    userId: input.userId,
+    conversation: created.conversation,
+  };
 }
 
 const LAUNCH_LOCK_TTL_SECONDS = 60;
