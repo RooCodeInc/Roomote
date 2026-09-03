@@ -12,3 +12,11 @@ export function hasPreviewServiceListEntries(
 ): boolean {
   return portNames.some(shouldIncludeInPreviewServiceList);
 }
+
+/** Turns a configured port name like `WEB_APP` into a display label. */
+export function humanizePortName(portName: string): string {
+  return portName
+    .toLowerCase()
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}

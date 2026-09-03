@@ -201,10 +201,20 @@ export function createFastAgentSourceControlTaskLauncher(params: {
   };
 }
 
+export type SourceControlPostedComment = {
+  messageId: string;
+  /**
+   * Replaces the comment's whole body in place. A turn's later replies edit
+   * the comment it opened with instead of stacking new comments on the
+   * discussion.
+   */
+  update?: (body: string) => Promise<void>;
+};
+
 export type SourceControlFastReplyPoster = (input: {
   discussion: SourceControlFastDiscussion;
   body: string;
-}) => Promise<{ messageId: string }>;
+}) => Promise<SourceControlPostedComment>;
 
 /**
  * Delivery for one discussion: how replies post and how delegated tasks
@@ -212,6 +222,15 @@ export type SourceControlFastReplyPoster = (input: {
  */
 export type SourceControlFastDelivery = {
   postComment: SourceControlFastReplyPoster;
+  /**
+   * Rebuilds an in-place editor from a previously posted comment's message
+   * id, for turns that resume in a fresh process and only carry the id.
+   */
+  updateCommentById?: (input: {
+    discussion: SourceControlFastDiscussion;
+    messageId: string;
+    body: string;
+  }) => Promise<void>;
   resolveTarget: () => Promise<SourceControlFastLaunchTarget>;
 };
 
@@ -258,7 +277,18 @@ async function buildGitHubFastDelivery(
             body,
           },
         );
-        return { messageId: String(response.data.id) };
+        const commentId = response.data.id;
+        return {
+          messageId: String(commentId),
+          update: async (nextBody) => {
+            await octokit.rest.pulls.updateReviewComment({
+              owner,
+              repo,
+              comment_id: commentId,
+              body: nextBody,
+            });
+          },
+        };
       }
       const response = await octokit.rest.issues.createComment({
         owner,
@@ -266,7 +296,39 @@ async function buildGitHubFastDelivery(
         issue_number: target.number,
         body,
       });
-      return { messageId: String(response.data.id) };
+      const commentId = response.data.id;
+      return {
+        messageId: String(commentId),
+        update: async (nextBody) => {
+          await octokit.rest.issues.updateComment({
+            owner,
+            repo,
+            comment_id: commentId,
+            body: nextBody,
+          });
+        },
+      };
+    },
+    updateCommentById: async ({ discussion: target, messageId, body }) => {
+      const commentId = Number(messageId);
+      if (!Number.isInteger(commentId)) {
+        throw new Error(`Not an editable GitHub comment id: ${messageId}`);
+      }
+      if (target.kind === 'pull' && target.reviewCommentId) {
+        await octokit.rest.pulls.updateReviewComment({
+          owner,
+          repo,
+          comment_id: commentId,
+          body,
+        });
+        return;
+      }
+      await octokit.rest.issues.updateComment({
+        owner,
+        repo,
+        comment_id: commentId,
+        body,
+      });
     },
     resolveTarget: async () => {
       if (discussion.kind === 'issues') {
@@ -367,9 +429,14 @@ async function buildGitLabFastDelivery(
     createGitLabIssueNote,
     createGitLabMergeRequestNote,
     getGitLabMergeRequest,
+    updateGitLabNote,
   } = await import('@roomote/gitlab');
   return {
     postComment: async ({ discussion: target, body }) => {
+      const noteableType =
+        target.kind === 'pull'
+          ? ('merge_requests' as const)
+          : ('issues' as const);
       const note =
         target.kind === 'pull'
           ? await createGitLabMergeRequestNote({
@@ -382,7 +449,27 @@ async function buildGitLabFastDelivery(
               issueIid: target.number,
               body,
             });
-      return { messageId: String(note.id) };
+      return {
+        messageId: String(note.id),
+        update: async (nextBody) => {
+          await updateGitLabNote({
+            projectId: target.repositoryFullName,
+            noteableType,
+            noteableIid: target.number,
+            noteId: note.id,
+            body: nextBody,
+          });
+        },
+      };
+    },
+    updateCommentById: async ({ discussion: target, messageId, body }) => {
+      await updateGitLabNote({
+        projectId: target.repositoryFullName,
+        noteableType: target.kind === 'pull' ? 'merge_requests' : 'issues',
+        noteableIid: target.number,
+        noteId: Number(messageId),
+        body,
+      });
     },
     resolveTarget: async () => {
       if (discussion.kind === 'issues') {
@@ -420,8 +507,11 @@ async function buildBitbucketFastDelivery(
   if (!repository || discussion.kind !== 'pull') {
     return null;
   }
-  const { createBitbucketPullRequestComment, getBitbucketPullRequest } =
-    await import('@roomote/bitbucket');
+  const {
+    createBitbucketPullRequestComment,
+    getBitbucketPullRequest,
+    updateBitbucketPullRequestComment,
+  } = await import('@roomote/bitbucket');
   return {
     postComment: async ({ discussion: target, body }) => {
       const comment = await createBitbucketPullRequestComment({
@@ -429,7 +519,25 @@ async function buildBitbucketFastDelivery(
         pullRequestNumber: target.number,
         body,
       });
-      return { messageId: String(comment.id) };
+      return {
+        messageId: String(comment.id),
+        update: async (nextBody) => {
+          await updateBitbucketPullRequestComment({
+            repositoryFullName: target.repositoryFullName,
+            pullRequestNumber: target.number,
+            commentId: comment.id,
+            body: nextBody,
+          });
+        },
+      };
+    },
+    updateCommentById: async ({ discussion: target, messageId, body }) => {
+      await updateBitbucketPullRequestComment({
+        repositoryFullName: target.repositoryFullName,
+        pullRequestNumber: target.number,
+        commentId: Number(messageId),
+        body,
+      });
     },
     resolveTarget: async () => {
       const pullRequest = await getBitbucketPullRequest({
@@ -462,6 +570,7 @@ async function buildGiteaFastDelivery(
     createGiteaIssueComment,
     createGiteaPullRequestComment,
     getGiteaPullRequest,
+    updateGiteaComment,
   } = await import('@roomote/gitea');
   return {
     postComment: async ({ discussion: target, body }) => {
@@ -477,7 +586,23 @@ async function buildGiteaFastDelivery(
               issueNumber: target.number,
               body,
             });
-      return { messageId: String(comment.id) };
+      return {
+        messageId: String(comment.id),
+        update: async (nextBody) => {
+          await updateGiteaComment({
+            repositoryFullName: target.repositoryFullName,
+            commentId: comment.id,
+            body: nextBody,
+          });
+        },
+      };
+    },
+    updateCommentById: async ({ discussion: target, messageId, body }) => {
+      await updateGiteaComment({
+        repositoryFullName: target.repositoryFullName,
+        commentId: Number(messageId),
+        body,
+      });
     },
     resolveTarget: async () => {
       if (discussion.kind === 'issues') {
@@ -519,6 +644,8 @@ async function buildAdoFastDelivery(
     getAdoPullRequest,
     listAdoRepositories,
     parseAdoRepositoryFullName,
+    updateAdoPullRequestComment,
+    updateAdoWorkItemComment,
   } = await import('@roomote/ado');
   const parsed = parseAdoRepositoryFullName(discussion.repositoryFullName);
   // Azure DevOps addresses pull requests by repository GUID, which the
@@ -549,8 +676,22 @@ async function buildAdoFastDelivery(
           organization: parsed.organization,
         });
         return {
-          messageId:
-            comment.commentId ?? `ado-work-item-comment:${randomUUID()}`,
+          messageId: comment.commentId
+            ? `wit:${comment.commentId}`
+            : `ado-work-item-comment:${randomUUID()}`,
+          ...(comment.commentId
+            ? {
+                update: async (nextBody: string) => {
+                  await updateAdoWorkItemComment({
+                    project: parsed.project,
+                    workItemId: target.number,
+                    commentId: comment.commentId!,
+                    body: nextBody,
+                    organization: parsed.organization,
+                  });
+                },
+              }
+            : {}),
         };
       }
       const adoRepositoryId = await resolveAdoRepositoryId();
@@ -571,8 +712,59 @@ async function buildAdoFastDelivery(
         organization: parsed.organization,
       });
       return {
-        messageId: comment.commentId ?? `ado-thread:${comment.threadId}`,
+        messageId: comment.commentId
+          ? `thread:${comment.threadId}:${comment.commentId}`
+          : `ado-thread:${comment.threadId}`,
+        ...(comment.commentId
+          ? {
+              update: async (nextBody: string) => {
+                await updateAdoPullRequestComment({
+                  repositoryFullName: target.repositoryFullName,
+                  repositoryId: adoRepositoryId,
+                  pullRequestNumber: target.number,
+                  threadId: comment.threadId,
+                  commentId: comment.commentId!,
+                  body: nextBody,
+                  organization: parsed.organization,
+                });
+              },
+            }
+          : {}),
       };
+    },
+    updateCommentById: async ({ discussion: target, messageId, body }) => {
+      const witMatch = /^wit:(.+)$/.exec(messageId);
+      if (witMatch) {
+        await updateAdoWorkItemComment({
+          project: parsed.project,
+          workItemId: target.number,
+          commentId: witMatch[1]!,
+          body,
+          organization: parsed.organization,
+        });
+        return;
+      }
+      const threadMatch = /^thread:([^:]+):(.+)$/.exec(messageId);
+      if (!threadMatch) {
+        throw new Error(
+          `Not an editable Azure DevOps comment id: ${messageId}`,
+        );
+      }
+      const adoRepositoryId = await resolveAdoRepositoryId();
+      if (!adoRepositoryId) {
+        throw new Error(
+          `Azure DevOps repository ${target.repositoryFullName} could not be resolved.`,
+        );
+      }
+      await updateAdoPullRequestComment({
+        repositoryFullName: target.repositoryFullName,
+        repositoryId: adoRepositoryId,
+        pullRequestNumber: target.number,
+        threadId: threadMatch[1]!,
+        commentId: threadMatch[2]!,
+        body,
+        organization: parsed.organization,
+      });
     },
     resolveTarget: async () => {
       if (discussion.kind === 'issues') {
@@ -627,8 +819,14 @@ export function buildSourceControlFastAdapter(params: {
 }): {
   launchTask: LaunchFastAgentTask;
   postReply: (reply: { message: string }) => Promise<{ messageId: string }>;
+  replaceReply?: (
+    handle: { messageId: string },
+    reply: { message: string },
+  ) => Promise<{ messageId: string }>;
 } {
   const discussion = parseSourceControlFastConversation(params.conversation);
+  let turnComment: SourceControlPostedComment | null = null;
+  let turnBody = '';
   return {
     launchTask: createFastAgentSourceControlTaskLauncher({
       userId: params.userId,
@@ -645,12 +843,53 @@ export function buildSourceControlFastAdapter(params: {
         provider: discussion.provider,
         sessionId: params.sessionId,
       });
+      // One comment per turn: the first reply opens it, later replies append
+      // by editing it in place, so a turn never stacks comments on the
+      // discussion.
+      if (turnComment?.update) {
+        turnBody = `${turnBody}\n\n${message}`;
+        await turnComment.update(`${turnBody}\n\n${footer}`);
+        params.onReplyPosted?.();
+        return { messageId: turnComment.messageId };
+      }
+      turnBody = message;
       const posted = await params.delivery.postComment({
         discussion,
         body: `${message}\n\n${footer}`,
       });
+      turnComment = posted;
       params.onReplyPosted?.();
-      return posted;
+      return { messageId: posted.messageId };
     },
+    ...(params.delivery.updateCommentById && discussion
+      ? {
+          // A resumed turn only carries the prior comment's id: rebuild the
+          // editor from it, replace the comment's body, and adopt it as the
+          // turn's comment so later replies keep appending in place.
+          replaceReply: async ({ messageId }, { message }) => {
+            const footer = buildFastSessionReplyFooterText({
+              provider: discussion.provider,
+              sessionId: params.sessionId,
+            });
+            await params.delivery.updateCommentById!({
+              discussion,
+              messageId,
+              body: `${message}\n\n${footer}`,
+            });
+            turnBody = message;
+            turnComment = {
+              messageId,
+              update: (nextBody: string) =>
+                params.delivery.updateCommentById!({
+                  discussion,
+                  messageId,
+                  body: nextBody,
+                }),
+            };
+            params.onReplyPosted?.();
+            return { messageId };
+          },
+        }
+      : {}),
   };
 }

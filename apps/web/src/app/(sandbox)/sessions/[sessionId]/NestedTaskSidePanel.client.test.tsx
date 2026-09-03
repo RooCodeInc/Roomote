@@ -162,6 +162,18 @@ vi.mock('../../task/[taskId]/sidebar-panels/SidePanelHeader', () => ({
   ),
 }));
 
+vi.mock('@/components/sandbox', () => ({
+  WorkspaceBadge: ({
+    environmentId,
+    repo,
+  }: {
+    environmentId?: string;
+    repo?: string;
+  }) => (
+    <span>{environmentId ? `Workspace ${environmentId}` : `Repo ${repo}`}</span>
+  ),
+}));
+
 import { useArtifactLink } from '../../task/[taskId]/hooks/ArtifactLinkProvider';
 import { NestedTaskSidePanel } from './NestedTaskSidePanel';
 
@@ -170,6 +182,7 @@ const baseSession = {
   task: { title: 'Fix checkout' },
   taskRun: {
     id: 42,
+    payload: { environmentId: 'env-1' },
     harness: 'opencode-server',
     status: RunStatus.Running,
     taskPhase: 'running',
@@ -201,6 +214,7 @@ describe('NestedTaskSidePanel', () => {
 
     expect(screen.getByText('Task:')).toHaveClass('font-semibold');
     expect(screen.getByText('Fix checkout')).toBeInTheDocument();
+    expect(screen.getByText('Workspace env-1')).toBeInTheDocument();
     expect(screen.getByTestId('live-provider')).toBeInTheDocument();
     expect(screen.getByText('Child transcript')).toBeInTheDocument();
     expect(screen.getByTestId('pending-input-provider')).toHaveAttribute(

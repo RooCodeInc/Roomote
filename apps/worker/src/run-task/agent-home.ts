@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -71,11 +70,6 @@ import { OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT } from './opencode-chatgpt-gatew
 import { OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT } from './opencode-tool-safety-plugin-script';
 import { resolveOpenCodeModelSelection } from './opencode-model';
 import {
-  createProofRunnerAgentPrompt,
-  createProofRunnerModelInstructions,
-  ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME,
-} from './proof-runner-prompt';
-import {
   getRepoLocalSkillInvocations,
   type RepoLocalSkill,
 } from '../workspace/repo-local-skills';
@@ -140,9 +134,6 @@ const ROOMOTE_OPENCODE_JUDGE_MODEL_INSTRUCTIONS_FILE_NAME =
 const ROOMOTE_OPENCODE_ADVISOR_MODEL_INSTRUCTIONS_FILE_NAME =
   'roomote-opencode-advisor-model-instructions.md';
 
-const ROOMOTE_OPENCODE_PROOF_RUNNER_INSTRUCTIONS_FILE_NAME =
-  'roomote-opencode-proof-runner-instructions.md';
-
 const ROOMOTE_OPENCODE_INTEGRATION_INSTRUCTIONS_FILE_NAME =
   'roomote-opencode-integration-instructions.md';
 
@@ -179,10 +170,6 @@ const ROOMOTE_OPENCODE_ON_DEMAND_MCP_CATALOG_FILE_NAME =
   'on-demand-mcp-servers.json';
 const ROOMOTE_ON_DEMAND_MCP_CATALOG_PATH_ENV_VAR =
   'ROOMOTE_ON_DEMAND_MCP_CATALOG_PATH';
-const ROOMOTE_ON_DEMAND_INTEGRATION_TOOL_NAMES = [
-  'find_integration_tools',
-  'call_integration_tool',
-] as const;
 
 const ROOMOTE_OPENCODE_SLACK_HOOKS_PLUGIN_FILE_NAME = 'roomote-slack-hooks.js';
 
@@ -1259,82 +1246,6 @@ function createArchitectAgentConfig(options: {
   };
 }
 
-/**
- * Digest of the activated feature-demo capture runner, pinned into the
- * proof-runner prompt so its sanctioned /tmp staging path (writable by any
- * parent flow) cannot be used to smuggle a different script into the
- * runner's browser sanction. Undefined (skill absent/unreadable) omits the
- * sanction entirely.
- */
-function resolveFeatureDemoCaptureRunnerDigest(
-  homeDir: string,
-): string | undefined {
-  const runnerPath = path.join(
-    homeDir,
-    '.agents',
-    'skills',
-    'feature-demo',
-    'capture',
-    'capture.mjs',
-  );
-
-  try {
-    return createHash('sha256')
-      .update(fs.readFileSync(runnerPath))
-      .digest('hex');
-  } catch {
-    return undefined;
-  }
-}
-
-function createProofRunnerAgentConfig(
-  browserTarget: string,
-  featureDemoCaptureRunnerSha256: string | undefined,
-): Record<string, unknown> {
-  return {
-    description:
-      'Delegated browser proof runner that captures and uploads screenshot and screencast proof from the sandbox-local browser surface.',
-    mode: 'subagent',
-    hidden: true,
-    prompt: createProofRunnerAgentPrompt(
-      browserTarget,
-      featureDemoCaptureRunnerSha256,
-    ),
-    permission: {
-      read: 'allow',
-      list: 'allow',
-      glob: 'allow',
-      grep: 'allow',
-      bash: 'allow',
-      external_directory: 'allow',
-      edit: 'deny',
-      task: 'deny',
-      todowrite: 'deny',
-      webfetch: 'deny',
-      lsp: 'deny',
-      skill: 'allow',
-      question: 'deny',
-    },
-    // The runner's only sanctioned MCP surface is artifact upload. Without
-    // this map it inherits the session's full roomote MCP toolset, including
-    // outward-facing writes (manage_source_control, send_chat_reply).
-    // Explicit per-tool denies rather than a wildcard: a mismatched name then
-    // fails toward the tool staying enabled instead of breaking uploads.
-    tools: {
-      ...SLACK_POSTING_TOOL_EXCLUSIONS,
-      roomote_get_about_me: false,
-      roomote_describe_video: false,
-      roomote_manage_tasks: false,
-      roomote_manage_source_control: false,
-      roomote_manage_environments: false,
-      roomote_request_environment_variables: false,
-      roomote_report_platform_issue: false,
-      roomote_get_chat_channel_messages: false,
-      roomote_get_chat_message_context: false,
-    },
-  };
-}
-
 function createVisualModelInstructions(): string {
   return [
     `A hidden OpenCode \`${ROOMOTE_OPENCODE_VISUAL_AGENT_NAME}\` subagent is configured with Roomote's deployment vision model.`,
@@ -1351,23 +1262,21 @@ function createJudgeModelInstructions(): string {
   return [
     `A hidden OpenCode \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent is configured for implementation completion checks only.`,
     '',
-    'When `R_CODE_REVIEW_MODEL` is configured, the judge uses that review model. Otherwise it falls back to the active coding model for the task.',
+    'When `R_VISION_MODEL` is configured, the judge runs on that vision model so it can open proof screenshots directly. Otherwise it falls back to the active coding model for the task.',
     '',
-    `After implementation, validation, and any required pre-delivery \`capture-visual-proof\` handoff, when the task has a concrete plan, checklist, or explicit requested outcome to compare against, delegate one focused compare pass to the \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent with the Task tool.`,
+    `After implementation, validation, and any required pre-delivery \`capture-visual-proof\` step, when the task has a concrete plan, checklist, or explicit requested outcome to compare against, delegate one focused compare pass to the \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent with the Task tool.`,
     '',
-    'When the active workflow requires a pre-delivery `capture-visual-proof` handoff for a repository-file change, do not run the judge pass until that handoff has returned a capture result, honest no-op, not-applicable, unnecessary, or blocked outcome. Include that proof outcome in the judge brief: the proof claim, applicability result, uploaded artifact URLs or local screenshot/screencast/keyframe paths when present, and any short proof captions from the proof report.',
+    'When the active workflow requires a pre-delivery `capture-visual-proof` step for a repository-file change, do not run the judge pass until that step has returned a capture result, honest no-op, not-applicable, unnecessary, or blocked outcome. Include in the judge brief: the plan or requested outcome, the validation results, the proof report verbatim, the path `/tmp/capture-visual-proof/diff-at-start.patch` when it exists, and the local paths of every kept screenshot and keyframe so the judge can open them.',
     '',
-    'Treat the judge as a narrow completion and sanity check. Start from the shipped diff, the plan, the validation state, and the latest pre-delivery visual-proof result instead of asking for an open-ended repo review. Ask the judge to verify kept screenshot and screencast evidence against the plan and shipped change, and to treat missing, weak, mismatched, or falsely claimed proof as a gap when proof should have applied.',
-    '',
-    'When background visual proof is explicitly configured to run after delivery, do not delay the delivery-time judge for unfinished background proof; note that background proof is pending so the judge does not treat unfinished screenshots alone as an implementation defect.',
+    'Treat the judge as a narrow completion and sanity check. Start from the shipped diff, the plan, the validation state, and the latest pre-delivery visual-proof result instead of asking for an open-ended repo review. Ask the judge to open the kept screenshot and keyframe images and verify them against the plan and shipped change, to treat missing, weak, mismatched, or falsely claimed proof as a gap when proof should have applied, and to report any undisclosed source drift between the proof snapshot and the shipped diff.',
     '',
     'Do not spawn the judge subagent when the current task is itself a pull-request or workspace code review (`review-code`, PR review, or PR re-review). Those workflows are already the review pass and must produce findings directly.',
     '',
     'Keep judge tool use minimal and targeted. Prefer the supplied diff and proof evidence, and only read extra files to resolve a specific ambiguity or verify an obvious risk.',
     '',
-    'Ask it to review what was built against the plan or requested outcome, verify visual proof when a pre-delivery proof handoff result or proof artifacts are available, summarize what matches, call out missing or risky gaps, and return the smallest concrete follow-up fixes worth making now.',
+    'Ask it to review what was built against the plan or requested outcome, verify visual proof when a proof result or proof artifacts are available, summarize what matches, call out missing or risky gaps, and return the smallest concrete follow-up fixes worth making now.',
     '',
-    'Treat the judge response as review input for the parent workflow. If judge-driven fixes change repository files and this run requires a pre-delivery `capture-visual-proof` handoff, re-run that pre-delivery handoff for the updated shipped change, replace prior proof evidence with that latest result, then run one more focused judge pass against the refreshed diff, validation state, and refreshed proof result before delivery. If judge-driven fixes change repository files and background visual proof is configured to run after delivery, do not re-run a pre-delivery proof handoff or block delivery on proof; re-review the updated diff, rerun the judge once without waiting for unfinished background proof when needed, deliver the judge-fixed diff, and let the post-delivery background `capture-visual-proof` capture that final shipped state. Keep orchestration, code changes, and final user-facing decisions in the parent agent.',
+    'Treat the judge response as review input for the parent workflow. If judge-driven fixes change repository files and this run requires a pre-delivery `capture-visual-proof` step, re-run that step once for the updated shipped change, replace prior proof evidence with that latest result, then run one more focused judge pass against the refreshed diff, validation state, and refreshed proof result before delivery. Keep orchestration, code changes, and final user-facing decisions in the parent agent.',
     '',
     "Do not paste the judge's full output into chat or any user-facing reply. The judge verdict is internal review material; surface at most a brief, parent-authored summary of the actionable outcome (what was fixed or what still needs attention), never the raw review dump.",
   ].join('\n');
@@ -1599,15 +1508,18 @@ function resolveModelBackedOpenCodeConfig(
           ),
         }
       : undefined;
-  const judgeModel = codeReviewModel ?? effectiveCodingModel;
+  // The judge opens visual-proof screenshots itself, so it runs on the
+  // vision model whenever one is configured and otherwise on the coding
+  // model. The code-review model is not part of this chain.
+  const judgeModel = visionModel ?? effectiveCodingModel;
   const judgeAgent = shouldConfigureJudgeSubagent(runtimeEnv)
     ? {
         [ROOMOTE_OPENCODE_JUDGE_AGENT_NAME]: createJudgeAgentConfig(
           judgeModel,
-          codeReviewModel && codeReviewModelReasoningEffort
+          visionModel && visionModelReasoningEffort
             ? buildOpenCodeModelReasoningOptions(
-                codeReviewModel,
-                codeReviewModelReasoningEffort,
+                visionModel,
+                visionModelReasoningEffort,
               )
             : null,
         ),
@@ -1958,28 +1870,6 @@ export function generateOpenCodeConfig({
     instructions.push(advisorModelInstructionsPath);
   }
 
-  const proofBrowserTarget = runtimeEnv.ROOMOTE_PROOF_BROWSER_TARGET?.trim();
-  delete runtimeEnv.ROOMOTE_PROOF_BROWSER_TARGET;
-
-  if (proofBrowserTarget) {
-    operatorAgent[ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME] =
-      createProofRunnerAgentConfig(
-        proofBrowserTarget,
-        resolveFeatureDemoCaptureRunnerDigest(homeDir),
-      );
-
-    const proofRunnerInstructionsPath = path.join(
-      openCodeConfigDir,
-      ROOMOTE_OPENCODE_PROOF_RUNNER_INSTRUCTIONS_FILE_NAME,
-    );
-    fs.writeFileSync(
-      proofRunnerInstructionsPath,
-      createProofRunnerModelInstructions(proofBrowserTarget),
-      'utf8',
-    );
-    instructions.push(proofRunnerInstructionsPath);
-  }
-
   const { mounted: mountedMcpServers, onDemand: onDemandMcpServers } =
     splitOnDemandMcpServers(mcpServers);
   const onDemandCatalogPath = writeOnDemandMcpCatalog(
@@ -1987,16 +1877,6 @@ export function generateOpenCodeConfig({
     onDemandMcpServers,
     runtimeEnv,
   );
-  // Agents kept away from a server's mounted tools must not reach it through
-  // the member server's on-demand tools either.
-  const onDemandToolExclusions: Record<string, false> = onDemandCatalogPath
-    ? Object.fromEntries(
-        ROOMOTE_ON_DEMAND_INTEGRATION_TOOL_NAMES.map(
-          (toolName) =>
-            [`${ROOMOTE_MCP_SERVER_NAME}_${toolName}`, false] as const,
-        ),
-      )
-    : {};
   const mcpToolExclusions = createMcpToolExclusions(mcpServers);
   for (const agentName of MCP_ISOLATED_AGENT_NAMES) {
     if (operatorAgent[agentName]) {
@@ -2005,20 +1885,6 @@ export function generateOpenCodeConfig({
         mcpToolExclusions,
       );
     }
-  }
-
-  if (operatorAgent[ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME]) {
-    operatorAgent[ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME] =
-      mergeAgentToolExclusions(
-        operatorAgent[ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME],
-        {
-          ...createMcpToolExclusions(
-            mcpServers,
-            (mcpServer) => mcpServer.name !== ROOMOTE_MCP_SERVER_NAME,
-          ),
-          ...onDemandToolExclusions,
-        },
-      );
   }
 
   const integrationInstructionsContent =

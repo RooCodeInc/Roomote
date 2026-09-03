@@ -249,7 +249,6 @@ vi.mock('@roomote/github', () => ({
 
 const mockPostMessage = vi.fn().mockResolvedValue('ts-123');
 const mockUpdateMessage = vi.fn().mockResolvedValue(true);
-const mockRemoveCancelButton = vi.fn().mockResolvedValue(true);
 const mockGetSlackStartedMessageTs = vi.fn().mockResolvedValue(null);
 const mockOpenConversation = vi.fn().mockResolvedValue('D123');
 const mockListPublicChannels = vi.fn().mockResolvedValue([]);
@@ -257,7 +256,6 @@ vi.mock('@roomote/slack', () => ({
   SlackNotifier: class MockSlackNotifier {
     postMessage = mockPostMessage;
     updateMessage = mockUpdateMessage;
-    removeCancelButton = mockRemoveCancelButton;
     openConversation = mockOpenConversation;
     listPublicChannels = mockListPublicChannels;
   },
@@ -1014,11 +1012,6 @@ describe('finishRun', () => {
         expect.anything(),
         expect.anything(),
       );
-      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
-        channel: 'C123',
-        messageTs: '111.333',
-        threadTs: '111.222',
-      });
     });
 
     it('does not post a setup completion message when setup becomes idle with a linked environment', async () => {
@@ -1061,11 +1054,6 @@ describe('finishRun', () => {
         expect.anything(),
         expect.anything(),
       );
-      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
-        channel: 'C123',
-        messageTs: '111.333',
-        threadTs: '111.222',
-      });
     });
 
     it('does not clean up setup UI when an idle setup task is still running', async () => {
@@ -1101,7 +1089,6 @@ describe('finishRun', () => {
       });
 
       expect(mockPostMessage).not.toHaveBeenCalled();
-      expect(mockRemoveCancelButton).not.toHaveBeenCalled();
     });
 
     it('does not clean up setup UI when setup becomes idle without a linked environment', async () => {
@@ -1136,7 +1123,6 @@ describe('finishRun', () => {
       });
 
       expect(mockPostMessage).not.toHaveBeenCalled();
-      expect(mockRemoveCancelButton).not.toHaveBeenCalled();
     });
 
     it('cleans up setup UI for resumed setup snapshot runs by reading sibling runs of the task', async () => {
@@ -1186,11 +1172,6 @@ describe('finishRun', () => {
       });
 
       expect(mockPostMessage).not.toHaveBeenCalled();
-      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
-        channel: 'C123',
-        messageTs: '111.333',
-        threadTs: '111.222',
-      });
     });
 
     it('cleans up setup UI for an idle resume when the linked environment lives on a sibling run', async () => {
@@ -1240,11 +1221,6 @@ describe('finishRun', () => {
       });
 
       expect(mockPostMessage).not.toHaveBeenCalled();
-      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
-        channel: 'C123',
-        messageTs: '111.333',
-        threadTs: '111.222',
-      });
     });
 
     it('DMs the installing user after their second completed non-unknown task when no channels were joined yet', async () => {
@@ -1572,11 +1548,6 @@ describe('finishRun', () => {
         },
       });
       expect(mockPostMessage).not.toHaveBeenCalled();
-      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
-        channel: 'C123',
-        messageTs: '111.333',
-        threadTs: '111.222',
-      });
     });
 
     it('redacts provider credentials and escapes Slack mentions at delivery', async () => {
@@ -1749,11 +1720,6 @@ describe('finishRun', () => {
         },
       });
       expect(mockPostMessage).not.toHaveBeenCalled();
-      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
-        channel: 'C123',
-        messageTs: '111.333',
-        threadTs: '111.222',
-      });
     });
 
     it('falls back to a new thread reply when there is no started message ts to update', async () => {
@@ -1791,7 +1757,6 @@ describe('finishRun', () => {
         thread_ts: '111.222',
         text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
       });
-      expect(mockRemoveCancelButton).not.toHaveBeenCalled();
     });
 
     it('posts runtime-failure copy as a new thread reply when the runtime task already started', async () => {
@@ -1833,11 +1798,6 @@ describe('finishRun', () => {
         channel: 'C123',
         thread_ts: '111.222',
         text: "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.",
-      });
-      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
-        channel: 'C123',
-        messageTs: '111.333',
-        threadTs: '111.222',
       });
     });
 

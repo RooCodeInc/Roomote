@@ -1786,69 +1786,6 @@ export class SlackNotifier {
     }
   }
 
-  /**
-   * Removes the cancel button from the started message.
-   * Keeps other buttons (e.g. Follow) in the actions block.
-   * If the actions block becomes empty, removes it entirely.
-   */
-  public async removeCancelButton({
-    channel,
-    messageTs,
-    threadTs,
-  }: {
-    channel: string;
-    messageTs: string;
-    threadTs: string;
-  }): Promise<boolean> {
-    try {
-      const blocks = await this.getMessageBlocks({
-        channel,
-        messageTs,
-        threadTs,
-      });
-
-      if (!blocks) {
-        return false;
-      }
-
-      const updatedBlocks = blocks
-        .map((block) => {
-          if (
-            !block ||
-            typeof block !== 'object' ||
-            (block as { type?: string }).type !== 'actions' ||
-            !Array.isArray((block as { elements?: unknown[] }).elements)
-          ) {
-            return block;
-          }
-
-          // Remove only the cancel_task button, keep others (e.g. Follow)
-          const filteredElements = (
-            block as { elements: Array<{ action_id?: string }> }
-          ).elements.filter((el) => el.action_id !== 'cancel_task');
-
-          // If no elements remain, drop the whole actions block
-          if (filteredElements.length === 0) {
-            return null;
-          }
-
-          return { ...block, elements: filteredElements };
-        })
-        .filter((block): block is unknown => block !== null);
-
-      return await this.updateMessage({
-        channel,
-        ts: messageTs,
-        message: { blocks: updatedBlocks },
-      });
-    } catch (error) {
-      console.error(
-        `[removeCancelButton] Failed to remove cancel button: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return false;
-    }
-  }
-
   public async deleteMessage(payload: { channel: string; ts: string }) {
     try {
       const response = await slackFetch(buildSlackApiUrl('chat.delete'), {

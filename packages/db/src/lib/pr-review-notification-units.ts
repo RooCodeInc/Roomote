@@ -1,6 +1,17 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, desc, eq, gt, inArray, isNull, lte, ne, sql } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  ne,
+  sql,
+} from 'drizzle-orm';
 
 import {
   activeRunStatuses,
@@ -18,6 +29,7 @@ import {
   prReviewNotificationDeliveries,
   prReviewNotificationUnitEvents,
   prReviewNotificationUnits,
+  taskMessages,
   taskPullRequests,
   taskRuns,
   tasks,
@@ -58,6 +70,7 @@ export type CanonicalPrReviewDeliveryClaim = {
   deferrals: number;
   events: Record<string, unknown>[];
   followUpPrompt: string | null;
+  reviewActionSuperseded: boolean;
   targetTaskId: string | null;
   actingUserId: string | null;
   routeProvider: 'slack' | 'teams' | 'telegram' | 'discord' | null;
@@ -705,6 +718,7 @@ export async function claimDueCanonicalPrReviewDeliveries(
       episode_id: string;
       event: Record<string, unknown>;
       follow_up_prompt: string | null;
+      action_claimed_at: Date | null;
       target_task_id: string | null;
       acting_user_id: string | null;
       route_provider: 'slack' | 'teams' | 'telegram' | 'discord' | null;
@@ -784,6 +798,7 @@ export async function claimDueCanonicalPrReviewDeliveries(
              u.episode_id,
              e.event,
              d.follow_up_prompt,
+             d.action_claimed_at,
              d.target_task_id,
              d.acting_user_id,
              d.route_provider,
@@ -862,6 +877,9 @@ export async function claimDueCanonicalPrReviewDeliveries(
         deferrals: row.deferrals,
         events: [row.event],
         followUpPrompt: row.follow_up_prompt,
+        reviewActionSuperseded:
+          row.status !== 'auto_dispatch_pending' &&
+          row.action_claimed_at !== null,
         targetTaskId: row.target_task_id,
         actingUserId: row.acting_user_id,
         routeProvider: row.route_provider,
@@ -933,10 +951,78 @@ export async function transitionCanonicalPrReviewDelivery(input: {
       and(
         canonicalClaimWhere(input),
         inArray(prReviewNotificationDeliveries.status, expected),
+        input.status === 'prompt_posting' ||
+          input.status === 'auto_dispatch_pending'
+          ? isNull(prReviewNotificationDeliveries.actionClaimedAt)
+          : undefined,
       ),
     )
     .returning({ id: prReviewNotificationDeliveries.id });
   return rows.length === 1;
+}
+
+/**
+ * Serializes an automatic follow-up enqueue with old-head retirement.
+ *
+ * The delivery row stays locked until `dispatch` settles. A concurrent
+ * synchronize transaction must therefore either fence the delivery before
+ * this transaction reads it, or wait until the follow-up has been enqueued.
+ * This closes the gap between a standalone state transition and the external
+ * enqueue that follows it.
+ */
+export async function withCanonicalPrReviewAutoDispatchFence<T>(
+  input: {
+    deliveryId: string;
+    leaseToken: string;
+    followUpPrompt: string;
+    targetTaskId: string;
+    actingUserId: string;
+    routeProvider: 'slack' | 'teams' | 'telegram' | 'discord' | null;
+    routeWorkspaceId: string | null;
+    routeChannelId: string | null;
+    routeThreadId: string | null;
+  },
+  dispatch: () => Promise<T>,
+): Promise<{ acquired: false } | { acquired: true; result: T }> {
+  return db.transaction(async (tx) => {
+    const [delivery] = await tx
+      .select({
+        id: prReviewNotificationDeliveries.id,
+        actionClaimedAt: prReviewNotificationDeliveries.actionClaimedAt,
+      })
+      .from(prReviewNotificationDeliveries)
+      .where(
+        and(
+          canonicalClaimWhere(input),
+          inArray(prReviewNotificationDeliveries.status, [
+            'prepared',
+            'auto_dispatch_pending',
+          ]),
+        ),
+      )
+      .for('update');
+
+    if (!delivery || delivery.actionClaimedAt !== null) {
+      return { acquired: false };
+    }
+
+    await tx
+      .update(prReviewNotificationDeliveries)
+      .set({
+        status: 'auto_dispatch_pending',
+        followUpPrompt: input.followUpPrompt,
+        targetTaskId: input.targetTaskId,
+        actingUserId: input.actingUserId,
+        routeProvider: input.routeProvider,
+        routeWorkspaceId: input.routeWorkspaceId,
+        routeChannelId: input.routeChannelId,
+        routeThreadId: input.routeThreadId,
+        updatedAt: new Date(),
+      })
+      .where(eq(prReviewNotificationDeliveries.id, delivery.id));
+
+    return { acquired: true, result: await dispatch() };
+  });
 }
 
 export async function deferCanonicalPrReviewDelivery(input: {
@@ -975,6 +1061,35 @@ export async function releaseCanonicalPrReviewDelivery(input: {
       updatedAt: new Date(),
     })
     .where(canonicalClaimWhere(input));
+}
+
+export async function releaseSupersededCanonicalPrReviewAction(input: {
+  deliveryId: string;
+  leaseToken: string;
+}): Promise<boolean> {
+  const now = new Date();
+  const rows = await db
+    .update(prReviewNotificationDeliveries)
+    .set({
+      status: 'pending',
+      dueAt: now,
+      leaseToken: null,
+      leaseExpiresAt: null,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        canonicalClaimWhere(input),
+        inArray(prReviewNotificationDeliveries.status, [
+          'claimed',
+          'prepared',
+          'auto_dispatch_pending',
+        ]),
+        isNotNull(prReviewNotificationDeliveries.actionClaimedAt),
+      ),
+    )
+    .returning({ id: prReviewNotificationDeliveries.id });
+  return rows.length === 1;
 }
 
 export async function upsertPrReviewAutoPreference(input: {
@@ -1503,6 +1618,131 @@ export async function retireCanonicalPrReviewActionsForDestination(input: {
       ),
     )
     .returning({ id: prReviewNotificationDeliveries.id });
+  return Promise.all(rows.map(({ id }) => getCanonicalPrReviewAction(id)));
+}
+
+export async function retireCanonicalPrReviewActionsForPullRequest(input: {
+  sourceControlProvider: SourceControlProvider;
+  repository: string;
+  prNumber: number;
+  currentHeadSha: string;
+}) {
+  const matchingUnits = db
+    .select({ id: prReviewNotificationUnits.id })
+    .from(prReviewNotificationUnits)
+    .where(
+      and(
+        eq(
+          prReviewNotificationUnits.sourceControlProvider,
+          input.sourceControlProvider,
+        ),
+        eq(prReviewNotificationUnits.repository, input.repository),
+        eq(prReviewNotificationUnits.prNumber, input.prNumber),
+        // Units without a recorded head (PR-conversation comments, summaries
+        // whose marker sha could not be parsed) cannot be proven stale, so
+        // they are left alone rather than retired on every push.
+        isNotNull(prReviewNotificationUnits.headSha),
+        // Roomote summary markers may record an abbreviated sha, so compare
+        // by prefix the same way the review-check paths do.
+        sql`NOT starts_with(${input.currentHeadSha}, ${prReviewNotificationUnits.headSha})`,
+      ),
+    );
+  const rows = await db.transaction(async (tx) => {
+    // A worker can already have read the old live head while it is still
+    // preparing the notification. Fence its later action transition without
+    // discarding the reviewer text; a reclaimed delivery carries this marker
+    // and is delivered without an action offer.
+    await tx
+      .update(prReviewNotificationDeliveries)
+      .set({
+        actionClaimedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          inArray(prReviewNotificationDeliveries.status, [
+            'claimed',
+            'prepared',
+            'auto_dispatch_pending',
+          ]),
+          isNull(prReviewNotificationDeliveries.actionClaimedAt),
+          inArray(
+            prReviewNotificationDeliveries.notificationUnitId,
+            matchingUnits,
+          ),
+        ),
+      );
+
+    const retired = await tx
+      .update(prReviewNotificationDeliveries)
+      .set({
+        status: 'dismissed',
+        leaseToken: null,
+        leaseExpiresAt: null,
+        actionClaimedAt: new Date(),
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          // Only offers whose controls are posted (or being posted) are
+          // superseded. Claimed/prepared deliveries are fenced above so a
+          // retry can still publish their reviewer text without stale
+          // controls.
+          inArray(prReviewNotificationDeliveries.status, [
+            'prompt_posting',
+            'awaiting_user_action',
+          ]),
+          inArray(
+            prReviewNotificationDeliveries.notificationUnitId,
+            matchingUnits,
+          ),
+        ),
+      )
+      .returning({
+        id: prReviewNotificationDeliveries.id,
+        taskId: prReviewNotificationDeliveries.taskId,
+      });
+
+    if (retired.length > 0) {
+      const deliveryIds = retired.map(({ id }) => id);
+      const taskIds = [
+        ...new Set(retired.flatMap(({ taskId }) => (taskId ? [taskId] : []))),
+      ];
+      await tx
+        .update(fastAgentMessages)
+        .set({
+          payload: sql`jsonb_set(coalesce(${fastAgentMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb('dismissed'::text), true)`,
+          updatedAt: sql`now()`,
+        })
+        .where(
+          inArray(
+            sql<string>`${fastAgentMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
+            deliveryIds,
+          ),
+        );
+      if (taskIds.length > 0) {
+        // Scope by task so the update uses task_messages_task_id_ts_idx
+        // instead of scanning every transcript row for the payload match.
+        await tx
+          .update(taskMessages)
+          .set({
+            payload: sql`jsonb_set(coalesce(${taskMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb('dismissed'::text), true)`,
+          })
+          .where(
+            and(
+              inArray(taskMessages.taskId, taskIds),
+              inArray(
+                sql<string>`${taskMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
+                deliveryIds,
+              ),
+            ),
+          );
+      }
+    }
+
+    return retired;
+  });
   return Promise.all(rows.map(({ id }) => getCanonicalPrReviewAction(id)));
 }
 

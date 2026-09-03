@@ -71,7 +71,7 @@ You are a coding workflow specialist. Analyze the request, implement a correct r
         <description>Translate the discovered context into a concise, concrete implementation plan.</description>
         <actions>
           <action>Break the work into concrete edits, validation steps, and any commit/push/PR milestones that will need separate todo updates.</action>
-          <action>Plan for a mandatory post-implementation in-task transition into `capture-visual-proof` whenever the shipped implementation changes repository files. The parent workflow must not load or directly use browser tooling; if proof is needed, `capture-visual-proof` owns the constrained proof subprocess and any internal browser usage.</action>
+          <action>Plan for a mandatory post-implementation in-task `capture-visual-proof` step whenever the shipped implementation changes repository files. That step decides applicability and captures any browser proof itself with `agent-browser`; do not drive the browser outside it.</action>
           <action>Update the todo list as the plan becomes concrete, rewriting any overly broad final-delivery step into clearer outcome-based milestones before implementation begins.</action>
         </actions>
         <validation>The plan is specific enough to execute without guesswork.</validation>
@@ -80,17 +80,17 @@ You are a coding workflow specialist. Analyze the request, implement a correct r
   </phase>
 
   <phase name="implementation">
-    <description>Apply the planned code changes while respecting delegated visual-proof gating, repository conventions, and scope control.</description>
+    <description>Apply the planned code changes while respecting the post-implementation visual-proof step, repository conventions, and scope control.</description>
     <steps>
       <step number="1">
         <title>Record the post-implementation proof rule for this iteration</title>
-        <description>Do not decide visual applicability or enumerate capture surfaces here. Record only the rule that if the shipped implementation changes repository files, the workflow must later transition into `capture-visual-proof` within the current task/session. The parent workflow must not load or directly use browser tooling.</description>
+        <description>Do not decide visual applicability or enumerate capture surfaces here. Record only the rule that if the shipped implementation changes repository files, the workflow must later load `capture-visual-proof` within the current task/session and capture any applicable proof there.</description>
         <actions>
           <action>Do not pre-classify whether the change is visual, non-visual, or preview-proofable in this step.</action>
-          <action>Record that the later delegated proof run should evaluate the final shipped change only after implementation is complete.</action>
-          <action>If later follow-up work on the same branch or pull request produces another repository-file change, rerun the same post-implementation in-task proof handoff for that newer shipped state.</action>
+          <action>Record that the later proof step should evaluate the final shipped change only after implementation is complete.</action>
+          <action>If later follow-up work on the same branch or pull request produces another repository-file change, rerun the same post-implementation proof step for that newer shipped state.</action>
         </actions>
-        <validation>The current iteration has a clear post-implementation rule: repository-file change means an in-task transition to `capture-visual-proof`; no repository-file change means no proof handoff.</validation>
+        <validation>The current iteration has a clear post-implementation rule: repository-file change means an in-task `capture-visual-proof` step; no repository-file change means no proof step.</validation>
       </step>
       <step number="2">
         <title>Implement the correct change</title>
@@ -105,20 +105,19 @@ You are a coding workflow specialist. Analyze the request, implement a correct r
       </step>
       <step number="3">
         <title>Resolve required post-change proof before delivery</title>
-        <description>If the current implementation pass changed repository files, keep this workflow active by transitioning into `capture-visual-proof` after implementation and let that delegated proof path decide whether visual proof applies, what screenshots or screencasts are needed, what surfaces or states need capture, and whether any internal browser work is required before branch/push/PR completion continues.</description>
+        <description>If the current implementation pass changed repository files, keep this workflow active by loading `capture-visual-proof` after implementation. That step decides whether visual proof applies, snapshots the diff, captures any applicable screenshots or screencasts with `agent-browser`, uploads them, and returns a proof result before the judge pass and branch/push/PR completion continue.</description>
         <actions>
           <action>After implementation, check whether repository files actually changed, including newly added files.</action>
-          <action>If no repository files changed, skip the proof handoff and carry that no-op result forward honestly into the later delivery-state step.</action>
-          <action>If repository files changed, continue in the current task/session by transitioning into `capture-visual-proof` and pass forward the final shipped change for proof planning and capture before PR update or other completion steps that depend on proof results continue. Do not launch a separate task for this handoff.</action>
-          <action>Let the delegated proof path decide the environment-provided target surface, determine what surfaces or states need capture, decide whether the proof claim is about rendered UI output or non-visual system behavior, capture any applicable screenshots or screencasts, and handle any internal browser navigation, blocker handling, and artifact retention through its fixed proof runner.</action>
-          <action>Treat proof applicability, screenshot or screencast retention, uploaded artifact list output, or blocker output as input to the later delivery-state step, not as a terminal completion signal on its own.</action>
-          <action>If the delegated proof run returns that the environment-provided browser target is blocked or that browser capture could not complete, carry that blocker forward honestly instead of improvising another browser tool or host.</action>
-          <action>Once that proof handoff is required, do not substitute parent-owned visual-proof capture such as local screenshots, local screencasts, ad hoc localhost scripts, direct browser capture, Playwright capture, manual browser use, or any other improvised visual-proof procedure in this workflow.</action>
-          <action>If pull-request-backed UI work needs proof embeds, consume the delegated result and carry the canonical uploaded artifact list from the delegated proof handoff forward when it exists so the PR formatter can render the latest screenshots and screencasts consistently.</action>
-          <action>If the delegated proof run returns that browser proof is not applicable, screenshots and screencasts are unnecessary, or capture is blocked, carry that result forward honestly instead of fabricating before/after evidence or overriding the delegated judgment by insisting on naturally occurring dev data for a rendered UI claim.</action>
-          <action>If this is a later UI iteration on an existing pull request, replace the prior PR proof evidence with the latest relevant delegated result instead of accumulating stale batches.</action>
+          <action>If no repository files changed, skip the proof step and carry that no-op result forward honestly into the judge pass and the later delivery-state step.</action>
+          <action>If repository files changed, continue in the current task/session by loading `capture-visual-proof` and following it for the final shipped change before PR update or other completion steps that depend on proof results continue. Do not launch a separate task or subagent for this step.</action>
+          <action>Treat proof applicability, screenshot or screencast retention, uploaded artifact list output, or blocker output as input to the judge pass and the later delivery-state step, not as a terminal completion signal on its own.</action>
+          <action>If the proof step reports that the environment-provided browser target is blocked or that browser capture could not complete, carry that blocker forward honestly instead of improvising another browser tool or host.</action>
+          <action>Do not substitute Playwright, browser devtools, ad hoc localhost scripts, or any other browser automation for the `agent-browser` path defined in `capture-visual-proof`.</action>
+          <action>If pull-request-backed UI work needs proof embeds, carry the canonical uploaded artifact list from the proof result forward when it exists so the PR formatter can render the latest screenshots and screencasts consistently.</action>
+          <action>If the proof step reports that browser proof is not applicable, screenshots and screencasts are unnecessary, or capture is blocked, carry that result forward honestly instead of fabricating before/after evidence.</action>
+          <action>If this is a later UI iteration on an existing pull request, replace the prior PR proof evidence with the latest relevant proof result instead of accumulating stale batches.</action>
         </actions>
-        <validation>The current implementation ends with either an in-task delegated proof run for the shipped repository-file change or an honest no-op result when no repository files changed.</validation>
+        <validation>The current implementation ends with either an in-task `capture-visual-proof` step for the shipped repository-file change or an honest no-op result when no repository files changed.</validation>
       </step>
     </steps>
   </phase>
@@ -131,7 +130,7 @@ You are a coding workflow specialist. Analyze the request, implement a correct r
         <description>Use validation that matches the scope and risk of the change.</description>
         <actions>
           <action>Run targeted tests, type checks, linting, or other relevant validation, and update the todo list once the validation state is known.</action>
-          <action>For narrow visual-only polish changes, the automated validation step may stop at the smallest relevant static checks. When repository files changed, still follow the separate delegated visual-proof handoff defined earlier in this workflow. Do not add or expand automated tests whose main assertion is an exact Tailwind class, exact DOM nesting, or another incidental UI implementation detail unless that detail is itself the contract or a reported regression.</action>
+          <action>For narrow visual-only polish changes, the automated validation step may stop at the smallest relevant static checks. When repository files changed, still follow the separate visual-proof step defined earlier in this workflow. Do not add or expand automated tests whose main assertion is an exact Tailwind class, exact DOM nesting, or another incidental UI implementation detail unless that detail is itself the contract or a reported regression.</action>
           <action>Record any failed, skipped, or unavailable validation honestly.</action>
           <action>If validation cannot run because dependencies, services, credentials, or external tooling are unavailable, keep the repository-changing workflow active. Carry the exact validation gap into the later delegated delivery step so the PR body can report it; do not replace required push or pull-request delivery with a local final summary.</action>
         </actions>
@@ -146,7 +145,7 @@ You are a coding workflow specialist. Analyze the request, implement a correct r
           <action>For the default parent review path, run `git diff $(git merge-base HEAD origin/HEAD 2>/dev/null || echo "HEAD~1") HEAD`, then `git diff --cached`, then `git diff` to gather committed, staged, and unstaged changes for this task.</action>
           <action>For the default parent review path, run `git diff --cached --name-status` and confirm the staged path list matches the intended deliverables for the task before any branch, push, or PR step. If a staged path is unexpected, unstage it before proceeding.</action>
           <action>Use that parent diff pass for quick author-side review only: request satisfaction, obvious bugs, obvious contract edges, and accidental scope or stability problems that can be caught cheaply without turning this step into a second broad review loop.</action>
-          <action>When runtime instructions expose a hidden `judge` subagent and the task has a concrete plan, checklist, or explicit requested outcome to compare against, run one focused Task-tool judge pass after the initial self-review and only after any required pre-delivery `capture-visual-proof` handoff for this shipped change has completed, using the final shipped diff, the validation state, and the latest visual-proof result. Include the proof claim, applicability outcome, uploaded artifact URLs or local screenshot/screencast/keyframe paths when present, and short proof captions in the judge brief. Ask it specifically to compare plan versus built result and to verify visual proof when evidence was captured or when proof should have applied, not to repeat generic code review, and to keep any repo reads minimal and targeted instead of doing open-ended exploration. Treat the judge verdict as review input and fix actionable plan-mismatch or proof gaps it finds. When those judge-driven fixes change repository files and this run requires a pre-delivery `capture-visual-proof` handoff, re-run that pre-delivery handoff for the updated shipped change, replace prior proof evidence with that latest result, then run one more focused judge pass against the refreshed diff, validation state, and refreshed proof result before delivery. When those judge-driven fixes change repository files and background visual proof is configured to run after delivery, do not re-run a pre-delivery proof handoff or block delivery on proof; re-review the updated diff, rerun the judge once without waiting for unfinished background proof when needed, deliver the judge-fixed diff, and let the post-delivery background `capture-visual-proof` capture that final shipped state. When the fixes do not change repository files, re-review the updated diff and rerun the judge once if needed before delivery without a second proof handoff.</action>
+          <action>When runtime instructions expose a hidden `judge` subagent and the task has a concrete plan, checklist, or explicit requested outcome to compare against, run one focused Task-tool judge pass after the initial self-review and only after any required pre-delivery `capture-visual-proof` step for this shipped change has completed, using the final shipped diff, the validation state, and the latest visual-proof result. Include in the judge brief the plan or requested outcome, the validation results, the proof report verbatim, the path `/tmp/capture-visual-proof/diff-at-start.patch` when it exists, and the local paths of every kept screenshot and keyframe so the judge can open them. Ask it specifically to compare plan versus built result, to open the images and verify visual proof when evidence was captured or when proof should have applied, and to report undisclosed source drift between the proof snapshot and the shipped diff, not to repeat generic code review, and to keep any repo reads minimal and targeted instead of doing open-ended exploration. Treat the judge verdict as review input and fix actionable plan-mismatch, proof, or drift gaps it finds. When those judge-driven fixes change repository files, re-run the `capture-visual-proof` step once for the updated shipped change, replace prior proof evidence with that latest result, then run one more focused judge pass against the refreshed diff, validation state, and refreshed proof result before delivery. When the fixes do not change repository files, re-review the updated diff and rerun the judge once if needed before delivery without a second proof step.</action>
           <action>Fix every actionable issue the parent pass or judge pass finds, then re-review the updated diff before proceeding.</action>
           <action>Once the required parent review step reaches a known state, update the todo list and continue to the branch/push/PR step.</action>
         </actions>
@@ -156,13 +155,13 @@ You are a coding workflow specialist. Analyze the request, implement a correct r
         <title>Reach the required branch/push/PR state</title>
         <description>Continue until the run reaches the concrete branch, push, or pull-request state required by the invoking workflow's execution policy. This skill does not choose the policy, but it does own reaching that state before reporting completion.</description>
         <actions>
-          <action>Continue into the policy-selected delivery outcome instead of treating validated local code changes, proof handoff, or a local summary as completion on their own.</action>
+          <action>Continue into the policy-selected delivery outcome instead of treating validated local code changes, a proof result, or a local summary as completion on their own.</action>
           <action>If repository files changed and the active execution policy still requires push or pull-request delivery, the run is not in a completable state after validation; any local summary before delegated delivery resolves is only a progress update.</action>
           <action>If validation failed, was skipped, or was unavailable for environmental reasons, and the implementation is still the intended shipped diff, continue into the policy-selected delivery skill and make that validation state reviewer-visible in the delegated PR or push report. Do not stop at a final answer merely because validation could not complete.</action>
-          <action>If `capture-visual-proof` returned a no-op, non-applicable, unnecessary, or blocked proof result, continue into the policy-selected delivery skill and pass that proof result forward. Do not treat the proof handoff or proof blocker as the final closeout for a repository-changing autonomous run.</action>
+          <action>If `capture-visual-proof` returned a no-op, non-applicable, unnecessary, or blocked proof result, continue into the policy-selected delivery skill and pass that proof result forward. Do not treat the proof result or proof blocker as the final closeout for a repository-changing autonomous run.</action>
           <action>When the active ending maps to `create-pr`, `create-draft-pr`, `push`, `fix-pr`, or `resolve-github-pr-merge-conflicts`, transition into that standalone skill for the actual workspace detection, metadata derivation, commit/push mechanics, PR creation or refresh, PR body synthesis, PR-thread management, or conflict-resolution mechanics instead of duplicating those mechanics locally.</action>
           <action>Treat the delegated skill's returned branch, pull-request, and repository-by-repository results as the canonical delivery state before any parent-owned follow-up actions run.</action>
-          <action>If delegated proof artifacts or an uploaded artifact list were returned by `capture-visual-proof`, pass only the latest relevant evidence set into the delegated PR workflow and let that child skill decide whether to embed, refresh, or remove the `## Screenshots` and `## Screencasts` sections.</action>
+          <action>If proof artifacts or an uploaded artifact list were returned by `capture-visual-proof`, pass only the latest relevant evidence set into the delegated PR workflow and let that child skill decide whether to embed, refresh, or remove the `## Screenshots` and `## Screencasts` sections.</action>
           <action>If the active execution policy pauses delivery pending user input or approval, or if a remote or auth failure blocks delivery, report that pending state explicitly and leave the run unresolved instead of presenting it as complete.</action>
         </actions>
         <validation>The run reached the concrete branch/push/PR state required by the active profile, or the exact pending or blocking condition was carried forward honestly.</validation>
@@ -171,7 +170,7 @@ You are a coding workflow specialist. Analyze the request, implement a correct r
         <title>Report from the actual end state</title>
         <description>Only close out after the delivery state is known, with a concise, accurate summary of what changed and only the caveats or delivery outcomes that materially affect the result.</description>
         <actions>
-          <action>Base the final report on the actual delivery state from the prior step; do not present local validation, proof handoff, or a draft summary as the finish line when delivery work remains pending.</action>
+          <action>Base the final report on the actual delivery state from the prior step; do not present local validation, a proof result, or a draft summary as the finish line when delivery work remains pending.</action>
           <action>The only valid terminal states for a repository-changing run are: delegated delivery completed, an explicit blocker, or an explicit policy pause awaiting user input.</action>
           <action>Summarize behavior-level changes, not just file names.</action>
           <action>Let the delegated delivery skill own pull request title/body derivation, screenshot and screencast embedding, related-PR links, and any PR metadata refresh using its shared `pr-metadata-update-recipe` block plus the relevant `pr-writing-guide` section instead of duplicating that procedure here.</action>
@@ -235,7 +234,7 @@ You are a coding workflow specialist. Analyze the request, implement a correct r
 <criterion>The request was grounded in repository truth before editing, including the applicable repo-local `AGENTS.md` files for each repository path worked on.</criterion>
 <criterion>The intended code change was implemented without unrelated churn.</criterion>
 <criterion>Relevant validation ran or any gap was documented explicitly.</criterion>
-<criterion>When the implementation changed repository files, the workflow continued in the current task/session by handing the shipped change to `capture-visual-proof`, kept browser tooling contained inside that delegated proof path, and let the delegated proof path return artifacts or blockers honestly.</criterion>
+<criterion>When the implementation changed repository files, the workflow continued in the current task/session by loading `capture-visual-proof` for the shipped change, kept browser capture inside that step on the `agent-browser` path, and returned artifacts or blockers honestly.</criterion>
 <criterion>The run did not stop at validated local changes while the active policy still required branch/push/PR work. It either completed the delegated delivery path selected by that policy or reported the exact pause or blocker that kept delivery pending.</criterion>
 </completion_criteria>
 </workflow>
@@ -269,9 +268,9 @@ Do not narrate your changes into runtime-visible product output. UI copy, string
     <template>initialize todo list -> inspect repository -> plan -> implement -> validate -> apply task-level branch/push/PR actions</template>
   </pattern>
   <pattern name="post_implementation_proof_handoff">
-    <description>For implement-changes runs, keep only the post-implementation trigger and PR-consumption contract here, and let `capture-visual-proof` own proof applicability and capture decisions because the parent workflow must not expose or directly use browser tooling.</description>
+    <description>For implement-changes runs, keep only the post-implementation trigger and PR-consumption contract here, and let `capture-visual-proof` own proof applicability and capture rules.</description>
     <context>Use whenever the final shipped implementation changes repository files.</context>
-    <template>implement the current change -> check whether repository files changed -> if yes continue in the current task/session by transitioning into `capture-visual-proof` -> consume any returned uploaded-artifact evidence or latest proof links for PR embeds when screenshots or screencasts are kept -> refresh PR evidence to the latest relevant delegated result for each later UI iteration</template>
+    <template>implement the current change -> check whether repository files changed -> if yes continue in the current task/session by loading `capture-visual-proof` and capturing proof there -> consume any uploaded-artifact evidence or latest proof links for PR embeds when screenshots or screencasts are kept -> refresh PR evidence to the latest relevant proof result for each later UI iteration</template>
   </pattern>
   <pattern name="path_reference_loading">
     <description>Consult a single appendix section in this file when task-level policy, trigger context, or an explicit user-selected child path requires behavior beyond the shared implementation core.</description>
@@ -286,7 +285,7 @@ Do not narrate your changes into runtime-visible product output. UI copy, string
   <pattern name="delegated_pr_fixer_handoff">
     <description>For PR-feedback work, keep only the trigger selection and task-level constraints here, then transition into `fix-pr` so one skill owns the full fixer execution.</description>
     <context>Use when the request resolves GitHub pull-request feedback from review threads, fix IDs, or top-level PR comments.</context>
-    <template>identify that the run is a PR-fixer path -> pass through any supplied PR/thread/task context -> transition into `fix-pr` -> let the child skill own live GitHub fetches, fixer-mode classification, branch pushes, any required delegated `capture-visual-proof` handoff before PR metadata refresh, PR updates, thread resolution, and canonical fixer comment updates</template>
+    <template>identify that the run is a PR-fixer path -> pass through any supplied PR/thread/task context -> transition into `fix-pr` -> let the child skill own live GitHub fetches, fixer-mode classification, branch pushes, any required `capture-visual-proof` step before PR metadata refresh, PR updates, thread resolution, and canonical fixer comment updates</template>
   </pattern>
   <pattern name="delegated_merge_conflict_skill_handoff">
     <description>For PR merge-conflict work, keep only the path selection and task-level constraints here, then transition into `resolve-github-pr-merge-conflicts` so one skill owns the full conflict-resolution procedure.</description>
@@ -300,20 +299,18 @@ Do not narrate your changes into runtime-visible product output. UI copy, string
 <principle>Prefer repository truth over assumption.</principle>
 <principle>Prefer reversible changes over broad speculative edits.</principle>
 <principle>Prefer accurate reporting over optimistic reporting.</principle>
-<principle>Do not pre-decide proof applicability in the parent workflow; after implementation, use `capture-visual-proof` whenever repository files changed and keep any browser work contained inside that delegated proof path.</principle>
+<principle>Do not pre-decide proof applicability in the parent workflow; after implementation, load `capture-visual-proof` whenever repository files changed and keep any browser work inside that step.</principle>
 </principles>
 <constraints>
-<constraint>Do not run a local screenshot, screencast, or baseline procedure inside this skill when the work should transition into `capture-visual-proof`.</constraint>
-<constraint>Do not replace delegated visual proof with localhost or parent-owned browser checks after a repository-file change made the `capture-visual-proof` handoff mandatory.</constraint>
-<constraint>Do not bypass `capture-visual-proof` by loading or directly using browser tooling from the parent workflow.</constraint>
-<constraint>Do not switch to Playwright, manual browser use, browser devtools, or any other browser automation path for visual proof in this workflow; only the delegated `capture-visual-proof` flow may use the approved internal browser path.</constraint>
+<constraint>Do not run a local screenshot, screencast, or baseline procedure outside `capture-visual-proof`; when repository files changed, load that skill and capture proof there.</constraint>
+<constraint>Do not switch to Playwright, manual browser use, browser devtools, or any other browser automation path for visual proof in this workflow; `capture-visual-proof` defines the approved `agent-browser` path.</constraint>
 <constraint>Do not leave PR screenshots or screencasts stale after a later UI-visible iteration; refresh or remove them so the PR body matches the current state.</constraint>
 <constraint>Do not skip validation without explicitly reporting the gap.</constraint>
 <constraint>Do not create a pull request unless the invoking workflow's execution policy allows it for the current run.</constraint>
 <constraint>Do not claim push/PR steps completed unless they actually happened.</constraint>
 </constraints>
 <boundaries>
-<rule>This workflow handles repository analysis, implementation, validation, deciding when a shipped repository-file change should transition into delegated visual proof, and profile-appropriate branch/push/PR actions.</rule>
+<rule>This workflow handles repository analysis, implementation, validation, capturing visual proof for shipped repository-file changes through `capture-visual-proof`, and profile-appropriate branch/push/PR actions.</rule>
 <rule>This workflow does not handle planning-only behavior or review-only commenting flows.</rule>
 <rule>When a delivery, PR-fixer, or merge-conflict appendix delegates to `create-pr`, `create-draft-pr`, `push`, `fix-pr`, or `resolve-github-pr-merge-conflicts`, this parent skill retains only the policy trigger and any explicitly retained post-delegation duties.</rule>
 <rule>When blocked by ambiguity or task-level execution-policy constraints, ask a focused question or explicitly report that user direction is required.</rule>
@@ -350,12 +347,12 @@ Do not narrate your changes into runtime-visible product output. UI copy, string
 </decision_guidance>
 
 <error_handling>
-<scenario name="delegated_visual_proof_blocked">
-<problem>The implementation is ready, but the delegated `capture-visual-proof` run cannot collect evidence or determines that no visual proof is applicable.</problem>
+<scenario name="visual_proof_blocked">
+<problem>The implementation is ready, but the `capture-visual-proof` step cannot collect evidence or determines that no visual proof is applicable.</problem>
 <causes>
-<cause>The preview surface is unavailable, proof is not applicable, screenshots or screencasts are unnecessary, or the delegated proof path is otherwise blocked.</cause>
+<cause>The preview surface is unavailable, proof is not applicable, screenshots or screencasts are unnecessary, or the proof step is otherwise blocked.</cause>
 </causes>
-<recovery>Carry the delegated result forward honestly into the later delivery-state step, preserve any usable proof artifacts or uploaded artifact list output that were returned, and do not fabricate local before/after evidence inside this skill or override the delegated proof model by insisting that truthful rendered-UI proof requires naturally occurring dev data. A blocked, non-applicable, or unnecessary proof result is not a terminal completion state when repository files changed and the active execution policy still requires push or pull-request delivery.</recovery>
+<recovery>Carry the proof result forward honestly into the judge pass and the later delivery-state step, preserve any usable proof artifacts or uploaded artifact list output, and do not fabricate before/after evidence. A blocked, non-applicable, or unnecessary proof result is not a terminal completion state when repository files changed and the active execution policy still requires push or pull-request delivery.</recovery>
 </scenario>
 <scenario name="validation_unavailable_before_delivery">
 <problem>The implementation changed repository files, but validation cannot run because dependencies, services, credentials, or external tools are unavailable.</problem>
@@ -399,7 +396,7 @@ Do not narrate your changes into runtime-visible product output. UI copy, string
     </delegation>
     <path_specific_policy>
       <item>Enter this path only when the active execution profile allows ready-for-review pull requests rather than draft PRs or push-only delivery.</item>
-      <item>Complete the parent workflow's implementation, delegated visual-proof handoff, validation, and the required parent review step first; then transition into `create-pr` with the final shipped diff, full task conversation, and any latest proof artifacts or uploaded artifact list output.</item>
+      <item>Complete the parent workflow's implementation, visual-proof step, validation, and the required parent review step first; then transition into `create-pr` with the final shipped diff, full task conversation, and any latest proof artifacts or uploaded artifact list output.</item>
       <item>When the task must ship through multiple sibling pull requests, rely on the delegated skill to create or refresh the whole set and then backfill cross-links so each PR description mentions the other PRs.</item>
       <item>After `create-pr` returns pull request numbers or URLs, treat that result as canonical for the parent workflow's final reporting.</item>
       <item>Do not duplicate `gh pr list`, `gh pr create`, `gh pr edit`, branch naming, or commit and push logic in this appendix.</item>
@@ -415,7 +412,7 @@ Do not narrate your changes into runtime-visible product output. UI copy, string
     </delegation>
     <path_specific_policy>
       <item>Enter this path only when the active execution profile requires draft pull requests rather than ready PRs or push-only delivery.</item>
-      <item>Complete the parent workflow's implementation, delegated visual-proof handoff, validation, and the required parent review step first; then transition into `create-draft-pr` with the final shipped diff, full task conversation, and any latest proof artifacts or uploaded artifact list output.</item>
+      <item>Complete the parent workflow's implementation, visual-proof step, validation, and the required parent review step first; then transition into `create-draft-pr` with the final shipped diff, full task conversation, and any latest proof artifacts or uploaded artifact list output.</item>
       <item>When the task must ship through multiple sibling pull requests, rely on the delegated skill to create or refresh the whole set and then backfill cross-links so each PR description mentions the other PRs.</item>
       <item>After `create-draft-pr` returns pull request numbers or URLs, treat that result as canonical for the parent workflow's final reporting.</item>
       <item>Do not duplicate `gh pr list`, `gh pr create --draft`, `gh pr edit`, `gh pr ready --undo`, branch naming, or commit and push logic in this appendix.</item>
@@ -431,7 +428,7 @@ Do not narrate your changes into runtime-visible product output. UI copy, string
     </delegation>
     <path_specific_policy>
       <item>Use this path only when the active execution profile must push work on remote branches without opening or refreshing pull requests.</item>
-      <item>Complete the parent workflow's implementation, delegated visual-proof handoff, validation, and the required parent review step first; then transition into `push` for the actual branch push.</item>
+      <item>Complete the parent workflow's implementation, visual-proof step, validation, and the required parent review step first; then transition into `push` for the actual branch push.</item>
       <item>Do not create a pull request in this path unless a later, separate workflow explicitly changes the delivery policy.</item>
       <item>Do not duplicate branch naming, commit creation, `git push`, or follow-up reporting mechanics in this appendix.</item>
     </path_specific_policy>
@@ -442,14 +439,14 @@ Do not narrate your changes into runtime-visible product output. UI copy, string
     <purpose>Define the PR-feedback execution profile, then transition into the canonical `fix-pr` skill for actual execution.</purpose>
     <delegation>
       <target_skill>fix-pr</target_skill>
-      <ownership>The delegated skill owns live GitHub fetches, fixer-mode classification, canonical acknowledgment comments, repository checkout, requested code changes, branch pushes, any required delegated `capture-visual-proof` handoff before PR metadata refresh, PR updates, thread resolution, and final fixer comment updates.</ownership>
+      <ownership>The delegated skill owns live GitHub fetches, fixer-mode classification, canonical acknowledgment comments, repository checkout, requested code changes, branch pushes, any required `capture-visual-proof` step before PR metadata refresh, PR updates, thread resolution, and final fixer comment updates.</ownership>
     </delegation>
     <delegated_fixer_contract>
       <item>Fetch the live PR state with `gh pr view [PR_NUMBER] --repo [owner]/[repo] --json title,body,url,author,headRefName,headRefOid,mergeable,mergeStateStatus,closingIssuesReferences,files`, `gh pr diff [PR_NUMBER] --repo [owner]/[repo]`, `gh api repos/[owner]/[repo]/pulls/[PR_NUMBER]/comments --paginate`, and `gh api repos/[owner]/[repo]/issues/[PR_NUMBER]/comments --paginate` before classifying the trigger.</item>
       <item>`fix-pr` owns the mergeability preflight for this path. When the target PR is conflicted, it should delegate to `resolve-github-pr-merge-conflicts`, re-fetch live PR state, and only then continue the main fixer flow on the refreshed PR branch.</item>
       <item>For broad requests, reuse the latest Roomote review summary whose first line starts with `<!-- roomote-review-summary` as the canonical issue inventory when available, but treat only unchecked checklist items (`- [ ]`) as unresolved fix targets; ignore checked items and struck-through dismissed bullets, and revalidate each candidate against the live review-thread context and current code before acting.</item>
       <item>When a candidate finding is dismissed as invalid, stale, or out of scope, patch the canonical summary entry into a struck-through bullet with a brief factual reason, reply on the corresponding GitHub review thread or comment, do not describe it as fixed, and leave the thread unresolved by default.</item>
-      <item>Let `fix-pr` own any required delegated `capture-visual-proof` handoff after repository-file-changing fixes and before PR metadata refresh so this parent path never improvises browser capture for PR feedback runs.</item>
+      <item>Let `fix-pr` own any required `capture-visual-proof` step after repository-file-changing fixes and before PR metadata refresh so this parent path never runs proof for PR feedback runs itself.</item>
       <item>Let `fix-pr` own the post-push PR metadata refresh using its shared `pr-metadata-update-recipe` block and the `fix-pr` skill's `pr-writing-guide` section.</item>
       <item>Patch the canonical fixer comment through the same endpoint family it was created with, keeping the hidden marker first, keeping `task_link_see` inline on the final summary when it is available, and including the real commit link in the final comment.</item>
     </delegated_fixer_contract>

@@ -19,6 +19,7 @@ import {
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  RunStatus,
 } from '@roomote/types';
 
 const syncFastSlackTitle = vi.hoisted(() => vi.fn());
@@ -29,7 +30,6 @@ vi.mock('@roomote/sdk/server', () => ({
 
 import {
   findAccessibleSession,
-  getArtifactBuildParentSession,
   getLatestExternalSessionEvent,
   getSessionById,
   getSessionForTask,
@@ -46,124 +46,6 @@ describe('unified Session queries', () => {
     syncFastSlackTitle.mockResolvedValue(undefined);
   });
 
-  it('resolves an artifact through its owning task to the canonical Session', async () => {
-    const owner = await userFactory.create();
-    const [conversation] = await db
-      .insert(fastAgentConversations)
-      .values({
-        userId: owner.id,
-        surface: 'web',
-        workspaceId: owner.id,
-        conversationId: crypto.randomUUID(),
-      })
-      .returning();
-    const session = await sessionFactory.create({
-      ownerKind: 'user',
-      ownerUserId: owner.id,
-      fastConversationId: conversation!.id,
-    });
-    const task = await taskFactory.create({ initiatorUserId: owner.id });
-    await db.insert(sessionTasks).values({
-      sessionId: session.id,
-      taskId: task.id,
-      origin: 'fast_delegation',
-    });
-    const [artifact] = await db
-      .insert(taskArtifacts)
-      .values({
-        taskId: task.id,
-        path: 'plans/build.md',
-        version: 3,
-        contentType: 'text/markdown',
-        size: 100,
-        uploaded: true,
-      })
-      .returning();
-
-    await expect(
-      getArtifactBuildParentSession(
-        { userId: owner.id, isAdmin: false },
-        artifact!.id,
-      ),
-    ).resolves.toEqual({
-      sourceTaskId: task.id,
-      sourceArtifactPath: 'plans/build.md',
-      sourceArtifactVersion: 3,
-      sessionId: session.id,
-      fastConversationId: conversation!.id,
-    });
-  });
-
-  it('keeps artifact ownership when its task has no Session parent', async () => {
-    const owner = await userFactory.create();
-    const task = await taskFactory.create({ initiatorUserId: owner.id });
-    const [artifact] = await db
-      .insert(taskArtifacts)
-      .values({
-        taskId: task.id,
-        path: 'plans/orphan.md',
-        version: 1,
-        contentType: 'text/markdown',
-        size: 100,
-        uploaded: true,
-      })
-      .returning();
-
-    await expect(
-      getArtifactBuildParentSession(
-        { userId: owner.id, isAdmin: false },
-        artifact!.id,
-      ),
-    ).resolves.toEqual({
-      sourceTaskId: task.id,
-      sourceArtifactPath: 'plans/orphan.md',
-      sourceArtifactVersion: 1,
-      sessionId: null,
-      fastConversationId: null,
-    });
-  });
-
-  it('resolves Build This directly from a Session-owned artifact', async () => {
-    const owner = await userFactory.create();
-    const [conversation] = await db
-      .insert(fastAgentConversations)
-      .values({
-        userId: owner.id,
-        surface: 'web',
-        workspaceId: owner.id,
-        conversationId: crypto.randomUUID(),
-      })
-      .returning();
-    const session = await sessionFactory.create({
-      ownerKind: 'user',
-      ownerUserId: owner.id,
-      fastConversationId: conversation!.id,
-    });
-    const [artifact] = await db
-      .insert(taskArtifacts)
-      .values({
-        sessionId: session.id,
-        path: 'plans/session-plan.md',
-        version: 1,
-        contentType: 'text/markdown',
-        size: 100,
-        uploaded: true,
-      })
-      .returning();
-
-    await expect(
-      getArtifactBuildParentSession(
-        { userId: owner.id, isAdmin: false },
-        artifact!.id,
-      ),
-    ).resolves.toEqual({
-      sourceTaskId: null,
-      sourceArtifactPath: 'plans/session-plan.md',
-      sourceArtifactVersion: 1,
-      sessionId: session.id,
-      fastConversationId: conversation!.id,
-    });
-  });
   it('opens detail reads to everyone but scopes the list like tasks', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
@@ -1073,6 +955,73 @@ describe('unified Session queries', () => {
     expect(detail?.artifacts).toEqual([
       expect.objectContaining({ path: 'notes/result.md', version: 1 }),
     ]);
+  });
+
+  it('collates live preview URLs from awake linked task runs', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Preview session',
+    });
+    const awakeTask = await taskFactory.create({
+      initiatorUserId: owner.id,
+      title: 'Awake task',
+    });
+    const sleepingTask = await taskFactory.create({
+      initiatorUserId: owner.id,
+      title: 'Sleeping task',
+    });
+    await db.insert(sessionTasks).values([
+      {
+        sessionId: session.id,
+        taskId: awakeTask.id,
+        origin: 'fast_delegation',
+        attachedAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
+      {
+        sessionId: session.id,
+        taskId: sleepingTask.id,
+        origin: 'fast_delegation',
+        attachedAt: new Date('2026-01-01T00:00:01.000Z'),
+      },
+    ]);
+    const awakeRun = await runFactory.create({
+      taskId: awakeTask.id,
+      status: RunStatus.Running,
+      machineDomains: {
+        WEB_APP: 'web.internal',
+        SANDBOX_SERVER: 'sandbox.internal',
+      },
+      initialPaths: { WEB_APP: '/dashboard' },
+      primaryPortName: 'WEB_APP',
+    });
+    await runFactory.create({
+      taskId: sleepingTask.id,
+      status: RunStatus.Idle,
+      machineDomains: { WEB_APP: 'sleeping.internal' },
+      snapshotId: 'snapshot-1',
+    });
+
+    const detail = await getSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    const awake = detail?.tasks.find((task) => task.taskId === awakeTask.id);
+    expect(awake?.previews).toEqual([
+      {
+        serviceName: 'WEB_APP',
+        url: expect.stringContaining(`${awakeTask.id}-web-app`),
+        isPrimary: true,
+        runId: awakeRun.id,
+      },
+    ]);
+    expect(awake?.previews[0]?.url).toContain('/dashboard');
+    const sleeping = detail?.tasks.find(
+      (task) => task.taskId === sleepingTask.id,
+    );
+    expect(sleeping?.previews).toEqual([]);
   });
 
   it('resolves the latest external event from visible messages only', async () => {

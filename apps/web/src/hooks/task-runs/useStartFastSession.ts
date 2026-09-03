@@ -46,13 +46,4 @@ type StartFastSessionVariables = {
     harness?: LaunchCodingHarness;
     computeProvider?: ComputeProvider;
   };
-  artifactBuild?: {
-    launchId: string;
-    environmentId: string;
-    branch?: string;
-    taskModel: string;
-    sourceArtifactId: string;
-    sourceArtifactPath: string;
-    sourceArtifactVersion: number;
-  };
 };

@@ -26,6 +26,15 @@ vi.mock('./TaskSessionReadTracker', () => ({
 }));
 
 vi.mock('@/components/sandbox', () => ({
+  WorkspaceBadge: ({
+    environmentId,
+    repo,
+  }: {
+    environmentId?: string;
+    repo?: string;
+  }) => (
+    <span>{environmentId ? `Workspace ${environmentId}` : `Repo ${repo}`}</span>
+  ),
   PullRequestBadge: ({
     repo,
     prNumber,
@@ -165,7 +174,7 @@ describe('Header', () => {
       await screen.findByRole('link', { name: 'Back to session' }),
     ).toHaveAttribute('href', '/sessions/session-1?task=task-123');
     expect(screen.queryByText('Parent Session')).not.toBeInTheDocument();
-    expect(screen.queryByText('Workspace env-1')).not.toBeInTheDocument();
+    expect(screen.getByText('Workspace env-1')).toBeInTheDocument();
     expect(parentSessionQueryMock).toHaveBeenCalled();
   });
 
@@ -187,7 +196,7 @@ describe('Header', () => {
     ).toHaveAttribute('href', '/sessions/00000000-0000-4000-8000-000000000001');
   });
 
-  it('preserves pull request badges without the environment badge', async () => {
+  it('renders environment and pull request badges together', async () => {
     renderHeader({
       taskRun: {
         payload: { environmentId: 'env-1' },
@@ -204,7 +213,7 @@ describe('Header', () => {
     expect(
       await screen.findByText('RooCodeInc/Roomote#42'),
     ).toBeInTheDocument();
-    expect(screen.queryByText('Workspace env-1')).not.toBeInTheDocument();
+    expect(screen.getByText('Workspace env-1')).toBeInTheDocument();
   });
 
   it('refreshes task lists after renaming a task', async () => {

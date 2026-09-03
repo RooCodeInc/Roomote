@@ -1,6 +1,4 @@
-import { Env } from '@roomote/env';
 import type { FastAgentReplyStream } from '@roomote/cloud-agents/server';
-import { AGENT_DISPLAY_NAME, formatErrorForLog } from '@roomote/types';
 import {
   findSlackConversationSubjectByUserId,
   recordSlackConversationMessageBestEffort,
@@ -10,8 +8,6 @@ import {
   type FastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
-  buildStartedBlocks,
-  persistPostedSlackKickoff,
   postSlackThreadMessageWithFooterText,
   type SlackNotifier,
 } from '@roomote/slack';
@@ -114,67 +110,6 @@ export async function postSlackThreadMarkdownMessage({
   }
 
   return { status: 'posted', messageId: messageTs };
-}
-
-export async function postTaskSuggestionStartedMessage(params: {
-  slack: SlackNotifier;
-  channelId: string;
-  threadTs: string;
-  workspaceName: string;
-  runId: number | null;
-  initiatingSlackUserId: string;
-  taskId: string | null;
-  readinessNote?: string;
-}): Promise<void> {
-  const {
-    slack,
-    channelId,
-    threadTs,
-    workspaceName,
-    runId,
-    initiatingSlackUserId,
-    taskId,
-    readinessNote,
-  } = params;
-
-  const taskUrl = taskId ? new URL(`/task/${taskId}`, Env.R_APP_URL) : null;
-
-  if (taskUrl) {
-    taskUrl.searchParams.set('utm_source', 'slack');
-    taskUrl.searchParams.set('utm_medium', 'integration');
-    taskUrl.searchParams.set('utm_campaign', 'setup_suggestion_reaction');
-  }
-
-  try {
-    const startedMessageTs = await slack.postMessage({
-      channel: channelId,
-      thread_ts: threadTs,
-      blocks: buildStartedBlocks({
-        workspaceDisplayName: workspaceName,
-        runId,
-        taskId,
-        initiatingSlackUserId,
-        taskUrl: taskUrl?.toString(),
-        readinessNote,
-      }),
-    });
-
-    if (startedMessageTs && runId) {
-      await persistPostedSlackKickoff({
-        runId,
-        taskId,
-        messageTs: startedMessageTs,
-        agentName: AGENT_DISPLAY_NAME,
-        initiatingSlackUserId,
-        workspaceDisplayName: workspaceName,
-        workspaceOnly: false,
-      });
-    }
-  } catch (error) {
-    console.warn(
-      `[SlackWebhook] Failed to post task suggestion started message for ${channelId}:${threadTs}: ${formatErrorForLog(error)}`,
-    );
-  }
 }
 
 /**

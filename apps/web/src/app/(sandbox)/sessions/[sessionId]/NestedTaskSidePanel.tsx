@@ -18,6 +18,7 @@ import {
   ExternalLink,
   Skeleton,
 } from '@/components/system';
+import { WorkspaceBadge } from '@/components/sandbox';
 import { FramedSurface } from '@/components/layout';
 
 import { ArtifactLinkProvider } from '../../task/[taskId]/hooks/ArtifactLinkProvider';
@@ -284,6 +285,8 @@ export function NestedTaskSidePanel({
 }) {
   const session = useTaskSession(taskId, { refetchInterval: 2_000 });
   const title = session.task?.title?.trim() || 'Task';
+  const environmentId = session.taskRun?.payload?.environmentId;
+  const repo = session.taskRun?.payload?.repo;
 
   return (
     <FramedSurface
@@ -293,13 +296,23 @@ export function NestedTaskSidePanel({
       <SidePanelHeader
         onClose={onClose}
         actions={
-          <BasicTooltip content="Go to task">
-            <Button asChild variant="ghost" size="icon" className="size-8">
-              <Link href={`/task/${taskId}`} aria-label="Go to task">
-                <ExternalLink className="size-4" />
-              </Link>
-            </Button>
-          </BasicTooltip>
+          <>
+            {environmentId || repo ? (
+              <WorkspaceBadge
+                environmentId={environmentId}
+                repo={repo}
+                className="max-w-32 text-xs text-muted-foreground"
+                iconClassName="text-muted-foreground"
+              />
+            ) : null}
+            <BasicTooltip content="Go to task">
+              <Button asChild variant="ghost" size="icon" className="size-8">
+                <Link href={`/task/${taskId}`} aria-label="Go to task">
+                  <ExternalLink className="size-4" />
+                </Link>
+              </Button>
+            </BasicTooltip>
+          </>
         }
         titleAdornment={
           tasks.length > 1 ? (

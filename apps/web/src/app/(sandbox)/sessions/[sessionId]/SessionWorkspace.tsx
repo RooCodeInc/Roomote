@@ -39,6 +39,7 @@ import { useTRPC } from '@/trpc/client';
 import { FramedSurface, WorkspaceSurface } from '@/components/layout';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 import {
+  AppWindow,
   ArrowLeftFromLine,
   ArrowLeft,
   Avatar,
@@ -86,6 +87,12 @@ import {
 } from './session-task-panel-context';
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
 import { useArtifactByPath } from '../../task/[taskId]/hooks/use-artifact-by-path';
+import { PreviewPaneProvider } from '../../task/[taskId]/hooks/use-preview-pane';
+import { humanizePortName } from '../../task/[taskId]/preview-port-utils';
+import {
+  PreviewSidePanel,
+  type PreviewEntry,
+} from '../../task/[taskId]/sidebar-panels/PreviewSidePanel';
 
 const ArtifactViewerContent = dynamic(
   () =>
@@ -122,6 +129,7 @@ type SessionTaskSummary = {
     result: unknown;
   } | null;
   artifacts: SessionArtifact[];
+  previews: SessionTaskPreview[];
   pullRequests: Array<{
     id: string;
     url: string;
@@ -142,6 +150,14 @@ type SessionArtifact = {
   createdAt: Date;
   thumbnailUrl?: string;
   previewUrl?: string;
+};
+
+/** A live preview URL from a session-linked task, collated server-side. */
+type SessionTaskPreview = {
+  serviceName: string;
+  url: string;
+  isPrimary: boolean;
+  runId: number;
 };
 
 export type SessionInfo = {
@@ -166,7 +182,7 @@ export type SessionInfo = {
   artifacts?: SessionArtifact[];
   taskSource?: 'unified' | 'fast';
   taskCards?: Array<
-    Pick<SessionTaskSummary, 'taskId' | 'title' | 'artifacts'> & {
+    Pick<SessionTaskSummary, 'taskId' | 'title' | 'artifacts' | 'previews'> & {
       inferenceCostMicroUsd?: number;
       latestRun: Pick<
         NonNullable<SessionTaskSummary['latestRun']>,
@@ -504,6 +520,68 @@ function SessionArtifactsPanel({
   );
 }
 
+type SessionPreviewEntry = {
+  taskId: string;
+  taskTitle: string;
+  preview: SessionTaskPreview;
+};
+
+type SessionPreviewTask = Pick<
+  SessionTaskSummary,
+  'taskId' | 'title' | 'previews'
+>;
+
+function getSessionPreviews(
+  tasks: SessionPreviewTask[],
+): SessionPreviewEntry[] {
+  // Cached payloads written before previews existed may omit the field.
+  return tasks.flatMap((task) =>
+    (task.previews ?? []).map((preview) => ({
+      taskId: task.taskId,
+      taskTitle: task.title,
+      preview,
+    })),
+  );
+}
+
+/**
+ * Session-level Live Preview: the task workspace's PreviewSidePanel fed with
+ * entries collated across every linked task. When more than one task exposes
+ * previews, entry labels carry the task title so the service picker
+ * disambiguates them.
+ */
+function SessionPreviewsPanel({
+  tasks,
+  onClose,
+}: {
+  tasks: SessionPreviewTask[];
+  onClose: () => void;
+}) {
+  const previews = getSessionPreviews(tasks);
+  const tasksWithPreviews = new Set(previews.map((entry) => entry.taskId)).size;
+  const entries: PreviewEntry[] = previews.map((entry) => ({
+    name: `${entry.taskId}:${entry.preview.serviceName}`,
+    label:
+      tasksWithPreviews > 1
+        ? `${humanizePortName(entry.preview.serviceName)} - ${entry.taskTitle}`
+        : humanizePortName(entry.preview.serviceName),
+    url: entry.preview.url,
+    isPrimary: entry.preview.isPrimary,
+    runId: entry.preview.runId,
+  }));
+
+  return (
+    <FramedSurface
+      frameClassName="p-0"
+      surfaceClassName="relative flex flex-col overflow-hidden"
+    >
+      <PreviewPaneProvider>
+        <PreviewSidePanel entries={entries} onClose={onClose} />
+      </PreviewPaneProvider>
+    </FramedSurface>
+  );
+}
+
 function SessionTasksPanel({
   tasks,
   onOpenTask,
@@ -652,6 +730,7 @@ type BaseWorkspacePanel =
   | { kind: 'info' }
   | { kind: 'tasks'; autoOpened?: boolean }
   | { kind: 'artifacts' }
+  | { kind: 'previews' }
   | { kind: 'nested'; taskId: string };
 
 type WorkspacePanel =
@@ -707,6 +786,7 @@ export function SessionWorkspace({
   const taskCards = isFastTaskSource ? fastTasks : sessionTasks;
   const artifactTasks = isFastTaskSource ? fastTasks : sessionTasks;
   const sessionPullRequests = getSessionPullRequests(sessionTasks);
+  const sessionPreviewCount = getSessionPreviews(taskCards).length;
   const runningTasks = taskCards.filter((task) =>
     isTaskExecutingTurn(task.latestRun?.status, task.latestRun?.taskPhase),
   );
@@ -781,7 +861,7 @@ export function SessionWorkspace({
     setPanel(null);
     selectTask(null);
   };
-  const togglePanel = (kind: 'info' | 'tasks' | 'artifacts') => {
+  const togglePanel = (kind: 'info' | 'tasks' | 'artifacts' | 'previews') => {
     setPanel((previous) => (previous?.kind === kind ? null : { kind }));
     selectTask(null);
   };
@@ -848,6 +928,8 @@ export function SessionWorkspace({
         sessionArtifacts={session.artifacts ?? []}
         onClose={closePanel}
       />
+    ) : panel?.kind === 'previews' ? (
+      <SessionPreviewsPanel tasks={taskCards} onClose={closePanel} />
     ) : (
       <SessionInfoPanel session={session} onClose={closePanel} />
     );
@@ -869,6 +951,15 @@ export function SessionWorkspace({
                 disabled={taskCards.length === 0}
                 icon={Rows4}
                 onClick={() => togglePanel('tasks')}
+              />
+              <SideNavItem
+                side="right"
+                label="Live Preview"
+                tooltip="Live Preview"
+                active={panel?.kind === 'previews' && !selectedTask}
+                disabled={sessionPreviewCount === 0}
+                icon={AppWindow}
+                onClick={() => togglePanel('previews')}
               />
               <SideNavItem
                 side="right"

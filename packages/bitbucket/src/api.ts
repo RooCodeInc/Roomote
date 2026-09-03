@@ -1410,3 +1410,49 @@ export async function getBitbucketPullRequest({
 
   return data;
 }
+
+/** Replaces the body of an existing pull request comment. */
+export async function updateBitbucketPullRequestComment({
+  repositoryFullName,
+  pullRequestNumber,
+  commentId,
+  body,
+  token,
+  username,
+  baseUrl,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryFullName: string;
+  pullRequestNumber: number;
+  commentId: number;
+  body: string;
+  token?: string;
+  username?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const auth = await resolveAuthIdentity({
+    token,
+    username,
+    baseUrl,
+    apiBaseUrl,
+    fetchImpl,
+  });
+  const { workspace, repo } =
+    splitBitbucketRepositoryFullName(repositoryFullName);
+  await requestBitbucketJson({
+    apiBaseUrl: auth.apiBaseUrl,
+    fetchImpl,
+    method: 'PUT',
+    path: `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+      repo,
+    )}/pullrequests/${pullRequestNumber}/comments/${commentId}`,
+    username: auth.username,
+    token: auth.token,
+    authScheme: auth.authScheme,
+    body: { content: { raw: body } },
+    schema: bitbucketCommentSchema,
+  });
+}

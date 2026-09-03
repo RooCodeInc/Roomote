@@ -109,7 +109,34 @@ vi.mock('@/trpc/client', () => ({
         }),
       },
     },
+    previewSettings: {
+      taskStatus: {
+        queryOptions: (
+          input: { taskId: string },
+          options?: Record<string, unknown>,
+        ) => ({
+          queryKey: ['previewSettings', 'taskStatus', input],
+          queryFn: async () => null,
+          ...options,
+        }),
+        queryKey: (input: { taskId: string }) => [
+          'previewSettings',
+          'taskStatus',
+          input,
+        ],
+      },
+      startSetupTask: {
+        mutationOptions: (options?: Record<string, unknown>) => ({
+          mutationFn: async () => ({ taskId: 'task-1', alreadyRunning: false }),
+          ...options,
+        }),
+      },
+    },
   }),
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({ isAdmin: true }),
 }));
 
 vi.mock('@/components/tasks/ArtifactViewerContent', () => ({
@@ -194,6 +221,7 @@ const singleTask: SessionInfo['tasks'][number] = {
   canAccessDetails: true,
   latestRun: null,
   artifacts: [],
+  previews: [],
   pullRequests: [],
 };
 
@@ -346,17 +374,21 @@ describe('SessionWorkspace', () => {
     };
   });
 
-  it('orders panel controls as tasks, artifacts, then session info', () => {
+  it('orders panel controls as tasks, preview, artifacts, then session info', () => {
     renderWorkspace({
       isMobile: false,
       sessionOverride: { tasks: [singleTask] },
     });
 
     const tasks = screen.getByRole('button', { name: 'Tasks' });
+    const preview = screen.getByRole('button', { name: 'Live Preview' });
     const artifacts = screen.getByRole('button', { name: 'Artifacts' });
     const sessionInfo = screen.getByRole('button', { name: 'Session info' });
 
-    expect(tasks.compareDocumentPosition(artifacts)).toBe(
+    expect(tasks.compareDocumentPosition(preview)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(preview.compareDocumentPosition(artifacts)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
     expect(artifacts.compareDocumentPosition(sessionInfo)).toBe(
@@ -903,6 +935,68 @@ describe('SessionWorkspace', () => {
     ).toBeVisible();
   });
 
+  it('disables the Live Preview control until a linked task has a live preview', () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    expect(screen.getByRole('button', { name: 'Live Preview' })).toBeDisabled();
+  });
+
+  it('collates live previews across tasks into the embedded preview panel', () => {
+    const firstTask = {
+      ...singleTask,
+      title: 'First execution',
+      previews: [
+        {
+          serviceName: 'WEB_APP',
+          url: 'https://task-1-web-app.preview.test/dashboard',
+          isPrimary: true,
+          runId: 11,
+        },
+      ],
+    };
+    const secondTask = {
+      ...singleTask,
+      taskId: 'task-2',
+      title: 'Second execution',
+      previews: [
+        {
+          serviceName: 'API',
+          url: 'https://task-2-api.preview.test/',
+          isPrimary: true,
+          runId: 22,
+        },
+      ],
+    };
+
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { tasks: [firstTask, secondTask] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Live Preview' }));
+
+    // The first task's primary preview opens by default, with the task title
+    // folded into the service picker since several tasks expose previews.
+    expect(
+      screen.getByRole('button', {
+        name: /Live Preview: Web App - First execution/,
+      }),
+    ).toBeVisible();
+    const iframe = screen.getByTitle('Live Preview');
+    expect(iframe).toHaveAttribute(
+      'src',
+      `/api/auth/preview-iframe?${new URLSearchParams({
+        preview_url: 'https://task-1-web-app.preview.test/dashboard',
+        task_run_id: '11',
+      }).toString()}`,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel' }));
+    expect(screen.queryByTitle('Live Preview')).toBeNull();
+  });
+
   it('enables and populates the Tasks panel from refreshed session tasks', async () => {
     const delegatedTask = {
       taskId: 'task-2',
@@ -915,6 +1009,7 @@ describe('SessionWorkspace', () => {
       canAccessDetails: true,
       latestRun: null,
       artifacts: [],
+      previews: [],
       pullRequests: [],
     };
     renderWorkspace({
@@ -949,6 +1044,7 @@ describe('SessionWorkspace', () => {
             taskPhase: 'running',
           },
           artifacts: [],
+          previews: [],
         },
       ],
     });
@@ -982,6 +1078,7 @@ describe('SessionWorkspace', () => {
             taskPhase: 'running',
           },
           artifacts: [],
+          previews: [],
         },
         {
           taskId: 'task-3',
@@ -991,6 +1088,7 @@ describe('SessionWorkspace', () => {
             taskPhase: null,
           },
           artifacts: [],
+          previews: [],
         },
       ],
     });
@@ -1026,6 +1124,7 @@ describe('SessionWorkspace', () => {
             taskPhase: 'running',
           },
           artifacts: [],
+          previews: [],
         },
       ],
     });
@@ -1046,6 +1145,7 @@ describe('SessionWorkspace', () => {
               taskPhase: 'running',
             },
             artifacts: [],
+            previews: [],
           },
           {
             taskId: 'task-3',
@@ -1055,6 +1155,7 @@ describe('SessionWorkspace', () => {
               taskPhase: null,
             },
             artifacts: [],
+            previews: [],
           },
         ],
       );
@@ -1076,6 +1177,7 @@ describe('SessionWorkspace', () => {
           taskId: 'fast-task-1',
           title: 'Fast execution',
           latestRun: null,
+          previews: [],
           artifacts: [
             {
               id: 'fast-artifact-1',
@@ -1114,6 +1216,7 @@ describe('SessionWorkspace', () => {
         taskPhase,
       },
       artifacts: [],
+      previews: [],
     });
     const { queryClient } = renderWorkspace({
       isMobile: false,
