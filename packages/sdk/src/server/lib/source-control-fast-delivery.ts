@@ -201,6 +201,26 @@ export function createFastAgentSourceControlTaskLauncher(params: {
   };
 }
 
+/**
+ * The comment a turn answers, quoted exactly the way GitHub's own
+ * "Quote reply" does: every line of the original prefixed with "> ",
+ * nothing added.
+ */
+export function buildSourceControlReplyQuote(params: {
+  text: string;
+}): string | null {
+  if (!params.text.trim()) {
+    return null;
+  }
+  // Quote the text verbatim: indentation and blank lines are meaningful
+  // Markdown (code blocks, paragraph breaks) and GitHub preserves them.
+  return params.text
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => (line.length > 0 ? `> ${line}` : '>'))
+    .join('\n');
+}
+
 export type SourceControlPostedComment = {
   messageId: string;
   /**
@@ -815,6 +835,8 @@ export function buildSourceControlFastAdapter(params: {
   delivery: SourceControlFastDelivery;
   userId: string;
   sessionId: string;
+  /** Blockquote of the message this turn answers; opens the turn's comment. */
+  quote?: string | null;
   onReplyPosted?: () => void;
 }): {
   launchTask: LaunchFastAgentTask;
@@ -852,10 +874,10 @@ export function buildSourceControlFastAdapter(params: {
         params.onReplyPosted?.();
         return { messageId: turnComment.messageId };
       }
-      turnBody = message;
+      turnBody = params.quote ? `${params.quote}\n\n${message}` : message;
       const posted = await params.delivery.postComment({
         discussion,
-        body: `${message}\n\n${footer}`,
+        body: `${turnBody}\n\n${footer}`,
       });
       turnComment = posted;
       params.onReplyPosted?.();

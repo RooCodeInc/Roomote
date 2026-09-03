@@ -67,6 +67,7 @@ import {
 import {
   buildSourceControlFastAdapter,
   buildSourceControlFastDelivery,
+  buildSourceControlReplyQuote,
 } from './source-control-fast-delivery';
 import { createFastAgentSessionArtifact } from './artifacts/create-session-artifact';
 
@@ -534,6 +535,9 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         delivery,
         userId: params.userId,
         sessionId: session.id,
+        quote: params.externalInput
+          ? null
+          : buildSourceControlReplyQuote({ text: params.question }),
       }),
     };
   }
