@@ -1712,35 +1712,34 @@ async function withSourceControlReplyTarget(
   });
   const attribution = buildSourceControlOriginAttribution(params.event, target);
   let attributionPending = true;
-  // The discussion side of the most recent reply, so a later replacement
-  // (a retry notice giving way to the real answer) lands on both surfaces.
-  let discussionHandle: FastAgentReplyHandle | null = null;
   const discussionLabel = `${target.repositoryFullName}#${target.number}`;
-  const postOnDiscussion = async (message: string) => {
+  const postOnDiscussion = async (
+    message: string,
+  ): Promise<FastAgentReplyHandle | null> => {
     try {
-      discussionHandle = await discussionAdapter.postReply({ message });
+      return await discussionAdapter.postReply({ message });
     } catch (error) {
       console.warn(
         `[Fast Agent] Failed to post the Session's reply on ${discussionLabel}: ${error instanceof Error ? error.message : String(error)}`,
       );
+      return null;
     }
   };
-  const replaceOnDiscussion = async (message: string) => {
-    if (discussionHandle && discussionAdapter.replaceReply) {
+  const replaceOnDiscussion = async (
+    handle: FastAgentReplyHandle | null,
+    message: string,
+  ): Promise<FastAgentReplyHandle | null> => {
+    if (handle && discussionAdapter.replaceReply) {
       try {
-        discussionHandle = await discussionAdapter.replaceReply(
-          discussionHandle,
-          { message },
-        );
-        return;
+        return await discussionAdapter.replaceReply(handle, { message });
       } catch (error) {
         console.warn(
           `[Fast Agent] Failed to replace the Session's reply on ${discussionLabel}: ${error instanceof Error ? error.message : String(error)}`,
         );
-        return;
+        return handle;
       }
     }
-    await postOnDiscussion(message);
+    return postOnDiscussion(message);
   };
   // Web and automation homes keep only the transcript, so there is nothing
   // on the home surface to replace; the discussion still needs the update.
@@ -1759,28 +1758,80 @@ async function withSourceControlReplyTarget(
             ? { ...reply, message: `${attribution}\n\n${reply.message}` }
             : reply;
         attributionPending = false;
-        const [homeHandle] = await Promise.all([
+        const [homeHandle, discussionHandle] = await Promise.all([
           turn.adapter.postReply(homeReply),
           postOnDiscussion(reply.message),
         ]);
-        // A home without messages of its own hands back the discussion
-        // handle, so replacements still reach the discussion.
-        return homeHandle ?? discussionHandle ?? undefined;
+        return encodeRoutedReplyHandle({
+          home: homeHandle ?? null,
+          discussion: discussionHandle,
+        });
       },
       ...(turn.adapter.replaceReply || homeHoldsNoMessages
         ? {
             replaceReply: async (handle, reply) => {
-              const [homeHandle] = await Promise.all([
-                turn.adapter.replaceReply
-                  ? turn.adapter.replaceReply(handle, reply)
+              const parts = decodeRoutedReplyHandle(handle);
+              const [homeHandle, discussionHandle] = await Promise.all([
+                parts.home && turn.adapter.replaceReply
+                  ? turn.adapter.replaceReply(parts.home, reply)
                   : Promise.resolve(undefined),
-                replaceOnDiscussion(reply.message),
+                replaceOnDiscussion(parts.discussion, reply.message),
               ]);
-              return homeHandle ?? discussionHandle ?? undefined;
+              return encodeRoutedReplyHandle({
+                home: homeHandle ?? parts.home,
+                discussion: discussionHandle,
+              });
             },
           }
         : {}),
     },
+  };
+}
+
+/**
+ * Separates the home and discussion message ids inside one reply handle. The
+ * service persists only `messageId` for a retry notice and hands that string
+ * back on a resumed turn, so both sides have to travel in it for the
+ * replacement to reach the pull request after a process change. The marker
+ * cannot occur in a Slack ts, a Discord snowflake, or a provider comment id.
+ */
+const ROUTED_REPLY_HANDLE_MARKER = '|scm:';
+
+function encodeRoutedReplyHandle({
+  home,
+  discussion,
+}: {
+  home: FastAgentReplyHandle | null;
+  discussion: FastAgentReplyHandle | null;
+}): FastAgentReplyHandle | undefined {
+  if (home && discussion) {
+    return {
+      messageId: `${home.messageId}${ROUTED_REPLY_HANDLE_MARKER}${discussion.messageId}`,
+    };
+  }
+  if (discussion) {
+    return {
+      messageId: `${ROUTED_REPLY_HANDLE_MARKER}${discussion.messageId}`,
+    };
+  }
+  return home ?? undefined;
+}
+
+function decodeRoutedReplyHandle(handle: FastAgentReplyHandle): {
+  home: FastAgentReplyHandle | null;
+  discussion: FastAgentReplyHandle | null;
+} {
+  const markerIndex = handle.messageId.indexOf(ROUTED_REPLY_HANDLE_MARKER);
+  if (markerIndex < 0) {
+    return { home: handle, discussion: null };
+  }
+  const homeMessageId = handle.messageId.slice(0, markerIndex);
+  const discussionMessageId = handle.messageId.slice(
+    markerIndex + ROUTED_REPLY_HANDLE_MARKER.length,
+  );
+  return {
+    home: homeMessageId ? { messageId: homeMessageId } : null,
+    discussion: discussionMessageId ? { messageId: discussionMessageId } : null,
   };
 }
 

@@ -2378,4 +2378,98 @@ describe('deliverFastAgentParentEvent', () => {
       'Done after the retry.',
     );
   });
+
+  it('replaces the mirrored pull request comment on a resumed turn that only has the persisted handle', async () => {
+    mocks.buildSourceControlFastDelivery.mockResolvedValue({
+      postComment: async (input: unknown) => {
+        mocks.postSourceControlComment(input);
+        return { messageId: 'comment-1' };
+      },
+      updateCommentById: async (input: unknown) => {
+        mocks.updateSourceControlComment(input);
+      },
+      resolveTarget: async () => ({
+        repositoryId: 'repo-1',
+        branch: 'feature/ship',
+        pullRequest: { url: 'https://github.com/acme/api/pull/42' },
+      }),
+    });
+    const event = {
+      type: 'human_follow_up' as const,
+      eventId: 'github:comment:902',
+      currentMessageId: 'github:comment:902',
+      userId: 'user-2',
+      question: 'Please retry that.',
+      senderDisplayName: 'alice',
+      sourceControlReplyTarget: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repositoryFullName: 'acme/api',
+        kind: 'pull' as const,
+        number: 42,
+        url: 'https://github.com/acme/api/pull/42',
+      },
+    };
+
+    // First process: the retry notice is posted and its handle persisted.
+    let persistedHandle: { messageId: string } | undefined;
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: {
+          postReply: (reply: unknown) => Promise<{ messageId: string } | void>;
+        };
+      }) => {
+        persistedHandle =
+          (await adapter.postReply({
+            purpose: 'progress',
+            message: 'Inference is being retried.',
+          })) ?? undefined;
+        return 'Parked';
+      },
+    );
+    await deliverFastAgentParentEventWithLock(
+      { parent, event },
+      mocks.releaseTurnLock,
+    );
+    expect(persistedHandle).toBeDefined();
+    // Both surfaces' ids travel in the one persisted message id.
+    expect(persistedHandle?.messageId).toBe('101.001|scm:comment-1');
+
+    // Second process: a fresh wrapper receives only the persisted handle.
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: {
+          replaceReply?: (handle: unknown, reply: unknown) => Promise<unknown>;
+        };
+      }) => {
+        await adapter.replaceReply!(
+          { messageId: persistedHandle!.messageId },
+          { purpose: 'closeout', message: 'Done after the resume.' },
+        );
+        return 'Done';
+      },
+    );
+    await deliverFastAgentParentEventWithLock(
+      { parent, event, resumedAfterInferenceRetry: true },
+      mocks.releaseTurnLock,
+    );
+
+    // The pull request comment from the first process is edited, not
+    // duplicated, and Slack replaces its own message by its own ts.
+    expect(mocks.postSourceControlComment).toHaveBeenCalledOnce();
+    expect(mocks.updateSourceControlComment).toHaveBeenCalledOnce();
+    expect(mocks.updateSourceControlComment.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        messageId: 'comment-1',
+        body: expect.stringContaining('Done after the resume.'),
+      }),
+    );
+    expect(mocks.updateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ ts: '101.001' }),
+    );
+  });
 });
