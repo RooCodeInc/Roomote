@@ -334,6 +334,11 @@ export async function processDiscordFastAgentMessage(
       ...(durableTurnForResume
         ? { durableAdmission: { eventId: durableTurnForResume.id } }
         : {}),
+      // A redelivered event whose earlier inline attempt never settled
+      // resumes that attempt instead of repeating its recorded actions.
+      ...(durableTurnForResume?.resumed
+        ? { resumedAfterInterruption: true }
+        : {}),
       senderDisplayName:
         input.interaction?.interaction.member?.nick ??
         input.sender.global_name ??

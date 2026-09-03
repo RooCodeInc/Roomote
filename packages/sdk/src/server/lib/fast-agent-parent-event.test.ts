@@ -431,6 +431,83 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('resumes a durable reaction or platform-event row with its recorded framing', async () => {
+    mocks.answerQuestion.mockResolvedValue('');
+    const externalInput = {
+      type: 'reaction_added' as const,
+      provider: 'slack' as const,
+      reactions: [{ name: 'eyes' }],
+      reactor: { externalUserId: 'U123' },
+      message: {
+        workspaceId: 'T1',
+        channelId: 'C1',
+        messageId: '100.001',
+        threadId: '100.000',
+      },
+      eventId: '102.000',
+    };
+
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'slack-reaction:102.000',
+          currentMessageId: 'slack-reaction:102.000',
+          userId: 'user-2',
+          question: '<external_input>{}</external_input>',
+          input: { type: 'reaction', externalInput },
+        },
+        resumedAfterInterruption: true,
+        durableAdmission: { eventId: 'row-1' },
+      },
+      mocks.releaseTurnLock,
+    );
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'setup-kickoff:conversation-1',
+          currentMessageId: 'setup-kickoff:conversation-1',
+          userId: 'user-2',
+          question: '<platform_event>{}</platform_event>',
+          turnSource: 'platform_event',
+          platformEventKind: 'setup',
+          platformEventVisibility: 'required',
+          setupSession: true,
+        },
+        resumedAfterInterruption: true,
+        durableAdmission: { eventId: 'row-2' },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    // The reaction resumes as a reaction, the platform event as a platform
+    // event; neither is read as a typed human message.
+    expect(mocks.answerQuestion).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        turnSource: 'human',
+        input: { type: 'reaction', externalInput },
+        resumedAfterInterruption: true,
+        durableAdmission: { eventId: 'row-1' },
+      }),
+    );
+    expect(mocks.answerQuestion).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        turnSource: 'platform_event',
+        platformEventKind: 'setup',
+        platformEventVisibility: 'required',
+        setupSession: true,
+        resumedAfterInterruption: true,
+        durableAdmission: { eventId: 'row-2' },
+      }),
+    );
+    expect(mocks.answerQuestion.mock.calls[1]?.[0]).not.toHaveProperty('input');
+  });
+
   it('passes a canonical review offer into the web transcript payload', async () => {
     const webParent = {
       sessionId: parent.sessionId,

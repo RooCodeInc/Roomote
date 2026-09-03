@@ -14,8 +14,11 @@ import {
 } from '@roomote/communication';
 import {
   findFastAgentSessionForProviderMessage,
+  persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
+  wakeFastAgentParentEventAt,
+  wakeFastAgentParentEventNow,
 } from '@roomote/sdk/server';
 import {
   buildSlackThreadReplyFooterBlock,
@@ -83,6 +86,40 @@ async function processFastAgentReaction(params: {
     },
     eventId: event.event_ts,
   };
+  const question = buildFastAgentReactionExternalInputQuestion(reactionInput);
+  const currentMessageId = `slack-reaction:${event.event_ts}`;
+  // Durable admission: the reaction turn is persisted under this process's
+  // claim before it runs, so an interruption hands it to the queue, which
+  // resumes it with the same reaction input instead of asking the user to
+  // react again.
+  const durableTurn = await persistFastAgentInlineHumanTurn({
+    parent: { sessionId: session.id, conversation },
+    event: {
+      type: 'human_follow_up',
+      eventId: currentMessageId,
+      currentMessageId,
+      userId: session.userId,
+      question,
+      senderExternalId: event.user,
+      ...(params.reactorDisplayName
+        ? { senderDisplayName: params.reactorDisplayName }
+        : {}),
+      input: { type: 'reaction', externalInput: reactionInput },
+    },
+  }).catch((error) => {
+    console.error(
+      `[SlackWebhook] Failed to persist Fast reaction turn admission: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  });
+  if (durableTurn) {
+    releaseTurnLock.durableRowId = durableTurn.id;
+    releaseTurnLock.durableResume = () =>
+      wakeFastAgentParentEventNow({
+        conversationId: session.id,
+        eventKey: durableTurn.eventKey,
+      });
+  }
 
   try {
     const activeTasks = await getActiveFastAgentTasks(session.id);
@@ -92,17 +129,36 @@ async function processFastAgentReaction(params: {
     let didSendVisibleResponse = false;
 
     const responseText = await answerFastAgentQuestion({
-      question: buildFastAgentReactionExternalInputQuestion(reactionInput),
+      question,
       userId: session.userId,
       conversation,
-      currentMessageId: `slack-reaction:${event.event_ts}`,
+      currentMessageId,
       senderExternalId: event.user,
       senderDisplayName: params.reactorDisplayName,
       activeTasks,
       apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
       signal: releaseTurnLock.signal,
       input: { type: 'reaction', externalInput: reactionInput },
+      ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
+      ...(durableTurn?.resumed ? { resumedAfterInterruption: true } : {}),
       adapter: {
+        ...(durableTurn
+          ? {
+              requestDurableResume: () =>
+                wakeFastAgentParentEventNow({
+                  conversationId: session.id,
+                  eventKey: durableTurn.eventKey,
+                }),
+              requestDurableRetry: (retryAt: Date) =>
+                wakeFastAgentParentEventAt(
+                  {
+                    conversationId: session.id,
+                    eventKey: durableTurn.eventKey,
+                  },
+                  retryAt,
+                ),
+            }
+          : {}),
         activity: createFastAgentSlackSessionActivity({
           slack: context.slack,
           workspaceId: context.teamId,

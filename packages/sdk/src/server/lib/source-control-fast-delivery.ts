@@ -445,6 +445,20 @@ function pullRequestPageUrl(discussion: SourceControlFastDiscussion): string {
       return `${base}/-/${discussion.kind === 'pull' ? 'merge_requests' : 'issues'}/${discussion.number}`;
     case 'bitbucket':
       return `${base}/pull-requests/${discussion.number}`;
+    case 'ado': {
+      // Azure DevOps names repositories organization/project/repository; a
+      // pull request lives under the repository's _git area and a work item
+      // under the project.
+      const [organization, project, repository, ...extra] =
+        discussion.repositoryFullName.split('/');
+      if (!organization || !project || !repository || extra.length > 0) {
+        return `${base}/${discussion.kind === 'pull' ? 'pullrequest' : '_workitems/edit'}/${discussion.number}`;
+      }
+      const projectBase = `https://${discussion.host}/${organization}/${project}`;
+      return discussion.kind === 'pull'
+        ? `${projectBase}/_git/${repository}/pullrequest/${discussion.number}`
+        : `${projectBase}/_workitems/edit/${discussion.number}`;
+    }
     default:
       return `${base}/${discussion.kind === 'pull' ? 'pulls' : 'issues'}/${discussion.number}`;
   }

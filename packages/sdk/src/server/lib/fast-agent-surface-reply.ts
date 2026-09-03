@@ -632,6 +632,15 @@ function buildSurfaceHumanFollowUpEvent(
       : {}),
     ...(params.agentContext ? { agentContext: params.agentContext } : {}),
     ...(params.activeTasks?.length ? { activeTasks: params.activeTasks } : {}),
+    ...(params.externalInput
+      ? {
+          senderExternalId: params.externalInput.reactor.externalUserId,
+          input: {
+            type: 'reaction' as const,
+            externalInput: params.externalInput,
+          },
+        }
+      : {}),
   };
 }
 
@@ -640,15 +649,18 @@ async function admitFastAgentSurfaceHumanFollowUp(
   delivery: FastAgentSurfaceReplyDelivery,
   forceQueue = false,
 ): Promise<FastAgentSurfaceHumanFollowUpAdmission> {
-  if (params.externalInput) return null;
-
+  // A reaction is admitted like a message so its row exists before the
+  // webhook is acknowledged: inline under this owner's claim when the
+  // conversation is idle, steered into the active turn otherwise. It is
+  // never force-queued, because the reaction's reply targets the reacted-to
+  // message and only the inline surface delivery knows how to do that.
   return admitFastAgentHumanFollowUp({
     parent: {
       sessionId: params.sessionId,
       conversation: delivery.conversation,
     },
     event: buildSurfaceHumanFollowUpEvent(params),
-    forceQueue,
+    forceQueue: forceQueue && !params.externalInput,
   });
 }
 
@@ -679,23 +691,23 @@ async function runFastAgentSurfaceReply(
           ...(await getActiveFastAgentTasks(params.sessionId)),
         ]
       : params.activeTasks;
-    // Durable admission for human turns (reactions are not replayable
-    // requests): persisted under this owner's claim before the turn runs.
-    const durableTurn = params.externalInput
-      ? null
-      : ((admission?.kind === 'turn' ? admission.durable : null) ??
-        (await persistFastAgentInlineHumanTurn({
-          parent: {
-            sessionId: params.sessionId,
-            conversation: delivery.conversation,
-          },
-          event: buildSurfaceHumanFollowUpEvent(params),
-        }).catch((error) => {
-          console.error(
-            `[Fast Agent] Failed to persist surface turn admission: ${error instanceof Error ? error.message : String(error)}`,
-          );
-          return null;
-        })));
+    // Durable admission: persisted under this owner's claim before the turn
+    // runs. A reaction rides the same row with its input recorded, so the
+    // queue resumes it as a reaction turn rather than a typed message.
+    const durableTurn =
+      (admission?.kind === 'turn' ? admission.durable : null) ??
+      (await persistFastAgentInlineHumanTurn({
+        parent: {
+          sessionId: params.sessionId,
+          conversation: delivery.conversation,
+        },
+        event: buildSurfaceHumanFollowUpEvent(params),
+      }).catch((error) => {
+        console.error(
+          `[Fast Agent] Failed to persist surface turn admission: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return null;
+      }));
     if (durableTurn) {
       release.durableRowId = durableTurn.id;
       release.durableResume = () =>
@@ -716,6 +728,9 @@ async function runFastAgentSurfaceReply(
       currentMessageId: params.currentMessageId,
       signal: release.signal,
       ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
+      // A redelivered message whose earlier inline attempt never settled
+      // resumes that attempt instead of repeating its recorded actions.
+      ...(durableTurn?.resumed ? { resumedAfterInterruption: true } : {}),
       senderDisplayName: params.senderDisplayName ?? undefined,
       ...(activeTasks ? { activeTasks } : {}),
       ...(params.externalInput
@@ -791,7 +806,9 @@ export async function queueFastAgentSurfaceReply(
     delivery,
     true,
   );
-  if (admission?.kind === 'queued') return true;
+  // Queued messages and steered reactions are on record for the active or
+  // next turn; only an inline admission still needs this process to run it.
+  if (admission && admission.kind !== 'turn') return true;
 
   void runFastAgentSurfaceReply({ ...params, delivery, admission }).catch(
     (error) => {

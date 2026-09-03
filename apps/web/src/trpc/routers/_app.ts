@@ -55,6 +55,7 @@ import {
   listSessionPins,
   markSessionReadCommand,
   sessionIdInputSchema,
+  sessionTimelineInputSchema,
   sessionsListInputSchema,
   setSessionPinned,
   updateSessionMetadata,
@@ -2967,9 +2968,9 @@ export const appRouter = createRouter({
         getSessionByIdCommand(auth, input.sessionId),
       ),
     timeline: protectedProcedure
-      .input(sessionIdInputSchema.extend({ since: z.number().optional() }))
+      .input(sessionTimelineInputSchema)
       .query(({ ctx: { auth }, input }) =>
-        getSessionTimeline(auth, input.sessionId, input.since),
+        getSessionTimeline(auth, input.sessionId, input.cursor ?? input.since),
       ),
     forTask: protectedProcedure
       .input(z.object({ taskId: z.string().min(1) }))

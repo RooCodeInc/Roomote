@@ -65,9 +65,6 @@ export type FastAgentMessageUpsertResult = {
 export const INTERRUPTED_INFERENCE_RETRY_MESSAGE =
   'The inference retry was interrupted before it completed. Please send the request again.';
 
-export const RESTARTED_ACTIVE_TURN_MESSAGE =
-  'Roomote restarted while working on this request. Please send it again.';
-
 /**
  * Why an accepted Fast turn ended without a real answer. Stamped into the
  * terminal message's metadata by every writer so occurrence counts can be
@@ -222,11 +219,30 @@ export type FastAgentTurnAttemptAction = {
   result?: string;
 };
 
+export type FastAgentTurnAttemptReplyPurpose =
+  | 'ack'
+  | 'progress'
+  | 'closeout'
+  | 'clarification';
+
 export type FastAgentTurnAttemptReply = {
   kind: 'reply';
   /** A visible assistant reply the attempt already posted. */
   text: string;
+  /** Recorded for replies the turn posted itself; absent on older rows. */
+  purpose?: FastAgentTurnAttemptReplyPurpose;
 };
+
+function isFastAgentTurnAttemptReplyPurpose(
+  value: unknown,
+): value is FastAgentTurnAttemptReplyPurpose {
+  return (
+    value === 'ack' ||
+    value === 'progress' ||
+    value === 'closeout' ||
+    value === 'clarification'
+  );
+}
 
 export type FastAgentTurnAttemptEvent =
   | FastAgentTurnAttemptReply
@@ -387,7 +403,13 @@ export async function loadFastAgentTurnAttemptSummary(
       metadata.interruptionReason === undefined
     ) {
       const reply = text(row.contentBlocks).trim();
-      if (reply) events.push({ kind: 'reply', text: reply });
+      if (!reply) continue;
+      const purpose = payload.purpose ?? metadata.purpose;
+      events.push({
+        kind: 'reply',
+        text: reply,
+        ...(isFastAgentTurnAttemptReplyPurpose(purpose) ? { purpose } : {}),
+      });
     }
   }
   return { events, next, prompt };

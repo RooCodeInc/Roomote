@@ -1004,10 +1004,16 @@ export async function getSessionById(auth: SessionAuth, sessionId: string) {
 export async function getSessionTimeline(
   auth: SessionAuth,
   sessionId: string,
-  since = 0,
+  cursor?: number | { at: number; seenIdsAtTimestamp: string[] },
 ) {
   const session = await findAccessibleSession(auth, sessionId);
   if (!session) return null;
+  const legacySince = typeof cursor === 'number' ? cursor : null;
+  const after =
+    typeof cursor === 'number'
+      ? { at: cursor, seenIdsAtTimestamp: [] }
+      : (cursor ?? { at: 0, seenIdsAtTimestamp: [] });
+  const seenIdsAtTimestamp = new Set(after.seenIdsAtTimestamp);
   const taskRows = await getSessionTasks(sessionId);
   const fast = session.fastConversationId
     ? await getFastSessionById(auth, session.fastConversationId)
@@ -1048,11 +1054,36 @@ export async function getSessionTimeline(
       },
     ]),
   ]
-    .filter((event) => event.at > since)
+    .filter(
+      (event) =>
+        event.at > after.at ||
+        (legacySince === null &&
+          event.at === after.at &&
+          !seenIdsAtTimestamp.has(event.id)),
+    )
     .sort(
       (left, right) => left.at - right.at || left.id.localeCompare(right.id),
     );
-  return { events, cursor: events.at(-1)?.at ?? since };
+  const last = events.at(-1);
+  const nextAt = last?.at ?? after.at;
+  const nextSeenIds = new Set(
+    nextAt === after.at ? after.seenIdsAtTimestamp : [],
+  );
+  for (const event of events) {
+    if (event.at === nextAt) nextSeenIds.add(event.id);
+  }
+  if (legacySince !== null) {
+    return { events, cursor: nextAt };
+  }
+  return {
+    events,
+    cursor: {
+      at: nextAt,
+      seenIdsAtTimestamp: [...nextSeenIds].sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    },
+  };
 }
 
 /**

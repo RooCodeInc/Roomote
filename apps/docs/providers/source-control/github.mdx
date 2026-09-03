@@ -233,6 +233,11 @@ Roomote runs the Review Code automation's structured review on the current
 head, posts the findings on the pull request, and reports back in the same
 discussion.
 
+Replying inside a review thread that Roomote opened counts as talking to
+Roomote, so no `@mention` is needed there; Roomote answers in that thread. On
+a pull request that a Roomote task opened, those replies are instead collected
+as review feedback for the owning Session, described below.
+
 A pull request that a Roomote task opened already belongs to the Session that
 started the work, for example the Slack thread where the task was requested.
 Mentions on that pull request join that Session instead of opening a second

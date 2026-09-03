@@ -24,6 +24,14 @@ import {
 const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
 
 export const sessionIdInputSchema = z.object({ sessionId: z.string().uuid() });
+const sessionTimelineCursorSchema = z.object({
+  at: z.number().nonnegative(),
+  seenIdsAtTimestamp: z.array(z.string()),
+});
+export const sessionTimelineInputSchema = sessionIdInputSchema.extend({
+  since: z.union([z.number(), sessionTimelineCursorSchema]).optional(),
+  cursor: sessionTimelineCursorSchema.optional(),
+});
 export const sessionsListInputSchema = z.object({
   scope: z.enum(['all', 'tasks', 'reviews', 'automations']).optional(),
   status: z.enum(SESSION_STATUSES).optional(),

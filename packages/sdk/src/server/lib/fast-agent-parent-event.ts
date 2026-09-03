@@ -1932,7 +1932,14 @@ export async function deliverFastAgentParentEventWithLock(
             })),
           }
         : {}),
-      turnSource: humanFollowUp ? 'human' : 'platform_event',
+      // A durable human row can carry a reaction or a platform event that
+      // was admitted through the human path; a resumed run keeps that
+      // framing rather than reading the event text as a typed message.
+      turnSource:
+        humanFollowUp?.turnSource ??
+        (humanFollowUp ? 'human' : 'platform_event'),
+      ...(humanFollowUp?.input ? { input: humanFollowUp.input } : {}),
+      ...(humanFollowUp?.setupSession ? { setupSession: true } : {}),
       ...(humanFollowUp
         ? { currentDurableHumanFollowUpEventId: humanFollowUp.eventId }
         : {}),
@@ -1951,15 +1958,17 @@ export async function deliverFastAgentParentEventWithLock(
           ? 'present_only'
           : 'default',
       platformEventVisibility:
-        params.event.type === 'pull_request_feedback' ||
+        humanFollowUp?.platformEventVisibility ??
+        (params.event.type === 'pull_request_feedback' ||
         params.event.type === 'pull_request_conflict_detected' ||
         params.event.type === 'automation_triggered'
           ? 'required'
-          : 'optional',
+          : 'optional'),
       platformEventKind:
-        params.event.type === 'automation_triggered'
+        humanFollowUp?.platformEventKind ??
+        (params.event.type === 'automation_triggered'
           ? 'automation'
-          : 'delegated_task',
+          : 'delegated_task'),
       ...(params.event.type === 'pull_request_feedback' &&
       params.event.reviewActionDeliveryId &&
       params.event.suggestedActionQuestion
