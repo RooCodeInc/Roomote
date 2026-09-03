@@ -10,7 +10,7 @@ import {
 import {
   generateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES,
-} from '../non-task-provider-usage';
+} from './non-task-provider-usage';
 
 type ExplicitBootstrapSkill = 'explain-repo-code' | 'plan-repo-implementation';
 
@@ -77,7 +77,7 @@ const TASK_TOOL_KIND: Record<TaskToolActionId, RequestedWorkKind> = {
   'capture-visual-proof': 'implement',
 };
 
-export function getExplicitBootstrapRequestedWorkKindDecision(
+function getExplicitBootstrapRequestedWorkKindDecision(
   skill?: ExplicitBootstrapSkill | null,
 ): RequestedWorkKindDecision | undefined {
   if (!skill) {
@@ -91,7 +91,7 @@ export function getExplicitBootstrapRequestedWorkKindDecision(
   };
 }
 
-export function getTaskToolRequestedWorkKindDecision(
+function getTaskToolRequestedWorkKindDecision(
   actionId?: TaskToolActionId | null,
 ): RequestedWorkKindDecision | undefined {
   if (!actionId) {
@@ -105,7 +105,7 @@ export function getTaskToolRequestedWorkKindDecision(
   };
 }
 
-export function getInheritedRequestedWorkKindDecision(
+function getInheritedRequestedWorkKindDecision(
   kind?: RequestedWorkKind | null,
 ): RequestedWorkKindDecision | undefined {
   if (!kind) {
@@ -119,7 +119,7 @@ export function getInheritedRequestedWorkKindDecision(
   };
 }
 
-export function getSystemDefaultRequestedWorkKindDecision(): RequestedWorkKindDecision {
+function getSystemDefaultRequestedWorkKindDecision(): RequestedWorkKindDecision {
   return {
     kind: 'unknown',
     source: 'system_default',

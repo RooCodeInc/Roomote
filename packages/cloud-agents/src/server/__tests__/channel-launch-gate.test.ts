@@ -2,9 +2,9 @@ const { mockGenerateTrackedNonTaskObject } = vi.hoisted(() => ({
   mockGenerateTrackedNonTaskObject: vi.fn(),
 }));
 
-vi.mock('../../non-task-provider-usage', async (importOriginal) => {
+vi.mock('../non-task-provider-usage', async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import('../../non-task-provider-usage')>();
+    await importOriginal<typeof import('../non-task-provider-usage')>();
 
   return {
     ...actual,

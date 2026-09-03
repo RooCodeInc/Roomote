@@ -5,7 +5,7 @@ import { formatSingleLineLog } from '@roomote/types';
 import {
   generateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES,
-} from '../non-task-provider-usage';
+} from './non-task-provider-usage';
 
 const discordForumTagResponseSchema = z.object({
   tagId: z.string().describe('The exact id of one available Discord tag.'),

@@ -116,7 +116,7 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   findFastAgentActiveInferenceRetryNotice: mocks.findActiveRetryNotice,
 }));
 
-vi.mock('../../router', () => ({
+vi.mock('../../available-environments', () => ({
   getAvailableEnvironments: mocks.getEnvironments,
 }));
 

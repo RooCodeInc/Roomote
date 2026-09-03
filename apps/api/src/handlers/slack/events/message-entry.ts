@@ -56,7 +56,6 @@ import {
   dispatchSlackThreadFollowUp,
   resolveSlackThreadFollowUpRoute,
 } from './thread-follow-up-dispatch.js';
-import { postChannelAutoStartRoutingDebug } from '../helpers/channel-auto-start-routing-debug.js';
 import {
   findRoomoteOwnedSlackThread,
   findTrackedBackgroundAutomationSlackThread,
@@ -569,16 +568,6 @@ async function postSlackChannelAutoStartFailureBestEffort(input: {
   }
 }
 
-async function postChannelAutoStartRoutingDebugBestEffort(
-  input: Parameters<typeof postChannelAutoStartRoutingDebug>[0],
-): Promise<void> {
-  await postChannelAutoStartRoutingDebug(input).catch((error) => {
-    apiLogger.warn(
-      `[SlackWebhook] Failed to post configured channel auto-start routing debug for ${input.sourceChannelId}:${input.threadId}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  });
-}
-
 export async function processSlackChannelAutoStartTask(params: {
   event: ChannelAutoStartMessageEvent;
   isBotAuthored: boolean;
@@ -587,7 +576,6 @@ export async function processSlackChannelAutoStartTask(params: {
   userMapping: SlackUserMapping | null;
   teamId: string;
   ackEmoji: string;
-  channelAutoStartLaunchMode: ChannelAutoStartLaunchMode;
   agentPromptPrefix?: string;
   launchCriteria?: string | null;
 }): Promise<boolean> {
@@ -599,7 +587,6 @@ export async function processSlackChannelAutoStartTask(params: {
     userMapping,
     teamId,
     ackEmoji,
-    channelAutoStartLaunchMode,
     agentPromptPrefix,
     launchCriteria,
   } = params;
@@ -644,10 +631,6 @@ export async function processSlackChannelAutoStartTask(params: {
   }
 
   void (async () => {
-    let channelAutoStartDebug: {
-      llmDecision: 'launch' | 'skip' | 'not_run' | 'error';
-      reason: string;
-    } | null = null;
     let sourceChannelName: string | null = null;
 
     try {
@@ -674,21 +657,7 @@ export async function processSlackChannelAutoStartTask(params: {
           logContext: `configured channel auto-start ${event.channel}:${threadId}`,
         });
 
-        channelAutoStartDebug = gateResult.debug;
-
         if (!gateResult.shouldLaunch) {
-          await postChannelAutoStartRoutingDebugBestEffort({
-            slack,
-            sourceChannelId: event.channel,
-            sourceChannelName,
-            threadId,
-            messageText: event.text,
-            launchMode: channelAutoStartLaunchMode,
-            llmDecision: gateResult.debug.llmDecision,
-            llmReason: gateResult.debug.reason,
-            taskOutcome: 'skipped_before_start',
-            taskOutcomeDetails: `Launch gate stopped before task startup (${gateResult.skipReason}).`,
-          });
           // Release the routing lock like other no-launch outcomes so a
           // manual @roomote mention in this thread is not blocked for the
           // remainder of the lock TTL.
@@ -760,39 +729,10 @@ export async function processSlackChannelAutoStartTask(params: {
       });
 
       if (fastStart.accepted) {
-        if (channelAutoStartDebug) {
-          await postChannelAutoStartRoutingDebugBestEffort({
-            slack,
-            sourceChannelId: event.channel,
-            sourceChannelName,
-            threadId,
-            messageText: event.text,
-            launchMode: channelAutoStartLaunchMode,
-            llmDecision: channelAutoStartDebug.llmDecision,
-            llmReason: channelAutoStartDebug.reason,
-            taskOutcome: 'started',
-            taskOutcomeDetails: 'Routed to Fast.',
-          });
-        }
         apiLogger.info(
           `[SlackWebhook] Configured channel auto-start routed to Fast thread_id=${threadId} channel=${event.channel}`,
         );
         return;
-      }
-
-      if (channelAutoStartDebug) {
-        await postChannelAutoStartRoutingDebugBestEffort({
-          slack,
-          sourceChannelId: event.channel,
-          sourceChannelName,
-          threadId,
-          messageText: event.text,
-          launchMode: channelAutoStartLaunchMode,
-          llmDecision: channelAutoStartDebug.llmDecision,
-          llmReason: channelAutoStartDebug.reason,
-          taskOutcome: 'not_started',
-          taskOutcomeDetails: `Fast entry not accepted: ${fastStart.reason}`,
-        });
       }
       apiLogger.warn(
         `[SlackWebhook] Configured channel auto-start Fast entry not accepted (${fastStart.reason}) for thread ${threadId}`,
@@ -807,21 +747,6 @@ export async function processSlackChannelAutoStartTask(params: {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-
-      if (channelAutoStartDebug) {
-        await postChannelAutoStartRoutingDebugBestEffort({
-          slack,
-          sourceChannelId: event.channel,
-          sourceChannelName,
-          threadId,
-          messageText: event.text,
-          launchMode: channelAutoStartLaunchMode,
-          llmDecision: channelAutoStartDebug.llmDecision,
-          llmReason: channelAutoStartDebug.reason,
-          taskOutcome: 'not_started',
-          taskOutcomeDetails: `Exception after launch gate approval: ${errorMessage}`,
-        });
-      }
 
       await redis.del(routingLockKey).catch(() => {});
       console.error(
@@ -988,7 +913,6 @@ async function maybeHandleChannelAutoStart(params: {
     userMapping,
     teamId: context.teamId,
     ackEmoji,
-    channelAutoStartLaunchMode: channelAutoStartLaunchConfig.launchMode,
     agentPromptPrefix: channelAutoStartLaunchConfig.agentPromptPrefix,
     launchCriteria: matchedChannelAutoStart?.launchCriteria ?? null,
   });

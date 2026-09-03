@@ -5,7 +5,7 @@ import {
   type TaskModelOption,
 } from '@roomote/types';
 
-import type { RoutableEnvironment } from '../router';
+import type { RoutableEnvironment } from '../available-environments';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,

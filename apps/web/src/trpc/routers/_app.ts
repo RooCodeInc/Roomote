@@ -443,10 +443,6 @@ import {
 import { getSubscriptionProviderUsageCommand } from '../commands/subscription-usage';
 import { getProviderCreditBalancesCommand } from '../commands/provider-credits';
 import {
-  getRouterDebugSettingsCommand,
-  updateRouterDebugSettingsCommand,
-} from '../commands/router-debug';
-import {
   listCustomSkillsCommand,
   searchCustomSkillsCommand,
   setCustomSkillAvailabilityCommand,
@@ -2534,26 +2530,6 @@ export const appRouter = createRouter({
     list: protectedProcedure.query(({ ctx: { auth } }) =>
       getProviderCreditBalancesCommand(auth),
     ),
-  }),
-
-  routerDebug: createRouter({
-    getSettings: protectedProcedure.query(({ ctx: { auth } }) =>
-      getRouterDebugSettingsCommand(auth),
-    ),
-
-    updateSettings: protectedProcedure
-      .input(
-        z.object({
-          provider: z
-            .enum(['slack', 'teams', 'telegram', 'discord'])
-            .nullable(),
-          channelId: z.string().trim().min(1).max(255).nullable(),
-          disabled: z.boolean(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        updateRouterDebugSettingsCommand(auth, input),
-      ),
   }),
 
   setup: createRouter({
