@@ -35,10 +35,12 @@ function SubmitButton({
   isBusy,
   disabledReason,
   icon,
+  submitWithMetaKey,
 }: {
   isBusy: boolean;
   disabledReason?: string;
   icon?: ReactNode;
+  submitWithMetaKey: boolean;
 }) {
   const isDisabled = isBusy || Boolean(disabledReason);
   const button = (
@@ -47,6 +49,7 @@ function SubmitButton({
       variant="default"
       size="sm"
       className="group size-8 overflow-clip"
+      tooltip={submitWithMetaKey ? 'Send (Cmd/Ctrl + Enter)' : 'Send (Enter)'}
     >
       {icon ?? (
         <SendHorizontal className="fill-background group-[:not(:disabled):hover]:animate-fly-through" />
@@ -206,6 +209,7 @@ export function TaskPromptInput({
                 isBusy={isBusy}
                 disabledReason={submitDisabledReason}
                 icon={submitIcon}
+                submitWithMetaKey={submitWithMetaKey}
               />
             </div>
           </div>

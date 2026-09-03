@@ -237,6 +237,7 @@ export function NewTaskForm({
           autoFocus
           textareaMaxHeight={textareaMaxHeight}
           animateContainer={false}
+          submitWithMetaKey={false}
           submitDisabledReason={submitDisabledReason}
           tools={
             <SessionModelSwitcher

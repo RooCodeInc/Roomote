@@ -16,6 +16,7 @@ let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
   { id: 'env-2', name: 'Secondary Env' },
 ];
 let currentEnvironmentsPending = false;
+let capturedSubmitWithMetaKey: boolean | undefined;
 
 const {
   mockPush,
@@ -138,6 +139,7 @@ vi.mock('@/components/tasks', async () => {
       promptText,
       placeholder,
       submitDisabledReason,
+      submitWithMetaKey,
       tools,
     }: {
       onSubmit: (message: PromptInputMessage) => Promise<void> | void;
@@ -145,37 +147,42 @@ vi.mock('@/components/tasks', async () => {
       promptText?: string;
       placeholder?: string;
       submitDisabledReason?: string;
+      submitWithMetaKey?: boolean;
       tools?: import('react').ReactNode;
-    }) => (
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (submitDisabledReason) {
-            return;
-          }
-          onPromptTextChange?.('Test prompt');
-          const result = onSubmit({ text: 'Test prompt', files: [] });
+    }) => {
+      capturedSubmitWithMetaKey = submitWithMetaKey;
 
-          if (result instanceof Promise) {
-            void result.catch(() => {});
-          }
-        }}
-      >
-        <button type="button" aria-label="Add attachments">
-          +
-        </button>
-        {tools}
-        <div data-testid="prompt-placeholder">{placeholder}</div>
-        <textarea
-          aria-label="Task prompt"
-          value={promptText ?? ''}
-          onChange={(event) => onPromptTextChange?.(event.target.value)}
-        />
-        <button type="submit" disabled={Boolean(submitDisabledReason)}>
-          Submit prompt
-        </button>
-      </form>
-    ),
+      return (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (submitDisabledReason) {
+              return;
+            }
+            onPromptTextChange?.('Test prompt');
+            const result = onSubmit({ text: 'Test prompt', files: [] });
+
+            if (result instanceof Promise) {
+              void result.catch(() => {});
+            }
+          }}
+        >
+          <button type="button" aria-label="Add attachments">
+            +
+          </button>
+          {tools}
+          <div data-testid="prompt-placeholder">{placeholder}</div>
+          <textarea
+            aria-label="Task prompt"
+            value={promptText ?? ''}
+            onChange={(event) => onPromptTextChange?.(event.target.value)}
+          />
+          <button type="submit" disabled={Boolean(submitDisabledReason)}>
+            Submit prompt
+          </button>
+        </form>
+      );
+    },
     SessionModelSwitcher: ({
       model,
       onModelChange,
@@ -210,6 +217,7 @@ describe('Home', () => {
       { id: 'env-2', name: 'Secondary Env' },
     ];
     currentEnvironmentsPending = false;
+    capturedSubmitWithMetaKey = undefined;
     localStorage.clear();
     vi.clearAllMocks();
 
@@ -295,6 +303,12 @@ describe('Home', () => {
         model: 'openrouter/z-ai/glm-5.2',
       });
     });
+  });
+
+  it('uses the shared plain-Enter submission mode', () => {
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(capturedSubmitWithMetaKey).toBe(false);
   });
 
   it('keeps Home-only content out of the shared launch form', async () => {
