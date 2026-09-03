@@ -18,7 +18,34 @@ const MENTION_LINK_CLASS_NAME = `${MENTION_CLASS_NAME} no-underline hover:underl
 const LINK_CLASS_NAME =
   'text-primary underline underline-offset-2 hover:opacity-80';
 const BARE_URL_PATTERN = /https?:\/\/[^\s<>]+/g;
-const TRAILING_URL_PUNCTUATION = /[.,;:!?)\]]+$/;
+const TRAILING_URL_PUNCTUATION = /[.,;:!?)\]]$/;
+const CLOSER_TO_OPENER: Record<string, string> = { ')': '(', ']': '[' };
+
+function countChar(text: string, char: string): number {
+  let count = 0;
+  for (const current of text) {
+    if (current === char) count += 1;
+  }
+  return count;
+}
+
+/**
+ * Trims sentence punctuation that trails a bare URL. Closing parentheses and
+ * brackets stay attached while they balance an opener inside the URL, so
+ * `https://en.wikipedia.org/wiki/Function_(mathematics)` keeps its `)`.
+ */
+function trimTrailingUrlPunctuation(raw: string): string {
+  let url = raw;
+  while (TRAILING_URL_PUNCTUATION.test(url)) {
+    const last = url[url.length - 1] ?? '';
+    const opener = CLOSER_TO_OPENER[last];
+    if (opener && countChar(url, opener) >= countChar(url, last)) {
+      break;
+    }
+    url = url.slice(0, -1);
+  }
+  return url;
+}
 
 function SlackMention({ label, href }: { label: string; href: string | null }) {
   if (href) {
@@ -64,9 +91,7 @@ function renderTextWithBareUrls(text: string, keyPrefix: number): ReactNode[] {
 
   for (const match of text.matchAll(BARE_URL_PATTERN)) {
     const index = match.index ?? 0;
-    const raw = match[0];
-    const trailing = TRAILING_URL_PUNCTUATION.exec(raw)?.[0] ?? '';
-    const url = raw.slice(0, raw.length - trailing.length);
+    const url = trimTrailingUrlPunctuation(match[0]);
     if (index > lastIndex) {
       nodes.push(
         <Fragment key={`${keyPrefix}-${part++}`}>

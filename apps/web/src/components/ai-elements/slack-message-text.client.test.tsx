@@ -96,6 +96,22 @@ describe('SlackMessageText', () => {
     expect(resolveUsersState.lastEnabled).toBe(false);
   });
 
+  it('keeps balanced parentheses in bare urls and trims unbalanced ones', () => {
+    render(
+      <SlackMessageText text="see https://en.wikipedia.org/wiki/Function_(mathematics) (and https://example.com/a)." />,
+    );
+
+    expect(
+      screen
+        .getAllByTestId('slack-link')
+        .map((node) => node.getAttribute('href')),
+    ).toEqual([
+      'https://en.wikipedia.org/wiki/Function_(mathematics)',
+      'https://example.com/a',
+    ]);
+    expect(screen.getByText(/\)\.$/)).toBeInTheDocument();
+  });
+
   it('does not query without a transcript scope', () => {
     render(<SlackMessageText text="<@U1> hi" />);
 
