@@ -27,9 +27,24 @@ vi.mock('../fast-agent-conversation-repository', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   db: { query: { taskRuns: { findFirst: mocks.taskRunsFindFirst } } },
+  and: vi.fn((...parts: unknown[]) => ({ and: parts })),
   desc: vi.fn((column: unknown) => ({ desc: column })),
   eq: vi.fn((left: unknown, right: unknown) => ({ eq: [left, right] })),
-  taskRuns: { taskId: 'task_runs.task_id', createdAt: 'c', id: 'i' },
+  isNull: vi.fn((column: unknown) => ({ isNull: column })),
+  sql: Object.assign(
+    vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
+      sql: strings.join('?'),
+      values,
+    })),
+    { raw: vi.fn() },
+  ),
+  taskRuns: {
+    taskId: 'task_runs.task_id',
+    createdAt: 'c',
+    id: 'i',
+    payload: 'task_runs.payload',
+    canceledAt: 'task_runs.canceled_at',
+  },
   getSessionForFastConversation: mocks.getSessionForFastConversation,
 }));
 
@@ -210,6 +225,60 @@ describe('launchPinnedFastSessionTask', () => {
         task: expect.objectContaining({
           payload: expect.objectContaining({
             fastAgentSessionId: 'fast-parent',
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('replays a launch with a reused id into the Session the first attempt created', async () => {
+    mocks.taskRunsFindFirst
+      .mockResolvedValueOnce({
+        payload: {
+          launchIdempotencyKey: 'pinned-launch:launch-1',
+          fastAgentParent: {
+            sessionId: '66666666-6666-4666-8666-666666666666',
+            conversation: {
+              surface: 'web',
+              workspaceId: 'user-1',
+              conversationId: 'conv-first',
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({ id: 7 });
+    mocks.findById.mockResolvedValue({
+      id: '66666666-6666-4666-8666-666666666666',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'conv-first',
+      },
+    });
+
+    const result = await launchPinnedFastSessionTask({
+      userId: 'user-1',
+      launchId: 'launch-1',
+      prompt: 'Fix the flaky test',
+      task,
+      surface: 'api',
+      kickoffMessage: 'Started a task.',
+    });
+
+    expect(result.fastConversationId).toBe(
+      '66666666-6666-4666-8666-666666666666',
+    );
+    expect(mocks.getOrCreateFastAgentSession).not.toHaveBeenCalled();
+    expect(mocks.findById).toHaveBeenCalledWith({
+      id: '66666666-6666-4666-8666-666666666666',
+    });
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            launchIdempotencyKey: 'pinned-launch:launch-1',
+            fastAgentSessionId: '66666666-6666-4666-8666-666666666666',
           }),
         }),
       }),

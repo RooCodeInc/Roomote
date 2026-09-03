@@ -1,15 +1,19 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  and,
   db,
   desc,
   eq,
   getSessionForFastConversation,
+  isNull,
+  sql,
   taskRuns,
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   buildFastAgentChildTaskMetadata,
+  getFastAgentParentFromPayload,
   type StandardTask,
   type TaskInitiator,
   type TaskSurface,
@@ -67,17 +71,52 @@ type ConversationTarget = {
   conversation: FastAgentConversation;
 };
 
+async function findConversationTargetById(
+  fastConversationId: string,
+): Promise<ConversationTarget | null> {
+  const record = await fastAgentConversationRepository.findById({
+    id: fastConversationId,
+  });
+  return record ? { id: record.id, conversation: record.conversation } : null;
+}
+
+/**
+ * A retry of an earlier launch must land in the Session that launch created,
+ * or the queue will refuse the reused idempotency key as belonging to another
+ * Session. The earlier task's Fast parent names that Session.
+ */
+async function findConversationTargetForLaunchKey(
+  launchIdempotencyKey: string,
+): Promise<ConversationTarget | null> {
+  const existingRun = await db.query.taskRuns.findFirst({
+    where: and(
+      sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
+      isNull(taskRuns.canceledAt),
+    ),
+    columns: { payload: true },
+  });
+  const parentSessionId = getFastAgentParentFromPayload(
+    existingRun?.payload,
+  )?.sessionId;
+  return parentSessionId ? findConversationTargetById(parentSessionId) : null;
+}
+
 async function resolveConversationTarget(
   input: PinnedFastSessionLaunchInput,
+  launchIdempotencyKey: string,
 ): Promise<ConversationTarget> {
   if (input.fastConversationId) {
-    const record = await fastAgentConversationRepository.findById({
-      id: input.fastConversationId,
-    });
-    if (!record) {
+    const target = await findConversationTargetById(input.fastConversationId);
+    if (!target) {
       throw new Error('The Session for this launch could not be found.');
     }
-    return { id: record.id, conversation: record.conversation };
+    return target;
+  }
+
+  const replayed =
+    await findConversationTargetForLaunchKey(launchIdempotencyKey);
+  if (replayed) {
+    return replayed;
   }
 
   const created = await getOrCreateFastAgentSession({
@@ -100,8 +139,8 @@ async function resolveConversationTarget(
 export async function launchPinnedFastSessionTask(
   input: PinnedFastSessionLaunchInput,
 ): Promise<PinnedFastSessionLaunchResult> {
-  const target = await resolveConversationTarget(input);
   const turnId = `pinned-launch:${input.launchId}`;
+  const target = await resolveConversationTarget(input, turnId);
   const prompt = input.prompt.trim();
   const images = input.images ?? [];
   const now = Date.now();
