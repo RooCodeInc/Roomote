@@ -2,6 +2,26 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.2.2 (2026-09-03)
+
+Roomote 1.2.2 strengthens deployment and setup reliability while making Slack-driven Fast conversations clearer and more consistent.
+
+### Highlights
+
+- Keep Brain, background jobs, and the controller available through service replacements and pending database migrations.
+- Complete setup when an orchestration model sends placeholder questions alongside the trusted starter-work prompt.
+- Resume the original Slack request through Fast after account linking instead of starting a separate task.
+- Read linked Slack names and emoji reaction receipts in web transcripts.
+
+### Patch changes
+
+- Fixed the Brain (gbrain) service crash-looping after a deploy when its job worker found the queue lock still held by the container being replaced. The worker now retries within the lock's TTL instead of taking the whole service down, so a fresh or redeployed Brain comes up on its own.
+- Render standard Slack and Microsoft Teams reaction receipts as emoji in Fast web transcripts without exposing the internal reaction tool activity, while leaving unknown workspace emoji names visible.
+- Render Slack user mentions as readable, linked names in web task and Fast Session transcripts while preserving the original message text for replies and follow-up tasks.
+- Fixed the setup session failing to offer starter-work choices when the orchestration model passes the trusted `setup_starter_tasks` preset together with placeholder questions. The preset now wins and model-supplied questions are discarded instead of rejecting the call, so onboarding no longer stalls at "choose your first work" on models that fill every optional tool parameter.
+- Resume a Slack user's original request through Fast after account linking instead of starting a separate legacy task, while preserving the original message and thread context.
+- Fixed the bullmq and controller services crashing during upgrades when they started before the database migration finished. On platforms that roll every service at once, a boot that reads a column the pending migration adds could exhaust the restart budget within seconds and stay down until someone redeployed it; both services now wait for the migration to land and then start normally.
+
 ## 1.2.1 (2026-09-02)
 
 Roomote 1.2.1 restores Fast turns on OpenAI models and keeps Slack replies and usage alerts accurate.
