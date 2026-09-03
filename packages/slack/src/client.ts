@@ -9,10 +9,7 @@ export {
   convertMarkdownLinksToSlack,
 } from './markdown-converter';
 
-export {
-  buildStartedBlocks,
-  buildTaskFailedBlocks,
-} from './started-message-blocks';
+export { buildStartedBlocks } from './started-message-blocks';
 export {
   buildSlackAnsweredRequestUserInputBlocks,
   buildSlackCancelledRequestUserInputBlocks,

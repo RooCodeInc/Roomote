@@ -550,8 +550,8 @@ async function postSlackChannelAutoStartFailureBestEffort(input: {
     return;
   }
 
-  await input.slack
-    .postMessage({
+  try {
+    await input.slack.postMessage({
       channel: input.channelId,
       thread_ts: input.threadId,
       text: CHANNEL_AUTO_START_FAILURE_MESSAGE,
@@ -561,12 +561,12 @@ async function postSlackChannelAutoStartFailureBestEffort(input: {
           text: CHANNEL_AUTO_START_FAILURE_MESSAGE,
         },
       ],
-    })
-    .catch((error) => {
-      apiLogger.warn(
-        `[SlackWebhook] Failed to post configured channel auto-start launch failure for ${input.channelId}:${input.threadId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
     });
+  } catch (error) {
+    apiLogger.warn(
+      `[SlackWebhook] Failed to post configured channel auto-start launch failure for ${input.channelId}:${input.threadId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 async function postChannelAutoStartRoutingDebugBestEffort(
@@ -1180,6 +1180,10 @@ async function processAutomatedAppMentionTask(params: {
         return true;
       }
 
+      // Fast no longer refuses a turn: a busy Session queues or steers the
+      // message. Non-acceptance here is an exception before admission, and
+      // automated mentions are bot-authored, so like the configured-channel
+      // path above it stays log-only rather than replying to a feed.
       apiLogger.warn(
         `[SlackWebhook] Automated app_mention Fast entry not accepted (${fastStart.reason}) for thread ${threadId}`,
       );

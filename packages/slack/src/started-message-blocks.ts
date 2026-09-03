@@ -19,11 +19,6 @@ interface BuildStartedBlocksOptions {
   warningText?: string;
 }
 
-interface BuildTaskFailedBlocksOptions {
-  runId: number;
-  messageText?: string;
-}
-
 export const SLACK_STARTUP_FAILURE_TEXT = TASK_STARTUP_FAILURE_TEXT;
 export const SLACK_RUNTIME_FAILURE_TEXT = TASK_RUNTIME_FAILURE_TEXT;
 
@@ -115,41 +110,4 @@ export function buildStartedBlocks(
   }
 
   return blocks;
-}
-
-export function buildTaskFailedBlocks(
-  options: BuildTaskFailedBlocksOptions,
-): SlackBlock[] {
-  return buildTaskFailedMessage(options).blocks;
-}
-
-export function buildTaskFailedMessage(options: BuildTaskFailedBlocksOptions): {
-  text: string;
-  blocks: SlackBlock[];
-} {
-  const messageText = options.messageText ?? SLACK_STARTUP_FAILURE_TEXT;
-
-  return {
-    text: messageText,
-    blocks: [
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: messageText,
-        },
-      },
-      {
-        type: 'actions',
-        elements: [
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: 'Try again', emoji: false },
-            action_id: 'retry_failed_task',
-            value: JSON.stringify({ runId: options.runId }),
-          },
-        ],
-      },
-    ],
-  };
 }

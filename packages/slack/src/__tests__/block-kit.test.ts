@@ -2,10 +2,7 @@ import {
   buildSlackAccountLinkConnectMessage,
   postSlackAccountLinkThreadReply,
 } from '../account-link';
-import {
-  buildStartedBlocks,
-  buildTaskFailedBlocks,
-} from '../started-message-blocks';
+import { buildStartedBlocks } from '../started-message-blocks';
 import type { SlackNotifier } from '../slack-notifier';
 
 type Blocks = ReturnType<typeof buildStartedBlocks>;
@@ -209,46 +206,6 @@ describe('Slack started and failed message blocks', () => {
         }),
       ]),
     );
-  });
-
-  it('builds a retryable failed-task message', () => {
-    const blocks = buildTaskFailedBlocks({
-      runId: 123,
-    });
-    const actionElements = getActionsElements(blocks);
-
-    expect(getPrimarySectionText(blocks)).toBe(
-      "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
-    );
-    expect(actionElements).toEqual([
-      expect.objectContaining({
-        action_id: 'retry_failed_task',
-        value: JSON.stringify({
-          runId: 123,
-        }),
-      }),
-    ]);
-  });
-
-  it('builds a retryable failed-task message with runtime-failure copy', () => {
-    const blocks = buildTaskFailedBlocks({
-      runId: 123,
-      messageText:
-        "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.",
-    });
-    const actionElements = getActionsElements(blocks);
-
-    expect(getPrimarySectionText(blocks)).toBe(
-      "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.",
-    );
-    expect(actionElements).toEqual([
-      expect.objectContaining({
-        action_id: 'retry_failed_task',
-        value: JSON.stringify({
-          runId: 123,
-        }),
-      }),
-    ]);
   });
 });
 
