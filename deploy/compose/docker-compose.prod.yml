@@ -74,7 +74,6 @@ x-roomote-inference-env: &roomote-inference-env
   R_MODEL_ENV_KEYS: ${R_MODEL_ENV_KEYS:-}
   CUSTOM_PROVIDER_API_KEY: ${CUSTOM_PROVIDER_API_KEY:-}
   OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-  R_SANDBOX_OPENROUTER_API_KEY: ${R_SANDBOX_OPENROUTER_API_KEY:-}
   AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -214,6 +213,7 @@ x-roomote-api-env: &roomote-api-env
 
 x-roomote-controller-env: &roomote-controller-env
   <<: *roomote-base-env
+  SANDBOX_OPENROUTER_API_KEY: ${SANDBOX_OPENROUTER_API_KEY:-}
   DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}
   JOB_AUTH_PRIVATE_KEY: ${JOB_AUTH_PRIVATE_KEY:?JOB_AUTH_PRIVATE_KEY is required}

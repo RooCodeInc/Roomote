@@ -2,10 +2,8 @@ import { Hono } from 'hono';
 
 import {
   formatSingleLineLog,
-  getLinkedEnvironmentIdFromPayload,
   rebaseRoomoteModelIdToUpstream,
   ROOMOTE_INFERENCE_PROVIDER_ID,
-  SANDBOX_OPENROUTER_GATEWAY_PROVIDER_ID,
 } from '@roomote/types';
 import {
   db,
@@ -344,7 +342,7 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
   }
 
   const taskRun = await db.query.taskRuns.findFirst({
-    columns: { id: true, payload: true },
+    columns: { id: true },
     where: eq(taskRuns.id, auth.runId),
   });
 
@@ -356,16 +354,6 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
 
   if (!provider) {
     return c.json({ error: `Unknown inference provider "${providerId}"` }, 404);
-  }
-
-  if (
-    providerId === SANDBOX_OPENROUTER_GATEWAY_PROVIDER_ID &&
-    !getLinkedEnvironmentIdFromPayload(taskRun.payload)
-  ) {
-    return c.json(
-      { error: 'Sandbox preview inference requires an environment task token' },
-      403,
-    );
   }
 
   const upstreamPath = extractUpstreamPath(pathname, providerId);

@@ -385,10 +385,9 @@ const serverSchema = {
   // stored key still exists. Served through the inference gateway like any
   // other provider key, so it never reaches a sandbox.
   R_TRIAL_OPENROUTER_API_KEY: z.string().min(1).optional(),
-  // Dedicated capped OpenRouter key used only by the parent inference gateway
-  // for Roomote deployments running inside task sandboxes. The raw key must
-  // never be forwarded to workers or task environments.
-  R_SANDBOX_OPENROUTER_API_KEY: z.string().min(1).optional(),
+  // Dedicated capped OpenRouter key forwarded by the launcher only to workers
+  // preparing nested Roomote deployments. Setup maps it to OPENROUTER_API_KEY.
+  SANDBOX_OPENROUTER_API_KEY: z.string().min(1).optional(),
   // Optional self-run inference upstreams for the Brain gateway. When set,
   // the gateway routes that path's requests there instead of the configured
   // model provider — embeddings can move to a local or fleet
@@ -551,7 +550,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_BRAIN_OPENROUTER_API_KEY',
   'R_BRAIN_OPENAI_API_KEY',
   'R_TRIAL_OPENROUTER_API_KEY',
-  'R_SANDBOX_OPENROUTER_API_KEY',
+  'SANDBOX_OPENROUTER_API_KEY',
   'R_BRAIN_EMBEDDINGS_UPSTREAM_URL',
   'R_BRAIN_INFERENCE_UPSTREAM_API_KEY',
   'R_BRAIN_GATEWAY_TOKEN',

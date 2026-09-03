@@ -28,7 +28,7 @@ describe('buildBaseWorkerEnv', () => {
     delete process.env.R_EXPLORE_MODEL_REASONING_EFFORT;
     delete process.env.R_PLANNING_MODEL_REASONING_EFFORT;
     delete process.env.R_MODEL_ENV_KEYS;
-    delete process.env.R_SANDBOX_OPENROUTER_API_KEY;
+    delete process.env.SANDBOX_OPENROUTER_API_KEY;
     delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
     delete process.env.MISTRAL_API_KEY;
   });
@@ -164,13 +164,13 @@ describe('buildBaseWorkerEnv', () => {
     process.env.AI_GATEWAY_API_KEY = 'vercel-key';
     process.env.AWS_BEARER_TOKEN_BEDROCK = 'bedrock-key';
     process.env.XAI_API_KEY = 'xai-key';
-    process.env.R_SANDBOX_OPENROUTER_API_KEY = 'sandbox-openrouter-key';
+    process.env.SANDBOX_OPENROUTER_API_KEY = 'sandbox-openrouter-key';
     process.env.AWS_REGION = 'us-west-2';
 
     const env = buildBaseWorkerEnv({
       authToken: 'auth-token',
       extraEnv: {
-        R_SANDBOX_OPENROUTER_API_KEY: 'extra-sandbox-openrouter-key',
+        SANDBOX_OPENROUTER_API_KEY: 'extra-sandbox-openrouter-key',
       },
     });
 
@@ -180,9 +180,25 @@ describe('buildBaseWorkerEnv', () => {
     expect(env.AI_GATEWAY_API_KEY).toBeUndefined();
     expect(env.AWS_BEARER_TOKEN_BEDROCK).toBeUndefined();
     expect(env.XAI_API_KEY).toBeUndefined();
-    expect(env.R_SANDBOX_OPENROUTER_API_KEY).toBeUndefined();
+    expect(env.SANDBOX_OPENROUTER_API_KEY).toBeUndefined();
     // Region config is not a secret and Bedrock's Mantle merge still
     // validates it sandbox-side.
     expect(env.AWS_REGION).toBe('us-west-2');
+  });
+
+  it('forwards the capped preview key only to environment workers', () => {
+    process.env.SANDBOX_OPENROUTER_API_KEY = 'sandbox-openrouter-key';
+
+    const environmentEnv = buildBaseWorkerEnv({
+      authToken: 'auth-token',
+      environmentId: 'environment-1',
+    });
+    const repositoryEnv = buildBaseWorkerEnv({ authToken: 'auth-token' });
+
+    expect(environmentEnv.SANDBOX_OPENROUTER_API_KEY).toBe(
+      'sandbox-openrouter-key',
+    );
+    expect(environmentEnv).not.toHaveProperty('OPENROUTER_API_KEY');
+    expect(repositoryEnv).not.toHaveProperty('SANDBOX_OPENROUTER_API_KEY');
   });
 });

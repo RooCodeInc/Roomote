@@ -38,7 +38,6 @@ x-roomote-production-env: &roomote-production-env
   R_MODEL_ENV_KEYS: ${R_MODEL_ENV_KEYS:-}
   CUSTOM_PROVIDER_API_KEY: ${CUSTOM_PROVIDER_API_KEY:-}
   OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-  R_SANDBOX_OPENROUTER_API_KEY: ${R_SANDBOX_OPENROUTER_API_KEY:-}
   AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -169,6 +168,7 @@ services:
   controller:
     environment:
       <<: *roomote-production-env
+      SANDBOX_OPENROUTER_API_KEY: ${SANDBOX_OPENROUTER_API_KEY:-}
     healthcheck:
       test:
         [
