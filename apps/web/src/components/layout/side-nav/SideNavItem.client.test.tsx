@@ -140,6 +140,24 @@ describe('SideNavItem', () => {
     ).not.toHaveAttribute('data-next-link');
   });
 
+  it('renders disabled destinations as non-navigable buttons', () => {
+    render(
+      <SideNavItem
+        icon={TestIcon}
+        href="/analytics"
+        tooltip="Analytics"
+        description="View analytics"
+        disabled
+      />,
+    );
+
+    expect(screen.queryByRole('link', { name: 'Analytics' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Analytics' })).toBeDisabled();
+    expect(screen.getByTestId('tooltip-content')).toHaveTextContent(
+      'View analytics',
+    );
+  });
+
   it('renders action items with the same structure and fires clicks', () => {
     const onClick = vi.fn();
 
