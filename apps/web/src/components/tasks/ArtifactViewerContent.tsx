@@ -12,6 +12,10 @@ import type { ArtifactWithContent } from '@/types';
 
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
+import {
+  getArtifactViewUrl,
+  getSessionArtifactViewUrl,
+} from '@/lib/artifact-view-urls';
 import { cn } from '@/lib/utils';
 
 import {
@@ -114,16 +118,6 @@ function isHtmlArtifact(contentType: string, path: string): boolean {
     extension === 'htm' ||
     extension === 'xhtml'
   );
-}
-
-function getArtifactViewUrl(
-  origin: string,
-  taskId: string,
-  path: string,
-  version: number,
-): string {
-  const search = new URLSearchParams({ path, v: String(version) });
-  return `${origin}/task/${encodeURIComponent(taskId)}/artifacts?${search}`;
 }
 
 interface ArtifactViewerContentProps {
@@ -269,14 +263,20 @@ export function ArtifactViewerContent({
   };
 
   const handleCopyUrl = async () => {
-    const url = taskId
-      ? getArtifactViewUrl(
-          window.location.origin,
-          taskId,
-          artifact.path,
-          artifact.version,
-        )
-      : `${window.location.origin}/sessions/${'sessionId' in artifactOwner ? artifactOwner.sessionId : ''}`;
+    const url =
+      'taskId' in artifactOwner
+        ? getArtifactViewUrl(
+            window.location.origin,
+            artifactOwner.taskId,
+            artifact.path,
+            artifact.version,
+          )
+        : getSessionArtifactViewUrl(
+            window.location.origin,
+            artifactOwner.sessionId,
+            artifact.path,
+            artifact.version,
+          );
     await navigator.clipboard.writeText(url);
     setIsUrlCopied(true);
     toast.success('URL copied to clipboard');

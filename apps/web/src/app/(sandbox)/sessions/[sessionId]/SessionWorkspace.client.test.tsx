@@ -829,6 +829,95 @@ describe('SessionWorkspace', () => {
     );
   });
 
+  it('opens a deep-linked Session artifact without a click and clears the link on back', async () => {
+    artifactQueryState.dataByPath['session-1:notes/decision.md'] = {
+      id: 'session-artifact',
+      taskId: null,
+      sessionId: 'session-1',
+      path: 'notes/decision.md',
+      version: 1,
+      artifactType: 'general',
+      contentType: 'text/markdown',
+      size: 100,
+      createdAt: new Date('2026-01-05T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/session-artifact/download',
+    };
+    renderWorkspace({
+      isMobile: false,
+      searchParams: 'artifact=notes%2Fdecision.md&v=1',
+      sessionOverride: {
+        artifacts: [
+          {
+            id: 'session-artifact',
+            path: 'notes/decision.md',
+            version: 2,
+            artifactType: 'general',
+            contentType: 'text/markdown',
+            size: 100,
+            createdAt: new Date('2026-01-05T00:00:00.000Z'),
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByRole('heading', { name: 'Decision' })).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Open Decision from Session' }),
+    ).toBeNull();
+    await waitFor(() =>
+      expect(artifactQueryInputs).toContainEqual({
+        sessionId: 'session-1',
+        path: 'notes/decision.md',
+        version: 1,
+      }),
+    );
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to artifacts' }));
+
+    expect(routerReplaceMock).toHaveBeenCalledWith('/sessions/session-1');
+    expect(
+      screen.getByRole('button', { name: 'Open Decision from Session' }),
+    ).toBeVisible();
+  });
+
+  it('shows the artifact gallery when a deep link matches no Session artifact', () => {
+    renderWorkspace({
+      isMobile: false,
+      searchParams: 'artifact=notes%2Fmissing.md&v=1',
+    });
+
+    expect(screen.getByRole('heading', { name: 'Artifacts' })).toBeVisible();
+    expect(screen.getByText('No artifacts in this session yet.')).toBeVisible();
+    expect(artifactQueryInputs).toEqual([]);
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+  });
+
+  it('leaves the side panel to the URL-selected task when a deep link also names an artifact', () => {
+    renderWorkspace({
+      isMobile: false,
+      queriedTasks: [singleTask],
+      searchParams: 'task=task-1&artifact=notes%2Fdecision.md&v=1',
+      sessionOverride: {
+        tasks: [singleTask],
+        artifacts: [
+          {
+            id: 'session-artifact',
+            path: 'notes/decision.md',
+            version: 1,
+            artifactType: 'general',
+            contentType: 'text/markdown',
+            size: 100,
+            createdAt: new Date('2026-01-05T00:00:00.000Z'),
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Decision' })).toBeNull();
+  });
+
   it('aggregates latest artifacts per task and preserves duplicate paths across tasks', async () => {
     const sharedPath = 'reports/result.md';
     const firstTask = {

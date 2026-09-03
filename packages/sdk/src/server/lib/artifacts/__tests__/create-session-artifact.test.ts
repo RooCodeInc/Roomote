@@ -93,7 +93,9 @@ describe('createSessionArtifact', () => {
     const session = await getSessionForFastConversation(db, conversation!.id);
 
     expect(session).not.toBeNull();
-    expect(artifact.viewUrl).toContain(`/sessions/${session!.id}`);
+    const viewUrl = new URL(artifact.viewUrl);
+    expect(viewUrl.pathname).toBe(`/sessions/${session!.id}`);
+    expect(viewUrl.search).toBe('?artifact=notes%2Fresult.md&v=1');
     const [row] = await db
       .select()
       .from(taskArtifacts)

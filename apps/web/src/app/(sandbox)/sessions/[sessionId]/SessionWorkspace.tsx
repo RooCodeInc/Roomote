@@ -26,6 +26,10 @@ import {
   getUserDisplayName,
   humanizeFilename,
 } from '@/lib';
+import {
+  parseSessionArtifactSearchParams,
+  type SessionArtifactSelection,
+} from '@/lib/artifact-view-urls';
 import { getSessionPullRequests } from '@/lib/session-pull-requests';
 import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInferenceCostBreakdown';
 import { PullRequestBadge } from '@/components/sandbox';
@@ -419,24 +423,52 @@ function SessionArtifactViewer({
   );
 }
 
+type SessionArtifactViewerSelection = {
+  owner: { taskId: string } | { sessionId: string };
+  path: string;
+  version?: number;
+};
+
 function SessionArtifactsPanel({
   tasks,
   sessionId,
   sessionArtifacts,
+  initialSelection,
+  onDeselect,
   onClose,
 }: {
   tasks: SessionArtifactTask[];
   sessionId: string;
   sessionArtifacts: SessionArtifact[];
+  /**
+   * Session-owned artifact requested by the page URL. Preselects the matching
+   * gallery entry on mount; an unmatched request falls back to the gallery.
+   */
+  initialSelection?: SessionArtifactSelection | null;
+  /** Called when the viewer returns to the gallery. */
+  onDeselect?: () => void;
   onClose: () => void;
 }) {
-  const [selectedArtifact, setSelectedArtifact] =
-    useState<SessionArtifactEntry | null>(null);
   const artifacts = getLatestSessionArtifacts(
     tasks,
     sessionId,
     sessionArtifacts,
   );
+  const [selectedArtifact, setSelectedArtifact] =
+    useState<SessionArtifactViewerSelection | null>(() => {
+      if (!initialSelection) return null;
+      const entry = artifacts.find(
+        ({ owner, artifact }) =>
+          'sessionId' in owner && artifact.path === initialSelection.path,
+      );
+      return entry
+        ? {
+            owner: entry.owner,
+            path: entry.artifact.path,
+            version: initialSelection.version ?? entry.artifact.version,
+          }
+        : null;
+    });
   const artifactSections = [
     {
       label: 'Screenshots',
@@ -467,14 +499,13 @@ function SessionArtifactsPanel({
     >
       {selectedArtifact ? (
         <SessionArtifactViewer
-          selection={{
-            owner: selectedArtifact.owner,
-            path: selectedArtifact.artifact.path,
-            version: selectedArtifact.artifact.version,
-          }}
+          selection={selectedArtifact}
           backLabel="Back to artifacts"
           closeLabel="Close artifacts"
-          onBack={() => setSelectedArtifact(null)}
+          onBack={() => {
+            setSelectedArtifact(null);
+            onDeselect?.();
+          }}
           onClose={onClose}
         />
       ) : (
@@ -504,7 +535,13 @@ function SessionArtifactsPanel({
                               key={`${'taskId' in entry.owner ? `task:${entry.owner.taskId}` : `session:${entry.owner.sessionId}`}:${entry.artifact.path}`}
                               artifact={entry.artifact}
                               taskTitle={entry.taskTitle}
-                              onOpen={() => setSelectedArtifact(entry)}
+                              onOpen={() =>
+                                setSelectedArtifact({
+                                  owner: entry.owner,
+                                  path: entry.artifact.path,
+                                  version: entry.artifact.version,
+                                })
+                              }
                             />
                           ))}
                         </div>
@@ -750,12 +787,21 @@ export function SessionWorkspace({
   session: SessionInfo;
   children: ReactNode;
 }) {
-  // Exactly one local side panel can be active. A URL-selected task normally
-  // takes precedence, except while its artifact detail temporarily overlays it.
-  const [panel, setPanel] = useState<WorkspacePanel | null>(null);
   const trpc = useTRPC();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const selectedTaskId = searchParams.get('task');
+  // A `?artifact=<path>&v=<version>` link (the create_artifact result and the
+  // viewer's copy-link URL) opens the Session-owned artifact in the Artifacts
+  // panel unless a URL-selected task already owns the side panel.
+  const requestedArtifact = selectedTaskId
+    ? null
+    : parseSessionArtifactSearchParams(searchParams);
+  // Exactly one local side panel can be active. A URL-selected task normally
+  // takes precedence, except while its artifact detail temporarily overlays it.
+  const [panel, setPanel] = useState<WorkspacePanel | null>(() =>
+    requestedArtifact ? { kind: 'artifacts' } : null,
+  );
   const isFastTaskSource = session.taskSource === 'fast';
   const { data: currentSession } = useQuery(
     trpc.sessions.byId.queryOptions(
@@ -797,7 +843,6 @@ export function SessionWorkspace({
   );
   const singleRunningTaskId =
     runningTaskCount === 1 ? runningTasks[0]?.taskId : null;
-  const selectedTaskId = searchParams.get('task');
   const selectedTask = taskCards.find((task) => task.taskId === selectedTaskId);
   const panelOpen = panel !== null || Boolean(selectedTask);
   const isMdOrLarger = useMediaQuery('(min-width: 768px)', {
@@ -827,17 +872,36 @@ export function SessionWorkspace({
     };
   }, [isMdOrLarger, panel, runningTaskCount, selectedTask, taskCards.length]);
 
-  const selectTask = useCallback(
-    (taskId: string | null) => {
-      if (taskId === selectedTaskId) return;
-
+  const replaceSearchParams = useCallback(
+    (update: (params: URLSearchParams) => void) => {
       const params = new URLSearchParams(searchParams);
-      if (taskId) params.set('task', taskId);
-      else params.delete('task');
+      update(params);
       const query = params.toString();
+      if (query === searchParams.toString()) return;
       router.replace(`/sessions/${session.id}${query ? `?${query}` : ''}`);
     },
-    [router, searchParams, selectedTaskId, session.id],
+    [router, searchParams, session.id],
+  );
+  // Leaving the deep-linked artifact drops it from the URL so a refresh does
+  // not reopen it.
+  const clearRequestedArtifact = useCallback(
+    () =>
+      replaceSearchParams((params) => {
+        params.delete('artifact');
+        params.delete('v');
+      }),
+    [replaceSearchParams],
+  );
+  const selectTask = useCallback(
+    (taskId: string | null) =>
+      replaceSearchParams((params) => {
+        if (taskId) params.set('task', taskId);
+        else params.delete('task');
+        // Any side-panel change moves away from the deep-linked artifact.
+        params.delete('artifact');
+        params.delete('v');
+      }),
+    [replaceSearchParams],
   );
 
   const openTaskPanel = useCallback(
@@ -926,6 +990,8 @@ export function SessionWorkspace({
         tasks={artifactTasks}
         sessionId={session.id}
         sessionArtifacts={session.artifacts ?? []}
+        initialSelection={requestedArtifact}
+        onDeselect={clearRequestedArtifact}
         onClose={closePanel}
       />
     ) : panel?.kind === 'previews' ? (
