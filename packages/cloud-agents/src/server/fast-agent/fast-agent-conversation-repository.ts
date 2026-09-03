@@ -235,6 +235,8 @@ export type FastAgentTurnAttemptSummary = {
     retryNoticeOrdinal: number;
     turnSeq: number;
   };
+  /** The attempt's prompt row, so the resumed run keeps its place and time. */
+  prompt: { ts: number; turnSeq: number } | null;
 };
 
 const TURN_ATTEMPT_RESULT_MAX_CHARS = 1_200;
@@ -254,6 +256,7 @@ export async function loadFastAgentTurnAttemptSummary(
     .select({
       eventId: fastAgentMessages.eventId,
       turnSeq: fastAgentMessages.turnSeq,
+      ts: fastAgentMessages.ts,
       eventType: fastAgentMessages.eventType,
       role: fastAgentMessages.role,
       contentBlocks: fastAgentMessages.contentBlocks,
@@ -290,11 +293,18 @@ export async function loadFastAgentTurnAttemptSummary(
     retryNoticeOrdinal: 0,
     turnSeq: 0,
   };
+  let prompt: FastAgentTurnAttemptSummary['prompt'] = null;
   const ordinalOf = (slot: string, eventId: string) => {
     const match = new RegExp(`:${slot}:(\\d+)$`, 'u').exec(eventId);
     return match ? Number(match[1]) + 1 : 0;
   };
   for (const row of rows) {
+    if (
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+      row.eventId === `${turnId}:user`
+    ) {
+      prompt = { ts: Number(row.ts), turnSeq: row.turnSeq };
+    }
     next.turnSeq = Math.max(next.turnSeq, row.turnSeq + 1);
     next.assistantOrdinal = Math.max(
       next.assistantOrdinal,
@@ -361,7 +371,7 @@ export async function loadFastAgentTurnAttemptSummary(
       if (reply) replies.push(reply);
     }
   }
-  return { replies, actions: [...actions.values()], next };
+  return { replies, actions: [...actions.values()], next, prompt };
 }
 
 export type FastAgentUnresolvedRequest = {

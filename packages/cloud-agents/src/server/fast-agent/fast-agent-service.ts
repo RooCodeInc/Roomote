@@ -2419,12 +2419,16 @@ export async function answerFastAgentQuestion({
           return null;
         })
       : null;
-    const userEvent = allocateCanonicalEvent('user');
+    // A resumed run re-persists the same prompt; it keeps the attempt's
+    // place and time so the transcript still reads in order.
+    const userEvent = previousAttempt?.prompt
+      ? { eventId: `${turnId}:user`, turnSeq: previousAttempt.prompt.turnSeq }
+      : allocateCanonicalEvent('user');
     const userMessageResult = await persistCanonicalMessage(
       {
         ...userEvent,
         turnId,
-        ts: Date.now(),
+        ts: previousAttempt?.prompt?.ts ?? Date.now(),
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
         role: 'user',
         contentBlocks: buildFastAgentUserContentBlocks(

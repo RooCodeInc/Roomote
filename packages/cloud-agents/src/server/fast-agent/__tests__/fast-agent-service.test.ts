@@ -447,6 +447,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         retryNoticeOrdinal: 0,
         turnSeq: 0,
       },
+      prompt: null,
     });
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
@@ -3995,6 +3996,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           retryNoticeOrdinal: 0,
           turnSeq: 7,
         },
+        prompt: { ts: 1_700_000_000_000, turnSeq: 0 },
       });
       const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-2' });
       mocks.generateText.mockImplementationOnce(
@@ -4029,8 +4031,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(
         written.some((message) => message.eventId.endsWith(':tool:3')),
       ).toBe(true);
+      // The prompt keeps the attempt's place and time; everything new lands
+      // after the attempt's rows.
+      const prompt = written.find((message) =>
+        message.eventId.endsWith(':user'),
+      );
+      expect(prompt).toMatchObject({ ts: 1_700_000_000_000, turnSeq: 0 });
       expect(
-        Math.min(...written.map((message) => message.turnSeq)),
+        Math.min(
+          ...written
+            .filter((message) => !message.eventId.endsWith(':user'))
+            .map((message) => message.turnSeq),
+        ),
       ).toBeGreaterThanOrEqual(7);
 
       expect(mocks.loadTurnAttempt).toHaveBeenCalledWith(

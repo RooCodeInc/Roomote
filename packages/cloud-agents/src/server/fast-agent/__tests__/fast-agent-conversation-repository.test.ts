@@ -1261,6 +1261,18 @@ describe('Fast conversation repository', () => {
       });
 
     await write({
+      eventId: 'turn-a:user',
+      turnId: 'turn-a',
+      turnSeq: 0,
+      ts: 990,
+      eventType: 'roomote_runtime.user_prompt',
+      role: 'user',
+      contentBlocks: [{ type: 'text', text: 'Count the root files.' }],
+      metadata: { visibleInTranscript: true, turnSource: 'human' },
+      payload: {},
+      source: 'slack',
+    });
+    await write({
       eventId: 'turn-a:assistant:0',
       turnId: 'turn-a',
       turnSeq: 1,
@@ -1387,6 +1399,7 @@ describe('Fast conversation repository', () => {
         retryNoticeOrdinal: 0,
         turnSeq: 10,
       },
+      prompt: { ts: 990, turnSeq: 0 },
     });
     await expect(
       loadFastAgentTurnAttemptSummary(session.id, 'turn-none'),
@@ -1399,6 +1412,7 @@ describe('Fast conversation repository', () => {
         retryNoticeOrdinal: 0,
         turnSeq: 0,
       },
+      prompt: null,
     });
   });
 
