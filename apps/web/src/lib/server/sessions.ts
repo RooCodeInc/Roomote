@@ -1083,27 +1083,6 @@ export async function getSessionForTask(auth: SessionAuth, taskId: string) {
   return row ?? null;
 }
 
-export async function getArtifactBuildParentSession(
-  auth: SessionAuth,
-  artifactId: string,
-) {
-  const [row] = await db
-    .select({
-      sourceTaskId: taskArtifacts.taskId,
-      sourceArtifactPath: taskArtifacts.path,
-      sourceArtifactVersion: taskArtifacts.version,
-      sessionId: sessions.id,
-      fastConversationId: sessions.fastConversationId,
-    })
-    .from(taskArtifacts)
-    .leftJoin(sessionTasks, eq(sessionTasks.taskId, taskArtifacts.taskId))
-    .leftJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
-    .where(and(eq(taskArtifacts.id, artifactId), sessionScope(auth)))
-    .limit(1);
-
-  return row ?? null;
-}
-
 export async function updateSessionMetadata(
   auth: SessionAuth,
   sessionId: string,
