@@ -3986,6 +3986,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           },
           {
             kind: 'action',
+            tool: 'send_task_message',
+            arguments: { taskId: 'task-1', message: 'Focus on the root.' },
+            status: 'failed',
+            result:
+              '{"success":false,"error":"Task is not accepting messages yet."}',
+          },
+          {
+            kind: 'action',
             tool: 'save_memory',
             arguments: { content: 'Prefers bullets.' },
             status: 'unknown',
@@ -4073,6 +4081,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         block.indexOf('[TOOL_CALL save_memory]'),
       );
       expect(call.prompt).toContain('Continue from the last entry');
+      // A failed call is replayed as failed and explicitly left retryable, so
+      // a transient failure is not mistaken for finished work.
+      expect(block).toContain('[TOOL_RESULT failed]');
+      expect(call.prompt).toContain(
+        'marked failed did not take effect and may be retried',
+      );
       expect(
         mocks.upsertMessage.mock.calls.map(([input]) => input.message),
       ).not.toContainEqual(
