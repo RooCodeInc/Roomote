@@ -15,7 +15,7 @@ import {
 import { lookupSlackUserMapping } from '../helpers/user-mapping.js';
 import { startFastAgentResponse } from './message-entry.js';
 
-export type ResumePendingSlackAuthResult =
+type ResumePendingSlackAuthResult =
   | { success: true; status: 'resumed' | 'not_resumable' }
   | {
       success: false;
