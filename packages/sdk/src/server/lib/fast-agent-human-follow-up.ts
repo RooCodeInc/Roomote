@@ -37,9 +37,9 @@ export type FastAgentHumanFollowUpAdmission =
 /**
  * Durable admission for a human turn the caller is about to run inline. The
  * row is persisted under a claim lease before any work starts, so the turn
- * survives the accepting process: if that process is interrupted while the
- * turn is still replay-safe, it releases the claim and the parent-event
- * queue re-runs the turn. The queue is not woken here; a live owner runs
+ * survives the accepting process: if that process is interrupted before the
+ * turn has posted its closeout, it releases the claim and the parent-event
+ * queue resumes the turn, telling it what the earlier attempt already did. The queue is not woken here; a live owner runs
  * the turn itself. An older pending inline row for the same conversation is
  * an interrupted turn this newer message supersedes.
  */

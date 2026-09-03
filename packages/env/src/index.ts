@@ -132,7 +132,7 @@ const serverSchema = {
   // run inline without a persisted claim, so an interrupted turn is not
   // resumed by the parent-event queue (the pre-durable-admission behavior).
   R_FAST_DURABLE_ADMISSION_DISABLED: optInBoolean(),
-  // Kill switch for durable retry scheduling. When set, a replay-safe Fast
+  // Kill switch for durable retry scheduling. When set, an in-flight Fast
   // turn waits out inference retry backoff inside its owning process (the
   // pre-scheduling behavior) instead of parking the turn for the queue.
   R_FAST_DURABLE_RETRY_DISABLED: optInBoolean(),

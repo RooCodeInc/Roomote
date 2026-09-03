@@ -106,12 +106,7 @@ for a separate turn under that participant's identity. This keeps shared
 conversations ordered without losing instructions that arrive during active
 work.
 
-Replay-safe Fast turns also survive API or worker interruptions. Roomote
-durably admits the turn before acknowledging it, then resumes unfinished work
-on a live process without repeating the acknowledgement or already-completed
-side effects. If an inference provider asks Roomote to retry later, replay-safe
-turns can wait durably and resume at the scheduled time; longer waits use one
-visible retry notice that the eventual answer replaces.
+Fast turns also survive API or worker interruptions. Roomote durably admits the turn before acknowledging it, records every action the turn takes as it happens, and resumes unfinished work on another process. The resumed run is told what the earlier attempt already did, so it continues from that point instead of repeating actions or asking you to send the request again. Provider-side retry waits are honored the same way: short waits keep the turn in place, and longer waits park it durably until the scheduled time.
 
 ### Message Suggestions
 

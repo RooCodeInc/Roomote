@@ -212,6 +212,168 @@ export async function markFastAgentInferenceRetryNoticeInterruption(
   return stamped.length > 0;
 }
 
+/** One action the interrupted attempt of a turn took, as the transcript recorded it. */
+export type FastAgentTurnAttemptAction = {
+  tool: string;
+  arguments: unknown;
+  /** 'unknown' when the call was recorded but the process died before its result. */
+  status: 'completed' | 'failed' | 'unknown';
+  result?: string;
+};
+
+export type FastAgentTurnAttemptSummary = {
+  /** Visible assistant replies the attempt already posted, in order. */
+  replies: string[];
+  actions: FastAgentTurnAttemptAction[];
+  /**
+   * Where the resumed run must continue numbering its canonical events so
+   * its rows extend the transcript instead of overwriting the attempt's.
+   */
+  next: {
+    assistantOrdinal: number;
+    toolOrdinal: number;
+    retryNoticeOrdinal: number;
+    turnSeq: number;
+  };
+  /** The attempt's prompt row, so the resumed run keeps its place and time. */
+  prompt: { ts: number; turnSeq: number } | null;
+};
+
+const TURN_ATTEMPT_RESULT_MAX_CHARS = 1_200;
+
+/**
+ * What an earlier attempt at this turn already did, for the run that resumes
+ * it. Every tool call is recorded before it executes and its result after,
+ * so a resumed run can be told exactly what happened instead of starting the
+ * turn over and repeating actions. A call with no result is reported as
+ * unknown: the process died between starting it and recording the outcome.
+ */
+export async function loadFastAgentTurnAttemptSummary(
+  conversationId: string,
+  turnId: string,
+): Promise<FastAgentTurnAttemptSummary> {
+  const rows = await db
+    .select({
+      eventId: fastAgentMessages.eventId,
+      turnSeq: fastAgentMessages.turnSeq,
+      ts: fastAgentMessages.ts,
+      eventType: fastAgentMessages.eventType,
+      role: fastAgentMessages.role,
+      contentBlocks: fastAgentMessages.contentBlocks,
+      metadata: fastAgentMessages.metadata,
+      payload: fastAgentMessages.payload,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.turnId, turnId),
+      ),
+    )
+    .orderBy(fastAgentMessages.turnSeq, fastAgentMessages.ts);
+
+  const text = (blocks: unknown) =>
+    Array.isArray(blocks)
+      ? blocks
+          .flatMap((block) =>
+            block &&
+            typeof block === 'object' &&
+            (block as { type?: unknown }).type === 'text'
+              ? [String((block as { text?: unknown }).text ?? '')]
+              : [],
+          )
+          .join('')
+      : '';
+
+  const replies: string[] = [];
+  const actions = new Map<string, FastAgentTurnAttemptAction>();
+  const next = {
+    assistantOrdinal: 0,
+    toolOrdinal: 0,
+    retryNoticeOrdinal: 0,
+    turnSeq: 0,
+  };
+  let prompt: FastAgentTurnAttemptSummary['prompt'] = null;
+  const ordinalOf = (slot: string, eventId: string) => {
+    const match = new RegExp(`:${slot}:(\\d+)$`, 'u').exec(eventId);
+    return match ? Number(match[1]) + 1 : 0;
+  };
+  for (const row of rows) {
+    if (
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+      row.eventId === `${turnId}:user`
+    ) {
+      prompt = { ts: Number(row.ts), turnSeq: row.turnSeq };
+    }
+    next.turnSeq = Math.max(next.turnSeq, row.turnSeq + 1);
+    next.assistantOrdinal = Math.max(
+      next.assistantOrdinal,
+      ordinalOf('assistant', row.eventId),
+    );
+    next.toolOrdinal = Math.max(
+      next.toolOrdinal,
+      ordinalOf('tool', row.eventId),
+    );
+    next.retryNoticeOrdinal = Math.max(
+      next.retryNoticeOrdinal,
+      ordinalOf('retry-notice', row.eventId),
+    );
+    const payload = (row.payload ?? {}) as Record<string, unknown>;
+    const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+    if (
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall ||
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult
+    ) {
+      // A call and its result share one canonical event, so the result row
+      // replaces the call row once it lands and carries the arguments with
+      // it. A call row that is still present therefore has no result: the
+      // process died between starting the call and recording its outcome.
+      const toolCallId = String(payload.toolCallId ?? '');
+      if (!toolCallId) continue;
+      // Native and MCP calls wrap their input as `rawInput.arguments`;
+      // subagent task calls persist the input object directly.
+      const rawInput = payload.rawInput as
+        | { arguments?: unknown }
+        | Record<string, unknown>
+        | undefined;
+      const action: FastAgentTurnAttemptAction = {
+        tool: String(payload.toolName ?? payload.title ?? 'tool'),
+        arguments:
+          rawInput && typeof rawInput === 'object'
+            ? 'arguments' in rawInput
+              ? rawInput.arguments
+              : rawInput
+            : null,
+        status:
+          row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall
+            ? 'unknown'
+            : payload.status === 'failed'
+              ? 'failed'
+              : 'completed',
+      };
+      if (action.status !== 'unknown') {
+        const output = text(row.contentBlocks);
+        if (output) {
+          action.result =
+            output.length > TURN_ATTEMPT_RESULT_MAX_CHARS
+              ? `${output.slice(0, TURN_ATTEMPT_RESULT_MAX_CHARS)}…`
+              : output;
+        }
+      }
+      actions.set(toolCallId, action);
+    } else if (
+      row.role === 'assistant' &&
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+      metadata.visibleInTranscript !== false &&
+      metadata.interruptionReason === undefined
+    ) {
+      const reply = text(row.contentBlocks).trim();
+      if (reply) replies.push(reply);
+    }
+  }
+  return { replies, actions: [...actions.values()], next, prompt };
+}
+
 export type FastAgentUnresolvedRequest = {
   /** Turn whose human request never received a completed answer. */
   turnId: string;
