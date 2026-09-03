@@ -122,6 +122,48 @@ describe('unified Session queries', () => {
       fastConversationId: null,
     });
   });
+
+  it('resolves Build This directly from a Session-owned artifact', async () => {
+    const owner = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      fastConversationId: conversation!.id,
+    });
+    const [artifact] = await db
+      .insert(taskArtifacts)
+      .values({
+        sessionId: session.id,
+        path: 'plans/session-plan.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 100,
+        uploaded: true,
+      })
+      .returning();
+
+    await expect(
+      getArtifactBuildParentSession(
+        { userId: owner.id, isAdmin: false },
+        artifact!.id,
+      ),
+    ).resolves.toEqual({
+      sourceTaskId: null,
+      sourceArtifactPath: 'plans/session-plan.md',
+      sourceArtifactVersion: 1,
+      sessionId: session.id,
+      fastConversationId: conversation!.id,
+    });
+  });
   it('opens detail reads to everyone but scopes the list like tasks', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
@@ -994,6 +1036,43 @@ describe('unified Session queries', () => {
         }),
       ]),
     );
+  });
+
+  it('returns uploaded Session-owned artifacts without creating a task', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Fast artifact session',
+    });
+    await db.insert(taskArtifacts).values([
+      {
+        sessionId: session.id,
+        path: 'notes/result.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 100,
+        uploaded: true,
+      },
+      {
+        sessionId: session.id,
+        path: 'notes/pending.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 100,
+        uploaded: false,
+      },
+    ]);
+
+    const detail = await getSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(detail?.tasks).toEqual([]);
+    expect(detail?.artifacts).toEqual([
+      expect.objectContaining({ path: 'notes/result.md', version: 1 }),
+    ]);
   });
 
   it('resolves the latest external event from visible messages only', async () => {

@@ -17,6 +17,7 @@ import {
 } from '@roomote/cloud-agents/server';
 import {
   buildFastAgentSurfaceReplyDelivery,
+  createFastAgentSessionArtifact,
   persistFastAgentInlineHumanTurn,
   resolveUserMcpServerConfigs,
   wakeFastAgentParentEventAt,
@@ -26,6 +27,7 @@ import {
 import {
   and,
   db,
+  ensureSessionForFastConversation,
   eq,
   fastAgentConversations,
   fastAgentMessages,
@@ -460,7 +462,7 @@ async function startArtifactBuildInParentSession(
       model: input.artifactBuild.taskModel,
       parentSessionId: parentFastConversationId,
     });
-    if (result.success) {
+    if (result.success && source.sourceTaskId) {
       try {
         await notifySourceTaskArtifactBuild({
           auth,
@@ -559,7 +561,7 @@ export async function startFastSessionCommand(
     model: null,
     reasoningEffort: null,
   });
-  const unifiedSession = await getSessionForFastConversation(db, session.id);
+  const unifiedSession = await ensureSessionForFastConversation(db, session.id);
 
   const kickoffTurnId = input.conversationId
     ? `web-kickoff:${session.id}`
@@ -595,6 +597,12 @@ export async function startFastSessionCommand(
       delivery: {
         conversation,
         adapter: {
+          createArtifact: (artifact) => {
+            return createFastAgentSessionArtifact({
+              sessionId: unifiedSession.id,
+              ...artifact,
+            });
+          },
           launchTask,
           postReply: async () => {},
         },

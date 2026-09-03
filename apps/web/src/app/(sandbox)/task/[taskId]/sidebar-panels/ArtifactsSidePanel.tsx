@@ -33,7 +33,7 @@ export function ArtifactsSidePanel({ session }: ArtifactsSidePanelProps) {
   );
 
   const { data: artifact, isPending: isArtifactPending } = useArtifactByPath(
-    session.taskId,
+    { taskId: session.taskId },
     selectedArtifactPath,
     resolvedVersion,
   );

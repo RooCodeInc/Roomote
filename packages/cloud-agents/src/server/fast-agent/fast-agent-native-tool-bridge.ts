@@ -293,6 +293,22 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Create a durable text artifact in this Session. Use this for documents the user should keep, share, or build from; use show_widget for transient visual presentation and launch_task for repository or filesystem work.",
+  args: {
+    path: z.string().min(1).max(255).describe("Relative artifact path, including a useful file extension"),
+    content: z.string().min(1).max(131072).describe("UTF-8 text content; maximum 128 KiB"),
+    contentType: z.string().min(1).max(200).optional().describe("MIME type; inferred from the path when omitted"),
+    artifactType: z.enum(["general", "plan"]).optional().describe("Use plan only for implementation plans; defaults to general"),
+  },
+  execute: (args, context) => invoke("create_artifact", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"

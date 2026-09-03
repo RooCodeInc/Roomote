@@ -921,9 +921,14 @@ export const taskArtifacts = pgTable(
   'task_artifacts',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    taskId: text('task_id')
-      .notNull()
-      .references(() => tasks.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
+    // Additive Session ownership keeps N-1 task-only writers safe. N-1 readers
+    // ignore these rows because their task joins cannot match a null task_id.
+    sessionId: uuid('session_id').references(() => sessions.id, {
+      onDelete: 'cascade',
+    }),
     runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
@@ -940,6 +945,7 @@ export const taskArtifacts = pgTable(
   },
   (table) => [
     index('task_artifacts_task_id_idx').on(table.taskId),
+    index('task_artifacts_session_id_idx').on(table.sessionId),
     index('task_artifacts_run_id_idx').on(table.runId),
     index('task_artifacts_uploaded_idx').on(table.uploaded),
     index('task_artifacts_created_at_idx').on(table.createdAt),
@@ -948,6 +954,13 @@ export const taskArtifacts = pgTable(
       table.taskId,
       table.path,
       table.version,
+    ),
+    uniqueIndex('task_artifacts_session_id_path_version_unique')
+      .on(table.sessionId, table.path, table.version)
+      .where(sql`${table.sessionId} IS NOT NULL`),
+    check(
+      'task_artifacts_owner_shape_check',
+      sql`(${table.taskId} IS NOT NULL) <> (${table.sessionId} IS NOT NULL)`,
     ),
   ],
 );
@@ -960,6 +973,10 @@ export const taskArtifactsRelations = relations(taskArtifacts, ({ one }) => ({
   run: one(taskRuns, {
     fields: [taskArtifacts.runId],
     references: [taskRuns.id],
+  }),
+  session: one(sessions, {
+    fields: [taskArtifacts.sessionId],
+    references: [sessions.id],
   }),
 }));
 

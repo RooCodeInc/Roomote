@@ -11,7 +11,13 @@ import {
   type FastAgentReactionExternalInput,
   type FastAgentTurnAdapter,
 } from '@roomote/cloud-agents/server';
-import { and, db, eq, slackInstallations } from '@roomote/db/server';
+import {
+  and,
+  db,
+  ensureSessionForFastConversation,
+  eq,
+  slackInstallations,
+} from '@roomote/db/server';
 import { isFastAgentSourceControlConversation } from '@roomote/types';
 import {
   buildFastSessionReplyFooterText,
@@ -62,6 +68,7 @@ import {
   buildSourceControlFastAdapter,
   buildSourceControlFastDelivery,
 } from './source-control-fast-delivery';
+import { createFastAgentSessionArtifact } from './artifacts/create-session-artifact';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
 const DISCORD_QUOTE_MAX_LENGTH = 280;
@@ -130,7 +137,7 @@ export type FastAgentSurfaceReplyDelivery = {
   conversation: FastAgentConversation;
   adapter: Pick<
     FastAgentTurnAdapter,
-    'activity' | 'launchTask' | 'postReply' | 'replaceReply'
+    'activity' | 'createArtifact' | 'launchTask' | 'postReply' | 'replaceReply'
   >;
 };
 
@@ -734,6 +741,16 @@ async function runFastAgentSurfaceReply(
                 ),
             }
           : {}),
+        createArtifact: async (artifact) => {
+          const unifiedSession = await ensureSessionForFastConversation(
+            db,
+            params.sessionId,
+          );
+          return createFastAgentSessionArtifact({
+            sessionId: unifiedSession.id,
+            ...artifact,
+          });
+        },
         ...delivery.adapter,
       },
     }).catch((error: unknown) => {

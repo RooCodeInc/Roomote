@@ -101,6 +101,21 @@ export type FastAgentReaction = {
   messageId: string;
 };
 
+export type CreateFastAgentArtifact = (params: {
+  path: string;
+  content: string;
+  contentType: string;
+  artifactType: 'general' | 'plan';
+}) => Promise<{
+  id: string;
+  path: string;
+  version: number;
+  artifactType: 'general' | 'plan';
+  contentType: string;
+  size: number;
+  viewUrl: string;
+}>;
+
 export type LaunchFastAgentTask = (params: {
   prompt: string;
   images?: string[];
@@ -167,6 +182,8 @@ export type FastAgentInputPreset = 'setup_starter_tasks';
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
+  /** Persist inline text output against the owning Session. */
+  createArtifact?: CreateFastAgentArtifact;
   /**
    * Optional surface-specific launch gate. Use this for durable product
    * readiness conditions that the model prompt alone must not enforce.

@@ -171,7 +171,7 @@ async function getValidatedArtifactBuildSource({
   }
 
   return {
-    sourceTaskId: sourceArtifact.taskId,
+    sourceTaskId: sourceArtifact.taskId!,
     artifactPath: sourceArtifact.path,
     artifactVersion: sourceArtifact.version,
   };

@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   getFastSessionTasks: vi.fn(),
   getArtifactBuildParentSession: vi.fn(),
   currentEpochSeconds: vi.fn(),
+  createSessionArtifact: vi.fn(),
   dbUpdate: vi.fn(),
   dbSet: vi.fn(),
   dbWhere: vi.fn(),
@@ -34,13 +35,18 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
   createFastAgentWebTaskLauncher: mocks.createWebTaskLauncher,
+  FastAgentDurableRetryScheduledError: class FastAgentDurableRetryScheduledError extends Error {},
   getOrCreateFastAgentSession: mocks.getOrCreateSession,
   resolveApiBaseUrl: vi.fn(),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
   buildFastAgentSurfaceReplyDelivery: mocks.buildReplyDelivery,
+  createFastAgentSessionArtifact: mocks.createSessionArtifact,
+  persistFastAgentInlineHumanTurn: vi.fn().mockResolvedValue(null),
   resolveUserMcpServerConfigs: vi.fn(),
+  wakeFastAgentParentEventAt: vi.fn(),
+  wakeFastAgentParentEventNow: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -56,6 +62,7 @@ vi.mock('@roomote/db/server', () => ({
   sessionTasks: {},
   taskRuns: {},
   getSessionForFastConversation: mocks.getUnifiedSession,
+  ensureSessionForFastConversation: mocks.getUnifiedSession,
 }));
 
 vi.mock('@/lib/server/fast-sessions', () => ({
@@ -166,6 +173,7 @@ const session = {
 describe('scheduleWebFastAgentTurn', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.answerQuestion.mockResolvedValue('');
     mocks.dbUpdate.mockReturnValue({ set: mocks.dbSet });
     mocks.dbSet.mockReturnValue({ where: mocks.dbWhere });
     mocks.dbWhere.mockResolvedValue(undefined);
@@ -229,6 +237,7 @@ describe('scheduleWebFastAgentTurn', () => {
 describe('startFastSessionCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.answerQuestion.mockResolvedValue('');
     mocks.createWebTaskLauncher.mockReturnValue(mocks.launchTask);
     mocks.launchTask.mockResolvedValue({ success: true, taskId: 'task-1' });
     mocks.surfaceLaunchTask.mockResolvedValue({
@@ -312,6 +321,36 @@ describe('startFastSessionCommand', () => {
     });
 
     expect(mocks.after).toHaveBeenCalledOnce();
+  });
+
+  it('lets the initial Fast Session turn create a Session-owned artifact', async () => {
+    let scheduled: (() => Promise<void>) | undefined;
+    mocks.after.mockImplementation((callback) => {
+      scheduled = callback;
+    });
+    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: new AbortController().signal,
+    });
+    mocks.acquireTurnLock.mockResolvedValue(release);
+    mocks.answerQuestion.mockImplementation(async ({ adapter }) =>
+      adapter.createArtifact({
+        path: 'notes/decision.md',
+        content: '# Decision',
+        contentType: 'text/markdown',
+        artifactType: 'general',
+      }),
+    );
+
+    await startFastSessionCommand(auth, { text: 'Create a decision record' });
+    await scheduled?.();
+
+    expect(mocks.createSessionArtifact).toHaveBeenCalledWith({
+      sessionId: 'unified-session-1',
+      path: 'notes/decision.md',
+      content: '# Decision',
+      contentType: 'text/markdown',
+      artifactType: 'general',
+    });
   });
 
   it('delegates a pinned launch without scheduling a Fast turn', async () => {

@@ -168,7 +168,8 @@ ${planContent}
 
 interface ArtifactViewerContentProps {
   artifact: ArtifactWithContent | null;
-  taskId: string;
+  owner?: { taskId: string } | { sessionId: string };
+  taskId?: string;
   onVersionChange?: (version: number) => void;
   className?: string;
   showToolbar?: boolean;
@@ -176,13 +177,16 @@ interface ArtifactViewerContentProps {
 
 export function ArtifactViewerContent({
   artifact,
-  taskId,
+  owner,
+  taskId: taskIdProp,
   onVersionChange,
   className,
   showToolbar = true,
 }: ArtifactViewerContentProps) {
+  const artifactOwner = owner ?? { taskId: taskIdProp! };
+  const taskId = 'taskId' in artifactOwner ? artifactOwner.taskId : undefined;
   const trpc = useTRPC();
-  const { data: task } = useTask(taskId, false);
+  const { data: task } = useTask(taskId ?? '', false);
   const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
     useAuthorizedUser();
   const [isRaw, setIsRaw] = useState(false);
@@ -217,7 +221,7 @@ export function ArtifactViewerContent({
 
   const { data: versions = [] } = useQuery({
     ...trpc.artifacts.versions.queryOptions({
-      taskId,
+      ...artifactOwner,
       path: artifact?.path || '',
     }),
     refetchInterval: artifact ? 3000 : false,
@@ -303,6 +307,7 @@ export function ArtifactViewerContent({
 
     const launchKey = JSON.stringify([
       taskId,
+      'sessionId' in artifactOwner ? artifactOwner.sessionId : null,
       artifact.id,
       artifact.version,
       values.environmentId,
@@ -342,7 +347,9 @@ export function ArtifactViewerContent({
   };
 
   const handleCopyUrl = async () => {
-    const url = `${window.location.origin}/task/${taskId}/artifacts/${artifact.path}?v=${artifact.version}`;
+    const url = taskId
+      ? `${window.location.origin}/task/${taskId}/artifacts/${artifact.path}?v=${artifact.version}`
+      : `${window.location.origin}/sessions/${'sessionId' in artifactOwner ? artifactOwner.sessionId : ''}`;
     await navigator.clipboard.writeText(url);
     setIsUrlCopied(true);
     toast.success('URL copied to clipboard');

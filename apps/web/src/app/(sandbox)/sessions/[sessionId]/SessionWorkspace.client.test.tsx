@@ -37,7 +37,8 @@ const {
   routerReplaceMock: vi.fn(),
   artifactQueryState: { dataByPath: {} as Record<string, unknown> },
   artifactQueryInputs: [] as Array<{
-    taskId: string;
+    taskId?: string;
+    sessionId?: string;
     path: string;
     version?: number;
   }>,
@@ -87,15 +88,21 @@ vi.mock('@/trpc/client', () => ({
     artifacts: {
       byPath: {
         queryOptions: (
-          input: { taskId: string; path: string; version?: number },
+          input: {
+            taskId?: string;
+            sessionId?: string;
+            path: string;
+            version?: number;
+          },
           options?: Record<string, unknown>,
         ) => ({
           queryKey: ['artifacts', 'byPath', input],
           queryFn: async () => {
             artifactQueryInputs.push(input);
             return (
-              artifactQueryState.dataByPath[`${input.taskId}:${input.path}`] ??
-              artifactQueryState.dataByPath[input.path]
+              artifactQueryState.dataByPath[
+                `${input.taskId ?? input.sessionId}:${input.path}`
+              ] ?? artifactQueryState.dataByPath[input.path]
             );
           },
           ...options,
@@ -741,6 +748,53 @@ describe('SessionWorkspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Close artifacts' }));
     expect(screen.queryByText('No artifacts in this session yet.')).toBeNull();
+  });
+
+  it('shows artifacts created directly by the Session', async () => {
+    artifactQueryState.dataByPath['session-1:notes/decision.md'] = {
+      id: 'session-artifact',
+      taskId: null,
+      sessionId: 'session-1',
+      path: 'notes/decision.md',
+      version: 1,
+      artifactType: 'general',
+      contentType: 'text/markdown',
+      size: 100,
+      createdAt: new Date('2026-01-05T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/session-artifact/download',
+    };
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: {
+        artifacts: [
+          {
+            id: 'session-artifact',
+            path: 'notes/decision.md',
+            version: 1,
+            artifactType: 'general',
+            contentType: 'text/markdown',
+            size: 100,
+            createdAt: new Date('2026-01-05T00:00:00.000Z'),
+          },
+        ],
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Open Decision from Session' }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Open Decision from Session' }),
+    );
+    await waitFor(() =>
+      expect(artifactQueryInputs).toContainEqual({
+        sessionId: 'session-1',
+        path: 'notes/decision.md',
+        version: 1,
+      }),
+    );
   });
 
   it('aggregates latest artifacts per task and preserves duplicate paths across tasks', async () => {

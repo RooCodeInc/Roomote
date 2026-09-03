@@ -93,6 +93,60 @@ export async function getArtifactByPath({
   };
 }
 
+export async function getArtifactBySessionPath({
+  sessionId,
+  path,
+  version,
+  auth: _auth,
+}: {
+  sessionId: string;
+  path: string;
+  version?: number;
+  auth: ArtifactAuth;
+}) {
+  const whereConditions = [
+    eq(taskArtifacts.sessionId, sessionId),
+    eq(taskArtifacts.path, path),
+  ];
+  if (version !== undefined) {
+    whereConditions.push(eq(taskArtifacts.version, version));
+  }
+  const [artifact] = await db
+    .select()
+    .from(taskArtifacts)
+    .where(and(...whereConditions))
+    .orderBy(desc(taskArtifacts.version))
+    .limit(1);
+  return artifact ? withTypedArtifactType(artifact) : null;
+}
+
+export async function getArtifactVersionsBySessionPath({
+  sessionId,
+  path,
+  auth: _auth,
+}: {
+  sessionId: string;
+  path: string;
+  auth: ArtifactAuth;
+}) {
+  return db
+    .select({
+      id: taskArtifacts.id,
+      version: taskArtifacts.version,
+      size: taskArtifacts.size,
+      createdAt: taskArtifacts.createdAt,
+    })
+    .from(taskArtifacts)
+    .where(
+      and(
+        eq(taskArtifacts.sessionId, sessionId),
+        eq(taskArtifacts.path, path),
+        eq(taskArtifacts.uploaded, true),
+      ),
+    )
+    .orderBy(desc(taskArtifacts.version));
+}
+
 /**
  * Get all versions of an artifact by task ID and path.
  * Returns an array of version info sorted by version descending (latest first).

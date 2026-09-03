@@ -1547,6 +1547,9 @@ importers:
 
   packages/sdk:
     dependencies:
+      '@aws-sdk/client-s3':
+        specifier: 3.1000.0
+        version: 3.1000.0
       '@roomote/ado':
         specifier: workspace:^
         version: link:../ado

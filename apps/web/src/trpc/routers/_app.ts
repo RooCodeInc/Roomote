@@ -1063,18 +1063,33 @@ export const appRouter = createRouter({
   artifacts: createRouter({
     byPath: protectedProcedure
       .input(
-        z.object({
-          taskId: z.string(),
-          path: z.string(),
-          version: z.number().optional(),
-        }),
+        z
+          .object({
+            taskId: z.string().optional(),
+            sessionId: z.string().uuid().optional(),
+            path: z.string(),
+            version: z.number().optional(),
+          })
+          .refine(
+            (value) => Boolean(value.taskId) !== Boolean(value.sessionId),
+          ),
       )
       .query(({ ctx: { auth }, input }) =>
         getArtifactByPathCommand(auth, input),
       ),
 
     versions: protectedProcedure
-      .input(z.object({ taskId: z.string(), path: z.string() }))
+      .input(
+        z
+          .object({
+            taskId: z.string().optional(),
+            sessionId: z.string().uuid().optional(),
+            path: z.string(),
+          })
+          .refine(
+            (value) => Boolean(value.taskId) !== Boolean(value.sessionId),
+          ),
+      )
       .query(({ ctx: { auth }, input }) =>
         getArtifactVersionsCommand(auth, input),
       ),

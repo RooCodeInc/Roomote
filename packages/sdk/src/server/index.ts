@@ -109,6 +109,10 @@ export {
 } from './lib/artifacts/raw-url';
 export { createTaskArtifactRecord } from './lib/artifacts/create-record';
 export {
+  createFastAgentSessionArtifact,
+  createSessionArtifact,
+} from './lib/artifacts/create-session-artifact';
+export {
   notifyFastAgentParentOnArtifact,
   type FastArtifactNotificationResult,
 } from './lib/artifacts/notify-fast-agent-parent';
