@@ -461,6 +461,21 @@ describe('startSetupFastSessionCommand', () => {
         currentMessageId: 'setup-kickoff:setup-conversation-1',
       }),
     );
+    // The kickoff is admitted durably with its platform framing, so a
+    // restart resumes it as a setup event rather than dropping it.
+    const { persistFastAgentInlineHumanTurn } = await import(
+      '@roomote/sdk/server'
+    );
+    expect(vi.mocked(persistFastAgentInlineHumanTurn)).toHaveBeenCalledWith({
+      parent: expect.objectContaining({ sessionId: 'setup-conversation-1' }),
+      event: expect.objectContaining({
+        type: 'human_follow_up',
+        currentMessageId: 'setup-kickoff:setup-conversation-1',
+        turnSource: 'platform_event',
+        platformEventKind: 'setup',
+        platformEventVisibility: 'required',
+      }),
+    });
     expect(release).toHaveBeenCalledOnce();
   });
 

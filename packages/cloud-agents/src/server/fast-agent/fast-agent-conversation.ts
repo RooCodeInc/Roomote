@@ -1,4 +1,8 @@
-import type { FastAgentConversation, ReasoningEffort } from '@roomote/types';
+import type {
+  FastAgentConversation,
+  FastAgentReactionExternalInput as SharedFastAgentReactionExternalInput,
+  ReasoningEffort,
+} from '@roomote/types';
 
 export {
   isFastAgentCommunicationConversation,
@@ -28,20 +32,8 @@ export type FastAgentPlatformEventKind =
   | 'setup'
   | 'input_response';
 
-export type FastAgentReactionExternalInput = {
-  type: 'reaction_added';
-  provider: 'slack' | 'discord' | 'teams' | 'telegram';
-  reactions: Array<{ name: string; id?: string }>;
-  reactor: { externalUserId: string; displayName?: string };
-  message: {
-    workspaceId: string;
-    channelId: string;
-    messageId: string;
-    threadId?: string;
-    text?: string;
-  };
-  eventId: string;
-};
+/** Shared with the durable follow-up event so an admitted reaction resumes as the same input. */
+export type FastAgentReactionExternalInput = SharedFastAgentReactionExternalInput;
 
 export const FAST_AGENT_REACTION_INPUT_TYPE = 'reaction' as const;
 
