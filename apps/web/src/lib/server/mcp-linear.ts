@@ -1,6 +1,5 @@
 import { LinearClient } from '@linear/sdk';
 
-import { buildTaskStartingText } from '@roomote/communication/chat-messages';
 import {
   db,
   mcpConnections,
@@ -15,18 +14,14 @@ import {
   getLinearDeploymentMetadata,
   LINEAR_ORG_CONNECTION_ROLE,
   LINEAR_USER_CONNECTION_ROLE,
+  startLinearFastSessionTurn,
 } from '@roomote/sdk/server';
 import {
-  createLinearAgentRun,
   createLinearClient,
   enrichSessionComments,
   parseAgentSessionEventPayload,
-  resolveLinearTaskDestination,
 } from '@roomote/linear';
 import type { OAuthTokens } from '@roomote/types';
-
-import { Env } from '@/lib/server/env';
-import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 
 type McpConnectionRecord = Awaited<
   ReturnType<typeof db.query.mcpConnections.findFirst>
@@ -150,63 +145,18 @@ async function resumeLinearReplay(input: {
     linearClient,
     payload.agentSession,
   );
-  const destinationResult = await resolveLinearTaskDestination({
+  const started = await startLinearFastSessionTurn({
     payload,
     agentSession: enrichedSession,
     userId: input.userId,
     linearClient,
-    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
   });
 
-  if (destinationResult.status === 'platform_answer') {
-    await linearClient.emitResponse(sessionId, destinationResult.answer);
-    return;
-  }
-
-  if (destinationResult.status === 'awaiting_selection') {
-    return;
-  }
-
-  if (destinationResult.status === 'error') {
+  if (started.status !== 'queued') {
     await linearClient.emitError(
       sessionId,
-      `Failed to start workspace selection: ${destinationResult.message}`,
+      "Roomote couldn't start a conversation right now. Please try again in a moment.",
     );
-    return;
-  }
-
-  const { destination } = destinationResult;
-
-  await linearClient.emitThought(
-    sessionId,
-    buildTaskStartingText({
-      workspaceDisplayName: destination.workspaceDisplayName,
-      kickoffMessage: destination.kickoffMessage,
-    }),
-    true,
-  );
-
-  const runResult = await createLinearAgentRun({
-    agentSession: enrichedSession,
-    payload,
-    userId: input.userId,
-    repo: destination.workspaceSelection.repo,
-    environmentId: destination.workspaceSelection.environmentId,
-  });
-
-  if (runResult.status === 'error') {
-    await linearClient.emitError(
-      sessionId,
-      `Failed to start agent: ${runResult.message}`,
-    );
-    return;
-  }
-
-  if ('taskId' in runResult) {
-    const baseUrl = getPublicAppUrl(Env);
-    await linearClient.updateSessionExternalUrls(sessionId, [
-      { label: 'Open task', url: `${baseUrl}/task/${runResult.taskId}` },
-    ]);
   }
 }
 

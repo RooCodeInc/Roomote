@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   slackPostThreadMessage: vi.fn(),
   slackUpdateMessage: vi.fn(),
   admitHumanFollowUp: vi.fn(),
+  resolveLinearClient: vi.fn(),
+  linearEmitResponse: vi.fn(),
+  linearGetIssue: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -41,6 +44,14 @@ vi.mock('../automations/destination', () => ({
   findTeamsConversationRoute: mocks.findTeamsConversationRoute,
 }));
 
+vi.mock('./linear-fast-session', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./linear-fast-session')>();
+  return {
+    ...actual,
+    resolveLinearFastSessionClient: mocks.resolveLinearClient,
+  };
+});
+
 vi.mock('./fast-agent-human-follow-up', () => ({
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
 }));
@@ -64,7 +75,7 @@ import {
 
 async function createConversation(input: {
   userId: string;
-  surface: 'web' | 'automation' | 'slack' | 'teams' | 'telegram';
+  surface: 'web' | 'automation' | 'slack' | 'teams' | 'telegram' | 'linear';
   title?: string;
   replyTarget?: { channelId: string; threadId?: string };
 }) {
@@ -218,6 +229,67 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         question: 'Bystander follow-up',
       }),
     ).resolves.not.toBeNull();
+  });
+
+  it('posts Linear replies as agent-session responses and launches session-bound tasks', async () => {
+    mocks.resolveLinearClient.mockResolvedValue({
+      emitResponse: mocks.linearEmitResponse,
+      getAgentSessionIssue: mocks.linearGetIssue,
+    });
+    mocks.linearEmitResponse.mockResolvedValue({ success: true });
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'linear',
+      replyTarget: { channelId: 'agent-session-1' },
+    });
+
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Dana',
+      question: 'Fix the retry loop',
+      currentMessageId: 'activity-1',
+    });
+
+    expect(delivery?.conversation).toMatchObject({
+      surface: 'linear',
+      replyTarget: { channelId: 'agent-session-1' },
+    });
+    expect(mocks.resolveLinearClient).toHaveBeenCalledWith(
+      conversation.workspaceId,
+    );
+    const handle = await delivery!.adapter.postReply({
+      message: 'On it.',
+    } as never);
+    expect(mocks.linearEmitResponse).toHaveBeenCalledWith(
+      'agent-session-1',
+      'On it.',
+    );
+    expect(handle).toMatchObject({
+      messageId: expect.stringMatching(/^linear-response:/),
+    });
+    expect(delivery?.adapter.launchTask).toEqual(expect.any(Function));
+  });
+
+  it('returns null for a Linear session whose organization is not connected', async () => {
+    mocks.resolveLinearClient.mockResolvedValue(null);
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'linear',
+      replyTarget: { channelId: 'agent-session-1' },
+    });
+
+    await expect(
+      buildFastAgentSurfaceReplyDelivery({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: null,
+        question: 'Hello',
+        currentMessageId: 'activity-1',
+      }),
+    ).resolves.toBeNull();
   });
 
   it('returns null for a Slack session without an installation', async () => {

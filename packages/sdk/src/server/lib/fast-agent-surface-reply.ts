@@ -51,6 +51,11 @@ import {
   wakeFastAgentParentEventNow,
 } from './fast-agent-parent-event-queue';
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
+import {
+  buildLinearFastReplyMessageId,
+  createFastAgentLinearTaskLauncher,
+  resolveLinearFastSessionClient,
+} from './linear-fast-session';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
 const DISCORD_QUOTE_MAX_LENGTH = 280;
@@ -128,6 +133,9 @@ type FastAgentSurfaceReplyParams = {
   userId: string;
   senderDisplayName: string | null;
   question: string;
+  /** Surface context the model reads with this message, for example the
+   * Linear issue a session belongs to. */
+  agentContext?: string;
   currentMessageId: string;
   replyToMessageId?: string;
   images?: string[];
@@ -467,6 +475,35 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     };
   }
 
+  if (conversation.surface === 'linear') {
+    const linear = await resolveLinearFastSessionClient(
+      conversation.workspaceId,
+    );
+    if (!linear) {
+      return null;
+    }
+    const agentSessionId = conversation.replyTarget.channelId;
+    return {
+      conversation,
+      adapter: {
+        launchTask: createFastAgentLinearTaskLauncher({
+          userId: params.userId,
+          conversation,
+          resolveIssue: () => linear.getAgentSessionIssue(agentSessionId),
+        }),
+        postReply: async ({ message }) => {
+          const result = await linear.emitResponse(agentSessionId, message);
+          if (!result.success) {
+            throw new Error(
+              result.error ?? 'Linear did not accept the agent response.',
+            );
+          }
+          return { messageId: buildLinearFastReplyMessageId() };
+        },
+      },
+    };
+  }
+
   if (conversation.surface === 'telegram') {
     const provider =
       await createTelegramCommunicationProviderFromRuntimeCredentials();
@@ -623,6 +660,9 @@ async function runFastAgentSurfaceReply(
     await answerFastAgentQuestion({
       question: params.question,
       images: params.images,
+      ...(params.agentContext
+        ? { currentMessageAgentContext: params.agentContext }
+        : {}),
       userId: params.userId,
       apiBaseUrl,
       conversation: delivery.conversation,

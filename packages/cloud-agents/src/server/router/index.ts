@@ -9,7 +9,6 @@ export type {
   TeamsRoutingSource,
   TelegramRoutingSource,
   DiscordRoutingSource,
-  LinearRoutingSource,
   GitHubRoutingSource,
   GitHubRoutingResult,
   GitHubRoutingDecision,
@@ -78,7 +77,6 @@ export type {
   TeamsContextParams,
   TelegramContextParams,
   DiscordContextParams,
-  LinearContextParams,
   GitHubContextParams,
 } from './context-builders';
 
@@ -87,7 +85,6 @@ export {
   buildTeamsRoutingContext,
   buildTelegramRoutingContext,
   buildDiscordRoutingContext,
-  buildLinearRoutingContext,
   buildGitHubRoutingContext,
   getAvailableEnvironments,
 } from './context-builders';
