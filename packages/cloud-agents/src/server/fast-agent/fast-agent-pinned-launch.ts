@@ -390,6 +390,40 @@ async function launchInSession(
     throw new Error(launch.error);
   }
 
+  // The transcript renders delegated-task cards from `launch_task` tool
+  // results. A pinned launch spends no model turn, so it persists the same
+  // row a delegating turn would; without it the Session shows only the
+  // kickoff text and the task is invisible.
+  await upsertFastAgentMessage({
+    sessionId: target.id,
+    message: {
+      eventId: `${turnId}:launch`,
+      turnId,
+      turnSeq: 2,
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      role: 'tool',
+      contentBlocks: [],
+      metadata: { visibleInTranscript: true },
+      payload: {
+        toolCallId: `${turnId}:tool:0`,
+        title: 'launch_task',
+        toolName: 'launch_task',
+        status: 'completed',
+        isExecute: false,
+        isRead: false,
+        isMcp: false,
+        isRoomoteNativeTool: true,
+        command: null,
+        exitCode: null,
+        output: JSON.stringify({ success: true, taskId: launch.taskId }),
+        rawInput: { arguments: prompt ? { prompt } : {} },
+      },
+      source: target.conversation.surface,
+      nativeSessionId: null,
+    },
+  });
+
   const [latestRun, session] = await Promise.all([
     db.query.taskRuns.findFirst({
       where: eq(taskRuns.taskId, launch.taskId),

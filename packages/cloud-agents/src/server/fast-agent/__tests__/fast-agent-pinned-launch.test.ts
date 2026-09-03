@@ -176,6 +176,27 @@ describe('launchPinnedFastSessionTask', () => {
         payload: { purpose: 'progress', kickoff: true },
       }),
     });
+    // The launch_task tool result is what the transcript renders as the
+    // delegated-task card.
+    const launchWrite = mocks.upsertFastAgentMessage.mock.calls[2]?.[0] as {
+      sessionId: string;
+      message: { eventType: string; payload: Record<string, unknown> };
+    };
+    expect(launchWrite).toEqual({
+      sessionId: 'fast-1',
+      message: expect.objectContaining({
+        eventId: 'pinned-launch:launch-1:launch',
+        turnSeq: 2,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        role: 'tool',
+        payload: expect.objectContaining({
+          toolName: 'launch_task',
+          status: 'completed',
+          output: JSON.stringify({ success: true, taskId: 'task-1' }),
+          rawInput: { arguments: { prompt: 'Fix the flaky test' } },
+        }),
+      }),
+    });
 
     expect(mocks.enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -344,7 +365,17 @@ describe('launchPinnedFastSessionTask', () => {
 
     expect(result.fastConversationId).toBe('fast-parent');
     expect(mocks.getOrCreateFastAgentSession).not.toHaveBeenCalled();
-    expect(mocks.upsertFastAgentMessage).toHaveBeenCalledTimes(1);
+    // No user row for a blank workspace: only the kickoff and the task card.
+    expect(mocks.upsertFastAgentMessage).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.upsertFastAgentMessage.mock.calls.map(
+        (call) =>
+          (call[0] as { message: { eventType: string } }).message.eventType,
+      ),
+    ).toEqual([
+      ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+    ]);
     expect(mocks.upsertFastAgentMessage.mock.calls[0]?.[0]).toEqual({
       sessionId: 'fast-parent',
       message: expect.objectContaining({
