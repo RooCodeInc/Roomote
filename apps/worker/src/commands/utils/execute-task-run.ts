@@ -23,6 +23,7 @@ import {
 import type { WorkspaceConfig } from '../../workspace';
 import type { RepoLocalSkill } from '../../workspace/repo-local-skills';
 import { callbackMap } from '../../callbacks';
+import { getLinearSessionActivityStreamCallbacks } from '../../callbacks/linear-agent';
 import { getSlackLiveTaskStreamRunTaskCallbacks } from '../../callbacks/slack-live-task-stream';
 import {
   getCommunicationRunTaskCallbacks,
@@ -348,6 +349,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       callbackMap[taskRun.payloadKind as TaskPayloadKind] ?? {},
       getCommunicationRunTaskCallbacks(taskRun),
       getSlackLiveTaskStreamRunTaskCallbacks(taskRun),
+      getLinearSessionActivityStreamCallbacks(taskRun),
     );
 
     workerEnv = WorkerEnv.fromProcessEnv(process.env);
