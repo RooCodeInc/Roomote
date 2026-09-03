@@ -243,7 +243,10 @@ export async function handleGitLabMergeRequest(
           prNumber: mergeRequest.iid,
           branchName: reviewBranch,
           sourceControlProvider: 'gitlab',
-          host: target.repo.host,
+          // Legacy repository rows may lack a host; fall back to the
+          // webhook's own host so a same-named repository on another
+          // instance can never supply this review's session.
+          host: target.repo.host ?? toHostFromUrl(mergeRequest.url),
         }).catch(() => null)
       : null;
     return enqueueTask(
