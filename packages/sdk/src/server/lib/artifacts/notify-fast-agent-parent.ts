@@ -12,8 +12,26 @@ import { enqueueFastAgentParentEvent } from '../fast-agent-parent-event-queue';
 
 export type FastArtifactNotificationResult =
   | 'not_applicable'
+  | 'in_progress'
   | 'queued'
   | 'failed';
+
+const LEGACY_ARTIFACT_DELIVERY_LEASE_MS = 15 * 60 * 1000;
+
+function getLegacyArtifactDeliveryState(
+  marker: unknown,
+): 'in_progress' | 'settled' | null {
+  if (marker === null || marker === undefined) return null;
+  if (typeof marker !== 'string' || !marker.startsWith('delivering:')) {
+    return 'settled';
+  }
+
+  const claimedAt = Number(marker.slice('delivering:'.length));
+  return Number.isFinite(claimedAt) &&
+    claimedAt >= Date.now() - LEGACY_ARTIFACT_DELIVERY_LEASE_MS
+    ? 'in_progress'
+    : null;
+}
 
 function buildArtifactViewUrl(input: {
   taskId: string;
@@ -44,12 +62,23 @@ export async function notifyFastAgentParentOnArtifact(input: {
 
   const run = await db.query.taskRuns.findFirst({
     where: and(eq(taskRuns.id, input.runId), eq(taskRuns.taskId, input.taskId)),
-    columns: { id: true, taskId: true, payload: true },
+    columns: { id: true, taskId: true, payload: true, result: true },
   });
   const parent = getFastAgentParentFromPayload(run?.payload);
   if (!run || !parent) {
     return 'not_applicable';
   }
+
+  // N-1 compatibility: a previous release recorded presentation claims on the
+  // run. Honor settled and live markers without creating new dual claims; stale
+  // claims fall through to the durable queue's event-key idempotency.
+  const legacyDeliveryState = getLegacyArtifactDeliveryState(
+    (run.result as Record<string, unknown> | null)?.[
+      `fastAgentArtifact:${input.id}`
+    ],
+  );
+  if (legacyDeliveryState === 'settled') return 'queued';
+  if (legacyDeliveryState === 'in_progress') return 'in_progress';
 
   try {
     await enqueueFastAgentParentEvent({

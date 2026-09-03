@@ -68,5 +68,11 @@ export async function markArtifactUploadComplete(
       503,
     );
   }
+  if (notification === 'in_progress') {
+    return c.json(
+      { error: 'Artifact published; parent notification is in progress' },
+      503,
+    );
+  }
   return new Response(null, { status: 200 });
 }

@@ -86,4 +86,12 @@ describe('markArtifactUploadComplete', () => {
 
     expect(response.status).toBe(503);
   });
+
+  it('retries while a previous-release artifact delivery is in progress', async () => {
+    mocks.notifyParent.mockResolvedValueOnce('in_progress');
+
+    const response = await markArtifactUploadComplete(context());
+
+    expect(response.status).toBe(503);
+  });
 });

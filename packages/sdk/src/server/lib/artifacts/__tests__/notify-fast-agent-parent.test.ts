@@ -114,6 +114,54 @@ describe('notifyFastAgentParentOnArtifact', () => {
     expect(mocks.recordLifecycle).not.toHaveBeenCalled();
   });
 
+  it('does not enqueue an artifact already delivered by the previous release', async () => {
+    mocks.findRun.mockResolvedValueOnce({
+      id: 200,
+      taskId: 'child-task',
+      payload: { fastAgentParent: fastParent },
+      result: {
+        'fastAgentArtifact:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa': 'delivered',
+      },
+    });
+
+    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
+      'queued',
+    );
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('keeps retrying while a previous-release delivery claim is live', async () => {
+    mocks.findRun.mockResolvedValueOnce({
+      id: 200,
+      taskId: 'child-task',
+      payload: { fastAgentParent: fastParent },
+      result: {
+        'fastAgentArtifact:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa': `delivering:${Date.now()}`,
+      },
+    });
+
+    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
+      'in_progress',
+    );
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('admits an artifact after a previous-release delivery claim expires', async () => {
+    mocks.findRun.mockResolvedValueOnce({
+      id: 200,
+      taskId: 'child-task',
+      payload: { fastAgentParent: fastParent },
+      result: {
+        'fastAgentArtifact:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa': `delivering:${Date.now() - 16 * 60 * 1000}`,
+      },
+    });
+
+    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
+      'queued',
+    );
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledOnce();
+  });
+
   it('uses inherited Fast parent metadata on resumed runs', async () => {
     mocks.findRun.mockResolvedValueOnce({
       id: 200,
