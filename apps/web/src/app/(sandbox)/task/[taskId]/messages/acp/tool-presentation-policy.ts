@@ -67,7 +67,8 @@ export function resolveToolPresentationPolicy(
   const keepConsequentialReceiptVisible =
     consequentialReceipt &&
     (presentation.identity.toolName !== 'send_chat_reply' ||
-      options.displayMode === 'narration');
+      options.displayMode === 'narration' ||
+      presentation.phase === 'failed');
 
   let rowVisibility: ResolvedToolPolicy['rowVisibility'] = 'visible';
   if (shouldHideAcpMessage(msg)) {

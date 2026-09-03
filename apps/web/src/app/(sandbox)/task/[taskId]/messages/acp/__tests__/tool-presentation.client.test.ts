@@ -176,6 +176,15 @@ describe('tool presentation policy', () => {
       resolveToolPresentationPolicy(message, { displayMode: 'narration' })
         .activityMode,
     ).toBe('keep-visible');
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'send_chat_reply',
+          kind: 'communication',
+          status: 'failed',
+        }),
+      ).activityMode,
+    ).toBe('keep-visible');
   });
 
   it('keeps delegated task cards visible in narration mode only on card-enabled surfaces', () => {
