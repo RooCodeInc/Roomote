@@ -1245,11 +1245,12 @@ describe('Fast conversation repository', () => {
       payload: Record<string, unknown>,
       text?: string,
     ) =>
+      // Production shape: the call and its result share one canonical event,
+      // so the result overwrites the call row when it lands.
       write({
-        eventId: `turn-a:tool:${ordinal}:${eventType}`,
+        eventId: `turn-a:tool:${ordinal}`,
         turnId: 'turn-a',
-        turnSeq:
-          ordinal * 2 + (eventType === 'roomote_runtime.tool_result' ? 1 : 0),
+        turnSeq: ordinal * 2,
         ts: 1_000 + ordinal * 10,
         eventType,
         role: 'tool',
@@ -1271,7 +1272,8 @@ describe('Fast conversation repository', () => {
       payload: { purpose: 'progress' },
       source: 'slack',
     });
-    // A completed launch, a failed message, and a call the process died on.
+    // A completed launch, a failed message, and a call the process died on
+    // (its call row was never replaced by a result).
     await tool(1, 'roomote_runtime.tool_call', {
       toolName: 'launch_task',
       rawInput: { arguments: { prompt: 'Fix the bug' } },
@@ -1279,7 +1281,11 @@ describe('Fast conversation repository', () => {
     await tool(
       1,
       'roomote_runtime.tool_result',
-      { toolName: 'launch_task', status: 'completed' },
+      {
+        toolName: 'launch_task',
+        status: 'completed',
+        rawInput: { arguments: { prompt: 'Fix the bug' } },
+      },
       '{"success":true,"taskId":"task-1"}',
     );
     await tool(2, 'roomote_runtime.tool_call', {
@@ -1289,7 +1295,11 @@ describe('Fast conversation repository', () => {
     await tool(
       2,
       'roomote_runtime.tool_result',
-      { toolName: 'send_task_message', status: 'failed' },
+      {
+        toolName: 'send_task_message',
+        status: 'failed',
+        rawInput: { arguments: { taskId: 'task-1', message: 'hi' } },
+      },
       '{"success":false,"error":"Task is not accepting messages."}',
     );
     await tool(3, 'roomote_runtime.tool_call', {

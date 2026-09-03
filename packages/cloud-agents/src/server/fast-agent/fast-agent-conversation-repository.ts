@@ -275,27 +275,37 @@ export async function loadFastAgentTurnAttemptSummary(
   for (const row of rows) {
     const payload = (row.payload ?? {}) as Record<string, unknown>;
     const metadata = (row.metadata ?? {}) as Record<string, unknown>;
-    if (row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall) {
+    if (
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall ||
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult
+    ) {
+      // A call and its result share one canonical event, so the result row
+      // replaces the call row once it lands and carries the arguments with
+      // it. A call row that is still present therefore has no result: the
+      // process died between starting the call and recording its outcome.
       const toolCallId = String(payload.toolCallId ?? '');
       if (!toolCallId) continue;
       const rawInput = payload.rawInput as { arguments?: unknown } | undefined;
-      actions.set(toolCallId, {
+      const action: FastAgentTurnAttemptAction = {
         tool: String(payload.toolName ?? payload.title ?? 'tool'),
         arguments: rawInput?.arguments ?? null,
-        status: 'unknown',
-      });
-    } else if (row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult) {
-      const toolCallId = String(payload.toolCallId ?? '');
-      const action = actions.get(toolCallId);
-      if (!action) continue;
-      action.status = payload.status === 'failed' ? 'failed' : 'completed';
-      const output = text(row.contentBlocks);
-      if (output) {
-        action.result =
-          output.length > TURN_ATTEMPT_RESULT_MAX_CHARS
-            ? `${output.slice(0, TURN_ATTEMPT_RESULT_MAX_CHARS)}…`
-            : output;
+        status:
+          row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall
+            ? 'unknown'
+            : payload.status === 'failed'
+              ? 'failed'
+              : 'completed',
+      };
+      if (action.status !== 'unknown') {
+        const output = text(row.contentBlocks);
+        if (output) {
+          action.result =
+            output.length > TURN_ATTEMPT_RESULT_MAX_CHARS
+              ? `${output.slice(0, TURN_ATTEMPT_RESULT_MAX_CHARS)}…`
+              : output;
+        }
       }
+      actions.set(toolCallId, action);
     } else if (
       row.role === 'assistant' &&
       row.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
