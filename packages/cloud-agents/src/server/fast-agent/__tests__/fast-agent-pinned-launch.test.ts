@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   upsertFastAgentMessage: vi.fn(),
   findById: vi.fn(),
   taskRunsFindFirst: vi.fn(),
+  sessionsFindFirst: vi.fn(),
   getSessionForFastConversation: vi.fn(),
 }));
 
@@ -32,7 +33,12 @@ vi.mock('../fast-agent-conversation-repository', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  db: { query: { taskRuns: { findFirst: mocks.taskRunsFindFirst } } },
+  db: {
+    query: {
+      taskRuns: { findFirst: mocks.taskRunsFindFirst },
+      sessions: { findFirst: mocks.sessionsFindFirst },
+    },
+  },
   and: vi.fn((...parts: unknown[]) => ({ and: parts })),
   desc: vi.fn((column: unknown) => ({ desc: column })),
   eq: vi.fn((left: unknown, right: unknown) => ({ eq: [left, right] })),
@@ -51,6 +57,7 @@ vi.mock('@roomote/db/server', () => ({
     payload: 'task_runs.payload',
     canceledAt: 'task_runs.canceled_at',
   },
+  sessions: { id: 'sessions.id' },
   getSessionForFastConversation: mocks.getSessionForFastConversation,
 }));
 
@@ -104,6 +111,7 @@ describe('launchPinnedFastSessionTask', () => {
       },
     );
     mocks.taskRunsFindFirst.mockResolvedValue({ id: 7 });
+    mocks.sessionsFindFirst.mockResolvedValue(null);
     mocks.getSessionForFastConversation.mockResolvedValue({ id: 'session-1' });
     mocks.releaseLock.mockResolvedValue(undefined);
     mocks.acquireRedisLock.mockResolvedValue(mocks.releaseLock);
@@ -199,6 +207,117 @@ describe('launchPinnedFastSessionTask', () => {
       }),
       expect.objectContaining({ beforeEnqueue: expect.any(Function) }),
     );
+  });
+
+  it("launches in the origin Session's own Fast conversation when it has one", async () => {
+    mocks.sessionsFindFirst.mockResolvedValue({
+      id: 'session-origin',
+      fastConversationId: 'fast-origin',
+    });
+    mocks.findById.mockResolvedValue({
+      id: 'fast-origin',
+      userId: 'user-2',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T1',
+        conversationId: '100.1',
+        replyTarget: { channelId: 'C1', threadId: '100.1' },
+      },
+    });
+    mocks.getSessionForFastConversation.mockResolvedValue({
+      id: 'session-origin',
+    });
+
+    const result = await launchPinnedFastSessionTask({
+      userId: 'user-1',
+      originSessionId: 'session-origin',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T1',
+        conversationId: '200.1',
+        replyTarget: { channelId: 'C1', threadId: '200.1' },
+      },
+      launchId: 'launch-origin',
+      prompt: 'Fix the flaky test',
+      task,
+      surface: 'slack',
+      kickoffMessage: 'Started a task in Backend.',
+    });
+
+    expect(result).toMatchObject({
+      sessionId: 'session-origin',
+      fastConversationId: 'fast-origin',
+    });
+    expect(mocks.findById).toHaveBeenCalledWith({ id: 'fast-origin' });
+    expect(mocks.getOrCreateFastAgentSession).not.toHaveBeenCalled();
+    expect(mocks.upsertFastAgentMessage.mock.calls[0]?.[0]).toMatchObject({
+      sessionId: 'fast-origin',
+    });
+  });
+
+  it("binds the caller's conversation to an origin Session that has none", async () => {
+    mocks.sessionsFindFirst.mockResolvedValue({
+      id: 'session-origin',
+      fastConversationId: null,
+    });
+    const conversation = {
+      surface: 'slack' as const,
+      workspaceId: 'T1',
+      conversationId: '200.1',
+      replyTarget: { channelId: 'C1', threadId: '200.1' },
+    };
+    mocks.getOrCreateFastAgentSession.mockResolvedValue({
+      id: 'fast-bound',
+      created: true,
+      conversation,
+    });
+
+    await launchPinnedFastSessionTask({
+      userId: 'user-1',
+      originSessionId: 'session-origin',
+      conversation,
+      launchId: 'launch-origin',
+      prompt: 'Fix the flaky test',
+      task,
+      surface: 'slack',
+      kickoffMessage: 'Started a task in Backend.',
+    });
+
+    expect(mocks.getOrCreateFastAgentSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation,
+      sessionId: 'session-origin',
+    });
+    expect(mocks.findById).not.toHaveBeenCalled();
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            fastAgentParent: { sessionId: 'fast-bound', conversation },
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('falls back to a fresh Session when the origin Session is gone', async () => {
+    mocks.sessionsFindFirst.mockResolvedValue(null);
+
+    await launchPinnedFastSessionTask({
+      userId: 'user-1',
+      originSessionId: 'session-missing',
+      launchId: 'launch-origin',
+      prompt: 'Fix the flaky test',
+      task,
+      surface: 'web',
+      kickoffMessage: 'Started a task in Backend.',
+    });
+
+    expect(mocks.getOrCreateFastAgentSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: expect.objectContaining({ surface: 'web' }),
+    });
   });
 
   it('launches inside an existing Fast conversation and skips the request row for a blank workspace', async () => {

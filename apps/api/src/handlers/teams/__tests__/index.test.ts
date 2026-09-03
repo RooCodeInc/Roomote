@@ -27,6 +27,7 @@ const {
   launchClaimedTeamsSuggestionMock,
   launchPinnedMock,
   resolveAndClaimTeamsSuggestionReactionMock,
+  getSessionForTaskMock,
   setTrustedRunActingUserMock,
   shouldRouteUnmentionedReplyMock,
   teamsInstallationsTable,
@@ -86,6 +87,7 @@ const {
   launchClaimedTeamsSuggestionMock: vi.fn(),
   launchPinnedMock: vi.fn(),
   resolveAndClaimTeamsSuggestionReactionMock: vi.fn(),
+  getSessionForTaskMock: vi.fn(),
   setTrustedRunActingUserMock: vi.fn(),
   shouldRouteUnmentionedReplyMock: vi.fn(),
   teamsInstallationsTable: {
@@ -140,6 +142,7 @@ vi.mock('../suggestion-start.js', () => ({
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
   setTrustedRunActingUser: setTrustedRunActingUserMock,
+  getSessionForTask: getSessionForTaskMock,
   claimPendingOutOfBandTaskMessages: claimPendingOutOfBandMock,
   releaseClaimedOutOfBandTaskMessages: releaseClaimedOutOfBandMock,
   resolveTeamsBotRuntimeCredentials: vi.fn(async () => ({
@@ -607,9 +610,11 @@ describe('Teams webhook handler', () => {
         investigationContext: null,
         targetRepositoryFullName: 'acme/app',
         targetEnvironmentId: null,
+        sourceTaskId: 'scan-task-1',
         launchClaimedAt: new Date('2026-08-07T00:00:00.000Z'),
       },
     });
+    getSessionForTaskMock.mockResolvedValue({ id: 'session-origin' });
     // The kickoff gate must run inside the enqueue, before the child becomes
     // runnable; model both sides so the wiring is exercised, not assumed.
     const postKickoff = vi.fn().mockResolvedValue(undefined);
@@ -696,6 +701,7 @@ describe('Teams webhook handler', () => {
         userId: 'mapped-user-1',
         surface: 'teams',
         prompt: 'Fix the flaky test',
+        originSessionId: 'session-origin',
         conversation: expect.objectContaining({
           surface: 'teams',
           workspaceId: 'tenant-1',

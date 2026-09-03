@@ -2,12 +2,14 @@ const mocks = vi.hoisted(() => ({
   finalize: vi.fn(),
   release: vi.fn(),
   cancel: vi.fn(),
+  getSessionForTask: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   db: {},
   finalizeWorkItemLaunched: mocks.finalize,
   releaseWorkItemClaim: mocks.release,
+  getSessionForTask: mocks.getSessionForTask,
 }));
 
 vi.mock('./orphaned-work-item-run.js', () => ({
@@ -27,6 +29,7 @@ vi.mock('../fast-agent-entry.js', () => ({
 import {
   launchClaimedSuggestedTask,
   resolveSuggestedTaskLaunchMode,
+  resolveSuggestionOriginSessionId,
 } from './suggestion-launch';
 
 const claimedAt = new Date('2026-08-28T00:00:00.000Z');
@@ -238,5 +241,37 @@ describe('launchClaimedSuggestedTask', () => {
     });
     expect(abort).toHaveBeenCalledOnce();
     expect(mocks.release).toHaveBeenCalled();
+  });
+});
+
+describe('resolveSuggestionOriginSessionId', () => {
+  it('returns the Session that owns the source task', async () => {
+    mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
+
+    await expect(resolveSuggestionOriginSessionId('scan-task-1')).resolves.toBe(
+      'session-origin',
+    );
+    expect(mocks.getSessionForTask).toHaveBeenCalledWith(
+      expect.anything(),
+      'scan-task-1',
+    );
+  });
+
+  it('returns null without a source task, without a Session, or on a lookup failure', async () => {
+    await expect(resolveSuggestionOriginSessionId(null)).resolves.toBeNull();
+    expect(mocks.getSessionForTask).not.toHaveBeenCalled();
+
+    mocks.getSessionForTask.mockResolvedValueOnce(null);
+    await expect(
+      resolveSuggestionOriginSessionId('scan-task-1'),
+    ).resolves.toBeNull();
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mocks.getSessionForTask.mockRejectedValueOnce(new Error('db down'));
+    await expect(
+      resolveSuggestionOriginSessionId('scan-task-1'),
+    ).resolves.toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

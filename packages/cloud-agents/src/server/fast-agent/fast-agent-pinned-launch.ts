@@ -9,6 +9,7 @@ import {
   eq,
   getSessionForFastConversation,
   isNull,
+  sessions,
   sql,
   taskRuns,
 } from '@roomote/db/server';
@@ -47,6 +48,14 @@ export type PinnedFastSessionLaunchInput = {
    * surfaces that bind the Session to a channel or thread.
    */
   conversation?: FastAgentConversation;
+  /**
+   * The Session the request came from, for example the one that owns the
+   * scan that produced a suggestion. The launch lands there: in its Fast
+   * conversation when it has one, otherwise `conversation` becomes that
+   * Session's conversation. Ignored when `fastConversationId` is set, and
+   * when `conversation` already belongs to another Session.
+   */
+  originSessionId?: string | null;
   /**
    * Idempotency key for the launch. Replays with the same id reuse the task
    * the first attempt created and never write a second transcript entry.
@@ -140,6 +149,49 @@ async function findConversationTargetForLaunchKey(
   return target;
 }
 
+function defaultWebConversation(userId: string): FastAgentConversation {
+  return {
+    surface: 'web',
+    workspaceId: userId,
+    conversationId: randomUUID(),
+  };
+}
+
+/**
+ * The origin Session's own conversation when it has one; otherwise the
+ * caller's conversation identity is created and bound to that Session. A
+ * conversation that already exists elsewhere keeps its Session, so the
+ * launch still has a home even when the origin cannot take it.
+ */
+async function findOriginConversationTarget(
+  input: PinnedFastSessionLaunchInput,
+  originSessionId: string,
+): Promise<ConversationTarget | null> {
+  const session = await db.query.sessions.findFirst({
+    where: eq(sessions.id, originSessionId),
+    columns: { id: true, fastConversationId: true },
+  });
+  if (!session) {
+    return null;
+  }
+  if (session.fastConversationId) {
+    const target = await findConversationTargetById(session.fastConversationId);
+    if (target) {
+      return target;
+    }
+  }
+  const created = await getOrCreateFastAgentSession({
+    userId: input.userId,
+    conversation: input.conversation ?? defaultWebConversation(input.userId),
+    sessionId: session.id,
+  });
+  return {
+    id: created.id,
+    userId: input.userId,
+    conversation: created.conversation,
+  };
+}
+
 async function resolveConversationTarget(
   input: PinnedFastSessionLaunchInput,
   launchIdempotencyKey: string,
@@ -160,13 +212,19 @@ async function resolveConversationTarget(
     return replayed;
   }
 
+  if (input.originSessionId) {
+    const origin = await findOriginConversationTarget(
+      input,
+      input.originSessionId,
+    );
+    if (origin) {
+      return origin;
+    }
+  }
+
   const created = await getOrCreateFastAgentSession({
     userId: input.userId,
-    conversation: input.conversation ?? {
-      surface: 'web',
-      workspaceId: input.userId,
-      conversationId: randomUUID(),
-    },
+    conversation: input.conversation ?? defaultWebConversation(input.userId),
   });
   return {
     id: created.id,

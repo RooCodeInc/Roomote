@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   handlePrReviewAction: vi.fn(),
   processFastAgentMessage: vi.fn(),
   launchPinned: vi.fn(),
+  getSessionForTask: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -39,6 +40,7 @@ vi.mock('@roomote/db/server', () => ({
   db: { query: { taskRuns: { findFirst: mocks.findRun } } },
   finalizeWorkItemLaunched: mocks.finalizeWorkItem,
   releaseWorkItemClaim: mocks.releaseWorkItem,
+  getSessionForTask: mocks.getSessionForTask,
 }));
 
 vi.mock('../../tasks/task-stop.js', () => ({ stopTaskRun: mocks.stopTaskRun }));
@@ -269,6 +271,7 @@ describe('Discord component callbacks', () => {
 
   it('starts a coding task for a pinned suggestion', async () => {
     const claimedAt = new Date('2026-08-28T00:00:00.000Z');
+    mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
     mocks.claimSuggestionByMessage.mockResolvedValue({
       outcome: 'claimed',
       suggestion: {
@@ -279,6 +282,7 @@ describe('Discord component callbacks', () => {
         targetRepositoryFullName: null,
         targetEnvironmentId: null,
         usesRouterLaunch: false,
+        sourceTaskId: 'scan-task-1',
         launchClaimedAt: claimedAt,
       },
     });
@@ -317,6 +321,13 @@ describe('Discord component callbacks', () => {
     });
 
     expect(mocks.startNewTask).toHaveBeenCalled();
+    expect(mocks.getSessionForTask).toHaveBeenCalledWith(
+      expect.anything(),
+      'scan-task-1',
+    );
+    expect(mocks.launchPinned).toHaveBeenCalledWith(
+      expect.objectContaining({ originSessionId: 'session-origin' }),
+    );
     expect(mocks.processFastAgentMessage).not.toHaveBeenCalled();
     expect(mocks.finalizeWorkItem).toHaveBeenCalledWith(expect.anything(), {
       id: 'suggestion-1',

@@ -166,6 +166,8 @@ export async function claimTelegramSuggestionLaunch(input: {
   /** The card's explicit launch target, kept even when its environment FK was cleared. */
   launchTarget?: string;
   usesRouterLaunch: boolean;
+  /** The scan or onboarding task that produced the suggestion. */
+  sourceTaskId: string | null;
   launchClaimedAt: Date;
 } | null> {
   // Scope: a suggestion card for this work item must have been posted in this
@@ -207,6 +209,7 @@ export async function claimTelegramSuggestionLaunch(input: {
       ? { launchTarget: trackedCard.metadata.launchTarget }
       : {}),
     usesRouterLaunch: routed,
+    sourceTaskId: claimed.sourceTaskId,
     launchClaimedAt: claimed.launchClaimedAt,
   };
 }

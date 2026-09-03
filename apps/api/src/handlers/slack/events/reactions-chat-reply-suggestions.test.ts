@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   resolveWorkspace: vi.fn(),
   lookupSlackUserMapping: vi.fn(),
   launchPinned: vi.fn(),
+  getSessionForTask: vi.fn(),
   liveTaskLauncher: vi.fn(),
   launchTask: vi.fn(),
   startFastAgentResponse: vi.fn(),
@@ -31,6 +32,7 @@ const workItem: {
   readinessMessage: null;
   sortOrder: number;
   status: string;
+  sourceTaskId: string | null;
 } = {
   id: 'work-item-1',
   title: 'Add retry telemetry',
@@ -44,6 +46,7 @@ const workItem: {
   readinessMessage: null,
   sortOrder: 0,
   status: 'open',
+  sourceTaskId: 'scan-task-1',
 };
 
 function createWorkItemSelectBuilder() {
@@ -87,8 +90,10 @@ vi.mock('@roomote/db/server', () => ({
     readinessMessage: 'readinessMessage',
     sortOrder: 'sortOrder',
     status: 'status',
+    sourceTaskId: 'sourceTaskId',
   },
   claimWorkItem: mocks.claimWorkItem,
+  getSessionForTask: mocks.getSessionForTask,
   finalizeWorkItemLaunched: mocks.finalizeWorkItemLaunched,
   releaseWorkItemClaim: mocks.releaseWorkItemClaim,
   db: {
@@ -342,6 +347,7 @@ describe('chat reply suggestion reactions', () => {
   });
 
   it('launches a pinned automation suggestion through the owning Session without a Fast turn', async () => {
+    mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
     mocks.trackedMessageFindFirst.mockResolvedValue({
       id: 'tracked-message-1',
       workItemId: 'work-item-1',
@@ -373,10 +379,15 @@ describe('chat reply suggestion reactions', () => {
     });
 
     expect(mocks.resolveWorkspace).toHaveBeenCalled();
+    expect(mocks.getSessionForTask).toHaveBeenCalledWith(
+      expect.anything(),
+      'scan-task-1',
+    );
     expect(mocks.launchPinned).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'user-1',
         surface: 'slack',
+        originSessionId: 'session-origin',
         conversation: {
           surface: 'slack',
           workspaceId: 'T1',

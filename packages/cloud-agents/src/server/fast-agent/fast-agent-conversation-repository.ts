@@ -10,6 +10,7 @@ import {
   fastAgentParentEvents,
   ensureSessionForFastConversation,
   advanceSessionNotifiedCursor,
+  attachFastConversationToSession,
   advanceSessionReadCursor,
   getSessionForFastConversation,
   gt,
@@ -555,6 +556,12 @@ export interface FastAgentConversationRepository {
   getOrCreate(input: {
     userId: string;
     conversation: FastAgentConversation;
+    /**
+     * Session to bind a newly created conversation to, when that Session has
+     * no conversation yet. A conversation that already exists keeps its own
+     * Session.
+     */
+    sessionId?: string;
   }): Promise<FastAgentConversationGetOrCreateResult>;
   findById(input: {
     id: string;
@@ -694,7 +701,7 @@ async function loadConversationRecord(
 
 export const fastAgentConversationRepository: FastAgentConversationRepository =
   {
-    async getOrCreate({ userId, conversation }) {
+    async getOrCreate({ userId, conversation, sessionId }) {
       return db.transaction(async (tx) => {
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${buildIdentityKey(conversation)}, 0))`,
@@ -710,6 +717,26 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           record = await tx.query.fastAgentConversations.findFirst({
             where: replyTargetWhere,
           });
+        }
+
+        // Launches into one Session with different conversation identities
+        // must agree on a single conversation. Serialize on the Session and
+        // reuse the conversation a concurrent launch already bound to it.
+        if (!record && sessionId) {
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-session-binding:${sessionId}`}, 0))`,
+          );
+          const [bound] = await tx
+            .select({ fastConversationId: sessions.fastConversationId })
+            .from(sessions)
+            .where(eq(sessions.id, sessionId))
+            .limit(1);
+          if (bound?.fastConversationId) {
+            return {
+              ...(await loadConversationRecord(tx, bound.fastConversationId)),
+              created: false,
+            };
+          }
         }
 
         if (!record) {
@@ -769,10 +796,20 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           .where(eq(fastAgentConversations.id, record.id))
           .returning();
 
-        await ensureSessionForFastConversation(tx, updated?.id ?? record.id);
+        const conversationId = updated?.id ?? record.id;
+        const attached =
+          created && sessionId
+            ? await attachFastConversationToSession(tx, {
+                sessionId,
+                fastConversationId: conversationId,
+              })
+            : null;
+        if (!attached) {
+          await ensureSessionForFastConversation(tx, conversationId);
+        }
 
         return {
-          ...(await loadConversationRecord(tx, updated?.id ?? record.id)),
+          ...(await loadConversationRecord(tx, conversationId)),
           created,
         };
       });

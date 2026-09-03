@@ -79,6 +79,8 @@ export type ClaimedTeamsSuggestion = {
   targetEnvironmentId?: string | null;
   usesRouterLaunch?: boolean;
   launchTarget?: string;
+  /** The scan or onboarding task that produced the suggestion. */
+  sourceTaskId?: string | null;
   launchClaimedAt: Date;
 };
 
@@ -206,6 +208,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       investigationContext: claimed.investigationContext,
       targetRepositoryFullName: claimed.targetRepositoryFullName,
       targetEnvironmentId: claimed.targetEnvironmentId,
+      sourceTaskId: claimed.sourceTaskId,
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };

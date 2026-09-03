@@ -117,6 +117,7 @@ import {
   resolveAndClaimTeamsSuggestionReaction,
   type ClaimedTeamsSuggestion,
 } from './suggestion-start.js';
+import { resolveSuggestionOriginSessionId } from '../tasks/suggestion-launch.js';
 import { shouldRouteUnmentionedTeamsThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
 const TEAMS_ACTIVITY_DEDUP_PREFIX = 'teams:activity:';
@@ -1558,6 +1559,8 @@ async function launchPinnedTeamsSuggestionTask(input: {
   metadata: TeamsActivityCommunicationMetadata;
   mappedUserId: string;
   suggestionId: string;
+  /** The task that produced the suggestion; its Session hosts the launch. */
+  sourceTaskId?: string | null;
   queuedMessage: QueuedTeamsCommunicationMessage;
   workspace: TeamsWorkspaceSelection;
 }) {
@@ -1570,11 +1573,15 @@ async function launchPinnedTeamsSuggestionTask(input: {
   if (!conversation) {
     throw new Error('Fast mode is unavailable in this Teams conversation.');
   }
+  const originSessionId = await resolveSuggestionOriginSessionId(
+    input.sourceTaskId,
+  );
   let launchResult: { id: number; taskId: string } | null = null;
   const pinned = await launchPinnedFastSessionTask({
     userId: input.mappedUserId,
     senderDisplayName: input.activity.from?.name?.trim() || null,
     conversation,
+    ...(originSessionId ? { originSessionId } : {}),
     launchId: `teams-suggestion:${input.suggestionId}:${input.queuedMessage.ts}`,
     prompt: input.queuedMessage.text,
     surface: 'teams',
@@ -2136,6 +2143,7 @@ teams.post('/', async (c) => {
           metadata,
           mappedUserId: mappedUserId!,
           suggestionId: claimedSuggestionReaction.id,
+          sourceTaskId: claimedSuggestionReaction.sourceTaskId,
           queuedMessage: {
             ...queuedMessage!,
             text: promptText,
@@ -2390,6 +2398,7 @@ teams.post('/', async (c) => {
               metadata,
               mappedUserId,
               suggestionId: resolution.suggestion.id,
+              sourceTaskId: resolution.suggestion.sourceTaskId,
               queuedMessage: { ...queuedMessage!, text: promptText },
               workspace: workspaceOverride!,
             }),
