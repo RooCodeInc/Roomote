@@ -54,7 +54,14 @@ const todos = (current: string) => [
 /** The state sent by the N-th (1-based) render request. */
 function renderedCard(nth: number) {
   const input = mocks.renderCard.mock.calls[nth - 1]?.[0];
-  return input ? { status: input.status, output: input.message } : undefined;
+  return input
+    ? { status: input.status, output: input.output ?? input.details }
+    : undefined;
+}
+
+/** The exact worker-to-control-plane payload of the N-th render request. */
+function renderedPayload(nth: number) {
+  return mocks.renderCard.mock.calls[nth - 1]?.[0];
 }
 
 describe('Slack live task card', () => {
@@ -99,7 +106,7 @@ describe('Slack live task card', () => {
     await reportSlackLiveTaskStatus(taskRun, RunStatus.Running, context);
 
     expect(mocks.renderCard).toHaveBeenCalledTimes(4);
-    expect(mocks.renderCard.mock.calls.map((call) => call[0].message)).toEqual([
+    expect(mocks.renderCard.mock.calls.map((call) => call[0].details)).toEqual([
       'Preparing the workspace…',
       'Starting the task…',
       'Connecting to the task…',
@@ -154,7 +161,7 @@ describe('Slack live task card', () => {
     expect(mocks.renderCard).toHaveBeenCalledWith({
       runId: resumed.id,
       status: 'in_progress',
-      message: 'Resumed update.',
+      details: 'Resumed update.',
     });
   });
 
@@ -273,6 +280,12 @@ describe('Slack live task card', () => {
       status: 'complete',
       output: 'Ready for review.',
     });
+    expect(renderedPayload(2)).toEqual({
+      runId: taskRun.id,
+      status: 'complete',
+      details: 'Almost there.',
+      output: 'Ready for review.',
+    });
   });
 
   it('ignores late events once the card settled', async () => {
@@ -362,6 +375,11 @@ describe('Slack live task card', () => {
 
     expect(mocks.renderCard).toHaveBeenCalledOnce();
     expect(renderedCard(1)).toEqual({
+      status: 'complete',
+      output: 'Ready for review.',
+    });
+    expect(renderedPayload(1)).toEqual({
+      runId: taskRun.id,
       status: 'complete',
       output: 'Ready for review.',
     });
@@ -756,6 +774,11 @@ describe('Slack live task card', () => {
       status: 'complete',
       output: 'Ready for review.',
     });
+    expect(renderedPayload(1)).toEqual({
+      runId: taskRun.id,
+      status: 'complete',
+      details: 'Ready for review.',
+    });
   });
 
   it('settles idle without a completion and re-opens when running', async () => {
@@ -994,6 +1017,16 @@ describe('Slack live task card', () => {
     expect(renderedCard(3)).toEqual({
       status: 'in_progress',
       output: 'Continuing with your answer…',
+    });
+    expect(renderedPayload(2)).toEqual({
+      runId: taskRun.id,
+      status: 'complete',
+      details: 'Waiting for your input…',
+    });
+    expect(renderedPayload(3)).toEqual({
+      runId: taskRun.id,
+      status: 'in_progress',
+      details: 'Continuing with your answer…',
     });
   });
 

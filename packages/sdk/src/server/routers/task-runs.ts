@@ -440,7 +440,8 @@ export const taskRunsRouter = router({
     z.object({
       runId: z.number(),
       status: z.enum(['in_progress', 'complete', 'error']),
-      message: z.string().optional(),
+      details: z.string().optional(),
+      output: z.string().optional(),
     }),
     'runId',
   )
@@ -456,7 +457,8 @@ export const taskRunsRouter = router({
     .mutation(({ input }) =>
       renderSlackLiveTaskCardForRun(input.runId, {
         status: input.status,
-        ...(input.message ? { message: input.message } : {}),
+        ...(input.details ? { details: input.details } : {}),
+        ...(input.output ? { output: input.output } : {}),
       }),
     ),
   getResolvedGitAuthor: runScoped(

@@ -42,7 +42,8 @@ function payloadUsesLiveTaskStream(payload: unknown): boolean {
 export async function renderSlackLiveTaskCard(input: {
   taskId: string;
   status: SlackLiveTaskCardRenderStatus;
-  message?: string;
+  details?: string;
+  output?: string;
   /** The task's generated title, rendered in place of the prompt-derived one. */
   taskTitle?: string | null;
 }): Promise<SlackLiveTaskCardRenderResult> {
@@ -72,7 +73,8 @@ export async function renderSlackLiveTaskCard(input: {
       taskUpdateId: data.taskUpdateId,
       title: taskTitle ? buildSlackLiveTaskTitle(taskTitle) : data.title,
       status: input.status,
-      ...(input.message ? { message: input.message } : {}),
+      ...(input.details ? { details: input.details } : {}),
+      ...(input.output ? { output: input.output } : {}),
       ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
     }),
   });
@@ -103,7 +105,7 @@ export async function settleSlackLiveTaskCardForRun(input: {
     await renderSlackLiveTaskCard({
       taskId: input.taskId,
       status: 'error',
-      message:
+      output:
         input.status === RunStatus.Canceled
           ? SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.canceled
           : SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.failed,

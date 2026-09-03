@@ -46,8 +46,7 @@ function usesSlackLiveTaskStream(taskRun: TaskRun): boolean {
  */
 type SlackLiveTaskCardState = {
   status: Extract<SlackTaskStreamStatus, 'in_progress' | 'complete' | 'error'>;
-  /** Latest narration from the agent (or a waiting notice), or the final
-   * result once settled. */
+  /** Latest narration from the agent, or a transient status notice. */
   message?: string;
   /** The completion text, kept apart from narration so the exit fallback
    * never promotes a transient line to the final result. */
@@ -96,7 +95,9 @@ function isSameCardState(
   return (
     a !== undefined &&
     a.status === b.status &&
-    (a.message ?? '') === (b.message ?? '')
+    (a.message ?? '') === (b.message ?? '') &&
+    (a.finalMessage ?? '') === (b.finalMessage ?? '') &&
+    a.provisionalCompletion === b.provisionalCompletion
   );
 }
 
@@ -208,7 +209,16 @@ async function renderCard(
     const result = await sdk.taskRuns.renderSlackLiveTaskCard({
       runId: taskRun.id,
       status: state.status,
-      ...(state.message ? { message: state.message } : {}),
+      ...(state.status !== 'error' && state.message
+        ? { details: state.message }
+        : {}),
+      ...(state.status === 'error' && state.message
+        ? { output: state.message }
+        : state.status === 'complete' &&
+            state.finalMessage &&
+            !state.provisionalCompletion
+          ? { output: state.finalMessage }
+          : {}),
     });
 
     if (!result.card) {
@@ -332,7 +342,9 @@ export async function updateSlackLiveTaskStream(
     state.status = 'complete';
     state.awaitingInput = false;
     state.finalMessage = event.text;
-    state.message = event.text;
+    if (event.provisional === true) {
+      state.message = event.text;
+    }
     state.provisionalCompletion = event.provisional === true;
     await renderCard(taskRun, context, { settle: true });
     return;
