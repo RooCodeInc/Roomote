@@ -22,6 +22,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   spillGrep: 'spill_grep',
   spillRead: 'spill_read',
   requestUserInput: 'request_user_input',
+  reviewPullRequest: 'review_pull_request',
 } as const;
 
 export type FastAgentNativeToolName =
@@ -33,6 +34,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
     kind: ACP_TOOL_KINDS.mcp,
   },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask, kind: ACP_TOOL_KINDS.task },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest,
+    kind: ACP_TOOL_KINDS.task,
+  },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact,
     kind: ACP_TOOL_KINDS.artifact,

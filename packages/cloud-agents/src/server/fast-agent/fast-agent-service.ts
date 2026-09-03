@@ -146,6 +146,7 @@ import {
 } from './fast-agent-integration-broker';
 import {
   cancelFastAgentTask,
+  launchFastAgentPrReview,
   sendFastAgentTaskMessage,
 } from './fast-agent-tasks';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
@@ -401,6 +402,46 @@ const launchTaskArgsSchema = z.object({
   includeAttachments: z.boolean().optional().default(false),
   kickoffMessage: z.string().trim().min(1),
 });
+
+const reviewPullRequestArgsSchema = z.object({
+  repository: z.string().trim().min(1).optional(),
+  pullRequestNumber: z.number().int().positive().optional(),
+  kickoffMessage: z.string().trim().min(1),
+});
+
+/**
+ * The pull request a source-control Session is already discussing, so
+ * review_pull_request can omit its target there. The workspaceId encodes
+ * host/owner/name and the conversationId encodes pull/<number>.
+ */
+function getConversationPullRequestTarget(conversation: {
+  surface: string;
+  workspaceId: string;
+  conversationId: string;
+}): { repository: string; pullRequestNumber: number } | null {
+  const sourceControlSurfaces = new Set([
+    'github',
+    'gitlab',
+    'bitbucket',
+    'ado',
+    'gitea',
+  ]);
+  if (!sourceControlSurfaces.has(conversation.surface)) {
+    return null;
+  }
+  const match = /^pull\/(\d+)$/.exec(conversation.conversationId);
+  if (!match) {
+    return null;
+  }
+  const [, ...repositoryParts] = conversation.workspaceId.split('/');
+  if (repositoryParts.length < 2) {
+    return null;
+  }
+  return {
+    repository: repositoryParts.join('/'),
+    pullRequestNumber: Number(match[1]),
+  };
+}
 const taskMessageArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
   message: z.string().trim().min(1),
@@ -964,74 +1005,88 @@ const FAST_AGENT_RESUMED_RETRY_TURN_REASON =
 const PREVIOUS_ATTEMPT_MAX_CHARS = 12_000;
 const PREVIOUS_ATTEMPT_REPLY_MAX_CHARS = 600;
 const PREVIOUS_ATTEMPT_ARGUMENTS_MAX_CHARS = 800;
+/**
+ * Stands in for the result of a call the process died on. It exists only in
+ * the resumed run's model input; nothing is written to the transcript or
+ * shown to the user.
+ */
+const LOST_TOOL_RESULT_TEXT =
+  'Tool result lost due to restart. The call may or may not have taken effect; check before repeating it.';
 
 function clipText(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
 /**
- * Bound every free-form field of the attempt before it is serialized: a
- * reply can be long and a single tool argument (an artifact body, a task
- * prompt) can run to many kilobytes, and the resume envelope must stay a
- * summary, not a copy of the transcript.
+ * Replay of the previous attempt, rendered in the same role-block form the
+ * model reads its history in, so it continues from the last entry instead
+ * of being told about it. Every field is bounded first: a reply can be long
+ * and a single argument (an artifact body, a task prompt) can run to many
+ * kilobytes, and the resume envelope must stay a summary, not a copy.
  */
-function boundPreviousAttempt(attempt: FastAgentTurnAttemptSummary) {
-  return {
-    replies: attempt.replies.map((reply) =>
-      clipText(reply, PREVIOUS_ATTEMPT_REPLY_MAX_CHARS),
-    ),
-    actions: attempt.actions.map((action) => {
-      const serializedArguments = JSON.stringify(action.arguments ?? null);
-      return {
-        tool: action.tool,
-        arguments:
-          serializedArguments.length > PREVIOUS_ATTEMPT_ARGUMENTS_MAX_CHARS
-            ? clipText(
-                serializedArguments,
-                PREVIOUS_ATTEMPT_ARGUMENTS_MAX_CHARS,
-              )
-            : action.arguments,
-        status: action.status,
-        ...(action.result !== undefined ? { result: action.result } : {}),
-      };
-    }),
-  };
+function renderPreviousAttemptTranscript(
+  attempt: FastAgentTurnAttemptSummary,
+  { includeResults }: { includeResults: boolean },
+): string {
+  const blocks: string[] = [];
+  for (const event of attempt.events) {
+    if (event.kind === 'reply') {
+      blocks.push(
+        `[ASSISTANT]\n${escapeFastAgentEnvelopeText(clipText(event.text, PREVIOUS_ATTEMPT_REPLY_MAX_CHARS))}`,
+      );
+      continue;
+    }
+    const args = clipText(
+      JSON.stringify(event.arguments ?? null),
+      PREVIOUS_ATTEMPT_ARGUMENTS_MAX_CHARS,
+    );
+    blocks.push(
+      `[TOOL_CALL ${escapeFastAgentEnvelopeText(event.tool)}]\n${escapeFastAgentEnvelopeText(args)}`,
+    );
+    if (event.status === 'unknown') {
+      blocks.push(`[TOOL_RESULT lost]\n${LOST_TOOL_RESULT_TEXT}`);
+    } else {
+      const result = includeResults
+        ? (event.result ?? '(no output recorded)')
+        : '(output omitted)';
+      blocks.push(
+        `[TOOL_RESULT ${event.status}]\n${escapeFastAgentEnvelopeText(result)}`,
+      );
+    }
+  }
+  return blocks.join('\n\n');
 }
 
 /**
  * The resumed-turn envelope. When the earlier attempt already did things, the
- * envelope lists them so the model continues from there rather than
- * repeating them: completed actions are done, failed ones may be retried,
- * unknown ones may or may not have happened and must be checked first.
+ * envelope carries its transcript so the model picks up at the cut: replies
+ * were delivered, completed calls ran, and a lost result means the call may
+ * or may not have taken effect.
  */
 function wrapFastAgentResumedTurn(
   reason: string,
   previousAttempt?: FastAgentTurnAttemptSummary | null,
 ): string {
-  const acted =
-    previousAttempt &&
-    (previousAttempt.actions.length > 0 || previousAttempt.replies.length > 0);
-  if (!acted) return `<resumed_turn>${reason}</resumed_turn>`;
-  const bounded = boundPreviousAttempt(previousAttempt);
-  let attempt = escapeFastAgentEnvelopeText(JSON.stringify(bounded));
-  if (attempt.length > PREVIOUS_ATTEMPT_MAX_CHARS) {
-    // Results are the bulkiest field; drop them before anything else.
-    attempt = escapeFastAgentEnvelopeText(
-      JSON.stringify({
-        replies: bounded.replies,
-        actions: bounded.actions.map(({ result: _result, ...rest }) => rest),
-        truncated: true,
-      }),
-    );
+  if (!previousAttempt || previousAttempt.events.length === 0) {
+    return `<resumed_turn>${reason}</resumed_turn>`;
   }
-  if (attempt.length > PREVIOUS_ATTEMPT_MAX_CHARS) {
+  let transcript = renderPreviousAttemptTranscript(previousAttempt, {
+    includeResults: true,
+  });
+  if (transcript.length > PREVIOUS_ATTEMPT_MAX_CHARS) {
+    // Results are the bulkiest field; drop them before anything else.
+    transcript = renderPreviousAttemptTranscript(previousAttempt, {
+      includeResults: false,
+    });
+  }
+  if (transcript.length > PREVIOUS_ATTEMPT_MAX_CHARS) {
     // The hard cap holds no matter what the attempt contained.
-    attempt = `${attempt.slice(0, PREVIOUS_ATTEMPT_MAX_CHARS)}… [previous attempt truncated]`;
+    transcript = `${transcript.slice(0, PREVIOUS_ATTEMPT_MAX_CHARS)}… [previous attempt truncated]`;
   }
   return [
     `<resumed_turn>${reason}`,
-    'The previous attempt already did the following. Replies listed are still visible to the user; do not post them again. Actions marked completed are done; use their results instead of repeating them. Actions marked failed may be retried. Actions marked unknown were started but their outcome was not recorded: check whether they happened (for example, look up the task) before repeating them. Continue the request from this point.',
-    `<previous_attempt>${attempt}</previous_attempt>`,
+    'Your previous attempt at this request produced the transcript below, ending where it was cut off. It is already part of this conversation: the replies were delivered to the user and the completed tool calls ran. Continue from the last entry as if you had just received it. Do not send those replies again or repeat calls that completed. A call whose result is marked failed returned an error; read that error before deciding whether to retry, because a timeout or a lost response can mean the call actually took effect.',
+    `<previous_attempt_transcript>\n${transcript}\n</previous_attempt_transcript>`,
     '</resumed_turn>',
   ].join('\n');
 }
@@ -3491,6 +3546,83 @@ export async function answerFastAgentQuestion({
                 await deliverKickoff(result);
               }
             }
+            return result;
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest: {
+            const args = reviewPullRequestArgsSchema.parse(call.args);
+            const conversationTarget =
+              getConversationPullRequestTarget(conversation);
+            const repository =
+              args.repository ?? conversationTarget?.repository;
+            const pullRequestNumber =
+              args.pullRequestNumber ?? conversationTarget?.pullRequestNumber;
+            if (!repository || !pullRequestNumber) {
+              return {
+                success: false,
+                error:
+                  'Name the repository (owner/name) and pull request number to review.',
+              };
+            }
+            const signature = `review_pull_request:${repository}#${pullRequestNumber}`;
+            if (completedTaskActions.has(signature)) {
+              return {
+                success: false,
+                error:
+                  'A review of that pull request was already started in this turn.',
+              };
+            }
+            completedTaskActions.add(signature);
+            throwIfTurnCancelled();
+            let result: Awaited<ReturnType<typeof launchFastAgentPrReview>>;
+            try {
+              result = await launchFastAgentPrReview(
+                { userId, apiBaseUrl },
+                {
+                  repository,
+                  pullRequestNumber,
+                  fastConversationId: session.id,
+                },
+              );
+            } catch (error) {
+              completedTaskActions.delete(signature);
+              throw error;
+            }
+            if (!result.success) {
+              completedTaskActions.delete(signature);
+              return result;
+            }
+            // A reused already-active review keeps its original payload, so
+            // this Session will not hear its settle: skip the kickoff and let
+            // the reply set expectations instead of promising a callback. It
+            // also belongs to another launch (often an automation), so it is
+            // never registered as this turn's task — that would expose it to
+            // cancel_task and send_task_message here.
+            if (result.alreadyRunning) {
+              return {
+                ...result,
+                guidance:
+                  'A review of that pull request is already running; its results will post on the pull request itself, not back into this conversation. Tell the user that and link the pull request.',
+              };
+            }
+            if (result.taskId) {
+              currentTasks.set(result.taskId, { taskId: result.taskId });
+            }
+            const kickoffMessage = [
+              args.kickoffMessage,
+              result.taskUrl && !args.kickoffMessage.includes(result.taskUrl)
+                ? `[Open in Roomote](${result.taskUrl})`
+                : undefined,
+            ]
+              .filter((part): part is string => Boolean(part))
+              .join('\n\n');
+            throwIfTurnCancelled();
+            await postReply(
+              { purpose: 'progress', message: kickoffMessage, kickoff: true },
+              true,
+            );
+            visibleUpdatePosted = true;
+            substantiveWorkAcknowledged = true;
             return result;
           }
 

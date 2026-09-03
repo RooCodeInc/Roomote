@@ -1,4 +1,4 @@
-import { TaskPayloadKind } from '@roomote/types';
+import { TASK_MODEL_ROLE_DESCRIPTORS, TaskPayloadKind } from '@roomote/types';
 
 import type { StartupLogger } from '../../logging';
 
@@ -331,6 +331,14 @@ describe('setup mode behavior', () => {
 
   it('runs environment repository commands best-effort for standard environment setup', async () => {
     const repoPaths = { 'owner/repo': '/tmp/workspace/owner/repo' };
+    const inheritedRoleEnvVars = Object.fromEntries(
+      Object.values(TASK_MODEL_ROLE_DESCRIPTORS).flatMap((descriptor) => [
+        [descriptor.modelEnvVar, 'openai/outer-model'],
+        [descriptor.reasoningEnvVar, 'high'],
+        [`ROOMOTE_${descriptor.modelEnvVar.slice(2)}`, 'openai/outer-model'],
+        [`ROOMOTE_${descriptor.reasoningEnvVar.slice(2)}`, 'high'],
+      ]),
+    );
     mockInitializeWorkspaceRepositories.mockResolvedValueOnce({
       workspacePath: '/tmp/workspace',
       environment: { repoPaths },
@@ -338,7 +346,13 @@ describe('setup mode behavior', () => {
 
     await setup({
       mode: 'full',
-      workspace: environmentWorkspaceOptions,
+      workspace: {
+        ...environmentWorkspaceOptions,
+        userEnvVars: {
+          FOO: 'bar',
+          ...inheritedRoleEnvVars,
+        },
+      },
       logger,
       workerEnv: mockWorkerEnv,
     });
@@ -350,7 +364,7 @@ describe('setup mode behavior', () => {
         FOO: 'bar',
         OPENROUTER_API_KEY: 'sandbox-openrouter-key',
       },
-      userEnvVars: undefined,
+      userEnvVars: { FOO: 'bar' },
       preparedWorkspace: {
         workspacePath: '/tmp/workspace',
         environment: { repoPaths },
@@ -365,6 +379,31 @@ describe('setup mode behavior', () => {
       environmentWorkspaceOptions.workspace.environmentConfig.repositories,
       repoPaths,
     );
+  });
+
+  it('preserves explicit model overrides for repository workspaces', async () => {
+    await setup({
+      mode: 'directDispatch',
+      workspace: {
+        ...workspaceOptions,
+        userEnvVars: {
+          R_MODEL: 'openai/explicit-model',
+          R_MODEL_REASONING_EFFORT: 'high',
+        },
+      },
+      logger,
+      workerEnv: mockWorkerEnv,
+    });
+
+    expect(mockInitializeWorkspaceRepositories).toHaveBeenCalledWith(logger, {
+      ...workspaceOptions,
+      cleanupLegacyPaths: false,
+      envVars: { BASE: 'base', FOO: 'bar' },
+      userEnvVars: {
+        R_MODEL: 'openai/explicit-model',
+        R_MODEL_REASONING_EFFORT: 'high',
+      },
+    });
   });
 
   it('maps a stored sandbox OpenRouter key without inheriting outer model configuration', async () => {
