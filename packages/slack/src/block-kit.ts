@@ -207,6 +207,7 @@ export async function promptSlackAccountLink({
   slackUserId,
   channel,
   threadTs,
+  messageTs,
   originalText,
   slackInstallation,
   slack,
@@ -215,6 +216,7 @@ export async function promptSlackAccountLink({
   slackUserId: string;
   channel: string;
   threadTs: string;
+  messageTs?: string;
   originalText: string;
   slackInstallation: SlackInstallation;
   slack: SlackNotifier;
@@ -231,6 +233,7 @@ export async function promptSlackAccountLink({
       slackTeamId: slackInstallation.teamId,
       channel,
       threadTs,
+      messageTs,
       originalText: resumeOriginalThread
         ? originalText
         : SLACK_AUTH_NO_RESUME_SENTINEL,
@@ -637,6 +640,7 @@ export async function showConnectAccount(
     slackUserId: event.user,
     channel: event.channel,
     threadTs: threadId,
+    messageTs: event.ts,
     originalText: event.text,
     slackInstallation,
     slack,

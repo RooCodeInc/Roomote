@@ -148,8 +148,8 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'public',
   },
 
-  // Teams OAuth resume: called server-to-server by the web app after account
-  // linking to resume a pending Teams conversation, authenticated by a
+  // Communication OAuth resumes: called server-to-server by the web app after
+  // account linking to resume a pending conversation, authenticated by a
   // single-use random-UUID state token in the body. The primary limit is
   // keyed on the state token so concurrent legitimate users (who all arrive
   // from the web app's egress IP with distinct tokens) never share a bucket,
@@ -161,6 +161,15 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
   {
     name: 'webhook-teams-auth-resume',
     match: { type: 'exact', path: '/api/webhooks/teams/auth/resume' },
+    policy: 'webhook',
+    rateLimits: [
+      { keySource: 'state-token', limit: 10, windowSeconds: 60 },
+      { keySource: 'client', limit: 300, windowSeconds: 60 },
+    ],
+  },
+  {
+    name: 'webhook-slack-auth-resume',
+    match: { type: 'exact', path: '/api/webhooks/slack/auth/resume' },
     policy: 'webhook',
     rateLimits: [
       { keySource: 'state-token', limit: 10, windowSeconds: 60 },
