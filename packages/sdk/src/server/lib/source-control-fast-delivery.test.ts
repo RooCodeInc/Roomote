@@ -413,6 +413,57 @@ describe('GitHub Fast delivery', () => {
     expect(second).toEqual({ messageId: '6001' });
   });
 
+  it('replaces a resumed turn comment by id and keeps appending into it', async () => {
+    const updateComment = vi.fn().mockResolvedValue({});
+    mocks.getInstallationOctokit.mockResolvedValue({
+      rest: {
+        issues: { createComment, updateComment },
+        pulls: { get: pullsGet },
+      },
+      request,
+    });
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    // A fresh adapter, as a resumed process would build: no in-memory state.
+    const adapter = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+    });
+
+    const replaced = await adapter.replaceReply!(
+      { messageId: '7001' },
+      { message: 'Recovered; here is the result.' },
+    );
+    await adapter.postReply({ message: 'And one more detail.' });
+
+    expect(replaced).toEqual({ messageId: '7001' });
+    expect(createComment).not.toHaveBeenCalled();
+    expect(updateComment).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        comment_id: 7001,
+        body: expect.stringContaining('Recovered; here is the result.'),
+      }),
+    );
+    expect(updateComment).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        comment_id: 7001,
+        body: expect.stringContaining(
+          'Recovered; here is the result.\n\nAnd one more detail.',
+        ),
+      }),
+    );
+  });
+
   it('threads replies under the review comment the mention came from', async () => {
     const conversation = buildSourceControlFastConversation({
       provider: 'github',
@@ -567,7 +618,8 @@ describe('other provider Fast deliveries', () => {
       userId: 'user-1',
       sessionId: 'fast-1',
     });
-    await adapter.postReply({ message: 'On it.' });
+    const adoPosted = await adapter.postReply({ message: 'On it.' });
+    expect(adoPosted).toEqual({ messageId: 'thread:5:901' });
     await delivery!.resolveTarget();
 
     expect(mocks.adoListRepositories).toHaveBeenCalledTimes(1);

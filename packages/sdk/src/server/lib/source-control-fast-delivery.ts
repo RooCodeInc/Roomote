@@ -222,6 +222,15 @@ export type SourceControlFastReplyPoster = (input: {
  */
 export type SourceControlFastDelivery = {
   postComment: SourceControlFastReplyPoster;
+  /**
+   * Rebuilds an in-place editor from a previously posted comment's message
+   * id, for turns that resume in a fresh process and only carry the id.
+   */
+  updateCommentById?: (input: {
+    discussion: SourceControlFastDiscussion;
+    messageId: string;
+    body: string;
+  }) => Promise<void>;
   resolveTarget: () => Promise<SourceControlFastLaunchTarget>;
 };
 
@@ -299,6 +308,27 @@ async function buildGitHubFastDelivery(
           });
         },
       };
+    },
+    updateCommentById: async ({ discussion: target, messageId, body }) => {
+      const commentId = Number(messageId);
+      if (!Number.isInteger(commentId)) {
+        throw new Error(`Not an editable GitHub comment id: ${messageId}`);
+      }
+      if (target.kind === 'pull' && target.reviewCommentId) {
+        await octokit.rest.pulls.updateReviewComment({
+          owner,
+          repo,
+          comment_id: commentId,
+          body,
+        });
+        return;
+      }
+      await octokit.rest.issues.updateComment({
+        owner,
+        repo,
+        comment_id: commentId,
+        body,
+      });
     },
     resolveTarget: async () => {
       if (discussion.kind === 'issues') {
@@ -432,6 +462,15 @@ async function buildGitLabFastDelivery(
         },
       };
     },
+    updateCommentById: async ({ discussion: target, messageId, body }) => {
+      await updateGitLabNote({
+        projectId: target.repositoryFullName,
+        noteableType: target.kind === 'pull' ? 'merge_requests' : 'issues',
+        noteableIid: target.number,
+        noteId: Number(messageId),
+        body,
+      });
+    },
     resolveTarget: async () => {
       if (discussion.kind === 'issues') {
         return {
@@ -492,6 +531,14 @@ async function buildBitbucketFastDelivery(
         },
       };
     },
+    updateCommentById: async ({ discussion: target, messageId, body }) => {
+      await updateBitbucketPullRequestComment({
+        repositoryFullName: target.repositoryFullName,
+        pullRequestNumber: target.number,
+        commentId: Number(messageId),
+        body,
+      });
+    },
     resolveTarget: async () => {
       const pullRequest = await getBitbucketPullRequest({
         repositoryFullName: discussion.repositoryFullName,
@@ -549,6 +596,13 @@ async function buildGiteaFastDelivery(
           });
         },
       };
+    },
+    updateCommentById: async ({ discussion: target, messageId, body }) => {
+      await updateGiteaComment({
+        repositoryFullName: target.repositoryFullName,
+        commentId: Number(messageId),
+        body,
+      });
     },
     resolveTarget: async () => {
       if (discussion.kind === 'issues') {
@@ -622,8 +676,9 @@ async function buildAdoFastDelivery(
           organization: parsed.organization,
         });
         return {
-          messageId:
-            comment.commentId ?? `ado-work-item-comment:${randomUUID()}`,
+          messageId: comment.commentId
+            ? `wit:${comment.commentId}`
+            : `ado-work-item-comment:${randomUUID()}`,
           ...(comment.commentId
             ? {
                 update: async (nextBody: string) => {
@@ -657,7 +712,9 @@ async function buildAdoFastDelivery(
         organization: parsed.organization,
       });
       return {
-        messageId: comment.commentId ?? `ado-thread:${comment.threadId}`,
+        messageId: comment.commentId
+          ? `thread:${comment.threadId}:${comment.commentId}`
+          : `ado-thread:${comment.threadId}`,
         ...(comment.commentId
           ? {
               update: async (nextBody: string) => {
@@ -674,6 +731,40 @@ async function buildAdoFastDelivery(
             }
           : {}),
       };
+    },
+    updateCommentById: async ({ discussion: target, messageId, body }) => {
+      const witMatch = /^wit:(.+)$/.exec(messageId);
+      if (witMatch) {
+        await updateAdoWorkItemComment({
+          project: parsed.project,
+          workItemId: target.number,
+          commentId: witMatch[1]!,
+          body,
+          organization: parsed.organization,
+        });
+        return;
+      }
+      const threadMatch = /^thread:([^:]+):(.+)$/.exec(messageId);
+      if (!threadMatch) {
+        throw new Error(
+          `Not an editable Azure DevOps comment id: ${messageId}`,
+        );
+      }
+      const adoRepositoryId = await resolveAdoRepositoryId();
+      if (!adoRepositoryId) {
+        throw new Error(
+          `Azure DevOps repository ${target.repositoryFullName} could not be resolved.`,
+        );
+      }
+      await updateAdoPullRequestComment({
+        repositoryFullName: target.repositoryFullName,
+        repositoryId: adoRepositoryId,
+        pullRequestNumber: target.number,
+        threadId: threadMatch[1]!,
+        commentId: threadMatch[2]!,
+        body,
+        organization: parsed.organization,
+      });
     },
     resolveTarget: async () => {
       if (discussion.kind === 'issues') {
@@ -728,6 +819,10 @@ export function buildSourceControlFastAdapter(params: {
 }): {
   launchTask: LaunchFastAgentTask;
   postReply: (reply: { message: string }) => Promise<{ messageId: string }>;
+  replaceReply?: (
+    handle: { messageId: string },
+    reply: { message: string },
+  ) => Promise<{ messageId: string }>;
 } {
   const discussion = parseSourceControlFastConversation(params.conversation);
   let turnComment: SourceControlPostedComment | null = null;
@@ -766,5 +861,35 @@ export function buildSourceControlFastAdapter(params: {
       params.onReplyPosted?.();
       return { messageId: posted.messageId };
     },
+    ...(params.delivery.updateCommentById && discussion
+      ? {
+          // A resumed turn only carries the prior comment's id: rebuild the
+          // editor from it, replace the comment's body, and adopt it as the
+          // turn's comment so later replies keep appending in place.
+          replaceReply: async ({ messageId }, { message }) => {
+            const footer = buildFastSessionReplyFooterText({
+              provider: discussion.provider,
+              sessionId: params.sessionId,
+            });
+            await params.delivery.updateCommentById!({
+              discussion,
+              messageId,
+              body: `${message}\n\n${footer}`,
+            });
+            turnBody = message;
+            turnComment = {
+              messageId,
+              update: (nextBody: string) =>
+                params.delivery.updateCommentById!({
+                  discussion,
+                  messageId,
+                  body: nextBody,
+                }),
+            };
+            params.onReplyPosted?.();
+            return { messageId };
+          },
+        }
+      : {}),
   };
 }
