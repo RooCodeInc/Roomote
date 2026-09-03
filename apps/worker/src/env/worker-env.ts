@@ -367,6 +367,10 @@ export class WorkerEnv {
     return { ...this.runtimeEnv };
   }
 
+  getUserEnvVarNames(): string[] {
+    return Object.keys(this.userEnv);
+  }
+
   /** Set a single system base var. */
   setSystemBase(key: string, value: string): void {
     this.systemBase[key] = value;

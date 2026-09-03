@@ -110,7 +110,11 @@ describe('reloadDeploymentEnvVars procedure', () => {
       OPENAI_API_KEY: 'new-openai-key',
       ANTHROPIC_API_KEY: 'new-anthropic-key',
     });
-    mockFindFirstById.mockResolvedValue({ id: 1, taskId: 'task-123' });
+    mockFindFirstById.mockResolvedValue({
+      id: 1,
+      taskId: 'task-123',
+      payload: { repo: 'owner/repo' },
+    });
     mockInjectEnvVars.mockImplementation(
       (env: Record<string, string | undefined>) => {
         env.BASH_ENV = '/tmp/roomote/env.sh';
@@ -139,7 +143,7 @@ describe('reloadDeploymentEnvVars procedure', () => {
         OPENAI_API_KEY: 'new-openai-key',
         ANTHROPIC_API_KEY: 'new-anthropic-key',
       }),
-      { id: 1, taskId: 'task-123' },
+      { id: 1, taskId: 'task-123', payload: { repo: 'owner/repo' } },
       expect.objectContaining({
         previewProxyBaseUrl: 'https://preview.roomote.run',
         previewProxySubdomainSuffix: 'preview.roomote.run',
@@ -168,6 +172,39 @@ describe('reloadDeploymentEnvVars procedure', () => {
       ROOMOTE_TASK_ID: 'task-123',
       ROOMOTE_TASK_TYPE: 'standard',
       CLAUDE_APPEND_SYSTEM_PROMPT: 'follow the system instructions',
+    });
+  });
+
+  it('keeps inherited model transport values out of environment shell files on reload', async () => {
+    mockGetResolvedRuntimeEnvVars.mockResolvedValue({
+      R_MODEL: 'openai/outer-model',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
+    });
+    mockFindFirstById.mockResolvedValue({
+      id: 1,
+      taskId: 'task-123',
+      payload: { environmentId: 'environment-1' },
+    });
+    const workerEnv = createWorkerEnv();
+    workerEnv.addUserEnv({ R_VISION_MODEL: 'openai/nested-vision-model' });
+    const { caller } = createCaller(workerEnv);
+
+    await caller.commands.reloadDeploymentEnvVars();
+
+    expect(mockInjectEnvVars).toHaveBeenCalledWith(
+      expect.objectContaining({ R_MODEL: 'openai/outer-model' }),
+      expect.objectContaining({ payload: { environmentId: 'environment-1' } }),
+      expect.objectContaining({
+        omitInheritedModelRuntimeEnvFromShell: true,
+        explicitShellEnvVarNames: expect.arrayContaining([
+          'NEXT_PUBLIC_API_BASE',
+          'R_VISION_MODEL',
+        ]),
+      }),
+    );
+    expect(workerEnv.getRuntimeEnv()).toMatchObject({
+      R_MODEL: 'openai/outer-model',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
     });
   });
 

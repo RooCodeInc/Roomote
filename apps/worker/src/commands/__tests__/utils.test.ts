@@ -1,11 +1,13 @@
 import * as fs from 'fs';
 
 import {
+  buildEnvironmentShellEnvVars,
   injectEnvVars,
   writeBashrc,
   writeCommonEnvFile,
   isValidEnvVarName,
 } from '../utils/env-vars';
+import { TASK_MODEL_ROLE_DESCRIPTORS } from '@roomote/types';
 import type { TaskRun } from '@roomote/sdk/client';
 
 vi.mock('fs', () => ({
@@ -101,6 +103,49 @@ afterEach(() => {
 });
 
 describe('injectEnvVars', () => {
+  it('omits inherited model transport values from the environment shell file without mutating runtime env', async () => {
+    const inheritedRoleEnvVars = Object.fromEntries(
+      Object.values(TASK_MODEL_ROLE_DESCRIPTORS).flatMap((descriptor) => [
+        [descriptor.modelEnvVar, 'openai/outer-model'],
+        [descriptor.reasoningEnvVar, 'high'],
+        [`ROOMOTE_${descriptor.modelEnvVar.slice(2)}`, 'openai/outer-model'],
+        [`ROOMOTE_${descriptor.reasoningEnvVar.slice(2)}`, 'high'],
+      ]),
+    );
+    const envVars: Record<string, string> = {
+      FOO: 'bar',
+      ...inheritedRoleEnvVars,
+      R_MODEL_ENV_KEYS: 'OPENAI_API_KEY',
+      ROOMOTE_MODEL_ENV_KEYS: 'OPENAI_API_KEY',
+    };
+
+    await injectEnvVars(envVars, undefined, {
+      omitInheritedModelRuntimeEnvFromShell: true,
+    });
+
+    expect(envVars.R_MODEL).toBe('openai/outer-model');
+    const commonEnvContent = String(findWrite(COMMON_ENV_PATH)?.[1]);
+    expect(commonEnvContent).toContain("export FOO='bar'");
+    for (const name of Object.keys(inheritedRoleEnvVars)) {
+      expect(commonEnvContent).not.toContain(`export ${name}=`);
+    }
+    expect(commonEnvContent).not.toContain('export R_MODEL_ENV_KEYS=');
+    expect(commonEnvContent).not.toContain('export ROOMOTE_MODEL_ENV_KEYS=');
+  });
+
+  it('preserves explicitly configured nested model values in filtered shell env', () => {
+    expect(
+      buildEnvironmentShellEnvVars(
+        {
+          FOO: 'bar',
+          R_MODEL: 'openai/nested-model',
+          R_SMALL_MODEL: 'openai/outer-small-model',
+        },
+        ['R_MODEL'],
+      ),
+    ).toEqual({ FOO: 'bar', R_MODEL: 'openai/nested-model' });
+  });
+
   it('prefers runtime auth bypass env vars over task run values', async () => {
     const envVars: Record<string, string> = {};
     const taskRun = {
