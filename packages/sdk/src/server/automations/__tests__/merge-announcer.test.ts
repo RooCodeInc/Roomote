@@ -212,6 +212,10 @@ describe('handleMergeAnnouncerPush', () => {
       expect.objectContaining({
         blocks: [
           expect.objectContaining({
+            subtitle: {
+              type: 'plain_text',
+              text: 'RooCodeInc/Roomote#1896 · develop · alice',
+            },
             child_blocks: expect.arrayContaining([
               expect.objectContaining({
                 type: 'actions',

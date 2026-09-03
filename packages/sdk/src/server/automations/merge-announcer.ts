@@ -416,6 +416,9 @@ function buildMergeAnnouncerNotification(params: {
 }) {
   const commitCount = params.event.commitCount ?? params.event.commits.length;
   const commitLabel = `${commitCount} ${commitCount === 1 ? 'commit' : 'commits'}`;
+  const repositoryLabel = params.event.pullRequest
+    ? `${params.repository.fullName}#${params.event.pullRequest.number}`
+    : params.repository.fullName;
   const summary = normalizeSummary(params.summary);
   const slackSummary = escapeSlackMrkdwnText(summary);
   const configureUrl = buildManagerSlackSettingsUrl(
@@ -447,7 +450,7 @@ function buildMergeAnnouncerNotification(params: {
       configureUrl,
       subtitle: {
         type: 'plain_text',
-        text: `${params.repository.fullName} · ${params.branch} · ${params.pusher}`,
+        text: `${repositoryLabel} · ${params.branch} · ${params.pusher}`,
       },
       contentBlocks: [
         {
