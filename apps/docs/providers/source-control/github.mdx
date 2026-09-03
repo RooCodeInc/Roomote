@@ -217,14 +217,17 @@ issue-search URL, but it does not represent that URL as a saved GitHub view.
 Once the app is installed and an environment maps the repository:
 
 - mention `@roomote` (or your deployment's GitHub App slug) in a pull request
-  comment to start PR review or follow-up work
+  comment, review comment, or review to talk to Roomote about that pull request
 - mention the same handle in a GitHub issue comment, or in a new issue body, to
-  start a standard task against that repository
+  talk to Roomote about that issue
 - link your GitHub account under Settings -> Linked Accounts so Roomote can
-  attribute the task to you
+  run the conversation as you
 
-Issue mentions use the environment mapped to the repository. Map the repository
-to an environment before mentioning Roomote on issues.
+Each pull request or issue is a Roomote Session. Roomote reads the discussion,
+answers as a comment when no workspace is needed, and otherwise starts a task
+on the pull request's branch (or the issue's repository) and reports back in
+the same discussion. Mention it again to redirect it, ask a follow-up, or
+steer a running task. Replies to a review comment stay in that review thread.
 
 When a Roomote task opens a pull request, actionable review feedback returns to
 the owning Session and appears in both Fast and standard web task transcripts.

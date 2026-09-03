@@ -10,7 +10,11 @@ import {
   type TaskTrigger,
 } from '@roomote/types';
 
-import { enqueueTask, type TaskChannelBindings } from '../task-run-queue';
+import {
+  enqueueTask,
+  type TaskChannelBindings,
+  type TaskPrLinkage,
+} from '../task-run-queue';
 import { getTaskUrl } from '../task-url';
 import type { LaunchFastAgentTask } from './fast-agent-conversation';
 
@@ -39,6 +43,8 @@ export function createFastAgentTaskLauncher(
     taskUrlCampaign: string;
     /** Provider bindings recorded on the task, for example a Linear session. */
     channels?: TaskChannelBindings;
+    /** Pull request the task works on, recorded with the task at launch. */
+    prLinkage?: TaskPrLinkage;
     buildTask: (input: {
       prompt: string;
       environmentId: string | null;
@@ -101,6 +107,7 @@ export function createFastAgentTaskLauncher(
         surface: params.surface,
         trigger: params.trigger ?? 'message',
         ...(params.channels ? { channels: params.channels } : {}),
+        ...(params.prLinkage ? { prLinkage: params.prLinkage } : {}),
       },
       {
         beforeEnqueue: async (taskRun) => {
