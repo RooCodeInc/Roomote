@@ -28,6 +28,7 @@ import {
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
   completeCanonicalPrReviewAutoDispatch,
+  claimCanonicalPrReviewNotificationAutoDispatch,
   dispatchPrReviewFollowUp,
   findAutoHandlePrReviewFeedbackPreference,
   finalizePrReviewNotificationRequest,
@@ -47,6 +48,7 @@ import {
   setPendingPrReviewAction,
   updateFastAgentPrReviewOfferStatus,
   updateTaskPrReviewOfferStatus,
+  unclaimCanonicalPrReviewNotificationAutoDispatch,
 } from '@roomote/sdk/server';
 import {
   buildSlackPrReviewActionBlocks,
@@ -837,10 +839,22 @@ export const prReviewNotificationJob = async (
               actingUserId: autoHandleUserId,
               route: autoHandleRoute!,
             });
-      if (!(await beginAutoDispatch())) {
+      if (
+        data.deliveryState !== 'auto_dispatch_pending' &&
+        !(await beginAutoDispatch())
+      ) {
         await retrySupersededPrReviewAction(data);
         console.log(
           `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its automatic-dispatch fence, skipping`,
+        );
+        return;
+      }
+      const autoDispatchClaim =
+        await claimCanonicalPrReviewNotificationAutoDispatch(data);
+      if (!autoDispatchClaim.claimed) {
+        await retrySupersededPrReviewAction(data);
+        console.log(
+          `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its automatic-dispatch claim, skipping`,
         );
         return;
       }
@@ -886,6 +900,9 @@ ${delivery.text}`;
           `[PrReviewNotification] Auto-dispatched review feedback for ${data.repository}#${data.prNumber} into task ${autoHandlePreference.taskId} (${dispatched.outcome}, run ${dispatched.runId})`,
         );
       } else {
+        if (autoDispatchClaim.claimedNow) {
+          await unclaimCanonicalPrReviewNotificationAutoDispatch(data);
+        }
         if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
           await schedulePrReviewNotificationJob({
             request: {

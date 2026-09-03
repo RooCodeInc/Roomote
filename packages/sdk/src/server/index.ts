@@ -274,6 +274,7 @@ export {
   beginCanonicalPrReviewWebPrompt,
   beginCanonicalPrReviewWebAutoDispatch,
   completeCanonicalPrReviewAutoDispatch,
+  claimCanonicalPrReviewNotificationAutoDispatch,
   consumePendingPrReviewActivity,
   dispatchDuePrReviewNotifications,
   enqueuePrReviewNotification,
@@ -299,6 +300,7 @@ export {
   type PrReviewNotificationRequest,
   type PrReviewNotificationRoute,
   type StartPrReviewNotificationCycleInput,
+  unclaimCanonicalPrReviewNotificationAutoDispatch,
 } from './lib/task-runs/pr-review-notification';
 export {
   createPrReviewNotificationTelemetry,

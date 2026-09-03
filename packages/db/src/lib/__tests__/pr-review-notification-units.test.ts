@@ -5,6 +5,7 @@ import {
   attachCanonicalPrReviewActionMessage,
   claimCanonicalPrReviewAction,
   claimDueCanonicalPrReviewDeliveries,
+  claimCanonicalPrReviewAutoDispatch,
   completeCanonicalPrReviewActionDispatch,
   db,
   deferPrReviewDeliveries,
@@ -1471,13 +1472,18 @@ describe('canonical PR review notification ownership', () => {
       expected: 'prepared',
       status: 'auto_dispatch_pending',
     });
-
     await retireCanonicalPrReviewActionsForPullRequest({
       sourceControlProvider: 'github',
       repository,
       prNumber: 30,
       currentHeadSha: 'new-head',
     });
+    await expect(
+      claimCanonicalPrReviewAutoDispatch({
+        deliveryId: claim.deliveryId,
+        leaseToken: claim.leaseToken,
+      }),
+    ).resolves.toEqual({ claimed: false, claimedNow: false });
     await expect(
       releaseSupersededCanonicalPrReviewAction({
         deliveryId: claim.deliveryId,

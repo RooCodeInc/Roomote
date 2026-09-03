@@ -1021,6 +1021,52 @@ export async function releaseSupersededCanonicalPrReviewAction(input: {
   return rows.length === 1;
 }
 
+export async function claimCanonicalPrReviewAutoDispatch(input: {
+  deliveryId: string;
+  leaseToken: string;
+}): Promise<{ claimed: boolean; claimedNow: boolean }> {
+  const now = new Date();
+  const rows = await db.execute<{ claimed_now: boolean }>(sql`
+    with candidate as (
+      select id, action_claimed_at is null as claimed_now
+      from ${prReviewNotificationDeliveries}
+      where id = ${input.deliveryId}
+        and lease_token = ${input.leaseToken}
+        and status = 'auto_dispatch_pending'
+      for update
+    ), updated as (
+      update ${prReviewNotificationDeliveries} delivery
+      set action_claimed_at = coalesce(delivery.action_claimed_at, ${now.toISOString()}::timestamp),
+          updated_at = ${now.toISOString()}::timestamp
+      from candidate
+      where delivery.id = candidate.id
+      returning candidate.claimed_now
+    )
+    select claimed_now from updated
+  `);
+  return rows[0]
+    ? { claimed: true, claimedNow: rows[0].claimed_now }
+    : { claimed: false, claimedNow: false };
+}
+
+export async function unclaimCanonicalPrReviewAutoDispatch(input: {
+  deliveryId: string;
+  leaseToken: string;
+}): Promise<boolean> {
+  const rows = await db
+    .update(prReviewNotificationDeliveries)
+    .set({ actionClaimedAt: null, updatedAt: new Date() })
+    .where(
+      and(
+        canonicalClaimWhere(input),
+        eq(prReviewNotificationDeliveries.status, 'auto_dispatch_pending'),
+        isNull(prReviewNotificationDeliveries.dispatchedRunId),
+      ),
+    )
+    .returning({ id: prReviewNotificationDeliveries.id });
+  return rows.length === 1;
+}
+
 export async function upsertPrReviewAutoPreference(input: {
   sourceControlProvider: SourceControlProvider;
   host?: string | null;
@@ -1592,8 +1638,26 @@ export async function retireCanonicalPrReviewActionsForPullRequest(input: {
           inArray(prReviewNotificationDeliveries.status, [
             'claimed',
             'prepared',
-            'auto_dispatch_pending',
           ]),
+          isNull(prReviewNotificationDeliveries.actionClaimedAt),
+          inArray(
+            prReviewNotificationDeliveries.notificationUnitId,
+            matchingUnits,
+          ),
+        ),
+      );
+    await tx
+      .update(prReviewNotificationDeliveries)
+      .set({
+        status: 'prepared',
+        actionClaimedAt: new Date(),
+        targetTaskId: null,
+        actingUserId: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(prReviewNotificationDeliveries.status, 'auto_dispatch_pending'),
           isNull(prReviewNotificationDeliveries.actionClaimedAt),
           inArray(
             prReviewNotificationDeliveries.notificationUnitId,

@@ -5,6 +5,7 @@ import type { CommunicationPostMessageInput } from '@roomote/communication';
 import type { TaskRun } from '@roomote/db/server';
 import {
   buildPrReviewEventKey,
+  claimCanonicalPrReviewAutoDispatch,
   claimDuePrReviewDeliveries,
   completePrReviewDeliveries,
   db,
@@ -17,6 +18,7 @@ import {
   renewPrReviewDeliveryClaim,
   slackInstallations,
   transitionCanonicalPrReviewDelivery,
+  unclaimCanonicalPrReviewAutoDispatch,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 import {
@@ -993,6 +995,38 @@ export async function beginCanonicalPrReviewWebAutoDispatch(input: {
       targetTaskId: input.targetTaskId,
       actingUserId: input.actingUserId,
     },
+  });
+}
+
+export async function claimCanonicalPrReviewNotificationAutoDispatch(
+  request: PrReviewNotificationRequest,
+): Promise<{ claimed: boolean; claimedNow: boolean }> {
+  if (
+    request.ownershipVersion !== 'canonical' ||
+    !request.deliveryId ||
+    !request.leaseToken
+  ) {
+    return { claimed: true, claimedNow: false };
+  }
+  return claimCanonicalPrReviewAutoDispatch({
+    deliveryId: request.deliveryId,
+    leaseToken: request.leaseToken,
+  });
+}
+
+export async function unclaimCanonicalPrReviewNotificationAutoDispatch(
+  request: PrReviewNotificationRequest,
+): Promise<boolean> {
+  if (
+    request.ownershipVersion !== 'canonical' ||
+    !request.deliveryId ||
+    !request.leaseToken
+  ) {
+    return true;
+  }
+  return unclaimCanonicalPrReviewAutoDispatch({
+    deliveryId: request.deliveryId,
+    leaseToken: request.leaseToken,
   });
 }
 

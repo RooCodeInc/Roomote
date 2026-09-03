@@ -16,6 +16,8 @@ const {
   mockReleaseCanonicalWebAutoDispatch,
   mockBeginCanonicalAutoDispatch,
   mockCompleteCanonicalAutoDispatch,
+  mockClaimCanonicalAutoDispatch,
+  mockUnclaimCanonicalAutoDispatch,
   mockRecordDelivery,
   mockPostMessage,
   mockTeamsPostMessage,
@@ -53,6 +55,8 @@ const {
   mockReleaseCanonicalWebAutoDispatch: vi.fn(),
   mockBeginCanonicalAutoDispatch: vi.fn(),
   mockCompleteCanonicalAutoDispatch: vi.fn(),
+  mockClaimCanonicalAutoDispatch: vi.fn(),
+  mockUnclaimCanonicalAutoDispatch: vi.fn(),
   mockRecordDelivery: vi.fn(),
   mockPostMessage: vi.fn(),
   mockTeamsPostMessage: vi.fn(),
@@ -207,6 +211,10 @@ vi.mock('@roomote/sdk/server', () => ({
   releaseCanonicalPrReviewWebAutoDispatch: mockReleaseCanonicalWebAutoDispatch,
   beginCanonicalPrReviewAutoDispatch: mockBeginCanonicalAutoDispatch,
   completeCanonicalPrReviewAutoDispatch: mockCompleteCanonicalAutoDispatch,
+  claimCanonicalPrReviewNotificationAutoDispatch:
+    mockClaimCanonicalAutoDispatch,
+  unclaimCanonicalPrReviewNotificationAutoDispatch:
+    mockUnclaimCanonicalAutoDispatch,
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
   setPendingPrReviewAction: mockSetPendingPrReviewAction,
   retirePrReviewActionMessagesBestEffort: mockRetirePrReviewActionMessages,
@@ -259,6 +267,11 @@ describe('prReviewNotificationJob', () => {
     mockReleaseCanonicalWebAutoDispatch.mockResolvedValue(true);
     mockBeginCanonicalAutoDispatch.mockResolvedValue(true);
     mockCompleteCanonicalAutoDispatch.mockResolvedValue(true);
+    mockClaimCanonicalAutoDispatch.mockResolvedValue({
+      claimed: true,
+      claimedNow: true,
+    });
+    mockUnclaimCanonicalAutoDispatch.mockResolvedValue(true);
 
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
@@ -1097,7 +1110,10 @@ describe('prReviewNotificationJob', () => {
       userId: 'user-1',
       destinationKey: 'task-1',
     });
-    mockBeginCanonicalAutoDispatch.mockResolvedValue(false);
+    mockClaimCanonicalAutoDispatch.mockResolvedValue({
+      claimed: false,
+      claimedNow: false,
+    });
     mockRetrySupersededPrReviewAction.mockResolvedValue(true);
     const job = makeJob({
       ownershipVersion: 'canonical',
@@ -1113,7 +1129,8 @@ describe('prReviewNotificationJob', () => {
 
     await prReviewNotificationJob(job as never);
 
-    expect(mockBeginCanonicalAutoDispatch).toHaveBeenCalledTimes(1);
+    expect(mockBeginCanonicalAutoDispatch).not.toHaveBeenCalled();
+    expect(mockClaimCanonicalAutoDispatch).toHaveBeenCalledWith(job.data);
     expect(mockRetrySupersededPrReviewAction).toHaveBeenCalledWith(job.data);
     expect(mockDispatchFollowUp).not.toHaveBeenCalled();
   });
@@ -1318,6 +1335,7 @@ describe('prReviewNotificationJob', () => {
       request: expect.objectContaining({ deferrals: 1 }),
       delayMs: 5000,
     });
+    expect(mockUnclaimCanonicalAutoDispatch).toHaveBeenCalled();
     expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
     expect(mockStickyFooterPost).not.toHaveBeenCalled();
     expect(mockRecordDelivery).not.toHaveBeenCalled();
@@ -2113,6 +2131,10 @@ describe('prReviewNotificationJob', () => {
     });
     mockNotifyFastAgentParent.mockResolvedValue(true);
     mockDispatchFollowUp.mockResolvedValue({ outcome: 'unavailable' });
+    mockClaimCanonicalAutoDispatch.mockResolvedValue({
+      claimed: true,
+      claimedNow: false,
+    });
 
     const job = makeJob({
       ownershipVersion: 'canonical',
@@ -2152,6 +2174,7 @@ describe('prReviewNotificationJob', () => {
       { leaseToken },
     );
     expect(mockFinalize).not.toHaveBeenCalled();
+    expect(mockUnclaimCanonicalAutoDispatch).not.toHaveBeenCalled();
 
     mockAttachPendingPrReviewActionMessage.mockResolvedValueOnce({
       attached: false,
