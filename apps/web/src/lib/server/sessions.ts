@@ -941,6 +941,27 @@ async function getSessionTasks(sessionId: string) {
   });
 }
 
+async function getSessionArtifacts(sessionId: string) {
+  return db
+    .select({
+      id: taskArtifacts.id,
+      path: taskArtifacts.path,
+      artifactType: taskArtifacts.artifactType,
+      contentType: taskArtifacts.contentType,
+      size: taskArtifacts.size,
+      version: taskArtifacts.version,
+      createdAt: taskArtifacts.createdAt,
+    })
+    .from(taskArtifacts)
+    .where(
+      and(
+        eq(taskArtifacts.sessionId, sessionId),
+        eq(taskArtifacts.uploaded, true),
+      ),
+    )
+    .orderBy(desc(taskArtifacts.createdAt));
+}
+
 export async function getSessionById(auth: SessionAuth, sessionId: string) {
   const session =
     (await findAccessibleSession(auth, sessionId)) ??
@@ -948,7 +969,10 @@ export async function getSessionById(auth: SessionAuth, sessionId: string) {
   if (!session) return null;
   // Fetch the task rollups once and feed them into hydration; this endpoint
   // is polled, so the duplicate linked-tasks join was pure waste.
-  const sessionTaskDetails = await getSessionTasks(session.id);
+  const [sessionTaskDetails, artifacts] = await Promise.all([
+    getSessionTasks(session.id),
+    getSessionArtifacts(session.id),
+  ]);
   const [hydrated] = await hydrateSessionRows(auth, [session], {
     preloadedLinkedTasks: sessionTaskDetails.map((task) => ({
       sessionId: session.id,
@@ -969,7 +993,12 @@ export async function getSessionById(auth: SessionAuth, sessionId: string) {
       goalStatus: task.goalStatus,
     })),
   });
-  return { ...hydrated!, tasks: sessionTaskDetails, status: liveStatus };
+  return {
+    ...hydrated!,
+    tasks: sessionTaskDetails,
+    artifacts,
+    status: liveStatus,
+  };
 }
 
 export async function getSessionTimeline(

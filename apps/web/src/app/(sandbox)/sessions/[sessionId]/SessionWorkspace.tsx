@@ -179,6 +179,7 @@ export type SessionInfo = {
   createdAt: Date;
   status: string | null;
   tasks: SessionTaskSummary[];
+  artifacts?: SessionArtifact[];
   taskSource?: 'unified' | 'fast';
   taskCards?: Array<
     Pick<SessionTaskSummary, 'taskId' | 'title' | 'artifacts' | 'previews'> & {
@@ -236,7 +237,9 @@ function SessionArtifactCard({
       type="button"
       onClick={onOpen}
       title={taskTitle ? `${artifact.path} - ${taskTitle}` : artifact.path}
-      aria-label={taskTitle ? `Open ${label} from ${taskTitle}` : undefined}
+      aria-label={
+        taskTitle ? `Open ${label} from ${taskTitle}` : `Open ${label}`
+      }
       className="group block w-full min-w-0 cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-opacity hover:opacity-70"
     >
       <span className="flex aspect-video w-full items-center justify-center overflow-hidden bg-muted">
@@ -289,8 +292,8 @@ function SessionArtifactCard({
 }
 
 type SessionArtifactEntry = {
-  taskId: string;
-  taskTitle: string;
+  owner: { taskId: string } | { sessionId: string };
+  taskTitle?: string;
   artifact: SessionArtifact;
 };
 
@@ -301,6 +304,8 @@ type SessionArtifactTask = Pick<
 
 function getLatestSessionArtifacts(
   tasks: SessionArtifactTask[],
+  sessionId: string,
+  sessionArtifacts: SessionArtifact[],
 ): SessionArtifactEntry[] {
   const entries: SessionArtifactEntry[] = [];
 
@@ -313,8 +318,23 @@ function getLatestSessionArtifacts(
       }
     }
     for (const artifact of latestByPath.values()) {
-      entries.push({ taskId: task.taskId, taskTitle: task.title, artifact });
+      entries.push({
+        owner: { taskId: task.taskId },
+        taskTitle: task.title,
+        artifact,
+      });
     }
+  }
+
+  const latestSessionByPath = new Map<string, SessionArtifact>();
+  for (const artifact of sessionArtifacts) {
+    const current = latestSessionByPath.get(artifact.path);
+    if (!current || artifact.version > current.version) {
+      latestSessionByPath.set(artifact.path, artifact);
+    }
+  }
+  for (const artifact of latestSessionByPath.values()) {
+    entries.push({ owner: { sessionId }, taskTitle: 'Session', artifact });
   }
 
   return entries.sort(
@@ -332,7 +352,7 @@ function SessionArtifactViewer({
   onClose,
 }: {
   selection: {
-    taskId: string;
+    owner: { taskId: string } | { sessionId: string };
     path: string;
     version?: number;
   };
@@ -345,7 +365,7 @@ function SessionArtifactViewer({
     data: artifact,
     isPending,
     isError,
-  } = useArtifactByPath(selection.taskId, selection.path, selection.version);
+  } = useArtifactByPath(selection.owner, selection.path, selection.version);
 
   return (
     <>
@@ -390,7 +410,7 @@ function SessionArtifactViewer({
         ) : (
           <ArtifactViewerContent
             artifact={artifact}
-            taskId={selection.taskId}
+            owner={selection.owner}
             className="h-full border-0"
           />
         )}
@@ -401,14 +421,22 @@ function SessionArtifactViewer({
 
 function SessionArtifactsPanel({
   tasks,
+  sessionId,
+  sessionArtifacts,
   onClose,
 }: {
   tasks: SessionArtifactTask[];
+  sessionId: string;
+  sessionArtifacts: SessionArtifact[];
   onClose: () => void;
 }) {
   const [selectedArtifact, setSelectedArtifact] =
     useState<SessionArtifactEntry | null>(null);
-  const artifacts = getLatestSessionArtifacts(tasks);
+  const artifacts = getLatestSessionArtifacts(
+    tasks,
+    sessionId,
+    sessionArtifacts,
+  );
   const artifactSections = [
     {
       label: 'Screenshots',
@@ -440,7 +468,7 @@ function SessionArtifactsPanel({
       {selectedArtifact ? (
         <SessionArtifactViewer
           selection={{
-            taskId: selectedArtifact.taskId,
+            owner: selectedArtifact.owner,
             path: selectedArtifact.artifact.path,
             version: selectedArtifact.artifact.version,
           }}
@@ -473,7 +501,7 @@ function SessionArtifactsPanel({
                         <div className="grid grid-cols-2 gap-4 @[500px]:grid-cols-3">
                           {sectionArtifacts.map((entry) => (
                             <SessionArtifactCard
-                              key={`${entry.taskId}:${entry.artifact.path}`}
+                              key={`${'taskId' in entry.owner ? `task:${entry.owner.taskId}` : `session:${entry.owner.sessionId}`}:${entry.artifact.path}`}
                               artifact={entry.artifact}
                               taskTitle={entry.taskTitle}
                               onOpen={() => setSelectedArtifact(entry)}
@@ -844,7 +872,11 @@ export function SessionWorkspace({
         surfaceClassName="relative flex flex-col overflow-hidden"
       >
         <SessionArtifactViewer
-          selection={panel}
+          selection={{
+            owner: { taskId: panel.taskId },
+            path: panel.path,
+            version: panel.version,
+          }}
           backLabel="Back to task"
           closeLabel="Close artifact"
           onBack={() => setPanel(panel.returnTo)}
@@ -890,7 +922,12 @@ export function SessionWorkspace({
         onClose={closePanel}
       />
     ) : panel?.kind === 'artifacts' ? (
-      <SessionArtifactsPanel tasks={artifactTasks} onClose={closePanel} />
+      <SessionArtifactsPanel
+        tasks={artifactTasks}
+        sessionId={session.id}
+        sessionArtifacts={session.artifacts ?? []}
+        onClose={closePanel}
+      />
     ) : panel?.kind === 'previews' ? (
       <SessionPreviewsPanel tasks={taskCards} onClose={closePanel} />
     ) : (

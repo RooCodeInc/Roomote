@@ -68,6 +68,7 @@ const nativeToolNames = vi.hoisted(
     ({
       callIntegrationTool: 'call_integration_tool',
       cancelTask: 'cancel_task',
+      createArtifact: 'create_artifact',
       findIntegrationTools: 'find_integration_tools',
       ignoreEvent: 'ignore_event',
       launchTask: 'launch_task',
@@ -2622,6 +2623,50 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       shown: true,
       html: '<p>Safe</p>',
       textFallback: 'Status: all systems operational.',
+    });
+  });
+
+  it('creates a durable Session artifact with inferred content type', async () => {
+    const createArtifact = vi.fn().mockResolvedValue({
+      id: 'artifact-1',
+      path: 'notes/decision.md',
+      version: 1,
+      artifactType: 'general',
+      contentType: 'text/markdown',
+      size: 8,
+      viewUrl: 'https://roomote.example/sessions/session-1',
+    });
+    const adapter = callbacks({ createArtifact });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Creating that document.',
+        });
+        const result = await invokeTool(nativeToolNames.createArtifact, {
+          path: 'notes/decision.md',
+          content: '# Decision',
+        });
+        expect(result).toMatchObject({
+          success: true,
+          artifact: { id: 'artifact-1', contentType: 'text/markdown' },
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The document is ready.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(createArtifact).toHaveBeenCalledWith({
+      path: 'notes/decision.md',
+      content: '# Decision',
+      contentType: 'text/markdown',
+      artifactType: 'general',
     });
   });
 

@@ -237,6 +237,12 @@ const showWidgetArgsSchema = z.object({
   height: z.number().optional(),
   textFallback: z.string().optional(),
 });
+const createArtifactArgsSchema = z.object({
+  path: z.string().trim().min(1).max(255),
+  content: z.string().min(1).max(131_072),
+  contentType: z.string().trim().min(1).max(200).optional(),
+  artifactType: z.enum(['general', 'plan']).optional().default('general'),
+});
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 // A reply tool call without a message reads the text the model wrote before
 // it. That text arrives on the OpenCode event stream, which may trail the
@@ -3220,6 +3226,54 @@ export async function answerFastAgentQuestion({
               args.purpose,
               instructionVersion,
             );
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact: {
+            if (!adapter.createArtifact) {
+              return {
+                success: false,
+                error: 'Artifact creation is unavailable for this Session.',
+              };
+            }
+            const args = createArtifactArgsSchema.parse(call.args);
+            const signature = createHash('sha256')
+              .update(`${args.path}\0${args.content}`)
+              .digest('hex');
+            if (completedTaskActions.has(`artifact:${signature}`)) {
+              return {
+                success: false,
+                error: 'The same artifact was already created in this turn.',
+              };
+            }
+            const extension = args.path.split('.').pop()?.toLowerCase();
+            const inferredContentType =
+              extension === 'md'
+                ? 'text/markdown'
+                : extension === 'html' || extension === 'htm'
+                  ? 'text/html'
+                  : extension === 'json'
+                    ? 'application/json'
+                    : extension === 'csv'
+                      ? 'text/csv'
+                      : extension === 'svg'
+                        ? 'image/svg+xml'
+                        : 'text/plain';
+            completedTaskActions.add(`artifact:${signature}`);
+            try {
+              const artifact = await adapter.createArtifact({
+                ...args,
+                contentType: args.contentType ?? inferredContentType,
+              });
+              if (conversation.surface === 'web') visibleUpdatePosted = true;
+              return {
+                success: true,
+                artifact,
+                guidance: 'Link the artifact viewUrl when it is useful.',
+              };
+            } catch (error) {
+              completedTaskActions.delete(`artifact:${signature}`);
+              return toolFailure(error);
+            }
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.showWidget: {

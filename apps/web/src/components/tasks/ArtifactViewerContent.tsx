@@ -128,7 +128,8 @@ function getArtifactViewUrl(
 
 interface ArtifactViewerContentProps {
   artifact: ArtifactWithContent | null;
-  taskId: string;
+  owner?: { taskId: string } | { sessionId: string };
+  taskId?: string;
   onVersionChange?: (version: number) => void;
   className?: string;
   showToolbar?: boolean;
@@ -136,11 +137,14 @@ interface ArtifactViewerContentProps {
 
 export function ArtifactViewerContent({
   artifact,
-  taskId,
+  owner,
+  taskId: taskIdProp,
   onVersionChange,
   className,
   showToolbar = true,
 }: ArtifactViewerContentProps) {
+  const artifactOwner = owner ?? { taskId: taskIdProp! };
+  const taskId = 'taskId' in artifactOwner ? artifactOwner.taskId : undefined;
   const trpc = useTRPC();
   const trpcClient = useTRPCClient();
   const pathname = usePathname();
@@ -153,24 +157,34 @@ export function ArtifactViewerContent({
     mutationFn: async () => {
       if (!artifact) return;
 
-      const parentSession = await trpcClient.sessions.forTask.query({ taskId });
-      if (!parentSession) {
+      const sessionId = taskId
+        ? (
+            await trpcClient.sessions.forTask.query({
+              taskId,
+            })
+          )?.sessionId
+        : 'sessionId' in artifactOwner
+          ? artifactOwner.sessionId
+          : null;
+      if (!sessionId) {
         throw new Error(
           'The task that created this artifact is not attached to a Session.',
         );
       }
 
-      const url = getArtifactViewUrl(
-        window.location.origin,
-        taskId,
-        artifact.path,
-        artifact.version,
-      );
+      const buildRequest = taskId
+        ? `Build this ${getArtifactViewUrl(
+            window.location.origin,
+            taskId,
+            artifact.path,
+            artifact.version,
+          )}`
+        : `Build the ${artifact.path} artifact (v${artifact.version}) created in this Session.`;
       await trpcClient.fastSessions.reply.mutate({
-        sessionId: parentSession.sessionId,
-        text: `Build this ${url}`,
+        sessionId,
+        text: buildRequest,
       });
-      return parentSession.sessionId;
+      return sessionId;
     },
     onSuccess: (sessionId) => {
       if (!sessionId) return;
@@ -188,7 +202,7 @@ export function ArtifactViewerContent({
 
   const { data: versions = [] } = useQuery({
     ...trpc.artifacts.versions.queryOptions({
-      taskId,
+      ...artifactOwner,
       path: artifact?.path || '',
     }),
     refetchInterval: artifact ? 3000 : false,
@@ -255,12 +269,14 @@ export function ArtifactViewerContent({
   };
 
   const handleCopyUrl = async () => {
-    const url = getArtifactViewUrl(
-      window.location.origin,
-      taskId,
-      artifact.path,
-      artifact.version,
-    );
+    const url = taskId
+      ? getArtifactViewUrl(
+          window.location.origin,
+          taskId,
+          artifact.path,
+          artifact.version,
+        )
+      : `${window.location.origin}/sessions/${'sessionId' in artifactOwner ? artifactOwner.sessionId : ''}`;
     await navigator.clipboard.writeText(url);
     setIsUrlCopied(true);
     toast.success('URL copied to clipboard');

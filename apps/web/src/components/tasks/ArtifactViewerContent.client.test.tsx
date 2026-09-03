@@ -429,6 +429,37 @@ describe('ArtifactViewerContent', () => {
     });
   });
 
+  it('sends a Session-owned artifact back into the same Session', async () => {
+    render(
+      <ArtifactViewerContent
+        owner={{ sessionId: '11111111-1111-4111-8111-111111111111' }}
+        artifact={{
+          id: 'artifact-2',
+          taskId: null,
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          path: 'plans/session-plan.md',
+          version: 1,
+          artifactType: 'plan',
+          contentType: 'text/markdown',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/session-plan.md',
+          content: '# Session plan',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Build this'));
+
+    await waitFor(() => {
+      expect(forTaskQueryMock).not.toHaveBeenCalled();
+      expect(replyMutationMock).toHaveBeenCalledWith({
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        text: 'Build the plans/session-plan.md artifact (v1) created in this Session.',
+      });
+    });
+  });
+
   it('preserves artifact paths in the sent URL', async () => {
     render(
       <ArtifactViewerContent

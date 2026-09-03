@@ -24,6 +24,7 @@ import {
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   admitFastAgentHumanFollowUp,
+  createFastAgentConversationArtifact,
   persistFastAgentInlineHumanTurn,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
@@ -332,6 +333,11 @@ export async function processFastAgentMessage(params: {
         !directedAtRoomote,
       ...(roomoteSlackUserId ? { slackRoomoteUserId: roomoteSlackUserId } : {}),
       adapter: {
+        createArtifact: (artifact) =>
+          createFastAgentConversationArtifact({
+            fastConversationId: session.id,
+            ...artifact,
+          }),
         ...(durableTurn
           ? {
               requestDurableResume: () =>

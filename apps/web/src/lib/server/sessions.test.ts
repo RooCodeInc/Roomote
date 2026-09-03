@@ -920,6 +920,43 @@ describe('unified Session queries', () => {
     );
   });
 
+  it('returns uploaded Session-owned artifacts without creating a task', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Fast artifact session',
+    });
+    await db.insert(taskArtifacts).values([
+      {
+        sessionId: session.id,
+        path: 'notes/result.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 100,
+        uploaded: true,
+      },
+      {
+        sessionId: session.id,
+        path: 'notes/pending.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 100,
+        uploaded: false,
+      },
+    ]);
+
+    const detail = await getSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(detail?.tasks).toEqual([]);
+    expect(detail?.artifacts).toEqual([
+      expect.objectContaining({ path: 'notes/result.md', version: 1 }),
+    ]);
+  });
+
   it('collates live preview URLs from awake linked task runs', async () => {
     const owner = await userFactory.create();
     const session = await sessionFactory.create({

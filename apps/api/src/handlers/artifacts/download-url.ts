@@ -54,7 +54,7 @@ export async function getArtifactDownloadUrl(
   }
 
   const url = await generateDownloadUrl(
-    artifact.taskId,
+    artifact.taskId!,
     artifact.id,
     artifact.path,
     artifact.version,
