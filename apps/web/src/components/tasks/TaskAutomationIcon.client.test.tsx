@@ -11,12 +11,15 @@ describe('TaskAutomationIcon', () => {
     expect(container.querySelector('.lucide-git-pull-request')).not.toBeNull();
   });
 
-  it('uses the merge icon for merged pull request summaries', () => {
+  it('uses the generated Slack asset for registered automations', () => {
     const { container } = render(
       <TaskAutomationIcon automationKey="announcer" />,
     );
 
-    expect(container.querySelector('.octicon-git-merge')).not.toBeNull();
+    expect(container.querySelector('img')).toHaveAttribute(
+      'src',
+      expect.stringContaining('git-merge.png'),
+    );
   });
 
   it('uses a bot icon for custom and unknown automations', () => {

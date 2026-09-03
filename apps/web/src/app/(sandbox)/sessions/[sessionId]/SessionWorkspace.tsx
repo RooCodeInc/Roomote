@@ -27,7 +27,7 @@ import {
   humanizeFilename,
 } from '@/lib';
 import { getSessionPullRequests } from '@/lib/session-pull-requests';
-import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
+import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInferenceCostBreakdown';
 import { PullRequestBadge } from '@/components/sandbox';
 import {
   getSessionSurfaceBrandIcon,
@@ -585,40 +585,10 @@ function SessionInfoPanel({
                 collisionPadding={16}
                 className="max-h-80 w-[calc(100vw-2rem)] max-w-80 overflow-y-auto"
               >
-                <p className="mb-3 text-sm font-medium">
-                  Inference cost breakdown
-                </p>
-                <dl className="space-y-2 text-xs">
-                  <div className="flex items-start justify-between gap-4">
-                    <dt className="text-muted-foreground">Direct session</dt>
-                    <dd className="shrink-0 font-medium tabular-nums">
-                      $
-                      {formatInferenceCost(
-                        session.inferenceCostBreakdown
-                          .directInferenceCostMicroUsd,
-                      )}
-                    </dd>
-                  </div>
-                  {session.inferenceCostBreakdown.tasks.map((task) => (
-                    <div
-                      key={task.taskId}
-                      className="flex items-start justify-between gap-4"
-                    >
-                      <dt className="min-w-0 break-words text-muted-foreground">
-                        {task.title}
-                      </dt>
-                      <dd className="shrink-0 font-medium tabular-nums">
-                        ${formatInferenceCost(task.inferenceCostMicroUsd)}
-                      </dd>
-                    </div>
-                  ))}
-                  <div className="flex items-start justify-between gap-4 border-t pt-2">
-                    <dt className="font-medium">Total</dt>
-                    <dd className="shrink-0 font-medium tabular-nums">
-                      ${inferenceCostLabel}
-                    </dd>
-                  </div>
-                </dl>
+                <SessionInferenceCostBreakdown
+                  breakdown={session.inferenceCostBreakdown}
+                  totalInferenceCostMicroUsd={session.inferenceCostMicroUsd}
+                />
               </PopoverContent>
             </Popover>
           </SandboxInfoRow>
@@ -644,11 +614,6 @@ function SessionInfoPanel({
               <span className="truncate">{surfaceLabel}</span>
             </span>
           </SandboxInfoRow>
-          {session.status ? (
-            <SandboxInfoRow label="Status">
-              <SessionStatusBadge status={session.status} />
-            </SandboxInfoRow>
-          ) : null}
         </SandboxInfoTable>
       </SandboxInfoPanel>
     </FramedSurface>
@@ -809,6 +774,8 @@ export function SessionWorkspace({
     ) : selectedTask ? (
       <NestedTaskSidePanel
         taskId={selectedTask.taskId}
+        tasks={taskCards}
+        onSelectTask={(taskId) => selectTask(taskId)}
         onClose={closePanel}
         onOpenArtifact={(path, version) =>
           setPanel({
@@ -823,6 +790,8 @@ export function SessionWorkspace({
     ) : panel?.kind === 'nested' ? (
       <NestedTaskSidePanel
         taskId={panel.taskId}
+        tasks={taskCards}
+        onSelectTask={(taskId) => setPanel({ kind: 'nested', taskId })}
         onClose={closePanel}
         onOpenArtifact={(path, version) =>
           setPanel({
