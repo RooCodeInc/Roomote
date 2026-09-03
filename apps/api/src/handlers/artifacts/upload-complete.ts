@@ -68,15 +68,5 @@ export async function markArtifactUploadComplete(
       503,
     );
   }
-  if (notification === 'in_progress') {
-    // Another request is mid-delivery; 503 keeps the worker retrying until
-    // that delivery settles instead of reporting success while it can still
-    // fail and release its claim.
-    return c.json(
-      { error: 'Artifact published; parent notification is in progress' },
-      503,
-    );
-  }
-
   return new Response(null, { status: 200 });
 }

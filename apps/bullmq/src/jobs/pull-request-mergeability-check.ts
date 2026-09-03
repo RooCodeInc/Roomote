@@ -102,8 +102,8 @@ async function postConflictNotification(params: {
 
   const title =
     params.candidate.prTitle ?? `Pull request #${params.candidate.prNumber}`;
-  const deliveredToFastParent =
-    await notifyFastAgentParentOnPullRequestConflict({
+  const admittedToFastParent = await notifyFastAgentParentOnPullRequestConflict(
+    {
       run: latestRun,
       pullRequest: {
         provider: 'github',
@@ -114,8 +114,9 @@ async function postConflictNotification(params: {
         url: params.candidate.prUrl,
       },
       conflictDetectedAt: params.conflictDetectedAt,
-    });
-  if (deliveredToFastParent) return true;
+    },
+  );
+  if (admittedToFastParent) return true;
 
   const route = await resolvePrReviewNotificationRoute(latestRun);
   const text = buildCandidateConflictText(params.candidate);

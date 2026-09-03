@@ -520,7 +520,6 @@ describe('prReviewNotificationJob', () => {
     );
 
     expect(mockNotifyFastAgentParent).toHaveBeenCalledWith({
-      canonicalDeliveryOwned: false,
       run: expect.objectContaining({ id: 1, taskId: 'task-1' }),
       feedbackSourceIds: [expect.any(String)],
       pullRequest: {

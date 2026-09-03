@@ -1,83 +1,29 @@
 import type { TaskRun } from '@roomote/db/server';
 
 const mocks = vi.hoisted(() => {
-  class FastAgentParentEventDeliveryError extends Error {
-    readonly replyPosted: boolean;
-    readonly permanent: boolean;
-
-    constructor(
-      message: string,
-      options: { replyPosted: boolean; permanent?: boolean },
-    ) {
-      super(message);
-      this.replyPosted = options.replyPosted;
-      this.permanent = options.permanent ?? false;
-    }
-  }
-
   return {
-    claimReturning: vi.fn(),
-    claimConversationDelivery: vi.fn(),
-    completeConversationDelivery: vi.fn(),
-    releaseConversationDelivery: vi.fn(),
     findReusableOwner: vi.fn(),
-    findClaimRun: vi.fn(),
-    updateSet: vi.fn(),
     recordLifecycle: vi.fn(),
-    enqueueParentEventAndWait: vi.fn(),
+    enqueueParentEvent: vi.fn(),
     getTaskUrl: vi.fn(
       ({ taskId }: { taskId: string }) =>
         `https://roomote.example/task/${taskId}`,
     ),
-    FastAgentParentEventDeliveryError,
   };
 });
 
 vi.mock('@roomote/db/server', () => ({
-  db: {
-    query: {
-      taskRuns: { findFirst: mocks.findClaimRun },
-    },
-    update: vi.fn(() => ({
-      set: vi.fn((values: unknown) => {
-        mocks.updateSet(values);
-        return {
-          where: vi.fn(() => ({ returning: mocks.claimReturning })),
-        };
-      }),
-    })),
-  },
-  claimFastAgentPrFeedbackDelivery: mocks.claimConversationDelivery,
-  completeFastAgentPrFeedbackDelivery: mocks.completeConversationDelivery,
-  releaseFastAgentPrFeedbackDelivery: mocks.releaseConversationDelivery,
+  db: {},
   findReusableGitHubPrFollowUpOwner: mocks.findReusableOwner,
-  and: vi.fn((...args: unknown[]) => args),
-  asc: vi.fn((value: unknown) => value),
-  desc: vi.fn((value: unknown) => value),
-  eq: vi.fn((...args: unknown[]) => args),
   recordTaskRunLifecycleEvent: mocks.recordLifecycle,
-  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
-    strings: [...strings],
-    values,
-  })),
-  taskRuns: {
-    id: 'task_runs.id',
-    taskId: 'task_runs.task_id',
-    createdAt: 'task_runs.created_at',
-    result: 'task_runs.result',
-  },
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   getTaskUrl: mocks.getTaskUrl,
 }));
 
-vi.mock('../../fast-agent-parent-event', () => ({
-  FastAgentParentEventDeliveryError: mocks.FastAgentParentEventDeliveryError,
-}));
-
 vi.mock('../../fast-agent-parent-event-queue', () => ({
-  enqueueFastAgentParentEventAndWait: mocks.enqueueParentEventAndWait,
+  enqueueFastAgentParentEvent: mocks.enqueueParentEvent,
 }));
 
 import { notifyFastAgentParentOnPrFeedback } from '../notify-fast-agent-parent-on-pr-feedback';
@@ -121,37 +67,24 @@ const input = {
   suggestedActionPrompt: 'Address the requested changes.',
 };
 
-function claimedFeedbackIds(): string[] {
-  return mocks.claimConversationDelivery.mock.calls.map(
-    (call: unknown[]) => (call[0] as { feedbackId: string }).feedbackId,
+function enqueuedFeedbackIds(): string[] {
+  return mocks.enqueueParentEvent.mock.calls.map(
+    (call: unknown[]) =>
+      (call[0] as { event: { feedbackId: string } }).event.feedbackId,
   );
 }
 
 describe('notifyFastAgentParentOnPrFeedback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
-    const claimed = new Set<string>();
-    mocks.claimConversationDelivery.mockImplementation(
-      async ({ feedbackId }: { feedbackId: string }) => {
-        if (claimed.has(feedbackId)) {
-          return { status: 'already_claimed' as const };
-        }
-        claimed.add(feedbackId);
-        return {
-          status: 'claimed' as const,
-          claim: { id: `claim-${feedbackId}`, leaseToken: 'lease-token' },
-        };
-      },
-    );
-    mocks.completeConversationDelivery.mockResolvedValue(undefined);
-    mocks.releaseConversationDelivery.mockResolvedValue(undefined);
     mocks.findReusableOwner.mockResolvedValue({
       taskId: 'child-task',
       runId: 200,
     });
-    mocks.findClaimRun.mockResolvedValue({ id: 200 });
-    mocks.enqueueParentEventAndWait.mockResolvedValue('delivered');
+    mocks.enqueueParentEvent.mockResolvedValue({
+      eventKey: 'feedback-event',
+      queued: true,
+    });
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
 
@@ -163,23 +96,20 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
       }),
     ).resolves.toBe(true);
 
-    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledWith(
-      {
-        parent: fastParent,
-        event: {
-          type: 'pull_request_feedback',
-          feedbackId: expect.stringMatching(/^[a-f0-9]{24}$/),
-          taskId: 'child-task',
-          runId: 200,
-          taskUrl: 'https://roomote.example/task/child-task',
-          pullRequest: input.pullRequest,
-          summary: input.summary,
-          suggestedActionQuestion: input.suggestedActionQuestion,
-          suggestedActionPrompt: input.suggestedActionPrompt,
-        },
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith({
+      parent: fastParent,
+      event: {
+        type: 'pull_request_feedback',
+        feedbackId: expect.stringMatching(/^[a-f0-9]{24}$/),
+        taskId: 'child-task',
+        runId: 200,
+        taskUrl: 'https://roomote.example/task/child-task',
+        pullRequest: input.pullRequest,
+        summary: input.summary,
+        suggestedActionQuestion: input.suggestedActionQuestion,
+        suggestedActionPrompt: input.suggestedActionPrompt,
       },
-      { timeoutMs: 30_000 },
-    );
+    });
     expect(mocks.recordLifecycle).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -199,7 +129,50 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
       }),
     ).resolves.toBe(false);
 
-    expect(mocks.enqueueParentEventAndWait).not.toHaveBeenCalled();
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('suppresses review-pipeline runs inherited from the parent Session', async () => {
+    await expect(
+      notifyFastAgentParentOnPrFeedback({
+        run: makeRun({
+          type: 'github_pr_review',
+          fastAgentParent: fastParent,
+        }),
+        ...input,
+      }),
+    ).resolves.toBe(false);
+
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('surfaces durable admission failures to the caller', async () => {
+    mocks.enqueueParentEvent.mockRejectedValueOnce(
+      new Error('database offline'),
+    );
+
+    await expect(
+      notifyFastAgentParentOnPrFeedback({
+        run: makeRun({ fastAgentParent: fastParent }),
+        ...input,
+      }),
+    ).rejects.toThrow('database offline');
+    expect(mocks.recordLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('keeps successful admission when lifecycle logging fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.recordLifecycle.mockRejectedValueOnce(new Error('logging offline'));
+
+    await expect(
+      notifyFastAgentParentOnPrFeedback({
+        run: makeRun({ fastAgentParent: fastParent }),
+        ...input,
+      }),
+    ).resolves.toBe(true);
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledOnce();
+    expect(errorSpy).toHaveBeenCalledOnce();
+    errorSpy.mockRestore();
   });
 
   it('uses the same feedback identity regardless of source event order', async () => {
@@ -215,8 +188,8 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
       feedbackSourceIds: ['delivery-1', 'delivery-2'],
     });
 
-    expect(claimedFeedbackIds()[1]).toBe(claimedFeedbackIds()[0]);
-    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledOnce();
+    expect(enqueuedFeedbackIds()[1]).toBe(enqueuedFeedbackIds()[0]);
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledTimes(2);
   });
 
   it('uses stable source events instead of generated summary text for fallback identity', async () => {
@@ -234,11 +207,11 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
       feedbackSourceIds: ['github-review:123'],
     });
 
-    expect(claimedFeedbackIds()[1]).toBe(claimedFeedbackIds()[0]);
-    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledOnce();
+    expect(enqueuedFeedbackIds()[1]).toBe(enqueuedFeedbackIds()[0]);
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledTimes(2);
   });
 
-  it('delivers once across linked tasks sharing a conversation', async () => {
+  it('uses one stable queue identity across linked tasks sharing a conversation', async () => {
     const olderRun = makeRun(
       { fastAgentParent: fastParent },
       { id: 100, taskId: 'older-task' },
@@ -255,8 +228,8 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
     await notifyFastAgentParentOnPrFeedback({ run: olderRun, ...input });
     await notifyFastAgentParentOnPrFeedback({ run: newerRun, ...input });
 
-    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledOnce();
-    expect(mocks.claimConversationDelivery).toHaveBeenCalledTimes(2);
+    expect(enqueuedFeedbackIds()[1]).toBe(enqueuedFeedbackIds()[0]);
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledTimes(2);
   });
 
   it('still delivers when a different task is the reusable owner', async () => {
@@ -277,8 +250,8 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
       }),
     ).resolves.toBe(true);
 
-    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledOnce();
-    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledWith(
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledOnce();
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
           taskId: 'newer-task',
@@ -286,22 +259,7 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
           taskUrl: 'https://roomote.example/task/newer-task',
         }),
       }),
-      { timeoutMs: 30_000 },
     );
-  });
-
-  it('falls back to the task-scoped claim when the conversation row is missing', async () => {
-    mocks.claimConversationDelivery.mockResolvedValue({
-      status: 'no_conversation' as const,
-    });
-
-    await notifyFastAgentParentOnPrFeedback({
-      run: makeRun({ fastAgentParent: fastParent }),
-      ...input,
-    });
-
-    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledOnce();
-    expect(mocks.completeConversationDelivery).not.toHaveBeenCalled();
   });
 
   it('shares a feedback identity between direct review handoff and webhook delivery', async () => {
@@ -321,8 +279,8 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
       reviewHeadSha: 'abc123',
     });
 
-    expect(claimedFeedbackIds()[1]).toBe(claimedFeedbackIds()[0]);
-    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledOnce();
+    expect(enqueuedFeedbackIds()[1]).toBe(enqueuedFeedbackIds()[0]);
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledTimes(2);
   });
 
   it('preserves structured terminal review metadata in the Fast event', async () => {
@@ -340,17 +298,16 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
       reviewResult,
     });
 
-    expect(mocks.enqueueParentEventAndWait).toHaveBeenCalledWith(
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({ reviewResult }),
       }),
-      { timeoutMs: 30_000 },
     );
   });
 
   it('does nothing for a task without a Fast parent', async () => {
     await notifyFastAgentParentOnPrFeedback({ run: makeRun({}), ...input });
 
-    expect(mocks.enqueueParentEventAndWait).not.toHaveBeenCalled();
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
   });
 });

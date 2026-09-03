@@ -163,44 +163,6 @@ export async function enqueueFastAgentParentEvent(params: {
   return { eventKey, queued: true };
 }
 
-/**
- * Durably admit an event, then wait for the ordered queue drain to settle it.
- * Callers that must distinguish presentation from admission can retain their
- * bounded retry contract without bypassing the shared parent-event queue.
- */
-export async function enqueueFastAgentParentEventAndWait(
-  params: {
-    parent: FastAgentParent;
-    event: FastAgentParentEvent;
-    retryTaskStartRunId?: number;
-  },
-  options: { timeoutMs: number; pollIntervalMs?: number },
-): Promise<'delivered' | 'skipped'> {
-  const { eventKey } = await enqueueFastAgentParentEvent(params);
-  const deadline = Date.now() + options.timeoutMs;
-  const pollIntervalMs = options.pollIntervalMs ?? 100;
-
-  for (;;) {
-    const row = await db.query.fastAgentParentEvents.findFirst({
-      where: eq(fastAgentParentEvents.eventKey, eventKey),
-      columns: { deliveredAt: true, discardedAt: true },
-    });
-    if (!row || row.discardedAt) return 'skipped';
-    if (row.deliveredAt) return 'delivered';
-
-    const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) {
-      throw new FastAgentParentEventDeliveryError(
-        'Timed out waiting for the queued Fast parent event to be delivered.',
-        { replyPosted: false },
-      );
-    }
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.min(pollIntervalMs, remainingMs)),
-    );
-  }
-}
-
 /** Serialize PR-open admission with terminal run updates on the same row. */
 export async function enqueueFastAgentParentEventForRun(params: {
   parent: FastAgentParent;

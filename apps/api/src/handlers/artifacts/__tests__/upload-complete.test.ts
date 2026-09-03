@@ -56,7 +56,7 @@ describe('markArtifactUploadComplete', () => {
       version: 1,
       uploaded: false,
     });
-    mocks.notifyParent.mockResolvedValue('delivered');
+    mocks.notifyParent.mockResolvedValue('queued');
   });
 
   it('notifies the Fast parent immediately after upload publication', async () => {
@@ -73,11 +73,7 @@ describe('markArtifactUploadComplete', () => {
     });
   });
 
-  it('replays publication through the idempotent notifier', async () => {
-    mocks.notifyParent
-      .mockResolvedValueOnce('delivered')
-      .mockResolvedValueOnce('already_delivered');
-
+  it('replays publication through idempotent durable admission', async () => {
     expect((await markArtifactUploadComplete(context())).status).toBe(200);
     expect((await markArtifactUploadComplete(context())).status).toBe(200);
     expect(mocks.notifyParent).toHaveBeenCalledTimes(2);
