@@ -45,6 +45,8 @@ const mocks = vi.hoisted(() => ({
   postDiscordSuggestions: vi.fn(),
   postTeamsSuggestions: vi.fn(),
   postTelegramSuggestions: vi.fn(),
+  buildSourceControlFastDelivery: vi.fn(),
+  postSourceControlComment: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -203,6 +205,11 @@ vi.mock('./fast-automation-suggestions', () => ({
   postFastAutomationSuggestionsToDiscord: mocks.postDiscordSuggestions,
   postFastAutomationSuggestionsToTeams: mocks.postTeamsSuggestions,
   postFastAutomationSuggestionsToTelegram: mocks.postTelegramSuggestions,
+}));
+
+vi.mock('./source-control-fast-delivery', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./source-control-fast-delivery')>()),
+  buildSourceControlFastDelivery: mocks.buildSourceControlFastDelivery,
 }));
 
 import {
@@ -2122,5 +2129,91 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
     expect(mocks.postMessage).not.toHaveBeenCalled();
     expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+  });
+
+  it('answers a pull request mention routed into a Slack Session on both the thread and the pull request', async () => {
+    mocks.buildSourceControlFastDelivery.mockResolvedValue({
+      postComment: async (input: unknown) => {
+        mocks.postSourceControlComment(input);
+        return { messageId: 'comment-1' };
+      },
+      resolveTarget: async () => ({
+        repositoryId: 'repo-1',
+        branch: 'feature/ship',
+        pullRequest: { url: 'https://github.com/acme/api/pull/42' },
+      }),
+    });
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => Promise<unknown> };
+      }) => {
+        await adapter.postReply({
+          purpose: 'closeout',
+          message: 'Done: the changelog now mentions the fix.',
+        });
+        return 'Done';
+      },
+    );
+
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'github:comment:900',
+          currentMessageId: 'github:comment:900',
+          userId: 'user-2',
+          question: 'Can you also update the changelog?',
+          senderDisplayName: 'alice',
+          agentContext: '<pull_request>#42</pull_request>',
+          activeTasks: [{ taskId: 'task-owner', status: 'running' }],
+          sourceControlReplyTarget: {
+            provider: 'github',
+            host: 'github.com',
+            repositoryFullName: 'acme/api',
+            kind: 'pull',
+            number: 42,
+            reviewCommentId: '800',
+            url: 'https://github.com/acme/api/pull/42',
+          },
+        },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Can you also update the changelog?',
+        currentMessageAgentContext: '<pull_request>#42</pull_request>',
+        activeTasks: [{ taskId: 'task-owner', status: 'running' }],
+        turnSource: 'human',
+      }),
+    );
+    expect(mocks.buildSourceControlFastDelivery).toHaveBeenCalledWith({
+      surface: 'github',
+      workspaceId: 'github.com/acme/api',
+      conversationId: 'pull/42',
+      replyTarget: { channelId: 'pull/42', threadId: '800' },
+    });
+    // The pull request gets the answer under the quoted mention, in the
+    // review thread the mention came from.
+    expect(mocks.postSourceControlComment).toHaveBeenCalledOnce();
+    const comment = mocks.postSourceControlComment.mock.calls[0]?.[0] as {
+      discussion: { number: number; reviewCommentId?: string };
+      body: string;
+    };
+    expect(comment.discussion).toEqual(
+      expect.objectContaining({ number: 42, reviewCommentId: '800' }),
+    );
+    expect(comment.body).toContain('> Can you also update the changelog?');
+    expect(comment.body).toContain('Done: the changelog now mentions the fix.');
+    // The Slack thread gets the same answer with attribution to the mention.
+    const slackPosts = JSON.stringify(mocks.postMessage.mock.calls);
+    expect(slackPosts).toContain(
+      '**alice** on [acme/api#42](https://github.com/acme/api/pull/42):',
+    );
+    expect(slackPosts).toContain('Done: the changelog now mentions the fix.');
   });
 });

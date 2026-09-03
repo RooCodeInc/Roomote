@@ -14,6 +14,7 @@ import {
   buildFastAgentChildTaskMetadata,
   linkedWorkItemProviderSchema,
   TaskPayloadKind,
+  type FastAgentConversation,
   type FastAgentSourceControlConversation,
   type FastAgentSourceControlSurface,
 } from '@roomote/types';
@@ -111,6 +112,12 @@ export type SourceControlFastLaunchTarget = {
 export function createFastAgentSourceControlTaskLauncher(params: {
   userId: string;
   conversation: FastAgentSourceControlConversation;
+  /**
+   * The Session's home conversation when it differs from the discussion (a
+   * Slack Session answering a mention on the pull request its task opened).
+   * The child attaches to that home so its lifecycle events reach the Session.
+   */
+  parentConversation?: FastAgentConversation;
   resolveTarget: () => Promise<SourceControlFastLaunchTarget>;
 }): LaunchFastAgentTask {
   const discussion = parseSourceControlFastConversation(params.conversation);
@@ -188,7 +195,7 @@ export function createFastAgentSourceControlTaskLauncher(params: {
           ...(linkedIssue ? { linkedWorkItems: [linkedIssue] } : {}),
           ...buildFastAgentChildTaskMetadata({
             sessionId: parentSessionId,
-            conversation: params.conversation,
+            conversation: params.parentConversation ?? params.conversation,
           }),
           ...(environmentId && environmentId !== ALL_REPOSITORIES
             ? { environmentId }
@@ -432,6 +439,8 @@ async function findProviderRepository(discussion: SourceControlFastDiscussion) {
 function pullRequestPageUrl(discussion: SourceControlFastDiscussion): string {
   const base = `https://${discussion.host}/${discussion.repositoryFullName}`;
   switch (discussion.provider) {
+    case 'github':
+      return `${base}/${discussion.kind === 'pull' ? 'pull' : 'issues'}/${discussion.number}`;
     case 'gitlab':
       return `${base}/-/${discussion.kind === 'pull' ? 'merge_requests' : 'issues'}/${discussion.number}`;
     case 'bitbucket':
@@ -440,6 +449,9 @@ function pullRequestPageUrl(discussion: SourceControlFastDiscussion): string {
       return `${base}/${discussion.kind === 'pull' ? 'pulls' : 'issues'}/${discussion.number}`;
   }
 }
+
+/** Public page of a discussion, derived from its identity when the provider's own URL is not at hand. */
+export const buildSourceControlDiscussionUrl = pullRequestPageUrl;
 
 async function buildGitLabFastDelivery(
   discussion: SourceControlFastDiscussion,
@@ -839,6 +851,11 @@ export function buildSourceControlFastAdapter(params: {
   userId: string;
   sessionId: string;
   /** Blockquote of the message this turn answers; opens the turn's comment. */
+  /**
+   * The Session's home conversation when the discussion is not its own (see
+   * createFastAgentSourceControlTaskLauncher). Delegated children attach there.
+   */
+  parentConversation?: FastAgentConversation;
   quote?: string | null;
   onReplyPosted?: () => void;
 }): {
@@ -856,6 +873,9 @@ export function buildSourceControlFastAdapter(params: {
     launchTask: createFastAgentSourceControlTaskLauncher({
       userId: params.userId,
       conversation: params.conversation,
+      ...(params.parentConversation
+        ? { parentConversation: params.parentConversation }
+        : {}),
       resolveTarget: params.delivery.resolveTarget,
     }),
     postReply: async ({ message }) => {

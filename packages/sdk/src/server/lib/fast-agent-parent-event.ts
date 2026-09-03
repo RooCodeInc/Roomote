@@ -52,6 +52,7 @@ import {
   exitedRunStatuses,
   type FastAgentConversation,
   type FastAgentHumanFollowUpEvent,
+  type FastAgentSourceControlReplyTarget,
   type FastAgentParent,
   type PullRequestStatus,
   type ReasoningEffort,
@@ -70,8 +71,10 @@ import {
 } from './linear-fast-session';
 import {
   buildSourceControlFastAdapter,
+  buildSourceControlFastConversation,
   buildSourceControlFastDelivery,
   buildSourceControlReplyQuote,
+  type SourceControlFastDiscussion,
 } from './source-control-fast-delivery';
 import { buildCustomAutomationSlackMessage } from './manager-slack';
 import {
@@ -1631,7 +1634,124 @@ async function createSourceControlFastAgentParentTurn(params: {
   };
 }
 
+/**
+ * Attribution line for the home surface when a human turn arrived on a
+ * source-control discussion: who wrote it and where, quoted the way a web
+ * reply is quoted into a Slack thread.
+ */
+function buildSourceControlOriginAttribution(
+  event: FastAgentHumanFollowUpEvent,
+  target: FastAgentSourceControlReplyTarget,
+): string {
+  const label = `${target.repositoryFullName}#${target.number}`;
+  const where = target.url ? `[${label}](${target.url})` : label;
+  const who = event.senderDisplayName?.trim() || 'Someone';
+  const quoted = event.question
+    .trim()
+    .split('\n')
+    .map((line) => `> ${line}`)
+    .join('\n');
+  return `> **${who}** on ${where}:\n${quoted}`;
+}
+
+/**
+ * A human turn that arrived on a source-control discussion this Session owns
+ * through a task (a mention on the pull request a Slack Session's task opened)
+ * answers in both places: the Session's home surface as usual, and the
+ * discussion the message came from. Delegated work targets the discussion's
+ * branch while staying attached to this Session.
+ */
+async function withSourceControlReplyTarget(
+  turn: FastAgentParentTurn,
+  params: {
+    parent: FastAgentParent;
+    event: FastAgentHumanFollowUpEvent;
+    onReplyPosted: () => void;
+  },
+): Promise<FastAgentParentTurn> {
+  const target = params.event.sourceControlReplyTarget;
+  if (!target) {
+    return turn;
+  }
+  const discussion: SourceControlFastDiscussion = {
+    provider: target.provider,
+    host: target.host,
+    repositoryFullName: target.repositoryFullName,
+    kind: target.kind,
+    number: target.number,
+    ...(target.reviewCommentId
+      ? { reviewCommentId: target.reviewCommentId }
+      : {}),
+    ...(target.replyCommentId ? { replyCommentId: target.replyCommentId } : {}),
+  };
+  const conversation = buildSourceControlFastConversation(discussion);
+  // The Session's own discussion: the home adapter already posts there.
+  if (
+    isFastAgentSourceControlConversation(turn.conversation) &&
+    turn.conversation.workspaceId === conversation.workspaceId &&
+    turn.conversation.conversationId === conversation.conversationId
+  ) {
+    return turn;
+  }
+  const delivery = await buildSourceControlFastDelivery(conversation);
+  if (!delivery) {
+    console.warn(
+      `[Fast Agent] The repository for ${target.repositoryFullName} is not connected; answering only on the Session's home surface.`,
+    );
+    return turn;
+  }
+  const discussionAdapter = buildSourceControlFastAdapter({
+    conversation,
+    delivery,
+    userId: turn.userId,
+    sessionId: params.parent.sessionId,
+    parentConversation: turn.conversation,
+    quote: buildSourceControlReplyQuote({ text: params.event.question }),
+    onReplyPosted: params.onReplyPosted,
+  });
+  const attribution = buildSourceControlOriginAttribution(params.event, target);
+  let attributionPending = true;
+
+  return {
+    ...turn,
+    adapter: {
+      ...turn.adapter,
+      launchTask: discussionAdapter.launchTask,
+      postReply: async (reply) => {
+        const homeReply =
+          attributionPending && turn.conversation.surface !== 'web'
+            ? { ...reply, message: `${attribution}\n\n${reply.message}` }
+            : reply;
+        attributionPending = false;
+        const [homeHandle] = await Promise.all([
+          turn.adapter.postReply(homeReply),
+          discussionAdapter
+            .postReply({ message: reply.message })
+            .catch((error: unknown) => {
+              console.warn(
+                `[Fast Agent] Failed to post the Session's reply on ${target.repositoryFullName}#${target.number}: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }),
+        ]);
+        return homeHandle;
+      },
+    },
+  };
+}
+
 async function createFastAgentParentTurn(params: {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  actorUserId?: string;
+  onReplyPosted: () => void;
+}): Promise<FastAgentParentTurn> {
+  const turn = await createFastAgentHomeParentTurn(params);
+  return params.event.type === 'human_follow_up'
+    ? withSourceControlReplyTarget(turn, { ...params, event: params.event })
+    : turn;
+}
+
+async function createFastAgentHomeParentTurn(params: {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
   actorUserId?: string;
@@ -1799,6 +1919,18 @@ export async function deliverFastAgentParentEventWithLock(
         : {}),
       ...(humanFollowUp?.senderExternalId
         ? { senderExternalId: humanFollowUp.senderExternalId }
+        : {}),
+      ...(humanFollowUp?.agentContext
+        ? { currentMessageAgentContext: humanFollowUp.agentContext }
+        : {}),
+      ...(humanFollowUp?.activeTasks?.length
+        ? {
+            activeTasks: humanFollowUp.activeTasks.map((task) => ({
+              taskId: task.taskId,
+              ...(task.title ? { title: task.title } : {}),
+              ...(task.status ? { status: task.status as RunStatus } : {}),
+            })),
+          }
         : {}),
       turnSource: humanFollowUp ? 'human' : 'platform_event',
       ...(humanFollowUp
