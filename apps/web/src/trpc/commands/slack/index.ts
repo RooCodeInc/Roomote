@@ -5,6 +5,7 @@ import {
 } from '@roomote/sdk/server';
 import {
   PRODUCT_NAME,
+  buildSlackChannelUrl,
   buildSlackUserProfileUrl,
   getSlackTeamIdFromTaskPayload,
 } from '@roomote/types';
@@ -823,6 +824,7 @@ export async function completePendingSlackAuthenticationCommand(
 }
 
 const SLACK_USER_ID_PATTERN = /^[UW][A-Z0-9]+$/;
+const SLACK_CHANNEL_ID_PATTERN = /^[CDG][A-Z0-9]+$/;
 
 /**
  * Slack team a transcript belongs to, derived server-side from the task run
@@ -865,9 +867,11 @@ export async function resolveSlackUsersCommand(
       | { kind: 'task'; taskId: string }
       | { kind: 'session'; sessionId: string };
     userIds: string[];
+    channelIds?: string[];
   },
 ): Promise<{
   users: Record<string, { name: string; profileUrl: string | null }>;
+  channels: Record<string, { name: string; url: string | null }>;
 }> {
   const userIds = [
     ...new Set(
@@ -876,14 +880,22 @@ export async function resolveSlackUsersCommand(
         .filter((userId) => SLACK_USER_ID_PATTERN.test(userId)),
     ),
   ];
+  const channelIds = [
+    ...new Set(
+      (input.channelIds ?? [])
+        .map((channelId) => channelId.trim())
+        .filter((channelId) => SLACK_CHANNEL_ID_PATTERN.test(channelId)),
+    ),
+  ];
   const users: Record<string, { name: string; profileUrl: string | null }> = {};
-  if (userIds.length === 0) {
-    return { users };
+  const channels: Record<string, { name: string; url: string | null }> = {};
+  if (userIds.length === 0 && channelIds.length === 0) {
+    return { users, channels };
   }
 
   const teamId = await resolveSlackMentionScopeTeamId(auth, input.scope);
   if (!teamId) {
-    return { users };
+    return { users, channels };
   }
 
   const installation =
@@ -945,12 +957,14 @@ export async function resolveSlackUsersCommand(
   }
 
   const unresolved = userIds.filter((userId) => !users[userId]);
-  if (unresolved.length > 0 && installation?.botAccessToken) {
-    const slack = new SlackNotifier(installation.botAccessToken, {
-      botUserId: installation.botUserId,
-      botName: installation.botName,
-      appName: installation.appName,
-    });
+  const slack = installation?.botAccessToken
+    ? new SlackNotifier(installation.botAccessToken, {
+        botUserId: installation.botUserId,
+        botName: installation.botName,
+        appName: installation.appName,
+      })
+    : null;
+  if (unresolved.length > 0 && slack) {
     try {
       const names = await slack.getUserDisplayNames(unresolved);
       for (const [slackUserId, name] of names) {
@@ -963,5 +977,25 @@ export async function resolveSlackUsersCommand(
     }
   }
 
-  return { users };
+  if (channelIds.length > 0 && slack) {
+    await Promise.all(
+      channelIds.map(async (slackChannelId) => {
+        const name = await slack
+          .getChannelName(slackChannelId)
+          .catch(() => null);
+        if (name) {
+          channels[slackChannelId] = {
+            name,
+            url: buildSlackChannelUrl({
+              slackChannelId,
+              slackTeamId: teamId,
+              slackWorkspaceDomain: teamDomain,
+            }),
+          };
+        }
+      }),
+    );
+  }
+
+  return { users, channels };
 }

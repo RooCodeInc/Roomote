@@ -5,9 +5,16 @@ import { SlackMessageText } from './slack-message-text';
 
 const resolveUsersState = vi.hoisted(() => ({
   data: undefined as
-    | { users: Record<string, { name: string; profileUrl: string | null }> }
+    | {
+        users: Record<string, { name: string; profileUrl: string | null }>;
+        channels?: Record<string, { name: string; url: string | null }>;
+      }
     | undefined,
-  lastInput: null as { scope: unknown; userIds: string[] } | null,
+  lastInput: null as {
+    scope: unknown;
+    userIds: string[];
+    channelIds: string[];
+  } | null,
   lastEnabled: null as boolean | null,
 }));
 
@@ -22,7 +29,11 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     slack: {
       resolveUsers: {
-        queryOptions: (input: { scope: unknown; userIds: string[] }) => {
+        queryOptions: (input: {
+          scope: unknown;
+          userIds: string[];
+          channelIds: string[];
+        }) => {
           resolveUsersState.lastInput = input;
           return { queryKey: ['slack.resolveUsers', input] };
         },
@@ -75,6 +86,7 @@ describe('SlackMessageText', () => {
     expect(resolveUsersState.lastInput).toEqual({
       scope: { kind: 'session', sessionId: 'session-1' },
       userIds: ['U0BJNE7FC12'],
+      channelIds: [],
     });
     expect(resolveUsersState.lastEnabled).toBe(true);
   });
@@ -110,6 +122,37 @@ describe('SlackMessageText', () => {
       'https://example.com/a',
     ]);
     expect(screen.getByText(/\)\.$/)).toBeInTheDocument();
+  });
+
+  it('links resolved channel mentions to the channel', () => {
+    resolveUsersState.data = {
+      users: {},
+      channels: {
+        C0BSQGORZRS: {
+          name: 'ops-migration',
+          url: 'https://acme.slack.com/archives/C0BSQGORZRS',
+        },
+      },
+    };
+
+    render(
+      <SlackMentionProvider scope={{ kind: 'session', sessionId: 'session-1' }}>
+        <SlackMessageText text="the plan in <#C0BSQGORZRS> channel" />
+      </SlackMentionProvider>,
+    );
+
+    const mention = screen.getByTestId('slack-mention');
+    expect(mention).toHaveTextContent('#ops-migration');
+    expect(mention).toHaveAttribute(
+      'href',
+      'https://acme.slack.com/archives/C0BSQGORZRS',
+    );
+    expect(resolveUsersState.lastInput).toEqual({
+      scope: { kind: 'session', sessionId: 'session-1' },
+      userIds: [],
+      channelIds: ['C0BSQGORZRS'],
+    });
+    expect(resolveUsersState.lastEnabled).toBe(true);
   });
 
   it('does not query without a transcript scope', () => {

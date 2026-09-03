@@ -1351,6 +1351,10 @@ export const appRouter = createRouter({
           userIds: z
             .array(z.string().trim().min(1).max(64))
             .max(SLACK_RESOLVE_USERS_MAX_IDS),
+          channelIds: z
+            .array(z.string().trim().min(1).max(64))
+            .max(SLACK_RESOLVE_USERS_MAX_IDS)
+            .optional(),
         }),
       )
       .query(({ ctx: { auth }, input }) =>

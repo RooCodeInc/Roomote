@@ -4,6 +4,7 @@ import { Fragment, useMemo, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   SLACK_RESOLVE_USERS_MAX_IDS,
+  extractSlackChannelMentionIds,
   extractSlackUserMentionIds,
   parseSlackMessageTokens,
   type SlackMessageToken,
@@ -116,10 +117,15 @@ function renderTextWithBareUrls(text: string, keyPrefix: number): ReactNode[] {
   return nodes;
 }
 
+type ResolvedSlackReferences = {
+  users: Record<string, { name: string; profileUrl: string | null }>;
+  channels: Record<string, { name: string; url: string | null }>;
+};
+
 function renderToken(
   token: SlackMessageToken,
   index: number,
-  users: Record<string, { name: string; profileUrl: string | null }>,
+  { users, channels }: ResolvedSlackReferences,
 ): ReactNode {
   switch (token.type) {
     case 'text':
@@ -139,14 +145,17 @@ function renderToken(
         />
       );
     }
-    case 'channel':
+    case 'channel': {
+      const resolved = channels[token.channelId];
+      const label = resolved?.name ?? token.label ?? token.channelId;
       return (
         <SlackMention
           key={index}
-          label={`#${token.label ?? token.channelId}`}
-          href={null}
+          label={`#${label}`}
+          href={resolved?.url ?? null}
         />
       );
+    }
     case 'usergroup':
       return (
         <SlackMention
@@ -168,7 +177,8 @@ function renderToken(
  * Renders persisted Slack message text with `<@U…>`, `<#C…>`, `<!…>`, and
  * `<url|label>` tokens shown as readable mentions and links, and bare URLs
  * linkified. User mentions resolve to display names and link to the member's
- * Slack profile; the stored text is never rewritten.
+ * Slack profile, channel mentions resolve to channel names and link to the
+ * channel; the stored text is never rewritten.
  */
 export function SlackMessageText({ text }: { text: string }) {
   const tokens = useMemo(() => parseSlackMessageTokens(text), [text]);
@@ -179,17 +189,28 @@ export function SlackMessageText({ text }: { text: string }) {
       extractSlackUserMentionIds(text).slice(0, SLACK_RESOLVE_USERS_MAX_IDS),
     [text],
   );
+  const channelIds = useMemo(
+    () =>
+      extractSlackChannelMentionIds(text).slice(0, SLACK_RESOLVE_USERS_MAX_IDS),
+    [text],
+  );
   const { scope } = useSlackMentionContext();
   const trpc = useTRPC();
   const { data } = useQuery({
     ...trpc.slack.resolveUsers.queryOptions({
       scope: scope ?? { kind: 'task', taskId: '' },
       userIds,
+      channelIds,
     }),
-    enabled: scope !== null && userIds.length > 0,
+    enabled: scope !== null && (userIds.length > 0 || channelIds.length > 0),
     staleTime: 10 * 60 * 1000,
   });
-  const users = data?.users ?? {};
+  const resolved: ResolvedSlackReferences = {
+    users: data?.users ?? {},
+    channels: data?.channels ?? {},
+  };
 
-  return <>{tokens.map((token, index) => renderToken(token, index, users))}</>;
+  return (
+    <>{tokens.map((token, index) => renderToken(token, index, resolved))}</>
+  );
 }

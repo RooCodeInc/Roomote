@@ -346,6 +346,45 @@ export function extractSlackUserMentionIds(text: string): string[] {
   return [...userIds];
 }
 
+/** Unique Slack channel IDs referenced by `<#C…>` tokens, in first-seen order. */
+export function extractSlackChannelMentionIds(text: string): string[] {
+  const channelIds = new Set<string>();
+  for (const token of parseSlackMessageTokens(text)) {
+    if (token.type === 'channel') {
+      channelIds.add(token.channelId);
+    }
+  }
+  return [...channelIds];
+}
+
+/**
+ * Link to a Slack channel. Prefers the workspace web URL when the domain is
+ * known and falls back to Slack's app redirect when only the team ID is
+ * available.
+ */
+export function buildSlackChannelUrl(params: {
+  slackChannelId: string;
+  slackTeamId?: string | null;
+  slackWorkspaceDomain?: string | null;
+}): string | null {
+  const slackChannelId = params.slackChannelId.trim();
+  if (!slackChannelId) {
+    return null;
+  }
+
+  const slackWorkspaceDomain = params.slackWorkspaceDomain?.trim();
+  if (slackWorkspaceDomain) {
+    return `https://${encodeURIComponent(slackWorkspaceDomain)}.slack.com/archives/${encodeURIComponent(slackChannelId)}`;
+  }
+
+  const slackTeamId = params.slackTeamId?.trim();
+  if (slackTeamId) {
+    return `https://slack.com/app_redirect?channel=${encodeURIComponent(slackChannelId)}&team=${encodeURIComponent(slackTeamId)}`;
+  }
+
+  return null;
+}
+
 /**
  * Link to a Slack member profile. Prefers the workspace web URL when the
  * workspace domain is known and falls back to the `slack://` deep link that

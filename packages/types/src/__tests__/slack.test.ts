@@ -1,6 +1,8 @@
 import {
+  buildSlackChannelUrl,
   buildSlackThreadPermalink,
   buildSlackUserProfileUrl,
+  extractSlackChannelMentionIds,
   extractSlackUserMentionIds,
   parseSlackChannelPermalink,
   parseSlackMessagePermalink,
@@ -73,6 +75,36 @@ describe('extractSlackUserMentionIds', () => {
     expect(
       extractSlackUserMentionIds('<@U2> then <@U1> and <@U2> again <#C1>'),
     ).toEqual(['U2', 'U1']);
+  });
+});
+
+describe('extractSlackChannelMentionIds', () => {
+  it('dedupes channel ids in first-seen order', () => {
+    expect(
+      extractSlackChannelMentionIds('<#C2|ops> then <#C1> and <#C2> <@U1>'),
+    ).toEqual(['C2', 'C1']);
+  });
+});
+
+describe('buildSlackChannelUrl', () => {
+  it('prefers the workspace archive url when the domain is known', () => {
+    expect(
+      buildSlackChannelUrl({
+        slackChannelId: 'C123',
+        slackTeamId: 'T123',
+        slackWorkspaceDomain: 'acme-team',
+      }),
+    ).toBe('https://acme-team.slack.com/archives/C123');
+  });
+
+  it('falls back to the app redirect with only a team id', () => {
+    expect(
+      buildSlackChannelUrl({ slackChannelId: 'C123', slackTeamId: 'T123' }),
+    ).toBe('https://slack.com/app_redirect?channel=C123&team=T123');
+  });
+
+  it('returns null without a team id or domain', () => {
+    expect(buildSlackChannelUrl({ slackChannelId: 'C123' })).toBeNull();
   });
 });
 
