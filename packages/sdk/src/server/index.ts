@@ -289,6 +289,7 @@ export {
   prReviewActivityEventSchema,
   prReviewNotificationRequestSchema,
   requeuePendingPrReviewActivity,
+  retrySupersededPrReviewAction,
   resolvePrReviewNotificationRoute,
   schedulePrReviewNotificationJob,
   startPrReviewNotificationCycle,

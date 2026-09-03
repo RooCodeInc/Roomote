@@ -992,6 +992,31 @@ export async function releaseCanonicalPrReviewDelivery(input: {
     .where(canonicalClaimWhere(input));
 }
 
+export async function releaseSupersededCanonicalPrReviewAction(input: {
+  deliveryId: string;
+  leaseToken: string;
+}): Promise<boolean> {
+  const now = new Date();
+  const rows = await db
+    .update(prReviewNotificationDeliveries)
+    .set({
+      status: 'pending',
+      dueAt: now,
+      leaseToken: null,
+      leaseExpiresAt: null,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        canonicalClaimWhere(input),
+        inArray(prReviewNotificationDeliveries.status, ['claimed', 'prepared']),
+        isNotNull(prReviewNotificationDeliveries.actionClaimedAt),
+      ),
+    )
+    .returning({ id: prReviewNotificationDeliveries.id });
+  return rows.length === 1;
+}
+
 export async function upsertPrReviewAutoPreference(input: {
   sourceControlProvider: SourceControlProvider;
   host?: string | null;

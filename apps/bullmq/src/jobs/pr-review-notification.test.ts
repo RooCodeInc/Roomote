@@ -6,6 +6,7 @@ const {
   mockFindFirstSlackInstallation,
   mockConsumePending,
   mockRequeuePending,
+  mockRetrySupersededPrReviewAction,
   mockSchedule,
   mockPrepareDelivery,
   mockPrepareCanonical,
@@ -42,6 +43,7 @@ const {
   mockFindFirstSlackInstallation: vi.fn(),
   mockConsumePending: vi.fn(),
   mockRequeuePending: vi.fn(),
+  mockRetrySupersededPrReviewAction: vi.fn(),
   mockSchedule: vi.fn(),
   mockPrepareDelivery: vi.fn(),
   mockPrepareCanonical: vi.fn(),
@@ -186,6 +188,7 @@ vi.mock('@roomote/sdk/server', () => ({
     .passthrough(),
   consumePendingPrReviewActivity: mockConsumePending,
   requeuePendingPrReviewActivity: mockRequeuePending,
+  retrySupersededPrReviewAction: mockRetrySupersededPrReviewAction,
   schedulePrReviewNotificationJob: mockSchedule,
   getCommunicationProviderAdapter: vi.fn(
     async (provider: 'slack' | 'teams' | 'telegram' | 'discord') =>
@@ -248,6 +251,7 @@ describe('prReviewNotificationJob', () => {
     mockIsDurable.mockReturnValue(true);
     mockMigrateLegacy.mockResolvedValue(0);
     mockRenewLease.mockResolvedValue(true);
+    mockRetrySupersededPrReviewAction.mockResolvedValue(false);
     mockPrepareCanonical.mockResolvedValue(true);
     mockBeginCanonicalPrompt.mockResolvedValue(true);
     mockBeginCanonicalWebPrompt.mockResolvedValue(true);
@@ -847,6 +851,41 @@ describe('prReviewNotificationJob', () => {
       expect.objectContaining({ text: 'Review feedback remains.' }),
     );
     expect(mockFinalize).toHaveBeenCalled();
+  });
+
+  it('immediately retries a pre-post action fenced during delivery', async () => {
+    const deliveryId = '67676767-6767-4767-8767-676767676767';
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockBeginCanonicalPrompt.mockResolvedValue(false);
+    mockRetrySupersededPrReviewAction.mockResolvedValue(true);
+    const job = makeJob({
+      ownershipVersion: 'canonical',
+      deliveryId,
+      notificationUnitId: '68686868-6868-4868-8868-686868686868',
+      deliveryState: 'claimed',
+      destinationKey: 'task-1',
+      dispatchKey: `pr-review-delivery:${deliveryId}`,
+      deliveryIds: [deliveryId],
+      leaseToken: '69696969-6969-4969-8969-696969696969',
+      events,
+    });
+
+    await prReviewNotificationJob(job as never);
+
+    expect(mockRetrySupersededPrReviewAction).toHaveBeenCalledWith(job.data);
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockRecordDelivery).not.toHaveBeenCalled();
   });
 
   it('retires a canonical Slack prompt that loses its posting fence', async () => {

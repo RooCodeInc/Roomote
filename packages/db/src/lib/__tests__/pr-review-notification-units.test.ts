@@ -20,6 +20,7 @@ import {
   prReviewNotificationUnitEvents,
   prReviewNotificationUnits,
   releaseCanonicalPrReviewActionDispatch,
+  releaseSupersededCanonicalPrReviewAction,
   retireCanonicalPrReviewActionsForPullRequest,
   runFactory,
   taskFactory,
@@ -1425,14 +1426,15 @@ describe('canonical PR review notification ownership', () => {
         'prepared',
       );
       await expect(
-        claimForRepository(
-          repository,
-          new Date(CLAIM_AT.getTime() + 11 * 60 * 1000),
-        ),
-      ).resolves.toEqual([
+        releaseSupersededCanonicalPrReviewAction({
+          deliveryId: claim.deliveryId,
+          leaseToken: claim.leaseToken,
+        }),
+      ).resolves.toBe(true);
+      await expect(claimForRepository(repository, CLAIM_AT)).resolves.toEqual([
         expect.objectContaining({
           deliveryId: claim.deliveryId,
-          state: 'prepared',
+          state: 'claimed',
           reviewActionSuperseded: true,
         }),
       ]);

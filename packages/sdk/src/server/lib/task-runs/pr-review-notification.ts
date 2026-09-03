@@ -13,6 +13,7 @@ import {
   persistPrReviewEvent,
   recordPrReviewCycleState,
   releasePrReviewDeliveries,
+  releaseSupersededCanonicalPrReviewAction,
   renewPrReviewDeliveryClaim,
   slackInstallations,
   transitionCanonicalPrReviewDelivery,
@@ -510,6 +511,27 @@ export async function schedulePrReviewNotificationJob({
     new Date(Date.now() + delayMs),
     { incrementDeferrals: countDeferral },
   );
+}
+
+export async function retrySupersededPrReviewAction(
+  request: PrReviewNotificationRequest,
+): Promise<boolean> {
+  if (
+    request.ownershipVersion !== 'canonical' ||
+    !request.deliveryId ||
+    !request.leaseToken
+  ) {
+    return false;
+  }
+
+  const released = await releaseSupersededCanonicalPrReviewAction({
+    deliveryId: request.deliveryId,
+    leaseToken: request.leaseToken,
+  });
+  if (!released) return false;
+
+  await dispatchDuePrReviewNotifications();
+  return true;
 }
 
 export async function consumePendingPrReviewActivity(
