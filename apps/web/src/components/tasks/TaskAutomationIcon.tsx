@@ -1,31 +1,21 @@
-import type { ComponentType } from 'react';
 import Image from 'next/image';
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
   type BackgroundAutomationKey,
 } from '@roomote/types';
 
-import {
-  BellElectric,
-  Bot,
-  GitPullRequest,
-  MessagesSquare,
-  Smile,
-} from '@/components/system';
-
 type TaskAutomationIconProps = {
   automationKey: string | null;
   className?: string;
 };
 
-const AUTOMATION_ICONS: Partial<
-  Record<BackgroundAutomationKey, ComponentType<{ className?: string }>>
-> = {
-  review_code: GitPullRequest,
-  call_roomote_via_emoji: Smile,
-  slack_channel_auto_start: MessagesSquare,
-  platform_issue_alerts: BellElectric,
-};
+const AUTOMATION_ICON_ASSETS: Partial<Record<BackgroundAutomationKey, string>> =
+  {
+    review_code: 'git-pull-request',
+    call_roomote_via_emoji: 'smile',
+    slack_channel_auto_start: 'messages-square',
+    platform_issue_alerts: 'bell-electric',
+  };
 
 export function TaskAutomationIcon({
   automationKey,
@@ -37,22 +27,20 @@ export function TaskAutomationIcon({
       )
     : null;
 
-  if (descriptor) {
-    return (
-      <Image
-        src={`/automation-icons/${descriptor.slackIcon}.png`}
-        width={96}
-        height={96}
-        alt=""
-        className={className}
-      />
-    );
-  }
-
-  const Icon =
+  const icon =
+    descriptor?.slackIcon ??
     (automationKey
-      ? AUTOMATION_ICONS[automationKey as BackgroundAutomationKey]
-      : undefined) ?? Bot;
+      ? AUTOMATION_ICON_ASSETS[automationKey as BackgroundAutomationKey]
+      : undefined) ??
+    'zap';
 
-  return <Icon className={className} />;
+  return (
+    <Image
+      src={`/automation-icons/${icon}.png`}
+      width={96}
+      height={96}
+      alt=""
+      className={className}
+    />
+  );
 }

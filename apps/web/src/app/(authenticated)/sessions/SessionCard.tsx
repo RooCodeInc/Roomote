@@ -84,7 +84,7 @@ export function SessionCard({
           >
             <TaskAutomationIcon
               automationKey={session.ownerAutomation}
-              className="size-4 text-muted-foreground"
+              className="size-7"
             />
           </span>
         ) : (

@@ -212,7 +212,9 @@ describe('SessionCard', () => {
 
     expect(screen.getByText('Sentry Triage')).toBeInTheDocument();
     expect(screen.getByText('started a session')).toBeInTheDocument();
-    expect(screen.getByLabelText('Sentry Triage')).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Sentry Triage').querySelector('img'),
+    ).toBeInTheDocument();
   });
 
   it('removes crowded attribution and source metadata only in board view', () => {
