@@ -1,4 +1,4 @@
-export * from './block-kit';
+export * from './account-link';
 export * from './communication-provider';
 export * from './drain-slack-messages';
 export * from './emoji-preferences';
@@ -37,9 +37,8 @@ export * from './slack-notifier';
 export * from './slack-system-messages';
 export * from './slack-thread-message-utils';
 export * from './prompt-ready-thread-messages';
-export * from './start-slack-app-mention';
-export * from './start-auto-routed-slack-task';
 export * from './started-message';
+export * from './started-message-blocks';
 export * from './statuspage-incidents';
 export * from './persist-posted-slack-kickoff';
 export * from './pr-review-action';

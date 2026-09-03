@@ -72,16 +72,15 @@ gives a clear answer or next step without pretending code was changed.
 ## Choosing an environment
 
 In chat, Roomote's Fast Session decides whether a request needs a workspace
-and which environment fits, and it says so before delegating. In Slack and
-Telegram, some requests still show a confirmation card you can accept, cancel,
-or correct by replying naturally. When you start from the dashboard, choose
-the environment yourself or leave the selector on **Fast** to let the Session
+and which environment fits, and it says so before delegating. Reply in the
+same thread to redirect it. When you start from the dashboard, choose the
+environment yourself or leave the selector on **Fast** to let the Session
 decide. Linear can also suggest an environment from issue context.
 
-If a Slack request is ambiguous, Roomote shows the environment picker so you can
-choose where the task should run. If automatic routing is temporarily
-unavailable, the picker includes a warning instead of silently falling back.
-Choose an environment to continue; if the warning persists, ask an admin to
-check the deployment's inference provider.
+If a request is ambiguous, the Session asks a clarifying question in the same
+thread before it delegates, so you can name the environment or repository in
+your reply. If the deployment's inference provider is unavailable, Roomote says
+so in the thread instead of silently doing nothing; ask an admin to check the
+provider connection in that case.
 
 For more detail, see [Environments](/environments).
