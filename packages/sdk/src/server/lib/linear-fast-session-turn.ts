@@ -70,9 +70,11 @@ export function buildLinearFastTurn(input: {
     ...(issue.project?.name ? [`Project: ${issue.project.name}`] : []),
     '</linear_issue>',
   ];
-  const previousComments = firstTurn
-    ? (agentSession.previousComments ?? [])
-    : [];
+  // Stub comments are plumbing on the issue too; keep them out of the
+  // discussion the Session reads.
+  const previousComments = (
+    firstTurn ? (agentSession.previousComments ?? []) : []
+  ).filter((comment) => !isLinearDelegationStub(comment.body.trim()));
   if (previousComments.length > 0) {
     contextParts.push(
       '<issue_comments>',

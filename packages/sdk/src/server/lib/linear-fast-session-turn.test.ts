@@ -116,6 +116,18 @@ describe('buildLinearFastTurn', () => {
           id: 'comment-stub',
           body: 'This thread is for an agent session with roomoteroomoteroomote.',
         },
+        previousComments: [
+          {
+            id: 'c-stub',
+            body: 'This thread is for an agent session with roomoteroomoteroomote.',
+            user: { id: 'u-bot', name: 'roomote' },
+          },
+          {
+            id: 'c-real',
+            body: 'Seen in production twice.',
+            user: { id: 'u-2', name: 'Sam' },
+          },
+        ],
         createdAt: '2026-09-02T00:00:00.000Z',
         updatedAt: '2026-09-02T00:00:00.000Z',
       },
@@ -138,6 +150,8 @@ describe('buildLinearFastTurn', () => {
 
     expect(turn.question).toBe('Work on ENG-123: Fix API retries');
     expect(turn.agentContext).toContain('Retries never back off.');
+    expect(turn.agentContext).toContain('Seen in production twice.');
+    expect(turn.agentContext).not.toContain('agent session with');
   });
 
   it('describes a delegation with no comment as work on the issue', () => {
