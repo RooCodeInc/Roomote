@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   TaskEventName,
@@ -16,6 +18,7 @@ import type {
 const TEST_OPENCODE_MODEL = 'test-provider/main-model';
 const TURN_STALL_TIMEOUT_MS = 60_000;
 const STEER_TEXT = 'Use this newer instruction instead.';
+let harnessSequence = 0;
 
 class FakeOpenCodeServerClient {
   private eventHandler:
@@ -70,6 +73,7 @@ function createLogger() {
 
 function createHarness(client = new FakeOpenCodeServerClient()) {
   const logger = createLogger();
+  const visualProofAttemptStatePath = `/tmp/roomote-visual-proof-stall-test-${process.pid}-${harnessSequence++}.json`;
   const harness = new OpenCodeServerHarness({
     client: client as unknown as OpenCodeServerClient,
     workspacePath: '/tmp/workspace',
@@ -77,9 +81,10 @@ function createHarness(client = new FakeOpenCodeServerClient()) {
     model: TEST_OPENCODE_MODEL,
     eventStreamReadyTimeoutMs: 100,
     turnStallTimeoutMs: TURN_STALL_TIMEOUT_MS,
+    visualProofAttemptStatePath,
   });
 
-  return { client, harness, logger };
+  return { client, harness, logger, visualProofAttemptStatePath };
 }
 
 async function connectHarness(
@@ -347,7 +352,7 @@ describe('OpenCode turn stall watchdog', () => {
   });
 
   it('aborts a wedged turn, surfaces a retryable error, and ends the task', async () => {
-    const { client, harness } = createHarness();
+    const { client, harness, visualProofAttemptStatePath } = createHarness();
     const taskEvents: TaskEvent[] = [];
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
     harness.subscribe((event) => taskEvents.push(event));
@@ -359,6 +364,10 @@ describe('OpenCode turn stall watchdog', () => {
       await connectHarness(harness, client);
       vi.useFakeTimers();
       await startTask(client, harness);
+      await fs.writeFile(
+        visualProofAttemptStatePath,
+        JSON.stringify({ attemptId: 'wedged-attempt' }),
+      );
       // Re-baseline the activity clock (startTask's waitFor advances fake
       // time a little) so the window boundary below is exact.
       await client.emit(assistantTextPartEvent());
@@ -393,6 +402,9 @@ describe('OpenCode turn stall watchdog', () => {
           (event) => event.eventName === TaskEventName.TaskAborted,
         ),
       ).toHaveLength(1);
+      await expect(
+        fs.readFile(visualProofAttemptStatePath, 'utf8'),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
 
       // The MessageAbortedError provoked by the recovery abort stays
       // suppressed instead of surfacing a second error or terminal abort.

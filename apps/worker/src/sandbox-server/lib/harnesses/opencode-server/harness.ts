@@ -5325,6 +5325,7 @@ export class OpenCodeServerHarness
       this.inFlight = false;
       this.finalizedAssistantTurn = null;
       this.clearAllExecuteToolProgress();
+      this.clearVisualProofAttemptState();
 
       if (this.prompts.hasQueuedMessages()) {
         await this.drainQueuedPrompts();
