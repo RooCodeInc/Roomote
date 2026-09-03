@@ -721,6 +721,7 @@ export const prReviewNotificationJob = async (
           followUpPrompt: followUp.prompt,
         }))
       ) {
+        await requeuePendingPrReviewActivity({ target: data, events });
         console.log(
           `[PrReviewNotification] Canonical Fast web delivery ${data.deliveryId} lost its prompt-posting fence, skipping`,
         );
@@ -1004,6 +1005,7 @@ ${delivery.text}`;
           followUpPrompt: followUp.prompt,
         }))
       ) {
+        await requeuePendingPrReviewActivity({ target: data, events });
         console.log(
           `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its prompt-posting fence, skipping`,
         );
@@ -1055,6 +1057,7 @@ ${delivery.text}`;
             followUpPrompt: followUp.prompt,
           }))
         ) {
+          await requeuePendingPrReviewActivity({ target: data, events });
           console.log(
             `[PrReviewNotification] Canonical web task delivery ${data.deliveryId} lost its prompt-posting fence, skipping`,
           );

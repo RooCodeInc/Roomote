@@ -849,6 +849,42 @@ describe('prReviewNotificationJob', () => {
     expect(mockFinalize).toHaveBeenCalled();
   });
 
+  it('releases a claimed delivery when its stale-action fence rejects the prompt', async () => {
+    const deliveryId = '77777777-7777-4777-8777-777777777777';
+    const request = makeJob({
+      ownershipVersion: 'canonical',
+      deliveryId,
+      notificationUnitId: '88888888-8888-4888-8888-888888888888',
+      deliveryState: 'claimed',
+      destinationKey: 'task-1',
+      dispatchKey: `pr-review-delivery:${deliveryId}`,
+      deliveryIds: [deliveryId],
+      leaseToken: '99999999-9999-4999-8999-999999999999',
+      events,
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockBeginCanonicalPrompt.mockResolvedValue(false);
+
+    await prReviewNotificationJob(request as never);
+
+    expect(mockRequeuePending).toHaveBeenCalledWith({
+      target: request.data,
+      events,
+    });
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+  });
+
   it('retires a canonical Slack prompt that loses its posting fence', async () => {
     const deliveryId = '77777777-7777-4777-8777-777777777777';
     mockPrepareDelivery.mockResolvedValue({
