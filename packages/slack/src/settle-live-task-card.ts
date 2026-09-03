@@ -11,8 +11,9 @@ import {
 } from './live-task-stream';
 import { SlackNotifier } from './slack-notifier';
 import {
-  removeSlackThreadActiveTask,
+  removeSlackThreadActiveTaskByTaskId,
   setSlackThreadActiveTask,
+  type SlackThreadActiveTaskRoute,
 } from './thread-active-tasks';
 import { refreshSlackThreadActiveTaskFooter } from './thread-reply-footer-ops';
 
@@ -52,41 +53,52 @@ export async function renderSlackLiveTaskCard(input: {
   /** The task's generated title, rendered in place of the prompt-derived one. */
   taskTitle?: string | null;
 }): Promise<SlackLiveTaskCardRenderResult> {
-  const data = await getSlackLiveTaskStreamData(input.taskId);
-  if (!data) {
-    return { card: false, updated: false };
-  }
-
-  const taskTitle = input.taskTitle?.trim();
-  const title = taskTitle ? buildSlackLiveTaskTitle(taskTitle) : data.title;
-  try {
-    if (input.status === 'in_progress') {
-      await setSlackThreadActiveTask({
-        channel: data.channel,
-        threadTs: data.threadTs,
-        task: {
-          taskId: data.taskId,
-          title,
-          ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
-        },
-      });
-    } else {
-      await removeSlackThreadActiveTask({
-        channel: data.channel,
-        threadTs: data.threadTs,
-        taskId: data.taskId,
-      });
+  const terminal = input.status !== 'in_progress';
+  let removedRoute: SlackThreadActiveTaskRoute | null = null;
+  if (terminal) {
+    try {
+      removedRoute = await removeSlackThreadActiveTaskByTaskId(input.taskId);
+    } catch (error) {
+      console.warn(
+        `[renderSlackLiveTaskCard] Failed to remove active task ${input.taskId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
-  } catch (error) {
-    console.warn(
-      `[renderSlackLiveTaskCard] Failed to synchronize active task ${data.taskId}: ${error instanceof Error ? error.message : String(error)}`,
-    );
   }
 
+  const data = await getSlackLiveTaskStreamData(input.taskId);
+  const taskTitle = input.taskTitle?.trim();
+  const title = data
+    ? taskTitle
+      ? buildSlackLiveTaskTitle(taskTitle)
+      : data.title
+    : null;
+  if (data) {
+    try {
+      if (!terminal) {
+        await setSlackThreadActiveTask({
+          teamId: data.teamId,
+          channel: data.channel,
+          threadTs: data.threadTs,
+          task: {
+            taskId: data.taskId,
+            title: title!,
+            ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
+          },
+        });
+      }
+    } catch (error) {
+      console.warn(
+        `[renderSlackLiveTaskCard] Failed to synchronize active task ${data.taskId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  const route = data ?? removedRoute;
+  if (!route) return { card: false, updated: false };
   const installation = await db.query.slackInstallations.findFirst({
     where: and(
       eq(slackInstallations.isActive, true),
-      eq(slackInstallations.teamId, data.teamId),
+      eq(slackInstallations.teamId, route.teamId),
     ),
     columns: { botAccessToken: true },
   });
@@ -95,12 +107,20 @@ export async function renderSlackLiveTaskCard(input: {
   }
 
   const slack = new SlackNotifier(installation.botAccessToken);
+  if (!data) {
+    await refreshSlackThreadActiveTaskFooter({
+      slack,
+      channel: route.channel,
+      threadTs: route.threadTs,
+    });
+    return { card: false, updated: false };
+  }
   const updated = await slack.updateMessage({
     channel: data.channel,
     ts: data.messageTs,
     message: buildSlackLiveTaskCardBlocks({
       taskUpdateId: data.taskUpdateId,
-      title,
+      title: title!,
       status: input.status,
       ...(input.details ? { details: input.details } : {}),
       ...(input.output ? { output: input.output } : {}),
@@ -108,7 +128,7 @@ export async function renderSlackLiveTaskCard(input: {
     }),
   });
 
-  if (input.status !== 'in_progress') {
+  if (terminal) {
     await refreshSlackThreadActiveTaskFooter({
       slack,
       channel: data.channel,

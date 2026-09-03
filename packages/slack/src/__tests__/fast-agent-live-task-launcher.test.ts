@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   normalizeIncomingText: vi.fn(async (text: string) => text),
   settleSlackLiveTaskCardForRun: vi.fn(),
   setSlackThreadActiveTask: vi.fn(),
+  refreshSlackThreadActiveTaskFooter: vi.fn(),
   taskUrl: 'https://roomote.example/task/task-1',
 }));
 
@@ -87,6 +88,10 @@ vi.mock('../thread-active-tasks', () => ({
   setSlackThreadActiveTask: mocks.setSlackThreadActiveTask,
 }));
 
+vi.mock('../thread-reply-footer-ops', () => ({
+  refreshSlackThreadActiveTaskFooter: mocks.refreshSlackThreadActiveTaskFooter,
+}));
+
 import { RunStatus } from '@roomote/types';
 
 import { createFastAgentSlackLiveTaskLauncher } from '../fast-agent-live-task-launcher';
@@ -97,6 +102,7 @@ function createLauncher() {
       postMessage: mocks.postMessage,
       postMessageDetailed: mocks.postMessageDetailed,
       updateMessage: mocks.updateMessage,
+      getMessageBlocks: vi.fn(),
       normalizeIncomingText: mocks.normalizeIncomingText,
     },
     userId: 'user-1',
@@ -123,6 +129,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     mocks.updateMessage.mockResolvedValue(true);
     mocks.settleSlackLiveTaskCardForRun.mockResolvedValue(undefined);
     mocks.setSlackThreadActiveTask.mockResolvedValue(undefined);
+    mocks.refreshSlackThreadActiveTaskFooter.mockResolvedValue(undefined);
     mocks.taskUrl = 'https://roomote.example/task/task-1';
   });
 
@@ -192,6 +199,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       taskUrl: 'https://roomote.example/task/task-1',
     });
     expect(mocks.setSlackThreadActiveTask).toHaveBeenCalledWith({
+      teamId: 'T123',
       channel: 'C123',
       threadTs: '100.001',
       task: {
@@ -200,6 +208,9 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
         taskUrl: 'https://roomote.example/task/task-1',
       },
     });
+    expect(mocks.refreshSlackThreadActiveTaskFooter).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'C123', threadTs: '100.001' }),
+    );
     expect(mocks.enqueueTask).toHaveBeenCalledWith({
       userId: 'user-1',
       teamId: 'T123',

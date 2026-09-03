@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   eval: vi.fn(),
-  hdel: vi.fn(),
+  get: vi.fn(),
   hgetall: vi.fn(),
 }));
 
@@ -10,9 +10,13 @@ vi.mock('@roomote/redis', () => ({
   getRedis: () => mocks,
 }));
 
+vi.mock('node:crypto', () => ({
+  default: { randomUUID: () => 'route-version' },
+}));
+
 import {
   getSlackThreadActiveTasks,
-  removeSlackThreadActiveTask,
+  removeSlackThreadActiveTaskByTaskId,
   setSlackThreadActiveTask,
 } from '../thread-active-tasks';
 
@@ -21,7 +25,7 @@ describe('thread-active-tasks', () => {
     vi.clearAllMocks();
     vi.useRealTimers();
     mocks.eval.mockResolvedValue(1);
-    mocks.hdel.mockResolvedValue(1);
+    mocks.get.mockResolvedValue(null);
     mocks.hgetall.mockResolvedValue({});
   });
 
@@ -30,6 +34,7 @@ describe('thread-active-tasks', () => {
     vi.setSystemTime(new Date('2026-09-03T12:00:00Z'));
 
     await setSlackThreadActiveTask({
+      teamId: 'T1',
       channel: 'C1',
       threadTs: '100.000',
       task: {
@@ -41,8 +46,9 @@ describe('thread-active-tasks', () => {
 
     expect(mocks.eval).toHaveBeenCalledWith(
       expect.stringContaining("redis.call('hset'"),
-      1,
+      2,
       'slack:thread_active_tasks:C1:100.000',
+      'slack:thread_active_task:task-1',
       'task-1',
       JSON.stringify({
         taskId: 'task-1',
@@ -50,21 +56,54 @@ describe('thread-active-tasks', () => {
         taskUrl: 'https://app.example.com/task/task-1',
         updatedAt: Date.now(),
       }),
+      JSON.stringify({
+        teamId: 'T1',
+        channel: 'C1',
+        threadTs: '100.000',
+        version: 'route-version',
+      }),
       (30 * 24 * 60 * 60).toString(),
     );
   });
 
-  it('removes a task as soon as it becomes terminal', async () => {
-    await removeSlackThreadActiveTask({
+  it('removes a terminal task through its task-scoped thread pointer', async () => {
+    const route = {
+      teamId: 'T1',
       channel: 'C1',
       threadTs: '100.000',
-      taskId: 'task-1',
-    });
+      version: 'route-version',
+    };
+    mocks.get.mockResolvedValue(JSON.stringify(route));
+    mocks.eval.mockResolvedValue(1);
 
-    expect(mocks.hdel).toHaveBeenCalledWith(
+    await expect(
+      removeSlackThreadActiveTaskByTaskId('task-1'),
+    ).resolves.toEqual(route);
+
+    expect(mocks.eval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('hdel'"),
+      2,
+      'slack:thread_active_task:task-1',
       'slack:thread_active_tasks:C1:100.000',
+      JSON.stringify(route),
       'task-1',
     );
+  });
+
+  it('does not remove a task whose route changed during settlement', async () => {
+    mocks.get.mockResolvedValue(
+      JSON.stringify({
+        teamId: 'T1',
+        channel: 'C1',
+        threadTs: '100.000',
+        version: 'older-version',
+      }),
+    );
+    mocks.eval.mockResolvedValue(0);
+
+    await expect(
+      removeSlackThreadActiveTaskByTaskId('task-1'),
+    ).resolves.toBeNull();
   });
 
   it('ignores malformed persisted summaries', async () => {

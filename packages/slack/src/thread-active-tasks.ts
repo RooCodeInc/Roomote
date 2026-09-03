@@ -1,9 +1,18 @@
+import crypto from 'node:crypto';
+
 import { getRedis } from '@roomote/redis';
 
 const SLACK_THREAD_ACTIVE_TASKS_TTL_SECONDS = 30 * 24 * 60 * 60;
 const UPSERT_SLACK_THREAD_ACTIVE_TASK_SCRIPT = `
 redis.call('hset', KEYS[1], ARGV[1], ARGV[2])
-redis.call('expire', KEYS[1], ARGV[3])
+redis.call('expire', KEYS[1], ARGV[4])
+redis.call('set', KEYS[2], ARGV[3], 'EX', ARGV[4])
+return 1
+`;
+const REMOVE_SLACK_THREAD_ACTIVE_TASK_SCRIPT = `
+if redis.call('get', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('hdel', KEYS[2], ARGV[2])
+redis.call('del', KEYS[1])
 return 1
 `;
 
@@ -17,6 +26,13 @@ export interface SlackThreadActiveTask {
   updatedAt: number;
 }
 
+export interface SlackThreadActiveTaskRoute {
+  teamId: string;
+  channel: string;
+  threadTs: string;
+  version: string;
+}
+
 function getSlackThreadActiveTasksKey(
   channel: string,
   threadTs: string,
@@ -24,7 +40,12 @@ function getSlackThreadActiveTasksKey(
   return `slack:thread_active_tasks:${channel}:${threadTs}`;
 }
 
+function getSlackThreadActiveTaskKey(taskId: string): string {
+  return `slack:thread_active_task:${taskId}`;
+}
+
 export async function setSlackThreadActiveTask(params: {
+  teamId: string;
   channel: string;
   threadTs: string;
   task: Omit<SlackThreadActiveTask, 'updatedAt'>;
@@ -33,23 +54,53 @@ export async function setSlackThreadActiveTask(params: {
   const key = getSlackThreadActiveTasksKey(params.channel, params.threadTs);
   await redis.eval(
     UPSERT_SLACK_THREAD_ACTIVE_TASK_SCRIPT,
-    1,
+    2,
     key,
+    getSlackThreadActiveTaskKey(params.task.taskId),
     params.task.taskId,
     JSON.stringify({ ...params.task, updatedAt: Date.now() }),
+    JSON.stringify({
+      teamId: params.teamId,
+      channel: params.channel,
+      threadTs: params.threadTs,
+      version: crypto.randomUUID(),
+    } satisfies SlackThreadActiveTaskRoute),
     SLACK_THREAD_ACTIVE_TASKS_TTL_SECONDS.toString(),
   );
 }
 
-export async function removeSlackThreadActiveTask(params: {
-  channel: string;
-  threadTs: string;
-  taskId: string;
-}): Promise<void> {
-  await getRedis().hdel(
-    getSlackThreadActiveTasksKey(params.channel, params.threadTs),
-    params.taskId,
+export async function removeSlackThreadActiveTaskByTaskId(
+  taskId: string,
+): Promise<SlackThreadActiveTaskRoute | null> {
+  const redis = getRedis();
+  const taskKey = getSlackThreadActiveTaskKey(taskId);
+  const rawRoute = await redis.get(taskKey);
+  if (!rawRoute) return null;
+
+  let route: SlackThreadActiveTaskRoute;
+  try {
+    route = JSON.parse(rawRoute) as SlackThreadActiveTaskRoute;
+    if (
+      typeof route.teamId !== 'string' ||
+      typeof route.channel !== 'string' ||
+      typeof route.threadTs !== 'string' ||
+      typeof route.version !== 'string'
+    ) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  const removed = await redis.eval(
+    REMOVE_SLACK_THREAD_ACTIVE_TASK_SCRIPT,
+    2,
+    taskKey,
+    getSlackThreadActiveTasksKey(route.channel, route.threadTs),
+    rawRoute,
+    taskId,
   );
+  return removed === 1 ? route : null;
 }
 
 export async function getSlackThreadActiveTasks(params: {

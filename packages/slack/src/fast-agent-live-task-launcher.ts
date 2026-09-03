@@ -18,6 +18,7 @@ import {
 import type { SlackNotifier } from './slack-notifier';
 import { settleSlackLiveTaskCardForRun } from './settle-live-task-card';
 import { setSlackThreadActiveTask } from './thread-active-tasks';
+import { refreshSlackThreadActiveTaskFooter } from './thread-reply-footer-ops';
 
 type SlackLiveTaskCardNotifier = Pick<
   SlackNotifier,
@@ -25,6 +26,7 @@ type SlackLiveTaskCardNotifier = Pick<
   | 'postMessage'
   | 'postMessageDetailed'
   | 'updateMessage'
+  | 'getMessageBlocks'
 >;
 
 const PREPARING_WORKSPACE_TITLE = 'Preparing workspace…';
@@ -83,6 +85,7 @@ export function createFastAgentSlackLiveTaskLauncher(
     const pinActiveTask = async (): Promise<void> => {
       try {
         await setSlackThreadActiveTask({
+          teamId: launcherParams.teamId,
           channel: launcherParams.channelId,
           threadTs: launcherParams.threadTs,
           task: {
@@ -90,6 +93,11 @@ export function createFastAgentSlackLiveTaskLauncher(
             title: buildSlackLiveTaskTitle(context.prompt),
             taskUrl: destinationUrl,
           },
+        });
+        await refreshSlackThreadActiveTaskFooter({
+          slack,
+          channel: launcherParams.channelId,
+          threadTs: launcherParams.threadTs,
         });
       } catch (error) {
         console.warn(
