@@ -132,6 +132,7 @@ interface OpenCodeServerHarnessOptions {
   turnStallTimeoutMs?: number;
   subagentSettlementGraceMs?: number;
   visualProofTimeoutMs?: number;
+  visualProofAttemptStatePath?: string;
   queuedPromptRetryDelayMs?: number;
   /**
    * Max automatic continue attempts after a provider rate-limit session.error
@@ -1614,6 +1615,7 @@ export class OpenCodeServerHarness
   private readonly stopHookReminderStallTimeoutMs: number;
   private readonly subagentSettlementGraceMs: number;
   private readonly visualProofTimeoutMs: number;
+  private readonly visualProofAttemptStatePath: string;
   private readonly queuedPromptRetryDelayMs: number;
   private readonly providerRateLimitMaxRetries: number;
   private readonly providerRateLimitBaseDelayMs: number;
@@ -1767,6 +1769,8 @@ export class OpenCodeServerHarness
       options.subagentSettlementGraceMs ?? DEFAULT_SUBAGENT_SETTLEMENT_GRACE_MS;
     this.visualProofTimeoutMs =
       options.visualProofTimeoutMs ?? DEFAULT_VISUAL_PROOF_TIMEOUT_MS;
+    this.visualProofAttemptStatePath =
+      options.visualProofAttemptStatePath ?? VISUAL_PROOF_ATTEMPT_STATE_PATH;
     this.queuedPromptRetryDelayMs =
       options.queuedPromptRetryDelayMs ?? DEFAULT_QUEUED_PROMPT_RETRY_DELAY_MS;
     this.providerRateLimitMaxRetries =
@@ -3729,7 +3733,7 @@ export class OpenCodeServerHarness
     this.visualProofAttemptId = randomUUID();
     try {
       writeFileSync(
-        VISUAL_PROOF_ATTEMPT_STATE_PATH,
+        this.visualProofAttemptStatePath,
         `${JSON.stringify({
           attemptId: this.visualProofAttemptId,
           startedAt: new Date().toISOString(),
@@ -3764,7 +3768,7 @@ export class OpenCodeServerHarness
 
   private clearVisualProofAttemptState(): void {
     this.visualProofAttemptId = null;
-    rmSync(VISUAL_PROOF_ATTEMPT_STATE_PATH, { force: true });
+    rmSync(this.visualProofAttemptStatePath, { force: true });
   }
 
   private async recoverVisualProofTimeout(): Promise<void> {
