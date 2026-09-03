@@ -285,16 +285,29 @@ async function handleSuggestionLaunchCallback(params: {
       launchTarget,
       suggestion,
     );
+    // A card pinned to a bare repository keeps that repository; only cards
+    // with no target at all run against every repository.
+    const pinnedRepositoryFullName =
+      launchTarget.kind === 'legacy_pinned' &&
+      suggestion.targetRepositoryFullName &&
+      suggestion.targetRepositoryFullName !== ALL_REPOSITORIES
+        ? suggestion.targetRepositoryFullName
+        : null;
     const workspace = pinnedEnvironmentId
       ? await resolveTelegramWorkspace({
           type: 'environment',
           id: pinnedEnvironmentId,
           name: pinnedEnvironmentId,
         })
-      : {
-          repoForPayload: ALL_REPOSITORIES,
-          workspaceDisplayName: 'all repos',
-        };
+      : pinnedRepositoryFullName
+        ? {
+            repoForPayload: pinnedRepositoryFullName,
+            workspaceDisplayName: pinnedRepositoryFullName,
+          }
+        : {
+            repoForPayload: ALL_REPOSITORIES,
+            workspaceDisplayName: 'all repos',
+          };
     // A pinned environment that no longer resolves must fail loudly rather
     // than launch somewhere else (legacy pinned cards included).
     if (!workspace) {

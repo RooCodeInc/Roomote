@@ -326,6 +326,31 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
     );
   });
 
+  it('keeps a bare-repository suggestion on its saved repository', async () => {
+    claimTelegramSuggestionLaunchMock.mockResolvedValue({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: 'acme/app',
+      targetEnvironmentId: null,
+      launchClaimedAt: CLAIMED_AT,
+    });
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(resolveTelegramWorkspaceMock).not.toHaveBeenCalled();
+    expect(launchTelegramTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace: {
+          repoForPayload: 'acme/app',
+          workspaceDisplayName: 'acme/app',
+        },
+      }),
+    );
+    expect(continueFastAgentSurfaceReplyMock).not.toHaveBeenCalled();
+  });
+
   it('launches an all-repositories suggestion without resolving an environment', async () => {
     claimTelegramSuggestionLaunchMock.mockResolvedValue({
       id: WORK_ITEM_ID,
