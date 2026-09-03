@@ -253,8 +253,12 @@ export async function startAutoRoutedSlackTask({
       }
     }
 
+    // Mentions stay raw (`<@U123>`) so the persisted prompt matches what the
+    // sender typed; the web transcript renders them as linked names.
     const taskDescription = stripLeadingSlackProductMention(
-      await slack.normalizeIncomingText(stripLeadingRawSlackMention(prompt)),
+      await slack.normalizeIncomingText(stripLeadingRawSlackMention(prompt), {
+        preserveMentions: true,
+      }),
     );
     const warningText = buildStatuspageSlackWarning(
       await getStatuspageIncident(),

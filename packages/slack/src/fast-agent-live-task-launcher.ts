@@ -188,7 +188,7 @@ export function createFastAgentSlackLiveTaskLauncher(
 
   return async (input) => {
     const prompt = await slack
-      .normalizeIncomingText(input.prompt)
+      .normalizeIncomingText(input.prompt, { preserveMentions: true })
       .catch((error) => {
         console.warn(
           `[Fast Agent] Failed to normalize the Slack task prompt: ${describeError(error)}`,

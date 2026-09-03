@@ -45,6 +45,7 @@ import { ProviderRetryNoticeMessage } from './ProviderRetryNoticeMessage';
 import { TerminalProviderErrorMessage } from './TerminalProviderErrorMessage';
 import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
 import { useMessageUiOptions } from '@/components/ai-elements/message-ui-options';
+import { SlackMessageText } from '@/components/ai-elements/slack-message-text';
 
 const UserMessageToggle = ({
   isExpanded,
@@ -360,10 +361,12 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
                         </p>
                       ),
                     )}
-                    <span className="mt-2 block">{baseContent}</span>
+                    <span className="mt-2 block">
+                      <SlackMessageText text={baseContent} />
+                    </span>
                   </>
                 ) : (
-                  baseContent
+                  <SlackMessageText text={baseContent} />
                 )}
               </MessagePlainText>
             </CollapsibleContent>
