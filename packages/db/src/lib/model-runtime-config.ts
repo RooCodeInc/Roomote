@@ -408,7 +408,7 @@ async function resolveModelRuntimeEnv(
   const executor = options.executor ?? db;
   const [
     persistedEnvVars,
-    { runtimeModelConfig, catalogModels, enabledCatalogModels },
+    { runtimeModelConfig, catalogModels, enabledCatalogModels, defaultModelId },
   ] = await Promise.all([
     resolveEffectiveDeploymentEnvVars({
       deploymentEnvVars: options.deploymentEnvVars,
@@ -445,7 +445,10 @@ async function resolveModelRuntimeEnv(
           runtimeOverrideModelConfig[descriptor.modelConfigKey] ??
             normalizeConfiguredValue(
               persistedRuntimeModelConfig[descriptor.modelConfigKey],
-            ),
+            ) ??
+            (descriptor.modelFallback === 'deployment-default'
+              ? defaultModelId
+              : undefined),
         ),
       ];
     }),
