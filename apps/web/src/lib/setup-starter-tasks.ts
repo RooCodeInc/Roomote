@@ -26,16 +26,16 @@ export const SETUP_STARTER_TASKS: readonly SetupStarterTask[] = [
   {
     id: 'speed-up-ci',
     title: 'Speed up CI',
-    description:
-      'Find the slowest parts of your CI pipeline and make them faster.',
+    description: 'Save your precious time by finding ways to speed up CI.',
     prompt: `Speed up our continuous integration.
 
 Review the CI configuration in the most impactful repository in this workspace: workflows, caching, test parallelism, and dependency installation. Identify the biggest sources of wasted time, then implement the safest high-impact improvements (for example caching dependencies, splitting or parallelizing slow jobs, or removing redundant steps) and open a pull request. Summarize the expected time savings and call out any riskier optimizations you deliberately left for follow-up.`,
   },
   {
     id: 'security-scan',
-    title: 'Run a security scan',
-    description: 'Scan for vulnerabilities and secure-by-default gaps.',
+    title: 'Security scan',
+    description:
+      'Catch vulnerabilities and secure-by-default gaps before they become problems.',
     prompt: `Run a security review of the most impactful repository in this workspace.
 
 Look for concrete vulnerabilities and secure-by-default gaps: injection risks, missing authentication or authorization checks, unsafe handling of secrets or user input, and risky dependency usage. Prioritize findings by severity and confidence. When a safe, targeted fix exists for the highest-confidence issues, implement it and open a pull request; report the remaining findings with file references so the team can follow up.`,
@@ -43,7 +43,8 @@ Look for concrete vulnerabilities and secure-by-default gaps: injection risks, m
   {
     id: 'fix-test-flakes',
     title: 'Fix test flakes',
-    description: 'Hunt down flaky tests and make them deterministic.',
+    description:
+      'Stop flaky tests from wasting your time by making them reliable.',
     prompt: `Find and fix flaky tests.
 
 Inspect the test suites and recent CI behavior in the most impactful repository in this workspace for tests that fail intermittently. Timing assumptions, shared state, unawaited async work, and test-order dependence are common causes. Reproduce the flakiest ones, fix the root causes so the tests are deterministic, and open a pull request. List any flaky tests you found but did not fix, with what you learned about each.`,
@@ -51,7 +52,8 @@ Inspect the test suites and recent CI behavior in the most impactful repository 
   {
     id: 'update-dependencies',
     title: 'Update dependencies',
-    description: 'Apply safe dependency upgrades and flag risky ones.',
+    description:
+      'Keep your codebase fresh with safe dependency upgrades, and flag the risky ones.',
     prompt: `Update the dependencies of the most impactful repository in this workspace.
 
 Check for outdated or vulnerable dependencies, apply the safe upgrades (patch and minor versions, plus security fixes), and validate the result with the repository's own install, build, and test tooling before opening a pull request. Do not attempt risky major upgrades; list them separately with a short note on what each one would involve.`,

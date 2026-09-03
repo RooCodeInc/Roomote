@@ -18,14 +18,12 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   AUTOMATION_RECOMMENDATION_CATALOG,
   createSetupNewSetupSession,
-  isSetupStarterTaskId,
   normalizeSetupNewState,
   normalizeSetupNewSetupSession,
   RunStatus,
   type AcpRequestUserInputAnswers,
   type AcpRequestUserInputPayload,
   type AutomationRecommendationBatch,
-  type SetupStarterTaskId,
 } from '@roomote/types';
 import { captureEvent } from '@roomote/telemetry/server';
 
@@ -318,8 +316,8 @@ async function buildSetupSessionAdapterExtensions(
           isSecret: false,
           multiple: true,
           options: SETUP_STARTER_TASKS.map((task) => ({
-            label: task.id,
-            description: `${task.title}: ${task.description}`,
+            label: task.title,
+            description: task.description,
           })),
         },
       ];
@@ -854,11 +852,15 @@ async function persistSetupPresetResponse(input: {
 
     const taskIds = [
       ...new Set(
-        input.answers['setup-starter-tasks']?.answers.filter(
-          isSetupStarterTaskId,
-        ) ?? [],
+        input.answers['setup-starter-tasks']?.answers.flatMap((answer) => {
+          const task = SETUP_STARTER_TASKS.find(
+            (candidate) =>
+              candidate.title === answer || candidate.id === answer,
+          );
+          return task ? [task.id] : [];
+        }) ?? [],
       ),
-    ] as SetupStarterTaskId[];
+    ];
     if (taskIds.length === 0) {
       throw new Error('Select at least one starter task.');
     }

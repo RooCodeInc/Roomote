@@ -19,9 +19,9 @@ export function SetupStarterTasksCard({
 }) {
   return (
     <SetupSessionActionCard
-      title="First task ideas"
+      title="I found stuff I can work on"
       icon={<ListChecks />}
-      intro="Optional: choose something I can start working on right away."
+      intro="Choose as many as you want, I'll create PRs for you to review"
     >
       <SessionUserInputCard
         sessionId={sessionId}
