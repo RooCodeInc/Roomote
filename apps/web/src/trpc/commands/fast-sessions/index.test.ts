@@ -461,7 +461,58 @@ describe('startSetupFastSessionCommand', () => {
         currentMessageId: 'setup-kickoff:setup-conversation-1',
       }),
     );
+    // The kickoff is admitted durably with its platform framing, so a
+    // restart resumes it as a setup event rather than dropping it.
+    const { persistFastAgentInlineHumanTurn } =
+      await import('@roomote/sdk/server');
+    expect(vi.mocked(persistFastAgentInlineHumanTurn)).toHaveBeenCalledWith({
+      parent: expect.objectContaining({ sessionId: 'setup-conversation-1' }),
+      event: expect.objectContaining({
+        type: 'human_follow_up',
+        currentMessageId: 'setup-kickoff:setup-conversation-1',
+        turnSource: 'platform_event',
+        platformEventKind: 'setup',
+        platformEventVisibility: 'required',
+      }),
+    });
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('runs a re-scheduled kickoff whose row is still pending as a resumption of the earlier attempt', async () => {
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'setup-conversation-1',
+      created: false,
+    });
+    mocks.dbSelectLimit.mockResolvedValue([]);
+    let scheduled: (() => Promise<void>) | undefined;
+    mocks.after.mockImplementation((callback) => {
+      scheduled = callback;
+    });
+    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: new AbortController().signal,
+    });
+    mocks.acquireTurnLock.mockResolvedValue(release);
+    mocks.answerQuestion.mockResolvedValue('Welcome');
+    const { persistFastAgentInlineHumanTurn } =
+      await import('@roomote/sdk/server');
+    vi.mocked(persistFastAgentInlineHumanTurn).mockResolvedValueOnce({
+      id: 'row-1',
+      eventKey: 'key-1',
+      resumed: true,
+    });
+
+    await startSetupFastSessionCommand(auth, input);
+    await scheduled?.();
+
+    // The earlier owner was interrupted after admitting this kickoff; the
+    // new run continues its recorded attempt rather than starting over.
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentMessageId: 'setup-kickoff:setup-conversation-1',
+        durableAdmission: { eventId: 'row-1' },
+        resumedAfterInterruption: true,
+      }),
+    );
   });
 
   it('recovers a lost or failed kickoff when no terminal output exists', async () => {

@@ -320,6 +320,9 @@ export async function processFastAgentMessage(params: {
       currentMessageId: event.ts,
       signal: activeTurnLock.signal,
       ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
+      // A redelivered event whose earlier inline attempt never settled
+      // resumes that attempt instead of repeating its recorded actions.
+      ...(durableTurn?.resumed ? { resumedAfterInterruption: true } : {}),
       senderExternalId: event.user,
       senderDisplayName:
         currentMessage?.user === event.user

@@ -112,7 +112,7 @@ for a separate turn under that participant's identity. This keeps shared
 conversations ordered without losing instructions that arrive during active
 work.
 
-Fast turns also survive API or worker interruptions. Roomote durably admits the turn before acknowledging it, records every action the turn takes as it happens, and resumes unfinished work on another process. The resumed run receives the transcript of its earlier attempt, up to the point it was cut off, so it continues from there instead of repeating actions or asking you to send the request again. Provider-side retry waits are honored the same way: short waits keep the turn in place, and longer waits park it durably until the scheduled time.
+Fast turns also survive API or worker interruptions. Roomote durably admits the turn before acknowledging it, records every action the turn takes as it happens, and resumes unfinished work on another process. The resumed run receives the transcript of its earlier attempt, up to the point it was cut off, so it continues from there instead of repeating actions or asking you to send the request again. If the cut lands on the final reply itself, the resumed run finishes from the transcript: a reply that was recorded is not posted again, and a reply the process died while posting goes out once more without another model request. This covers turns started by a typed message, by an emoji reaction, and by platform events such as a setup kickoff. Provider-side retry waits are honored the same way: short waits keep the turn in place, and longer waits park it durably until the scheduled time.
 
 ### Message Suggestions
 

@@ -3,6 +3,7 @@ const mocks = vi.hoisted(() => ({
   enqueueParentEvent: vi.fn(),
   updateWhere: vi.fn(),
   insertOnConflict: vi.fn(),
+  insertReturning: vi.fn(),
   findFirst: vi.fn(),
 }));
 
@@ -10,12 +11,6 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   FAST_AGENT_DURABLE_TURN_CLAIM_MS: 15 * 60 * 1000,
 }));
-
-const envMock = vi.hoisted(() => ({
-  R_FAST_DURABLE_ADMISSION_DISABLED: false,
-}));
-
-vi.mock('@roomote/env', () => ({ Env: envMock }));
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...values) => values),
@@ -79,12 +74,16 @@ describe('persistFastAgentInlineHumanTurn', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.updateWhere.mockResolvedValue(undefined);
-    mocks.insertOnConflict.mockResolvedValue(undefined);
+    mocks.insertOnConflict.mockReturnValue({
+      returning: mocks.insertReturning,
+    });
+    mocks.insertReturning.mockResolvedValue([{ id: 'row-1' }]);
   });
 
   it('persists the turn under an inline claim and supersedes older pending inline rows', async () => {
     mocks.findFirst.mockResolvedValue({
       id: 'row-1',
+      admission: 'inline',
       deliveredAt: null,
       discardedAt: null,
     });
@@ -97,17 +96,41 @@ describe('persistFastAgentInlineHumanTurn', () => {
     expect(mocks.updateWhere).toHaveBeenCalledOnce();
   });
 
-  it('persists nothing when the durable admission kill switch is set', async () => {
-    envMock.R_FAST_DURABLE_ADMISSION_DISABLED = true;
-    try {
-      await expect(
-        persistFastAgentInlineHumanTurn({ parent, event }),
-      ).resolves.toBeNull();
-      expect(mocks.insertOnConflict).not.toHaveBeenCalled();
-      expect(mocks.updateWhere).not.toHaveBeenCalled();
-    } finally {
-      envMock.R_FAST_DURABLE_ADMISSION_DISABLED = false;
-    }
+  it('reports a still-pending inline row as a resumption and refreshes its claim', async () => {
+    // The insert hit the existing row: an earlier inline attempt admitted
+    // this same turn and never settled it.
+    mocks.insertReturning.mockResolvedValue([]);
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'inline',
+      deliveredAt: null,
+      discardedAt: null,
+    });
+
+    await expect(
+      persistFastAgentInlineHumanTurn({ parent, event }),
+    ).resolves.toEqual({
+      id: 'row-1',
+      eventKey: 'stable-event-key',
+      resumed: true,
+    });
+    // Claim refresh, then the supersede sweep.
+    expect(mocks.updateWhere).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not report a queued row that has not run yet as a resumption', async () => {
+    mocks.insertReturning.mockResolvedValue([]);
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'queued',
+      deliveredAt: null,
+      discardedAt: null,
+    });
+
+    await expect(
+      persistFastAgentInlineHumanTurn({ parent, event }),
+    ).resolves.toEqual({ id: 'row-1', eventKey: 'stable-event-key' });
+    expect(mocks.updateWhere).toHaveBeenCalledOnce();
   });
 
   it('returns no durable handle when the same message already settled', async () => {
@@ -128,9 +151,13 @@ describe('admitFastAgentHumanFollowUp', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.updateWhere.mockResolvedValue(undefined);
-    mocks.insertOnConflict.mockResolvedValue(undefined);
+    mocks.insertOnConflict.mockReturnValue({
+      returning: mocks.insertReturning,
+    });
+    mocks.insertReturning.mockResolvedValue([{ id: 'row-1' }]);
     mocks.findFirst.mockResolvedValue({
       id: 'row-1',
+      admission: 'inline',
       deliveredAt: null,
       discardedAt: null,
     });
@@ -153,7 +180,7 @@ describe('admitFastAgentHumanFollowUp', () => {
   it('still runs the turn inline when durable admission cannot be persisted', async () => {
     const turnLock = vi.fn();
     mocks.acquireTurnLock.mockResolvedValue(turnLock);
-    mocks.insertOnConflict.mockRejectedValue(new Error('db offline'));
+    mocks.insertReturning.mockRejectedValue(new Error('db offline'));
 
     await expect(
       admitFastAgentHumanFollowUp({ parent, event }),

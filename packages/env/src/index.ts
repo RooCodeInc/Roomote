@@ -128,10 +128,6 @@ const serverSchema = {
   // by default; operators opt out explicitly. Existing connections remain
   // stored but cannot be configured or used while disabled.
   R_CURATED_INTEGRATIONS_DISABLED: optInBoolean(),
-  // Kill switch for durable admission of human Fast turns. When set, turns
-  // run inline without a persisted claim, so an interrupted turn is not
-  // resumed by the parent-event queue (the pre-durable-admission behavior).
-  R_FAST_DURABLE_ADMISSION_DISABLED: optInBoolean(),
   // Kill switch for durable retry scheduling. When set, an in-flight Fast
   // turn waits out inference retry backoff inside its owning process (the
   // pre-scheduling behavior) instead of parking the turn for the queue.

@@ -11,7 +11,6 @@ import {
   isNull,
   ne,
 } from '@roomote/db/server';
-import { Env } from '@roomote/env';
 import type {
   FastAgentHumanFollowUpEvent,
   FastAgentParent,
@@ -22,7 +21,18 @@ import {
   enqueueFastAgentParentEvent,
 } from './fast-agent-parent-event-queue';
 
-export type FastAgentDurableTurn = { id: string; eventKey: string };
+export type FastAgentDurableTurn = {
+  id: string;
+  eventKey: string;
+  /**
+   * True when admission found this turn's row already pending from an
+   * earlier inline attempt that never settled (a re-scheduled web kickoff
+   * after a restart, a redelivered webhook). The caller is then resuming
+   * that attempt, not starting a fresh one, and must run it as a resumption
+   * so the recorded actions are not repeated.
+   */
+  resumed?: boolean;
+};
 
 export type FastAgentHumanFollowUpAdmission =
   | {
@@ -47,14 +57,14 @@ export async function persistFastAgentInlineHumanTurn(params: {
   parent: FastAgentParent;
   event: FastAgentHumanFollowUpEvent;
 }): Promise<FastAgentDurableTurn | null> {
-  if (Env.R_FAST_DURABLE_ADMISSION_DISABLED) {
-    return null;
-  }
   const eventKey = buildFastAgentParentEventKey(params);
   // Admission and supersession commit together, so recovery can never see
   // the new row without the older interrupted row already retired.
   return db.transaction(async (tx) => {
-    await tx
+    const claimedUntil = new Date(
+      Date.now() + FAST_AGENT_DURABLE_TURN_CLAIM_MS,
+    );
+    const inserted = await tx
       .insert(fastAgentParentEvents)
       .values({
         conversationId: params.parent.sessionId,
@@ -62,16 +72,33 @@ export async function persistFastAgentInlineHumanTurn(params: {
         parent: params.parent,
         event: params.event,
         admission: 'inline',
-        claimedUntil: new Date(Date.now() + FAST_AGENT_DURABLE_TURN_CLAIM_MS),
+        claimedUntil,
       })
-      .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
+      .onConflictDoNothing({ target: fastAgentParentEvents.eventKey })
+      .returning({ id: fastAgentParentEvents.id });
 
     const row = await tx.query.fastAgentParentEvents.findFirst({
       where: eq(fastAgentParentEvents.eventKey, eventKey),
-      columns: { id: true, deliveredAt: true, discardedAt: true },
+      columns: {
+        id: true,
+        admission: true,
+        deliveredAt: true,
+        discardedAt: true,
+      },
     });
     if (!row || row.deliveredAt || row.discardedAt) {
       return null;
+    }
+    // The row was already there and still pending: an earlier inline attempt
+    // was interrupted before it settled. This caller takes the row over as a
+    // resumption of that attempt, under a fresh claim so the recovery sweep
+    // does not hand it to the queue while it runs.
+    const resumed = inserted.length === 0 && row.admission === 'inline';
+    if (resumed) {
+      await tx
+        .update(fastAgentParentEvents)
+        .set({ claimedUntil, updatedAt: new Date() })
+        .where(eq(fastAgentParentEvents.id, row.id));
     }
 
     await tx
@@ -91,7 +118,7 @@ export async function persistFastAgentInlineHumanTurn(params: {
         ),
       );
 
-    return { id: row.id, eventKey };
+    return { id: row.id, eventKey, ...(resumed ? { resumed: true } : {}) };
   });
 }
 

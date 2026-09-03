@@ -103,8 +103,6 @@ vi.mock('../fast-agent-session', () => ({
 vi.mock('../fast-agent-conversation-repository', () => ({
   INTERRUPTED_INFERENCE_RETRY_MESSAGE:
     'The inference retry was interrupted before it completed. Please send the request again.',
-  RESTARTED_ACTIVE_TURN_MESSAGE:
-    'Roomote restarted while working on this request. Please send it again.',
   reconcileFastAgentInferenceRetryNotices: mocks.reconcileRetryNotices,
   markFastAgentInferenceRetryNoticeInterruption:
     mocks.markRetryNoticeInterruption,
@@ -3585,7 +3583,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   describe('durable admission', () => {
     const durableAdmission = { eventId: 'durable-row-1' };
 
-    it('keeps replay open through an acknowledgement and closes it before the closeout', async () => {
+    it('keeps replay open through the acknowledgement and the closeout', async () => {
       const order: string[] = [];
       mocks.revokeDurableReplay.mockImplementation(async (_id, reason) => {
         order.push(`revoke:${reason}`);
@@ -3599,7 +3597,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             message: 'Looking into it.',
           });
           order.push('acked');
-          expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
             message: 'Done.',
@@ -3615,11 +3612,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         durableAdmission,
       });
 
-      expect(order).toEqual(['acked', 'revoke:Terminal closeout.', 'closed']);
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
-        'durable-row-1',
-        expect.any(String),
-      );
+      // Nothing withdraws the turn from replay any more: a run that resumes
+      // it after the closeout settles on the recorded reply instead.
+      expect(order).toEqual(['acked', 'closed']);
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 
@@ -3656,10 +3652,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         durableAdmission,
       });
 
-      // The launch itself does not end replay: the turn stays resumable and
-      // a resumed run is told the launch happened. Only the closeout ends it.
-      expect(order).toEqual(['launch', 'revoke']);
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledTimes(1);
+      // Neither the launch nor the closeout ends replay: the turn stays
+      // resumable and a resumed run is told what happened.
+      expect(order).toEqual(['launch']);
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
       // The key is stable for this turn and launch, so a repeat after a kill
       // between launching and recording returns the same task.
       expect(launchTask).toHaveBeenCalledWith(
@@ -3671,16 +3667,32 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
     });
 
-    it('withdraws a plain-text turn from replay before its terminal closeout', async () => {
+    // Records the order of a system-posted closeout's intent row, its
+    // surface post, and its result row.
+    const recordCloseoutOrder = (postReply: ReturnType<typeof vi.fn>) => {
       const order: string[] = [];
-      mocks.revokeDurableReplay.mockImplementation(async () => {
-        order.push('revoke');
-        return true;
-      });
-      const postReply = vi.fn(async () => {
+      postReply.mockImplementation(async () => {
         order.push('post');
         return { messageId: 'reply-1' };
       });
+      mocks.upsertMessage.mockImplementation(async ({ message }) => {
+        const payload = message.payload as {
+          title?: string;
+          rawInput?: { arguments?: { purpose?: string; message?: string } };
+        };
+        if (payload.title === nativeToolNames.sendChatReply) {
+          order.push(
+            `${message.eventType === 'roomote_runtime.tool_call' ? 'call' : 'result'}:${payload.rawInput?.arguments?.message}`,
+          );
+        }
+        return { initialHumanTurn: false };
+      });
+      return order;
+    };
+
+    it('records the terminal closeout as a call before posting it and a result after', async () => {
+      const postReply = vi.fn();
+      const order = recordCloseoutOrder(postReply);
       mocks.generateText.mockResolvedValueOnce('All done.');
 
       await answerFastAgentQuestion({
@@ -3689,49 +3701,159 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         durableAdmission,
       });
 
-      expect(order).toEqual(['revoke', 'post']);
+      // Same recorded intent as a model-authored closeout, so a resumed run
+      // finds it in the transcript whether or not the post completed.
+      expect(order).toEqual(['call:All done.', 'post', 'result:All done.']);
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('records the error closeout as a call before posting it and a result after', async () => {
+      const postReply = vi.fn();
+      const order = recordCloseoutOrder(postReply);
+      mocks.generateText.mockRejectedValueOnce(new Error('provider exploded'));
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+      });
+
+      expect(order).toHaveLength(3);
+      expect(order[0]).toMatch(/^call:/u);
+      expect(order[1]).toBe('post');
+      expect(order[2]).toMatch(/^result:/u);
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    const attemptCounters = {
+      next: {
+        assistantOrdinal: 2,
+        toolOrdinal: 2,
+        retryNoticeOrdinal: 0,
+        turnSeq: 6,
+      },
+      prompt: { ts: 1_000, turnSeq: 0 },
+    };
+
+    it('settles a resumed turn whose earlier attempt already delivered its closeout without asking the model', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        ...attemptCounters,
+        events: [
+          { kind: 'reply', text: 'Looking into it.', purpose: 'ack' },
+          { kind: 'reply', text: 'All done.', purpose: 'closeout' },
+        ],
+      });
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+
+      const result = await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      // The answer already reached the surface; the resumed run only closes
+      // the books.
+      expect(result).toBe('All done.');
+      expect(mocks.generateText).not.toHaveBeenCalled();
+      expect(postReply).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('settles a resumed turn whose closeout replaced the retry notice, leaving the completed call as the last event', async () => {
+      // The replaced notice keeps its earlier sequence, so the closeout's
+      // reply row sits before the call that delivered it; the completed
+      // call is the proof of delivery.
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        ...attemptCounters,
+        events: [
+          { kind: 'reply', text: 'All done.', purpose: 'closeout' },
+          {
+            kind: 'action',
+            tool: nativeToolNames.sendChatReply,
+            arguments: { purpose: 'closeout', message: 'All done.' },
+            status: 'completed',
+            result: '{"success":true,"delivered":true}',
+          },
+        ],
+      });
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+
+      const result = await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      expect(result).toBe('All done.');
+      expect(mocks.generateText).not.toHaveBeenCalled();
+      expect(postReply).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('posts the closeout again when the earlier attempt died inside the call before recording it', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        ...attemptCounters,
+        events: [
+          { kind: 'reply', text: 'Looking into it.', purpose: 'ack' },
+          {
+            kind: 'action',
+            tool: nativeToolNames.sendChatReply,
+            arguments: { purpose: 'closeout', message: 'All done.' },
+            status: 'unknown',
+          },
+        ],
+      });
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-2' });
+
+      const result = await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      // The text is on record but its post is not, so it goes out once more
+      // without a model request; a duplicate is possible only if the first
+      // post landed in the instant before the process died.
+      expect(result).toBe('All done.');
+      expect(mocks.generateText).not.toHaveBeenCalled();
+      expect(postReply).toHaveBeenCalledOnce();
       expect(postReply).toHaveBeenCalledWith(
         expect.objectContaining({ purpose: 'closeout', message: 'All done.' }),
       );
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 
-    it('hands the turn to the queue when the terminal closeout cannot be withdrawn from replay', async () => {
-      mocks.revokeDurableReplay.mockResolvedValue(false);
-      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
-      const requestDurableResume = vi.fn().mockResolvedValue(undefined);
-      mocks.generateText.mockResolvedValueOnce('All done.');
+    it('lets the model finish a resumed turn whose lost closeout carried no explicit text', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        ...attemptCounters,
+        events: [
+          {
+            kind: 'action',
+            tool: nativeToolNames.sendChatReply,
+            arguments: { purpose: 'closeout' },
+            status: 'unknown',
+          },
+        ],
+      });
+      mocks.generateText.mockResolvedValueOnce('Finished.');
 
       await answerFastAgentQuestion({
         ...baseParams,
-        adapter: callbacks({ postReply, requestDurableResume }),
+        adapter: callbacks(),
         durableAdmission,
+        resumedAfterInterruption: true,
       });
 
-      // No closeout, and the row stays recoverable so the resumed run
-      // delivers the answer instead of the user getting nothing.
-      expect(postReply).not.toHaveBeenCalled();
-      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
-      expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
-      expect(requestDurableResume).toHaveBeenCalledOnce();
-    });
-
-    it('hands the turn to the queue when the error closeout cannot be withdrawn from replay', async () => {
-      mocks.revokeDurableReplay.mockResolvedValue(false);
-      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
-      const requestDurableResume = vi.fn().mockResolvedValue(undefined);
-      mocks.generateText.mockRejectedValueOnce(new Error('provider exploded'));
-
-      await answerFastAgentQuestion({
-        ...baseParams,
-        adapter: callbacks({ postReply, requestDurableResume }),
-        durableAdmission,
-      });
-
-      expect(postReply).not.toHaveBeenCalled();
-      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
-      expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
-      expect(requestDurableResume).toHaveBeenCalledOnce();
+      // Nothing to re-post verbatim: the model resumes with the transcript
+      // and the lost-result placeholder, as for any other cut-off call.
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      const call = mocks.generateText.mock.calls[0]?.[0];
+      expect(call.prompt).toContain('lost due to restart');
     });
 
     it('posts no interruption closeout when a cancelled turn cannot be withdrawn from replay', async () => {
@@ -4707,11 +4829,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('posts a terminal closeout when API shutdown interrupts silent retry backoff', async () => {
+  it('posts nothing when API shutdown cuts off an unadmitted turn during silent retry backoff', async () => {
+    // No durable row (the admission write failed) and no visible retry
+    // notice to correct: there is no restart notice any more, so the turn
+    // ends without a user-facing message.
     const controller = new AbortController();
     const shutdown = new FastAgentProcessShutdownError('SIGTERM');
-    const expectedCloseout =
-      'Roomote restarted while working on this request. Please send it again.';
     const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
     const originalSetTimeout = globalThis.setTimeout;
     let shouldAbort = true;
@@ -4738,35 +4861,22 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ).rejects.toBe(shutdown);
 
       expect(mocks.generateText).toHaveBeenCalledOnce();
-      expect(postReply).toHaveBeenCalledOnce();
-      expect(postReply).toHaveBeenCalledWith({
-        purpose: 'closeout',
-        message: expectedCloseout,
-      });
-      const retryWrites = mocks.upsertMessage.mock.calls
-        .map(([input]) => input.message)
-        .filter((message) => message.eventId === '100.2:retry-notice:0');
-      expect(retryWrites.at(-1)).toMatchObject({
-        contentBlocks: [
-          {
-            type: 'text',
-            text: expectedCloseout,
-          },
-        ],
-        metadata: {
-          visibleInTranscript: true,
-          purpose: 'closeout',
-          platformMessageId: 'closeout-1',
-          inferenceRetryNotice: true,
-          inferenceRetryActive: false,
-          interruptionReason: 'api_shutdown',
-        },
-      });
+      expect(postReply).not.toHaveBeenCalled();
+      const persisted = mocks.upsertMessage.mock.calls.map(
+        ([input]) => input.message,
+      );
       expect(
-        mocks.upsertMessage.mock.calls
-          .map(([input]) => input.message.eventId)
-          .filter((eventId) => eventId.startsWith('100.2:assistant:')),
+        persisted.filter((message) =>
+          message.eventId.startsWith('100.2:assistant:'),
+        ),
       ).toHaveLength(0);
+      expect(
+        persisted.some(
+          (message) =>
+            (message.metadata as { purpose?: string } | undefined)?.purpose ===
+            'closeout',
+        ),
+      ).toBe(false);
     } finally {
       timeout.mockRestore();
     }

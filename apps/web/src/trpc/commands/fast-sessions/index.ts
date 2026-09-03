@@ -252,10 +252,13 @@ async function runWebFastAgentTurn({
     }
 
     const turnMessageId = currentMessageId ?? `web-${randomUUID()}`;
-    // Durable admission: a human web turn is persisted under this process's
-    // claim before it runs, so an interruption hands it to the queue.
+    // Durable admission: a web turn is persisted under this process's claim
+    // before it runs, so an interruption hands it to the queue. Platform
+    // events ride the same row with their framing recorded; the ones that
+    // need adapter extensions or a setup snapshot cannot be rebuilt by the
+    // queue and stay process-bound.
     const durableTurn =
-      durableSessionId && !platformEventKind
+      durableSessionId && !adapterExtensions && !setupSnapshot
         ? await persistFastAgentInlineHumanTurn({
             parent: { sessionId: durableSessionId, conversation },
             event: {
@@ -266,6 +269,16 @@ async function runWebFastAgentTurn({
               question,
               ...(images?.length ? { images } : {}),
               ...(senderDisplayName ? { senderDisplayName } : {}),
+              ...(turnSource === 'platform_event'
+                ? {
+                    turnSource,
+                    ...(platformEventKind ? { platformEventKind } : {}),
+                    ...(platformEventVisibility
+                      ? { platformEventVisibility }
+                      : {}),
+                  }
+                : {}),
+              ...(setupSession ? { setupSession: true } : {}),
             },
           }).catch((error) => {
             console.error(
@@ -292,6 +305,10 @@ async function runWebFastAgentTurn({
       currentMessageId: turnMessageId,
       signal: release.signal,
       ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
+      // A row admission found still pending is an interrupted earlier
+      // attempt (a kickoff re-scheduled after a restart); run it as a
+      // resumption so recorded actions are not repeated.
+      ...(durableTurn?.resumed ? { resumedAfterInterruption: true } : {}),
       model,
       reasoningEffort,
       senderDisplayName,
@@ -543,6 +560,7 @@ export async function startSetupFastSessionCommand(
       platformEventKind: 'setup',
       platformEventVisibility: 'required',
       currentMessageId: kickoffTurnId,
+      durableSessionId: session.id,
       skipIfTurnCompleted: {
         conversationId: session.id,
         turnId: kickoffTurnId,
@@ -843,6 +861,7 @@ export async function submitFastSessionUserInputCommand(
       platformEventKind: 'input_response',
       platformEventVisibility: 'required',
       currentMessageId: responseTurnId,
+      durableSessionId: session.id,
       skipIfTurnCompleted: {
         conversationId: session.id,
         turnId: responseTurnId,
