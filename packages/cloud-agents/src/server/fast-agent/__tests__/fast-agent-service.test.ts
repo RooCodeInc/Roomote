@@ -713,24 +713,82 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('rejects request_user_input calls that mix questions with a trusted preset', async () => {
+  it('lets a trusted preset win when the model also passes placeholder questions', async () => {
+    const presetQuestions = [
+      {
+        id: 'setup-starter-tasks',
+        header: 'First work',
+        question: 'What should Roomote work on first?',
+        isOther: false,
+        isSecret: false,
+        multiple: true,
+        options: [
+          {
+            label: 'fix-flaky-tests',
+            description: 'Find and fix flaky tests.',
+          },
+        ],
+      },
+    ];
     let toolResult: unknown;
     const requestUserInput = vi.fn();
-    const resolveUserInputPreset = vi.fn();
+    const resolveUserInputPreset = vi.fn(async () => presetQuestions);
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
         options.onPromptStarted?.();
+        // Some models fill every optional parameter; the placeholder
+        // questions must be discarded, never rendered or used to reject.
         toolResult = await invokeTool(nativeToolNames.requestUserInput, {
           preset: 'setup_starter_tasks',
           questions: [
             {
-              id: 'starter-work',
-              header: 'First work',
-              question: 'What should I work on first?',
+              id: 'placeholder',
+              header: 'placeholder',
+              question: 'placeholder',
+              options: [{ label: 'placeholder', description: 'placeholder' }],
             },
           ],
         });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'setup-session-1',
+      },
+      turnSource: 'platform_event',
+      platformEventKind: 'setup',
+      platformEventVisibility: 'required',
+      setupSession: true,
+      adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+    });
+
+    expect(toolResult).toEqual({
+      success: true,
+      requestId: expect.any(String),
+      closed: true,
+    });
+    expect(resolveUserInputPreset).toHaveBeenCalledWith('setup_starter_tasks');
+    expect(requestUserInput).toHaveBeenCalledWith({
+      requestId: expect.any(String),
+      preset: 'setup_starter_tasks',
+      questions: presetQuestions,
+    });
+  });
+
+  it('rejects request_user_input calls with neither questions nor a preset', async () => {
+    let toolResult: unknown;
+    const requestUserInput = vi.fn();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        toolResult = await invokeTool(nativeToolNames.requestUserInput, {});
         return 'Please choose your first task.';
       },
     );
@@ -742,13 +800,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         workspaceId: 'deployment-1',
         conversationId: 'setup-session-1',
       },
+      turnSource: 'platform_event',
+      platformEventKind: 'setup',
+      platformEventVisibility: 'required',
       setupSession: true,
-      adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+      adapter: callbacks({ requestUserInput }),
     });
 
-    expect(toolResult).toMatchObject({ success: false });
+    expect(toolResult).toEqual({
+      success: false,
+      error: 'Pass either questions to ask or a trusted preset name.',
+    });
     expect(requestUserInput).not.toHaveBeenCalled();
-    expect(resolveUserInputPreset).not.toHaveBeenCalled();
   });
 
   it('lets a required setup platform event end with trusted structured input', async () => {
