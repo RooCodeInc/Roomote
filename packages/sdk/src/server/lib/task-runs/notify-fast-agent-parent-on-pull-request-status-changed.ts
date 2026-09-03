@@ -9,6 +9,7 @@ import {
 import {
   getFastAgentParentFromPayload,
   type SourceControlProvider,
+  isPrReviewPayload,
 } from '@roomote/types';
 
 import type { FastAgentPullRequestContext } from '../fast-agent-parent-event';
@@ -43,6 +44,13 @@ export async function notifyFastAgentParentOnPullRequestStatusChanged(params: {
 }): Promise<void> {
   const parent = getFastAgentParentFromPayload(params.run.payload);
   if (!parent) {
+    return;
+  }
+
+  // Review-pipeline runs never forward PR events to their parent session:
+  // the PR's implementation task already delivers them, and a duplicate from
+  // the attached review task would double-announce in the same session.
+  if (isPrReviewPayload(params.run.payload)) {
     return;
   }
 

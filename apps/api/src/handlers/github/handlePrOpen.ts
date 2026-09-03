@@ -101,6 +101,8 @@ export async function handlePrOpen(
       branchName: pr.head.ref,
       prBody: pr.body ?? null,
       reviewerSettings: target.settings,
+      repositoryId: target.repo.id,
+      host: target.repo.host ?? toHostFromUrl(pr.html_url),
     });
 
     const releaseLifecycleLock = await acquireGithubPrReviewLifecycleLock(

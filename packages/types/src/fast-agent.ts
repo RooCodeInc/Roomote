@@ -195,6 +195,23 @@ export function buildFastAgentChildTaskMetadata(parent: FastAgentParent): {
   };
 }
 
+/**
+ * Session linkage without orchestrator report ownership: the task shows up in
+ * the parent Fast session (session_tasks + the fast task list) and can emit
+ * parent events, but keeps its own workflow's report and communication
+ * behavior. Used for review-pipeline tasks attached to the session whose
+ * delegated work opened the reviewed PR.
+ */
+export function buildFastAgentSessionAttachment(parent: FastAgentParent): {
+  fastAgentSessionId: string;
+  fastAgentParent: FastAgentParent;
+} {
+  return {
+    fastAgentSessionId: parent.sessionId,
+    fastAgentParent: parent,
+  };
+}
+
 export function getFastAgentParentFromPayload(
   payload: unknown,
 ): FastAgentParent | null {
