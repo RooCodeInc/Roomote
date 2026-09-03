@@ -8,26 +8,16 @@ import {
 import {
   FastAgentDurableRetryScheduledError,
   hasFastAgentSession,
-  ROUTING_AUTO_CONFIRM_TIMEOUT_MS,
 } from '@roomote/cloud-agents/server';
 import {
   acquireSlackFastRootBindingLock,
-  autoConfirmRouting,
-  collectAndExtractThreadAttachmentTexts,
-  collectAndProcessThreadImages,
   createFastAgentSlackLiveTaskLauncher,
-  fetchThreadMessagesSafe,
   findActiveSlackTaskRun,
-  formatSlackRoutingWaitReplyText,
-  hasPendingRoutingConfirmation,
   getSlackThreadReplyFooterMessageTs,
   isTargetSlackBotMessage,
   markSlackThreadExplicitMentionRequired,
   resolveSlackReactionNames,
   showConnectAccount,
-  showTaskConfiguration,
-  handleSlackRoutingCorrection,
-  startAutoRoutedSlackTask,
   type SlackEvent,
   type SlackNotifier,
   type SlackThreadMessage,
@@ -44,10 +34,6 @@ import {
   type TaskInitiator,
   isDeploymentReadOnlyError,
 } from '@roomote/types';
-import {
-  stripLeadingRawSlackMention,
-  stripLeadingSlackProductMention,
-} from '@roomote/cloud-agents';
 
 import { apiLogger } from '../../../logging.js';
 import {
@@ -57,7 +43,6 @@ import {
 import type { AutomatedSlackAppMentionEvent } from '../types.js';
 import { processActiveRunMessage } from './active-run.js';
 import {
-  isBareFastCommandInvocation,
   isFastCommandInvocation,
   processFastAgentMessage,
 } from './fast-agent.js';
@@ -71,7 +56,6 @@ import {
   dispatchSlackThreadFollowUp,
   resolveSlackThreadFollowUpRoute,
 } from './thread-follow-up-dispatch.js';
-import { processSlackAttachments } from '../helpers/attachments.js';
 import { postChannelAutoStartRoutingDebug } from '../helpers/channel-auto-start-routing-debug.js';
 import {
   findRoomoteOwnedSlackThread,
@@ -105,7 +89,6 @@ import {
   evaluateUnmentionedThreadReplyRouting,
   type UnmentionedThreadHistoryMessage,
 } from '../../shared/unmentioned-thread-reply.js';
-import { showManualPickerForAutoRouteFallback } from './auto-route-fallback.js';
 
 const REMOVED_EVAL_COMMAND_PATTERN = /^!eval(?:\s|$)/iu;
 
@@ -158,170 +141,6 @@ async function postRemovedEvalCommandMessage(params: {
       source: 'slack_eval_command',
     },
   });
-}
-
-async function runSlackAutoConfirm({
-  threadId,
-  confirmNonce,
-  delayMs = ROUTING_AUTO_CONFIRM_TIMEOUT_MS,
-  logContext,
-}: {
-  threadId: string;
-  confirmNonce: string;
-  delayMs?: number;
-  logContext: string;
-}): Promise<void> {
-  const runAutoConfirm = async () => {
-    try {
-      await autoConfirmRouting(threadId, confirmNonce);
-    } catch (error) {
-      console.error(
-        `[AutoConfirm] Failed for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  };
-
-  if (delayMs <= 0) {
-    apiLogger.debug(
-      `[AutoConfirm] Triggering immediate Slack auto-confirm for ${logContext}`,
-    );
-    void runAutoConfirm();
-    return;
-  }
-
-  setTimeout(() => {
-    void runAutoConfirm();
-  }, delayMs);
-}
-
-async function processNewTaskConfiguration(
-  event: SlackEvent,
-  slackInstallation: SlackInstallation,
-  userMapping: SlackUserMapping,
-  slack: SlackNotifier,
-  processingReactionName: string,
-): Promise<void> {
-  const threadId = event.thread_ts || event.ts;
-  const threadMessagesPromise = event.thread_ts
-    ? fetchThreadMessagesSafe({
-        fetchThreadMessages: (params) => slack.fetchThreadMessages(params),
-        channel: event.channel,
-        threadTs: threadId,
-        logContext: `new task configuration in ${event.channel}:${threadId}`,
-      })
-    : Promise.resolve([]);
-  const [{ images, attachmentTexts, videoDescriptions }, threadMessages] =
-    await Promise.all([
-      processSlackAttachments({
-        slack,
-        files: event.files,
-        userId: userMapping.userId,
-        userTextContext: stripLeadingSlackProductMention(
-          stripLeadingRawSlackMention(event.text),
-        ),
-      }),
-      threadMessagesPromise,
-    ]);
-
-  const excludeFileIds = event.files
-    ? new Set(event.files.map((file) => file.id))
-    : undefined;
-  const [threadImages, threadAttachmentTexts] = await Promise.all([
-    collectAndProcessThreadImages({
-      processSlackFiles: (files) => slack.processSlackFiles(files),
-      messages: threadMessages,
-      excludeFileIds,
-      logContext: `new task configuration in ${event.channel}:${threadId}`,
-    }),
-    collectAndExtractThreadAttachmentTexts({
-      extractSlackAttachmentTexts: async (files) =>
-        (
-          await processSlackAttachments({
-            slack,
-            files,
-            userId: userMapping.userId,
-            userTextContext: stripLeadingSlackProductMention(
-              stripLeadingRawSlackMention(event.text),
-            ),
-          })
-        ).attachmentTexts,
-      messages: threadMessages,
-      excludeFileIds,
-      logContext: `new task configuration in ${event.channel}:${threadId}`,
-    }),
-  ]);
-
-  event.processedImages = [...images, ...threadImages];
-  event.processedAttachmentTexts = [
-    ...attachmentTexts,
-    ...threadAttachmentTexts,
-  ];
-  event.processedVideoDescriptions = videoDescriptions;
-
-  const result = await showTaskConfiguration({
-    event,
-    slackInstallation,
-    userMapping,
-    slack,
-    processingReactionName,
-  });
-
-  if (result.routingUsed && result.confirmNonce) {
-    await runSlackAutoConfirm({
-      threadId: result.threadId,
-      confirmNonce: result.confirmNonce,
-      delayMs: result.autoConfirmDelayMs,
-      logContext: `thread ${result.threadId}`,
-    });
-  }
-
-  apiLogger.debug(
-    `✅ Successfully processed task configuration for ${result.threadId}` +
-      (result.startedImmediately
-        ? ' (task started immediately)'
-        : result.routingUsed
-          ? result.autoConfirmDelayMs === 0
-            ? ' (routing confirmation sent, immediate auto-confirm triggered)'
-            : ' (routing confirmation sent, auto-confirm scheduled)'
-          : ''),
-  );
-}
-
-async function processRoutingCorrection(
-  event: SlackEvent,
-  slackInstallation: SlackInstallation,
-  userMapping: SlackUserMapping,
-  slack: SlackNotifier,
-  processingReactionName: string,
-): Promise<void> {
-  const threadId = event.thread_ts || event.ts;
-  const correctionText = await slack.normalizeIncomingText(
-    stripLeadingRawSlackMention(event.text),
-  );
-
-  const correctionResult = await handleSlackRoutingCorrection({
-    threadId,
-    correctionText,
-    event,
-    slackInstallation,
-    userMapping,
-    slack,
-    processingReactionName,
-  });
-
-  if (correctionResult.autoConfirmData) {
-    const {
-      threadId: confirmThreadId,
-      confirmNonce,
-      autoConfirmDelayMs,
-    } = correctionResult.autoConfirmData;
-    await runSlackAutoConfirm({
-      threadId: confirmThreadId,
-      confirmNonce,
-      delayMs: autoConfirmDelayMs,
-      logContext: `corrected thread ${confirmThreadId}`,
-    });
-  }
 }
 
 type UnmentionedSlackThreadReplyRoutingDecision =
@@ -515,22 +334,14 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     return { shouldRoute: false };
   }
 
-  const pendingRoutingConfirmation = await hasPendingRoutingConfirmation(
-    event.thread_ts,
-  );
   let roomoteThreadMatch: Awaited<
     ReturnType<typeof findRoomoteOwnedSlackThread>
   > | null = null;
   let isFastAgentThread = false;
 
-  let eligibilityReason:
-    | 'pending-routing-confirmation'
-    | 'roomote-owned-thread'
-    | null = null;
+  let eligibilityReason: 'roomote-owned-thread' | null = null;
 
-  if (pendingRoutingConfirmation) {
-    eligibilityReason = 'pending-routing-confirmation';
-  } else {
+  {
     isFastAgentThread = await hasBoundSlackFastAgentSession({
       teamId,
       channelId: event.channel,
@@ -669,69 +480,6 @@ export async function resolveMentionedSlackThreadAliasTaskId(params: {
   return match?.trackedAliasTaskId ?? null;
 }
 
-async function startNewTaskConfigurationWithLock(params: {
-  event: SlackEvent;
-  slackInstallation: SlackInstallation;
-  userMapping: SlackUserMapping;
-  slack: SlackNotifier;
-  threadId: string;
-  errorLogPrefix: string;
-  processingReactionName: string;
-}): Promise<boolean> {
-  const redis = getRedis();
-  const routingLockKey = `${SLACK_ROUTING_LOCK_PREFIX}${params.threadId}`;
-  const routingLockAcquired = await redis.set(
-    routingLockKey,
-    '1',
-    'EX',
-    ROUTING_LOCK_TTL_SECONDS,
-    'NX',
-  );
-
-  if (!routingLockAcquired) {
-    apiLogger.debug(
-      `🔄 Skipping duplicate routing for thread ${params.threadId} (routing lock held)`,
-    );
-
-    if (params.event.thread_ts) {
-      await params.slack
-        .postMessage({
-          channel: params.event.channel,
-          thread_ts: params.threadId,
-          blocks: [
-            {
-              type: 'markdown',
-              text: formatSlackRoutingWaitReplyText(),
-            },
-          ],
-        })
-        .catch((error) => {
-          console.warn(
-            `[SlackWebhook] Failed to post routing wait message for thread ${params.threadId}: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        });
-    }
-
-    return false;
-  }
-
-  processNewTaskConfiguration(
-    params.event,
-    params.slackInstallation,
-    params.userMapping,
-    params.slack,
-    params.processingReactionName,
-  ).catch(async (error) => {
-    await redis.del(routingLockKey).catch(() => {});
-    console.error(
-      params.errorLogPrefix,
-      error instanceof Error ? error.message : String(error),
-    );
-  });
-
-  return true;
-}
-
 async function maybeRecordTrackedAutomationThreadReply(params: {
   event: SlackEvent;
   slack: SlackNotifier;
@@ -802,8 +550,8 @@ async function postSlackChannelAutoStartFailureBestEffort(input: {
     return;
   }
 
-  await input.slack
-    .postMessage({
+  try {
+    await input.slack.postMessage({
       channel: input.channelId,
       thread_ts: input.threadId,
       text: CHANNEL_AUTO_START_FAILURE_MESSAGE,
@@ -813,12 +561,12 @@ async function postSlackChannelAutoStartFailureBestEffort(input: {
           text: CHANNEL_AUTO_START_FAILURE_MESSAGE,
         },
       ],
-    })
-    .catch((error) => {
-      apiLogger.warn(
-        `[SlackWebhook] Failed to post configured channel auto-start launch failure for ${input.channelId}:${input.threadId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
     });
+  } catch (error) {
+    apiLogger.warn(
+      `[SlackWebhook] Failed to post configured channel auto-start launch failure for ${input.channelId}:${input.threadId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 async function postChannelAutoStartRoutingDebugBestEffort(
@@ -960,59 +708,22 @@ export async function processSlackChannelAutoStartTask(params: {
         }
       }
 
-      // Bot-authored feed messages get the same first hop as a human post in
-      // this channel: a Fast turn under the automation launch identity, with
-      // the direct task launch below as the fallback. The launch gate above
-      // still decides whether the message warrants any response at all.
-      if (isBotAuthored) {
-        const fastStart = await startFastAgentResponse({
-          event: { ...event, user: launchIdentity.slackUserId },
-          slackInstallation,
-          slack,
-          userId: launchIdentity.launchUserId,
-          teamId,
-          continuation: true,
-          directedAtRoomote: mentionsSlackBot(
-            event,
-            slackInstallation.botUserId,
-          ),
-          delegatedTaskInitiator: {
-            kind: 'automation',
-            key: 'slack_channel_auto_start',
-            ...(typeof event.user === 'string'
-              ? { actor: { externalId: event.user } }
-              : {}),
-          },
-          processingReactionName: ackEmoji,
-          errorLogPrefix: `❌ Background fast-agent response failed for configured channel auto-start thread ${threadId}:`,
-        });
-
-        if (fastStart.accepted) {
-          if (channelAutoStartDebug) {
-            await postChannelAutoStartRoutingDebugBestEffort({
-              slack,
-              sourceChannelId: event.channel,
-              sourceChannelName,
-              threadId,
-              messageText: event.text,
-              launchMode: channelAutoStartLaunchMode,
-              llmDecision: channelAutoStartDebug.llmDecision,
-              llmReason: channelAutoStartDebug.reason,
-              taskOutcome: 'started',
-              taskOutcomeDetails: 'Routed to Fast.',
-            });
-          }
-          apiLogger.info(
-            `[SlackWebhook] Configured channel auto-start routed to Fast thread_id=${threadId} channel=${event.channel}`,
-          );
-          return;
-        }
-
-        apiLogger.warn(
-          `[SlackWebhook] Configured channel auto-start Fast entry not accepted (${fastStart.reason}); falling back to direct task launch for thread ${threadId}`,
-        );
-      }
-
+      // Every post in a configured channel enters Fast: a linked person under
+      // their own identity, a bot or webhook feed under the automation launch
+      // identity. The channel's instructions ride along as model context. The
+      // launch gate above already decided the message warrants a response.
+      const instructionContext = agentPromptPrefix?.trim();
+      const fastEvent = {
+        ...event,
+        user: launchIdentity.slackUserId,
+        ...(instructionContext
+          ? {
+              agentContext: [instructionContext, event.agentContext]
+                .filter((part): part is string => Boolean(part))
+                .join('\n\n'),
+            }
+          : {}),
+      };
       if (humanUserMapping && typeof event.user === 'string') {
         await recordInboundSlackConversationMessage({
           event: { ...event, user: event.user },
@@ -1022,72 +733,33 @@ export async function processSlackChannelAutoStartTask(params: {
           shouldRecordThreadReply: false,
         });
       }
-
-      await redis.sadd(REDIS_KEYS.MENTIONED_THREADS, threadId);
-      await slack.addReaction({
-        channel: event.channel,
-        timestamp: event.ts,
-        name: ackEmoji,
-      });
-
-      const { images, attachmentTexts, videoDescriptions } =
-        await processSlackAttachments({
-          slack,
-          files: event.files,
-          userId: launchIdentity.launchUserId,
-          userTextContext: stripLeadingSlackProductMention(
-            stripLeadingRawSlackMention(event.text),
-          ),
-        });
-
-      // Bot-authored auto-starts are automation-initiated with no installer
-      // owner; a human posting in a configured auto-start channel is the
-      // initiating user.
-      const initiator: TaskInitiator = isBotAuthored
-        ? {
-            kind: 'automation',
-            key: 'slack_channel_auto_start',
-            ...(typeof event.user === 'string'
-              ? { actor: { externalId: event.user } }
-              : {}),
-          }
-        : {
-            kind: 'user',
-            externalId: launchIdentity.slackUserId,
-            matchedUserId: launchIdentity.launchUserId,
-          };
-
-      const result = await startAutoRoutedSlackTask({
+      const fastStart = await startFastAgentResponse({
+        event: fastEvent,
         slackInstallation,
+        ...(humanUserMapping ? { userMapping: humanUserMapping } : {}),
         slack,
-        initiator,
-        trigger: 'message',
-        launchUserId: isBotAuthored ? null : launchIdentity.launchUserId,
-        slackUserId: launchIdentity.slackUserId,
-        persistedSlackUserId: isBotAuthored ? null : launchIdentity.slackUserId,
-        initiatingSlackUserId:
-          launchIdentity.slackUserId === slackInstallation.botUserId
-            ? undefined
-            : launchIdentity.slackUserId,
-        channel: event.channel,
-        prompt: event.authoredText ?? event.text,
-        slackMessageContext: event.agentContext,
-        threadTs: threadId,
-        originMessageTs: event.ts,
-        processedImages: images.length > 0 ? images : undefined,
-        processedImageFileIds: event.files?.map((file) => file.id),
-        processedAttachmentFileIds: event.files?.map((file) => file.id),
-        ...(attachmentTexts.length > 0
-          ? { processedAttachmentTexts: attachmentTexts }
+        userId: launchIdentity.launchUserId,
+        teamId,
+        continuation: true,
+        directedAtRoomote:
+          !isBotAuthored ||
+          mentionsSlackBot(event, slackInstallation.botUserId),
+        ...(isBotAuthored
+          ? {
+              delegatedTaskInitiator: {
+                kind: 'automation',
+                key: 'slack_channel_auto_start',
+                ...(typeof event.user === 'string'
+                  ? { actor: { externalId: event.user } }
+                  : {}),
+              },
+            }
           : {}),
-        ...(videoDescriptions.length > 0
-          ? { processedVideoDescriptions: videoDescriptions }
-          : {}),
-        channelAutoStartLaunchMode,
-        agentPromptPrefix,
+        processingReactionName: ackEmoji,
+        errorLogPrefix: `❌ Background fast-agent response failed for configured channel auto-start thread ${threadId}:`,
       });
 
-      if (result.status === 'started') {
+      if (fastStart.accepted) {
         if (channelAutoStartDebug) {
           await postChannelAutoStartRoutingDebugBestEffort({
             slack,
@@ -1099,29 +771,14 @@ export async function processSlackChannelAutoStartTask(params: {
             llmDecision: channelAutoStartDebug.llmDecision,
             llmReason: channelAutoStartDebug.reason,
             taskOutcome: 'started',
+            taskOutcomeDetails: 'Routed to Fast.',
           });
         }
         apiLogger.info(
-          `[SlackWebhook] Configured channel auto-start launched task thread_id=${result.threadId} task_run_id=${result.runId} task_id=${result.taskId} channel=${event.channel}`,
+          `[SlackWebhook] Configured channel auto-start routed to Fast thread_id=${threadId} channel=${event.channel}`,
         );
         return;
       }
-
-      const failureCode =
-        result.status === 'not_started' ? result.code : 'routing_fallback';
-      const showedManualPicker = await showManualPickerForAutoRouteFallback({
-        result,
-        event,
-        slackInstallation,
-        userMapping: humanUserMapping,
-        slack,
-        processedImages: images.length > 0 ? images : undefined,
-        processedAttachmentTexts:
-          attachmentTexts.length > 0 ? attachmentTexts : undefined,
-        processedVideoDescriptions:
-          videoDescriptions.length > 0 ? videoDescriptions : undefined,
-        processingReactionName: ackEmoji,
-      });
 
       if (channelAutoStartDebug) {
         await postChannelAutoStartRoutingDebugBestEffort({
@@ -1134,39 +791,17 @@ export async function processSlackChannelAutoStartTask(params: {
           llmDecision: channelAutoStartDebug.llmDecision,
           llmReason: channelAutoStartDebug.reason,
           taskOutcome: 'not_started',
-          taskOutcomeDetails: showedManualPicker
-            ? `${failureCode}: manual picker shown`
-            : result.status === 'not_started' &&
-                result.code === 'routing_fallback'
-              ? `${failureCode}: manual picker unavailable`
-              : `${failureCode}: ${result.message}`,
+          taskOutcomeDetails: `Fast entry not accepted: ${fastStart.reason}`,
         });
       }
       apiLogger.warn(
-        `[SlackWebhook] Configured channel auto-start did not start task code=${failureCode} thread_id=${result.threadId} channel=${event.channel}`,
+        `[SlackWebhook] Configured channel auto-start Fast entry not accepted (${fastStart.reason}) for thread ${threadId}`,
       );
-      if (showedManualPicker) {
-        return;
-      }
-
-      if (
-        result.status === 'not_started' &&
-        result.code === 'routing_fallback'
-      ) {
-        await redis.del(routingLockKey).catch(() => {});
-        return;
-      }
-
-      await slack.postMessage({
-        channel: event.channel,
-        thread_ts: threadId,
-        text: result.message,
-        blocks: [
-          {
-            type: 'markdown',
-            text: result.message,
-          },
-        ],
+      await postSlackChannelAutoStartFailureBestEffort({
+        slack,
+        channelId: event.channel,
+        threadId,
+        isBotAuthored,
       });
       await redis.del(routingLockKey).catch(() => {});
     } catch (error) {
@@ -1323,40 +958,6 @@ async function maybeHandleChannelAutoStart(params: {
   }
 
   const { ackEmoji } = await resolveSlackReactionNames();
-
-  const fastAgentEntryMode =
-    userMapping && typeof channelAutoStartEvent.user === 'string'
-      ? resolveFastAgentEntryMode({
-          explicitInvocation: isBareFastCommandInvocation(
-            channelAutoStartEvent.authoredText ?? channelAutoStartEvent.text,
-          ),
-          userDefaultEnabled: !isRemovedEvalCommandInvocation(
-            channelAutoStartEvent.authoredText ?? channelAutoStartEvent.text,
-          ),
-        })
-      : null;
-
-  if (fastAgentEntryMode && userMapping) {
-    void startFastAgentResponse({
-      event: { ...channelAutoStartEvent, user: channelAutoStartEvent.user },
-      slackInstallation: context.slackInstallation,
-      userMapping,
-      slack: context.slack,
-      userId: userMapping.userId,
-      teamId: context.teamId,
-      continuation: fastAgentEntryMode === 'default',
-      directedAtRoomote:
-        fastAgentEntryMode === 'explicit' ||
-        mentionsSlackBot(
-          channelAutoStartEvent,
-          context.slackInstallation.botUserId,
-        ),
-      processingReactionName: ackEmoji,
-      errorLogPrefix: `❌ Background fast-agent response failed for auto-start thread ${channelAutoStartEvent.ts}:`,
-    });
-
-    return true;
-  }
 
   if (
     userMapping &&
@@ -1579,104 +1180,15 @@ async function processAutomatedAppMentionTask(params: {
         return true;
       }
 
+      // Fast no longer refuses a turn: a busy Session queues or steers the
+      // message. Non-acceptance here is an exception before admission, and
+      // automated mentions are bot-authored, so like the configured-channel
+      // path above it stays log-only rather than replying to a feed.
       apiLogger.warn(
-        `[SlackWebhook] Automated app_mention Fast entry not accepted (${fastStart.reason}); falling back to direct task launch for thread ${threadId}`,
+        `[SlackWebhook] Automated app_mention Fast entry not accepted (${fastStart.reason}) for thread ${threadId}`,
       );
 
-      const { images, attachmentTexts, videoDescriptions } =
-        await processSlackAttachments({
-          slack,
-          files: event.files,
-          userTextContext: stripLeadingSlackProductMention(
-            stripLeadingRawSlackMention(event.text),
-          ),
-        });
-
-      // Automated (bot/relay-authored) @mention: automation initiator with
-      // the relay message author as the external actor when available.
-      const result = await startAutoRoutedSlackTask({
-        slackInstallation,
-        slack,
-        initiator: {
-          kind: 'automation',
-          key: 'slack_channel_auto_start',
-          ...(typeof event.user === 'string'
-            ? { actor: { externalId: event.user } }
-            : {}),
-        },
-        trigger: 'message',
-        slackUserId: launchIdentity.slackUserId,
-        initiatingSlackUserId:
-          launchIdentity.slackUserId === slackInstallation.botUserId
-            ? undefined
-            : launchIdentity.slackUserId,
-        channel: event.channel,
-        prompt: event.authoredText ?? event.text,
-        slackMessageContext: event.agentContext,
-        threadTs: threadId,
-        originMessageTs: event.ts,
-        processedImages: images.length > 0 ? images : undefined,
-        processedImageFileIds: event.files?.map((file) => file.id),
-        processedAttachmentFileIds: event.files?.map((file) => file.id),
-        ...(attachmentTexts.length > 0
-          ? { processedAttachmentTexts: attachmentTexts }
-          : {}),
-        skipMcpSetupSuggestion: true,
-        ...(videoDescriptions.length > 0
-          ? { processedVideoDescriptions: videoDescriptions }
-          : {}),
-      });
-
-      if (result.status !== 'started') {
-        const failureCode =
-          result.status === 'not_started' ? result.code : 'replied_inline';
-        apiLogger.warn(
-          `[SlackWebhook] Automated app_mention did not start task code=${failureCode} thread_id=${result.threadId} channel=${event.channel} app_id=${event.app_id}`,
-        );
-
-        const showedManualPicker = await showManualPickerForAutoRouteFallback({
-          result,
-          event: threadEvent,
-          slackInstallation,
-          userMapping: { userId: launchIdentity.launchUserId },
-          slack,
-          processedImages: images.length > 0 ? images : undefined,
-          processedAttachmentTexts:
-            attachmentTexts.length > 0 ? attachmentTexts : undefined,
-          processedVideoDescriptions:
-            videoDescriptions.length > 0 ? videoDescriptions : undefined,
-        });
-
-        if (showedManualPicker) {
-          return true;
-        }
-
-        if (
-          result.status === 'not_started' &&
-          (result.code === 'source_message_inaccessible' ||
-            result.code === 'deployment_read_only')
-        ) {
-          await slack.postMessage({
-            channel: event.channel,
-            thread_ts: threadId,
-            text: result.message,
-            blocks: [
-              {
-                type: 'markdown',
-                text: result.message,
-              },
-            ],
-          });
-        }
-
-        return false;
-      }
-
-      apiLogger.info(
-        `[SlackWebhook] Automated app_mention started task thread_id=${result.threadId} task_run_id=${result.runId} task_id=${result.taskId} channel=${event.channel} app_id=${event.app_id}`,
-      );
-
-      return true;
+      return false;
     },
   });
 
@@ -1791,9 +1303,7 @@ async function handleSlackEntryEvent(params: {
   slack: SlackNotifier;
   teamId: string;
   ackEmoji: string;
-  completionEmoji: string;
   skipThreadFollowupHandling?: boolean;
-  prefetchedThreadMessages?: SlackThreadMessage[];
   threadTaskId?: string;
 }): Promise<void> {
   const {
@@ -1802,9 +1312,7 @@ async function handleSlackEntryEvent(params: {
     slack,
     teamId,
     ackEmoji,
-    completionEmoji,
     skipThreadFollowupHandling = false,
-    prefetchedThreadMessages,
     threadTaskId,
   } = params;
 
@@ -1921,245 +1429,13 @@ async function handleSlackEntryEvent(params: {
     return;
   }
 
-  const isFastAgentContinuation = isRemovedEvalCommandInvocation(
-    authoredEventText,
-  )
-    ? false
-    : await hasBoundSlackFastAgentSession({
-        teamId,
-        channelId: event.channel,
-        threadId,
-      });
-
-  if (isFastAgentContinuation) {
-    void startFastAgentResponse({
-      event,
-      slackInstallation,
-      userMapping,
-      slack,
-      userId: userMapping.userId,
-      teamId,
-      continuation: true,
-      isExistingConversation: true,
-      resolveActiveTasks: () =>
-        resolveFastAgentReplyTasks({
-          slack,
-          slackTeamId: teamId,
-          channelId: event.channel,
-          threadTs: threadId,
-          activeTaskId: activeRun?.taskId,
-        }),
-      processingReactionName: ackEmoji,
-      errorLogPrefix: `❌ Background fast-agent continuation failed for thread ${threadId}:`,
-    });
-
-    return;
-  }
-
-  if (!skipThreadFollowupHandling) {
-    const followUpRoute = await resolveSlackThreadFollowUpRoute({
-      threadId,
-      channelId: event.channel,
-      slackTeamId: teamId,
-      ...(threadTaskId ? { taskId: threadTaskId } : {}),
-      prefetchedActiveRun: activeRun ?? null,
-      allowCompletedResume: false,
-    });
-    const followUpOutcome = await dispatchSlackThreadFollowUp({
-      route: followUpRoute,
-      slack,
-      channel: event.channel,
-      threadId,
-      onActive: async (activeThreadRun) => {
-        apiLogger.debug(
-          `Found active task run ${activeThreadRun.id} for thread ${threadId} - queuing message for continuation`,
-        );
-
-        processActiveRunMessage(
-          event,
-          slack,
-          userMapping.userId,
-          activeThreadRun,
-          teamId,
-          slackInstallation.botUserId,
-          prefetchedThreadMessages,
-        ).catch((error) => {
-          console.error(
-            `❌ Background processing failed for active task run ${activeThreadRun.id}:`,
-            error instanceof Error ? error.message : String(error),
-          );
-        });
-      },
-    });
-
-    if (followUpOutcome.kind !== 'fresh') {
-      return;
-    }
-
-    const pendingConfirmation = await hasPendingRoutingConfirmation(threadId);
-
-    if (pendingConfirmation) {
-      apiLogger.debug(
-        `Pending routing confirmation found for thread ${threadId} - processing correction in background`,
-      );
-
-      processRoutingCorrection(
-        event,
-        slackInstallation,
-        userMapping,
-        slack,
-        ackEmoji,
-      ).catch((error) => {
-        console.error(
-          `❌ Background routing correction failed for thread ${threadId}:`,
-          error instanceof Error ? error.message : String(error),
-        );
-      });
-
-      return;
-    }
-  } else {
-    apiLogger.debug(
-      `[SlackWebhook] Treating thread ${threadId} as a fresh summon request; bypassing continuation and correction handling`,
-    );
-  }
-
-  if (
-    event.type === 'app_mention' &&
-    isRemovedEvalCommandInvocation(authoredEventText)
-  ) {
-    await postRemovedEvalCommandMessage({
-      event,
-      slack,
-      userId: userMapping.userId,
-      teamId,
-    });
-    return;
-  }
-
-  await slack.addReaction({
-    channel: event.channel,
-    timestamp: event.ts,
-    name: ackEmoji,
-  });
-
-  const followUpRoute = await resolveSlackThreadFollowUpRoute({
-    threadId,
-    channelId: event.channel,
-    slackTeamId: teamId,
-    ...(threadTaskId ? { taskId: threadTaskId } : {}),
-    prefetchedActiveRun: null,
-  });
-  const startFreshTaskConfiguration = async (errorLogPrefix: string) => {
-    await startNewTaskConfigurationWithLock({
-      event,
-      slackInstallation,
-      userMapping,
-      slack,
-      threadId,
-      errorLogPrefix,
-      processingReactionName: ackEmoji,
-    }).catch((lockError) => {
-      console.error(
-        `❌ Failed to acquire routing lock for thread ${threadId}:`,
-        lockError instanceof Error ? lockError.message : String(lockError),
-      );
-    });
-  };
-
-  await dispatchSlackThreadFollowUp({
-    route: followUpRoute,
+  // The only message shape that does not enter Fast is the retired `!eval`
+  // command, which gets a notice instead of a task.
+  await postRemovedEvalCommandMessage({
+    event,
     slack,
-    channel: event.channel,
-    threadId,
-    onActive: async (activeThreadRun) => {
-      apiLogger.debug(
-        `Found active task run ${activeThreadRun.id} for thread ${threadId} - queuing message for continuation`,
-      );
-
-      processActiveRunMessage(
-        event,
-        slack,
-        userMapping.userId,
-        activeThreadRun,
-        teamId,
-        slackInstallation.botUserId,
-        prefetchedThreadMessages,
-      ).catch((error) => {
-        console.error(
-          `❌ Background processing failed for active task run ${activeThreadRun.id}:`,
-          error instanceof Error ? error.message : String(error),
-        );
-      });
-    },
-    onResume: async (completedRun) => {
-      apiLogger.debug(
-        `[SlackWebhook] Found completed task run ${completedRun.id} with snapshot ${completedRun.snapshotId} for thread ${threadId} - creating SnapshotResume`,
-      );
-
-      void processSnapshotResume(
-        event,
-        slack,
-        completedRun,
-        threadId,
-        userMapping.userId,
-        ackEmoji,
-        completionEmoji,
-        teamId,
-        slackInstallation.botUserId,
-      )
-        .then(async (handled) => {
-          if (handled) {
-            return;
-          }
-
-          apiLogger.debug(
-            `[SlackWebhook] Resume not handled for thread ${threadId} - falling back to new task configuration`,
-          );
-
-          await startFreshTaskConfiguration(
-            `❌ Background task configuration fallback failed for thread ${threadId}:`,
-          );
-        })
-        .catch(async (error) => {
-          if (isDeploymentReadOnlyError(error)) {
-            await slack.postMessage({
-              channel: event.channel,
-              thread_ts: threadId,
-              text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
-              blocks: [
-                {
-                  type: 'markdown',
-                  text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
-                },
-              ],
-            });
-            return;
-          }
-
-          console.error(
-            `❌ Background snapshot resume failed for thread ${threadId}:`,
-            error instanceof Error ? error.message : String(error),
-          );
-
-          await startFreshTaskConfiguration(
-            `❌ Background task configuration fallback failed for thread ${threadId}:`,
-          );
-        });
-
-      return { handled: true, value: undefined };
-    },
-    onFresh: async () => {
-      if (followUpRoute.kind === 'fresh') {
-        apiLogger.debug(
-          `No active task run found for thread ${threadId} - processing in background`,
-        );
-      }
-
-      await startFreshTaskConfiguration(
-        `❌ Background task configuration failed for thread ${threadId}:`,
-      );
-    },
+    userId: userMapping.userId,
+    teamId,
   });
 }
 
@@ -2251,7 +1527,7 @@ export async function handleMessageOrAppMentionEvent(params: {
     return;
   }
 
-  const { ackEmoji, completionEmoji } = await resolveSlackReactionNames();
+  const { ackEmoji } = await resolveSlackReactionNames();
 
   await handleSlackEntryEvent({
     event,
@@ -2259,10 +1535,6 @@ export async function handleMessageOrAppMentionEvent(params: {
     slack: context.slack,
     teamId: context.teamId,
     ackEmoji,
-    completionEmoji,
-    prefetchedThreadMessages: unmentionedThreadReplyRouting.shouldRoute
-      ? unmentionedThreadReplyRouting.threadMessages
-      : undefined,
     threadTaskId: unmentionedThreadReplyRouting.shouldRoute
       ? unmentionedThreadReplyRouting.taskId
       : (mentionedThreadAliasTaskId ?? undefined),

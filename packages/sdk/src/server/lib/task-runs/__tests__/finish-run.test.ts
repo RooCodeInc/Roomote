@@ -251,8 +251,6 @@ const mockPostMessage = vi.fn().mockResolvedValue('ts-123');
 const mockUpdateMessage = vi.fn().mockResolvedValue(true);
 const mockRemoveCancelButton = vi.fn().mockResolvedValue(true);
 const mockGetSlackStartedMessageTs = vi.fn().mockResolvedValue(null);
-const mockBuildTaskFailedBlocks = vi.fn();
-const mockBuildTaskFailedMessage = vi.fn();
 const mockOpenConversation = vi.fn().mockResolvedValue('D123');
 const mockListPublicChannels = vi.fn().mockResolvedValue([]);
 vi.mock('@roomote/slack', () => ({
@@ -263,10 +261,6 @@ vi.mock('@roomote/slack', () => ({
     openConversation = mockOpenConversation;
     listPublicChannels = mockListPublicChannels;
   },
-  buildTaskFailedBlocks: (...args: unknown[]) =>
-    mockBuildTaskFailedBlocks(...args),
-  buildTaskFailedMessage: (...args: unknown[]) =>
-    mockBuildTaskFailedMessage(...args),
   getSlackStartedMessageTs: (...args: unknown[]) =>
     mockGetSlackStartedMessageTs(...args),
   refreshAutomationRootFooter: (...args: unknown[]) =>
@@ -417,34 +411,6 @@ describe('finishRun', () => {
     mockGetValidAccessToken.mockResolvedValue('decrypted-token');
     mockFindFirstTask.mockResolvedValue(null);
     mockSuggestSlackQuestionChannels.mockResolvedValue([]);
-    mockBuildTaskFailedBlocks.mockReturnValue([
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
-        },
-      },
-      {
-        type: 'actions',
-        elements: [
-          {
-            type: 'button',
-            action_id: 'retry_failed_task',
-            text: { type: 'plain_text', text: 'Try again' },
-            value: JSON.stringify({ runId: 1 }),
-          },
-        ],
-      },
-    ]);
-    mockBuildTaskFailedMessage.mockImplementation((options) => ({
-      text:
-        options && typeof options === 'object' && 'messageText' in options
-          ? ((options as { messageText?: string }).messageText ??
-            "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.")
-          : "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
-      blocks: mockBuildTaskFailedBlocks(),
-    }));
     mockRedisSet.mockResolvedValue('OK');
     mockRedisDel.mockResolvedValue(1);
     mockGetCheckRun.mockResolvedValue({
@@ -1598,17 +1564,11 @@ describe('finishRun', () => {
         error: 'spawn timeout',
       });
 
-      expect(mockBuildTaskFailedMessage).toHaveBeenCalledWith({
-        runId: 1,
-        messageText:
-          "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
-      });
       expect(mockUpdateMessage).toHaveBeenCalledWith({
         channel: 'C123',
         ts: '111.333',
         message: {
           text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
-          blocks: mockBuildTaskFailedBlocks.mock.results[0]?.value,
         },
       });
       expect(mockPostMessage).not.toHaveBeenCalled();
@@ -1651,10 +1611,10 @@ describe('finishRun', () => {
 
       const messageText = String(
         (
-          mockBuildTaskFailedMessage.mock.calls.at(-1)?.[0] as
-            | { messageText?: string }
+          mockUpdateMessage.mock.calls.at(-1)?.[0] as
+            | { message?: { text?: string } }
             | undefined
-        )?.messageText,
+        )?.message?.text,
       );
       expect(messageText).toContain(
         'The provider returned an error: Invalid credential [redacted]; &lt;!channel&gt; authentication unavailable.',
@@ -1693,7 +1653,6 @@ describe('finishRun', () => {
         error: 'Worker heartbeat stale and instance sb-1 is stopped',
       });
 
-      expect(mockBuildTaskFailedMessage).not.toHaveBeenCalled();
       expect(mockUpdateMessage).not.toHaveBeenCalled();
       expect(mockPostMessage).not.toHaveBeenCalled();
       // Persist/report consistency: the stop-normalized status is also what
@@ -1748,7 +1707,6 @@ describe('finishRun', () => {
           completedAt: expect.any(Date),
         }),
       );
-      expect(mockBuildTaskFailedMessage).toHaveBeenCalled();
       expect(mockUpdateMessage).toHaveBeenCalled();
     });
 
@@ -1783,7 +1741,6 @@ describe('finishRun', () => {
         error: 'resume bootstrap timeout',
       });
 
-      expect(mockBuildTaskFailedBlocks).not.toHaveBeenCalled();
       expect(mockUpdateMessage).toHaveBeenCalledWith({
         channel: 'C123',
         ts: '111.333',
@@ -1833,7 +1790,6 @@ describe('finishRun', () => {
         channel: 'C123',
         thread_ts: '111.222',
         text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
-        blocks: mockBuildTaskFailedBlocks.mock.results[0]?.value,
       });
       expect(mockRemoveCancelButton).not.toHaveBeenCalled();
     });
@@ -1872,17 +1828,11 @@ describe('finishRun', () => {
         error: 'worker heartbeat stale',
       });
 
-      expect(mockBuildTaskFailedMessage).toHaveBeenCalledWith({
-        runId: 1,
-        messageText:
-          "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.",
-      });
       expect(mockUpdateMessage).not.toHaveBeenCalled();
       expect(mockPostMessage).toHaveBeenCalledWith({
         channel: 'C123',
         thread_ts: '111.222',
         text: "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.",
-        blocks: mockBuildTaskFailedBlocks.mock.results[0]?.value,
       });
       expect(mockRemoveCancelButton).toHaveBeenCalledWith({
         channel: 'C123',

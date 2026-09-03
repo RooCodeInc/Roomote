@@ -1,6 +1,5 @@
 import { acquireRedisLock } from '@roomote/redis';
 import {
-  AGENT_DISPLAY_NAME,
   ALL_REPOSITORIES,
   formatErrorForLog,
   normalizeSetupNewState,
@@ -17,12 +16,12 @@ import {
   type SuggestionLaunchWorkspace,
 } from '../helpers/suggestion-workspace.js';
 import {
+  createFastAgentSlackLiveTaskLauncher,
   resolveSlackReactionNames,
-  startAutoRoutedSlackTask,
-  startSlackAppMentionTask,
   type SlackNotifier,
   type SlackReactionAddedEvent,
 } from '@roomote/slack';
+import { launchPinnedFastSessionTask } from '@roomote/cloud-agents/server';
 import {
   and,
   claimWorkItem,
@@ -172,14 +171,12 @@ async function launchTaskSuggestionTaskFromReaction({
   slack,
   reactionEvent,
   ackEmoji,
-  completionEmoji,
 }: {
   teamId: string;
   slackInstallation: SlackWebhookContext['slackInstallation'];
   slack: SlackNotifier;
   reactionEvent: SlackReactionAddedEvent;
   ackEmoji: string;
-  completionEmoji: string;
 }): Promise<TaskSuggestionReactionLaunchResult> {
   if (reactionEvent.item.type !== 'message') {
     return false;
@@ -427,10 +424,13 @@ async function launchTaskSuggestionTaskFromReaction({
     return true;
   }
 
-  // A Fast-targeted suggestion has no coding fallback and a Fast turn needs a
-  // linked user, so an unlinked reactor gets the link prompt before any claim
-  // (the other chat surfaces gate on account linking the same way).
-  if (usesFastLaunchTarget && !reactingUserMapping.activeMapping) {
+  // A card that Fast decides for has no direct-launch fallback and a Fast turn
+  // needs a linked user, so an unlinked reactor gets the link prompt before
+  // any claim (the other chat surfaces gate on account linking the same way).
+  if (
+    (usesFastLaunchTarget || usesRouterLaunch) &&
+    !reactingUserMapping.activeMapping
+  ) {
     await postSuggestionLaunchFailureMessage({
       slack,
       channelId,
@@ -540,28 +540,16 @@ async function launchTaskSuggestionTaskFromReaction({
     };
 
     const activeUserMapping = reactingUserMapping.activeMapping;
+    // Cards without a pinned workspace let Fast decide; pinned cards delegate
+    // through the owning Session without a model turn.
+    const usesFastTurn = usesFastLaunchTarget || usesRouterLaunch;
     const launchResult = await launchClaimedSuggestedTask({
       suggestion: { id: workItemId, launchClaimedAt: claimedAt },
       policy: {
-        // Pinned scan suggestions still enter Fast; the pin only selects the
-        // verified workspace if this launch falls back to coding.
-        fastEligible: suggestionType === 'suggested_tasks',
-        userDefaultEnabled:
-          usesFastLaunchTarget ||
-          ((launchTarget.kind === 'router' ||
-            launchTarget.kind === 'legacy_pinned') &&
-            Boolean(activeUserMapping)),
+        fastEligible: usesFastTurn,
+        userDefaultEnabled: usesFastTurn,
         fastAvailable: Boolean(activeUserMapping),
-        ...(launchTarget.kind === 'fast' ||
-        launchTarget.kind === 'environment' ||
-        launchTarget.kind === 'all_repositories'
-          ? {
-              requiredMode:
-                launchTarget.kind === 'fast'
-                  ? ('fast' as const)
-                  : ('coding' as const),
-            }
-          : {}),
+        requiredMode: usesFastTurn ? ('fast' as const) : ('coding' as const),
       },
       launch: async (launchMode) => {
         if (launchMode === 'fast') {
@@ -597,71 +585,66 @@ async function launchTaskSuggestionTaskFromReaction({
             : fastStart;
         }
 
-        if (usesRouterLaunch) {
-          const routedLaunch = await startAutoRoutedSlackTask({
-            slackInstallation,
-            slack,
-            initiator,
-            trigger: 'manual',
-            launchUserId: activeUserMapping?.userId,
-            slackUserId: reactionEvent.user,
-            persistedSlackUserId: reactionEvent.user,
-            initiatingSlackUserId: reactionEvent.user,
-            channel: channelId,
-            prompt: `${workItem.title}\n\n${suggestionBrief}`,
-            threadTs: launchThreadTs,
-            originMessageTs: launchThreadTs,
-            agentPromptTextOverride: suggestionTaskPrompt,
-            skipMcpSetupSuggestion: true,
-          });
-          return routedLaunch.status === 'started'
-            ? {
-                accepted: true,
-                runId: routedLaunch.runId,
-                taskId: routedLaunch.taskId,
-              }
-            : {
-                accepted: false,
-                reason:
-                  routedLaunch.message ||
-                  "I couldn't determine which workspace should run this suggestion.",
-              };
-        }
-
         if (!suggestionWorkspace) {
           throw new Error('Setup suggestion workspace was not resolved.');
         }
-        const directLaunch = await startSlackAppMentionTask({
+        // The card already names the workspace, so the owning Session
+        // delegates the task straight away, without a Fast turn. The seeded
+        // thread is the Session's home in Slack.
+        const workspace = suggestionWorkspace;
+        const launchOwnerUserId = activeUserMapping?.userId ?? null;
+        if (!launchOwnerUserId) {
+          return {
+            accepted: false,
+            reason: UNLINKED_SLACK_ACCOUNT_FAST_LAUNCH_FAILURE,
+          };
+        }
+        const pinned = await launchPinnedFastSessionTask({
+          userId: launchOwnerUserId,
+          conversation: {
+            surface: 'slack',
+            workspaceId: teamId,
+            conversationId: launchThreadTs,
+            replyTarget: { channelId, threadId: launchThreadTs },
+          },
+          launchId: `slack-suggestion:${workItemId}:${launchThreadTs}`,
+          prompt: suggestionSlackText,
+          surface: 'slack',
           initiator,
-          trigger: 'manual',
-          channel: channelId,
-          teamId,
-          slackUserId: reactionEvent.user,
-          text: suggestionSlackText,
-          agentPromptText: suggestionTaskPrompt,
-          ts: launchThreadTs,
-          threadTs: launchThreadTs,
-          repo:
-            launchTarget.kind === 'all_repositories'
-              ? ALL_REPOSITORIES
-              : suggestionWorkspace.repoForPayload,
-          environmentId: suggestionWorkspace.environmentId,
-          readinessMessage: suggestionWorkspace.readinessMessage ?? undefined,
-          webPath: suggestionType === 'setup_onboarding' ? '/setup' : undefined,
-          ackEmoji,
-          completionEmoji,
-          queuedStartedMessage: {
-            ts: launchThreadTs,
-            agentName: AGENT_DISPLAY_NAME,
-            initiatingSlackUserId: reactionEvent.user,
-            workspaceDisplayName: suggestionWorkspace.workspaceDisplayName,
-            workspaceOnly: false,
+          kickoffMessage: `Started a task in ${workspace.workspaceDisplayName}.`,
+          launch: async ({ parent, launchIdempotencyKey, postKickoff }) => {
+            const launchTask = createFastAgentSlackLiveTaskLauncher({
+              slack,
+              userId: launchOwnerUserId,
+              teamId,
+              ...(slackInstallation.teamDomain
+                ? { teamDomain: slackInstallation.teamDomain }
+                : {}),
+              channelId,
+              threadTs: launchThreadTs,
+              messageId: launchThreadTs,
+              initiator,
+              repoForPayload:
+                launchTarget.kind === 'all_repositories'
+                  ? ALL_REPOSITORIES
+                  : workspace.repoForPayload,
+            });
+            return launchTask({
+              prompt: suggestionTaskPrompt,
+              environmentId: workspace.environmentId ?? null,
+              model: null,
+              parentSessionId: parent.sessionId,
+              launchIdempotencyKey,
+              postKickoff: async () => {
+                await postKickoff();
+              },
+            });
           },
         });
         return {
           accepted: true,
-          runId: directLaunch.id,
-          taskId: directLaunch.taskId,
+          runId: pinned.runId,
+          taskId: pinned.taskId,
         };
       },
       finalize: (taskId) =>
@@ -871,7 +854,6 @@ export async function handleReactionAddedEvent(params: {
             slack: context.slack,
             reactionEvent: event,
             ackEmoji: reactionNames.ackEmoji,
-            completionEmoji: reactionNames.completionEmoji,
           }),
       },
     );
