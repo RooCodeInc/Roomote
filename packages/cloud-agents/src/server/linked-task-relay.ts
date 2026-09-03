@@ -9,7 +9,9 @@ import {
 } from '@roomote/db/server';
 import {
   getFastAgentParentFromPayload,
+  type FastAgentParent,
   type PrReviewSettings,
+  type SourceControlProvider,
 } from '@roomote/types';
 
 export type LinkedTaskRelayState = {
@@ -17,6 +19,8 @@ export type LinkedTaskRelayState = {
   relayEnabled: boolean;
   handoffTarget?: 'fast_parent' | 'implementation_task';
   ownerLookupPending?: true;
+  /** The Fast parent of the task that opened the PR, when it has one. */
+  fastAgentParent?: FastAgentParent;
 };
 
 function getRelayEligibleCreatorIds(
@@ -83,15 +87,16 @@ export async function getLinkedTaskRelayState({
     orderBy: [desc(taskRuns.createdAt)],
     columns: { payload: true },
   });
-  const hasFastParent = Boolean(
-    getFastAgentParentFromPayload(latestRun?.payload),
-  );
+  const fastParent = getFastAgentParentFromPayload(latestRun?.payload);
+  const hasFastParent = Boolean(fastParent);
 
   if (!linkedTask.initiatorUserId) {
     return {
       linkedTaskId: linkedTask.id,
       relayEnabled: hasFastParent,
-      ...(hasFastParent ? { handoffTarget: 'fast_parent' as const } : {}),
+      ...(fastParent
+        ? { handoffTarget: 'fast_parent' as const, fastAgentParent: fastParent }
+        : {}),
     };
   }
 
@@ -102,8 +107,8 @@ export async function getLinkedTaskRelayState({
   return {
     linkedTaskId: linkedTask.id,
     relayEnabled: hasFastParent || creatorRelayEnabled,
-    ...(hasFastParent
-      ? { handoffTarget: 'fast_parent' as const }
+    ...(fastParent
+      ? { handoffTarget: 'fast_parent' as const, fastAgentParent: fastParent }
       : creatorRelayEnabled
         ? { handoffTarget: 'implementation_task' as const }
         : {}),
@@ -129,4 +134,40 @@ export async function isLinkedTaskCreatorRelayEnabled({
       reviewerSettings,
     })
   ).relayEnabled;
+}
+
+/**
+ * The Fast parent of the session-delegated task that opened this PR, for
+ * attaching follow-on work (like the PR's review task) to the same session.
+ */
+export async function getPrOriginFastAgentParent({
+  repository,
+  prNumber,
+  branchName,
+  sourceControlProvider = 'github',
+  host,
+}: {
+  repository: string;
+  prNumber: number;
+  branchName: string;
+  sourceControlProvider?: SourceControlProvider;
+  host?: string | null;
+}): Promise<FastAgentParent | null> {
+  const owner = await findReusableGitHubPrFollowUpOwner({
+    repoFullName: repository,
+    prNumber,
+    branchName,
+    sourceControlProvider,
+    ...(host ? { host } : {}),
+  });
+  if (!owner?.taskId) {
+    return null;
+  }
+
+  const latestRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.taskId, owner.taskId),
+    orderBy: [desc(taskRuns.createdAt)],
+    columns: { payload: true },
+  });
+  return getFastAgentParentFromPayload(latestRun?.payload);
 }

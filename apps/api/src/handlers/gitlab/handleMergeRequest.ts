@@ -1,6 +1,7 @@
 import pMap from 'p-map';
 
 import {
+  buildFastAgentSessionAttachment,
   type TaskPayload,
   DEFAULT_PR_REVIEW_SETTINGS,
   type PrReviewSettings,
@@ -13,7 +14,10 @@ import {
   eq,
   findActiveGitHubPrReviewTask,
 } from '@roomote/db/server';
-import { enqueueTask } from '@roomote/cloud-agents/server';
+import {
+  enqueueTask,
+  getPrOriginFastAgentParent,
+} from '@roomote/cloud-agents/server';
 import {
   recordPrStatusChangeInTaskHistory,
   updateTaskPrStatus,
@@ -228,8 +232,21 @@ export async function handleGitLabMergeRequest(
     payload.user?.id != null ? String(payload.user.id) : payload.user?.username;
   const mrAuthorName = payload.user?.name ?? payload.user?.username;
 
-  const enqueued = await pMap(targets, async (target) =>
-    enqueueTask(
+  const enqueued = await pMap(targets, async (target) => {
+    // A PR opened by a session-delegated task pulls its review into that
+    // same session, so the review shows up as a task there instead of
+    // spawning an unrelated one.
+    const reviewBranch = mergeRequest.source_branch;
+    const originParent = reviewBranch
+      ? await getPrOriginFastAgentParent({
+          repository: repoFullName,
+          prNumber: mergeRequest.iid,
+          branchName: reviewBranch,
+          sourceControlProvider: 'gitlab',
+          host: target.repo.host,
+        }).catch(() => null)
+      : null;
+    return enqueueTask(
       {
         task: {
           type: taskType,
@@ -241,6 +258,9 @@ export async function handleGitLabMergeRequest(
             // Legacy rows without a recorded host omit the field.
             ...(target.repo.host
               ? { sourceControlHost: target.repo.host }
+              : {}),
+            ...(originParent
+              ? buildFastAgentSessionAttachment(originParent)
               : {}),
             prNumber: mergeRequest.iid,
             prTitle: mergeRequest.title,
@@ -284,8 +304,8 @@ export async function handleGitLabMergeRequest(
       {
         launchClass: 'automation',
       },
-    ),
-  );
+    );
+  });
 
   return {
     status: 'ok',

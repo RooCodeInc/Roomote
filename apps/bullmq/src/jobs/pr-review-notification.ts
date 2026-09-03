@@ -56,6 +56,7 @@ import {
   PR_REVIEW_ACTION_LABELS,
   isTaskExecutingTurn,
   getFastAgentParentFromPayload,
+  isPrReviewPayload,
   WORKER_HEARTBEAT_STALE_MS,
 } from '@roomote/types';
 
@@ -161,6 +162,11 @@ function isButtonRoute(
 function getFastParentButtonRoute(
   payload: unknown,
 ): ButtonPrReviewNotificationRoute | null {
+  // Review-pipeline runs carry a Fast parent for session visibility only;
+  // their PR notifications must not route buttons into the parent thread.
+  if (isPrReviewPayload(payload)) {
+    return null;
+  }
   const parent = getFastAgentParentFromPayload(payload);
   if (
     !parent ||

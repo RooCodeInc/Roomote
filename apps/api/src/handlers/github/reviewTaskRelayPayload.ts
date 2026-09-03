@@ -1,4 +1,8 @@
-import { type PrReviewSettings } from '@roomote/types';
+import {
+  buildFastAgentSessionAttachment,
+  type FastAgentParent,
+  type PrReviewSettings,
+} from '@roomote/types';
 import { getReviewCodeAutomationSettings } from '@roomote/db/server';
 
 import { getLinkedTaskRelayState } from './linkedTaskRelay';
@@ -34,6 +38,8 @@ export async function getReviewTaskRelayPayload({
   linkedTaskId?: string;
   linkedTaskRelayLookupPending?: boolean;
   linkedReviewHandoffTarget?: 'fast_parent' | 'implementation_task';
+  fastAgentSessionId?: string;
+  fastAgentParent?: FastAgentParent;
 }> {
   const settings =
     reviewerSettings ?? (await getReviewCodeAutomationSettings());
@@ -53,6 +59,13 @@ export async function getReviewTaskRelayPayload({
     };
   }
 
+  // A PR opened by a session-delegated task pulls its review into that same
+  // session, so the review shows up as a task there instead of spawning an
+  // unrelated one.
+  const sessionAttachment = relayState.fastAgentParent
+    ? buildFastAgentSessionAttachment(relayState.fastAgentParent)
+    : {};
+
   if (relayState.relayEnabled && relayState.linkedTaskId) {
     return {
       relayReviewResultsToTask: true,
@@ -60,8 +73,9 @@ export async function getReviewTaskRelayPayload({
       ...(relayState.handoffTarget
         ? { linkedReviewHandoffTarget: relayState.handoffTarget }
         : {}),
+      ...sessionAttachment,
     };
   }
 
-  return { relayReviewResultsToTask: false };
+  return { relayReviewResultsToTask: false, ...sessionAttachment };
 }
