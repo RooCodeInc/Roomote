@@ -1,6 +1,6 @@
 import { formatInferenceCost } from '@/lib';
 
-export type SessionInferenceCostBreakdownData = {
+type SessionInferenceCostBreakdownData = {
   directInferenceCostMicroUsd: number;
   tasks: Array<{
     taskId: string;
