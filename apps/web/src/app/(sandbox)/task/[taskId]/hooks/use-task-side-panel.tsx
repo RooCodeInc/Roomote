@@ -102,6 +102,16 @@ function computeBasePath(pathname: string): string {
   );
 }
 
+function buildArtifactDetailPath(
+  basePath: string,
+  path: string,
+  version?: number,
+): string {
+  const search = new URLSearchParams({ path });
+  if (version !== undefined) search.set('v', String(version));
+  return `${basePath}/artifacts?${search}`;
+}
+
 /**
  * Parse the current pathname to determine which panel (if any) should be
  * active and extract its parameters.
@@ -353,11 +363,10 @@ export function TaskSidePanelProvider({
       setSelectedArtifactPath(path);
       setSelectedArtifactVersion(version);
 
-      const versionParam = version ? `?v=${version}` : '';
       window.history.replaceState(
         null,
         '',
-        `${basePath}/artifacts/${path}${versionParam}`,
+        buildArtifactDetailPath(basePath, path, version),
       );
     },
     [basePath],
@@ -429,7 +438,7 @@ export function TaskSidePanelProvider({
         window.history.replaceState(
           null,
           '',
-          `${basePath}/artifacts/${selectedArtifactPath}?v=${version}`,
+          buildArtifactDetailPath(basePath, selectedArtifactPath, version),
         );
       }
     },

@@ -87,6 +87,27 @@ describe('useTaskSidePanel URL sync', () => {
     });
   });
 
+  it('writes query-based artifact paths when opening artifact details', async () => {
+    pathname = '/task/task-1';
+    searchParams = new URLSearchParams();
+    replaceLocation(pathname);
+    const replaceStateSpy = vi.spyOn(window.history, 'replaceState');
+
+    const { result } = renderHook(() => useTaskSidePanel(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.openArtifactDetail('plans/./draft.md', 2);
+    });
+
+    expect(replaceStateSpy).toHaveBeenCalledWith(
+      null,
+      '',
+      '/task/task-1/artifacts?path=plans%2F.%2Fdraft.md&v=2',
+    );
+  });
+
   it('parses the terminal route as an active side panel view', async () => {
     pathname = '/task/task-1/terminal';
     searchParams = new URLSearchParams();
