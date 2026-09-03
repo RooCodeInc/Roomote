@@ -201,27 +201,22 @@ export function createFastAgentSourceControlTaskLauncher(params: {
   };
 }
 
-const SOURCE_CONTROL_QUOTE_MAX_LENGTH = 200;
-
 /**
- * A markdown blockquote of the comment a turn answers, prepended to the
- * turn's comment the way Slack replies quote their message. Kept to one
- * normalized line so the quote stays a header, not a second comment.
+ * The comment a turn answers, quoted exactly the way GitHub's own
+ * "Quote reply" does: every line of the original prefixed with "> ",
+ * nothing added.
  */
 export function buildSourceControlReplyQuote(params: {
-  senderDisplayName: string | null;
   text: string;
 }): string | null {
-  const username = params.senderDisplayName?.replace(/\s+/g, ' ').trim();
-  const normalized = params.text.replace(/\s+/g, ' ').trim();
-  if (!normalized) {
+  const trimmed = params.text.trim();
+  if (!trimmed) {
     return null;
   }
-  const text =
-    normalized.length > SOURCE_CONTROL_QUOTE_MAX_LENGTH
-      ? `${normalized.slice(0, SOURCE_CONTROL_QUOTE_MAX_LENGTH)}…`
-      : normalized;
-  return `> ${username ? `**${username}:** ` : ''}${text}`;
+  return trimmed
+    .split('\n')
+    .map((line) => (line.trim() ? `> ${line}` : '>'))
+    .join('\n');
 }
 
 export type SourceControlPostedComment = {

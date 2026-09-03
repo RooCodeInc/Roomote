@@ -80,6 +80,7 @@ import {
   buildSourceControlFastAdapter,
   buildSourceControlFastConversation,
   buildSourceControlFastDelivery,
+  buildSourceControlReplyQuote,
   createFastAgentSourceControlTaskLauncher,
   parseSourceControlFastConversation,
 } from './source-control-fast-delivery';
@@ -393,7 +394,7 @@ describe('GitHub Fast delivery', () => {
       delivery: delivery!,
       userId: 'user-1',
       sessionId: 'fast-1',
-      quote: '> **alice:** @roomote please rebase this',
+      quote: '> @roomote please rebase this',
     });
 
     await adapter.postReply({ message: 'On it.' });
@@ -411,12 +412,8 @@ describe('GitHub Fast delivery', () => {
     // The turn opened with the quote and appends keep it at the top.
     const firstBody = createComment.mock.calls[0]?.[0].body as string;
     const editedBody = updateComment.mock.calls[0]?.[0].body as string;
-    expect(firstBody.startsWith('> **alice:** @roomote please rebase')).toBe(
-      true,
-    );
-    expect(editedBody.startsWith('> **alice:** @roomote please rebase')).toBe(
-      true,
-    );
+    expect(firstBody.startsWith('> @roomote please rebase this')).toBe(true);
+    expect(editedBody.startsWith('> @roomote please rebase this')).toBe(true);
     // Footer appears once, at the bottom of the edited body.
     const body = updateComment.mock.calls[0]?.[0].body as string;
     expect(body.match(/footer:github/g)).toHaveLength(1);
@@ -665,5 +662,16 @@ describe('other provider Fast deliveries', () => {
         }),
       ),
     ).resolves.toBeNull();
+  });
+});
+
+describe('buildSourceControlReplyQuote', () => {
+  it('quotes every line the way GitHub quote-reply does, with no username', () => {
+    expect(
+      buildSourceControlReplyQuote({
+        text: '@roomote please rebase\n\nand rerun the checks',
+      }),
+    ).toBe('> @roomote please rebase\n>\n> and rerun the checks');
+    expect(buildSourceControlReplyQuote({ text: '   ' })).toBeNull();
   });
 });

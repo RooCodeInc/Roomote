@@ -530,10 +530,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         sessionId: session.id,
         quote: params.externalInput
           ? null
-          : buildSourceControlReplyQuote({
-              senderDisplayName: params.senderDisplayName,
-              text: params.question,
-            }),
+          : buildSourceControlReplyQuote({ text: params.question }),
       }),
     };
   }
