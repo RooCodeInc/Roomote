@@ -109,7 +109,7 @@ export const TaskCard = ({
                   {task.attributionKind === 'automation' ? (
                     <TaskAutomationIcon
                       automationKey={task.initiatorAutomation}
-                      className="size-4 text-muted-foreground"
+                      className="size-7"
                     />
                   ) : (
                     <FileText className="size-4 text-muted-foreground" />
