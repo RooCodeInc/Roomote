@@ -152,6 +152,7 @@ describe('handleAdoComment', () => {
       prNumber: 42,
       branchName: 'feature/test',
       sourceControlProvider: 'ado',
+      host: 'dev.azure.com',
     });
     expect(mocks.createAdoPullRequestComment).not.toHaveBeenCalled();
   });

@@ -120,6 +120,7 @@ describe('handleBitbucketComment', () => {
       prNumber: 1,
       branchName: 'feature',
       sourceControlProvider: 'bitbucket',
+      host: 'bitbucket.org',
     });
     expect(mocks.createBitbucketPullRequestComment).not.toHaveBeenCalled();
   });

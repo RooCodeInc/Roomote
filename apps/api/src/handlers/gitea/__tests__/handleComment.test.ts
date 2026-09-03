@@ -143,6 +143,7 @@ describe('handleGiteaComment', () => {
       prNumber: 42,
       branchName: 'feature/test',
       sourceControlProvider: 'gitea',
+      host: 'git.example.com',
     });
     expect(mocks.createGiteaPullRequestComment).not.toHaveBeenCalled();
   });

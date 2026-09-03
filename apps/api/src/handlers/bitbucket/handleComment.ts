@@ -181,7 +181,7 @@ export async function handleBitbucketComment(
     prNumber,
     branchName: headRef ?? '',
     headSha: headSha ?? '',
-    host: target.repo.host ?? null,
+    host: discussion.host,
   });
 
   const started = await startSourceControlFastSessionTurn({

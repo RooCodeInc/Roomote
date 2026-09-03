@@ -127,7 +127,8 @@ export async function resolveSourceControlPullRequestActiveTasks({
   prNumber: number;
   branchName: string;
   headSha: string;
-  host?: string | null;
+  /** The discussion's resolved host, which scopes the lookup to this instance. */
+  host: string;
 }): Promise<FastAgentActiveTask[]> {
   const [owner, review] = await Promise.all([
     findReusableGitHubPrFollowUpOwner({
@@ -135,7 +136,7 @@ export async function resolveSourceControlPullRequestActiveTasks({
       prNumber,
       branchName,
       sourceControlProvider: provider,
-      ...(host ? { host } : {}),
+      host,
     }).catch(() => null),
     headSha
       ? findActiveGitHubPrReviewTask({

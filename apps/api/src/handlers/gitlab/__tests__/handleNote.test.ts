@@ -164,6 +164,7 @@ describe('handleGitLabNote', () => {
       prNumber: 42,
       branchName: 'feature/test',
       sourceControlProvider: 'gitlab',
+      host: 'gitlab.com',
     });
     expect(mocks.findActiveGitHubPrReviewTask).toHaveBeenCalledWith({
       repoFullName: 'acme/backend',
