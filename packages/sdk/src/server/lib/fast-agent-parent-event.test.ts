@@ -47,6 +47,7 @@ const mocks = vi.hoisted(() => ({
   postTelegramSuggestions: vi.fn(),
   buildSourceControlFastDelivery: vi.fn(),
   postSourceControlComment: vi.fn(),
+  updateSourceControlComment: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -2292,5 +2293,89 @@ describe('deliverFastAgentParentEvent', () => {
       '**alice** on [acme/api#42](https://github.com/acme/api/pull/42):',
     );
     expect(slackPosts).toContain('Done: the changelog now mentions the fix.');
+  });
+
+  it('replaces a retry notice on both the Slack thread and the pull request for a routed mention', async () => {
+    mocks.buildSourceControlFastDelivery.mockResolvedValue({
+      postComment: async (input: unknown) => {
+        mocks.postSourceControlComment(input);
+        return { messageId: 'comment-1' };
+      },
+      updateCommentById: async (input: unknown) => {
+        mocks.updateSourceControlComment(input);
+      },
+      resolveTarget: async () => ({
+        repositoryId: 'repo-1',
+        branch: 'feature/ship',
+        pullRequest: { url: 'https://github.com/acme/api/pull/42' },
+      }),
+    });
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: {
+          postReply: (reply: unknown) => Promise<unknown>;
+          replaceReply?: (handle: unknown, reply: unknown) => Promise<unknown>;
+        };
+      }) => {
+        const notice = await adapter.postReply({
+          purpose: 'progress',
+          message: 'Inference is being retried.',
+        });
+        expect(adapter.replaceReply).toBeDefined();
+        await adapter.replaceReply!(notice, {
+          purpose: 'closeout',
+          message: 'Done after the retry.',
+        });
+        return 'Done';
+      },
+    );
+
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'github:comment:901',
+          currentMessageId: 'github:comment:901',
+          userId: 'user-2',
+          question: 'Please retry that.',
+          senderDisplayName: 'alice',
+          sourceControlReplyTarget: {
+            provider: 'github',
+            host: 'github.com',
+            repositoryFullName: 'acme/api',
+            kind: 'pull',
+            number: 42,
+            url: 'https://github.com/acme/api/pull/42',
+          },
+        },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    // The notice went to both surfaces...
+    expect(mocks.postSourceControlComment).toHaveBeenCalledOnce();
+    expect(
+      (mocks.postSourceControlComment.mock.calls[0]?.[0] as { body: string })
+        .body,
+    ).toContain('Inference is being retried.');
+    expect(JSON.stringify(mocks.postMessage.mock.calls)).toContain(
+      'Inference is being retried.',
+    );
+    // ...and so did the replacement: the pull request comment is edited in
+    // place to the real answer instead of keeping the retry notice.
+    expect(mocks.updateSourceControlComment).toHaveBeenCalledOnce();
+    const update = mocks.updateSourceControlComment.mock.calls[0]?.[0] as {
+      messageId: string;
+      body: string;
+    };
+    expect(update.messageId).toBe('comment-1');
+    expect(update.body).toContain('Done after the retry.');
+    expect(update.body).not.toContain('Inference is being retried.');
+    expect(JSON.stringify(mocks.updateMessage.mock.calls)).toContain(
+      'Done after the retry.',
+    );
   });
 });

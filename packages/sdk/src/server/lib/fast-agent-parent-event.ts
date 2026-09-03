@@ -9,6 +9,7 @@ import {
   fastAgentConversationRepository,
   resolveApiBaseUrl,
   type FastAgentTurnLockHandle,
+  type FastAgentReplyHandle,
   type FastAgentTurnAdapter,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
@@ -1711,6 +1712,41 @@ async function withSourceControlReplyTarget(
   });
   const attribution = buildSourceControlOriginAttribution(params.event, target);
   let attributionPending = true;
+  // The discussion side of the most recent reply, so a later replacement
+  // (a retry notice giving way to the real answer) lands on both surfaces.
+  let discussionHandle: FastAgentReplyHandle | null = null;
+  const discussionLabel = `${target.repositoryFullName}#${target.number}`;
+  const postOnDiscussion = async (message: string) => {
+    try {
+      discussionHandle = await discussionAdapter.postReply({ message });
+    } catch (error) {
+      console.warn(
+        `[Fast Agent] Failed to post the Session's reply on ${discussionLabel}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
+  const replaceOnDiscussion = async (message: string) => {
+    if (discussionHandle && discussionAdapter.replaceReply) {
+      try {
+        discussionHandle = await discussionAdapter.replaceReply(
+          discussionHandle,
+          { message },
+        );
+        return;
+      } catch (error) {
+        console.warn(
+          `[Fast Agent] Failed to replace the Session's reply on ${discussionLabel}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return;
+      }
+    }
+    await postOnDiscussion(message);
+  };
+  // Web and automation homes keep only the transcript, so there is nothing
+  // on the home surface to replace; the discussion still needs the update.
+  const homeHoldsNoMessages =
+    turn.conversation.surface === 'web' ||
+    turn.conversation.surface === 'automation';
 
   return {
     ...turn,
@@ -1719,22 +1755,31 @@ async function withSourceControlReplyTarget(
       launchTask: discussionAdapter.launchTask,
       postReply: async (reply) => {
         const homeReply =
-          attributionPending && turn.conversation.surface !== 'web'
+          attributionPending && !homeHoldsNoMessages
             ? { ...reply, message: `${attribution}\n\n${reply.message}` }
             : reply;
         attributionPending = false;
         const [homeHandle] = await Promise.all([
           turn.adapter.postReply(homeReply),
-          discussionAdapter
-            .postReply({ message: reply.message })
-            .catch((error: unknown) => {
-              console.warn(
-                `[Fast Agent] Failed to post the Session's reply on ${target.repositoryFullName}#${target.number}: ${error instanceof Error ? error.message : String(error)}`,
-              );
-            }),
+          postOnDiscussion(reply.message),
         ]);
-        return homeHandle;
+        // A home without messages of its own hands back the discussion
+        // handle, so replacements still reach the discussion.
+        return homeHandle ?? discussionHandle ?? undefined;
       },
+      ...(turn.adapter.replaceReply || homeHoldsNoMessages
+        ? {
+            replaceReply: async (handle, reply) => {
+              const [homeHandle] = await Promise.all([
+                turn.adapter.replaceReply
+                  ? turn.adapter.replaceReply(handle, reply)
+                  : Promise.resolve(undefined),
+                replaceOnDiscussion(reply.message),
+              ]);
+              return homeHandle ?? discussionHandle ?? undefined;
+            },
+          }
+        : {}),
     },
   };
 }
