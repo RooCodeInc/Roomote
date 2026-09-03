@@ -3,7 +3,7 @@ import {
   enqueueSlackAccountLinkEducation,
   recordSlackConversationMessageBestEffort,
 } from '@roomote/sdk/server';
-import { PRODUCT_NAME } from '@roomote/types';
+import { PRODUCT_NAME, buildSlackUserProfileUrl } from '@roomote/types';
 import {
   type SlackAuthToken,
   type SlackInstallation,
@@ -13,8 +13,10 @@ import {
   desc,
   eq,
   gt,
+  inArray,
   resolveEffectiveDeploymentEnvVars,
   slackAuthTokens,
+  slackDirectoryUsers,
   slackInstallations,
   slackUserMappings,
   users,
@@ -811,4 +813,122 @@ export async function completePendingSlackAuthenticationCommand(
           : 'Failed to complete authentication',
     };
   }
+}
+
+interface ResolvedSlackUser {
+  name: string;
+  profileUrl: string | null;
+}
+
+interface ResolveSlackUsersResult {
+  users: Record<string, ResolvedSlackUser>;
+}
+
+const SLACK_USER_ID_PATTERN = /^[UW][A-Z0-9]{2,}$/;
+
+/**
+ * Resolves raw Slack user IDs referenced by `<@U…>` tokens in persisted
+ * message text to display names and profile links for the web transcript.
+ * The Brain Slack directory answers first; anything it does not know goes
+ * through `users.info` with the installation's bot token. Unresolvable IDs
+ * are omitted so the caller can fall back to the raw token.
+ */
+export async function resolveSlackUsersCommand(
+  _auth: UserAuthSuccess,
+  input: { teamId?: string | null; userIds: string[] },
+): Promise<ResolveSlackUsersResult> {
+  const userIds = [
+    ...new Set(
+      input.userIds
+        .map((userId) => userId.trim())
+        .filter((userId) => SLACK_USER_ID_PATTERN.test(userId)),
+    ),
+  ];
+  const users: Record<string, ResolvedSlackUser> = {};
+  if (userIds.length === 0) {
+    return { users };
+  }
+
+  const teamId = input.teamId?.trim() || null;
+  const installation =
+    (await db.query.slackInstallations.findFirst({
+      where: teamId
+        ? and(
+            eq(slackInstallations.isActive, true),
+            eq(slackInstallations.teamId, teamId),
+          )
+        : eq(slackInstallations.isActive, true),
+      orderBy: [desc(slackInstallations.updatedAt)],
+    })) ?? null;
+  const resolvedTeamId = installation?.teamId ?? teamId;
+  const teamDomain = installation?.teamDomain ?? null;
+  const toProfileUrl = (slackUserId: string) =>
+    buildSlackUserProfileUrl({
+      slackUserId,
+      slackTeamId: resolvedTeamId,
+      slackWorkspaceDomain: teamDomain,
+    });
+
+  if (installation?.botUserId && userIds.includes(installation.botUserId)) {
+    const botName =
+      installation.botName?.trim() || installation.appName?.trim() || null;
+    if (botName) {
+      users[installation.botUserId] = {
+        name: botName,
+        profileUrl: toProfileUrl(installation.botUserId),
+      };
+    }
+  }
+
+  const unresolvedAfterBot = userIds.filter((userId) => !users[userId]);
+  if (unresolvedAfterBot.length > 0 && resolvedTeamId) {
+    const directoryRows = await db
+      .select({
+        slackUserId: slackDirectoryUsers.slackUserId,
+        displayName: slackDirectoryUsers.displayName,
+        realName: slackDirectoryUsers.realName,
+        username: slackDirectoryUsers.username,
+      })
+      .from(slackDirectoryUsers)
+      .where(
+        and(
+          eq(slackDirectoryUsers.slackTeamId, resolvedTeamId),
+          inArray(slackDirectoryUsers.slackUserId, unresolvedAfterBot),
+        ),
+      );
+    for (const row of directoryRows) {
+      const name =
+        row.displayName?.trim() ||
+        row.realName?.trim() ||
+        row.username?.trim() ||
+        null;
+      if (name) {
+        users[row.slackUserId] = {
+          name,
+          profileUrl: toProfileUrl(row.slackUserId),
+        };
+      }
+    }
+  }
+
+  const unresolved = userIds.filter((userId) => !users[userId]);
+  if (unresolved.length > 0 && installation?.botAccessToken) {
+    const slack = new SlackNotifier(installation.botAccessToken, {
+      botUserId: installation.botUserId,
+      botName: installation.botName,
+      appName: installation.appName,
+    });
+    try {
+      const names = await slack.getUserDisplayNames(unresolved);
+      for (const [slackUserId, name] of names) {
+        users[slackUserId] = { name, profileUrl: toProfileUrl(slackUserId) };
+      }
+    } catch (error) {
+      console.warn(
+        `[resolveSlackUsers] Failed to resolve Slack users: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return { users };
 }

@@ -151,6 +151,7 @@ import {
   startAuthenticateSlackAccountCommand,
   finishAuthenticateSlackAccountCommand,
   completePendingSlackAuthenticationCommand,
+  resolveSlackUsersCommand,
 } from '../commands/slack';
 import {
   getLinearInstallationCommand,
@@ -1354,6 +1355,17 @@ export const appRouter = createRouter({
     installation: protectedProcedure.query(({ ctx: { auth } }) =>
       getSlackInstallationCommand(auth),
     ),
+
+    resolveUsers: protectedProcedure
+      .input(
+        z.object({
+          teamId: z.string().trim().max(64).nullable().optional(),
+          userIds: z.array(z.string().trim().min(1).max(64)).max(50),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        resolveSlackUsersCommand(auth, input),
+      ),
 
     connectApp: protectedProcedure
       .input(z.object({ redirectPath: z.string().optional() }).optional())

@@ -1,8 +1,75 @@
 import {
   buildSlackThreadPermalink,
+  buildSlackUserProfileUrl,
+  extractSlackUserMentionIds,
   parseSlackChannelPermalink,
   parseSlackMessagePermalink,
+  parseSlackMessageTokens,
 } from '../slack';
+
+describe('parseSlackMessageTokens', () => {
+  it('returns plain text untouched', () => {
+    expect(parseSlackMessageTokens('just words')).toEqual([
+      { type: 'text', text: 'just words' },
+    ]);
+  });
+
+  it('splits user, channel, usergroup, and broadcast references', () => {
+    expect(
+      parseSlackMessageTokens(
+        '<@U0BJNE7FC12> ping <@W123|jane> in <#C456|general> <!subteam^S789|@eng> <!here>',
+      ),
+    ).toEqual([
+      { type: 'user', userId: 'U0BJNE7FC12', label: null },
+      { type: 'text', text: ' ping ' },
+      { type: 'user', userId: 'W123', label: 'jane' },
+      { type: 'text', text: ' in ' },
+      { type: 'channel', channelId: 'C456', label: 'general' },
+      { type: 'text', text: ' ' },
+      { type: 'usergroup', usergroupId: 'S789', label: 'eng' },
+      { type: 'text', text: ' ' },
+      { type: 'broadcast', name: 'here' },
+    ]);
+  });
+
+  it('leaves unrelated angle-bracket text alone', () => {
+    expect(
+      parseSlackMessageTokens('<https://example.com|link> and <b>bold</b>'),
+    ).toEqual([
+      { type: 'text', text: '<https://example.com|link> and <b>bold</b>' },
+    ]);
+  });
+});
+
+describe('extractSlackUserMentionIds', () => {
+  it('dedupes user ids in first-seen order', () => {
+    expect(
+      extractSlackUserMentionIds('<@U2> then <@U1> and <@U2> again <#C1>'),
+    ).toEqual(['U2', 'U1']);
+  });
+});
+
+describe('buildSlackUserProfileUrl', () => {
+  it('prefers the workspace web profile when the domain is known', () => {
+    expect(
+      buildSlackUserProfileUrl({
+        slackUserId: 'U123',
+        slackTeamId: 'T123',
+        slackWorkspaceDomain: 'acme-team',
+      }),
+    ).toBe('https://acme-team.slack.com/team/U123');
+  });
+
+  it('falls back to the slack:// deep link with only a team id', () => {
+    expect(
+      buildSlackUserProfileUrl({ slackUserId: 'U123', slackTeamId: 'T123' }),
+    ).toBe('slack://user?team=T123&id=U123');
+  });
+
+  it('returns null without a team id or domain', () => {
+    expect(buildSlackUserProfileUrl({ slackUserId: 'U123' })).toBeNull();
+  });
+});
 
 describe('buildSlackThreadPermalink', () => {
   it('builds an app.slack.com permalink when no workspace domain is available', () => {
