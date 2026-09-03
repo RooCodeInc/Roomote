@@ -263,6 +263,13 @@ export async function handleGitHubIssueComment(
     issue.html_url ??
     `https://github.com/${repositoryFullName}/issues/${issueNumber}`;
   const issueTitle = issue.title ?? `Issue #${issueNumber}`;
+  const discussion: SourceControlFastDiscussion = {
+    provider: 'github',
+    host: target.repo.host ?? 'github.com',
+    repositoryFullName,
+    kind: 'issues',
+    number: issueNumber,
+  };
   const [linkedReferences, existingOwner] = await Promise.all([
     fetchGitHubLinkedReferences({
       installationId: githubInstallationId,
@@ -272,19 +279,14 @@ export async function handleGitHubIssueComment(
     findReusableGitHubIssueTaskOwner({
       repoFullName: repositoryFullName,
       issueNumber,
-      host: target.repo.host ?? null,
+      // Scoped to this instance so a same-named issue task on another
+      // self-hosted host never surfaces here.
+      host: discussion.host,
     }).catch(() => null),
   ]);
   const activeTasks: FastAgentActiveTask[] = existingOwner?.taskId
     ? [{ taskId: existingOwner.taskId, status: existingOwner.status }]
     : [];
-  const discussion: SourceControlFastDiscussion = {
-    provider: 'github',
-    host: target.repo.host ?? 'github.com',
-    repositoryFullName,
-    kind: 'issues',
-    number: issueNumber,
-  };
 
   const started = await startSourceControlFastSessionTurn({
     discussion,

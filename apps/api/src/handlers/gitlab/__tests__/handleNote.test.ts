@@ -171,6 +171,7 @@ describe('handleGitLabNote', () => {
       prNumber: 42,
       headSha: 'abc123',
       sourceControlProvider: 'gitlab',
+      host: 'gitlab.com',
     });
     expect(mocks.startSourceControlFastSessionTurn).toHaveBeenCalledWith(
       expect.objectContaining({

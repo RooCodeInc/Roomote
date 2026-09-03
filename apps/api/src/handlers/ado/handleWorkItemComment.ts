@@ -445,7 +445,7 @@ export async function handleAdoWorkItemComment(
     provider: 'ado',
     repositoryFullName: repo.fullName,
     issueNumber: workItemId,
-    host: repo.host,
+    host: discussion.host,
   });
 
   const started = await startSourceControlFastSessionTurn({

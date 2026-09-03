@@ -168,7 +168,7 @@ async function handleGitLabIssueNote({
     provider: 'gitlab',
     repositoryFullName: repoFullName,
     issueNumber: issue.iid,
-    host: target.repo.host ?? null,
+    host: discussion.host,
   });
 
   const started = await startSourceControlFastSessionTurn({

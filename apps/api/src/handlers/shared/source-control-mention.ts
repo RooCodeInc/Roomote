@@ -144,6 +144,7 @@ export async function resolveSourceControlPullRequestActiveTasks({
           prNumber,
           headSha,
           sourceControlProvider: provider,
+          host,
         }).catch(() => null)
       : Promise.resolve(null),
   ]);
@@ -166,13 +167,14 @@ export async function resolveSourceControlIssueActiveTasks({
   provider: SourceControlProvider;
   repositoryFullName: string;
   issueNumber: number;
-  host?: string | null;
+  /** The discussion's resolved host, which scopes the lookup to this instance. */
+  host: string;
 }): Promise<FastAgentActiveTask[]> {
   const owner = await findReusableGitHubIssueTaskOwner({
     repoFullName: repositoryFullName,
     issueNumber,
     sourceControlProvider: provider,
-    host: host ?? null,
+    host,
   }).catch(() => null);
   return owner?.taskId ? [{ taskId: owner.taskId, status: owner.status }] : [];
 }

@@ -644,6 +644,7 @@ async function resolvePullRequestActiveTasks({
           prNumber,
           headSha,
           sourceControlProvider: 'github',
+          host,
         }).catch(() => null)
       : Promise.resolve(null),
   ]);

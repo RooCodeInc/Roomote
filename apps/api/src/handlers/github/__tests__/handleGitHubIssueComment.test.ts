@@ -161,7 +161,7 @@ describe('handleGitHubIssueComment', () => {
     expect(mocks.findReusableGitHubIssueTaskOwner).toHaveBeenCalledWith({
       repoFullName: 'acme/api',
       issueNumber: 42,
-      host: null,
+      host: 'github.com',
     });
     expect(mocks.startSourceControlFastSessionTurn).toHaveBeenCalledWith(
       expect.objectContaining({

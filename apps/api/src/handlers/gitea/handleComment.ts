@@ -249,7 +249,7 @@ async function handleGiteaIssueComment({
     provider: 'gitea',
     repositoryFullName: repoFullName,
     issueNumber: issue.number,
-    host: target.repo.host ?? null,
+    host: discussion.host,
   });
 
   const started = await startSourceControlFastSessionTurn({
