@@ -163,6 +163,30 @@ describe('tool presentation policy', () => {
     ).toBe('keep-visible');
   });
 
+  it('collapses settled chat reply receipts outside narration mode', () => {
+    const message = toolMessage({
+      toolName: 'send_chat_reply',
+      kind: 'communication',
+    });
+
+    expect(resolveToolPresentationPolicy(message).activityMode).toBe(
+      'collapsible',
+    );
+    expect(
+      resolveToolPresentationPolicy(message, { displayMode: 'narration' })
+        .activityMode,
+    ).toBe('keep-visible');
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'send_chat_reply',
+          kind: 'communication',
+          status: 'failed',
+        }),
+      ).activityMode,
+    ).toBe('keep-visible');
+  });
+
   it('keeps delegated task cards visible in narration mode only on card-enabled surfaces', () => {
     const message = toolMessage({
       toolName: 'launch_task',
@@ -201,6 +225,25 @@ describe('tool presentation policy', () => {
       title: 'ignore_event',
       toolName: 'ignore_event',
       kind: 'communication',
+    });
+
+    expect(
+      resolveToolPresentationPolicy(message, {
+        showInternalMessages: false,
+      }).rowVisibility,
+    ).toBe('debug-only');
+    expect(
+      resolveToolPresentationPolicy(message, {
+        showInternalMessages: true,
+      }).rowVisibility,
+    ).toBe('visible');
+  });
+
+  it('hides integration tool discovery outside internal transcript debugging', () => {
+    const message = toolMessage({
+      title: 'find_integration_tools',
+      toolName: 'find_integration_tools',
+      kind: 'search',
     });
 
     expect(

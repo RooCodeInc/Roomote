@@ -1052,6 +1052,7 @@ export const PromptInputActionMenuContent = ({
 type PromptInputSubmitProps = ComponentProps<typeof InputGroupButton> & {
   status?: ChatStatus;
   onStop?: () => void;
+  tooltip?: string;
 };
 
 export const PromptInputSubmit = ({
@@ -1062,6 +1063,7 @@ export const PromptInputSubmit = ({
   onStop,
   onClick,
   children,
+  tooltip = 'Send (Enter)',
   ...props
 }: PromptInputSubmitProps) => {
   const isGenerating = status === 'submitted' || status === 'streaming';
@@ -1086,7 +1088,7 @@ export const PromptInputSubmit = ({
   };
 
   return (
-    <BasicTooltip content="Send (Cmd/Ctrl + Enter)">
+    <BasicTooltip content={tooltip}>
       <InputGroupButton
         aria-label={isGenerating ? 'Stop' : 'Submit'}
         className={cn(

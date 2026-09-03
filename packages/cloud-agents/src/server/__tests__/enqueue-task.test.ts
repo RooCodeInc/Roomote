@@ -40,6 +40,7 @@ import {
   environments,
   environmentRepositoryMappings,
   repositories,
+  sessions,
   sessionTasks,
   userFactory,
   environmentFactory,
@@ -944,6 +945,189 @@ describe('enqueueTask Session linkage', () => {
     await expect(
       db.select().from(sessionTasks).where(eq(sessionTasks.taskId, run.taskId)),
     ).resolves.toEqual([]);
+  });
+
+  it('reuses one Session task for concurrent launch idempotency retries', async () => {
+    const userId = await createUser();
+    const fastAgentSessionId = crypto.randomUUID();
+    await db.insert(fastAgentConversations).values({
+      id: fastAgentSessionId,
+      userId,
+      surface: 'web',
+      workspaceId: userId,
+      conversationId: `setup:first-admin:${userId}`,
+    });
+    const fastAgentParent = {
+      sessionId: fastAgentSessionId,
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: userId,
+        conversationId: `setup:first-admin:${userId}`,
+      },
+    };
+    const task = standardTaskInput({
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: 'Investigate CI performance',
+        fastAgentSessionId,
+        fastAgentParent,
+        launchIdempotencyKey: 'setup-starter:concurrent-retry',
+      },
+    });
+
+    const [first, second] = await Promise.all([
+      launchFresh({
+        task,
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
+      }),
+      launchFresh({
+        task,
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
+      }),
+    ]);
+
+    expect(second.id).toBe(first.id);
+    expect(second.taskId).toBe(first.taskId);
+    await expect(
+      db.select().from(taskRuns).where(eq(taskRuns.taskId, first.taskId)),
+    ).resolves.toHaveLength(1);
+    await expect(
+      db
+        .select({ fastConversationId: sessions.fastConversationId })
+        .from(sessionTasks)
+        .innerJoin(sessions, eq(sessionTasks.sessionId, sessions.id))
+        .where(eq(sessionTasks.taskId, first.taskId)),
+    ).resolves.toEqual([{ fastConversationId: fastAgentSessionId }]);
+  });
+
+  it('creates a replacement when cancellation wins before keyed reuse', async () => {
+    const userId = await createUser();
+    const launchIdempotencyKey = 'setup-starter:canceled-before-reuse';
+    const task = standardTaskInput({
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: 'Investigate CI performance',
+        launchIdempotencyKey,
+      },
+    });
+    const first = await launchFresh({
+      task,
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    let releaseCancellation!: () => void;
+    const cancellationHeld = new Promise<void>((resolve) => {
+      releaseCancellation = resolve;
+    });
+    let cancellationStarted!: () => void;
+    const cancellationReady = new Promise<void>((resolve) => {
+      cancellationStarted = resolve;
+    });
+    const cancellation = db.transaction(async (tx) => {
+      await tx
+        .update(taskRuns)
+        .set({ canceledAt: new Date(), status: RunStatus.Canceled })
+        .where(eq(taskRuns.id, first.id));
+      cancellationStarted();
+      await cancellationHeld;
+    });
+    await cancellationReady;
+
+    const retry = launchFresh({
+      task,
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    releaseCancellation();
+    await cancellation;
+    const replacement = await retry;
+
+    expect(replacement.id).not.toBe(first.id);
+    expect(replacement.taskId).not.toBe(first.taskId);
+  });
+
+  it('rejects keyed reuse when the persisted Session attachment conflicts', async () => {
+    const userId = await createUser();
+    const firstConversationId = crypto.randomUUID();
+    const secondConversationId = crypto.randomUUID();
+    await db.insert(fastAgentConversations).values([
+      {
+        id: firstConversationId,
+        userId,
+        surface: 'web',
+        workspaceId: userId,
+        conversationId: `setup:first:${userId}`,
+      },
+      {
+        id: secondConversationId,
+        userId,
+        surface: 'web',
+        workspaceId: userId,
+        conversationId: `setup:second:${userId}`,
+      },
+    ]);
+    const parent = (sessionId: string, conversationId: string) => ({
+      sessionId,
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: userId,
+        conversationId,
+      },
+    });
+    const launchIdempotencyKey = 'setup-starter:conflicting-session';
+    const firstParent = parent(firstConversationId, `setup:first:${userId}`);
+    const first = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: ALL_REPOSITORIES,
+          description: 'Investigate CI performance',
+          fastAgentSessionId: firstConversationId,
+          fastAgentParent: firstParent,
+          launchIdempotencyKey,
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    const secondParent = parent(secondConversationId, `setup:second:${userId}`);
+    await db
+      .update(taskRuns)
+      .set({
+        payload: {
+          ...first.payload,
+          fastAgentSessionId: secondConversationId,
+          fastAgentParent: secondParent,
+        },
+      })
+      .where(eq(taskRuns.id, first.id));
+
+    await expect(
+      launchFresh({
+        task: standardTaskInput({
+          payload: {
+            ...first.payload,
+            fastAgentSessionId: secondConversationId,
+            fastAgentParent: secondParent,
+          },
+        }),
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
+      }),
+    ).rejects.toThrow('another Session');
   });
 });
 

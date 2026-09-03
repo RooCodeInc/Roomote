@@ -15,16 +15,13 @@ const TOOL_CALLS_DENY_LIST_BY_SOURCE = new Map([
   ],
 ]);
 
+// Only tools whose call carries no user-visible effect belong here. Outbound
+// communication (`send_chat_reply`, `post_to_channel`,
+// `send_chat_reaction_emoji`) is a consequential receipt like
+// `send_task_message`: for a delegated task reporting to its orchestrator it
+// is the entire result, so hiding it left the task transcript blank.
 const INTERNAL_DEBUG_TOOL_CALLS_BY_SOURCE = new Map([
-  [
-    'roomote',
-    new Set([
-      'ignore_event',
-      'post_to_channel',
-      'send_chat_reaction_emoji',
-      'send_chat_reply',
-    ]),
-  ],
+  ['roomote', new Set(['find_integration_tools', 'ignore_event'])],
 ]);
 
 function normalizeIdentifier(value: string | null | undefined): string | null {

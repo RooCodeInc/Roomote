@@ -424,6 +424,83 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('resumes a durable reaction or platform-event row with its recorded framing', async () => {
+    mocks.answerQuestion.mockResolvedValue('');
+    const externalInput = {
+      type: 'reaction_added' as const,
+      provider: 'slack' as const,
+      reactions: [{ name: 'eyes' }],
+      reactor: { externalUserId: 'U123' },
+      message: {
+        workspaceId: 'T1',
+        channelId: 'C1',
+        messageId: '100.001',
+        threadId: '100.000',
+      },
+      eventId: '102.000',
+    };
+
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'slack-reaction:102.000',
+          currentMessageId: 'slack-reaction:102.000',
+          userId: 'user-2',
+          question: '<external_input>{}</external_input>',
+          input: { type: 'reaction', externalInput },
+        },
+        resumedAfterInterruption: true,
+        durableAdmission: { eventId: 'row-1' },
+      },
+      mocks.releaseTurnLock,
+    );
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'setup-kickoff:conversation-1',
+          currentMessageId: 'setup-kickoff:conversation-1',
+          userId: 'user-2',
+          question: '<platform_event>{}</platform_event>',
+          turnSource: 'platform_event',
+          platformEventKind: 'setup',
+          platformEventVisibility: 'required',
+          setupSession: true,
+        },
+        resumedAfterInterruption: true,
+        durableAdmission: { eventId: 'row-2' },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    // The reaction resumes as a reaction, the platform event as a platform
+    // event; neither is read as a typed human message.
+    expect(mocks.answerQuestion).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        turnSource: 'human',
+        input: { type: 'reaction', externalInput },
+        resumedAfterInterruption: true,
+        durableAdmission: { eventId: 'row-1' },
+      }),
+    );
+    expect(mocks.answerQuestion).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        turnSource: 'platform_event',
+        platformEventKind: 'setup',
+        platformEventVisibility: 'required',
+        setupSession: true,
+        resumedAfterInterruption: true,
+        durableAdmission: { eventId: 'row-2' },
+      }),
+    );
+    expect(mocks.answerQuestion.mock.calls[1]?.[0]).not.toHaveProperty('input');
+  });
+
   it('passes a canonical review offer into the web transcript payload', async () => {
     const webParent = {
       sessionId: parent.sessionId,
@@ -1056,6 +1133,7 @@ describe('deliverFastAgentParentEvent', () => {
         prompt: 'Find actionable regressions.',
         trigger: 'schedule',
         defaultTaskModel: 'openai/gpt-5.6-luna',
+        defaultTaskReasoningEffort: 'high',
       },
     });
 
@@ -1072,6 +1150,7 @@ describe('deliverFastAgentParentEvent', () => {
           harnessModelOverrides: {
             'opencode-server': 'openai/gpt-5.6-luna',
           },
+          reasoningEffort: 'high',
         }),
       }),
     });
@@ -1151,6 +1230,11 @@ describe('deliverFastAgentParentEvent', () => {
       event,
     });
 
+    // The adapter hands back the posted message so a later edit (a retry
+    // notice becoming the answer) can target it, also from a resumed run.
+    await expect(
+      mocks.answerQuestion.mock.results.at(-1)!.value,
+    ).resolves.toEqual({ messageId: 'message-1' });
     expect(mocks.discordPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: 'channel-1',
@@ -1507,6 +1591,7 @@ describe('deliverFastAgentParentEvent', () => {
           prompt: 'Fix the follow-up regression',
           environmentId: null,
           model: 'anthropic/claude-sonnet-5',
+          reasoningEffort: 'high',
           parentSessionId: parent.sessionId,
           postKickoff,
         }),
@@ -1537,6 +1622,7 @@ describe('deliverFastAgentParentEvent', () => {
             harnessModelOverrides: {
               'opencode-server': 'anthropic/claude-sonnet-5',
             },
+            reasoningEffort: 'high',
             communicationContextInherited: true,
             fastAgentSessionId: parent.sessionId,
             fastAgentParent: {
@@ -1589,6 +1675,7 @@ describe('deliverFastAgentParentEvent', () => {
             prompt: 'Fix the follow-up regression',
             environmentId: null,
             model: null,
+            reasoningEffort: 'xhigh',
             parentSessionId: parent.sessionId,
             postKickoff: vi.fn().mockResolvedValue(undefined),
           }),
@@ -1625,6 +1712,7 @@ describe('deliverFastAgentParentEvent', () => {
               ...(serviceUrl ? { communicationServiceUrl: serviceUrl } : {}),
               communicationContextInherited: true,
               fastAgentSessionId: parent.sessionId,
+              reasoningEffort: 'xhigh',
             }),
           }),
         }),
@@ -1681,6 +1769,12 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id).toBe(
       firstClientMessageId,
     );
+    // The adapter hands back the posted message so the turn (or a run the
+    // queue resumes) can edit it later, for example a retry notice that
+    // becomes the answer.
+    await expect(
+      mocks.answerQuestion.mock.results.at(-1)!.value,
+    ).resolves.toEqual({ messageId: '101.001' });
   });
 
   it('delivers pull request feedback as a platform event with a stable idempotency key', async () => {

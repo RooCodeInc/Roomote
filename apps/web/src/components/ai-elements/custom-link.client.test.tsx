@@ -44,6 +44,17 @@ describe('CustomLink', () => {
     expect(pushMock).not.toHaveBeenCalled();
   });
 
+  it('opens query-based artifact links in the current task panel', () => {
+    const href = `${window.location.origin}/task/task-1/artifacts?path=plans%2F.%2Fdemo-plan.md&v=2`;
+
+    render(<CustomLink href={href}>Open legacy artifact</CustomLink>);
+
+    fireEvent.click(screen.getByRole('link', { name: 'Open legacy artifact' }));
+
+    expect(openArtifactMock).toHaveBeenCalledWith('plans/./demo-plan.md', 2);
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
   it('navigates in-app for absolute artifact links to a different task', () => {
     const href = `${window.location.origin}/task/task-2/artifacts/plans/demo-plan.md?v=3`;
 

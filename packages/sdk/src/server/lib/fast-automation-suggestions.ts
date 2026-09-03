@@ -8,13 +8,16 @@ import {
   asc,
   db,
   eq,
+  environments,
   findTrackedSuggestionWorkItemIds,
   inArray,
+  isNull,
   registerTrackedSuggestionCards,
   sql,
   trackedMessages,
   workItems,
 } from '@roomote/db/server';
+import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
 import {
   buildTaskSuggestionMessageMetadata,
   type SlackNotifier,
@@ -23,6 +26,7 @@ import {
 type FastAutomationSuggestion = {
   title: string;
   brief: string;
+  environmentId?: string;
 };
 
 type PersistedFastAutomationSuggestion = FastAutomationSuggestion & {
@@ -71,6 +75,49 @@ async function persistFastAutomationSuggestions(params: {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`fast-automation-suggestions:${params.eventId}`}))`,
     );
+    const targetEnvironmentIds = [
+      ...new Set(
+        params.suggestions
+          .map((suggestion) => suggestion.environmentId)
+          .filter(
+            (environmentId): environmentId is string =>
+              Boolean(environmentId) &&
+              environmentId !== ALL_REPOSITORIES &&
+              environmentId !== FAST_EXECUTION,
+          ),
+      ),
+    ];
+    const hasInvalidTargetFormat = targetEnvironmentIds.some(
+      (environmentId) =>
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          environmentId,
+        ),
+    );
+    if (hasInvalidTargetFormat) {
+      throw new Error('A suggested task target environment is unavailable.');
+    }
+    const validTargetEnvironmentIds = new Set(
+      targetEnvironmentIds.length === 0
+        ? []
+        : (
+            await tx
+              .select({ id: environments.id })
+              .from(environments)
+              .where(
+                and(
+                  inArray(environments.id, targetEnvironmentIds),
+                  eq(environments.isEval, false),
+                  isNull(environments.userId),
+                ),
+              )
+          ).map((environment) => environment.id),
+    );
+    const invalidTarget = targetEnvironmentIds.find(
+      (environmentId) => !validTargetEnvironmentIds.has(environmentId),
+    );
+    if (invalidTarget) {
+      throw new Error('A suggested task target environment is unavailable.');
+    }
     const inputs = params.suggestions.map((suggestion, index) => ({
       suggestion,
       index,
@@ -113,6 +160,12 @@ async function persistFastAutomationSuggestions(params: {
             kind: 'suggestion' as const,
             title: suggestion.title,
             brief: suggestion.brief,
+            ...(suggestion.environmentId === ALL_REPOSITORIES ||
+            suggestion.environmentId === FAST_EXECUTION
+              ? { targetRepositoryFullName: suggestion.environmentId }
+              : suggestion.environmentId
+                ? { targetEnvironmentId: suggestion.environmentId }
+                : {}),
             fingerprint,
             status: 'open' as const,
             sortOrder: index,
@@ -138,6 +191,9 @@ async function persistFastAutomationSuggestions(params: {
         id: persisted.id,
         title: persisted.title,
         brief: persisted.brief ?? suggestion.brief,
+        ...(suggestion.environmentId
+          ? { environmentId: suggestion.environmentId }
+          : {}),
       };
     });
   });
@@ -160,6 +216,7 @@ async function trackSuggestion(params: {
   workItemId: string;
   createdByUserId: string;
   eventId: string;
+  launchTarget?: string;
 }): Promise<void> {
   await registerTrackedSuggestionCards([
     {
@@ -172,7 +229,9 @@ async function trackSuggestion(params: {
       suggestionType: 'suggested_tasks',
       suggestionKey: `${params.eventId}:${params.workItemId}`,
       suggestionGroupKey: params.eventId,
-      launchRouting: 'router',
+      ...(params.launchTarget
+        ? { launchTarget: params.launchTarget }
+        : { launchRouting: 'router' as const }),
     },
   ]);
 }
@@ -184,6 +243,7 @@ async function claimSuggestionSend(params: {
   workItemId: string;
   createdByUserId: string;
   eventId: string;
+  launchTarget?: string;
 }): Promise<string | null> {
   const [claim] = await db
     .insert(trackedMessages)
@@ -199,7 +259,9 @@ async function claimSuggestionSend(params: {
         suggestionType: 'suggested_tasks',
         suggestionKey: `${params.eventId}:${params.workItemId}`,
         suggestionGroupKey: params.eventId,
-        launchRouting: 'router',
+        ...(params.launchTarget
+          ? { launchTarget: params.launchTarget }
+          : { launchRouting: 'router' }),
       },
     })
     .onConflictDoNothing({
@@ -268,6 +330,9 @@ export async function postFastAutomationSuggestionsToSlack(params: {
       workItemId: suggestion.id,
       createdByUserId: params.createdByUserId,
       eventId: params.eventId,
+      ...(suggestion.environmentId
+        ? { launchTarget: suggestion.environmentId }
+        : {}),
     });
   }
 }
@@ -305,6 +370,9 @@ export async function postFastAutomationSuggestionsToDiscord(params: {
       workItemId: suggestion.id,
       createdByUserId: params.createdByUserId,
       eventId: params.eventId,
+      ...(suggestion.environmentId
+        ? { launchTarget: suggestion.environmentId }
+        : {}),
     });
   }
 }
@@ -333,6 +401,9 @@ export async function postFastAutomationSuggestionsToTeams(params: {
       workItemId: suggestion.id,
       createdByUserId: params.createdByUserId,
       eventId: params.eventId,
+      ...(suggestion.environmentId
+        ? { launchTarget: suggestion.environmentId }
+        : {}),
     });
     if (!claimId) continue;
 
@@ -377,6 +448,9 @@ export async function postFastAutomationSuggestionsToTelegram(params: {
       workItemId: suggestion.id,
       createdByUserId: params.createdByUserId,
       eventId: params.eventId,
+      ...(suggestion.environmentId
+        ? { launchTarget: suggestion.environmentId }
+        : {}),
     });
     if (!claimId) continue;
 

@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   buildManageCustomAutomationsRequest,
+  compactManageCustomAutomationsResult,
   type ManageCustomAutomationsInput,
 } from '@roomote/types';
 
@@ -36,7 +37,13 @@ async function invokeManageCustomAutomations(
       : { method },
   });
 
-  return toolResultFromApi(result);
+  return toolResultFromApi({
+    ...result,
+    payload: compactManageCustomAutomationsResult(
+      params.action,
+      result.payload,
+    ),
+  });
 }
 
 export function registerRoomoteCustomAutomationsTool(

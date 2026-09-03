@@ -12,7 +12,13 @@ import {
 } from '@/components/system';
 import { useCreateGitHubAppManifest } from '@/hooks/github';
 
-export function GitHubSourceControlConfig({ onBack }: { onBack?: () => void }) {
+export function GitHubSourceControlConfig({
+  onBack,
+  returnPath = '/setup?step=source-control-connect',
+}: {
+  onBack?: () => void;
+  returnPath?: string;
+}) {
   const [githubOrganization, setGithubOrganization] = useState('');
   const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
   const [manifestForm, setManifestForm] = useState<{
@@ -119,7 +125,7 @@ export function GitHubSourceControlConfig({ onBack }: { onBack?: () => void }) {
           type="button"
           onClick={() =>
             createGitHubAppManifest.mutate({
-              redirect: '/setup?step=source-control-connect',
+              redirect: returnPath,
               organization: githubOrganization.trim() || null,
             })
           }

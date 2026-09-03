@@ -90,6 +90,12 @@ const ENABLED_MODELS = [
     displayName: 'GPT 5.6 Luna',
     family: 'GPT',
   },
+  {
+    id: 'openai/gpt-4.1',
+    displayName: 'GPT 4.1',
+    family: 'GPT',
+    metadata: { supportsReasoning: false },
+  },
 ];
 
 function createApp() {
@@ -210,6 +216,64 @@ describe('custom-automations MCP routes', () => {
       });
     });
 
+    it('returns compact automation records without changing the API response', async () => {
+      const authContext: AuthTokenContext = {
+        userId: 'admin-1',
+        tokenType: 'auth',
+        version: 1,
+      };
+      const { handler } = registerApiHostedTool({
+        userId: 'admin-1',
+        authContext,
+      });
+      mockListCustomAutomations.mockResolvedValue([
+        {
+          id: 'automation-1',
+          name: 'Nightly report',
+          prompt: 'Large private prompt',
+          enabled: true,
+          scheduleMode: 'daily',
+          cronExpression: null,
+          model: null,
+          environmentId: ENVIRONMENT_ID,
+          allRepositories: false,
+          executionMode: 'sandbox_task',
+          target: {},
+          createdByUser: { id: 'admin-1', email: 'admin@example.com' },
+          lastError: 'previous failure',
+        },
+      ]);
+
+      const toolResult = (await handler({ action: 'list' })) as {
+        structuredContent: unknown;
+      };
+      expect(toolResult.structuredContent).toEqual({
+        automations: [
+          {
+            id: 'automation-1',
+            name: 'Nightly report',
+            enabled: true,
+            schedule: 'daily',
+            model: null,
+            environmentId: ENVIRONMENT_ID,
+            lastError: 'previous failure',
+          },
+        ],
+      });
+
+      const { app } = createApp();
+      const apiResult = await app.request('/custom-automations');
+      expect(await apiResult.json()).toMatchObject({
+        automations: [
+          {
+            prompt: 'Large private prompt',
+            createdByUser: { email: 'admin@example.com' },
+            lastError: 'previous failure',
+          },
+        ],
+      });
+    });
+
     it('routes create actions through the existing custom automation domain handler', async () => {
       const authContext: AuthTokenContext = {
         userId: 'admin-1',
@@ -249,6 +313,29 @@ describe('custom-automations MCP routes', () => {
             environmentId: ENVIRONMENT_ID,
           },
         },
+      });
+    });
+
+    it('returns a non-terminal queued result for a Fast run', async () => {
+      const authContext: AuthTokenContext = {
+        userId: 'admin-1',
+        tokenType: 'auth',
+        version: 1,
+      };
+      const { handler } = registerApiHostedTool({
+        userId: 'admin-1',
+        authContext,
+      });
+      mockRunCustomAutomationNow.mockResolvedValue({ outcome: 'queued' });
+
+      const result = await handler({
+        action: 'run_now',
+        automationId: 'automation-1',
+      });
+
+      expect(mockRunCustomAutomationNow).toHaveBeenCalledWith('automation-1');
+      expect(result).toMatchObject({
+        structuredContent: { outcome: 'queued' },
       });
     });
 
@@ -327,6 +414,64 @@ describe('custom-automations MCP routes', () => {
         );
       },
     );
+
+    it('persists a supported reasoning effort with the selected model', async () => {
+      const { app } = createApp();
+      mockResolveCustomAutomationSchedule.mockResolvedValue({
+        status: 'resolved',
+        scheduleMode: 'daily',
+        cronExpression: null,
+        resolution: null,
+      });
+      mockCreateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const res = await postCreate(
+        app,
+        createBody({
+          model: 'openai/gpt-5.6-luna',
+          reasoningEffort: 'high',
+        }),
+      );
+
+      expect(res.status).toBe(201);
+      expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'openai/gpt-5.6-luna',
+          reasoningEffort: 'high',
+        }),
+      );
+    });
+
+    it('rejects reasoning effort without a selected model', async () => {
+      const { app } = createApp();
+
+      const res = await postCreate(
+        app,
+        createBody({ reasoningEffort: 'high' }),
+      );
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({
+        error: 'Reasoning effort requires a model override.',
+      });
+      expect(mockCreateCustomAutomation).not.toHaveBeenCalled();
+    });
+
+    it('rejects reasoning effort for a model without reasoning support', async () => {
+      const { app } = createApp();
+
+      const res = await postCreate(
+        app,
+        createBody({ model: 'openai/gpt-4.1', reasoningEffort: 'high' }),
+      );
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({
+        error:
+          'Model "openai/gpt-4.1" does not support configurable reasoning effort.',
+      });
+      expect(mockCreateCustomAutomation).not.toHaveBeenCalled();
+    });
 
     it('accepts the all-repositories workspace target', async () => {
       const { app } = createApp();
@@ -605,6 +750,8 @@ describe('custom-automations MCP routes', () => {
       enabled: true,
       scheduleMode: 'daily',
       cronExpression: null,
+      model: null,
+      reasoningEffort: null,
       environmentId: ENVIRONMENT_ID,
       target: {},
     };
@@ -625,6 +772,56 @@ describe('custom-automations MCP routes', () => {
           'Model "requesty/openai/gpt-5.6-luna" is not enabled for new tasks.',
       });
       expect(mockUpdateCustomAutomation).not.toHaveBeenCalled();
+    });
+
+    it('clears reasoning effort without clearing the model', async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue({
+        ...existing,
+        model: 'openai/gpt-5.6-luna',
+        reasoningEffort: 'high',
+      });
+      mockUpdateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ reasoningEffort: null }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockUpdateCustomAutomation).toHaveBeenCalledWith(
+        'automation-1',
+        expect.objectContaining({
+          model: 'openai/gpt-5.6-luna',
+          reasoningEffort: null,
+        }),
+      );
+    });
+
+    it('clears reasoning effort when the model is cleared', async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue({
+        ...existing,
+        model: 'openai/gpt-5.6-luna',
+        reasoningEffort: 'high',
+      });
+      mockUpdateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: null }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockUpdateCustomAutomation).toHaveBeenCalledWith(
+        'automation-1',
+        expect.objectContaining({
+          model: null,
+          reasoningEffort: null,
+        }),
+      );
     });
 
     it('switches an existing automation to all repositories', async () => {

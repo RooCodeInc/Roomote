@@ -8,9 +8,12 @@ const mocks = vi.hoisted(() => ({
   findSession: vi.fn(),
   getActiveTasks: vi.fn(),
   lookupUser: vi.fn(),
+  persistAdmission: vi.fn(),
   postThreadMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
   releaseLock: vi.fn(),
+  wakeParentEventAt: vi.fn(),
+  wakeParentEventNow: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -31,8 +34,11 @@ vi.mock('@roomote/communication', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   findFastAgentSessionForProviderMessage: mocks.findSession,
+  persistFastAgentInlineHumanTurn: mocks.persistAdmission,
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
+  wakeFastAgentParentEventAt: mocks.wakeParentEventAt,
+  wakeFastAgentParentEventNow: mocks.wakeParentEventNow,
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -77,6 +83,75 @@ describe('Fast Slack reaction input', () => {
       },
     });
     mocks.answerQuestion.mockResolvedValue('');
+    mocks.persistAdmission.mockResolvedValue(null);
+  });
+
+  it('admits a reaction turn durably so an interruption resumes it with the same reaction', async () => {
+    // The row was still pending from an earlier attempt (a redelivered
+    // event), so this run is a resumption.
+    mocks.persistAdmission.mockResolvedValueOnce({
+      id: 'row-1',
+      eventKey: 'key-1',
+      resumed: true,
+    });
+    const slack = {
+      getMessage: vi.fn(async () => ({
+        text: 'React to this message with your favorite emoji.',
+        thread_ts: '100.000',
+      })),
+      normalizeIncomingText: vi.fn(async () => '@alice'),
+      updateMessage: vi.fn(),
+    };
+
+    await expect(
+      maybeRouteFastAgentReaction({
+        context: {
+          teamId: 'T1',
+          slackInstallation: { botUserId: 'UROOMOTE' },
+          slack,
+        } as never,
+        event: {
+          type: 'reaction_added',
+          user: 'UALICE',
+          reaction: 'sparkling_heart',
+          item: { type: 'message', channel: 'C1', ts: '101.000' },
+          event_ts: '102.000',
+        },
+      }),
+    ).resolves.toBe(true);
+    await vi.waitFor(() => expect(mocks.answerQuestion).toHaveBeenCalledOnce());
+
+    expect(mocks.persistAdmission).toHaveBeenCalledWith({
+      parent: expect.objectContaining({ sessionId: 'session-1' }),
+      event: expect.objectContaining({
+        type: 'human_follow_up',
+        eventId: 'slack-reaction:102.000',
+        currentMessageId: 'slack-reaction:102.000',
+        userId: 'user-1',
+        senderExternalId: 'UALICE',
+        senderDisplayName: '@alice',
+        input: {
+          type: 'reaction',
+          externalInput: expect.objectContaining({
+            type: 'reaction_added',
+            reactions: [{ name: 'sparkling_heart' }],
+          }),
+        },
+      }),
+    });
+    expect((mocks.releaseLock as { durableRowId?: string }).durableRowId).toBe(
+      'row-1',
+    );
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        durableAdmission: { eventId: 'row-1' },
+        resumedAfterInterruption: true,
+        adapter: expect.objectContaining({
+          requestDurableResume: expect.any(Function),
+          requestDurableRetry: expect.any(Function),
+        }),
+      }),
+    );
   });
 
   it('includes the Fast-authored message when a reaction can directly answer it', async () => {

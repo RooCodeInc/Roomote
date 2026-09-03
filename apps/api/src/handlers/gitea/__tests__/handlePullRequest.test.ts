@@ -20,6 +20,7 @@ const {
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
+  getPrOriginFastAgentParent: vi.fn(async () => null),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({

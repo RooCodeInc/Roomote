@@ -275,6 +275,7 @@ describe('Fast session queries', () => {
               version: 2,
             }),
           ],
+          previews: [],
           latestRun: {
             status: RunStatus.Running,
             taskPhase: 'running',
@@ -285,6 +286,7 @@ describe('Fast session queries', () => {
           title: 'Zero cost task',
           inferenceCostMicroUsd: 0,
           artifacts: [],
+          previews: [],
           latestRun: {
             status: RunStatus.Completed,
             taskPhase: null,
@@ -292,6 +294,75 @@ describe('Fast session queries', () => {
         },
       ]),
     );
+  });
+
+  it('collates live preview URLs from awake delegated task runs', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'preview-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const awakeTask = await taskFactory.create({
+      title: 'Awake task',
+      state: 'active',
+    });
+    const awakeRun = await runFactory.create({
+      taskId: awakeTask.id,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      machineDomains: {
+        WEB_APP: 'web.internal',
+        API: 'api.internal',
+        SANDBOX_SERVER: 'sandbox.internal',
+      },
+      initialPaths: { WEB_APP: '/dashboard' },
+      primaryPortName: 'WEB_APP',
+      payload: {
+        repo: 'acme/widgets',
+        description: 'Awake Fast task',
+        fastAgentSessionId: session.id,
+      },
+    });
+    const sleepingTask = await taskFactory.create({
+      title: 'Sleeping task',
+      state: 'active',
+    });
+    await runFactory.create({
+      taskId: sleepingTask.id,
+      status: RunStatus.Idle,
+      machineDomains: { WEB_APP: 'sleeping.internal' },
+      snapshotId: 'snapshot-1',
+      payload: {
+        repo: 'acme/widgets',
+        description: 'Sleeping Fast task',
+        fastAgentSessionId: session.id,
+      },
+    });
+
+    const result = await getFastSessionTasks(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    const awake = result?.find((task) => task.taskId === awakeTask.id);
+    expect(awake?.previews).toEqual([
+      {
+        serviceName: 'WEB_APP',
+        url: expect.stringContaining(`${awakeTask.id}-web-app`),
+        isPrimary: true,
+        runId: awakeRun.id,
+      },
+      {
+        serviceName: 'API',
+        url: expect.stringContaining(`${awakeTask.id}-api`),
+        isPrimary: false,
+        runId: awakeRun.id,
+      },
+    ]);
+    expect(awake?.previews[0]?.url).toContain('/dashboard');
+    const sleeping = result?.find((task) => task.taskId === sleepingTask.id);
+    expect(sleeping?.previews).toEqual([]);
   });
 
   it('keeps task-linked usage out of the legacy Fast direct cost', async () => {
@@ -355,7 +426,11 @@ describe('Fast session queries', () => {
   });
 
   it('reads canonical messages in timestamp and turn sequence order', async () => {
-    const owner = await userFactory.create();
+    const owner = await userFactory.create({
+      name: 'Slack Sender',
+      email: 'sender@example.com',
+      imageUrl: 'https://example.com/sender.png',
+    });
     const session = await createFastSession({
       userId: owner.id,
       conversationId: 'ordered-session',
@@ -374,6 +449,7 @@ describe('Fast session queries', () => {
       ts: 100,
       role: 'user',
       eventType: 'roomote_runtime.user_prompt',
+      metadata: { visibleInTranscript: true, userId: owner.id },
     });
 
     const result = await getFastSessionById(
@@ -385,6 +461,11 @@ describe('Fast session queries', () => {
       'turn-1:user',
       'turn-1:assistant:0',
     ]);
+    expect(result?.messages[0]).toMatchObject({
+      userName: 'Slack Sender',
+      userEmail: 'sender@example.com',
+      userImageUrl: 'https://example.com/sender.png',
+    });
   });
 
   it('does not fall back to compatibility messages for existing sessions', async () => {
@@ -405,7 +486,7 @@ describe('Fast session queries', () => {
     expect(result?.messageCount).toBe(0);
   });
 
-  it('returns native tool event payloads unchanged', async () => {
+  it('returns visible native tool event payloads unchanged', async () => {
     const owner = await userFactory.create();
     const session = await createFastSession({
       userId: owner.id,
@@ -420,7 +501,7 @@ describe('Fast session queries', () => {
       role: 'tool',
       payload: {
         toolCallId: 'turn-1:tool:0',
-        toolName: 'send_chat_reply',
+        toolName: 'launch_task',
         status: 'completed',
         output: '{"delivered":true}',
       },
@@ -433,9 +514,51 @@ describe('Fast session queries', () => {
 
     expect(result?.messages[0]?.payload).toMatchObject({
       toolCallId: 'turn-1:tool:0',
-      toolName: 'send_chat_reply',
+      toolName: 'launch_task',
       status: 'completed',
     });
+  });
+
+  it('hides send_chat_reply tool events while keeping the delivered reply', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'hidden-reply-tool-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:tool:0',
+      turnSeq: 1,
+      eventType: 'roomote_runtime.tool_result',
+      role: 'tool',
+      metadata: { visibleInTranscript: false },
+      payload: {
+        toolCallId: 'turn-1:tool:0',
+        toolName: 'send_chat_reply',
+        status: 'completed',
+        output: '{"delivered":true}',
+      },
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:assistant:0',
+      turnSeq: 2,
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+    });
+
+    const result = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(result?.messages.map((message) => message.eventId)).toEqual([
+      'turn-1:assistant:0',
+    ]);
+    expect(result?.messages[0]?.contentBlocks).toEqual([
+      { type: 'text', text: 'turn-1:assistant:0' },
+    ]);
   });
 
   it('grants every deployment user access to shared conversations', async () => {
@@ -529,6 +652,52 @@ describe('Fast session queries', () => {
     expect(payload.output).toContain('[output truncated');
   });
 
+  it('returns a persisted canonical subagent row in cold transcript history', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'cold-subagent-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:subagent:assistant-1:part-1',
+      turnSeq: 1,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      role: 'tool',
+      payload: {
+        toolCallId: 'task-call-1',
+        kind: 'subagent',
+        title: 'Review the implementation',
+        status: 'completed',
+        isSubagentSpawn: true,
+        senderThreadId: 'opencode-session-1',
+        receiverThreadIds: [],
+        agentType: 'general',
+        output: 'Implementation looks correct.',
+      },
+    });
+
+    const result = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(result?.messages).toEqual([
+      expect.objectContaining({
+        eventId: 'turn-1:subagent:assistant-1:part-1',
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        metadata: { visibleInTranscript: true },
+        payload: expect.objectContaining({
+          kind: 'subagent',
+          status: 'completed',
+          agentType: 'general',
+          output: 'Implementation looks correct.',
+        }),
+      }),
+    ]);
+  });
+
   it('windows long transcripts to whole turns and flags older messages', async () => {
     const owner = await userFactory.create();
     const session = await createFastSession({
@@ -566,7 +735,7 @@ describe('Fast session queries', () => {
   });
 
   it('streams only rows updated after the cursor and advances it', async () => {
-    const owner = await userFactory.create();
+    const owner = await userFactory.create({ name: 'Stream Sender' });
     const session = await createFastSession({
       userId: owner.id,
       conversationId: 'stream-session',
@@ -579,6 +748,11 @@ describe('Fast session queries', () => {
       ts: 1,
       role: 'user',
       eventType: 'roomote_runtime.user_prompt',
+      metadata: {
+        visibleInTranscript: true,
+        userId: owner.id,
+        userName: 'Slack Display Name',
+      },
     });
     await createFastMessage({
       conversationId: session.id,
@@ -594,6 +768,10 @@ describe('Fast session queries', () => {
     expect(first.messages.map((message) => message.eventId)).toEqual([
       'turn-1:user',
     ]);
+    expect(first.messages[0]).toMatchObject({
+      userName: 'Slack Display Name',
+      userEmail: expect.any(String),
+    });
     expect(first.cursor).toBeGreaterThan(0);
 
     const second = await getFastSessionMessagesSince(session.id, first.cursor);

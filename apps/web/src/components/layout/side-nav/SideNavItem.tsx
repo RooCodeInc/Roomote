@@ -139,7 +139,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
       >
         {children as ReactElement}
       </Button>
-    ) : href != null ? (
+    ) : href != null && !disabled ? (
       <Button
         ref={ref}
         variant="ghost"

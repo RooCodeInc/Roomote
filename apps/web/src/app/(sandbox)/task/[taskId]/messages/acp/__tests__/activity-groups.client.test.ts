@@ -112,6 +112,7 @@ function toolResultBlock(params: {
   toolName?: string;
   output?: string;
   kind?: string;
+  status?: AcpToolResultUiMessage['data']['status'];
 }): AcpRenderBlock {
   return {
     kind: 'message',
@@ -125,6 +126,7 @@ function buildToolResult(params: {
   toolName?: string;
   output?: string;
   kind?: string;
+  status?: AcpToolResultUiMessage['data']['status'];
 }): AcpToolResultUiMessage {
   return {
     id: params.id,
@@ -139,7 +141,7 @@ function buildToolResult(params: {
       toolCallId: `call-${params.id}`,
       kind: params.kind ?? 'mcp',
       title: params.toolName ?? 'read_file',
-      status: 'completed',
+      status: params.status ?? 'completed',
       isExecute: false,
       isMcp: true,
       mcpServerName: 'roomote',
@@ -389,6 +391,63 @@ describe('buildAcpActivityRenderBlocks', () => {
       ts: 4_000,
       endTs: 10_000,
     });
+  });
+
+  it('collapses settled activity containing a chat reply receipt after a todo section', () => {
+    const entries = buildAcpActivityRenderBlocks([
+      messageBlock('todo-1', 1_000, 'todo_section'),
+      messageBlock('reasoning-1', 2_000, 'reasoning'),
+      toolResultBlock({ id: 'read-1', ts: 3_000 }),
+      toolResultBlock({
+        id: 'chat-reply-1',
+        ts: 4_000,
+        toolName: 'send_chat_reply',
+      }),
+      messageBlock('reasoning-2', 5_000, 'reasoning'),
+      textBlock('final-response', 10_000),
+    ]);
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'activity_group',
+      'message',
+    ]);
+    expect(entries[1]).toMatchObject({
+      kind: 'activity_group',
+      ts: 2_000,
+      endTs: 10_000,
+      blocks: [
+        { kind: 'message', msg: { id: 'reasoning-1' } },
+        { kind: 'message', msg: { id: 'read-1' } },
+        { kind: 'message', msg: { id: 'chat-reply-1' } },
+        { kind: 'message', msg: { id: 'reasoning-2' } },
+      ],
+    });
+  });
+
+  it('keeps failed chat reply receipts outside collapsed activity', () => {
+    const failedChatReply = toolResultBlock({
+      id: 'chat-reply-failed',
+      ts: 3_000,
+      toolName: 'send_chat_reply',
+      status: 'failed',
+    });
+    const entries = buildAcpActivityRenderBlocks([
+      messageBlock('todo-1', 1_000, 'todo_section'),
+      messageBlock('reasoning-1', 2_000, 'reasoning'),
+      failedChatReply,
+      messageBlock('reasoning-2', 4_000, 'reasoning'),
+      textBlock('final-response', 10_000),
+    ]);
+
+    expect(isActivityCollapsibleBlock(failedChatReply)).toBe(false);
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+      'message',
+      'message',
+    ]);
   });
 
   it('keeps task cancellation visible and uses it as a boundary', () => {

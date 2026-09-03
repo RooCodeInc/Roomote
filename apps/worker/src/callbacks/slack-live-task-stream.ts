@@ -46,8 +46,7 @@ function usesSlackLiveTaskStream(taskRun: TaskRun): boolean {
  */
 type SlackLiveTaskCardState = {
   status: Extract<SlackTaskStreamStatus, 'in_progress' | 'complete' | 'error'>;
-  /** Latest narration from the agent (or a waiting notice), or the final
-   * result once settled. */
+  /** Latest narration from the agent, or a transient status notice. */
   message?: string;
   /** The completion text, kept apart from narration so the exit fallback
    * never promotes a transient line to the final result. */
@@ -96,7 +95,9 @@ function isSameCardState(
   return (
     a !== undefined &&
     a.status === b.status &&
-    (a.message ?? '') === (b.message ?? '')
+    (a.message ?? '') === (b.message ?? '') &&
+    (a.finalMessage ?? '') === (b.finalMessage ?? '') &&
+    a.provisionalCompletion === b.provisionalCompletion
   );
 }
 
@@ -205,10 +206,21 @@ async function renderCard(
       return;
     }
 
+    const output =
+      state.status === 'error'
+        ? state.message
+        : state.status === 'complete' && !state.provisionalCompletion
+          ? state.finalMessage
+          : undefined;
+    const details =
+      state.status !== 'error' && state.message !== output
+        ? state.message
+        : undefined;
     const result = await sdk.taskRuns.renderSlackLiveTaskCard({
       runId: taskRun.id,
       status: state.status,
-      ...(state.message ? { message: state.message } : {}),
+      ...(details ? { details } : {}),
+      ...(output ? { output } : {}),
     });
 
     if (!result.card) {
@@ -332,7 +344,9 @@ export async function updateSlackLiveTaskStream(
     state.status = 'complete';
     state.awaitingInput = false;
     state.finalMessage = event.text;
-    state.message = event.text;
+    if (event.provisional === true) {
+      state.message = event.text;
+    }
     state.provisionalCompletion = event.provisional === true;
     await renderCard(taskRun, context, { settle: true });
     return;
@@ -394,9 +408,10 @@ export async function finishSlackLiveTaskStream(
     }
     state.status = 'complete';
     if (!state.awaitingInput) {
-      state.message =
-        state.finalMessage ?? SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.completed;
-      state.provisionalCompletion = state.finalMessage === undefined;
+      if (state.finalMessage === undefined) {
+        state.message = SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.completed;
+        state.provisionalCompletion = true;
+      }
     }
     await renderCard(taskRun, context, { settle: true });
     return;
@@ -412,8 +427,9 @@ export async function finishSlackLiveTaskStream(
       return;
     }
     state.status = 'complete';
-    state.message =
-      state.finalMessage ?? SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.completed;
+    if (state.finalMessage === undefined) {
+      state.message = SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.completed;
+    }
     state.provisionalCompletion = false;
     await renderCard(taskRun, context, { settle: true });
     return;

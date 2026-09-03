@@ -38,6 +38,10 @@ with merge-conflict resolution when the relevant automation is enabled. Admins
 manage these in the web app under **Automations** — see
 [Automations](/automations).
 
+The same review is available on demand. Mention Roomote on a pull request and
+ask for a review, or ask in any Session, and the Review Code pipeline runs as a
+task inside that Session and reports back when it finishes.
+
 ## Where work starts
 
 | Surface       | How work starts                                            | Where updates appear                    |
@@ -47,7 +51,7 @@ manage these in the web app under **Automations** — see
 | Telegram      | Mention the bot in a group chat, or message it directly in a private chat            | Telegram chat and task view             |
 | Discord       | Mention the bot in a server or send it a direct message    | Discord thread, forum post, or DM       |
 | Web dashboard | Submit a prompt from **Home**                              | Task view in Roomote                    |
-| Linear        | Start an agent session or mention Roomote on an issue      | Linear activity and task view           |
+| Linear        | Start an agent session or mention Roomote on an issue      | Agent session replies and Session view  |
 | GitHub        | Pull request events or `@`-mentions in PR and issue comments | GitHub comments, reviews, and task view |
 | GitLab        | Repository or merge request follow-up when configured      | GitLab activity and task view           |
 | Gitea         | Repository or pull request follow-up when configured       | Gitea activity and task view            |
@@ -71,17 +75,17 @@ gives a clear answer or next step without pretending code was changed.
 
 ## Choosing an environment
 
-In chat, Roomote can suggest the right environment and ask for confirmation when
-needed. In Slack, Telegram, and Discord, you can use the confirmation controls
-or reply naturally to accept, cancel, or correct that suggestion. When you
-start from the dashboard, choose the environment yourself or use **Auto** when
-you want Roomote to route the task. Linear can also suggest an environment from
-issue context.
+In chat, Roomote's Fast Session decides whether a request needs a workspace
+and which environment fits, and it says so before delegating. Reply in the
+same thread to redirect it. When you start from the dashboard, choose the
+environment yourself or leave the selector on **Fast** to let the Session
+decide. A Linear agent session works the same way: the Session reads the
+issue and chooses the environment before delegating.
 
-If a Slack request is ambiguous, Roomote shows the environment picker so you can
-choose where the task should run. If automatic routing is temporarily
-unavailable, the picker includes a warning instead of silently falling back.
-Choose an environment to continue; if the warning persists, ask an admin to
-check the deployment's inference provider.
+If a request is ambiguous, the Session asks a clarifying question in the same
+thread before it delegates, so you can name the environment or repository in
+your reply. If the deployment's inference provider is unavailable, Roomote says
+so in the thread instead of silently doing nothing; ask an admin to check the
+provider connection in that case.
 
 For more detail, see [Environments](/environments).

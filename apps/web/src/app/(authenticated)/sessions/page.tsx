@@ -113,7 +113,7 @@ export default async function SessionsPage({
                 >
                   {getSessionStatusLabel(column)}
                 </h2>
-                <div className="divide-y rounded-lg border bg-card">
+                <div className="divide-y-2 divide-background bg-card">
                   {result.sessions
                     .filter((session) =>
                       column === 'ready'
@@ -127,6 +127,7 @@ export default async function SessionsPage({
                         session={session}
                         viewerUserId={authorizedUser.userId}
                         query={q}
+                        view="board"
                       />
                     ))}
                 </div>

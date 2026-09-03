@@ -13,6 +13,7 @@ import {
   inArray,
   isNull,
   or,
+  type DatabaseOrTransaction,
 } from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
@@ -24,8 +25,10 @@ type SourceControlConnectionSummary = {
   repositoryCounts: Partial<Record<SourceControlProvider, number>>;
 };
 
-export async function getSourceControlConnectionSummary(): Promise<SourceControlConnectionSummary> {
-  const rows = await db
+export async function getSourceControlConnectionSummary(
+  executor: DatabaseOrTransaction = db,
+): Promise<SourceControlConnectionSummary> {
+  const rows = await executor
     .select({
       sourceControlProvider: repositories.sourceControlProvider,
     })

@@ -24,15 +24,21 @@ import {
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   admitFastAgentHumanFollowUp,
+  createFastAgentConversationArtifact,
   persistFastAgentInlineHumanTurn,
+  wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
   type FastAgentDurableTurn,
+  createSlackFastReplyStream,
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
 } from '@roomote/sdk/server';
 
 import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
-import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
+import {
+  postSlackThreadMarkdownMessage,
+  guardReplyStreamBySourceMessage,
+} from '../helpers/thread-posting.js';
 import { processSlackAttachments } from '../helpers/attachments.js';
 
 export function stripLeadingFastCommandMention(text: string): string {
@@ -42,10 +48,6 @@ export function stripLeadingFastCommandMention(text: string): string {
 export function isFastCommandInvocation(text: string): boolean {
   const mentionStrippedText = stripLeadingFastCommandMention(text);
   return /^!fast(?:\s|$)/i.test(mentionStrippedText);
-}
-
-export function isBareFastCommandInvocation(text: string): boolean {
-  return /^!fast(?:\s|$)/i.test(text.trimStart());
 }
 
 export function extractFastQuestion(
@@ -318,6 +320,9 @@ export async function processFastAgentMessage(params: {
       currentMessageId: event.ts,
       signal: activeTurnLock.signal,
       ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
+      // A redelivered event whose earlier inline attempt never settled
+      // resumes that attempt instead of repeating its recorded actions.
+      ...(durableTurn?.resumed ? { resumedAfterInterruption: true } : {}),
       senderExternalId: event.user,
       senderDisplayName:
         currentMessage?.user === event.user
@@ -331,6 +336,11 @@ export async function processFastAgentMessage(params: {
         !directedAtRoomote,
       ...(roomoteSlackUserId ? { slackRoomoteUserId: roomoteSlackUserId } : {}),
       adapter: {
+        createArtifact: (artifact) =>
+          createFastAgentConversationArtifact({
+            fastConversationId: session.id,
+            ...artifact,
+          }),
         ...(durableTurn
           ? {
               requestDurableResume: () =>
@@ -338,6 +348,14 @@ export async function processFastAgentMessage(params: {
                   conversationId: session.id,
                   eventKey: durableTurn.eventKey,
                 }),
+              requestDurableRetry: (retryAt: Date) =>
+                wakeFastAgentParentEventAt(
+                  {
+                    conversationId: session.id,
+                    eventKey: durableTurn.eventKey,
+                  },
+                  retryAt,
+                ),
             }
           : {}),
         activity: createFastAgentSlackSessionActivity({
@@ -357,6 +375,32 @@ export async function processFastAgentMessage(params: {
             includeRoomoteMemberTools: true,
           }),
         launchTask,
+        ...(event.user
+          ? {
+              createReplyStream: () =>
+                guardReplyStreamBySourceMessage(
+                  createSlackFastReplyStream({
+                    slack,
+                    conversation,
+                    channelId: event.channel,
+                    threadTs: threadId,
+                    recipientTeamId: teamId,
+                    recipientUserId: event.user,
+                    sessionId: session.id,
+                    footerContext,
+                    onDelivered: () => {
+                      didSendVisibleResponse = true;
+                    },
+                  }),
+                  {
+                    slack,
+                    channel: event.channel,
+                    threadTs: threadId,
+                    sourceMessageTs: event.ts,
+                  },
+                ),
+            }
+          : {}),
         postReply: async ({ message, kickoff }) => {
           const posted = await postSlackThreadMarkdownMessage({
             slack,

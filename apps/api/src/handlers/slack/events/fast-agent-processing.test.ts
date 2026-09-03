@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   recordProviderMessage: vi.fn(),
   admitHumanFollowUp: vi.fn(),
   resolveFooterContext: vi.fn(),
+  createConversationArtifact: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -64,6 +65,7 @@ vi.mock('@roomote/cloud-agents', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
+  createFastAgentConversationArtifact: mocks.createConversationArtifact,
   persistFastAgentInlineHumanTurn: vi.fn(async () => null),
   wakeFastAgentParentEventNow: vi.fn(async () => undefined),
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
@@ -176,6 +178,60 @@ describe('processFastAgentMessage', () => {
       expect.objectContaining({ question: expectedQuestion }),
     );
     expect(slack.normalizeIncomingText).not.toHaveBeenCalled();
+  });
+
+  it('creates artifacts against the canonical Fast conversation', async () => {
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: {
+          createArtifact: (artifact: {
+            path: string;
+            content: string;
+            contentType: string;
+            artifactType: 'general' | 'plan';
+          }) => Promise<unknown>;
+        };
+      }) => {
+        await adapter.createArtifact({
+          path: 'notes/slack.md',
+          content: '# Slack',
+          contentType: 'text/markdown',
+          artifactType: 'general',
+        });
+        return 'Created.';
+      },
+    );
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: 'Create a note',
+        ts: '100.001',
+        thread_ts: '100.000',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+      isExistingConversation: true,
+    });
+
+    expect(mocks.createConversationArtifact).toHaveBeenCalledWith({
+      fastConversationId: 'fast-session-1',
+      path: 'notes/slack.md',
+      content: '# Slack',
+      contentType: 'text/markdown',
+      artifactType: 'general',
+    });
   });
 
   it('durably steers an active Fast generation instead of waiting for its lock', async () => {

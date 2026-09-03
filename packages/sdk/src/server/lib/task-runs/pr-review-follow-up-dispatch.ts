@@ -56,7 +56,7 @@ export type PrReviewFollowUpDispatchResult =
   | { outcome: 'resumed'; runId: number }
   | { outcome: 'unavailable' };
 
-type PrReviewFollowUpDispatchInput = {
+export type PrReviewFollowUpDispatchInput = {
   taskId: string;
   followUpPrompt: string;
   actingUserId: string;

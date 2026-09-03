@@ -1,0 +1,625 @@
+const mocks = vi.hoisted(() => ({
+  acquireRedisLock: vi.fn(),
+  releaseLock: vi.fn(),
+  enqueueTask: vi.fn(),
+  getTaskUrl: vi.fn(() => 'https://roomote.example/task/task-1'),
+  getOrCreateFastAgentSession: vi.fn(),
+  upsertFastAgentMessage: vi.fn(),
+  findById: vi.fn(),
+  taskRunsFindFirst: vi.fn(),
+  sessionsFindFirst: vi.fn(),
+  getSessionForFastConversation: vi.fn(),
+}));
+
+vi.mock('@roomote/redis', () => ({
+  acquireRedisLock: mocks.acquireRedisLock,
+}));
+
+vi.mock('../../task-run-queue', () => ({
+  enqueueTask: mocks.enqueueTask,
+}));
+
+vi.mock('../../task-url', () => ({
+  getTaskUrl: mocks.getTaskUrl,
+}));
+
+vi.mock('../fast-agent-session', () => ({
+  getOrCreateFastAgentSession: mocks.getOrCreateFastAgentSession,
+  upsertFastAgentMessage: mocks.upsertFastAgentMessage,
+}));
+
+vi.mock('../fast-agent-conversation-repository', () => ({
+  fastAgentConversationRepository: { findById: mocks.findById },
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  db: {
+    query: {
+      taskRuns: { findFirst: mocks.taskRunsFindFirst },
+      sessions: { findFirst: mocks.sessionsFindFirst },
+    },
+  },
+  and: vi.fn((...parts: unknown[]) => ({ and: parts })),
+  desc: vi.fn((column: unknown) => ({ desc: column })),
+  eq: vi.fn((left: unknown, right: unknown) => ({ eq: [left, right] })),
+  isNull: vi.fn((column: unknown) => ({ isNull: column })),
+  sql: Object.assign(
+    vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
+      sql: strings.join('?'),
+      values,
+    })),
+    { raw: vi.fn() },
+  ),
+  taskRuns: {
+    taskId: 'task_runs.task_id',
+    createdAt: 'c',
+    id: 'i',
+    payload: 'task_runs.payload',
+    canceledAt: 'task_runs.canceled_at',
+  },
+  sessions: { id: 'sessions.id' },
+  getSessionForFastConversation: mocks.getSessionForFastConversation,
+}));
+
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  TaskPayloadKind,
+  type StandardTask,
+} from '@roomote/types';
+
+import { launchPinnedFastSessionTask } from '../fast-agent-pinned-launch';
+
+const task: StandardTask = {
+  type: TaskPayloadKind.StandardTask,
+  harness: 'opencode-server',
+  payload: {
+    repo: 'acme/api',
+    branch: 'main',
+    environmentId: 'env-1',
+    description: 'Fix the flaky test',
+    blank: false,
+  },
+};
+
+describe('launchPinnedFastSessionTask', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getOrCreateFastAgentSession.mockResolvedValue({
+      id: 'fast-1',
+      created: true,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'conv-1',
+      },
+    });
+    mocks.upsertFastAgentMessage.mockResolvedValue({
+      initialHumanTurn: true,
+    });
+    mocks.enqueueTask.mockImplementation(
+      async (
+        _input: unknown,
+        options: {
+          beforeEnqueue: (taskRun: {
+            id: number;
+            taskId: string;
+          }) => Promise<void>;
+        },
+      ) => {
+        await options.beforeEnqueue({ id: 7, taskId: 'task-1' });
+        return { id: 7, taskId: 'task-1' };
+      },
+    );
+    mocks.taskRunsFindFirst.mockResolvedValue({ id: 7 });
+    mocks.sessionsFindFirst.mockResolvedValue(null);
+    mocks.getSessionForFastConversation.mockResolvedValue({ id: 'session-1' });
+    mocks.releaseLock.mockResolvedValue(undefined);
+    mocks.acquireRedisLock.mockResolvedValue(mocks.releaseLock);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('creates a web session, records the request and kickoff, and delegates the task', async () => {
+    const result = await launchPinnedFastSessionTask({
+      userId: 'user-1',
+      senderDisplayName: 'User One',
+      launchId: 'launch-1',
+      prompt: 'Fix the flaky test',
+      task,
+      surface: 'web',
+      kickoffMessage: 'Started a task in Backend.',
+    });
+
+    expect(result).toEqual({
+      sessionId: 'session-1',
+      fastConversationId: 'fast-1',
+      taskId: 'task-1',
+      runId: 7,
+    });
+    expect(mocks.getOrCreateFastAgentSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: expect.objectContaining({
+        surface: 'web',
+        workspaceId: 'user-1',
+      }),
+    });
+
+    const [userWrite, kickoffWrite] = mocks.upsertFastAgentMessage.mock.calls;
+    expect(userWrite?.[0]).toEqual({
+      sessionId: 'fast-1',
+      message: expect.objectContaining({
+        eventId: 'pinned-launch:launch-1:user',
+        turnId: 'pinned-launch:launch-1',
+        turnSeq: 0,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'Fix the flaky test' }],
+        metadata: expect.objectContaining({
+          visibleInTranscript: true,
+          turnSource: 'human',
+          userId: 'user-1',
+          senderDisplayName: 'User One',
+        }),
+        source: 'web',
+      }),
+    });
+    expect(kickoffWrite?.[0]).toEqual({
+      sessionId: 'fast-1',
+      message: expect.objectContaining({
+        eventId: 'pinned-launch:launch-1:kickoff',
+        turnSeq: 1,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Started a task in Backend.' }],
+        payload: { purpose: 'progress', kickoff: true },
+      }),
+    });
+    // The launch_task tool result is what the transcript renders as the
+    // delegated-task card.
+    const launchWrite = mocks.upsertFastAgentMessage.mock.calls[2]?.[0] as {
+      sessionId: string;
+      message: { eventType: string; payload: Record<string, unknown> };
+    };
+    expect(launchWrite).toEqual({
+      sessionId: 'fast-1',
+      message: expect.objectContaining({
+        eventId: 'pinned-launch:launch-1:launch',
+        turnSeq: 2,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        role: 'tool',
+        payload: expect.objectContaining({
+          toolName: 'launch_task',
+          status: 'completed',
+          output: JSON.stringify({ success: true, taskId: 'task-1' }),
+          rawInput: { arguments: { prompt: 'Fix the flaky test' } },
+        }),
+      }),
+    });
+
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initiator: { kind: 'user', userId: 'user-1' },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
+        task: expect.objectContaining({
+          harness: 'opencode-server',
+          payload: expect.objectContaining({
+            repo: 'acme/api',
+            branch: 'main',
+            environmentId: 'env-1',
+            description: 'Fix the flaky test',
+            blank: false,
+            launchIdempotencyKey: 'pinned-launch:launch-1',
+            reportConsumer: 'orchestrator',
+            fastAgentSessionId: 'fast-1',
+            fastAgentParent: {
+              sessionId: 'fast-1',
+              conversation: {
+                surface: 'web',
+                workspaceId: 'user-1',
+                conversationId: 'conv-1',
+              },
+            },
+          }),
+        }),
+      }),
+      expect.objectContaining({ beforeEnqueue: expect.any(Function) }),
+    );
+  });
+
+  it("launches in the origin Session's own Fast conversation when it has one", async () => {
+    mocks.sessionsFindFirst.mockResolvedValue({
+      id: 'session-origin',
+      fastConversationId: 'fast-origin',
+    });
+    mocks.findById.mockResolvedValue({
+      id: 'fast-origin',
+      userId: 'user-2',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T1',
+        conversationId: '100.1',
+        replyTarget: { channelId: 'C1', threadId: '100.1' },
+      },
+    });
+    mocks.getSessionForFastConversation.mockResolvedValue({
+      id: 'session-origin',
+    });
+
+    const result = await launchPinnedFastSessionTask({
+      userId: 'user-1',
+      originSessionId: 'session-origin',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T1',
+        conversationId: '200.1',
+        replyTarget: { channelId: 'C1', threadId: '200.1' },
+      },
+      launchId: 'launch-origin',
+      prompt: 'Fix the flaky test',
+      task,
+      surface: 'slack',
+      kickoffMessage: 'Started a task in Backend.',
+    });
+
+    expect(result).toMatchObject({
+      sessionId: 'session-origin',
+      fastConversationId: 'fast-origin',
+    });
+    expect(mocks.findById).toHaveBeenCalledWith({ id: 'fast-origin' });
+    expect(mocks.getOrCreateFastAgentSession).not.toHaveBeenCalled();
+    expect(mocks.upsertFastAgentMessage.mock.calls[0]?.[0]).toMatchObject({
+      sessionId: 'fast-origin',
+    });
+  });
+
+  it("binds the caller's conversation to an origin Session that has none", async () => {
+    mocks.sessionsFindFirst.mockResolvedValue({
+      id: 'session-origin',
+      fastConversationId: null,
+    });
+    const conversation = {
+      surface: 'slack' as const,
+      workspaceId: 'T1',
+      conversationId: '200.1',
+      replyTarget: { channelId: 'C1', threadId: '200.1' },
+    };
+    mocks.getOrCreateFastAgentSession.mockResolvedValue({
+      id: 'fast-bound',
+      created: true,
+      conversation,
+    });
+
+    await launchPinnedFastSessionTask({
+      userId: 'user-1',
+      originSessionId: 'session-origin',
+      conversation,
+      launchId: 'launch-origin',
+      prompt: 'Fix the flaky test',
+      task,
+      surface: 'slack',
+      kickoffMessage: 'Started a task in Backend.',
+    });
+
+    expect(mocks.getOrCreateFastAgentSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation,
+      sessionId: 'session-origin',
+    });
+    expect(mocks.findById).not.toHaveBeenCalled();
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            fastAgentParent: { sessionId: 'fast-bound', conversation },
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('falls back to a fresh Session when the origin Session is gone', async () => {
+    mocks.sessionsFindFirst.mockResolvedValue(null);
+
+    await launchPinnedFastSessionTask({
+      userId: 'user-1',
+      originSessionId: 'session-missing',
+      launchId: 'launch-origin',
+      prompt: 'Fix the flaky test',
+      task,
+      surface: 'web',
+      kickoffMessage: 'Started a task in Backend.',
+    });
+
+    expect(mocks.getOrCreateFastAgentSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: expect.objectContaining({ surface: 'web' }),
+    });
+  });
+
+  it('launches inside an existing Fast conversation and skips the request row for a blank workspace', async () => {
+    mocks.findById.mockResolvedValue({
+      id: 'fast-parent',
+      userId: 'user-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'conv-parent',
+      },
+    });
+
+    const result = await launchPinnedFastSessionTask({
+      userId: 'user-1',
+      fastConversationId: 'fast-parent',
+      launchId: 'launch-2',
+      prompt: '',
+      task: { ...task, payload: { ...task.payload, blank: true } },
+      surface: 'api',
+      initiator: { kind: 'user', userId: 'user-1' },
+      kickoffMessage: 'Opened a workspace in Backend.',
+    });
+
+    expect(result.fastConversationId).toBe('fast-parent');
+    expect(mocks.getOrCreateFastAgentSession).not.toHaveBeenCalled();
+    // No user row for a blank workspace: only the kickoff and the task card.
+    expect(mocks.upsertFastAgentMessage).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.upsertFastAgentMessage.mock.calls.map(
+        (call) =>
+          (call[0] as { message: { eventType: string } }).message.eventType,
+      ),
+    ).toEqual([
+      ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+    ]);
+    expect(mocks.upsertFastAgentMessage.mock.calls[0]?.[0]).toEqual({
+      sessionId: 'fast-parent',
+      message: expect.objectContaining({
+        eventId: 'pinned-launch:launch-2:kickoff',
+      }),
+    });
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surface: 'api',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            fastAgentSessionId: 'fast-parent',
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('replays a launch with a reused id into the Session the first attempt created', async () => {
+    mocks.taskRunsFindFirst
+      .mockResolvedValueOnce({
+        payload: {
+          launchIdempotencyKey: 'pinned-launch:launch-1',
+          fastAgentParent: {
+            sessionId: '66666666-6666-4666-8666-666666666666',
+            conversation: {
+              surface: 'web',
+              workspaceId: 'user-1',
+              conversationId: 'conv-first',
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({ id: 7 });
+    mocks.findById.mockResolvedValue({
+      id: '66666666-6666-4666-8666-666666666666',
+      userId: 'user-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'conv-first',
+      },
+    });
+
+    const result = await launchPinnedFastSessionTask({
+      userId: 'user-1',
+      launchId: 'launch-1',
+      prompt: 'Fix the flaky test',
+      task,
+      surface: 'api',
+      kickoffMessage: 'Started a task.',
+    });
+
+    expect(result.fastConversationId).toBe(
+      '66666666-6666-4666-8666-666666666666',
+    );
+    expect(mocks.getOrCreateFastAgentSession).not.toHaveBeenCalled();
+    expect(mocks.findById).toHaveBeenCalledWith({
+      id: '66666666-6666-4666-8666-666666666666',
+    });
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            launchIdempotencyKey: 'pinned-launch:launch-1',
+            fastAgentSessionId: '66666666-6666-4666-8666-666666666666',
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('serializes launches that must discover their Session behind a per-launch lock', async () => {
+    await launchPinnedFastSessionTask({
+      userId: 'user-1',
+      launchId: 'launch-1',
+      prompt: 'Fix the flaky test',
+      task,
+      surface: 'api',
+      kickoffMessage: 'Started a task.',
+    });
+
+    expect(mocks.acquireRedisLock).toHaveBeenCalledWith(
+      'pinned-launch:launch-1:lock',
+      { ttlSeconds: 60 },
+    );
+    expect(mocks.releaseLock).toHaveBeenCalledOnce();
+    // The queue lookup happens under the lock, so a concurrent retry that
+    // waited sees the first attempt's run before creating anything.
+    expect(mocks.acquireRedisLock.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.taskRunsFindFirst.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('waits for a concurrent attempt to finish, then replays into its Session', async () => {
+    vi.useFakeTimers();
+    mocks.acquireRedisLock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(mocks.releaseLock);
+    mocks.taskRunsFindFirst
+      .mockResolvedValueOnce({
+        payload: {
+          fastAgentParent: {
+            sessionId: '66666666-6666-4666-8666-666666666666',
+            conversation: {
+              surface: 'web',
+              workspaceId: 'user-1',
+              conversationId: 'conv-first',
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({ id: 7 });
+    mocks.findById.mockResolvedValue({
+      id: '66666666-6666-4666-8666-666666666666',
+      userId: 'user-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'conv-first',
+      },
+    });
+
+    const pending = launchPinnedFastSessionTask({
+      userId: 'user-1',
+      launchId: 'launch-1',
+      prompt: 'Fix the flaky test',
+      task,
+      surface: 'api',
+      kickoffMessage: 'Started a task.',
+    });
+    await vi.advanceTimersByTimeAsync(250);
+    const result = await pending;
+
+    expect(result.fastConversationId).toBe(
+      '66666666-6666-4666-8666-666666666666',
+    );
+    expect(mocks.acquireRedisLock).toHaveBeenCalledTimes(2);
+    expect(mocks.getOrCreateFastAgentSession).not.toHaveBeenCalled();
+  });
+
+  it('gives up when another attempt holds the launch for too long', async () => {
+    vi.useFakeTimers();
+    mocks.acquireRedisLock.mockResolvedValue(null);
+
+    const pending = launchPinnedFastSessionTask({
+      userId: 'user-1',
+      launchId: 'launch-1',
+      prompt: 'Fix the flaky test',
+      task,
+      surface: 'api',
+      kickoffMessage: 'Started a task.',
+    });
+    const outcome = pending.then(
+      () => 'resolved',
+      (error: Error) => error.message,
+    );
+    await vi.advanceTimersByTimeAsync(16_000);
+
+    await expect(outcome).resolves.toBe(
+      'Another attempt at this launch is still in progress. Retry in a moment.',
+    );
+    expect(mocks.enqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('skips the lock when the caller already names the Session', async () => {
+    mocks.findById.mockResolvedValue({
+      id: 'fast-parent',
+      userId: 'user-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'conv-parent',
+      },
+    });
+
+    await launchPinnedFastSessionTask({
+      userId: 'user-1',
+      fastConversationId: 'fast-parent',
+      launchId: 'launch-2',
+      prompt: 'Fix it',
+      task,
+      surface: 'api',
+      kickoffMessage: 'Started a task.',
+    });
+
+    expect(mocks.acquireRedisLock).not.toHaveBeenCalled();
+  });
+
+  it("refuses to replay a launch id that belongs to another user's Session", async () => {
+    mocks.taskRunsFindFirst.mockResolvedValueOnce({
+      payload: {
+        fastAgentParent: {
+          sessionId: '66666666-6666-4666-8666-666666666666',
+          conversation: {
+            surface: 'web',
+            workspaceId: 'user-1',
+            conversationId: 'conv-first',
+          },
+        },
+      },
+    });
+    mocks.findById.mockResolvedValue({
+      id: '66666666-6666-4666-8666-666666666666',
+      userId: 'user-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'conv-first',
+      },
+    });
+
+    await expect(
+      launchPinnedFastSessionTask({
+        userId: 'user-2',
+        launchId: 'launch-1',
+        prompt: 'Fix the flaky test',
+        task,
+        surface: 'api',
+        kickoffMessage: 'Started a task.',
+      }),
+    ).rejects.toThrow('This launch id already belongs to another Session.');
+    expect(mocks.getOrCreateFastAgentSession).not.toHaveBeenCalled();
+    expect(mocks.upsertFastAgentMessage).not.toHaveBeenCalled();
+    expect(mocks.enqueueTask).not.toHaveBeenCalled();
+    expect(mocks.releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a launch into a Fast conversation that does not exist', async () => {
+    mocks.findById.mockResolvedValue(null);
+
+    await expect(
+      launchPinnedFastSessionTask({
+        userId: 'user-1',
+        fastConversationId: 'missing',
+        launchId: 'launch-3',
+        prompt: 'Hello',
+        task,
+        surface: 'web',
+        kickoffMessage: 'Started a task.',
+      }),
+    ).rejects.toThrow('The Session for this launch could not be found.');
+    expect(mocks.enqueueTask).not.toHaveBeenCalled();
+  });
+});

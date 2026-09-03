@@ -2,14 +2,23 @@ import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   createFastAgentWebTaskLauncher,
+  FastAgentDurableRetryScheduledError,
   fastAgentConversationRepository,
   getActiveFastAgentTasks,
   resolveApiBaseUrl,
+  type FastAgentActiveTask,
   type FastAgentConversation,
   type FastAgentReactionExternalInput,
   type FastAgentTurnAdapter,
 } from '@roomote/cloud-agents/server';
-import { and, db, eq, slackInstallations } from '@roomote/db/server';
+import {
+  and,
+  db,
+  ensureSessionForFastConversation,
+  eq,
+  slackInstallations,
+} from '@roomote/db/server';
+import { isFastAgentSourceControlConversation } from '@roomote/types';
 import {
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
@@ -19,15 +28,14 @@ import {
 import {
   createFastAgentSlackLiveTaskLauncher,
   createFastAgentSlackSessionActivity,
-  getSlackThreadReplyFooterMessageTs,
   postSlackThreadMessageWithFooterText,
-  withSlackThreadReplyFooterLock,
-  buildSlackThreadReplyFooterBlock,
   SlackNotifier,
   ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
 } from '@roomote/slack';
 
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
+import { createSlackFastReplyStream } from './fast-agent-slack-reply-stream';
+import { findSlackConversationSubjectByUserId } from './slack-conversation-log';
 import {
   createFastAgentCommunicationTaskLauncher,
   createFastAgentDiscordTaskLauncher,
@@ -37,11 +45,31 @@ import { createTelegramCommunicationProviderFromRuntimeCredentials } from './tel
 import { findTeamsConversationRoute } from '../automations/destination';
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
 import {
+  createDiscordFastReplyReplacer,
+  createSlackFastReplyReplacer,
+  createTeamsFastReplyReplacer,
+  createTelegramFastReplyReplacer,
+} from './fast-agent-reply-replacement';
+import {
   admitFastAgentHumanFollowUp,
   persistFastAgentInlineHumanTurn,
 } from './fast-agent-human-follow-up';
-import { wakeFastAgentParentEventNow } from './fast-agent-parent-event-queue';
+import {
+  wakeFastAgentParentEventAt,
+  wakeFastAgentParentEventNow,
+} from './fast-agent-parent-event-queue';
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
+import {
+  buildLinearFastReplyMessageId,
+  createFastAgentLinearTaskLauncher,
+  resolveLinearFastSessionClient,
+} from './linear-fast-session';
+import {
+  buildSourceControlFastAdapter,
+  buildSourceControlFastDelivery,
+  buildSourceControlReplyQuote,
+} from './source-control-fast-delivery';
+import { createFastAgentSessionArtifact } from './artifacts/create-session-artifact';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
 const DISCORD_QUOTE_MAX_LENGTH = 280;
@@ -110,7 +138,7 @@ export type FastAgentSurfaceReplyDelivery = {
   conversation: FastAgentConversation;
   adapter: Pick<
     FastAgentTurnAdapter,
-    'activity' | 'launchTask' | 'postReply' | 'replaceReply'
+    'activity' | 'createArtifact' | 'launchTask' | 'postReply' | 'replaceReply'
   >;
 };
 
@@ -119,10 +147,27 @@ type FastAgentSurfaceReplyParams = {
   userId: string;
   senderDisplayName: string | null;
   question: string;
+  /** Surface context the model reads with this message, for example the
+   * Linear issue a session belongs to. */
+  agentContext?: string;
   currentMessageId: string;
   replyToMessageId?: string;
   images?: string[];
+  /**
+   * Tasks the Session may steer on this turn beyond the ones it delegated,
+   * for example the task that already owns the pull request a comment is on.
+   */
+  activeTasks?: FastAgentActiveTask[];
   externalInput?: FastAgentReactionExternalInput;
+  /**
+   * Admission-time hooks for callers that must not block on the whole turn
+   * (suggestion launchers finalize their claim as soon as the turn is
+   * admitted). `onAccepted` fires once the follow-up is durably queued,
+   * steered into a running turn, or owns the turn lock, with a callback that
+   * aborts that admission; `onRejected` fires when the session refuses it.
+   */
+  onAccepted?: (abort: () => Promise<void>) => void;
+  onRejected?: () => void;
 };
 
 // Sessions follow the same rules as tasks: every authenticated user of the
@@ -214,10 +259,35 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           senderDisplayName: params.senderDisplayName,
           text: params.question,
         });
+    // Streaming a reply outside a DM needs the Slack user it is addressed
+    // to; a sender without a linked Slack account gets whole replies.
+    const senderSubject = await findSlackConversationSubjectByUserId({
+      userId: params.userId,
+      slackTeamId: conversation.workspaceId,
+    }).catch(() => null);
 
     return {
       conversation,
       adapter: {
+        ...(senderSubject
+          ? {
+              createReplyStream: () =>
+                createSlackFastReplyStream({
+                  slack,
+                  conversation,
+                  channelId: conversation.replyTarget.channelId,
+                  threadTs: threadId,
+                  recipientTeamId: conversation.workspaceId,
+                  recipientUserId: senderSubject.subjectSlackUserId,
+                  sessionId: session.id,
+                  footerContext,
+                  getQuote: () => pendingQuote,
+                  onDelivered: () => {
+                    pendingQuote = null;
+                  },
+                }),
+            }
+          : {}),
         activity: createFastAgentSlackSessionActivity({
           slack,
           workspaceId: conversation.workspaceId,
@@ -274,51 +344,14 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           });
           return { messageId: messageTs };
         },
-        replaceReply: async (handle, { message }) => {
-          // Keep the sticky footer when the edited message is its current
-          // carrier; the lookup and edit share the footer lock so a
-          // concurrent relocation cannot slip in between them.
-          const updated = await withSlackThreadReplyFooterLock({
-            channel: conversation.replyTarget.channelId,
-            threadTs: threadId,
-            fn: async () => {
-              const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
-                conversation.replyTarget.channelId,
-                threadId,
-              ).catch(() => null);
-              return slack.updateMessage({
-                channel: conversation.replyTarget.channelId,
-                ts: handle.messageId,
-                message: {
-                  text: message,
-                  blocks: [
-                    { type: 'markdown', text: message },
-                    ...(footerMessageTs === handle.messageId
-                      ? [
-                          buildSlackThreadReplyFooterBlock({
-                            footerText: buildFastSessionReplyFooterText({
-                              provider: 'slack',
-                              sessionId: session.id,
-                              ...footerContext,
-                            }),
-                          }),
-                        ]
-                      : []),
-                  ],
-                },
-              });
-            },
-          });
-          if (!updated) {
-            throw new Error('Slack did not update the Fast reply.');
-          }
-          await recordFastAgentConversationMessageBestEffort({
-            sessionId: session.id,
-            conversation,
-            messageId: handle.messageId,
-          });
-          return handle;
-        },
+        replaceReply: createSlackFastReplyReplacer({
+          slack,
+          conversation,
+          channelId: conversation.replyTarget.channelId,
+          threadTs: threadId,
+          sessionId: session.id,
+          footerContext,
+        }),
       },
     };
   }
@@ -337,69 +370,76 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           text: params.question,
         });
 
-    return {
-      conversation,
-      adapter: {
-        launchTask: createFastAgentDiscordTaskLauncher({
-          provider,
-          userId: params.userId,
-          conversation,
-        }),
-        postReply: async ({ message }) => {
-          const quote = pendingQuote;
-          pendingQuote = null;
-          const footerText = buildFastSessionReplyFooterText({
-            provider: 'discord',
-            sessionId: session.id,
-            ...footerContext,
-          });
-          const bodyText = quote ? `${quote}\n\n${message}` : message;
-          const textWithFooter = `${bodyText}\n\n${footerText}`;
-          const channelId = conversation.replyTarget.channelId;
-          const footerStateThreadId =
-            conversation.replyTarget.threadId ?? 'root';
-          const footerMessageChannelId =
-            conversation.replyTarget.threadId ?? channelId;
+    const adapter: FastAgentTurnAdapter = {
+      launchTask: createFastAgentDiscordTaskLauncher({
+        provider,
+        userId: params.userId,
+        conversation,
+      }),
+      postReply: async ({ message }) => {
+        const quote = pendingQuote;
+        pendingQuote = null;
+        const footerText = buildFastSessionReplyFooterText({
+          provider: 'discord',
+          sessionId: session.id,
+          ...footerContext,
+        });
+        const bodyText = quote ? `${quote}\n\n${message}` : message;
+        const textWithFooter = `${bodyText}\n\n${footerText}`;
+        const channelId = conversation.replyTarget.channelId;
+        const footerStateThreadId = conversation.replyTarget.threadId ?? 'root';
+        const footerMessageChannelId =
+          conversation.replyTarget.threadId ?? channelId;
 
-          const posted = await deliverManagedThreadReplyFooter({
-            provider: 'discord',
-            providerLabel: 'Discord',
-            channelId,
-            footerStateThreadId,
-            lockKey: `discord:thread_reply_footer_lock:${channelId}:${footerStateThreadId}`,
-            logRef: `fast session ${session.id}`,
-            logContext: 'fastAgentSurfaceReply',
-            postReplyWithFooter: async () => {
-              const result = await provider.postMessage({
-                ...conversation.replyTarget,
-                text: textWithFooter,
-                textFormat: 'markdown',
-              });
-              return {
-                messageId: result.lastTextMessageId ?? result.messageId,
-                textWithoutFooter: getDiscordFooterlessFinalChunk({
-                  textWithFooter,
-                  footerText,
-                }),
-              };
-            },
-            clearPreviousFooter: async (previousFooterRecord) => {
-              await provider.editMessage({
-                channelId: footerMessageChannelId,
-                messageId: previousFooterRecord.messageId,
-                text: previousFooterRecord.textWithoutFooter,
-              });
-            },
-          });
-          await recordFastAgentConversationMessageBestEffort({
-            sessionId: session.id,
-            conversation,
-            messageId: posted.messageId,
-          });
-          return { messageId: posted.messageId };
-        },
+        const posted = await deliverManagedThreadReplyFooter({
+          provider: 'discord',
+          providerLabel: 'Discord',
+          channelId,
+          footerStateThreadId,
+          lockKey: `discord:thread_reply_footer_lock:${channelId}:${footerStateThreadId}`,
+          logRef: `fast session ${session.id}`,
+          logContext: 'fastAgentSurfaceReply',
+          postReplyWithFooter: async () => {
+            const result = await provider.postMessage({
+              ...conversation.replyTarget,
+              text: textWithFooter,
+              textFormat: 'markdown',
+            });
+            return {
+              messageId: result.lastTextMessageId ?? result.messageId,
+              textWithoutFooter: getDiscordFooterlessFinalChunk({
+                textWithFooter,
+                footerText,
+              }),
+            };
+          },
+          clearPreviousFooter: async (previousFooterRecord) => {
+            await provider.editMessage({
+              channelId: footerMessageChannelId,
+              messageId: previousFooterRecord.messageId,
+              text: previousFooterRecord.textWithoutFooter,
+            });
+          },
+        });
+        await recordFastAgentConversationMessageBestEffort({
+          sessionId: session.id,
+          conversation,
+          messageId: posted.messageId,
+        });
+        return { messageId: posted.messageId };
       },
     };
+    adapter.replaceReply = createDiscordFastReplyReplacer({
+      provider,
+      conversation,
+      channelId: conversation.replyTarget.channelId,
+      threadId: conversation.replyTarget.threadId,
+      sessionId: session.id,
+      footerContext,
+      postReplacement: (text) =>
+        adapter.postReply({ purpose: 'closeout', message: text }),
+    });
+    return { conversation, adapter };
   }
 
   if (conversation.surface === 'teams') {
@@ -442,22 +482,63 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           });
           return { messageId: posted.messageId };
         },
-        replaceReply: async (handle, { message }) => {
-          await provider.updateMessage({
-            channelId: conversation.replyTarget.channelId,
-            messageId: handle.messageId,
-            serviceUrl,
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id, ...footerContext })}`,
-            textFormat: 'markdown',
-          });
-          await recordFastAgentConversationMessageBestEffort({
-            sessionId: session.id,
-            conversation,
-            messageId: handle.messageId,
-          });
-          return handle;
+        replaceReply: createTeamsFastReplyReplacer({
+          provider,
+          conversation,
+          channelId: conversation.replyTarget.channelId,
+          serviceUrl,
+          sessionId: session.id,
+          footerContext,
+        }),
+      },
+    };
+  }
+
+  if (conversation.surface === 'linear') {
+    const linear = await resolveLinearFastSessionClient(
+      conversation.workspaceId,
+    );
+    if (!linear) {
+      return null;
+    }
+    const agentSessionId = conversation.replyTarget.channelId;
+    return {
+      conversation,
+      adapter: {
+        launchTask: createFastAgentLinearTaskLauncher({
+          userId: params.userId,
+          conversation,
+          resolveIssue: () => linear.getAgentSessionIssue(agentSessionId),
+        }),
+        postReply: async ({ message }) => {
+          const result = await linear.emitResponse(agentSessionId, message);
+          if (!result.success) {
+            throw new Error(
+              result.error ?? 'Linear did not accept the agent response.',
+            );
+          }
+          return { messageId: buildLinearFastReplyMessageId() };
         },
       },
+    };
+  }
+
+  if (isFastAgentSourceControlConversation(conversation)) {
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    if (!delivery) {
+      return null;
+    }
+    return {
+      conversation,
+      adapter: buildSourceControlFastAdapter({
+        conversation,
+        delivery,
+        userId: params.userId,
+        sessionId: session.id,
+        quote: params.externalInput
+          ? null
+          : buildSourceControlReplyQuote({ text: params.question }),
+      }),
     };
   }
 
@@ -492,20 +573,13 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           });
           return { messageId: posted.messageId };
         },
-        replaceReply: async (handle, { message }) => {
-          await provider.editMessageText({
-            channelId: conversation.replyTarget.channelId,
-            messageId: handle.messageId,
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id, ...footerContext })}`,
-            textFormat: 'markdown',
-          });
-          await recordFastAgentConversationMessageBestEffort({
-            sessionId: session.id,
-            conversation,
-            messageId: handle.messageId,
-          });
-          return handle;
-        },
+        replaceReply: createTelegramFastReplyReplacer({
+          provider,
+          conversation,
+          channelId: conversation.replyTarget.channelId,
+          sessionId: session.id,
+          footerContext,
+        }),
       },
     };
   }
@@ -518,11 +592,15 @@ export async function continueFastAgentSurfaceReply(
 ): Promise<boolean> {
   const delivery = await buildFastAgentSurfaceReplyDelivery(params);
   if (!delivery) {
+    params.onRejected?.();
     return false;
   }
 
   const admission = await admitFastAgentSurfaceHumanFollowUp(params, delivery);
-  if (admission && admission.kind !== 'turn') return true;
+  if (admission && admission.kind !== 'turn') {
+    params.onAccepted?.(admission.abort);
+    return true;
+  }
 
   return runFastAgentSurfaceReply({ ...params, delivery, admission });
 }
@@ -536,8 +614,11 @@ async function admitFastAgentSurfaceHumanFollowUp(
   delivery: FastAgentSurfaceReplyDelivery,
   forceQueue = false,
 ): Promise<FastAgentSurfaceHumanFollowUpAdmission> {
-  if (params.externalInput) return null;
-
+  // A reaction is admitted like a message so its row exists before the
+  // webhook is acknowledged: inline under this owner's claim when the
+  // conversation is idle, steered into the active turn otherwise. It is
+  // never force-queued, because the reaction's reply targets the reacted-to
+  // message and only the inline surface delivery knows how to do that.
   return admitFastAgentHumanFollowUp({
     parent: {
       sessionId: params.sessionId,
@@ -553,8 +634,17 @@ async function admitFastAgentSurfaceHumanFollowUp(
       ...(params.senderDisplayName
         ? { senderDisplayName: params.senderDisplayName }
         : {}),
+      ...(params.externalInput
+        ? {
+            senderExternalId: params.externalInput.reactor.externalUserId,
+            input: {
+              type: 'reaction' as const,
+              externalInput: params.externalInput,
+            },
+          }
+        : {}),
     },
-    forceQueue,
+    forceQueue: forceQueue && !params.externalInput,
   });
 }
 
@@ -571,40 +661,56 @@ async function runFastAgentSurfaceReply(
     (await acquireFastAgentTurnLock({
       conversation: delivery.conversation,
     }));
-  if (!release) return false;
+  if (!release) {
+    params.onRejected?.();
+    return false;
+  }
+  params.onAccepted?.(() => release.abort());
 
   const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
   try {
     const activeTasks = params.externalInput
-      ? await getActiveFastAgentTasks(params.sessionId)
-      : undefined;
-    // Durable admission for human turns (reactions are not replayable
-    // requests): persisted under this owner's claim before the turn runs.
-    const durableTurn = params.externalInput
-      ? null
-      : ((admission?.kind === 'turn' ? admission.durable : null) ??
-        (await persistFastAgentInlineHumanTurn({
-          parent: {
-            sessionId: params.sessionId,
-            conversation: delivery.conversation,
-          },
-          event: {
-            type: 'human_follow_up',
-            eventId: params.currentMessageId,
-            currentMessageId: params.currentMessageId,
-            userId: params.userId,
-            question: params.question,
-            ...(params.images?.length ? { images: params.images } : {}),
-            ...(params.senderDisplayName
-              ? { senderDisplayName: params.senderDisplayName }
-              : {}),
-          },
-        }).catch((error) => {
-          console.error(
-            `[Fast Agent] Failed to persist surface turn admission: ${error instanceof Error ? error.message : String(error)}`,
-          );
-          return null;
-        })));
+      ? [
+          ...(params.activeTasks ?? []),
+          ...(await getActiveFastAgentTasks(params.sessionId)),
+        ]
+      : params.activeTasks;
+    // Durable admission: persisted under this owner's claim before the turn
+    // runs. A reaction rides the same row with its input recorded, so the
+    // queue resumes it as a reaction turn rather than a typed message.
+    const durableTurn =
+      (admission?.kind === 'turn' ? admission.durable : null) ??
+      (await persistFastAgentInlineHumanTurn({
+        parent: {
+          sessionId: params.sessionId,
+          conversation: delivery.conversation,
+        },
+        event: {
+          type: 'human_follow_up',
+          eventId: params.currentMessageId,
+          currentMessageId: params.currentMessageId,
+          userId: params.userId,
+          question: params.question,
+          ...(params.images?.length ? { images: params.images } : {}),
+          ...(params.senderDisplayName
+            ? { senderDisplayName: params.senderDisplayName }
+            : {}),
+          ...(params.externalInput
+            ? {
+                senderExternalId: params.externalInput.reactor.externalUserId,
+                input: {
+                  type: 'reaction' as const,
+                  externalInput: params.externalInput,
+                },
+              }
+            : {}),
+        },
+      }).catch((error) => {
+        console.error(
+          `[Fast Agent] Failed to persist surface turn admission: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return null;
+      }));
     if (durableTurn) {
       release.durableRowId = durableTurn.id;
       release.durableResume = () =>
@@ -616,12 +722,18 @@ async function runFastAgentSurfaceReply(
     await answerFastAgentQuestion({
       question: params.question,
       images: params.images,
+      ...(params.agentContext
+        ? { currentMessageAgentContext: params.agentContext }
+        : {}),
       userId: params.userId,
       apiBaseUrl,
       conversation: delivery.conversation,
       currentMessageId: params.currentMessageId,
       signal: release.signal,
       ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
+      // A redelivered message whose earlier inline attempt never settled
+      // resumes that attempt instead of repeating its recorded actions.
+      ...(durableTurn?.resumed ? { resumedAfterInterruption: true } : {}),
       senderDisplayName: params.senderDisplayName ?? undefined,
       ...(activeTasks ? { activeTasks } : {}),
       ...(params.externalInput
@@ -647,10 +759,38 @@ async function runFastAgentSurfaceReply(
                   conversationId: params.sessionId,
                   eventKey: durableTurn.eventKey,
                 }),
+              requestDurableRetry: (retryAt: Date) =>
+                wakeFastAgentParentEventAt(
+                  {
+                    conversationId: params.sessionId,
+                    eventKey: durableTurn.eventKey,
+                  },
+                  retryAt,
+                ),
             }
           : {}),
+        createArtifact: async (artifact) => {
+          const unifiedSession = await ensureSessionForFastConversation(
+            db,
+            params.sessionId,
+          );
+          return createFastAgentSessionArtifact({
+            sessionId: unifiedSession.id,
+            ...artifact,
+          });
+        },
         ...delivery.adapter,
       },
+    }).catch((error: unknown) => {
+      // Not a failure: the turn parked itself for a durable retry and the
+      // queue re-runs it at the scheduled time, so the reply is on its way.
+      if (error instanceof FastAgentDurableRetryScheduledError) {
+        console.info(
+          `[Fast Agent] Surface reply turn parked for a durable retry: ${error.message}`,
+        );
+        return;
+      }
+      throw error;
     });
     return true;
   } finally {
@@ -669,7 +809,9 @@ export async function queueFastAgentSurfaceReply(
     delivery,
     true,
   );
-  if (admission?.kind === 'queued') return true;
+  // Queued messages and steered reactions are on record for the active or
+  // next turn; only an inline admission still needs this process to run it.
+  if (admission && admission.kind !== 'turn') return true;
 
   void runFastAgentSurfaceReply({ ...params, delivery, admission }).catch(
     (error) => {

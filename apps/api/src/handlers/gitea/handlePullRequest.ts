@@ -1,6 +1,7 @@
 import pMap from 'p-map';
 
 import {
+  buildFastAgentSessionAttachment,
   type TaskPayload,
   DEFAULT_PR_REVIEW_SETTINGS,
   type PrReviewSettings,
@@ -13,7 +14,10 @@ import {
   eq,
   findActiveGitHubPrReviewTask,
 } from '@roomote/db/server';
-import { enqueueTask } from '@roomote/cloud-agents/server';
+import {
+  enqueueTask,
+  getPrOriginFastAgentParent,
+} from '@roomote/cloud-agents/server';
 import {
   recordPrStatusChangeInTaskHistory,
   updateTaskPrStatus,
@@ -225,8 +229,25 @@ export async function handleGiteaPullRequest(
   const prAuthorId =
     pullRequest.user?.id != null ? String(pullRequest.user.id) : prAuthorName;
 
-  const enqueued = await pMap(targets, async (target) =>
-    enqueueTask(
+  const enqueued = await pMap(targets, async (target) => {
+    // A PR opened by a session-delegated task pulls its review into that
+    // same session, so the review shows up as a task there instead of
+    // spawning an unrelated one.
+    const reviewBranch = pullRequest.head?.ref;
+    const originParent = reviewBranch
+      ? await getPrOriginFastAgentParent({
+          repository: repoFullName,
+          prNumber: payload.number,
+          branchName: reviewBranch,
+          sourceControlProvider: 'gitea',
+          repositoryId: target.repo.id,
+          // Legacy repository rows may lack a host; fall back to the
+          // webhook's own host so a same-named repository on another
+          // instance can never supply this review's session.
+          host: target.repo.host ?? toHostFromUrl(prUrl),
+        }).catch(() => null)
+      : null;
+    return enqueueTask(
       {
         task: {
           type: taskType,
@@ -238,6 +259,9 @@ export async function handleGiteaPullRequest(
             // Legacy rows without a recorded host omit the field.
             ...(target.repo.host
               ? { sourceControlHost: target.repo.host }
+              : {}),
+            ...(originParent
+              ? buildFastAgentSessionAttachment(originParent)
               : {}),
             prNumber: payload.number,
             prTitle: pullRequest.title,
@@ -280,8 +304,8 @@ export async function handleGiteaPullRequest(
       {
         launchClass: 'automation',
       },
-    ),
-  );
+    );
+  });
 
   return {
     status: 'ok',

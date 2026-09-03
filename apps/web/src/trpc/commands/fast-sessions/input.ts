@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
-import { REASONING_EFFORT_VALUES } from '@roomote/types';
+import {
+  computeProviders,
+  launchCodingHarnesses,
+  REASONING_EFFORT_VALUES,
+} from '@roomote/types';
 
 const MAX_FAST_ATTACHMENT_COUNT = 20;
 const MAX_FAST_ATTACHMENT_TEXT_CHARS = 200_000;
@@ -26,10 +30,39 @@ const fastSessionMessageInputShape = {
   reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
 };
 
+/**
+ * A launch whose workspace the person already chose. The Session records the
+ * request and delegates the task immediately instead of asking Fast to decide.
+ * When present, the top-level `model` selects the task model, and an empty
+ * prompt opens a blank workspace.
+ */
+export const pinnedFastSessionLaunchSchema = z.object({
+  launchId: z.string().uuid(),
+  repo: z.string().trim().min(1),
+  branch: z.string().trim().min(1).optional(),
+  sha: z.string().trim().min(1).optional(),
+  environmentId: z.string().uuid().optional(),
+  harness: z.enum(launchCodingHarnesses).optional(),
+  computeProvider: z.enum(computeProviders).optional(),
+});
+
+export type PinnedFastSessionLaunchInput = z.infer<
+  typeof pinnedFastSessionLaunchSchema
+>;
+
 function requireFastSessionContent(
-  input: { text: string; images?: string[]; attachmentTexts?: string[] },
+  input: {
+    text: string;
+    images?: string[];
+    attachmentTexts?: string[];
+    pinnedLaunch?: unknown;
+  },
   ctx: z.RefinementCtx,
 ): void {
+  // A pinned launch may open a blank workspace with nothing to say yet.
+  if (input.pinnedLaunch) {
+    return;
+  }
   if (!input.text && !input.images?.length && !input.attachmentTexts?.length) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -54,17 +87,7 @@ function requireFastSessionContent(
 export const startFastSessionInputSchema = z
   .object({
     ...fastSessionMessageInputShape,
-    artifactBuild: z
-      .object({
-        launchId: z.string().uuid(),
-        environmentId: z.string().uuid(),
-        branch: z.string().trim().min(1).optional(),
-        taskModel: z.string().trim().min(1),
-        sourceArtifactId: z.string().uuid(),
-        sourceArtifactPath: z.string().min(1),
-        sourceArtifactVersion: z.number().int(),
-      })
-      .optional(),
+    pinnedLaunch: pinnedFastSessionLaunchSchema.optional(),
   })
   .superRefine(requireFastSessionContent);
 
