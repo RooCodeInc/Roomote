@@ -206,19 +206,21 @@ async function renderCard(
       return;
     }
 
+    const output =
+      state.status === 'error'
+        ? state.message
+        : state.status === 'complete' && !state.provisionalCompletion
+          ? state.finalMessage
+          : undefined;
+    const details =
+      state.status !== 'error' && state.message !== output
+        ? state.message
+        : undefined;
     const result = await sdk.taskRuns.renderSlackLiveTaskCard({
       runId: taskRun.id,
       status: state.status,
-      ...(state.status !== 'error' && state.message
-        ? { details: state.message }
-        : {}),
-      ...(state.status === 'error' && state.message
-        ? { output: state.message }
-        : state.status === 'complete' &&
-            state.finalMessage &&
-            !state.provisionalCompletion
-          ? { output: state.finalMessage }
-          : {}),
+      ...(details ? { details } : {}),
+      ...(output ? { output } : {}),
     });
 
     if (!result.card) {

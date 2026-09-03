@@ -718,6 +718,11 @@ describe('Slack live task card', () => {
       status: 'complete',
       output: 'Ready for review.',
     });
+    expect(renderedPayload(2)).toEqual({
+      runId: taskRun.id,
+      status: 'complete',
+      output: 'Ready for review.',
+    });
   });
 
   it('settles a completed run as a fallback when the completion event was lost', async () => {
