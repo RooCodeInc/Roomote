@@ -1,33 +1,23 @@
 import {
-  buildMentionRequestBlock,
-  buildUntrustedContentPolicy,
-  enqueueTask,
-  escapeTaskContextText,
-  getTaskUrl,
-} from '@roomote/cloud-agents/server';
-import {
-  findActiveGitHubPrReviewTask,
-  findReusableGitHubPrFollowUpOwner,
-} from '@roomote/db/server';
-import {
   createGitLabIssueNote,
   createGitLabMergeRequestNote,
   getGitLabDeploymentUser,
 } from '@roomote/gitlab';
 import {
-  type TaskPayload,
-  TaskPayloadKind,
-  PRODUCT_NAME,
-  isActivelyRunningTask,
-} from '@roomote/types';
+  startSourceControlFastSessionTurn,
+  type SourceControlFastDiscussion,
+} from '@roomote/sdk/server';
+import { PRODUCT_NAME } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
 import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
-import { orchestrateIssueMention } from '../shared/issue-mention-orchestration';
 import {
-  sendMessageToTask,
-  steerMessageToTask,
-} from '../tasks/sendMessageToTask';
+  buildSourceControlIssueMentionContext,
+  buildSourceControlPullRequestMentionContext,
+  resolveSourceControlIssueActiveTasks,
+  resolveSourceControlPullRequestActiveTasks,
+  SOURCE_CONTROL_FAST_UNAVAILABLE_MESSAGE,
+} from '../shared/source-control-mention';
 import {
   getGitLabAutomationTargets,
   isRoomoteGitLabUsername,
@@ -41,13 +31,6 @@ const GITLAB_MENTION_HANDLE = '@roomote';
 // service accounts. Worker-posted MR notes use those identities, so treat
 // them as Roomote-authored to avoid mention loops.
 const GITLAB_RESOURCE_BOT_USERNAME_PATTERN = /^(project|group)_\d+_bot/i;
-
-type GitLabMrMentionReplyKind =
-  | 'active_follow_up'
-  | 'active_review'
-  | 'review_started';
-
-type GitLabIssueMentionReplyKind = 'active_follow_up' | 'task_started';
 
 function isGitLabMention(noteBody: string): boolean {
   return noteBody.toLowerCase().includes(GITLAB_MENTION_HANDLE);
@@ -87,11 +70,7 @@ async function postMergeRequestMentionResponseNote({
   body: string;
 }): Promise<void> {
   try {
-    await createGitLabMergeRequestNote({
-      projectId,
-      mergeRequestIid,
-      body,
-    });
+    await createGitLabMergeRequestNote({ projectId, mergeRequestIid, body });
   } catch (error) {
     console.warn(
       `[handleGitLabNote] failed to post mention response note on project ${projectId} MR !${mergeRequestIid}: ${error instanceof Error ? error.message : String(error)}`,
@@ -109,104 +88,12 @@ async function postIssueMentionResponseNote({
   body: string;
 }): Promise<void> {
   try {
-    await createGitLabIssueNote({
-      projectId,
-      issueIid,
-      body,
-    });
+    await createGitLabIssueNote({ projectId, issueIid, body });
   } catch (error) {
     console.warn(
       `[handleGitLabNote] failed to post mention response note on project ${projectId} issue #${issueIid}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-}
-
-function tryBuildTaskLink({
-  taskId,
-  campaign,
-}: {
-  taskId: string;
-  campaign: string;
-}): string | null {
-  try {
-    return getTaskUrl({
-      taskId,
-      utm: { source: 'gitlab-note', campaign },
-    });
-  } catch (error) {
-    console.warn(
-      `[handleGitLabNote] failed to build task link for ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-
-    return null;
-  }
-}
-
-function formatGitLabMrMentionReply(
-  kind: GitLabMrMentionReplyKind,
-  link: string | null,
-): string {
-  const replyCopy = (() => {
-    switch (kind) {
-      case 'active_follow_up':
-        return {
-          intro:
-            "I'm on it. I routed this request into the existing task for this merge request so follow-up work stays on one Roomote thread, and I'll keep updates here.",
-          fallback:
-            'I could not generate the task link for this note, but the follow-up was delivered.',
-        };
-      case 'active_review':
-        return {
-          intro:
-            'I found a merge request review already running for this request, and I will keep updates here.',
-          fallback:
-            'I could not generate the task link for this note, but the review is already in progress.',
-        };
-      case 'review_started':
-        return {
-          intro:
-            'I started a merge request review task for this request, and I will keep updates here.',
-          fallback:
-            'I could not generate the task link for this note, but the review task is already running.',
-        };
-    }
-  })();
-
-  if (!link) {
-    return `${replyCopy.intro} ${replyCopy.fallback}`;
-  }
-
-  return `${replyCopy.intro} [See task](${link})`;
-}
-
-function formatGitLabIssueMentionReply(
-  kind: GitLabIssueMentionReplyKind,
-  link: string | null,
-): string {
-  const replyCopy = (() => {
-    switch (kind) {
-      case 'active_follow_up':
-        return {
-          intro:
-            "I'm on it. I routed this request into the existing task for this issue so follow-up work stays on one Roomote thread, and I'll keep updates here.",
-          fallback:
-            'I could not generate the task link for this note, but the follow-up was delivered.',
-        };
-      case 'task_started':
-        return {
-          intro:
-            "I'm on it. I started a task for this issue, and I'll keep updates here.",
-          fallback:
-            'I could not generate the task link for this note, but the task is already running.',
-        };
-    }
-  })();
-
-  if (!link) {
-    return `${replyCopy.intro} ${replyCopy.fallback}`;
-  }
-
-  return `${replyCopy.intro} [See task](${link})`;
 }
 
 function buildReviewerGateMissNote(): string {
@@ -215,44 +102,6 @@ function buildReviewerGateMissNote(): string {
 
 function buildIssueGateMissNote(): string {
   return `I saw the mention, but I could not start work on this issue with the current ${PRODUCT_NAME} GitLab setup.`;
-}
-
-function buildTaskStartFailedNote(surface: 'merge request' | 'issue'): string {
-  return `I saw the mention, but I could not start a task for this ${surface} right now. Please try again in a moment.`;
-}
-
-function buildExistingMrTaskFollowUpMessage({
-  repoFullName,
-  mergeRequest,
-  commenter,
-  noteBody,
-}: {
-  repoFullName: string;
-  mergeRequest: NonNullable<GitLabNoteWebhook['merge_request']>;
-  commenter: string;
-  noteBody: string;
-}): string {
-  const lines = [
-    `${commenter} mentioned Roomote in a comment on GitLab merge request !${mergeRequest.iid} (${escapeTaskContextText(mergeRequest.title)}) in ${repoFullName}.`,
-    '',
-    'Please act on this comment as a follow-up to your existing work on this merge request.',
-  ];
-
-  if (mergeRequest.source_branch) {
-    lines.push(
-      `The merge request source branch is \`${mergeRequest.source_branch}\`.`,
-    );
-  }
-
-  lines.push(
-    '',
-    'Mention comment (the request to act on):',
-    buildMentionRequestBlock(noteBody),
-    '',
-    buildUntrustedContentPolicy(),
-  );
-
-  return lines.join('\n');
 }
 
 async function handleGitLabIssueNote({
@@ -272,14 +121,14 @@ async function handleGitLabIssueNote({
     projectId: payload.project.id,
     issueIid: issue.iid,
   };
+  const webhookHost = toHostFromUrl(issue.url ?? payload.project.web_url ?? '');
 
   // Skip pr_review automation gates (review enabled / author policy). Issue
-  // mentions should only need a linked sender and a mapped environment, matching
-  // GitHub issue comment handling.
+  // mentions only need a linked sender and a mapped environment.
   const targetsResult = await getGitLabAutomationTargets({
     workflow: 'pr_conflict_resolve',
     payload,
-    webhookHost: toHostFromUrl(issue.url ?? payload.project.web_url ?? ''),
+    webhookHost,
     ignoreAuthorPolicy: true,
     requireLinkedSenderAccount: true,
   });
@@ -307,40 +156,58 @@ async function handleGitLabIssueNote({
     };
   }
 
-  const issueUrl =
-    issue.url ??
-    (payload.project.web_url
-      ? `${payload.project.web_url}/-/issues/${issue.iid}`
-      : '');
-  const issueTitle = issue.title ?? `Issue #${issue.iid}`;
-  const issueBody = issue.description ?? null;
-
-  return orchestrateIssueMention({
+  const host = target.repo.host ?? webhookHost ?? 'gitlab.com';
+  const discussion: SourceControlFastDiscussion = {
     provider: 'gitlab',
-    logPrefix: '[handleGitLabNote]',
-    repositoryId: target.repo.id,
+    host,
+    repositoryFullName: repoFullName,
+    kind: 'issues',
+    number: issue.iid,
+  };
+  const activeTasks = await resolveSourceControlIssueActiveTasks({
+    provider: 'gitlab',
     repositoryFullName: repoFullName,
     issueNumber: issue.iid,
-    issueTitle,
-    issueBody,
-    issueUrl,
-    commentBody: note.note,
-    commenterLogin: commenter,
-    commenterUserId: target.userId,
-    sourceControlHost: target.repo.host ?? null,
-    includeSourceControlOnPayload: true,
-    providerDisplayName: 'GitLab',
-    issueBodySource: 'gitlab_issue_description',
-    issueBodyContextLabel: 'Issue description (context only):',
-    postComment: (body) =>
-      postIssueMentionResponseNote({ ...mentionResponseTarget, body }),
-    formatFollowUpReply: (taskLink) =>
-      formatGitLabIssueMentionReply('active_follow_up', taskLink),
-    formatStartedReply: (taskLink) =>
-      formatGitLabIssueMentionReply('task_started', taskLink),
-    formatStartFailed: () => buildTaskStartFailedNote('issue'),
-    tryBuildTaskLink,
+    host: target.repo.host ?? null,
   });
+
+  const started = await startSourceControlFastSessionTurn({
+    discussion,
+    userId: target.userId,
+    senderDisplayName: payload.user?.name ?? commenter,
+    question: note.note,
+    agentContext: buildSourceControlIssueMentionContext({
+      providerLabel: 'GitLab',
+      issueLabel: 'Issue',
+      repositoryFullName: repoFullName,
+      number: issue.iid,
+      title: issue.title,
+      body: issue.description ?? null,
+      url:
+        issue.url ??
+        (payload.project.web_url
+          ? `${payload.project.web_url}/-/issues/${issue.iid}`
+          : null),
+      commenter,
+      commentBody: note.note,
+    }),
+    currentMessageId: `gitlab:note:${note.id ?? `${issue.iid}:${Date.now()}`}`,
+    activeTasks,
+  });
+
+  if (started.status !== 'queued') {
+    await postIssueMentionResponseNote({
+      ...mentionResponseTarget,
+      body: SOURCE_CONTROL_FAST_UNAVAILABLE_MESSAGE,
+    });
+    return { status: 'error', message: 'fast_unavailable' };
+  }
+
+  return {
+    status: 'ok',
+    message: 'fast_session_queued',
+    metadata: { fastConversationId: started.fastConversationId },
+  };
 }
 
 async function handleGitLabMergeRequestNote({
@@ -360,15 +227,14 @@ async function handleGitLabMergeRequestNote({
     projectId: payload.project.id,
     mergeRequestIid: mergeRequest.iid,
   };
+  const webhookHost = toHostFromUrl(
+    mergeRequest.url ?? payload.project.web_url ?? '',
+  );
 
   const targetsResult = await getGitLabAutomationTargets({
     workflow: 'pr_review',
     payload,
-    // The MR (or project) web URL carries the instance host, matching
-    // repositories.host.
-    webhookHost: toHostFromUrl(
-      mergeRequest.url ?? payload.project.web_url ?? '',
-    ),
+    webhookHost,
     ignoreAuthorPolicy: true,
     requireLinkedSenderAccount: true,
   });
@@ -376,7 +242,6 @@ async function handleGitLabMergeRequestNote({
   const target =
     targetsResult.status === 'ok' ? targetsResult.targets[0] : undefined;
 
-  // requireLinkedSenderAccount guarantees a linked commenter here.
   if (!target || !target.userId) {
     await postMergeRequestMentionResponseNote({
       ...mentionResponseTarget,
@@ -398,166 +263,64 @@ async function handleGitLabMergeRequestNote({
   }
 
   const branchName = mergeRequest.source_branch ?? '';
-
-  const activeOwner = await findReusableGitHubPrFollowUpOwner({
-    repoFullName,
+  const headSha = mergeRequest.last_commit?.id ?? '';
+  const host = target.repo.host ?? webhookHost ?? 'gitlab.com';
+  const discussion: SourceControlFastDiscussion = {
+    provider: 'gitlab',
+    host,
+    repositoryFullName: repoFullName,
+    kind: 'pull',
+    number: mergeRequest.iid,
+  };
+  const activeTasks = await resolveSourceControlPullRequestActiveTasks({
+    provider: 'gitlab',
+    repositoryFullName: repoFullName,
     prNumber: mergeRequest.iid,
     branchName,
-    sourceControlProvider: 'gitlab',
+    headSha,
   });
 
-  if (activeOwner?.taskId) {
-    const followUpMessage = buildExistingMrTaskFollowUpMessage({
-      repoFullName,
-      mergeRequest,
+  const started = await startSourceControlFastSessionTurn({
+    discussion,
+    userId: target.userId,
+    senderDisplayName: payload.user?.name ?? commenter,
+    question: note.note,
+    agentContext: buildSourceControlPullRequestMentionContext({
+      providerLabel: 'GitLab',
+      pullRequestLabel: 'Merge request',
+      repositoryFullName: repoFullName,
+      number: mergeRequest.iid,
+      title: mergeRequest.title,
+      body: mergeRequest.description ?? null,
+      headRef: branchName || null,
+      baseRef: mergeRequest.target_branch ?? null,
       commenter,
-      noteBody: note.note,
-    });
-    const delivery = isActivelyRunningTask(
-      activeOwner.status,
-      activeOwner.taskPhase,
-    )
-      ? await steerMessageToTask({
-          taskId: activeOwner.taskId,
-          userId: target.userId,
-          message: followUpMessage,
-          senderMode: 'github_pr_follow_up',
-        })
-      : await sendMessageToTask({
-          taskId: activeOwner.taskId,
-          userId: target.userId,
-          message: followUpMessage,
-          senderMode: 'github_pr_follow_up',
-        });
+      commentBody: note.note,
+    }),
+    currentMessageId: `gitlab:note:${note.id ?? `${mergeRequest.iid}:${Date.now()}`}`,
+    activeTasks,
+  });
 
-    if (delivery.success) {
-      await postMergeRequestMentionResponseNote({
-        ...mentionResponseTarget,
-        body: formatGitLabMrMentionReply(
-          'active_follow_up',
-          tryBuildTaskLink({
-            taskId: activeOwner.taskId,
-            campaign: 'gitlab.mr.mention.active-owner',
-          }),
-        ),
-      });
-
-      return { status: 'ok', message: 'active_mr_owner_routed' };
-    }
-
-    console.warn(
-      `[handleGitLabNote] failed to deliver MR mention to reusable task ${activeOwner.taskId}: ${delivery.error}`,
-    );
-  }
-
-  const headSha = mergeRequest.last_commit?.id ?? '';
-
-  // Dedup against a review already running for this MR head, mirroring GitHub's
-  // handlePrComment. Without this, a mention on an MR that already has an active
-  // review — or two mentions in quick succession — would enqueue a duplicate
-  // review task and post a second acknowledgement note.
-  if (headSha) {
-    const activeReview = await findActiveGitHubPrReviewTask({
-      repoFullName,
-      prNumber: mergeRequest.iid,
-      headSha,
-    });
-
-    if (activeReview?.taskId) {
-      await postMergeRequestMentionResponseNote({
-        ...mentionResponseTarget,
-        body: formatGitLabMrMentionReply(
-          'active_review',
-          tryBuildTaskLink({
-            taskId: activeReview.taskId,
-            campaign: 'gitlab.mr.mention.review.active',
-          }),
-        ),
-      });
-
-      return { status: 'ok', message: 'active_mr_review_linked' };
-    }
-  }
-
-  const prUrl =
-    mergeRequest.url ??
-    (payload.project.web_url
-      ? `${payload.project.web_url}/-/merge_requests/${mergeRequest.iid}`
-      : '');
-
-  const reviewPayload = {
-    repo: repoFullName,
-    sourceControlProvider: 'gitlab',
-    // Pin repository resolution to the webhook repository's host so
-    // same-name repositories on other hosts cannot be picked up. Legacy
-    // rows without a recorded host omit the field.
-    ...(target.repo.host ? { sourceControlHost: target.repo.host } : {}),
-    prNumber: mergeRequest.iid,
-    prTitle: mergeRequest.title,
-    prUrl,
-    headSha,
-    branchName: mergeRequest.source_branch,
-    ...(mergeRequest.source_branch
-      ? { branch: mergeRequest.source_branch }
-      : {}),
-    ...(headSha ? { sha: headSha } : {}),
-    targetBranch: mergeRequest.target_branch,
-  } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>;
-
-  try {
-    // A human @roomote mention started this review: the commenter is the
-    // initiator (the old automatic/gitlab attribution override is gone).
-    const launch = await enqueueTask({
-      task: {
-        type: TaskPayloadKind.GithubPrReview,
-        payload: reviewPayload,
-      },
-      initiator: { kind: 'user', userId: target.userId },
-      workflow: 'pr_review',
-      surface: 'gitlab',
-      trigger: 'message',
-      prLinkage: {
-        provider: 'gitlab',
-        ...(target.repo.host ? { host: target.repo.host } : {}),
-        repositoryId: target.repo.id,
-        repository: repoFullName,
-        prNumber: mergeRequest.iid,
-        prUrl,
-        prTitle: mergeRequest.title,
-        prSha: headSha || null,
-        prBaseRef: mergeRequest.target_branch ?? null,
-      },
-    });
-
+  if (started.status !== 'queued') {
     await postMergeRequestMentionResponseNote({
       ...mentionResponseTarget,
-      body: formatGitLabMrMentionReply(
-        'review_started',
-        tryBuildTaskLink({
-          taskId: launch.taskId,
-          campaign: 'gitlab.mr.mention.review',
-        }),
-      ),
+      body: SOURCE_CONTROL_FAST_UNAVAILABLE_MESSAGE,
     });
-
-    return { status: 'ok', metadata: { ids: [launch.id] } };
-  } catch (error) {
-    console.warn(
-      `[handleGitLabNote] failed to start MR review task for ${repoFullName}!${mergeRequest.iid}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-
-    await postMergeRequestMentionResponseNote({
-      ...mentionResponseTarget,
-      body: buildTaskStartFailedNote('merge request'),
-    });
-
-    return {
-      status: 'error',
-      message: `review_start_failed:${error instanceof Error ? error.message : String(error)}`,
-    };
+    return { status: 'error', message: 'fast_unavailable' };
   }
+
+  return {
+    status: 'ok',
+    message: 'fast_session_queued',
+    metadata: { fastConversationId: started.fastConversationId },
+  };
 }
 
+/**
+ * Every @roomote note on a merge request or issue enters that discussion's
+ * Fast Session. The Session reads the discussion, replies as a note, and
+ * delegates work when the request needs a task.
+ */
 export async function handleGitLabNote(
   payload: GitLabNoteWebhook,
 ): Promise<WebhookResponse> {

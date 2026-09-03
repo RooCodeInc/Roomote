@@ -1377,3 +1377,51 @@ export async function revokeTaskRunScopedGitLabTokens(
     ),
   );
 }
+
+const gitLabMergeRequestDetailsSchema = z
+  .object({
+    iid: z.number(),
+    title: z.string(),
+    description: z.string().nullable().optional(),
+    web_url: z.string().optional(),
+    source_branch: z.string().optional(),
+    target_branch: z.string().optional(),
+    sha: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export type GitLabMergeRequestDetails = z.infer<
+  typeof gitLabMergeRequestDetailsSchema
+>;
+
+/** Fetches a merge request by project path (or id) and iid. */
+export async function getGitLabMergeRequest({
+  projectId,
+  mergeRequestIid,
+  token,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  projectId: string | number;
+  mergeRequestIid: number;
+  token?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<GitLabMergeRequestDetails> {
+  const gitLabToken = token ?? (await resolveGitLabToken());
+
+  if (!gitLabToken?.trim()) {
+    throw new Error('A GitLab token is required to read merge requests.');
+  }
+
+  const { data } = await requestGitLabJson({
+    apiBaseUrl,
+    fetchImpl,
+    path: `/projects/${encodeURIComponent(String(projectId))}/merge_requests/${mergeRequestIid}`,
+    params: {},
+    token: gitLabToken,
+    schema: gitLabMergeRequestDetailsSchema,
+  });
+
+  return data;
+}

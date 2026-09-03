@@ -1,67 +1,36 @@
-const {
-  mockEnqueueTask,
-  mockGetTaskUrl,
-  mockGetAdoAutomationTargets,
-  mockGetAdoDeploymentUser,
-  mockCreateAdoPullRequestComment,
-  mockFindActiveGitHubPrReviewTask,
-  mockFindReusableGitHubPrFollowUpOwner,
-  mockSendMessageToTask,
-  mockSteerMessageToTask,
-} = vi.hoisted(() => ({
-  mockEnqueueTask: vi.fn(),
-  mockGetTaskUrl: vi.fn(),
-  mockGetAdoAutomationTargets: vi.fn(),
-  mockGetAdoDeploymentUser: vi.fn(),
-  mockCreateAdoPullRequestComment: vi.fn(),
-  mockFindActiveGitHubPrReviewTask: vi.fn(),
-  mockFindReusableGitHubPrFollowUpOwner: vi.fn(),
-  mockSendMessageToTask: vi.fn(),
-  mockSteerMessageToTask: vi.fn(),
-}));
-
-// Prompt-framing fakes use distinctive markers so tests can assert the
-// handler routes each piece of text through the right builder; the real
-// escaping/wrapping behavior is unit-tested in @roomote/cloud-agents.
-vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueTask: mockEnqueueTask,
-  getTaskUrl: mockGetTaskUrl,
-  buildMentionRequestBlock: (text: string) =>
-    `<mention_request>${text}</mention_request>`,
-  buildUntrustedContentPolicy: () => '<untrusted_content_policy/>',
-  escapeTaskContextText: (value: string) => value,
+const mocks = vi.hoisted(() => ({
+  getAdoAutomationTargets: vi.fn(),
+  getAdoDeploymentUser: vi.fn(),
+  createAdoPullRequestComment: vi.fn(),
+  findActiveGitHubPrReviewTask: vi.fn(),
+  findReusableGitHubPrFollowUpOwner: vi.fn(),
+  startSourceControlFastSessionTurn: vi.fn(),
 }));
 
 vi.mock('@roomote/ado', () => ({
-  getAdoDeploymentUser: mockGetAdoDeploymentUser,
-  createAdoPullRequestComment: mockCreateAdoPullRequestComment,
+  createAdoPullRequestComment: mocks.createAdoPullRequestComment,
+  getAdoDeploymentUser: mocks.getAdoDeploymentUser,
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  findActiveGitHubPrReviewTask: mockFindActiveGitHubPrReviewTask,
-  findReusableGitHubPrFollowUpOwner: mockFindReusableGitHubPrFollowUpOwner,
+  findActiveGitHubPrReviewTask: mocks.findActiveGitHubPrReviewTask,
+  findReusableGitHubIssueTaskOwner: vi.fn(),
+  findReusableGitHubPrFollowUpOwner: mocks.findReusableGitHubPrFollowUpOwner,
 }));
 
-vi.mock('../getAdoAutomationTargets', () => ({
-  getAdoAutomationTargets: mockGetAdoAutomationTargets,
-  getAdoIdentityName: (identity?: {
-    uniqueName?: string;
-    displayName?: string;
-  }) => identity?.uniqueName ?? identity?.displayName,
-  isRoomoteAdoIdentity: (identityName: string) => {
-    const normalized = identityName.toLowerCase().trim();
-    return (
-      normalized.startsWith('roomote') || normalized.startsWith('@roomote')
-    );
-  },
+vi.mock('@roomote/sdk/server', () => ({
+  startSourceControlFastSessionTurn: mocks.startSourceControlFastSessionTurn,
 }));
 
-vi.mock('../../tasks/sendMessageToTask', () => ({
-  sendMessageToTask: mockSendMessageToTask,
-  steerMessageToTask: mockSteerMessageToTask,
-}));
-
-import { RunStatus, TaskPayloadKind } from '@roomote/types';
+vi.mock('../getAdoAutomationTargets', async () => {
+  const actual = await vi.importActual<
+    typeof import('../getAdoAutomationTargets')
+  >('../getAdoAutomationTargets');
+  return {
+    ...actual,
+    getAdoAutomationTargets: mocks.getAdoAutomationTargets,
+  };
+});
 
 import { handleAdoComment } from '../handleComment';
 import type { AdoPullRequestCommentWebhook } from '../types';
@@ -69,9 +38,6 @@ import type { AdoPullRequestCommentWebhook } from '../types';
 function makeCommentPayload(
   overrides: {
     comment?: Partial<AdoPullRequestCommentWebhook['resource']['comment']>;
-    pullRequest?: Partial<
-      AdoPullRequestCommentWebhook['resource']['pullRequest']
-    >;
   } = {},
 ): AdoPullRequestCommentWebhook {
   return {
@@ -79,9 +45,7 @@ function makeCommentPayload(
     eventType: 'ms.vss-code.git-pullrequest-comment-event',
     publisherId: 'tfs',
     resourceContainers: {
-      account: {
-        baseUrl: 'https://dev.azure.com/acme/',
-      },
+      account: { baseUrl: 'https://dev.azure.com/acme/' },
     },
     resource: {
       comment: {
@@ -104,46 +68,31 @@ function makeCommentPayload(
         repository: {
           id: 'repo-1',
           name: 'backend',
-          project: {
-            id: 'project-1',
-            name: 'Platform',
-          },
+          project: { id: 'project-1', name: 'Platform' },
         },
         pullRequestId: 42,
         title: 'Update backend',
+        description: 'Refactors the retry loop.',
         status: 'active',
         sourceRefName: 'refs/heads/feature/test',
         targetRefName: 'refs/heads/main',
-        createdBy: {
-          uniqueName: 'roomote-bot@acme.example',
-        },
-        lastMergeSourceCommit: {
-          commitId: 'abc123',
-        },
+        createdBy: { uniqueName: 'bob@acme.example' },
+        lastMergeSourceCommit: { commitId: 'abc123' },
         _links: {
           web: {
             href: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
           },
         },
-        ...overrides.pullRequest,
       },
     },
-  };
+  } as AdoPullRequestCommentWebhook;
 }
 
 describe('handleAdoComment', () => {
   beforeEach(() => {
-    mockEnqueueTask.mockReset();
-    mockGetTaskUrl.mockReset();
-    mockGetAdoAutomationTargets.mockReset();
-    mockGetAdoDeploymentUser.mockReset();
-    mockCreateAdoPullRequestComment.mockReset();
-    mockFindActiveGitHubPrReviewTask.mockReset();
-    mockFindReusableGitHubPrFollowUpOwner.mockReset();
-    mockSendMessageToTask.mockReset();
-    mockSteerMessageToTask.mockReset();
-
-    mockGetAdoAutomationTargets.mockResolvedValue({
+    vi.clearAllMocks();
+    mocks.getAdoDeploymentUser.mockResolvedValue(null);
+    mocks.getAdoAutomationTargets.mockResolvedValue({
       status: 'ok',
       targets: [
         {
@@ -155,378 +104,115 @@ describe('handleAdoComment', () => {
         },
       ],
     });
-    mockGetAdoDeploymentUser.mockResolvedValue({
-      id: 'ado-roomote-bot',
-      uniqueName: 'roomote-bot@acme.example',
-      displayName: 'Roomote Bot',
+    mocks.findActiveGitHubPrReviewTask.mockResolvedValue(null);
+    mocks.findReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
+    mocks.startSourceControlFastSessionTurn.mockResolvedValue({
+      status: 'queued',
+      fastConversationId: 'fast-1',
     });
-    mockCreateAdoPullRequestComment.mockResolvedValue({
+    mocks.createAdoPullRequestComment.mockResolvedValue({
       threadId: '5',
-      commentId: '1',
+      commentId: '901',
     });
-    mockFindActiveGitHubPrReviewTask.mockResolvedValue(null);
-    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
-    mockEnqueueTask.mockResolvedValue({ id: 1234, taskId: 'task-1' });
-    mockGetTaskUrl.mockReturnValue('https://roomote.example/tasks/task-1');
-    mockSendMessageToTask.mockResolvedValue({ success: true });
-    mockSteerMessageToTask.mockResolvedValue({ success: true });
   });
 
-  it('enqueues an ADO PR review task when a mention has no reusable owner', async () => {
-    const result = await handleAdoComment(makeCommentPayload());
-
-    expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
-    expect(mockEnqueueTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          type: TaskPayloadKind.GithubPrReview,
-          payload: expect.objectContaining({
-            repo: 'acme/Platform/backend',
-            sourceControlProvider: 'ado',
-            prNumber: 42,
-            prUrl:
-              'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
-            branch: 'feature/test',
-            sha: 'abc123',
-            targetBranch: 'main',
-          }),
-        }),
-        // A human @roomote mention: the linked commenter is the initiator.
-        initiator: { kind: 'user', userId: 'user-1' },
-        workflow: 'pr_review',
-        surface: 'ado',
-        trigger: 'message',
-        prLinkage: expect.objectContaining({
-          provider: 'ado',
-          repository: 'acme/Platform/backend',
-          prNumber: 42,
-        }),
-      }),
-    );
-    expect(mockCreateAdoPullRequestComment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        repositoryFullName: 'acme/Platform/backend',
-        repositoryId: 'repo-1',
-        pullRequestNumber: 42,
-        threadId: '5',
-        parentCommentId: 900,
-        body: expect.stringContaining('started a pull request review task'),
-      }),
-    );
-    // A repository row without a recorded host omits the payload host field
-    // entirely so resolution falls back to (provider, fullName).
-    const [{ task }] = mockEnqueueTask.mock.calls[0]! as unknown as [
-      { task: { payload: Record<string, unknown> } },
-    ];
-    expect('sourceControlHost' in task.payload).toBe(false);
-  });
-
-  it('selects and stamps the webhook host among same-name repositories on multiple hosts', async () => {
-    // Two active rows share the repository identity; only the host differs.
-    const rows = [
-      { id: 'repo-host-a', host: 'ado.host-a.example' },
-      { id: 'repo-host-b', host: 'ado.host-b.example' },
-    ];
-    mockGetAdoAutomationTargets.mockImplementation(
-      async ({ webhookHost }: { webhookHost?: string | null }) => {
-        const repo = rows.find((row) => row.host === webhookHost);
-        return repo
-          ? {
-              status: 'ok',
-              targets: [
-                {
-                  id: `ado:pr_review:${repo.id}`,
-                  settings: null,
-                  repo,
-                  repositoryIds: [repo.id],
-                  userId: 'user-1',
-                },
-              ],
-            }
-          : { status: 'error', message: 'no matching repository row' };
-      },
-    );
-
-    await handleAdoComment(
-      makeCommentPayload({
-        pullRequest: {
-          _links: {
-            web: {
-              href: 'https://ado.host-a.example/acme/Platform/_git/backend/pullrequest/42',
-            },
-          },
-        },
-      }),
-    );
-
-    // The handler derives the instance host from the webhook URL...
-    expect(mockGetAdoAutomationTargets).toHaveBeenCalledWith(
-      expect.objectContaining({ webhookHost: 'ado.host-a.example' }),
-    );
-    // ...and the launched payload pins the matching row's host.
-    expect(mockEnqueueTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          payload: expect.objectContaining({
-            sourceControlHost: 'ado.host-a.example',
-          }),
-        }),
-      }),
-    );
-  });
-
-  it('stamps the repository host into mention review payloads when the repository row has one', async () => {
-    mockGetAdoAutomationTargets.mockResolvedValue({
-      status: 'ok',
-      targets: [
-        {
-          id: 'ado:pr_review:repo-1',
-          settings: null,
-          repo: { id: 'repo-1', host: 'ado.example.com' },
-          repositoryIds: ['repo-1'],
-          userId: 'user-1',
-        },
-      ],
-    });
-
-    await handleAdoComment(makeCommentPayload());
-
-    expect(mockEnqueueTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          payload: expect.objectContaining({
-            sourceControlProvider: 'ado',
-            // Pins repository resolution to the webhook repository's host.
-            sourceControlHost: 'ado.example.com',
-          }),
-        }),
-      }),
-    );
-  });
-
-  it('uses the legacy Visual Studio repository host as the organization fallback', async () => {
-    const payload = makeCommentPayload({
-      pullRequest: {
-        repository: {
-          id: 'repo-1',
-          name: 'backend',
-          project: {
-            id: 'project-1',
-            name: 'Platform',
-          },
-          webUrl: 'https://acme.visualstudio.com/Platform/_git/backend',
-        },
-        _links: undefined,
-      },
-    });
-    payload.resourceContainers = undefined;
-
-    await handleAdoComment(payload);
-
-    expect(mockFindReusableGitHubPrFollowUpOwner).toHaveBeenCalledWith(
-      expect.objectContaining({
-        repoFullName: 'acme/Platform/backend',
-      }),
-    );
-    expect(mockEnqueueTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          payload: expect.objectContaining({
-            repo: 'acme/Platform/backend',
-          }),
-        }),
-      }),
-    );
-    expect(mockCreateAdoPullRequestComment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        repositoryFullName: 'acme/Platform/backend',
-      }),
-    );
-  });
-
-  it('routes mentions into a reusable active task before starting a new review', async () => {
-    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
-      taskId: 'task-existing',
-      status: RunStatus.Running,
-      taskPhase: 'running',
-    });
-    mockGetTaskUrl.mockReturnValue(
-      'https://roomote.example/tasks/task-existing',
-    );
-
-    const result = await handleAdoComment(makeCommentPayload());
-
-    expect(result).toEqual({ status: 'ok', message: 'active_pr_owner_routed' });
-    expect(mockSteerMessageToTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskId: 'task-existing',
-        userId: 'user-1',
-        message: expect.stringContaining(
-          '<mention_request>@roomote please review this</mention_request>',
-        ),
-        senderMode: 'github_pr_follow_up',
-      }),
-    );
-    expect(mockSteerMessageToTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: expect.stringContaining('<untrusted_content_policy/>'),
-      }),
-    );
-    expect(mockEnqueueTask).not.toHaveBeenCalled();
-    expect(mockCreateAdoPullRequestComment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        body: expect.stringContaining('existing task'),
-      }),
-    );
-  });
-
-  it('links to an active PR review instead of enqueuing a duplicate', async () => {
-    mockFindActiveGitHubPrReviewTask.mockResolvedValue({
-      taskId: 'review-task',
-      runId: 9,
-      type: TaskPayloadKind.GithubPrReview,
-      status: RunStatus.Running,
-      taskPhase: 'running',
-      match: 'github_pr',
-    });
-    mockGetTaskUrl.mockReturnValue('https://roomote.example/tasks/review-task');
-
+  it('enters a pull request comment into the pull request Session, threaded under its comment thread', async () => {
     const result = await handleAdoComment(makeCommentPayload());
 
     expect(result).toEqual({
       status: 'ok',
-      message: 'active_pr_review_linked',
+      message: 'fast_session_queued',
+      metadata: { fastConversationId: 'fast-1' },
     });
-    expect(mockFindActiveGitHubPrReviewTask).toHaveBeenCalledWith({
+    expect(mocks.startSourceControlFastSessionTurn).toHaveBeenCalledWith({
+      discussion: {
+        provider: 'ado',
+        host: 'dev.azure.com',
+        repositoryFullName: 'acme/Platform/backend',
+        kind: 'pull',
+        number: 42,
+        reviewCommentId: '5',
+      },
+      userId: 'user-1',
+      senderDisplayName: 'alice@acme.example',
+      question: '@roomote please review this',
+      agentContext: expect.stringContaining(
+        'Pull request: #42 - Update backend',
+      ),
+      currentMessageId: 'ado:comment:900',
+      activeTasks: [],
+    });
+    const context = mocks.startSourceControlFastSessionTurn.mock.calls[0]?.[0]
+      .agentContext as string;
+    expect(context).toContain('Head branch: feature/test');
+    expect(context).toContain('Target branch: main');
+    expect(mocks.findReusableGitHubPrFollowUpOwner).toHaveBeenCalledWith({
       repoFullName: 'acme/Platform/backend',
       prNumber: 42,
-      headSha: 'abc123',
+      branchName: 'feature/test',
+      sourceControlProvider: 'ado',
     });
-    expect(mockEnqueueTask).not.toHaveBeenCalled();
-    expect(mockCreateAdoPullRequestComment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        body: expect.stringContaining('already running'),
-      }),
-    );
+    expect(mocks.createAdoPullRequestComment).not.toHaveBeenCalled();
   });
 
-  it('ignores comments without an @roomote mention', async () => {
-    const result = await handleAdoComment(
-      makeCommentPayload({ comment: { content: 'just a normal comment' } }),
-    );
-
-    expect(result).toEqual({ status: 'ok', message: 'no_mention' });
-    expect(mockEnqueueTask).not.toHaveBeenCalled();
-    expect(mockCreateAdoPullRequestComment).not.toHaveBeenCalled();
-  });
-
-  it('detects mentions case-insensitively', async () => {
-    const result = await handleAdoComment(
-      makeCommentPayload({ comment: { content: 'ping @RooMote here' } }),
-    );
-
-    expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
-  });
-
-  it('ignores comments from the deployment token identity', async () => {
-    mockGetAdoDeploymentUser.mockResolvedValue({
-      id: 'ado-user-1',
-      uniqueName: 'alice@acme.example',
-      displayName: 'Alice',
-    });
-
-    const result = await handleAdoComment(makeCommentPayload());
-
-    expect(result).toEqual({
-      status: 'ok',
-      message: 'roomote_authored_comment',
-    });
-    expect(mockEnqueueTask).not.toHaveBeenCalled();
-    expect(mockGetAdoAutomationTargets).not.toHaveBeenCalled();
-  });
-
-  it('processes mentions from a human whose email domain contains roomote', async () => {
-    // Regression: users in a `roomote.*` Entra tenant have `@roomote…`
-    // uniqueNames and must not be mistaken for Roomote's own bot.
-    const result = await handleAdoComment(
-      makeCommentPayload({
-        comment: {
-          author: {
-            id: 'ado-user-2',
-            uniqueName: 'grace@roomote.onmicrosoft.com',
-            displayName: 'Grace Hopper',
-          },
-        },
-      }),
-    );
-
-    expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
-    expect(mockEnqueueTask).toHaveBeenCalled();
-  });
-
-  it('posts a reviewer-gate comment when no automation target is found', async () => {
-    mockGetAdoAutomationTargets.mockResolvedValue({
-      status: 'error',
-      message: 'no active Azure DevOps repository',
-    });
-
-    const result = await handleAdoComment(makeCommentPayload());
-
-    expect(result).toEqual({ status: 'ok', message: 'reviewer_gate_miss' });
-    expect(mockCreateAdoPullRequestComment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        repositoryFullName: 'acme/Platform/backend',
-        pullRequestNumber: 42,
-        body: expect.stringContaining('could not start work'),
-      }),
-    );
-    expect(mockEnqueueTask).not.toHaveBeenCalled();
-  });
-
-  it('bypasses the PR author policy for explicit mentions', async () => {
-    await handleAdoComment(makeCommentPayload());
-
-    expect(mockGetAdoAutomationTargets).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ignoreAuthorPolicy: true,
-        requireLinkedSenderAccount: true,
-        payload: expect.objectContaining({
-          commentAuthor: expect.objectContaining({
-            id: 'ado-user-1',
-            uniqueName: 'alice@acme.example',
-          }),
-        }),
-      }),
-    );
-  });
-
-  it('prompts the commenter to link Azure DevOps before starting work', async () => {
-    mockGetAdoAutomationTargets.mockResolvedValue({
+  it('asks an unlinked commenter to link their account in the same thread', async () => {
+    mocks.getAdoAutomationTargets.mockResolvedValue({
       status: 'error',
       code: 'account_link_required',
-      message: 'Azure DevOps user alice is not linked',
+      message: 'not linked',
     });
 
     const result = await handleAdoComment(makeCommentPayload());
 
     expect(result).toEqual({ status: 'ok', message: 'account_link_required' });
-    expect(mockCreateAdoPullRequestComment).toHaveBeenCalledWith(
+    expect(mocks.createAdoPullRequestComment).toHaveBeenCalledWith(
       expect.objectContaining({
+        repositoryFullName: 'acme/Platform/backend',
+        repositoryId: 'repo-1',
+        pullRequestNumber: 42,
+        threadId: '5',
         body: expect.stringContaining('Azure DevOps account linked'),
       }),
     );
-    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mocks.startSourceControlFastSessionTurn).not.toHaveBeenCalled();
   });
 
-  it('creates a new response thread when the comment thread link is absent', async () => {
-    await handleAdoComment(
-      makeCommentPayload({ comment: { _links: undefined } }),
-    );
+  it('tells the commenter when the Session cannot start', async () => {
+    mocks.startSourceControlFastSessionTurn.mockResolvedValue({
+      status: 'unavailable',
+    });
 
-    expect(mockCreateAdoPullRequestComment).toHaveBeenCalledWith(
-      expect.not.objectContaining({
-        threadId: expect.anything(),
+    const result = await handleAdoComment(makeCommentPayload());
+
+    expect(result).toEqual({ status: 'error', message: 'fast_unavailable' });
+    expect(mocks.createAdoPullRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining("couldn't start a conversation"),
       }),
     );
+  });
+
+  it('ignores non-text comments, Roomote-authored comments, and comments without a mention', async () => {
+    await expect(
+      handleAdoComment(
+        makeCommentPayload({ comment: { commentType: 'system' } }),
+      ),
+    ).resolves.toEqual({
+      status: 'ok',
+      message: 'unsupported_comment_type:system',
+    });
+    await expect(
+      handleAdoComment(makeCommentPayload({ comment: { content: 'plain' } })),
+    ).resolves.toEqual({ status: 'ok', message: 'no_mention' });
+    mocks.getAdoDeploymentUser.mockResolvedValue({
+      id: 'ado-user-1',
+      uniqueName: 'alice@acme.example',
+      displayName: 'Alice',
+    });
+    await expect(handleAdoComment(makeCommentPayload())).resolves.toEqual({
+      status: 'ok',
+      message: 'roomote_authored_comment',
+    });
+    expect(mocks.startSourceControlFastSessionTurn).not.toHaveBeenCalled();
   });
 });
