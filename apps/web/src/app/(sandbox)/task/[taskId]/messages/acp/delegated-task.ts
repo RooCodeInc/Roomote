@@ -30,6 +30,11 @@ export function getDelegatedTaskDetails(
   try {
     const parsed = asRecord(JSON.parse(msg.data.output));
     const result = asRecord(parsed?.result) ?? asRecord(parsed?.data) ?? parsed;
+    // A reused already-running review belongs to another launch; the reply
+    // explains where its results land, and no card should expose that task.
+    if (result?.alreadyRunning === true) {
+      return null;
+    }
     const taskId = result?.taskId;
 
     if (typeof taskId !== 'string' || taskId.length === 0) {
