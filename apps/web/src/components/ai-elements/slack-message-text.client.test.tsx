@@ -79,6 +79,23 @@ describe('SlackMessageText', () => {
     expect(resolveUsersState.lastEnabled).toBe(true);
   });
 
+  it('renders Slack link tokens and bare urls as links', () => {
+    render(
+      <SlackMessageText text="I like <https://roomote.dev> and <https://example.com|Example>, also https://docs.roomote.dev/start." />,
+    );
+
+    const links = screen.getAllByTestId('slack-link');
+    expect(
+      links.map((node) => [node.textContent, node.getAttribute('href')]),
+    ).toEqual([
+      ['https://roomote.dev', 'https://roomote.dev'],
+      ['Example', 'https://example.com'],
+      ['https://docs.roomote.dev/start', 'https://docs.roomote.dev/start'],
+    ]);
+    expect(screen.getByText(/, also/)).toBeInTheDocument();
+    expect(resolveUsersState.lastEnabled).toBe(false);
+  });
+
   it('does not query without a transcript scope', () => {
     render(<SlackMessageText text="<@U1> hi" />);
 

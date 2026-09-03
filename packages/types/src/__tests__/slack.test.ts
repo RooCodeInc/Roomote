@@ -46,11 +46,24 @@ describe('parseSlackMessageTokens', () => {
     ]);
   });
 
-  it('leaves unrelated angle-bracket text alone', () => {
+  it('parses Slack link references and drops labels that repeat the url', () => {
     expect(
-      parseSlackMessageTokens('<https://example.com|link> and <b>bold</b>'),
+      parseSlackMessageTokens(
+        'I like <https://roomote.dev> and <https://example.com/path|Example> <mailto:a@b.co|a@b.co>',
+      ),
     ).toEqual([
-      { type: 'text', text: '<https://example.com|link> and <b>bold</b>' },
+      { type: 'text', text: 'I like ' },
+      { type: 'link', url: 'https://roomote.dev', label: null },
+      { type: 'text', text: ' and ' },
+      { type: 'link', url: 'https://example.com/path', label: 'Example' },
+      { type: 'text', text: ' ' },
+      { type: 'link', url: 'mailto:a@b.co', label: null },
+    ]);
+  });
+
+  it('leaves unrelated angle-bracket text alone', () => {
+    expect(parseSlackMessageTokens('use <b>bold</b> or <T> generics')).toEqual([
+      { type: 'text', text: 'use <b>bold</b> or <T> generics' },
     ]);
   });
 });

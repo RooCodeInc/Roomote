@@ -13,9 +13,12 @@ import { useTRPC } from '@/trpc/client';
 
 import { useSlackMentionContext } from './slack-mention-context';
 
-const MENTION_CLASS_NAME =
-  'rounded-sm bg-primary/10 px-1 font-medium text-primary';
+const MENTION_CLASS_NAME = 'font-medium text-primary';
 const MENTION_LINK_CLASS_NAME = `${MENTION_CLASS_NAME} no-underline hover:underline`;
+const LINK_CLASS_NAME =
+  'text-primary underline underline-offset-2 hover:opacity-80';
+const BARE_URL_PATTERN = /https?:\/\/[^\s<>]+/g;
+const TRAILING_URL_PUNCTUATION = /[.,;:!?)\]]+$/;
 
 function SlackMention({ label, href }: { label: string; href: string | null }) {
   if (href) {
@@ -39,6 +42,55 @@ function SlackMention({ label, href }: { label: string; href: string | null }) {
   );
 }
 
+function SlackLink({ url, label }: { url: string; label: string | null }) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className={LINK_CLASS_NAME}
+      data-testid="slack-link"
+    >
+      {label ?? url}
+    </a>
+  );
+}
+
+/** Plain text with bare http(s) URLs turned into links. */
+function renderTextWithBareUrls(text: string, keyPrefix: number): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let part = 0;
+
+  for (const match of text.matchAll(BARE_URL_PATTERN)) {
+    const index = match.index ?? 0;
+    const raw = match[0];
+    const trailing = TRAILING_URL_PUNCTUATION.exec(raw)?.[0] ?? '';
+    const url = raw.slice(0, raw.length - trailing.length);
+    if (index > lastIndex) {
+      nodes.push(
+        <Fragment key={`${keyPrefix}-${part++}`}>
+          {text.slice(lastIndex, index)}
+        </Fragment>,
+      );
+    }
+    nodes.push(
+      <SlackLink key={`${keyPrefix}-${part++}`} url={url} label={null} />,
+    );
+    lastIndex = index + url.length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(
+      <Fragment key={`${keyPrefix}-${part++}`}>
+        {text.slice(lastIndex)}
+      </Fragment>,
+    );
+  }
+
+  return nodes;
+}
+
 function renderToken(
   token: SlackMessageToken,
   index: number,
@@ -46,7 +98,11 @@ function renderToken(
 ): ReactNode {
   switch (token.type) {
     case 'text':
-      return <Fragment key={index}>{token.text}</Fragment>;
+      return (
+        <Fragment key={index}>
+          {renderTextWithBareUrls(token.text, index)}
+        </Fragment>
+      );
     case 'user': {
       const resolved = users[token.userId];
       const label = resolved?.name ?? token.label ?? token.userId;
@@ -76,15 +132,18 @@ function renderToken(
       );
     case 'broadcast':
       return <SlackMention key={index} label={`@${token.name}`} href={null} />;
+    case 'link':
+      return <SlackLink key={index} url={token.url} label={token.label} />;
     default:
       return null;
   }
 }
 
 /**
- * Renders persisted Slack message text with `<@U…>`, `<#C…>`, and `<!…>`
- * tokens shown as readable mentions. User mentions resolve to display names
- * and link to the member's Slack profile; the stored text is never rewritten.
+ * Renders persisted Slack message text with `<@U…>`, `<#C…>`, `<!…>`, and
+ * `<url|label>` tokens shown as readable mentions and links, and bare URLs
+ * linkified. User mentions resolve to display names and link to the member's
+ * Slack profile; the stored text is never rewritten.
  */
 export function SlackMessageText({ text }: { text: string }) {
   const tokens = useMemo(() => parseSlackMessageTokens(text), [text]);
@@ -106,10 +165,6 @@ export function SlackMessageText({ text }: { text: string }) {
     staleTime: 10 * 60 * 1000,
   });
   const users = data?.users ?? {};
-
-  if (tokens.length === 1 && tokens[0]?.type === 'text') {
-    return <>{text}</>;
-  }
 
   return <>{tokens.map((token, index) => renderToken(token, index, users))}</>;
 }

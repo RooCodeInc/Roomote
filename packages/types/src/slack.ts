@@ -206,7 +206,8 @@ export type SlackMessageToken =
   | { type: 'user'; userId: string; label: string | null }
   | { type: 'channel'; channelId: string; label: string | null }
   | { type: 'usergroup'; usergroupId: string; label: string | null }
-  | { type: 'broadcast'; name: string };
+  | { type: 'broadcast'; name: string }
+  | { type: 'link'; url: string; label: string | null };
 
 /** Upper bound on Slack user IDs resolved in one `slack.resolveUsers` call. */
 export const SLACK_RESOLVE_USERS_MAX_IDS = 50;
@@ -219,6 +220,8 @@ const SLACK_CHANNEL_REFERENCE_PATTERN = /^#([CDG][A-Z0-9]+)(?:\|([^|]*))?$/;
 const SLACK_USERGROUP_REFERENCE_PATTERN =
   /^!subteam\^([A-Z0-9]+)(?:\|([^|]*))?$/;
 const SLACK_BROADCAST_REFERENCE_PATTERN = /^!(here|channel|everyone)(?:\|.*)?$/;
+const SLACK_LINK_REFERENCE_PATTERN =
+  /^((?:https?:\/\/|mailto:)[^|\s]+)(?:\|(.*))?$/;
 
 function normalizeSlackTokenLabel(label: string | undefined): string | null {
   const trimmed = label?.trim().replace(/^@/, '') ?? '';
@@ -258,13 +261,28 @@ function parseSlackReference(inner: string): SlackMessageToken | null {
     return { type: 'broadcast', name: broadcast[1] };
   }
 
+  const link = SLACK_LINK_REFERENCE_PATTERN.exec(inner);
+  if (link?.[1]) {
+    const url = link[1];
+    const label = link[2]?.trim() ?? '';
+    // Slack repeats the url (or the address behind `mailto:`) as the label
+    // when the sender typed a bare link; that adds nothing, so drop it.
+    const redundantLabels = new Set([url, url.replace(/^mailto:/, '')]);
+    return {
+      type: 'link',
+      url,
+      label: label.length > 0 && !redundantLabels.has(label) ? label : null,
+    };
+  }
+
   return null;
 }
 
 /**
  * Splits raw Slack message text into plain-text runs and Slack references
  * (`<@U123>`, `<@U123|name>`, `<#C123|general>`, `<!subteam^S123|@team>`,
- * `<!here>`). Text without references comes back as a single text token.
+ * `<!here>`, `<https://example.com|label>`). Text without references comes
+ * back as a single text token.
  *
  * Single forward scan: a `<` opens a candidate, the candidate ends at the
  * next `>`, and another `<` before that restarts the candidate there, so no
