@@ -1009,7 +1009,11 @@ export async function releaseSupersededCanonicalPrReviewAction(input: {
     .where(
       and(
         canonicalClaimWhere(input),
-        inArray(prReviewNotificationDeliveries.status, ['claimed', 'prepared']),
+        inArray(prReviewNotificationDeliveries.status, [
+          'claimed',
+          'prepared',
+          'auto_dispatch_pending',
+        ]),
         isNotNull(prReviewNotificationDeliveries.actionClaimedAt),
       ),
     )
@@ -1588,6 +1592,7 @@ export async function retireCanonicalPrReviewActionsForPullRequest(input: {
           inArray(prReviewNotificationDeliveries.status, [
             'claimed',
             'prepared',
+            'auto_dispatch_pending',
           ]),
           isNull(prReviewNotificationDeliveries.actionClaimedAt),
           inArray(

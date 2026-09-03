@@ -822,9 +822,8 @@ export const prReviewNotificationJob = async (
       (autoHandleRoute || canAutoHandleWeb) &&
       ownsAutoHandleDispatch
     ) {
-      if (
-        data.deliveryState !== 'auto_dispatch_pending' &&
-        !(await (canAutoHandleWeb
+      const beginAutoDispatch = () =>
+        canAutoHandleWeb
           ? beginCanonicalPrReviewWebAutoDispatch({
               request: data,
               followUpPrompt: followUp.prompt,
@@ -837,11 +836,24 @@ export const prReviewNotificationJob = async (
               targetTaskId: autoHandlePreference.taskId,
               actingUserId: autoHandleUserId,
               route: autoHandleRoute!,
-            })))
+            });
+      if (
+        data.deliveryState !== 'auto_dispatch_pending' &&
+        !(await beginAutoDispatch())
       ) {
         await retrySupersededPrReviewAction(data);
         console.log(
           `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its automatic-dispatch fence, skipping`,
+        );
+        return;
+      }
+      if (
+        data.deliveryState !== 'auto_dispatch_pending' &&
+        !(await beginAutoDispatch())
+      ) {
+        await retrySupersededPrReviewAction(data);
+        console.log(
+          `[PrReviewNotification] Canonical delivery ${data.deliveryId} was superseded before automatic dispatch, skipping`,
         );
         return;
       }

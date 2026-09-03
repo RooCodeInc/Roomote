@@ -1441,6 +1441,58 @@ describe('canonical PR review notification ownership', () => {
     },
   );
 
+  it('releases an automatic dispatch fenced before remediation starts', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/auto-dispatch-new-commit-${task.id}`;
+    await associate(task.id, repository, 30);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 30,
+        eventKey: `auto-dispatch-old-head-${task.id}`,
+        headSha: 'old-head',
+      }),
+    );
+    const claim = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    if (!claim || claim.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+    });
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'prepared',
+      status: 'auto_dispatch_pending',
+    });
+
+    await retireCanonicalPrReviewActionsForPullRequest({
+      sourceControlProvider: 'github',
+      repository,
+      prNumber: 30,
+      currentHeadSha: 'new-head',
+    });
+    await expect(
+      releaseSupersededCanonicalPrReviewAction({
+        deliveryId: claim.deliveryId,
+        leaseToken: claim.leaseToken,
+      }),
+    ).resolves.toBe(true);
+    await expect(claimForRepository(repository, CLAIM_AT)).resolves.toEqual([
+      expect.objectContaining({
+        deliveryId: claim.deliveryId,
+        state: 'claimed',
+        reviewActionSuperseded: true,
+      }),
+    ]);
+  });
+
   it('leaves a pending older-head delivery for the reviewer text to be delivered', async () => {
     const task = await taskFactory.create();
     const repository = `owner/pending-new-commit-${task.id}`;

@@ -1078,6 +1078,48 @@ describe('prReviewNotificationJob', () => {
     );
   });
 
+  it('retries an automatic dispatch superseded after its initial transition', async () => {
+    const deliveryId = '56565656-5656-4656-8656-565656565656';
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockFindAutoHandlePrReviewFeedbackPreference.mockResolvedValue({
+      taskId: 'task-1',
+      userId: 'user-1',
+      destinationKey: 'task-1',
+    });
+    mockBeginCanonicalAutoDispatch
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    mockRetrySupersededPrReviewAction.mockResolvedValue(true);
+    const job = makeJob({
+      ownershipVersion: 'canonical',
+      deliveryId,
+      notificationUnitId: '57575757-5757-4757-8757-575757575757',
+      deliveryState: 'claimed',
+      destinationKey: 'task-1',
+      dispatchKey: `pr-review-delivery:${deliveryId}`,
+      deliveryIds: [deliveryId],
+      leaseToken: '58585858-5858-4858-8858-585858585858',
+      events,
+    });
+
+    await prReviewNotificationJob(job as never);
+
+    expect(mockBeginCanonicalAutoDispatch).toHaveBeenCalledTimes(2);
+    expect(mockRetrySupersededPrReviewAction).toHaveBeenCalledWith(job.data);
+    expect(mockDispatchFollowUp).not.toHaveBeenCalled();
+  });
+
   it('keeps repeated review and CI cycles on auto-dispatch while a prior cycle retries', async () => {
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,

@@ -955,7 +955,7 @@ export async function beginCanonicalPrReviewAutoDispatch(input: {
   return transitionCanonicalPrReviewDelivery({
     deliveryId: request.deliveryId,
     leaseToken: request.leaseToken,
-    expected: 'prepared',
+    expected: ['prepared', 'auto_dispatch_pending'],
     status: 'auto_dispatch_pending',
     values: {
       followUpPrompt: input.followUpPrompt,
@@ -986,7 +986,7 @@ export async function beginCanonicalPrReviewWebAutoDispatch(input: {
   return transitionCanonicalPrReviewDelivery({
     deliveryId: request.deliveryId,
     leaseToken: request.leaseToken,
-    expected: 'prepared',
+    expected: ['prepared', 'auto_dispatch_pending'],
     status: 'auto_dispatch_pending',
     values: {
       followUpPrompt: input.followUpPrompt,
