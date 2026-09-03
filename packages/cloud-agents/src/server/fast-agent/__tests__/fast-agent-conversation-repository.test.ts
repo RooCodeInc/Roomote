@@ -15,6 +15,7 @@ import {
   fastAgentConversationRepository,
   findFastAgentActiveInferenceRetryNotice,
   findFastAgentUnresolvedRequest,
+  loadFastAgentTurnAttemptSummary,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   scheduleFastAgentDurableTurnRetry,
   markFastAgentDurableTurnDelivered,
@@ -1221,6 +1222,138 @@ describe('Fast conversation repository', () => {
     await expect(
       findFastAgentUnresolvedRequest(session.id),
     ).resolves.toBeNull();
+  });
+
+  it('summarizes what an interrupted attempt already did for the run that resumes it', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const write = (
+      message: Parameters<
+        typeof fastAgentConversationRepository.upsertMessage
+      >[0]['message'],
+    ) =>
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message,
+      });
+    const tool = (
+      ordinal: number,
+      eventType: 'roomote_runtime.tool_call' | 'roomote_runtime.tool_result',
+      payload: Record<string, unknown>,
+      text?: string,
+    ) =>
+      write({
+        eventId: `turn-a:tool:${ordinal}:${eventType}`,
+        turnId: 'turn-a',
+        turnSeq:
+          ordinal * 2 + (eventType === 'roomote_runtime.tool_result' ? 1 : 0),
+        ts: 1_000 + ordinal * 10,
+        eventType,
+        role: 'tool',
+        contentBlocks: text ? [{ type: 'text', text }] : [],
+        metadata: { visibleInTranscript: true },
+        payload: { toolCallId: `turn-a:tool:${ordinal}`, ...payload },
+        source: 'slack',
+      });
+
+    await write({
+      eventId: 'turn-a:assistant:0',
+      turnId: 'turn-a',
+      turnSeq: 1,
+      ts: 1_000,
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Starting on it.' }],
+      metadata: { visibleInTranscript: true, purpose: 'progress' },
+      payload: { purpose: 'progress' },
+      source: 'slack',
+    });
+    // A completed launch, a failed message, and a call the process died on.
+    await tool(1, 'roomote_runtime.tool_call', {
+      toolName: 'launch_task',
+      rawInput: { arguments: { prompt: 'Fix the bug' } },
+    });
+    await tool(
+      1,
+      'roomote_runtime.tool_result',
+      { toolName: 'launch_task', status: 'completed' },
+      '{"success":true,"taskId":"task-1"}',
+    );
+    await tool(2, 'roomote_runtime.tool_call', {
+      toolName: 'send_task_message',
+      rawInput: { arguments: { taskId: 'task-1', message: 'hi' } },
+    });
+    await tool(
+      2,
+      'roomote_runtime.tool_result',
+      { toolName: 'send_task_message', status: 'failed' },
+      '{"success":false,"error":"Task is not accepting messages."}',
+    );
+    await tool(3, 'roomote_runtime.tool_call', {
+      toolName: 'save_memory',
+      rawInput: { arguments: { content: 'Prefers bullets.' } },
+    });
+    // Rows from another turn and hidden or terminal assistant rows are not
+    // part of the attempt.
+    await write({
+      eventId: 'turn-b:assistant:0',
+      turnId: 'turn-b',
+      turnSeq: 1,
+      ts: 2_000,
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Other turn.' }],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+      source: 'slack',
+    });
+    await write({
+      eventId: 'turn-a:interruption',
+      turnId: 'turn-a',
+      turnSeq: 9,
+      ts: 1_900,
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Roomote restarted…' }],
+      metadata: {
+        visibleInTranscript: true,
+        purpose: 'closeout',
+        interruptionReason: 'api_shutdown',
+      },
+      payload: { purpose: 'closeout' },
+      source: 'slack',
+    });
+
+    await expect(
+      loadFastAgentTurnAttemptSummary(session.id, 'turn-a'),
+    ).resolves.toEqual({
+      replies: ['Starting on it.'],
+      actions: [
+        {
+          tool: 'launch_task',
+          arguments: { prompt: 'Fix the bug' },
+          status: 'completed',
+          result: '{"success":true,"taskId":"task-1"}',
+        },
+        {
+          tool: 'send_task_message',
+          arguments: { taskId: 'task-1', message: 'hi' },
+          status: 'failed',
+          result: '{"success":false,"error":"Task is not accepting messages."}',
+        },
+        {
+          tool: 'save_memory',
+          arguments: { content: 'Prefers bullets.' },
+          status: 'unknown',
+        },
+      ],
+    });
+    await expect(
+      loadFastAgentTurnAttemptSummary(session.id, 'turn-none'),
+    ).resolves.toEqual({ replies: [], actions: [] });
   });
 
   it('walks a durable turn row through claim, release, revoke, and delivery', async () => {
