@@ -323,6 +323,13 @@ export async function findReusableGitHubPrFollowUpOwner({
     return null;
   }
 
+  // The payload-branch fallback cannot be pinned to a repositories row, so a
+  // caller that demands the exact-repository match gets no fallback: an
+  // unstamped legacy payload on another instance must never satisfy it.
+  if (repositoryId) {
+    return null;
+  }
+
   const branchRows = await db
     .select(REUSABLE_FOLLOW_UP_OWNER_COLUMNS)
     .from(taskRuns)
