@@ -97,7 +97,7 @@ describe('settleSlackLiveTaskCardForRun', () => {
       renderSlackLiveTaskCard({
         taskId: 'task-1',
         status: 'in_progress',
-        message: 'Working.',
+        details: 'Working.',
       }),
     ).resolves.toEqual({ card: true, updated: true });
 

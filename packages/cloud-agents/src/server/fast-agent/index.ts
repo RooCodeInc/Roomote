@@ -10,3 +10,4 @@ export * from './fast-agent-session';
 export * from './fast-agent-task-launcher';
 export * from './fast-agent-title';
 export * from './fast-agent-tasks';
+export * from './fast-agent-pinned-launch';

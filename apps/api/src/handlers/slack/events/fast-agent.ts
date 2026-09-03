@@ -49,10 +49,6 @@ export function isFastCommandInvocation(text: string): boolean {
   return /^!fast(?:\s|$)/i.test(mentionStrippedText);
 }
 
-export function isBareFastCommandInvocation(text: string): boolean {
-  return /^!fast(?:\s|$)/i.test(text.trimStart());
-}
-
 export function extractFastQuestion(
   mentionStrippedText: string,
   continuation = false,

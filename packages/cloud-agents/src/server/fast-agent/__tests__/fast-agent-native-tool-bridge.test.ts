@@ -206,10 +206,16 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(skillListSource).toContain(
       'exactly one of environmentId or repositoryId',
     );
-    expect(requestUserInputSource).toContain('args: z.union');
+    // OpenCode wraps `args` in z.object itself; a bare union there produces
+    // a schema OpenAI rejects, which takes every Fast turn down on its models.
+    expect(requestUserInputSource).toContain('args: {');
+    expect(requestUserInputSource).not.toContain('z.union');
     expect(requestUserInputSource).toContain('questions: z.array');
+    expect(requestUserInputSource).toContain('.max(4).optional()');
     expect(requestUserInputSource).toContain('preset: z.enum');
-    expect(requestUserInputSource).toContain('.strict()');
+    expect(requestUserInputSource).toContain(
+      'questions are ignored when a preset is set',
+    );
     expect(skillSource).toContain('Exact skill ID returned by list_skills');
     expect(skillSource).not.toContain('"explore-and-act"');
     expect(skillSource).toContain(

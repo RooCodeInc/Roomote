@@ -44,6 +44,10 @@ import { parseCreatorFilterValue } from '@/lib/task-creator-filter';
 import { getSessionPullRequests } from '@/lib/session-pull-requests';
 
 import { getFastSessionById } from './fast-sessions';
+import {
+  buildSessionTaskPreviews,
+  getSessionPreviewProxyConfig,
+} from './session-task-previews';
 
 type SessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
 export type SessionScope = 'all' | 'tasks' | 'reviews' | 'automations';
@@ -501,6 +505,7 @@ type HydratedLinkedTask = {
   repositoryName: string | null;
   model: string | null;
   activityAt: number;
+  inferenceCostMicroUsd?: number;
 };
 
 async function hydrateSessionRows(
@@ -589,13 +594,14 @@ async function hydrateSessionRows(
     db
       .select({
         sessionId: sessionTasks.sessionId,
+        taskId: sessionTasks.taskId,
         costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
       })
       .from(sessionTasks)
       .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
       .innerJoin(llmUsageEvents, eq(llmUsageEvents.taskId, sessionTasks.taskId))
       .where(and(inArray(sessionTasks.sessionId, ids), isNull(tasks.deletedAt)))
-      .groupBy(sessionTasks.sessionId),
+      .groupBy(sessionTasks.sessionId, sessionTasks.taskId),
     db
       .select({
         sessionId: sessions.id,
@@ -680,13 +686,20 @@ async function hydrateSessionRows(
         legacyFastDirectUsage.find((event) => event.sessionId === row.id)
           ?.costMicroUsd ?? 0,
       );
-    const taskInferenceCostMicroUsd = Number(
-      attachedTaskUsage.find((event) => event.sessionId === row.id)
-        ?.costMicroUsd ?? 0,
+    const tasksWithUsage = tasksForSession.map((task) => ({
+      ...task,
+      inferenceCostMicroUsd: Number(
+        attachedTaskUsage.find((event) => event.taskId === task.taskId)
+          ?.costMicroUsd ?? 0,
+      ),
+    }));
+    const taskInferenceCostMicroUsd = tasksWithUsage.reduce(
+      (total, task) => total + task.inferenceCostMicroUsd,
+      0,
     );
     return {
       ...row,
-      tasks: tasksForSession,
+      tasks: tasksWithUsage,
       pullRequests: getSessionPullRequests([
         {
           pullRequests: linkedPullRequests
@@ -816,7 +829,7 @@ async function getSessionTasks(sessionId: string) {
   // Four batched lookups regardless of task count; the per-task N+1 version
   // multiplied badly under the session workspace's polling.
   const taskIds = linked.map((task) => task.taskId);
-  const [latestRuns, artifactRows, pullRequestRows, usageRows] =
+  const [latestRuns, artifactRows, pullRequestRows, usageRows, previewConfig] =
     await Promise.all([
       db
         .selectDistinctOn([taskRuns.taskId], {
@@ -826,6 +839,15 @@ async function getSessionTasks(sessionId: string) {
           taskPhase: taskRuns.taskPhase,
           error: taskRuns.error,
           result: taskRuns.result,
+          machineDomain: taskRuns.machineDomain,
+          machineDomains: taskRuns.machineDomains,
+          initialPaths: taskRuns.initialPaths,
+          primaryPortName: taskRuns.primaryPortName,
+          sleepRequestedAt: taskRuns.sleepRequestedAt,
+          snapshotRequestedAt: taskRuns.snapshotRequestedAt,
+          snapshotCreatedAt: taskRuns.snapshotCreatedAt,
+          snapshotFailedAt: taskRuns.snapshotFailedAt,
+          snapshotId: taskRuns.snapshotId,
         })
         .from(taskRuns)
         .where(inArray(taskRuns.taskId, taskIds))
@@ -869,6 +891,7 @@ async function getSessionTasks(sessionId: string) {
         .from(llmUsageEvents)
         .where(inArray(llmUsageEvents.taskId, taskIds))
         .groupBy(llmUsageEvents.taskId),
+      getSessionPreviewProxyConfig(),
     ]);
 
   const latestRunByTask = new Map(latestRuns.map((run) => [run.taskId, run]));
@@ -903,6 +926,11 @@ async function getSessionTasks(sessionId: string) {
       latestRun,
       latestOutput,
       inferenceCostMicroUsd: usageByTask.get(task.taskId) ?? 0,
+      previews: buildSessionTaskPreviews(
+        task.taskId,
+        latestRunRow,
+        previewConfig,
+      ),
       artifacts: artifactRows
         .filter((artifact) => artifact.taskId === task.taskId)
         .map(({ taskId: _taskId, ...artifact }) => artifact),
@@ -1052,27 +1080,6 @@ export async function getSessionForTask(auth: SessionAuth, taskId: string) {
     .innerJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
     .where(and(eq(sessionTasks.taskId, taskId), sessionScope(auth)))
     .limit(1);
-  return row ?? null;
-}
-
-export async function getArtifactBuildParentSession(
-  auth: SessionAuth,
-  artifactId: string,
-) {
-  const [row] = await db
-    .select({
-      sourceTaskId: taskArtifacts.taskId,
-      sourceArtifactPath: taskArtifacts.path,
-      sourceArtifactVersion: taskArtifacts.version,
-      sessionId: sessions.id,
-      fastConversationId: sessions.fastConversationId,
-    })
-    .from(taskArtifacts)
-    .leftJoin(sessionTasks, eq(sessionTasks.taskId, taskArtifacts.taskId))
-    .leftJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
-    .where(and(eq(taskArtifacts.id, artifactId), sessionScope(auth)))
-    .limit(1);
-
   return row ?? null;
 }
 

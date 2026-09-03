@@ -5,7 +5,6 @@ const {
   authAccountsFindFirstMock,
   authAccountsFindManyMock,
   authUsersFindFirstMock,
-  buildTeamsRoutingContextMock,
   enqueueTaskMock,
   envMock,
   fetchMessageImageDataUrlsMock,
@@ -25,9 +24,10 @@ const {
   redisGetMock,
   queueCommunicationMessageMock,
   redisSetMock,
-  routeTaskMock,
   launchClaimedTeamsSuggestionMock,
+  launchPinnedMock,
   resolveAndClaimTeamsSuggestionReactionMock,
+  getSessionForTaskMock,
   setTrustedRunActingUserMock,
   shouldRouteUnmentionedReplyMock,
   teamsInstallationsTable,
@@ -51,7 +51,6 @@ const {
   authAccountsFindFirstMock: vi.fn(),
   authAccountsFindManyMock: vi.fn(),
   authUsersFindFirstMock: vi.fn(),
-  buildTeamsRoutingContextMock: vi.fn(),
   enqueueTaskMock: vi.fn(),
   envMock: {
     R_TEAMS_BOT_APP_ID: 'bot-app-id' as string | undefined,
@@ -85,9 +84,10 @@ const {
   redisGetMock: vi.fn(),
   queueCommunicationMessageMock: vi.fn(),
   redisSetMock: vi.fn(),
-  routeTaskMock: vi.fn(),
   launchClaimedTeamsSuggestionMock: vi.fn(),
+  launchPinnedMock: vi.fn(),
   resolveAndClaimTeamsSuggestionReactionMock: vi.fn(),
+  getSessionForTaskMock: vi.fn(),
   setTrustedRunActingUserMock: vi.fn(),
   shouldRouteUnmentionedReplyMock: vi.fn(),
   teamsInstallationsTable: {
@@ -142,6 +142,7 @@ vi.mock('../suggestion-start.js', () => ({
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
   setTrustedRunActingUser: setTrustedRunActingUserMock,
+  getSessionForTask: getSessionForTaskMock,
   claimPendingOutOfBandTaskMessages: claimPendingOutOfBandMock,
   releaseClaimedOutOfBandTaskMessages: releaseClaimedOutOfBandMock,
   resolveTeamsBotRuntimeCredentials: vi.fn(async () => ({
@@ -305,11 +306,10 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     (input: unknown) =>
       `<external_input>${JSON.stringify(input)}</external_input>`,
   ),
-  buildTeamsRoutingContext: buildTeamsRoutingContextMock,
   enqueueTask: enqueueTaskMock,
   getOrCreateFastAgentSession: getFastSessionMock,
   getTaskUrl: getTaskUrlMock,
-  routeTask: routeTaskMock,
+  launchPinnedFastSessionTask: launchPinnedMock,
 }));
 
 vi.mock('../bot-framework-auth.js', () => ({
@@ -408,18 +408,37 @@ describe('Teams webhook handler', () => {
     queueCommunicationMessageMock.mockResolvedValue(undefined);
     claimPendingOutOfBandMock.mockResolvedValue([]);
     releaseClaimedOutOfBandMock.mockResolvedValue(undefined);
-    buildTeamsRoutingContextMock.mockResolvedValue({ context: true });
-    routeTaskMock.mockResolvedValue({
-      status: 'routed',
-      result: {
-        workspace: { type: 'all_repositories' },
-        reasoning: 'all repos',
-      },
-    });
     enqueueTaskMock.mockResolvedValue({
       id: 88,
       taskId: 'task-new',
     });
+    // The pinned-launch primitive runs the surface launcher inside a Session.
+    launchPinnedMock.mockImplementation(
+      async (input: {
+        launchId: string;
+        conversation: unknown;
+        launch: (context: {
+          parent: { sessionId: string; conversation: unknown };
+          launchIdempotencyKey: string;
+          postKickoff: () => Promise<void>;
+        }) => Promise<
+          { success: true; taskId: string } | { success: false; error: string }
+        >;
+      }) => {
+        const result = await input.launch({
+          parent: { sessionId: 'fast-1', conversation: input.conversation },
+          launchIdempotencyKey: `pinned-launch:${input.launchId}`,
+          postKickoff: async () => {},
+        });
+        if (!result.success) throw new Error(result.error);
+        return {
+          sessionId: 'session-1',
+          fastConversationId: 'fast-1',
+          taskId: result.taskId,
+          runId: 88,
+        };
+      },
+    );
     postDirectMessageMock.mockResolvedValue({ messageId: 'dm-response' });
     postMessageMock.mockResolvedValue({ messageId: 'activity-response' });
     fetchMessageImageDataUrlsMock.mockResolvedValue([]);
@@ -573,6 +592,151 @@ describe('Teams webhook handler', () => {
     );
     expect(callViaEmojiConfigMock).not.toHaveBeenCalled();
     expect(queueFastReplyMock).not.toHaveBeenCalled();
+  });
+
+  it('launches a pinned suggestion through the owning Fast Session without a model turn', async () => {
+    trackedSuggestionMessageFindFirstMock.mockResolvedValue({
+      workItemId: 'suggestion-1',
+    });
+    teamsUserMappingFindFirstMock.mockResolvedValue({
+      userId: 'mapped-user-1',
+    });
+    resolveAndClaimTeamsSuggestionReactionMock.mockResolvedValue({
+      outcome: 'claimed',
+      suggestion: {
+        id: 'suggestion-1',
+        title: 'Fix the flaky test',
+        brief: 'Remove the timing race.',
+        investigationContext: null,
+        targetRepositoryFullName: 'acme/app',
+        targetEnvironmentId: null,
+        sourceTaskId: 'scan-task-1',
+        launchClaimedAt: new Date('2026-08-07T00:00:00.000Z'),
+      },
+    });
+    getSessionForTaskMock.mockResolvedValue({ id: 'session-origin' });
+    // The kickoff gate must run inside the enqueue, before the child becomes
+    // runnable; model both sides so the wiring is exercised, not assumed.
+    const postKickoff = vi.fn().mockResolvedValue(undefined);
+    launchPinnedMock.mockImplementationOnce(
+      async (input: {
+        launchId: string;
+        conversation: unknown;
+        launch: (context: {
+          parent: { sessionId: string; conversation: unknown };
+          launchIdempotencyKey: string;
+          postKickoff: () => Promise<void>;
+        }) => Promise<
+          { success: true; taskId: string } | { success: false; error: string }
+        >;
+      }) => {
+        const result = await input.launch({
+          parent: { sessionId: 'fast-1', conversation: input.conversation },
+          launchIdempotencyKey: `pinned-launch:${input.launchId}`,
+          postKickoff,
+        });
+        if (!result.success) throw new Error(result.error);
+        return {
+          sessionId: 'session-1',
+          fastConversationId: 'fast-1',
+          taskId: result.taskId,
+          runId: 88,
+        };
+      },
+    );
+    enqueueTaskMock.mockImplementationOnce(
+      async (
+        _input: unknown,
+        options: {
+          beforeEnqueue?: (taskRun: {
+            id: number;
+            taskId: string;
+          }) => Promise<void>;
+        },
+      ) => {
+        await options.beforeEnqueue?.({ id: 88, taskId: 'task-new' });
+        return { id: 88, taskId: 'task-new' };
+      },
+    );
+    // Drive the real launcher the way launchClaimedTeamsSuggestion would.
+    launchClaimedTeamsSuggestionMock.mockImplementationOnce(
+      async (params: {
+        launchTask: (
+          promptText: string,
+          target: { kind: string },
+        ) => Promise<{ launchResult: { id: number } }>;
+      }) => {
+        const launch = await params.launchTask('Fix the flaky test', {
+          kind: 'legacy_pinned',
+        });
+        return { result: 'started', runId: launch.launchResult.id };
+      },
+    );
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          type: 'messageReaction',
+          id: 'suggestion-reaction-2',
+          text: undefined,
+          entities: undefined,
+          replyToId: 'suggestion-card-1',
+          reactionsAdded: [{ type: 'like' }],
+        }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      started: true,
+      runId: 88,
+    });
+    expect(launchPinnedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'mapped-user-1',
+        surface: 'teams',
+        prompt: 'Fix the flaky test',
+        originSessionId: 'session-origin',
+        conversation: expect.objectContaining({
+          surface: 'teams',
+          workspaceId: 'tenant-1',
+        }),
+        kickoffMessage: 'Started a task in acme/app.',
+      }),
+    );
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initiator: { kind: 'user', userId: 'mapped-user-1' },
+        surface: 'teams',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: 'acme/app',
+            description: 'Fix the flaky test',
+            reportConsumer: 'orchestrator',
+            fastAgentSessionId: 'fast-1',
+          }),
+        }),
+      }),
+      expect.objectContaining({ beforeEnqueue: expect.any(Function) }),
+    );
+    // The Session transcript kickoff ran inside the launch gate, and the
+    // Teams acknowledgement was posted after the enqueue.
+    expect(postKickoff).toHaveBeenCalledOnce();
+    expect(postKickoff.mock.invocationCallOrder[0]).toBeLessThan(
+      postMessageMock.mock.invocationCallOrder[0]!,
+    );
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '19:conversation@thread.v2',
+        text: expect.stringContaining('Started a task in acme/app'),
+      }),
+    );
+    expect(continueFastReplyMock).not.toHaveBeenCalled();
   });
 
   it('starts a Fast-targeted suggestion in the personal chat’s shared Fast session', async () => {
@@ -1556,7 +1720,7 @@ describe('Teams webhook handler', () => {
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('falls back to normal Teams task routing when Fast session setup fails', async () => {
+  it('replies with an error when Fast session setup fails', async () => {
     findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
@@ -1574,11 +1738,16 @@ describe('Teams webhook handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      started: true,
-      runId: 88,
+      queued: false,
+      fastUnavailable: true,
     });
-    expect(buildTeamsRoutingContextMock).toHaveBeenCalled();
-    expect(enqueueTaskMock).toHaveBeenCalled();
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining("couldn't start a conversation"),
+      }),
+    );
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
+    expect(continueFastReplyMock).not.toHaveBeenCalled();
   });
 
   it('starts Fast with Teams image attachments', async () => {
@@ -1685,8 +1854,6 @@ describe('Teams webhook handler', () => {
       reason: 'account_link_required',
     });
     expect(response.status).toBe(200);
-    expect(buildTeamsRoutingContextMock).not.toHaveBeenCalled();
-    expect(routeTaskMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(findFirstMock).toHaveBeenCalledTimes(1);
@@ -1791,6 +1958,12 @@ describe('Teams webhook handler', () => {
       userId: 'mapped-user-1',
     });
     findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    continueFastReplyMock.mockImplementationOnce(
+      async ({ onAccepted }: { onAccepted?: (abort: unknown) => void }) => {
+        onAccepted?.(vi.fn());
+        return true;
+      },
+    );
 
     const response = await createApp().request('/teams/auth/resume', {
       method: 'POST',
@@ -1800,10 +1973,7 @@ describe('Teams webhook handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       success: true,
-      status: 'started',
-      runId: 88,
-      taskId: 'task-new',
-      taskUrl: 'https://app.example.com/task/task-new',
+      status: 'fast',
     });
     expect(response.status).toBe(200);
     expect(redisGetMock).toHaveBeenCalledWith('teams:auth:teams-auth-token-1');
@@ -1812,27 +1982,27 @@ describe('Teams webhook handler', () => {
       1,
       'teams:auth:teams-auth-token-1',
     );
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          type: 'standard',
-          payload: expect.objectContaining({
-            description: 'run the tests',
-            images: ['data:image/png;base64,abc123'],
-            communicationProvider: 'teams',
-            communicationChannelId: '19:conversation@thread.v2',
-            communicationThreadId: 'activity-root',
-          }),
-        }),
-        initiator: { kind: 'user', userId: 'mapped-user-1' },
-        workflow: 'standard',
+    expect(getFastSessionMock).toHaveBeenCalledWith({
+      userId: 'mapped-user-1',
+      conversation: {
         surface: 'teams',
-        trigger: 'message',
-      }),
+        workspaceId: 'tenant-1',
+        conversationId: 'activity-root:user:mapped-user-1',
+        replyTarget: {
+          channelId: '19:conversation@thread.v2',
+          threadId: 'activity-root',
+        },
+      },
+    });
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        launchClass: 'human',
+        userId: 'mapped-user-1',
+        question: 'run the tests',
+        images: ['data:image/png;base64,abc123'],
+        currentMessageId: 'pending-activity-1',
       }),
     );
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
     expect(processImageAttachmentsMock).toHaveBeenCalledWith(
       [
         {

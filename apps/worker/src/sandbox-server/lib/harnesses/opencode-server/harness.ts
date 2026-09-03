@@ -50,7 +50,6 @@ import type {
   StartNewTaskCommand,
   TaskCommand,
 } from '../../harness';
-import { VISUAL_PROOF_ATTEMPT_STATE_PATH } from '../../../../run-task/proof-runner-prompt';
 import { buildTaskGoalContext } from '../../../../run-task/task-goal';
 import {
   hasTerminalChatReplyDeliveryFailure,
@@ -337,6 +336,8 @@ const FALLBACK_OPENCODE_STOP_HOOK_REMINDER =
   'Before finalizing, post a terminal chat-visible reply for the current turn.';
 const ROOMOTE_OPENCODE_VISUAL_AGENT_NAME = 'visual';
 const CAPTURE_VISUAL_PROOF_SKILL = 'capture-visual-proof';
+export const VISUAL_PROOF_ATTEMPT_STATE_PATH =
+  '/tmp/roomote-visual-proof-attempt.json';
 const formatVisualProofTimeoutRecoveryPrompt = (attemptId: string | null) =>
   `The visual proof step exceeded its shared five-minute deadline. Do not retry capture or run further proof recovery. Before reporting the outcome, list this task's \`visual-proof\` artifacts once. The interrupted proof attempt ID is ${attemptId ?? 'unavailable'}; only artifacts whose path starts with \`tmp/capture-visual-proof/${attemptId ?? '<attemptId>'}/\` belong to this attempt. Carry matching artifacts into delivery instead of reporting a timeout. If the attempt ID is unavailable or no matching uploads exist, return a blocked proof handoff with blocker type \`proof capture timed out\`, then continue the active parent workflow without visual proof. Never reuse artifacts from another proof attempt.`;
 // OpenCode's built-in tool for loading skills into the session.

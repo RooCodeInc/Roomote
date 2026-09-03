@@ -21,7 +21,12 @@ export type FastSessionFooterProvider =
   | 'slack'
   | 'discord'
   | 'teams'
-  | 'telegram';
+  | 'telegram'
+  | 'github'
+  | 'gitlab'
+  | 'bitbucket'
+  | 'ado'
+  | 'gitea';
 
 export type FastSessionPullRequestReference = {
   number: number | null;
@@ -132,11 +137,20 @@ export function buildFastSessionReplyFooterText(params: {
 }): string {
   const sessionUrl = buildFastSessionUrl(params.provider, params.sessionId);
 
+  // Chat surfaces route any thread reply to the Session; source-control
+  // discussions only hear @-mentions, so the footer must say so.
+  const explicitMentionRequired =
+    params.provider === 'github' ||
+    params.provider === 'gitlab' ||
+    params.provider === 'bitbucket' ||
+    params.provider === 'ado' ||
+    params.provider === 'gitea';
+
   return buildThreadReplyFooterText({
     taskUrl: sessionUrl,
     linkedPrs: collectFastSessionLinkedPrs(params),
     livePreviewUrl: params.livePreviewUrl,
-    explicitMentionRequired: false,
+    explicitMentionRequired,
     ...(params.provider === 'slack'
       ? { formatLink: (label: string, url: string) => `<${url}|${label}>` }
       : params.provider === 'discord'

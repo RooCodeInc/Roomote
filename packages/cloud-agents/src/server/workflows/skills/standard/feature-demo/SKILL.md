@@ -27,7 +27,7 @@ resolved rectangle of every interaction target, so effects stay aligned and
 nothing needs retiming afterwards.
 
 Pipeline: plan the narrative → author script → narrate → capture (browser,
-delegated, paced to the narrative) → trim opening → render → verify →
+paced to the narrative) → trim opening → render → verify →
 upload.
 
 The bundled `render/` project is a **reference template**, not a fixed
@@ -67,7 +67,7 @@ this pipeline is ever committed to the repository.
 <action>Caption display can be tuned declaratively with a top-level `"captionStyle"` object in the demo script — `{ "position": "top"|"bottom", "accent": cssColor, "pill": boolean, "sizeScale": number }` — controlling placement, the active-word highlight color, the pill background (off = bare text with a drop shadow), and a font-size multiplier. Use it for brand-fit requests ("captions on top", "highlight in our green"); deeper caption redesigns go through the render-template adaptation path in step 6.</action>
 <action>Selectors must be resilient: prefer ids, stable data attributes, or unique semantic tags over deep CSS chains. How you gain confidence before capture depends on the surface:
 - Repository-backed surface (the app's own UI): grep the component/template source for each proposed selector and confirm it exists — cheap and worth doing every time.
-- External public page named by the user: there is no local source to grep, and the browser is reachable only through the single capture delegation (the `proof-runner` takes one brief per task and keeps its configured surface, so a separate pre-flight is not available). Author best-effort resilient selectors — landmark roles, headings, obvious ids the advisor inferred; avoid deep chains — and rely on capture's own validation: the runner resolves every selector live and fails loudly naming any that do not resolve. Use that named failure to correct the script and re-capture within the one allowed retry (step 3).</action>
+- External public page named by the user: there is no local source to grep. Author best-effort resilient selectors — landmark roles, headings, obvious ids the advisor inferred; avoid deep chains — optionally confirm them with one `agent-browser snapshot -i` of the page, and rely on capture's own validation: the runner resolves every selector live and fails loudly naming any that do not resolve. Use that named failure to correct the script and re-capture within the one allowed retry (step 4).</action>
 </actions>
 </step>
 
@@ -80,15 +80,14 @@ this pipeline is ever committed to the repository.
 </step>
 
 <step number="4">
-<name>Capture (delegated browser work)</name>
+<name>Capture</name>
 <actions>
-<action>Stage the capture runner where the delegated runtime can see it — home-directory paths do not survive the delegation boundary, so always copy first:
+<action>Run the capture runner directly from the installed skill:
 
-`mkdir -p /tmp/feature-demo && cp "$HOME/.agents/skills/feature-demo/capture/capture.mjs" /tmp/feature-demo/capture.mjs`
+`SCRIPT=/tmp/feature-demo/demo-script.json OUT_DIR=/tmp/feature-demo/work node "$HOME/.agents/skills/feature-demo/capture/capture.mjs"`
 
-The runner also reads `/tmp/feature-demo/narration.json` (written in step 3) on its own; captions-only runs simply will not have one.</action>
-<action>Browser automation is the proof-runner subagent's exclusive surface — do not load `agent-browser` or run the capture yourself. Delegate with the Task tool to `proof-runner`, telling it the script path (`/tmp/feature-demo/demo-script.json`), the output dir (`/tmp/feature-demo/work`), and the staged runner path (`/tmp/feature-demo/capture.mjs`), and to report the runner's printed summary plus `ls -la /tmp/feature-demo/work`. The staged runner is proof-runner's one sanctioned script exception — an agent-browser orchestrator that shells the `agent-browser` CLI for every browser action — and its own instructions define the exact integrity-verified command it must use to execute it. Do not dictate the `node` invocation yourself; the proof-runner owns that.</action>
-<action>If the harness has no proof-runner registered, report a blocker (`proof runtime unavailable`) instead of driving the browser from this skill.</action>
+The runner is an `agent-browser` orchestrator: every browser action it performs goes through the `agent-browser` CLI, so it is the only browser automation this skill needs. It also reads `/tmp/feature-demo/narration.json` (written in step 3) on its own; captions-only runs simply will not have one. Keep the runner's printed summary and `ls -la /tmp/feature-demo/work` for the report.</action>
+<action>If the `agent-browser` executable is unavailable in this sandbox, report a blocker (`proof runtime unavailable`) instead of substituting another browser automation path.</action>
 <action>Expected outputs: `/tmp/feature-demo/work/recording.mp4` and `/tmp/feature-demo/work/timeline.json`. Verify both exist and that `ffprobe` reports a duration close to the timeline's `durationSeconds` (the runner itself fails loudly when the recording is much shorter than the interaction). One retry on failure; then report blocked with the runner's error.</action>
 <action>The runner records headless with an imperceptible frame ticker, which is deterministic and captures at wall-clock rate on ordinary pages. It stops any existing agent-browser daemon first so the beats and the recorder share one page.</action>
 <action>If a recording comes back much shorter than the interaction, the runner fails loudly. GPU-backed surfaces (WebGL/WebGPU, 3D, games) do not present frames to the headless compositor and cannot be recorded here — report `webgl surface stalls recording` naming the surface rather than retrying. If `record stop` itself reports an ffmpeg error, the sandbox is likely a stale snapshot with an outdated runtime ffmpeg (`stale sandbox runtime`).</action>
@@ -141,8 +140,7 @@ Run this with a GENEROUS command timeout (10 minutes) on the first attempt: a na
 </workflow>
 
 <rules>
-<rule>Never load or invoke `agent-browser` (or any other browser automation) from this skill — capture is always delegated to the `proof-runner` subagent.</rule>
-<rule>Launch `proof-runner` directly from the current parent session, passing `proof-runner` as the Task tool's agent type. Never wrap capture in a `general` or any other intermediate subagent: subagents cannot spawn further subagents, so an intermediate hop makes `proof-runner` unreachable.</rule>
+<rule>Drive the recording only through the capture runner, which shells the `agent-browser` CLI for every action. Do not hand-script `agent-browser` beats or use any other browser automation for the recording itself; the runner owns pacing, cursor effects, and the timeline.</rule>
 <rule>Never ask for, read, or handle TTS provider keys. Narration goes through the control-plane endpoint with the run token; a 404 there means captions-only.</rule>
 <rule>All intermediate files live under `/tmp/feature-demo`. Never commit recordings, renders, node_modules, or props into the repository.</rule>
 <rule>Author demo scripts using only the beat actions listed in step 2.</rule>

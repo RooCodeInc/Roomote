@@ -6,11 +6,19 @@ import Link from 'next/link';
 import { DEFAULT_CODING_HARNESS, type TaskPhase } from '@roomote/types';
 
 import {
+  BasicTooltip,
   Button,
+  ChevronDown,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
   ErrorState,
   ExternalLink,
   Skeleton,
 } from '@/components/system';
+import { WorkspaceBadge } from '@/components/sandbox';
 import { FramedSurface } from '@/components/layout';
 
 import { ArtifactLinkProvider } from '../../task/[taskId]/hooks/ArtifactLinkProvider';
@@ -264,15 +272,21 @@ function NestedTaskTranscript({
 
 export function NestedTaskSidePanel({
   taskId,
+  tasks = [],
+  onSelectTask,
   onClose,
   onOpenArtifact,
 }: {
   taskId: string;
+  tasks?: Array<{ taskId: string; title: string }>;
+  onSelectTask?: (taskId: string) => void;
   onClose: () => void;
   onOpenArtifact?: (path: string, version?: number) => void;
 }) {
   const session = useTaskSession(taskId, { refetchInterval: 2_000 });
   const title = session.task?.title?.trim() || 'Task';
+  const environmentId = session.taskRun?.payload?.environmentId;
+  const repo = session.taskRun?.payload?.repo;
 
   return (
     <FramedSurface
@@ -280,15 +294,62 @@ export function NestedTaskSidePanel({
       surfaceClassName="relative flex flex-col overflow-hidden"
     >
       <SidePanelHeader
-        title={title}
         onClose={onClose}
         actions={
-          <Button asChild variant="ghost" size="sm">
-            <Link href={`/task/${taskId}`}>
-              Go to task
-              <ExternalLink />
-            </Link>
-          </Button>
+          <>
+            {environmentId || repo ? (
+              <WorkspaceBadge
+                environmentId={environmentId}
+                repo={repo}
+                className="max-w-32 text-xs text-muted-foreground"
+                iconClassName="text-muted-foreground"
+              />
+            ) : null}
+            <BasicTooltip content="Go to task">
+              <Button asChild variant="ghost" size="icon" className="size-8">
+                <Link href={`/task/${taskId}`} aria-label="Go to task">
+                  <ExternalLink className="size-4" />
+                </Link>
+              </Button>
+            </BasicTooltip>
+          </>
+        }
+        titleAdornment={
+          tasks.length > 1 ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="relative -left-2 h-7 min-w-0 gap-1.5 px-2 text-sm hover:text-accent-foreground"
+                >
+                  <span className="font-semibold">Task:</span>
+                  <span className="max-w-48 truncate font-medium">{title}</span>
+                  <ChevronDown className="size-3.5 shrink-0" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-h-80">
+                <DropdownMenuLabel>Tasks in this session</DropdownMenuLabel>
+                {tasks.map((task) => (
+                  <DropdownMenuItem
+                    key={task.taskId}
+                    className="cursor-pointer text-xs"
+                    onClick={() => onSelectTask?.(task.taskId)}
+                  >
+                    <span className="max-w-72 truncate">{task.title}</span>
+                    {task.taskId === taskId ? (
+                      <span className="ml-auto text-muted-foreground">
+                        &bull;
+                      </span>
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <h2 className="truncate text-sm font-medium whitespace-nowrap">
+              <span className="font-semibold">Task:</span> {title}
+            </h2>
+          )
         }
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

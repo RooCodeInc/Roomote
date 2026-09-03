@@ -1,7 +1,15 @@
 import type { UserAuthSuccess } from '@/types';
 
-const { mockFinalChain } = vi.hoisted(() => ({
+const {
+  mockDeleteWhere,
+  mockFinalChain,
+  mockSelectLimit,
+  mockUpdateReturning,
+} = vi.hoisted(() => ({
+  mockDeleteWhere: vi.fn(),
   mockFinalChain: vi.fn(),
+  mockSelectLimit: vi.fn(),
+  mockUpdateReturning: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -10,11 +18,28 @@ vi.mock('@roomote/db/server', () => ({
       from: () => ({
         where: () => ({
           orderBy: mockFinalChain,
+          limit: mockSelectLimit,
         }),
       }),
     })),
+    transaction: vi.fn(
+      async (
+        callback: (tx: {
+          delete: () => { where: typeof mockDeleteWhere };
+        }) => Promise<void>,
+      ) => callback({ delete: () => ({ where: mockDeleteWhere }) }),
+    ),
+    update: vi.fn(() => ({
+      set: () => ({
+        where: () => ({ returning: mockUpdateReturning }),
+      }),
+    })),
   },
-  environmentVariables: { name: 'env.name', userId: 'env.user_id' },
+  environmentVariables: {
+    id: 'env.id',
+    name: 'env.name',
+    userId: 'env.user_id',
+  },
   eq: vi.fn(),
   desc: vi.fn(),
   inArray: vi.fn(),
@@ -22,7 +47,12 @@ vi.mock('@roomote/db/server', () => ({
   getTableColumns: () => ({ id: 'env.id', name: 'env.name' }),
 }));
 
-import { createEnvVarCommand, getEnvVarsCommand } from './index';
+import {
+  createEnvVarCommand,
+  deleteEnvVarCommand,
+  getEnvVarsCommand,
+  updateEnvVarCommand,
+} from './index';
 
 function buildMockAuth(
   overrides: Partial<UserAuthSuccess> = {},
@@ -51,6 +81,9 @@ function buildMockAuth(
 describe('environment-variables commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDeleteWhere.mockResolvedValue(undefined);
+    mockFinalChain.mockResolvedValue([]);
+    mockUpdateReturning.mockResolvedValue([{ id: 'updated-env-var' }]);
   });
 
   describe('getEnvVarsCommand', () => {
@@ -90,6 +123,89 @@ describe('environment-variables commands', () => {
       ).rejects.toThrow(
         'is a reserved communications provider variable. Configure it under Settings → Communications.',
       );
+    });
+
+    it('rejects the sandbox OpenRouter control-plane key', async () => {
+      await expect(
+        createEnvVarCommand(buildMockAuth(), {
+          name: 'SANDBOX_OPENROUTER_API_KEY',
+          value: 'must-not-be-saved',
+        }),
+      ).rejects.toThrow(
+        '"SANDBOX_OPENROUTER_API_KEY" is a reserved deployment variable and cannot be set here.',
+      );
+    });
+  });
+
+  describe('updateEnvVarCommand', () => {
+    it.each([
+      {
+        name: 'DATABASE_URL',
+        error: 'is a reserved deployment variable and cannot be set here.',
+      },
+      {
+        name: 'OPENCODE_AUTH_CONTENT',
+        error: 'is managed by Roomote and cannot be set here.',
+      },
+    ])('rejects reserved $name rows', async ({ name, error }) => {
+      mockSelectLimit.mockResolvedValue([{ id: 'reserved-id', name }]);
+
+      await expect(
+        updateEnvVarCommand(buildMockAuth(), {
+          id: 'reserved-id',
+          value: 'replacement',
+        }),
+      ).rejects.toThrow(error);
+
+      expect(mockUpdateReturning).not.toHaveBeenCalled();
+    });
+
+    it('updates an ordinary environment variable', async () => {
+      mockSelectLimit.mockResolvedValue([
+        { id: 'ordinary-id', name: 'ORDINARY_VAR' },
+      ]);
+
+      await expect(
+        updateEnvVarCommand(buildMockAuth(), {
+          id: 'ordinary-id',
+          value: 'replacement',
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(mockUpdateReturning).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('deleteEnvVarCommand', () => {
+    it.each([
+      {
+        name: 'DATABASE_URL',
+        error: 'is a reserved deployment variable and cannot be set here.',
+      },
+      {
+        name: 'OPENCODE_AUTH_CONTENT',
+        error: 'is managed by Roomote and cannot be set here.',
+      },
+    ])('rejects reserved $name rows', async ({ name, error }) => {
+      mockSelectLimit.mockResolvedValue([{ id: 'reserved-id', name }]);
+
+      await expect(
+        deleteEnvVarCommand(buildMockAuth(), { id: 'reserved-id' }),
+      ).rejects.toThrow(error);
+
+      expect(mockDeleteWhere).not.toHaveBeenCalled();
+    });
+
+    it('deletes an ordinary environment variable', async () => {
+      mockSelectLimit.mockResolvedValue([
+        { id: 'ordinary-id', name: 'ORDINARY_VAR' },
+      ]);
+
+      await expect(
+        deleteEnvVarCommand(buildMockAuth(), { id: 'ordinary-id' }),
+      ).resolves.toEqual({ success: true });
+
+      expect(mockDeleteWhere).toHaveBeenCalledTimes(1);
     });
   });
 });

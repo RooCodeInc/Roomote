@@ -27,6 +27,7 @@ export function createSlackFastReplyStream(params: {
     | 'startMessageStream'
     | 'appendMessageStream'
     | 'stopMessageStream'
+    | 'deleteMessage'
     | 'updateMessage'
     | 'getMessageBlocks'
   >;
@@ -37,8 +38,8 @@ export function createSlackFastReplyStream(params: {
   recipientUserId: string;
   sessionId: string;
   footerContext: FastSessionReplyFooterContext;
-  /** The quote a first reply leads with, consumed when the stream finishes. */
-  takeQuote?: () => string | null;
+  /** The pending quote a first reply leads with, cleared after delivery. */
+  getQuote?: () => string | null;
   onDelivered?: () => void;
 }): FastAgentReplyStream {
   let messageTs: string | null = null;
@@ -75,38 +76,51 @@ export function createSlackFastReplyStream(params: {
       if (!ts) return undefined;
       messageTs = null;
       await params.slack.stopMessageStream({ channel: params.channelId, ts });
-      const quote = params.takeQuote?.() ?? null;
-      const updated = await updateSlackThreadMessageWithFooterText({
-        slack: params.slack,
-        channel: params.channelId,
-        threadTs: params.threadTs,
-        messageTs: ts,
-        text: quote ? `${quote}\n${reply.message}` : reply.message,
-        bodyBlocks: [
-          ...(quote
-            ? [
-                {
-                  type: 'section' as const,
-                  block_id: ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
-                  text: { type: 'mrkdwn' as const, text: quote },
-                },
-              ]
-            : []),
-          { type: 'markdown' as const, text: reply.message },
-        ],
-        footerText: buildFastSessionReplyFooterText({
-          provider: 'slack',
-          sessionId: params.sessionId,
-          ...params.footerContext,
-        }),
-      });
-      if (!updated) {
-        // The streamed draft stays as it is; the caller posts the reply in
-        // full rather than treating the draft as the delivery.
+      const quote = params.getQuote?.() ?? null;
+      let updated = false;
+      try {
+        updated = await updateSlackThreadMessageWithFooterText({
+          slack: params.slack,
+          channel: params.channelId,
+          threadTs: params.threadTs,
+          messageTs: ts,
+          text: quote ? `${quote}\n${reply.message}` : reply.message,
+          bodyBlocks: [
+            ...(quote
+              ? [
+                  {
+                    type: 'section' as const,
+                    block_id: ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
+                    text: { type: 'mrkdwn' as const, text: quote },
+                  },
+                ]
+              : []),
+            { type: 'markdown' as const, text: reply.message },
+          ],
+          footerText: buildFastSessionReplyFooterText({
+            provider: 'slack',
+            sessionId: params.sessionId,
+            ...params.footerContext,
+          }),
+        });
+      } catch (error) {
         console.warn(
-          `[Fast Agent] Slack did not accept the final body for streamed reply ${ts}; posting the reply instead.`,
+          `[Fast Agent] Failed to apply the final body to streamed Slack reply ${ts}: ${error instanceof Error ? error.message : String(error)}`,
         );
-        return undefined;
+      }
+      if (!updated) {
+        const deleted = await params.slack
+          .deleteMessage({ channel: params.channelId, ts })
+          .catch(() => false);
+        if (deleted) {
+          console.warn(
+            `[Fast Agent] Slack did not accept the final body for streamed reply ${ts}; removed the partial stream so the reply can post normally.`,
+          );
+          return undefined;
+        }
+        console.error(
+          `[Fast Agent] Slack did not accept the final body for streamed reply ${ts}, and the partial stream could not be removed; keeping it as the delivery.`,
+        );
       }
       await recordFastAgentConversationMessageBestEffort({
         sessionId: params.sessionId,

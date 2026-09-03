@@ -8,8 +8,10 @@ import {
 } from '@roomote/types';
 
 import type { OpenCodeServerClient } from '../opencode-server/client';
-import { OpenCodeServerHarness } from '../opencode-server/harness';
-import { VISUAL_PROOF_ATTEMPT_STATE_PATH } from '../../../../run-task/proof-runner-prompt';
+import {
+  OpenCodeServerHarness,
+  VISUAL_PROOF_ATTEMPT_STATE_PATH,
+} from '../opencode-server/harness';
 import { TaskCommandName } from '../../harness';
 import type {
   OpenCodeGlobalEvent,

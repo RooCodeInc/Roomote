@@ -34,6 +34,10 @@ import {
   MessageUiOptionsProvider,
   Shimmer,
 } from '@/components/ai-elements';
+import {
+  SlackMentionProvider,
+  type SlackMentionScope,
+} from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
 import {
   SessionPromptInput,
@@ -55,6 +59,10 @@ import {
   SessionUserInputCard,
 } from './SessionUserInputCard';
 import { SetupStarterTasksCard } from './setup/SetupStarterTasksCard';
+import {
+  SESSION_HEADER_CONTENT_CLASS_NAME,
+  SESSION_HEADER_TITLE_CLASS_NAME,
+} from './session-header-layout';
 
 import {
   AcpTranscriptBlockList,
@@ -300,6 +308,10 @@ export function FastSessionTranscript({
   const taskStateRevision = useSessionTaskStateRevision();
   const { enabled: narrationModeEnabled } = useNarrationMode();
   const displayMode = narrationModeEnabled ? 'narration' : 'default';
+  const slackMentionScope = useMemo<SlackMentionScope>(
+    () => ({ kind: 'session', sessionId }),
+    [sessionId],
+  );
   const [serverMessages, setServerMessages] = useState<
     Map<string, TranscriptMessage>
   >(
@@ -731,94 +743,96 @@ export function FastSessionTranscript({
     <MessageUiOptionsProvider
       value={{ displayMode, hidePrReviewActions: true }}
     >
-      <WorkspaceHeader
-        className="py-4.25"
-        contentClassName="items-stretch gap-2 pr-12 @[600px]:items-center @[600px]:gap-3 @[600px]:pr-4"
-      >
-        <h1 className="ph-no-capture min-w-0 flex-1 break-words text-sm font-medium @[600px]:flex-[0_1_auto] @[600px]:truncate">
-          {title ?? fallbackTitle}
-        </h1>
-        {headerExtras}
-      </WorkspaceHeader>
-      <Conversation className="min-h-0 flex-1" initial="instant">
-        <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4">
-          {hasOlderMessages ? (
-            <p className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
-              Older messages in this session are not shown.
-            </p>
-          ) : null}
-          <AcpTranscriptBlockList
-            blocks={renderBlocks}
-            showInternalMessages={false}
-            onSuppress={suppressMessage}
-            onOpenDelegatedTask={openTaskPanel ?? undefined}
-          />
-          {hasVisibleAssistantMessage ? timelineExtras : null}
-          {pendingResponseState.pendingAfter !== null &&
-          streamMessages.length === 0 ? (
-            <ThinkingMessage />
-          ) : !isSending &&
-            conversationResponding !== true &&
-            runningTaskCount > 0 &&
-            openTasksPanel ? (
-            <RunningTasksMessage
-              count={runningTaskCount}
-              onOpenTasks={openTasksPanel}
+      <SlackMentionProvider scope={slackMentionScope}>
+        <WorkspaceHeader
+          className="py-4.25"
+          contentClassName={SESSION_HEADER_CONTENT_CLASS_NAME}
+        >
+          <h1 className={`ph-no-capture ${SESSION_HEADER_TITLE_CLASS_NAME}`}>
+            {title ?? fallbackTitle}
+          </h1>
+          {headerExtras}
+        </WorkspaceHeader>
+        <Conversation className="min-h-0 flex-1" initial="instant">
+          <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4">
+            {hasOlderMessages ? (
+              <p className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
+                Older messages in this session are not shown.
+              </p>
+            ) : null}
+            <AcpTranscriptBlockList
+              blocks={renderBlocks}
+              showInternalMessages={false}
+              onSuppress={suppressMessage}
+              onOpenDelegatedTask={openTaskPanel ?? undefined}
             />
-          ) : null}
-          {reviewOffers.map((offer) => (
-            <PrReviewActionOffer
-              key={offer.deliveryId}
-              className="mt-3 rounded-lg border border-border/70 bg-muted/40 px-3 py-3"
-              offer={offer}
-              showQuestion
-              onAction={(choice) =>
-                handleReviewAction(offer.deliveryId, choice)
+            {hasVisibleAssistantMessage ? timelineExtras : null}
+            {pendingResponseState.pendingAfter !== null &&
+            streamMessages.length === 0 ? (
+              <ThinkingMessage />
+            ) : !isSending &&
+              conversationResponding !== true &&
+              runningTaskCount > 0 &&
+              openTasksPanel ? (
+              <RunningTasksMessage
+                count={runningTaskCount}
+                onOpenTasks={openTasksPanel}
+              />
+            ) : null}
+            {reviewOffers.map((offer) => (
+              <PrReviewActionOffer
+                key={offer.deliveryId}
+                className="mt-3 rounded-lg border border-border/70 bg-muted/40 px-3 py-3"
+                offer={offer}
+                showQuestion
+                onAction={(choice) =>
+                  handleReviewAction(offer.deliveryId, choice)
+                }
+              />
+            ))}
+            {pendingInputRequest ? (
+              <div className="mt-3">
+                {pendingInputRequest.preset === 'setup_starter_tasks' ? (
+                  <SetupStarterTasksCard
+                    sessionId={sessionId}
+                    request={pendingInputRequest}
+                  />
+                ) : (
+                  <SessionUserInputCard
+                    sessionId={sessionId}
+                    request={pendingInputRequest}
+                  />
+                )}
+              </div>
+            ) : null}
+          </ConversationContent>
+          <ConversationScrollButton />
+        </Conversation>
+        {canReply && !pendingInputRequest ? (
+          <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card transition-colors @[56rem]:rounded-t-lg">
+            <SessionPromptInput
+              sessionId={sessionId}
+              isBusy={isSending}
+              onSend={sendReply}
+              historyMessageCount={suggestionHistory.messageCount}
+              assistantMessageCount={suggestionHistory.assistantCount}
+              taskStateRevision={taskStateRevision}
+              agentWorking={
+                isSending ||
+                conversationResponding === true ||
+                pendingResponseState.pendingAfter !== null
               }
+              initialModel={sessionModel}
+              initialReasoningEffort={sessionReasoningEffort}
+              defaultModelId={defaultModelId}
+              defaultReasoningEffort={defaultReasoningEffort}
             />
-          ))}
-          {pendingInputRequest ? (
-            <div className="mt-3">
-              {pendingInputRequest.preset === 'setup_starter_tasks' ? (
-                <SetupStarterTasksCard
-                  sessionId={sessionId}
-                  request={pendingInputRequest}
-                />
-              ) : (
-                <SessionUserInputCard
-                  sessionId={sessionId}
-                  request={pendingInputRequest}
-                />
-              )}
-            </div>
-          ) : null}
-        </ConversationContent>
-        <ConversationScrollButton />
-      </Conversation>
-      {canReply && !pendingInputRequest ? (
-        <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card transition-colors @[56rem]:rounded-t-lg">
-          <SessionPromptInput
-            sessionId={sessionId}
-            isBusy={isSending}
-            onSend={sendReply}
-            historyMessageCount={suggestionHistory.messageCount}
-            assistantMessageCount={suggestionHistory.assistantCount}
-            taskStateRevision={taskStateRevision}
-            agentWorking={
-              isSending ||
-              conversationResponding === true ||
-              pendingResponseState.pendingAfter !== null
-            }
-            initialModel={sessionModel}
-            initialReasoningEffort={sessionReasoningEffort}
-            defaultModelId={defaultModelId}
-            defaultReasoningEffort={defaultReasoningEffort}
-          />
-          {replyError ? (
-            <p className="px-4 pb-2 text-xs text-destructive">{replyError}</p>
-          ) : null}
-        </div>
-      ) : null}
+            {replyError ? (
+              <p className="px-4 pb-2 text-xs text-destructive">{replyError}</p>
+            ) : null}
+          </div>
+        ) : null}
+      </SlackMentionProvider>
     </MessageUiOptionsProvider>
   );
 }

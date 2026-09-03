@@ -51,6 +51,13 @@ vi.mock('@/trpc/client', () => ({
     },
   }),
   useTRPC: () => ({
+    slack: {
+      resolveUsers: {
+        queryOptions: (input: unknown) => ({
+          queryKey: ['slack.resolveUsers', input],
+        }),
+      },
+    },
     fastSessions: {
       composerSuggestion: {
         queryOptions: (input: unknown, options?: Record<string, unknown>) => ({
@@ -70,7 +77,7 @@ vi.mock('@tanstack/react-query', async (importOriginal) => ({
   useQuery: () => ({ data: composerSuggestionState.data }),
 }));
 
-vi.mock('./SessionModelSwitcher', () => ({
+vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
   SessionModelSwitcher: ({
     model,
     onModelChange,
@@ -1767,6 +1774,30 @@ describe('FastSessionTranscript', () => {
     expect(document.title).toBe(
       'Rotate the API keys across every production environment with... | Roomote',
     );
+  });
+
+  it('uses content-driven wrapping for header extras', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        initialTitle="Short session title"
+        headerExtras={
+          <a href="https://github.com/acme/widgets/pull/42">widgets#42</a>
+        }
+      />,
+    );
+
+    const heading = screen.getByRole('heading', {
+      name: 'Short session title',
+    });
+    expect(heading).toHaveClass('max-w-full', 'flex-[0_1_auto]');
+    expect(heading.parentElement).toHaveClass(
+      'flex-row',
+      'flex-wrap',
+      'items-center',
+    );
+    expect(heading.parentElement?.className).not.toContain('@[480px]');
   });
 
   it('hides the reply composer for non-web sessions', () => {

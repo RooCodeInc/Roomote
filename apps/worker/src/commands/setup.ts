@@ -140,6 +140,10 @@ export async function setup({
     envVars: {
       ...workerEnv.buildUserFacingEnv(),
       ...workspaceOpts.envVars,
+      ...(workspaceOpts.workspace.type === 'environment' &&
+        workerEnv.sandboxOpenRouterApiKey && {
+          OPENROUTER_API_KEY: workerEnv.sandboxOpenRouterApiKey,
+        }),
     },
   };
   let result: PrepareWorkspaceResult | undefined;
