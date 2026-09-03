@@ -62,6 +62,11 @@ import {
 } from '@roomote/types';
 
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
+import {
+  buildLinearFastReplyMessageId,
+  createFastAgentLinearTaskLauncher,
+  resolveLinearFastSessionClient,
+} from './linear-fast-session';
 import { buildCustomAutomationSlackMessage } from './manager-slack';
 import {
   appendFastAutomationSuggestionInstruction,
@@ -1511,6 +1516,59 @@ async function createTelegramFastAgentParentTurn(
   };
 }
 
+/**
+ * A Linear agent session has no thread to post into: child outcomes land in
+ * the session as agent responses, the same way the Session's own replies do.
+ */
+async function createLinearFastAgentParentTurn(params: {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  actorUserId?: string;
+  onReplyPosted: () => void;
+}): Promise<FastAgentParentTurn> {
+  const fallbackConversation = params.parent.conversation;
+  if (fallbackConversation.surface !== 'linear') {
+    throw new Error('Expected a Linear Fast parent conversation.');
+  }
+  const [session, linear] = await Promise.all([
+    fastAgentConversationRepository.findById({
+      id: params.parent.sessionId,
+      fallbackConversation,
+    }),
+    resolveLinearFastSessionClient(fallbackConversation.workspaceId),
+  ]);
+  if (!session || session.conversation.surface !== 'linear' || !linear) {
+    throw new FastAgentParentEventDeliveryError(
+      'Fast parent session or Linear credentials were not found.',
+      { replyPosted: false, permanent: true },
+    );
+  }
+  const actorUserId = params.actorUserId ?? session.userId;
+  const conversation = session.conversation;
+  const agentSessionId = conversation.replyTarget.channelId;
+  return {
+    userId: actorUserId,
+    conversation,
+    adapter: {
+      launchTask: createFastAgentLinearTaskLauncher({
+        userId: actorUserId,
+        conversation,
+        resolveIssue: () => linear.getAgentSessionIssue(agentSessionId),
+      }),
+      postReply: async ({ message }) => {
+        const result = await linear.emitResponse(agentSessionId, message);
+        if (!result.success) {
+          throw new Error(
+            result.error ?? 'Linear did not accept the agent response.',
+          );
+        }
+        params.onReplyPosted();
+        return { messageId: buildLinearFastReplyMessageId() };
+      },
+    },
+  };
+}
+
 async function createFastAgentParentTurn(params: {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
@@ -1522,6 +1580,9 @@ async function createFastAgentParentTurn(params: {
   }
   if (params.parent.conversation.surface === 'web') {
     return createWebFastAgentParentTurn(params);
+  }
+  if (params.parent.conversation.surface === 'linear') {
+    return createLinearFastAgentParentTurn(params);
   }
 
   const pullRequest =

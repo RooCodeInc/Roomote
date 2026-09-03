@@ -163,9 +163,11 @@ export function buildFastAgentSystemPrompt({
           ? 'Microsoft Teams'
           : surface === 'telegram'
             ? 'Telegram'
-            : surface === 'web'
-              ? 'the Roomote web app'
-              : 'a stored automation conversation';
+            : surface === 'linear'
+              ? 'a Linear agent session'
+              : surface === 'web'
+                ? 'the Roomote web app'
+                : 'a stored automation conversation';
   const reactionGuidance =
     surface === 'slack' && currentMessageReactable
       ? '- Use `send_chat_reaction` only for an optional reaction or an emoji-only terminal answer. It does not satisfy the turn-start acknowledgement required before continuing work. Put the Slack emoji name without colons in `name`. Reserve "eyes" for actively looking, use "thumbsup" for acknowledgement or agreement, and "white_check_mark" for completion.'

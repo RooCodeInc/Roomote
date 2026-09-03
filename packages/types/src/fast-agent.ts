@@ -5,6 +5,7 @@ export const fastAgentSurfaces = [
   'discord',
   'teams',
   'telegram',
+  'linear',
   'automation',
   'web',
 ] as const;
@@ -47,6 +48,16 @@ export const fastAgentConversationSchema = z.discriminatedUnion('surface', [
   z.object({
     surface: z.literal('telegram'),
     ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('linear'),
+    ...fastAgentConversationIdentitySchema,
+    /**
+     * A Linear agent session. `workspaceId` is the Linear organization,
+     * `conversationId` and `replyTarget.channelId` are the agent session id;
+     * replies post as agent-session response activities.
+     */
     replyTarget: fastAgentReplyTargetSchema,
   }),
   z.object({

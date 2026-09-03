@@ -3539,6 +3539,12 @@ export const slackFastIntegrationCallsRelations = relations(
  * stores the workspace choices shown to the user.
  */
 
+/**
+ * N-1 rollback: no longer written since Linear sessions enter Fast Sessions
+ * (the workspace elicitation flow is gone). The previous release still reads
+ * and writes this table; drop it only after that release is no longer the
+ * supported rollback target.
+ */
 export const linearPendingSelections = pgTable(
   'linear_pending_selections',
   {

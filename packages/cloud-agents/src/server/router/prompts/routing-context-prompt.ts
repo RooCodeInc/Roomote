@@ -262,34 +262,6 @@ export function buildSourceContext(source: RoutingSource): string {
       return discordContext + '\n';
     }
 
-    case 'linear': {
-      let linearContext = '**Source**: Linear\n';
-      linearContext += `**Issue**: ${source.issueIdentifier} - ${source.issueTitle}\n`;
-      if (source.projectName) {
-        linearContext += `**Project**: ${source.projectName}\n`;
-      }
-      if (source.teamName) {
-        linearContext += `**Team**: ${source.teamName}\n`;
-      }
-      if (source.guidance?.system) {
-        linearContext += `**Team Guidance**: ${truncateText(source.guidance.system, 500)}\n`;
-      }
-      if (source.guidance?.instructions) {
-        linearContext += `**Session Instructions**: ${truncateText(source.guidance.instructions, 500)}\n`;
-      }
-      if (source.issueDescription) {
-        linearContext += `**Description**: ${truncateText(source.issueDescription, 500)}\n`;
-      }
-      if (source.previousComments?.length) {
-        linearContext += `**Previous Comments**:\n`;
-        const comments = source.previousComments.slice(-MAX_THREAD_MESSAGES);
-        for (const comment of comments) {
-          linearContext += `- ${comment.username ?? 'User'}: ${truncateText(comment.body, 220)}\n`;
-        }
-      }
-      return linearContext + '\n';
-    }
-
     case 'github': {
       let githubContext = '**Source**: GitHub\n';
       githubContext += `**Repository**: ${source.repository}\n`;

@@ -16,7 +16,6 @@ import type {
   TeamsRoutingSource,
   TelegramRoutingSource,
   DiscordRoutingSource,
-  LinearRoutingSource,
   GitHubRoutingSource,
 } from './types';
 
@@ -92,20 +91,6 @@ export interface DiscordContextParams {
 /**
  * Parameters for building a Linear routing context.
  */
-export interface LinearContextParams {
-  userId?: string;
-  routingModel?: string;
-  taskDescription: string;
-  issueIdentifier: string;
-  issueTitle: string;
-  issueDescription?: string;
-  projectName?: string;
-  teamName?: string;
-  guidance?: { system?: string; instructions?: string };
-  previousComments?: Array<{ body: string; username?: string }>;
-  apiBaseUrl?: string;
-}
-
 /**
  * Parameters for building a GitHub routing context.
  */
@@ -241,45 +226,6 @@ export async function buildDiscordRoutingContext(
     threadMessages: params.threadMessages,
     images: params.images,
   };
-  return {
-    routingModel: params.routingModel,
-    taskDescription: params.taskDescription,
-    source,
-    availableEnvironments: envs,
-    ...deploymentRoutingSettings,
-    ...(params.userId
-      ? {
-          routingActor: {
-            userId: params.userId,
-            apiBaseUrl: params.apiBaseUrl,
-          },
-        }
-      : {}),
-  };
-}
-
-/**
- * Builds a routing context for a Linear request.
- */
-export async function buildLinearRoutingContext(
-  params: LinearContextParams,
-): Promise<RoutingContext> {
-  const [envs, deploymentRoutingSettings] = await Promise.all([
-    getAvailableEnvironments(),
-    fetchDeploymentRoutingSettings(),
-  ]);
-
-  const source: LinearRoutingSource = {
-    type: 'linear',
-    issueIdentifier: params.issueIdentifier,
-    issueTitle: params.issueTitle,
-    issueDescription: params.issueDescription,
-    projectName: params.projectName,
-    teamName: params.teamName,
-    guidance: params.guidance,
-    previousComments: params.previousComments,
-  };
-
   return {
     routingModel: params.routingModel,
     taskDescription: params.taskDescription,
