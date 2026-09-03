@@ -216,7 +216,7 @@ export async function injectEnvVars(
     sourceControlToken?: SourceControlTokenMetadata;
     syncSourceControlTokenFiles?: boolean;
     omitInheritedModelRuntimeEnvFromShell?: boolean;
-    explicitShellEnvVarNames?: Iterable<string>;
+    explicitShellEnvVars?: Record<string, string>;
   },
 ): Promise<void> {
   const identity = resolvePreviewIdentity(taskRun);
@@ -300,7 +300,10 @@ export async function injectEnvVars(
 
   writeBashrc(
     options?.omitInheritedModelRuntimeEnvFromShell
-      ? buildEnvironmentShellEnvVars(envVars, options.explicitShellEnvVarNames)
+      ? buildEnvironmentShellEnvVars(
+          { ...envVars, ...options.explicitShellEnvVars },
+          Object.keys(options.explicitShellEnvVars ?? {}),
+        )
       : envVars,
   );
 }

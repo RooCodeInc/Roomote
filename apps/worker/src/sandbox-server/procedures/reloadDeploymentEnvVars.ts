@@ -59,8 +59,8 @@ export async function applyDeploymentEnvVarsReload(input: {
     previewProxySubdomainSuffix: workerEnv.previewProxySubdomainSuffix,
     syncSourceControlTokenFiles: false,
     omitInheritedModelRuntimeEnvFromShell: isEnvironmentWorkspace,
-    explicitShellEnvVarNames: isEnvironmentWorkspace
-      ? workerEnv.getUserEnvVarNames()
+    explicitShellEnvVars: isEnvironmentWorkspace
+      ? workerEnv.getUserEnv()
       : undefined,
   });
 

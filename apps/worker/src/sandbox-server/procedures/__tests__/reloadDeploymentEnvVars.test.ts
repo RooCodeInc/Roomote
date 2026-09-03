@@ -196,10 +196,10 @@ describe('reloadDeploymentEnvVars procedure', () => {
       expect.objectContaining({ payload: { environmentId: 'environment-1' } }),
       expect.objectContaining({
         omitInheritedModelRuntimeEnvFromShell: true,
-        explicitShellEnvVarNames: expect.arrayContaining([
-          'NEXT_PUBLIC_API_BASE',
-          'R_VISION_MODEL',
-        ]),
+        explicitShellEnvVars: {
+          NEXT_PUBLIC_API_BASE: 'https://workspace.example.test',
+          R_VISION_MODEL: 'openai/nested-vision-model',
+        },
       }),
     );
     expect(workerEnv.getRuntimeEnv()).toMatchObject({

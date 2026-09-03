@@ -146,6 +146,28 @@ describe('injectEnvVars', () => {
     ).toEqual({ FOO: 'bar', R_MODEL: 'openai/nested-model' });
   });
 
+  it('writes explicit nested model values over inherited deployment values', async () => {
+    await injectEnvVars(
+      {
+        R_MODEL: 'openai/outer-model',
+        R_VISION_MODEL: 'openai/outer-vision-model',
+      },
+      undefined,
+      {
+        omitInheritedModelRuntimeEnvFromShell: true,
+        explicitShellEnvVars: {
+          R_VISION_MODEL: 'openai/nested-vision-model',
+        },
+      },
+    );
+
+    const commonEnvContent = String(findWrite(COMMON_ENV_PATH)?.[1]);
+    expect(commonEnvContent).not.toContain('export R_MODEL=');
+    expect(commonEnvContent).toContain(
+      "export R_VISION_MODEL='openai/nested-vision-model'",
+    );
+  });
+
   it('prefers runtime auth bypass env vars over task run values', async () => {
     const envVars: Record<string, string> = {};
     const taskRun = {

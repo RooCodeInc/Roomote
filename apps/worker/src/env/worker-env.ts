@@ -367,8 +367,8 @@ export class WorkerEnv {
     return { ...this.runtimeEnv };
   }
 
-  getUserEnvVarNames(): string[] {
-    return Object.keys(this.userEnv);
+  getUserEnv(): Record<string, string> {
+    return { ...this.userEnv };
   }
 
   /** Set a single system base var. */
