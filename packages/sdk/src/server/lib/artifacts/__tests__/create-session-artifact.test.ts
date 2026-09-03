@@ -138,4 +138,25 @@ describe('createSessionArtifact', () => {
     ).rejects.toThrow('path traversal');
     expect(mocks.send).not.toHaveBeenCalled();
   });
+
+  it('rejects an unknown Session before creating an artifact record', async () => {
+    const sessionId = crypto.randomUUID();
+
+    await expect(
+      createSessionArtifact({
+        sessionId,
+        path: 'notes/result.md',
+        content: '# Result',
+        contentType: 'text/markdown',
+        artifactType: 'general',
+      }),
+    ).rejects.toThrow('Session not found.');
+
+    const rows = await db
+      .select()
+      .from(taskArtifacts)
+      .where(eq(taskArtifacts.sessionId, sessionId));
+    expect(rows).toHaveLength(0);
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
 });

@@ -1,5 +1,8 @@
 import { db, taskArtifacts, tasks, eq, and, desc } from '@roomote/db/server';
-import type { TaskArtifactType } from '@roomote/types';
+import {
+  type TaskArtifactType,
+  validateTaskArtifactPath,
+} from '@roomote/types';
 
 function withTypedArtifactType<T extends { artifactType: string }>(
   artifact: T,
@@ -233,47 +236,14 @@ export async function getUploadedArtifactById(artifactId: string) {
   return result[0]!;
 }
 
-const MAX_PATH_LENGTH = 255;
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 
 export function validateArtifactPath(path: string): {
   valid: boolean;
   error?: string;
 } {
-  if (!path || path.trim() === '') {
-    return { valid: false, error: 'Path cannot be empty' };
-  }
-
-  if (path.length > MAX_PATH_LENGTH) {
-    return {
-      valid: false,
-      error: `Path too long (max ${MAX_PATH_LENGTH} chars)`,
-    };
-  }
-
-  // Check for path traversal attempts
-  // Match ".." only when it's a path segment (preceded/followed by / or \ or at boundaries)
-  // This allows valid filenames like "file..name.txt" while blocking "../", "..\", etc.
-  const pathTraversalPattern = /(?:^|[/\\])\.\.(?:$|[/\\])/;
-
-  if (pathTraversalPattern.test(path)) {
-    return { valid: false, error: 'Invalid path: path traversal detected' };
-  }
-
-  // Check for absolute paths (should be relative)
-  if (path.startsWith('/')) {
-    return {
-      valid: false,
-      error: 'Invalid path: must be relative to workspace',
-    };
-  }
-
-  // Check for null bytes (security)
-  if (path.includes('\0')) {
-    return { valid: false, error: 'Invalid path: contains null byte' };
-  }
-
-  return { valid: true };
+  const error = validateTaskArtifactPath(path);
+  return error ? { valid: false, error } : { valid: true };
 }
 
 export function validateArtifactSize(size: number): {

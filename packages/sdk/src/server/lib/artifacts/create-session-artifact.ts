@@ -1,12 +1,8 @@
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import {
-  and,
   db,
   ensureSessionForFastConversation,
   eq,
-  max,
-  sessions,
-  sql,
   taskArtifacts,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
@@ -15,6 +11,8 @@ import {
   type TaskArtifactType,
   validateTaskArtifactPath,
 } from '@roomote/types';
+
+import { createArtifactRecord } from './create-record';
 
 const MAX_FAST_ARTIFACT_BYTES = 128 * 1024;
 let s3Client: S3Client | undefined;
@@ -49,40 +47,14 @@ export async function createSessionArtifact(input: {
     throw new Error('Fast artifacts cannot exceed 128 KiB.');
   }
 
-  const artifact = await db.transaction(async (tx) => {
-    const session = await tx.query.sessions.findFirst({
-      where: eq(sessions.id, input.sessionId),
-      columns: { id: true },
-    });
-    if (!session) throw new Error('Session not found.');
-
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`session:${input.sessionId}:${input.path}`}))`,
-    );
-    const [latest] = await tx
-      .select({ version: max(taskArtifacts.version) })
-      .from(taskArtifacts)
-      .where(
-        and(
-          eq(taskArtifacts.sessionId, input.sessionId),
-          eq(taskArtifacts.path, input.path),
-        ),
-      );
-    const [created] = await tx
-      .insert(taskArtifacts)
-      .values({
-        sessionId: input.sessionId,
-        artifactType: input.artifactType,
-        contentType: input.contentType,
-        path: input.path,
-        version: (latest?.version ?? 0) + 1,
-        size: content.length,
-        uploaded: false,
-      })
-      .returning();
-    if (!created) throw new Error('Failed to create artifact record.');
-    return created;
+  const artifact = await createArtifactRecord({
+    sessionId: input.sessionId,
+    artifactType: input.artifactType,
+    contentType: input.contentType,
+    path: input.path,
+    size: content.length,
   });
+  if (!artifact) throw new Error('Failed to create artifact record.');
 
   await getS3Client().send(
     new PutObjectCommand({
