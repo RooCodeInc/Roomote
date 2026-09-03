@@ -1,4 +1,14 @@
-import { and, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 
 import {
   type TaskPayload,
@@ -500,6 +510,67 @@ export async function findActiveGitHubPrReviewTask({
     .limit(10);
 
   return pickActiveWork(reviewRows, 'task_pull_request');
+}
+
+export type GitHubPullRequestLinkedTask = {
+  runId: number;
+  taskId: string;
+  type: TaskPayloadKind;
+  status: RunStatus;
+};
+
+/**
+ * The newest Roomote task durably linked to the pull request, other than the
+ * review pipeline or a conflict resolver: the task that opened it or a
+ * follow-up on it, whether or not a run is still active or resumable.
+ *
+ * Review-feedback delivery keys on this linkage (every linked task's Fast
+ * parent hears human review comments), so a caller deciding whether the
+ * feedback pipeline already owns replies on the pull request must use this,
+ * not the active-run lookups above, which return null once the task finishes
+ * without a snapshot.
+ */
+export async function findGitHubPullRequestLinkedTask({
+  repoFullName,
+  prNumber,
+  sourceControlProvider = 'github',
+  host,
+}: {
+  repoFullName: string;
+  prNumber: number;
+  sourceControlProvider?: SourceControlProvider;
+  /** When given, only rows on this host (or legacy rows with no host) match. */
+  host?: string | null;
+}): Promise<GitHubPullRequestLinkedTask | null> {
+  const [row] = await db
+    .select(ACTIVE_WORK_COLUMNS)
+    .from(taskRuns)
+    .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, taskRuns.taskId))
+    .where(
+      and(
+        notInArray(taskRuns.payloadKind, [
+          ...ACTIVE_PR_REVIEW_TYPES,
+          TaskPayloadKind.GithubPrConflictResolve,
+        ]),
+        eq(taskPullRequests.sourceControlProvider, sourceControlProvider),
+        eq(taskPullRequests.repository, repoFullName),
+        eq(taskPullRequests.prNumber, prNumber),
+        ...(host
+          ? [or(eq(taskPullRequests.host, host), isNull(taskPullRequests.host))]
+          : []),
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
+
+  return row
+    ? {
+        runId: row.runId,
+        taskId: row.taskId,
+        type: row.type,
+        status: row.status,
+      }
+    : null;
 }
 
 async function fetchRunReuseMetadata(

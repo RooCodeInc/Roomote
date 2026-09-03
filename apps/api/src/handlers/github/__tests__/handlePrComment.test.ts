@@ -2,6 +2,7 @@ const mocks = vi.hoisted(() => ({
   getGitHubAutomationTargets: vi.fn(),
   getInstallationOctokit: vi.fn(),
   findActiveGitHubPrReviewTask: vi.fn(),
+  findGitHubPullRequestLinkedTask: vi.fn(),
   findReusableGitHubPrFollowUpOwner: vi.fn(),
   startSourceControlFastSessionTurn: vi.fn(),
   fetchGitHubLinkedReferences: vi.fn(),
@@ -9,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@roomote/db/server', () => ({
   findActiveGitHubPrReviewTask: mocks.findActiveGitHubPrReviewTask,
+  findGitHubPullRequestLinkedTask: mocks.findGitHubPullRequestLinkedTask,
   findReusableGitHubPrFollowUpOwner: mocks.findReusableGitHubPrFollowUpOwner,
 }));
 
@@ -164,6 +166,7 @@ describe('handlePrComment', () => {
     });
     mocks.findActiveGitHubPrReviewTask.mockResolvedValue(null);
     mocks.findReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
+    mocks.findGitHubPullRequestLinkedTask.mockResolvedValue(null);
     mocks.fetchGitHubLinkedReferences.mockResolvedValue([]);
     mocks.startSourceControlFastSessionTurn.mockResolvedValue({
       status: 'queued',
@@ -358,10 +361,9 @@ describe('handlePrComment', () => {
           message: 'fast_session_queued',
         }),
       );
-      expect(mocks.findReusableGitHubPrFollowUpOwner).toHaveBeenCalledWith({
+      expect(mocks.findGitHubPullRequestLinkedTask).toHaveBeenCalledWith({
         repoFullName: 'acme/api',
         prNumber: 42,
-        branchName: 'feature/ship',
         host: 'github.com',
       });
       // The gate's fetch is reused for the context; the parent is not
@@ -389,13 +391,15 @@ describe('handlePrComment', () => {
       );
     });
 
-    it('leaves replies on a Roomote-opened pull request to the review-feedback pipeline', async () => {
-      mocks.findReusableGitHubPrFollowUpOwner.mockResolvedValue({
+    it('leaves replies on a Roomote-opened pull request to the review-feedback pipeline, even after its task finished', async () => {
+      // The opening task is done and has no resumable snapshot, so the
+      // active-owner lookup finds nothing; the durable PR linkage still does.
+      mocks.findReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
+      mocks.findGitHubPullRequestLinkedTask.mockResolvedValue({
         taskId: 'task-owner',
         runId: 5,
-        status: 'running',
-        taskPhase: null,
-        delivery: 'attach',
+        type: 'standard_task',
+        status: 'completed',
       });
 
       const result = await handlePrComment(makeRoomoteThreadReplyPayload());
