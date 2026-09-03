@@ -214,7 +214,7 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(requestUserInputSource).toContain('.max(4).optional()');
     expect(requestUserInputSource).toContain('preset: z.enum');
     expect(requestUserInputSource).toContain(
-      'exactly one of questions or preset',
+      'questions are ignored when a preset is set',
     );
     expect(skillSource).toContain('Exact skill ID returned by list_skills');
     expect(skillSource).not.toContain('"explore-and-act"');
