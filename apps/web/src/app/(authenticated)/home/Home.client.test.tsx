@@ -949,45 +949,10 @@ describe('Home', () => {
     expect(mockStartFastSession).toHaveBeenCalledTimes(1);
   });
 
-  it('does not show the empty-environments warning while environments are loading', () => {
-    currentEnvironments = undefined;
-    currentEnvironmentsPending = true;
-
+  it('renders onboarding guidance on Home', () => {
     render(<Home initialPlaceholderIndex={0} />);
 
-    expect(
-      screen.queryByText(/You haven't created any environments yet/i),
-    ).not.toBeInTheDocument();
-  });
-
-  it('shows the empty-environments warning only after load completes with none', () => {
-    currentEnvironments = undefined;
-    currentEnvironmentsPending = true;
-
-    const { rerender } = render(<Home initialPlaceholderIndex={0} />);
-
-    expect(
-      screen.queryByText(/You haven't created any environments yet/i),
-    ).not.toBeInTheDocument();
-
-    currentEnvironments = [];
-    currentEnvironmentsPending = false;
-    rerender(<Home initialPlaceholderIndex={0} />);
-
-    expect(
-      screen.getByText(/You haven't created any environments yet/i),
-    ).toBeInTheDocument();
-  });
-
-  it('does not show the empty-environments warning to members', () => {
-    currentIsAdmin = false;
-    currentEnvironments = [];
-
-    render(<Home initialPlaceholderIndex={0} />);
-
-    expect(
-      screen.queryByText(/You haven't created any environments yet/i),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText('Onboarding')).toBeInTheDocument();
   });
 
   it('allows all-repositories launches when no environments exist', async () => {

@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useState, useCallback, useEffect, useRef, type Ref } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm, FormProvider } from 'react-hook-form';
@@ -19,11 +18,9 @@ import {
 
 import { type CreateTaskFormValues, createTaskFormSchema } from '@/types';
 
-import { SETTINGS_PATHS } from '@/lib/settings';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 
-import { useEnvironments } from '@/hooks/environments';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import {
@@ -33,14 +30,11 @@ import {
 import { useStartFastSession } from '@/hooks/task-runs';
 
 import {
-  Alert,
-  ArrowRight,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-  VectorSquare,
 } from '@/components/system';
 import type { PromptInputMessage } from '@/components/ai-elements';
 import {
@@ -106,12 +100,8 @@ export function NewTaskForm({
   const resolvedAvailableComputeProviders =
     availableComputeProviders ?? taskLaunchConfig.availableComputeProviders;
   const router = useRouter();
-  const environments = useEnvironments();
-  const {
-    cloudEnabled,
-    isAdmin,
-    managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
-  } = useAuthorizedUser();
+  const { cloudEnabled, managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
+    useAuthorizedUser();
 
   const canSelectBranch = false;
 
@@ -316,9 +306,6 @@ export function NewTaskForm({
 
   const isBusy = startFastSessionMutation.isPending;
 
-  const hasAnyEnvironments = (environments.data?.length ?? 0) > 0;
-  const showNoEnvironmentsWarning =
-    isAdmin && !environments.isPending && !hasAnyEnvironments;
   const submitDisabledReason = getTaskLaunchDisabledReason(managedAccess);
 
   const handleSubmit = useCallback(
@@ -460,28 +447,6 @@ export function NewTaskForm({
           submitDisabledReason={submitDisabledReason}
         />
       </div>
-
-      {showNoEnvironmentsWarning && (
-        <Alert
-          variant="light"
-          className="mt-2 animate-[enter-down_1s_1_300ms_backwards]"
-        >
-          <VectorSquare />
-          <p>
-            <span>You haven&apos;t created any environments yet. </span>
-            <span className="block md:inline">
-              Roomote can work directly on your repos, but it can&apos;t verify
-              its work.{' '}
-            </span>
-            <Link
-              href={SETTINGS_PATHS.newEnvironment}
-              className="text-primary font-semibold underline hover:no-underline block md:inline"
-            >
-              Create your first <ArrowRight className="inline size-4" />
-            </Link>
-          </p>
-        </Alert>
-      )}
     </FormProvider>
   );
 }
