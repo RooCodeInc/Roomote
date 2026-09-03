@@ -51,6 +51,13 @@ vi.mock('@/trpc/client', () => ({
     },
   }),
   useTRPC: () => ({
+    slack: {
+      resolveUsers: {
+        queryOptions: (input: unknown) => ({
+          queryKey: ['slack.resolveUsers', input],
+        }),
+      },
+    },
     fastSessions: {
       composerSuggestion: {
         queryOptions: (input: unknown, options?: Record<string, unknown>) => ({

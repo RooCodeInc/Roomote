@@ -1,13 +1,13 @@
-import {
-  SlackNotifier,
-  shouldResumeSlackAuthThread,
-  showTaskConfiguration,
-} from '@roomote/slack';
+import { SlackNotifier, shouldResumeSlackAuthThread } from '@roomote/slack';
 import {
   enqueueSlackAccountLinkEducation,
   recordSlackConversationMessageBestEffort,
 } from '@roomote/sdk/server';
-import { PRODUCT_NAME } from '@roomote/types';
+import {
+  PRODUCT_NAME,
+  buildSlackUserProfileUrl,
+  getSlackTeamIdFromTaskPayload,
+} from '@roomote/types';
 import {
   type SlackAuthToken,
   type SlackInstallation,
@@ -17,8 +17,10 @@ import {
   desc,
   eq,
   gt,
+  inArray,
   resolveEffectiveDeploymentEnvVars,
   slackAuthTokens,
+  slackDirectoryUsers,
   slackInstallations,
   slackUserMappings,
   users,
@@ -26,6 +28,9 @@ import {
 
 import type { UserAuthSuccess } from '@/types';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
+import { findAccessibleFastSession } from '@/lib/server/fast-sessions';
+
+import { getTaskByIdCommand } from '../tasks/by-id';
 import { getSlackRedirectUri } from '@/lib/server/slack-redirect-uri';
 import { syncUser } from '@/lib/server/sync-internal';
 import { buildSlackInstallUrl } from '@/lib/slack-install-url';
@@ -327,7 +332,7 @@ async function handleSlackAuthentication({
   userId: string;
   authToken: SlackAuthToken;
 }) {
-  await bootstrapWebRuntimeEnv();
+  const env = await bootstrapWebRuntimeEnv();
   await ensureSlackMappingUserExists(userId);
 
   const { userMapping, status } = await upsertSlackUserMapping({
@@ -361,19 +366,21 @@ async function handleSlackAuthentication({
   );
 
   if (resumedOriginalThread) {
-    await showTaskConfiguration({
-      event: {
-        type: 'app_mention',
-        channel: authToken.channel,
-        user: authToken.slackUserId,
-        text: authToken.originalText,
-        ts: authToken.threadTs,
-        thread_ts: undefined,
-      },
-      slackInstallation,
-      userMapping,
-      slack,
+    const apiUrl = new URL(
+      'api/webhooks/slack/auth/resume',
+      env.TRPC_URL.endsWith('/') ? env.TRPC_URL : `${env.TRPC_URL}/`,
+    );
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ state: authToken.token }),
     });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to resume pending Slack request: HTTP ${response.status}`,
+      );
+    }
   }
 
   try {
@@ -813,4 +820,148 @@ export async function completePendingSlackAuthenticationCommand(
           : 'Failed to complete authentication',
     };
   }
+}
+
+const SLACK_USER_ID_PATTERN = /^[UW][A-Z0-9]+$/;
+
+/**
+ * Slack team a transcript belongs to, derived server-side from the task run
+ * payload or the Fast conversation so the browser never chooses which
+ * workspace's directory and bot token answer a lookup.
+ */
+async function resolveSlackMentionScopeTeamId(
+  auth: UserAuthSuccess,
+  scope:
+    | { kind: 'task'; taskId: string }
+    | { kind: 'session'; sessionId: string },
+): Promise<string | null> {
+  if (scope.kind === 'session') {
+    const session = await findAccessibleFastSession(
+      { userId: auth.userId, isAdmin: auth.isAdmin },
+      scope.sessionId,
+    );
+    return session?.surface === 'slack' ? (session.workspaceId ?? null) : null;
+  }
+
+  // Same lookup the task page uses, so soft-deleted or otherwise
+  // inaccessible tasks never reveal which workspace they came from.
+  const task = await getTaskByIdCommand(auth, { taskId: scope.taskId });
+  return task?.taskRun
+    ? getSlackTeamIdFromTaskPayload(task.taskRun.payload)
+    : null;
+}
+
+/**
+ * Resolves raw Slack user IDs referenced by `<@U…>` tokens in persisted
+ * message text to display names and profile links for the web transcript.
+ * The Brain Slack directory answers first; anything it does not know goes
+ * through `users.info` with the installation's bot token. Unresolvable IDs
+ * are omitted so the caller can fall back to the raw token.
+ */
+export async function resolveSlackUsersCommand(
+  auth: UserAuthSuccess,
+  input: {
+    scope:
+      | { kind: 'task'; taskId: string }
+      | { kind: 'session'; sessionId: string };
+    userIds: string[];
+  },
+): Promise<{
+  users: Record<string, { name: string; profileUrl: string | null }>;
+}> {
+  const userIds = [
+    ...new Set(
+      input.userIds
+        .map((userId) => userId.trim())
+        .filter((userId) => SLACK_USER_ID_PATTERN.test(userId)),
+    ),
+  ];
+  const users: Record<string, { name: string; profileUrl: string | null }> = {};
+  if (userIds.length === 0) {
+    return { users };
+  }
+
+  const teamId = await resolveSlackMentionScopeTeamId(auth, input.scope);
+  if (!teamId) {
+    return { users };
+  }
+
+  const installation =
+    (await db.query.slackInstallations.findFirst({
+      where: and(
+        eq(slackInstallations.isActive, true),
+        eq(slackInstallations.teamId, teamId),
+      ),
+      orderBy: [desc(slackInstallations.updatedAt)],
+    })) ?? null;
+  const teamDomain = installation?.teamDomain ?? null;
+  const toProfileUrl = (slackUserId: string) =>
+    buildSlackUserProfileUrl({
+      slackUserId,
+      slackTeamId: teamId,
+      slackWorkspaceDomain: teamDomain,
+    });
+
+  if (installation?.botUserId && userIds.includes(installation.botUserId)) {
+    const botName =
+      installation.botName?.trim() || installation.appName?.trim() || null;
+    if (botName) {
+      users[installation.botUserId] = {
+        name: botName,
+        profileUrl: toProfileUrl(installation.botUserId),
+      };
+    }
+  }
+
+  const unresolvedAfterBot = userIds.filter((userId) => !users[userId]);
+  if (unresolvedAfterBot.length > 0) {
+    const directoryRows = await db
+      .select({
+        slackUserId: slackDirectoryUsers.slackUserId,
+        displayName: slackDirectoryUsers.displayName,
+        realName: slackDirectoryUsers.realName,
+        username: slackDirectoryUsers.username,
+      })
+      .from(slackDirectoryUsers)
+      .where(
+        and(
+          eq(slackDirectoryUsers.slackTeamId, teamId),
+          inArray(slackDirectoryUsers.slackUserId, unresolvedAfterBot),
+        ),
+      );
+    for (const row of directoryRows) {
+      const name =
+        row.displayName?.trim() ||
+        row.realName?.trim() ||
+        row.username?.trim() ||
+        null;
+      if (name) {
+        users[row.slackUserId] = {
+          name,
+          profileUrl: toProfileUrl(row.slackUserId),
+        };
+      }
+    }
+  }
+
+  const unresolved = userIds.filter((userId) => !users[userId]);
+  if (unresolved.length > 0 && installation?.botAccessToken) {
+    const slack = new SlackNotifier(installation.botAccessToken, {
+      botUserId: installation.botUserId,
+      botName: installation.botName,
+      appName: installation.appName,
+    });
+    try {
+      const names = await slack.getUserDisplayNames(unresolved);
+      for (const [slackUserId, name] of names) {
+        users[slackUserId] = { name, profileUrl: toProfileUrl(slackUserId) };
+      }
+    } catch (error) {
+      console.warn(
+        `[resolveSlackUsers] Failed to resolve Slack users: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return { users };
 }

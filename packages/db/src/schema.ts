@@ -3054,6 +3054,7 @@ export const slackAuthTokens = pgTable(
     slackTeamId: text('slack_team_id').notNull(),
     channel: text('channel').notNull(),
     threadTs: text('thread_ts').notNull(),
+    messageTs: text('message_ts'),
     originalText: text('original_text').notNull(),
     expiresAt: timestamp('expires_at').notNull(),
     createdAt: timestamp('created_at').notNull().defaultNow(),

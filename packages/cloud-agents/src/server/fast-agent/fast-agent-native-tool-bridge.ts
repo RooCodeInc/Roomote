@@ -487,7 +487,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Ask structured questions, or use a trusted setup preset whose options Roomote supplies. Pass exactly one of questions or preset. Multiple-choice questions require explicit submission. The turn resumes from the persisted answer.",
+  description: "Ask structured questions, or use a trusted setup preset whose options Roomote supplies. Pass a preset alone when setup instructions name one; questions are ignored when a preset is set. Multiple-choice questions require explicit submission. The turn resumes from the persisted answer.",
   args: {
     questions: z.array(z.object({
       id: z.string().min(1).max(80),

@@ -41,6 +41,7 @@ export * from './lib/map-raw-row';
 export * from './lib/legacy-task-inference-usage';
 export * from './lib/llm-usage';
 export * from './lib/deployment-auth-keypairs';
+export * from './lib/migration-readiness';
 export * from './lib/environment-variables';
 export * from './lib/task-id';
 export * from './lib/task-activity-timestamp';

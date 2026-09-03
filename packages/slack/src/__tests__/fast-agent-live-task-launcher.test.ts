@@ -198,7 +198,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     });
   });
 
-  it('normalizes Slack mentions before launching the child task', async () => {
+  it('normalizes Slack links but keeps raw mentions before launching the child task', async () => {
     await createLauncher()({
       prompt: 'Ask <@U456> about the regression',
       environmentId: 'env-1',
@@ -208,6 +208,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
 
     expect(mocks.normalizeIncomingText).toHaveBeenCalledWith(
       'Ask <@U456> about the regression',
+      { preserveMentions: true },
     );
     expect(mocks.setSlackLiveTaskStreamData).toHaveBeenCalledWith(
       'task-1',
