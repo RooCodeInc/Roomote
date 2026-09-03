@@ -393,6 +393,7 @@ describe('GitHub Fast delivery', () => {
       delivery: delivery!,
       userId: 'user-1',
       sessionId: 'fast-1',
+      quote: '> **alice:** @roomote please rebase this',
     });
 
     await adapter.postReply({ message: 'On it.' });
@@ -406,6 +407,15 @@ describe('GitHub Fast delivery', () => {
         comment_id: 6001,
         body: expect.stringContaining('On it.\n\nRebased; running checks.'),
       }),
+    );
+    // The turn opened with the quote and appends keep it at the top.
+    const firstBody = createComment.mock.calls[0]?.[0].body as string;
+    const editedBody = updateComment.mock.calls[0]?.[0].body as string;
+    expect(firstBody.startsWith('> **alice:** @roomote please rebase')).toBe(
+      true,
+    );
+    expect(editedBody.startsWith('> **alice:** @roomote please rebase')).toBe(
+      true,
     );
     // Footer appears once, at the bottom of the edited body.
     const body = updateComment.mock.calls[0]?.[0].body as string;

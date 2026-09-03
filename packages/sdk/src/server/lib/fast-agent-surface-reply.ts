@@ -61,6 +61,7 @@ import {
 import {
   buildSourceControlFastAdapter,
   buildSourceControlFastDelivery,
+  buildSourceControlReplyQuote,
 } from './source-control-fast-delivery';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
@@ -527,6 +528,12 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         delivery,
         userId: params.userId,
         sessionId: session.id,
+        quote: params.externalInput
+          ? null
+          : buildSourceControlReplyQuote({
+              senderDisplayName: params.senderDisplayName,
+              text: params.question,
+            }),
       }),
     };
   }

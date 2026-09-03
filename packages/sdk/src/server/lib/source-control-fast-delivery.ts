@@ -201,6 +201,29 @@ export function createFastAgentSourceControlTaskLauncher(params: {
   };
 }
 
+const SOURCE_CONTROL_QUOTE_MAX_LENGTH = 200;
+
+/**
+ * A markdown blockquote of the comment a turn answers, prepended to the
+ * turn's comment the way Slack replies quote their message. Kept to one
+ * normalized line so the quote stays a header, not a second comment.
+ */
+export function buildSourceControlReplyQuote(params: {
+  senderDisplayName: string | null;
+  text: string;
+}): string | null {
+  const username = params.senderDisplayName?.replace(/\s+/g, ' ').trim();
+  const normalized = params.text.replace(/\s+/g, ' ').trim();
+  if (!normalized) {
+    return null;
+  }
+  const text =
+    normalized.length > SOURCE_CONTROL_QUOTE_MAX_LENGTH
+      ? `${normalized.slice(0, SOURCE_CONTROL_QUOTE_MAX_LENGTH)}…`
+      : normalized;
+  return `> ${username ? `**${username}:** ` : ''}${text}`;
+}
+
 export type SourceControlPostedComment = {
   messageId: string;
   /**
@@ -815,6 +838,8 @@ export function buildSourceControlFastAdapter(params: {
   delivery: SourceControlFastDelivery;
   userId: string;
   sessionId: string;
+  /** Blockquote of the message this turn answers; opens the turn's comment. */
+  quote?: string | null;
   onReplyPosted?: () => void;
 }): {
   launchTask: LaunchFastAgentTask;
@@ -852,10 +877,10 @@ export function buildSourceControlFastAdapter(params: {
         params.onReplyPosted?.();
         return { messageId: turnComment.messageId };
       }
-      turnBody = message;
+      turnBody = params.quote ? `${params.quote}\n\n${message}` : message;
       const posted = await params.delivery.postComment({
         discussion,
-        body: `${message}\n\n${footer}`,
+        body: `${turnBody}\n\n${footer}`,
       });
       turnComment = posted;
       params.onReplyPosted?.();
