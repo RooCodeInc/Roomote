@@ -16,7 +16,7 @@ import {
   DialogTitle,
   Input,
 } from '@/components/system';
-import { PullRequestBadge } from '@/components/sandbox';
+import { PullRequestBadge, WorkspaceBadge } from '@/components/sandbox';
 import { WorkspaceHeader } from '@/components/layout';
 
 import { useTRPC } from '@/trpc/client';
@@ -39,6 +39,8 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
     trpc.sessions.forTask.queryOptions({ taskId }),
   );
 
+  const environmentId = taskRun?.payload?.environmentId;
+  const repo = taskRun?.payload?.repo;
   const prRepo = taskRun?.prRepo;
   const prNumber = taskRun?.prNumber;
   const pullRequests = taskRun?.pullRequests ?? [];
@@ -49,6 +51,14 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
       : null;
 
   const badges = [
+    (environmentId || repo) && (
+      <WorkspaceBadge
+        key="workspace"
+        environmentId={environmentId}
+        repo={repo}
+        iconClassName="text-muted-foreground"
+      />
+    ),
     ...(pullRequests.length > 0
       ? pullRequests.map((pullRequest) => (
           <PullRequestBadge
