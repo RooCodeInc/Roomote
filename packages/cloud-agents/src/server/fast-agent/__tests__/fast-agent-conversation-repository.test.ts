@@ -1378,10 +1378,28 @@ describe('Fast conversation repository', () => {
           result: 'Subagent exited early.',
         },
       ],
+      // The resumed run numbers its rows after the attempt's, so nothing
+      // is overwritten: assistant:0 exists, tools 1..4 exist, turnSeq 9 is
+      // the highest row.
+      next: {
+        assistantOrdinal: 1,
+        toolOrdinal: 5,
+        retryNoticeOrdinal: 0,
+        turnSeq: 10,
+      },
     });
     await expect(
       loadFastAgentTurnAttemptSummary(session.id, 'turn-none'),
-    ).resolves.toEqual({ replies: [], actions: [] });
+    ).resolves.toEqual({
+      replies: [],
+      actions: [],
+      next: {
+        assistantOrdinal: 0,
+        toolOrdinal: 0,
+        retryNoticeOrdinal: 0,
+        turnSeq: 0,
+      },
+    });
   });
 
   it('walks a durable turn row through claim, release, revoke, and delivery', async () => {

@@ -2301,6 +2301,28 @@ export async function answerFastAgentQuestion({
       currentMessageReactable,
     });
     canonicalConversationId = session.id;
+    // A resumed run continues the same turn. Load what the earlier attempt
+    // already did before anything is written: the model is told about it,
+    // and this run numbers its canonical events after the attempt's rows so
+    // it extends the transcript instead of overwriting them. Best effort:
+    // without it the model starts the turn over, the pre-resume behavior.
+    const previousAttempt =
+      resumedAfterInterruption || resumedAfterInferenceRetry
+        ? await loadFastAgentTurnAttemptSummary(session.id, turnId).catch(
+            (error) => {
+              console.warn(
+                `[Fast Agent] Failed to load the previous attempt for a resumed turn: ${formatErrorForLog(error)}`,
+              );
+              return null;
+            },
+          )
+        : null;
+    if (previousAttempt) {
+      nextAssistantOrdinal = previousAttempt.next.assistantOrdinal;
+      nextToolOrdinal = previousAttempt.next.toolOrdinal;
+      nextRetryNoticeOrdinal = previousAttempt.next.retryNoticeOrdinal;
+      nextTurnSeq = previousAttempt.next.turnSeq;
+    }
     // A resumed execution of this same turn inherits the retry notice its
     // predecessor left active, so the eventual answer edits that notice in
     // place; only when no such notice exists (or this is a new turn) does a
@@ -2464,20 +2486,6 @@ export async function answerFastAgentQuestion({
             senderDisplayName?.trim() || currentUser.displayName || undefined,
           githubLogin: currentUser.githubLogin || undefined,
         };
-    // A resumed run continues the same turn, so it is told what the earlier
-    // attempt already did. Best effort: without it the model starts the turn
-    // over, which is the pre-resume behavior, not a failure.
-    const previousAttempt =
-      resumedAfterInterruption || resumedAfterInferenceRetry
-        ? await loadFastAgentTurnAttemptSummary(session.id, turnId).catch(
-            (error) => {
-              console.warn(
-                `[Fast Agent] Failed to load the previous attempt for a resumed turn: ${formatErrorForLog(error)}`,
-              );
-              return null;
-            },
-          )
-        : null;
     const {
       bootstrapMessages,
       turnMessages,

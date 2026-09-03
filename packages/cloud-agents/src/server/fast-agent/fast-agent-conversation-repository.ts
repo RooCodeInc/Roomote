@@ -225,6 +225,16 @@ export type FastAgentTurnAttemptSummary = {
   /** Visible assistant replies the attempt already posted, in order. */
   replies: string[];
   actions: FastAgentTurnAttemptAction[];
+  /**
+   * Where the resumed run must continue numbering its canonical events so
+   * its rows extend the transcript instead of overwriting the attempt's.
+   */
+  next: {
+    assistantOrdinal: number;
+    toolOrdinal: number;
+    retryNoticeOrdinal: number;
+    turnSeq: number;
+  };
 };
 
 const TURN_ATTEMPT_RESULT_MAX_CHARS = 1_200;
@@ -242,6 +252,8 @@ export async function loadFastAgentTurnAttemptSummary(
 ): Promise<FastAgentTurnAttemptSummary> {
   const rows = await db
     .select({
+      eventId: fastAgentMessages.eventId,
+      turnSeq: fastAgentMessages.turnSeq,
       eventType: fastAgentMessages.eventType,
       role: fastAgentMessages.role,
       contentBlocks: fastAgentMessages.contentBlocks,
@@ -272,7 +284,30 @@ export async function loadFastAgentTurnAttemptSummary(
 
   const replies: string[] = [];
   const actions = new Map<string, FastAgentTurnAttemptAction>();
+  const next = {
+    assistantOrdinal: 0,
+    toolOrdinal: 0,
+    retryNoticeOrdinal: 0,
+    turnSeq: 0,
+  };
+  const ordinalOf = (slot: string, eventId: string) => {
+    const match = new RegExp(`:${slot}:(\\d+)$`, 'u').exec(eventId);
+    return match ? Number(match[1]) + 1 : 0;
+  };
   for (const row of rows) {
+    next.turnSeq = Math.max(next.turnSeq, row.turnSeq + 1);
+    next.assistantOrdinal = Math.max(
+      next.assistantOrdinal,
+      ordinalOf('assistant', row.eventId),
+    );
+    next.toolOrdinal = Math.max(
+      next.toolOrdinal,
+      ordinalOf('tool', row.eventId),
+    );
+    next.retryNoticeOrdinal = Math.max(
+      next.retryNoticeOrdinal,
+      ordinalOf('retry-notice', row.eventId),
+    );
     const payload = (row.payload ?? {}) as Record<string, unknown>;
     const metadata = (row.metadata ?? {}) as Record<string, unknown>;
     if (
@@ -326,7 +361,7 @@ export async function loadFastAgentTurnAttemptSummary(
       if (reply) replies.push(reply);
     }
   }
-  return { replies, actions: [...actions.values()] };
+  return { replies, actions: [...actions.values()], next };
 }
 
 export type FastAgentUnresolvedRequest = {

@@ -438,7 +438,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.revokeDurableReplay.mockResolvedValue(true);
     mocks.scheduleDurableRetry.mockResolvedValue(true);
     mocks.findActiveRetryNotice.mockResolvedValue(null);
-    mocks.loadTurnAttempt.mockResolvedValue({ replies: [], actions: [] });
+    mocks.loadTurnAttempt.mockResolvedValue({
+      replies: [],
+      actions: [],
+      next: {
+        assistantOrdinal: 0,
+        toolOrdinal: 0,
+        retryNoticeOrdinal: 0,
+        turnSeq: 0,
+      },
+    });
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
@@ -3980,14 +3989,49 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             status: 'unknown',
           },
         ],
+        next: {
+          assistantOrdinal: 2,
+          toolOrdinal: 3,
+          retryNoticeOrdinal: 0,
+          turnSeq: 7,
+        },
       });
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-2' });
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Done: 12 files.',
+          });
+          return '';
+        },
+      );
 
       await answerFastAgentQuestion({
         ...baseParams,
-        adapter: callbacks(),
+        adapter: callbacks({ postReply }),
         durableAdmission,
         resumedAfterInterruption: true,
       });
+
+      // This run's rows are numbered after the attempt's, so the earlier
+      // attempt's transcript survives the resume.
+      const written = mocks.upsertMessage.mock.calls.map(
+        ([input]) => input.message,
+      );
+      expect(
+        written.some((message) => message.eventId.endsWith(':assistant:2')),
+      ).toBe(true);
+      expect(
+        written.some((message) => /:assistant:[01]$/u.test(message.eventId)),
+      ).toBe(false);
+      expect(
+        written.some((message) => message.eventId.endsWith(':tool:3')),
+      ).toBe(true);
+      expect(
+        Math.min(...written.map((message) => message.turnSeq)),
+      ).toBeGreaterThanOrEqual(7);
 
       expect(mocks.loadTurnAttempt).toHaveBeenCalledWith(
         expect.any(String),
