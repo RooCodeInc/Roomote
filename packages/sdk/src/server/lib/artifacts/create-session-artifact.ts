@@ -92,7 +92,9 @@ export async function createFastAgentSessionArtifact(
     artifactType: artifact.artifactType as 'general' | 'plan',
     contentType: artifact.contentType,
     size: artifact.size,
-    viewUrl: `${baseUrl}/sessions/${input.sessionId}`,
+    // Deep link into the Session Artifacts panel; mirrors
+    // getSessionArtifactViewUrl in apps/web/src/lib/artifact-view-urls.ts.
+    viewUrl: `${baseUrl}/sessions/${input.sessionId}?artifact=${encodeURIComponent(artifact.path)}&v=${artifact.version}`,
   };
 }
 
