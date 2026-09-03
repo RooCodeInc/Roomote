@@ -45,6 +45,12 @@ vi.mock('@roomote/slack', () => ({
   SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_TEXT: 'followup text',
   SlackNotifier: class {},
   ROOMOTE_SLACK_REPLY_TOGGLE_ACTION_ID: 'roomote_slack_reply_toggle',
+  // Mirrors the real helper: forwards to global fetch with an abort timeout.
+  slackFetch: (url: string, init: RequestInit = {}) =>
+    fetch(url, {
+      ...init,
+      signal: init.signal ?? AbortSignal.timeout(5_000),
+    }),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -145,6 +151,8 @@ describe('handleSlackInteractivePayload', () => {
           replace_original: false,
           text: 'That button came from an older Roomote message and no longer does anything. Mention Roomote in this thread to continue.',
         }),
+        // The request is bounded by slackFetch's abort timeout.
+        signal: expect.any(AbortSignal),
       });
       expect(apiLoggerInfoMock).toHaveBeenCalledTimes(1);
       expect(apiLoggerInfoMock).toHaveBeenCalledWith(

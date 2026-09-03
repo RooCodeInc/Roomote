@@ -18,6 +18,7 @@ import {
   SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_TEXT,
   SlackNotifier,
   ROOMOTE_SLACK_REPLY_TOGGLE_ACTION_ID,
+  slackFetch,
   type SlackInteractivePayload,
 } from '@roomote/slack';
 import { and, db, eq, slackInstallations } from '@roomote/db/server';
@@ -57,7 +58,10 @@ async function handleRetiredAction(
   );
 
   try {
-    const response = await fetch(payload.response_url, {
+    // This runs detached from the webhook response, so the request carries
+    // slackFetch's abort timeout; a stalled response_url connection fails
+    // into the warning path instead of pending indefinitely.
+    const response = await slackFetch(payload.response_url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
