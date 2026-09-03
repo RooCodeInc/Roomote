@@ -132,6 +132,7 @@ describe('handleAdoComment', () => {
         kind: 'pull',
         number: 42,
         reviewCommentId: '5',
+        replyCommentId: '900',
       },
       userId: 'user-1',
       senderDisplayName: 'alice@acme.example',

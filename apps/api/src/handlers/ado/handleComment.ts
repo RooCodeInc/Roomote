@@ -229,6 +229,9 @@ export async function handleAdoComment(
     kind: 'pull',
     number: pullRequest.pullRequestId,
     ...(threadId ? { reviewCommentId: threadId } : {}),
+    ...(threadId && comment.id !== undefined
+      ? { replyCommentId: String(comment.id) }
+      : {}),
   };
   const activeTasks = await resolveSourceControlPullRequestActiveTasks({
     provider: 'ado',

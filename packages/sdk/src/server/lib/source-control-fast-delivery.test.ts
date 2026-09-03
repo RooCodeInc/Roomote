@@ -499,7 +499,9 @@ describe('other provider Fast deliveries', () => {
       kind: 'pull',
       number: 42,
       reviewCommentId: '5',
+      replyCommentId: '900',
     });
+    expect(conversation.replyTarget.threadId).toBe('5:900');
 
     const delivery = await buildSourceControlFastDelivery(conversation);
     const adapter = buildSourceControlFastAdapter({
@@ -517,6 +519,7 @@ describe('other provider Fast deliveries', () => {
         repositoryId: 'guid-1',
         pullRequestNumber: 42,
         threadId: '5',
+        parentCommentId: '900',
         organization: 'acme',
       }),
     );

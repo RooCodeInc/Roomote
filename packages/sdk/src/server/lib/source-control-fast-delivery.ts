@@ -25,6 +25,11 @@ export type SourceControlFastDiscussion = {
   number: number;
   /** Review comment a reply threads under, when the mention came from one. */
   reviewCommentId?: string;
+  /**
+   * The comment a reply answers inside that thread, for providers that
+   * nest replies under a parent (Azure DevOps).
+   */
+  replyCommentId?: string;
 };
 
 /**
@@ -37,15 +42,20 @@ export function buildSourceControlFastConversation(
   discussion: SourceControlFastDiscussion,
 ): FastAgentSourceControlConversation {
   const discussionId = `${discussion.kind}/${discussion.number}`;
+  // The reply thread is one target field; a nested parent comment rides
+  // along after a colon so both survive the reply target's single thread id.
+  const threadId = discussion.reviewCommentId
+    ? discussion.replyCommentId
+      ? `${discussion.reviewCommentId}:${discussion.replyCommentId}`
+      : discussion.reviewCommentId
+    : undefined;
   return {
     surface: discussion.provider,
     workspaceId: `${discussion.host}/${discussion.repositoryFullName}`,
     conversationId: discussionId,
     replyTarget: {
       channelId: discussionId,
-      ...(discussion.reviewCommentId
-        ? { threadId: discussion.reviewCommentId }
-        : {}),
+      ...(threadId ? { threadId } : {}),
     },
   };
 }
@@ -60,15 +70,16 @@ export function parseSourceControlFastConversation(
   if (separator <= 0 || !repositoryFullName || !match) {
     return null;
   }
+  const [reviewCommentId, replyCommentId] =
+    conversation.replyTarget.threadId?.split(':') ?? [];
   return {
     provider: conversation.surface,
     host,
     repositoryFullName,
     kind: match[1] as SourceControlDiscussionKind,
     number: Number(match[2]),
-    ...(conversation.replyTarget.threadId
-      ? { reviewCommentId: conversation.replyTarget.threadId }
-      : {}),
+    ...(reviewCommentId ? { reviewCommentId } : {}),
+    ...(replyCommentId ? { replyCommentId } : {}),
   };
 }
 
@@ -553,6 +564,9 @@ async function buildAdoFastDelivery(
         repositoryId: adoRepositoryId,
         pullRequestNumber: target.number,
         ...(target.reviewCommentId ? { threadId: target.reviewCommentId } : {}),
+        ...(target.replyCommentId
+          ? { parentCommentId: target.replyCommentId }
+          : {}),
         body,
         organization: parsed.organization,
       });

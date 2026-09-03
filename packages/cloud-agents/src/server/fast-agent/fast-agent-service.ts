@@ -983,12 +983,27 @@ function buildSupplementalThreadContext({
 function wrapFastAgentMessage(
   text: string,
   sender?: { displayName?: string; githubLogin?: string },
+  agentContext?: string,
 ): string {
-  return `<current_message>\n${escapeFastAgentEnvelopeJson({
+  // Surface context (a Linear issue, a pull request, auto-respond channel
+  // instructions) travels beside the message on every surface, the way the
+  // Slack envelope carries it.
+  const normalizedAgentContext = agentContext?.trim();
+  const contextBlock = normalizedAgentContext
+    ? `<current_message_context>\n${escapeFastAgentEnvelopeText(normalizedAgentContext)}\n</current_message_context>\n\n`
+    : '';
+  return `${contextBlock}<current_message>\n${escapeFastAgentEnvelopeJson({
     ...(sender?.displayName ? { sender_name: sender.displayName } : {}),
     ...(sender?.githubLogin ? { sender_github: sender.githubLogin } : {}),
     text,
   })}\n</current_message>`;
+}
+
+function escapeFastAgentEnvelopeText(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
 
 function escapeFastAgentEnvelopeJson(value: Record<string, string>): string {
@@ -1098,7 +1113,11 @@ function buildFastAgentMessages({
           })
         : normalizedQuestion
       : turnSource === 'human'
-        ? wrapFastAgentMessage(normalizedQuestion, currentMessageSender)
+        ? wrapFastAgentMessage(
+            normalizedQuestion,
+            currentMessageSender,
+            currentMessageAgentContext,
+          )
         : normalizedQuestion;
   const currentUserMessageText = [
     explicitSkillInvocationContext,
