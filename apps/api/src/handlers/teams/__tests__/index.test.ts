@@ -610,6 +610,49 @@ describe('Teams webhook handler', () => {
         launchClaimedAt: new Date('2026-08-07T00:00:00.000Z'),
       },
     });
+    // The kickoff gate must run inside the enqueue, before the child becomes
+    // runnable; model both sides so the wiring is exercised, not assumed.
+    const postKickoff = vi.fn().mockResolvedValue(undefined);
+    launchPinnedMock.mockImplementationOnce(
+      async (input: {
+        launchId: string;
+        conversation: unknown;
+        launch: (context: {
+          parent: { sessionId: string; conversation: unknown };
+          launchIdempotencyKey: string;
+          postKickoff: () => Promise<void>;
+        }) => Promise<
+          { success: true; taskId: string } | { success: false; error: string }
+        >;
+      }) => {
+        const result = await input.launch({
+          parent: { sessionId: 'fast-1', conversation: input.conversation },
+          launchIdempotencyKey: `pinned-launch:${input.launchId}`,
+          postKickoff,
+        });
+        if (!result.success) throw new Error(result.error);
+        return {
+          sessionId: 'session-1',
+          fastConversationId: 'fast-1',
+          taskId: result.taskId,
+          runId: 88,
+        };
+      },
+    );
+    enqueueTaskMock.mockImplementationOnce(
+      async (
+        _input: unknown,
+        options: {
+          beforeEnqueue?: (taskRun: {
+            id: number;
+            taskId: string;
+          }) => Promise<void>;
+        },
+      ) => {
+        await options.beforeEnqueue?.({ id: 88, taskId: 'task-new' });
+        return { id: 88, taskId: 'task-new' };
+      },
+    );
     // Drive the real launcher the way launchClaimedTeamsSuggestion would.
     launchClaimedTeamsSuggestionMock.mockImplementationOnce(
       async (params: {
@@ -675,8 +718,15 @@ describe('Teams webhook handler', () => {
       }),
       expect.objectContaining({ beforeEnqueue: expect.any(Function) }),
     );
+    // The Session transcript kickoff ran inside the launch gate, and the
+    // Teams acknowledgement was posted after the enqueue.
+    expect(postKickoff).toHaveBeenCalledOnce();
+    expect(postKickoff.mock.invocationCallOrder[0]).toBeLessThan(
+      postMessageMock.mock.invocationCallOrder[0]!,
+    );
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
+        channelId: '19:conversation@thread.v2',
         text: expect.stringContaining('Started a task in acme/app'),
       }),
     );
