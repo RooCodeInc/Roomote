@@ -231,6 +231,36 @@ describe('handlePrReviewLaunch', () => {
     );
   });
 
+  it("treats a reused automatic review of this Session's own PR as already running", async () => {
+    mocks.enqueueTask.mockResolvedValue({
+      id: 900,
+      taskId: 'review-task',
+      // The automatic review carries the same parent attachment but not the
+      // session-requested flag, so its settle stays suppressed.
+      payload: {
+        repo: 'acme/api',
+        prNumber: 42,
+        fastAgentParent: fastParent,
+        fastAgentSessionId: fastParent.sessionId,
+      },
+    });
+    const { c, json } = makeContext();
+
+    await handlePrReviewLaunch(
+      c,
+      { userId: 'user-1' },
+      {
+        repo: 'acme/api',
+        prNumber: 42,
+        fastConversationId: fastParent.sessionId,
+      },
+    );
+
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({ success: true, alreadyRunning: true }),
+    );
+  });
+
   it('fails cleanly when the pull request cannot be resolved', async () => {
     mocks.resolveTarget.mockResolvedValue({ repositoryId: 'repo-1' });
     const { c, json } = makeContext();

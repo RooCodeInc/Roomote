@@ -3578,18 +3578,21 @@ export async function answerFastAgentQuestion({
               completedTaskActions.delete(signature);
               return result;
             }
-            if (result.taskId) {
-              currentTasks.set(result.taskId, { taskId: result.taskId });
-            }
             // A reused already-active review keeps its original payload, so
             // this Session will not hear its settle: skip the kickoff and let
-            // the reply set expectations instead of promising a callback.
+            // the reply set expectations instead of promising a callback. It
+            // also belongs to another launch (often an automation), so it is
+            // never registered as this turn's task — that would expose it to
+            // cancel_task and send_task_message here.
             if (result.alreadyRunning) {
               return {
                 ...result,
                 guidance:
                   'A review of that pull request is already running; its results will post on the pull request itself, not back into this conversation. Tell the user that and link the pull request.',
               };
+            }
+            if (result.taskId) {
+              currentTasks.set(result.taskId, { taskId: result.taskId });
             }
             const kickoffMessage = [
               args.kickoffMessage,

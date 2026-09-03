@@ -183,12 +183,20 @@ export async function handlePrReviewLaunch(
 
   // An already-active review run for this PR is returned as-is by the queue:
   // this launch's payload (and its Session binding) never lands, so the
-  // caller must not promise a settle announcement into the Session.
+  // caller must not promise a settle announcement into the Session. Matching
+  // the parent alone is not enough — an automatic review of a PR this same
+  // Session opened carries the parent attachment but not the
+  // session-requested flag, and its settle stays suppressed.
+  const launchedPayload = launch.payload as {
+    fastParentRequestedReview?: boolean;
+  } | null;
   const launchedParentSessionId = getFastAgentParentFromPayload(
     launch.payload,
   )?.sessionId;
   const alreadyRunning = Boolean(
-    parent && launchedParentSessionId !== parent.sessionId,
+    parent &&
+    (launchedParentSessionId !== parent.sessionId ||
+      launchedPayload?.fastParentRequestedReview !== true),
   );
 
   return c.json({
