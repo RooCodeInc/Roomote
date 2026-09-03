@@ -20,7 +20,10 @@ vi.mock('@roomote/db/server', () => ({
   taskRuns: { taskId: 'taskRuns.taskId', createdAt: 'taskRuns.createdAt' },
 }));
 
-import { getLinkedTaskRelayState } from '../linked-task-relay';
+import {
+  getLinkedTaskRelayState,
+  getPrOriginFastAgentParent,
+} from '../linked-task-relay';
 
 const fastParent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
@@ -77,5 +80,63 @@ describe('getLinkedTaskRelayState', () => {
       linkedTaskId: 'implementation-task',
       relayEnabled: false,
     });
+  });
+});
+
+describe('getPrOriginFastAgentParent', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.findOwner.mockResolvedValue({ taskId: 'implementation-task' });
+  });
+
+  it('returns the PR-opening task Fast parent for the requested provider', async () => {
+    mocks.findRun.mockResolvedValue({
+      payload: { fastAgentParent: fastParent },
+    });
+
+    await expect(
+      getPrOriginFastAgentParent({
+        repository: 'acme/app',
+        prNumber: 42,
+        branchName: 'feature/test',
+        sourceControlProvider: 'gitlab',
+        host: 'git.example.com',
+        repositoryId: 'repo-1',
+      }),
+    ).resolves.toEqual(fastParent);
+    expect(mocks.findOwner).toHaveBeenCalledWith({
+      repoFullName: 'acme/app',
+      prNumber: 42,
+      branchName: 'feature/test',
+      sourceControlProvider: 'gitlab',
+      host: 'git.example.com',
+      repositoryId: 'repo-1',
+    });
+  });
+
+  it('returns null when no session-delegated task opened the PR', async () => {
+    mocks.findOwner.mockResolvedValue(null);
+
+    await expect(
+      getPrOriginFastAgentParent({
+        repository: 'acme/app',
+        prNumber: 42,
+        branchName: 'feature/test',
+        repositoryId: 'repo-1',
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('returns null when the opening task run has no Fast parent', async () => {
+    mocks.findRun.mockResolvedValue({ payload: {} });
+
+    await expect(
+      getPrOriginFastAgentParent({
+        repository: 'acme/app',
+        prNumber: 42,
+        branchName: 'feature/test',
+        repositoryId: 'repo-1',
+      }),
+    ).resolves.toBeNull();
   });
 });

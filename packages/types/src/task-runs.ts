@@ -537,6 +537,20 @@ export function shouldUseAppTokenOnly(type: TaskPayloadKind): boolean {
 }
 
 /**
+ * Review-pipeline payloads carry a Fast parent only for session visibility:
+ * review outcomes reach the session through the reviewed PR's feedback relay
+ * and the PR summary comment, so review runs stay quiet on the parent-event
+ * channel except for failures.
+ */
+export function isPrReviewPayload(payload: unknown): boolean {
+  const type = (payload as { type?: string } | null | undefined)?.type;
+  return (
+    type === TaskPayloadKind.GithubPrReview ||
+    type === TaskPayloadKind.GithubPrReviewSync
+  );
+}
+
+/**
  * CodingHarness
  */
 

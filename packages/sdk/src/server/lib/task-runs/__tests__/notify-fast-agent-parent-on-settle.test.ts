@@ -1,5 +1,5 @@
 import type { TaskRun } from '@roomote/db/server';
-import { RunStatus, TaskRunErrorCode } from '@roomote/types';
+import { RunStatus, TaskPayloadKind, TaskRunErrorCode } from '@roomote/types';
 
 const mocks = vi.hoisted(() => ({
   claimReturning: vi.fn(),
@@ -81,6 +81,40 @@ describe('notifyFastAgentParentOnSettle', () => {
     mocks.listPullRequests.mockResolvedValue([]);
     mocks.recordLifecycle.mockResolvedValue(undefined);
     mocks.canRetryFailedStart.mockResolvedValue(false);
+  });
+
+  it('stays quiet for a successful review child settle', async () => {
+    await notifyFastAgentParentOnSettle(
+      makeRun({
+        type: TaskPayloadKind.GithubPrReview,
+        fastAgentParent: fastParent,
+      }),
+      RunStatus.Idle,
+      'Review acme/app#42',
+    );
+
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+    expect(mocks.updateSet).not.toHaveBeenCalled();
+  });
+
+  it('still announces a failed review child settle', async () => {
+    await notifyFastAgentParentOnSettle(
+      makeRun({
+        type: TaskPayloadKind.GithubPrReviewSync,
+        fastAgentParent: fastParent,
+      }),
+      RunStatus.Failed,
+      'Review acme/app#42',
+    );
+
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          type: 'task_settled',
+          status: RunStatus.Failed,
+        }),
+      }),
+    );
   });
 
   it('queues child lifecycle state and settles the source claim immediately', async () => {
