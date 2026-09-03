@@ -1366,7 +1366,7 @@ describe('Fast conversation repository', () => {
     ).resolves.toEqual({
       // Transcript order: the reply, then each call with its outcome.
       events: [
-        { kind: 'reply', text: 'Starting on it.' },
+        { kind: 'reply', text: 'Starting on it.', purpose: 'progress' },
         {
           kind: 'action',
           tool: 'launch_task',

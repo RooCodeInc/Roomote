@@ -222,11 +222,30 @@ export type FastAgentTurnAttemptAction = {
   result?: string;
 };
 
+export type FastAgentTurnAttemptReplyPurpose =
+  | 'ack'
+  | 'progress'
+  | 'closeout'
+  | 'clarification';
+
 export type FastAgentTurnAttemptReply = {
   kind: 'reply';
   /** A visible assistant reply the attempt already posted. */
   text: string;
+  /** Recorded for replies the turn posted itself; absent on older rows. */
+  purpose?: FastAgentTurnAttemptReplyPurpose;
 };
+
+function isFastAgentTurnAttemptReplyPurpose(
+  value: unknown,
+): value is FastAgentTurnAttemptReplyPurpose {
+  return (
+    value === 'ack' ||
+    value === 'progress' ||
+    value === 'closeout' ||
+    value === 'clarification'
+  );
+}
 
 export type FastAgentTurnAttemptEvent =
   | FastAgentTurnAttemptReply
@@ -387,7 +406,13 @@ export async function loadFastAgentTurnAttemptSummary(
       metadata.interruptionReason === undefined
     ) {
       const reply = text(row.contentBlocks).trim();
-      if (reply) events.push({ kind: 'reply', text: reply });
+      if (!reply) continue;
+      const purpose = payload.purpose ?? metadata.purpose;
+      events.push({
+        kind: 'reply',
+        text: reply,
+        ...(isFastAgentTurnAttemptReplyPurpose(purpose) ? { purpose } : {}),
+      });
     }
   }
   return { events, next, prompt };

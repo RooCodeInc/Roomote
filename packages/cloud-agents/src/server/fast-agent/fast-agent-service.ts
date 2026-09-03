@@ -1013,6 +1013,45 @@ const PREVIOUS_ATTEMPT_ARGUMENTS_MAX_CHARS = 800;
 const LOST_TOOL_RESULT_TEXT =
   'Tool result lost due to restart. The call may or may not have taken effect; check before repeating it.';
 
+type FastAgentRecordedCloseout =
+  | { kind: 'delivered'; text: string }
+  | { kind: 'lost'; purpose: 'closeout' | 'clarification'; text: string };
+
+/**
+ * What the transcript says about the closeout of an interrupted attempt.
+ * 'delivered' means a closing reply row is on record, so the answer reached
+ * the surface. 'lost' means the attempt was cut off inside a closing reply
+ * call whose text is known but whose post was never recorded. Anything else
+ * (no closeout yet, or one whose result the model can read) is left to the
+ * resumed model request.
+ */
+function findRecordedCloseout(
+  events: FastAgentTurnAttemptSummary['events'],
+): FastAgentRecordedCloseout | null {
+  const last = events.at(-1);
+  if (!last) return null;
+  if (last.kind === 'reply') {
+    return last.purpose === 'closeout' || last.purpose === 'clarification'
+      ? { kind: 'delivered', text: last.text }
+      : null;
+  }
+  if (
+    last.tool !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply ||
+    last.status !== 'unknown' ||
+    !last.arguments ||
+    typeof last.arguments !== 'object'
+  ) {
+    return null;
+  }
+  const { purpose, message } = last.arguments as {
+    purpose?: unknown;
+    message?: unknown;
+  };
+  if (purpose !== 'closeout' && purpose !== 'clarification') return null;
+  const text = typeof message === 'string' ? message.trim() : '';
+  return text ? { kind: 'lost', purpose, text } : null;
+}
+
 function clipText(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
@@ -1525,34 +1564,8 @@ export async function answerFastAgentQuestion({
       return false;
     }
   };
-  const DURABLE_REVOKE_FAILED_TOOL_ERROR =
-    'Roomote could not durably record this closeout before posting it. Try the closeout again.';
-  // Set when a terminal closeout was skipped because its revocation did not
-  // land: the user has no answer yet, so settlement must hand the turn to
-  // the queue instead of marking it delivered.
-  let terminalRevocationFailed = false;
   const settleDurableTurn = async () => {
     if (!durableAdmission) return;
-    if (terminalRevocationFailed) {
-      durableTurnReplayable = false;
-      const released = await releaseFastAgentDurableTurnClaim(
-        durableAdmission.eventId,
-      ).catch((error) => {
-        console.warn(
-          `[Fast Agent] Failed to release durable turn claim after a skipped closeout: ${formatErrorForLog(error)}`,
-        );
-        return false;
-      });
-      await adapter.requestDurableResume?.().catch((error) => {
-        console.warn(
-          `[Fast Agent] Failed to wake durable turn resume after a skipped closeout: ${formatErrorForLog(error)}`,
-        );
-      });
-      console.info(
-        `[Fast Agent] Durable turn handed to the queue after a skipped closeout (row=${durableAdmission.eventId}, released=${released}).`,
-      );
-      return;
-    }
     durableTurnReplayable = false;
     await markFastAgentDurableTurnDelivered(durableAdmission.eventId).catch(
       (error) => {
@@ -3195,18 +3208,10 @@ export async function answerFastAgentQuestion({
             if (!message) {
               return { success: false, error: FAST_AGENT_EMPTY_REPLY_ERROR };
             }
-            // The one action that still ends replay: a delivered answer must
-            // never be re-run, so the row is withdrawn before the closeout is
-            // posted. Everything before it stays resumable.
-            if (
-              args.purpose === 'closeout' &&
-              !(await revokeDurableTurnReplay('Terminal closeout.'))
-            ) {
-              return {
-                success: false,
-                error: DURABLE_REVOKE_FAILED_TOOL_ERROR,
-              };
-            }
+            // A closeout does not withdraw the turn from replay. Its call row
+            // is on record before the post and its reply row right after, so
+            // a run that resumes this turn finishes it from that record (see
+            // findRecordedCloseout) instead of failing closed.
             if (
               args.suggestions?.length &&
               (args.purpose !== 'closeout' ||
@@ -3918,6 +3923,37 @@ export async function answerFastAgentQuestion({
       durableOpenCodeSessionId = openCodeSessionId;
       session.openCodeSessionId = openCodeSessionId;
     };
+    // A resumed run whose earlier attempt reached its closeout has nothing
+    // left to ask the model. Finish the turn from the record instead. A
+    // recorded closing reply was delivered: settle silently. A closing reply
+    // call the process died inside may or may not have reached the surface:
+    // post the same text once more and settle. The duplicate that can cause
+    // is bounded to the window between the surface accepting the post and
+    // the transcript recording it.
+    const recordedCloseout = previousAttempt
+      ? findRecordedCloseout(previousAttempt.events)
+      : null;
+    if (recordedCloseout) {
+      if (recordedCloseout.kind === 'delivered') {
+        console.info(
+          `[Fast Agent] Resumed turn ${turnId} already delivered its closeout; settling without a model request.`,
+        );
+        closedInstructionVersions.add(currentInstructionVersion);
+        lastVisibleMessage = recordedCloseout.text;
+        visibleUpdatePosted = true;
+      } else {
+        console.info(
+          `[Fast Agent] Resumed turn ${turnId} was cut off inside its closeout; posting it again.`,
+        );
+        await postReply({
+          purpose: recordedCloseout.purpose,
+          message: recordedCloseout.text,
+        });
+      }
+      await settleDurableTurn();
+      await mirrorPendingMessages();
+      return lastVisibleMessage;
+    }
     diagnostics.markInferenceQueued();
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
@@ -4414,16 +4450,10 @@ export async function answerFastAgentQuestion({
       !isInstructionClosed(terminalInstructionVersion)
     ) {
       const message = resolveTerminalReplyText(promptText).trim();
-      // A terminal closeout is itself a side effect a replay would repeat:
-      // withdraw the turn from recovery before posting it.
-      const terminalReplayRevoked =
-        await revokeDurableTurnReplay('Terminal closeout.');
-      if (!terminalReplayRevoked) {
-        terminalRevocationFailed = true;
-        console.warn(
-          '[Fast Agent] Skipping the terminal closeout because the turn could not be withdrawn from replay.',
-        );
-      } else if (message) {
+      // The terminal closeout stays inside replay: its reply row is recorded
+      // as soon as it posts, and a resumed run settles on that record
+      // instead of posting again.
+      if (message) {
         const streamedEvent = await takeStreamedReplyEvent();
         await postReply(
           { purpose: 'closeout', message },
@@ -4619,17 +4649,9 @@ export async function answerFastAgentQuestion({
             inferenceRetryAttempted,
           )
         : 'I hit an error while handling that request. Please try again in a moment.';
-    // The error closeout is terminal too; a replay must not post it twice.
-    const errorReplayRevoked =
-      !isInstructionClosed() &&
-      (await revokeDurableTurnReplay('Error closeout.'));
-    if (!isInstructionClosed() && !errorReplayRevoked) {
-      terminalRevocationFailed = true;
-      console.warn(
-        '[Fast Agent] Skipping the error closeout because the turn could not be withdrawn from replay.',
-      );
-    }
-    if (errorReplayRevoked) {
+    // The error closeout is recorded like any other reply, so a run that
+    // resumes this turn sees it and does not post a second one.
+    if (!isInstructionClosed()) {
       try {
         const reply = { purpose: 'closeout' as const, message };
         if (
