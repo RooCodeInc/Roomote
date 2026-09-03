@@ -28,6 +28,7 @@ import {
 } from '@roomote/communication';
 import {
   admitFastAgentHumanFollowUp,
+  createFastAgentConversationArtifact,
   persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
@@ -347,6 +348,11 @@ export async function processDiscordFastAgentMessage(
             entry.user !== input.sender.id,
         ),
       adapter: {
+        createArtifact: (artifact) =>
+          createFastAgentConversationArtifact({
+            fastConversationId: session.id,
+            ...artifact,
+          }),
         ...(durableTurnForResume
           ? {
               requestDurableResume: () =>

@@ -12,12 +12,17 @@ vi.mock('@aws-sdk/client-s3', () => ({
 import {
   db,
   eq,
+  fastAgentConversations,
+  getSessionForFastConversation,
   sessionFactory,
   taskArtifacts,
   userFactory,
 } from '@roomote/db/server';
 
-import { createSessionArtifact } from '../create-session-artifact';
+import {
+  createFastAgentConversationArtifact,
+  createSessionArtifact,
+} from '../create-session-artifact';
 
 describe('createSessionArtifact', () => {
   beforeEach(() => {
@@ -64,6 +69,36 @@ describe('createSessionArtifact', () => {
       .where(eq(taskArtifacts.sessionId, session.id));
     expect(rows).toHaveLength(2);
     expect(rows.every((row) => row.taskId === null && row.uploaded)).toBe(true);
+  });
+
+  it('resolves a Fast conversation to its canonical Session owner', async () => {
+    const owner = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'slack',
+        workspaceId: 'team-1',
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+
+    const artifact = await createFastAgentConversationArtifact({
+      fastConversationId: conversation!.id,
+      path: 'notes/result.md',
+      content: '# Result',
+      contentType: 'text/markdown',
+      artifactType: 'general',
+    });
+    const session = await getSessionForFastConversation(db, conversation!.id);
+
+    expect(session).not.toBeNull();
+    expect(artifact.viewUrl).toContain(`/sessions/${session!.id}`);
+    const [row] = await db
+      .select()
+      .from(taskArtifacts)
+      .where(eq(taskArtifacts.id, artifact.id));
+    expect(row).toMatchObject({ sessionId: session!.id, taskId: null });
   });
 
   it('leaves an incomplete row hidden when object storage fails', async () => {

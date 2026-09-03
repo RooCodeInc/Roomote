@@ -2,6 +2,7 @@ import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import {
   and,
   db,
+  ensureSessionForFastConversation,
   eq,
   max,
   sessions,
@@ -121,4 +122,17 @@ export async function createFastAgentSessionArtifact(
     size: artifact.size,
     viewUrl: `${baseUrl}/sessions/${input.sessionId}`,
   };
+}
+
+export async function createFastAgentConversationArtifact(
+  input: Omit<Parameters<typeof createSessionArtifact>[0], 'sessionId'> & {
+    fastConversationId: string;
+  },
+) {
+  const session = await ensureSessionForFastConversation(
+    db,
+    input.fastConversationId,
+  );
+  const { fastConversationId: _fastConversationId, ...artifact } = input;
+  return createFastAgentSessionArtifact({ sessionId: session.id, ...artifact });
 }
