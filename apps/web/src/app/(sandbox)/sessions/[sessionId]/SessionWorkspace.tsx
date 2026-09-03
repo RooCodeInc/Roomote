@@ -917,20 +917,20 @@ export function SessionWorkspace({
               />
               <SideNavItem
                 side="right"
-                label="Artifacts"
-                tooltip="Artifacts"
-                active={panel?.kind === 'artifacts' && !selectedTask}
-                icon={LayoutGrid}
-                onClick={() => togglePanel('artifacts')}
-              />
-              <SideNavItem
-                side="right"
                 label="Live Preview"
                 tooltip="Live Preview"
                 active={panel?.kind === 'previews' && !selectedTask}
                 disabled={sessionPreviewCount === 0}
                 icon={AppWindow}
                 onClick={() => togglePanel('previews')}
+              />
+              <SideNavItem
+                side="right"
+                label="Artifacts"
+                tooltip="Artifacts"
+                active={panel?.kind === 'artifacts' && !selectedTask}
+                icon={LayoutGrid}
+                onClick={() => togglePanel('artifacts')}
               />
               <SideNavItem
                 side="right"
