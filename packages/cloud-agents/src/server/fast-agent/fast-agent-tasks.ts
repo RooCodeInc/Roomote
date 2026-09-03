@@ -221,6 +221,39 @@ export async function sendFastAgentTaskMessageOnce(
   });
 }
 
+/**
+ * Launches the structured review pipeline on a pull request through the task
+ * API, attaching the review to the calling Session so its outcome reports
+ * back there.
+ */
+export async function launchFastAgentPrReview(
+  context: FastAgentTaskApiContext,
+  params: {
+    repository: string;
+    pullRequestNumber: number;
+    fastConversationId: string;
+  },
+): Promise<
+  FastAgentTaskToolResult & {
+    taskId?: string;
+    taskUrl?: string;
+    prUrl?: string;
+    prTitle?: string;
+  }
+> {
+  return callFastAgentTaskApi({
+    ...context,
+    method: 'POST',
+    path: FAST_AGENT_TASKS_API_PATH,
+    body: {
+      type: 'pr-review',
+      repo: params.repository,
+      prNumber: params.pullRequestNumber,
+      fastConversationId: params.fastConversationId,
+    },
+  });
+}
+
 export async function cancelFastAgentTask(
   context: FastAgentTaskApiContext,
   taskId: string,

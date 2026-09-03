@@ -20,7 +20,10 @@ export function getDelegatedTaskDetails(
     ?.trim()
     .toLowerCase();
 
-  if (msg.kind !== 'tool_result' || toolName !== 'launch_task') {
+  if (
+    msg.kind !== 'tool_result' ||
+    (toolName !== 'launch_task' && toolName !== 'review_pull_request')
+  ) {
     return null;
   }
 

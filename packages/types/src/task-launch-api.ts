@@ -14,6 +14,7 @@ export const launchTaskTypeSchema = z.enum([
   'standard',
   'environment-definition',
   'suggested-tasks',
+  'pr-review',
 ]);
 
 export type TaskLaunchType = z.infer<typeof launchTaskTypeSchema>;
@@ -137,6 +138,13 @@ export const taskLaunchRequestSchema = z.object({
    * polling. Standard launches only.
    */
   notifyOnSettle: z.boolean().optional(),
+  /** Pull request number for `pr-review` launches; `repo` names its repository. */
+  prNumber: z.number().int().positive().optional(),
+  /**
+   * Fast conversation whose Session should own the launched task. `pr-review`
+   * launches attach the review to this Session and announce its outcome there.
+   */
+  fastConversationId: z.string().uuid().optional(),
 });
 
 export type TaskLaunchRequest = z.infer<typeof taskLaunchRequestSchema>;

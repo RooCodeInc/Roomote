@@ -1067,6 +1067,9 @@ const sharedTaskPayloadSchema = z.object({
   liveTaskStream: z.boolean().optional(),
   /** Runless Fast conversation that delegated this task on any chat provider. */
   fastAgentSessionId: z.string().uuid().optional(),
+  /** A Session explicitly requested this review, so its settle announces
+   * there even though automatic review settles stay quiet. */
+  fastParentRequestedReview: z.boolean().optional(),
   /** Provider event that caused this fresh launch; used for idempotent retries. */
   communicationSourceEventId: z.string().optional(),
   /**

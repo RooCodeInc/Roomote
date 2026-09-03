@@ -87,6 +87,7 @@ const READ_TOOL_NAMES = new Set([
 ]);
 const TASK_TOOL_NAMES = new Set([
   'launch_task',
+  'review_pull_request',
   'retry_task_start',
   'cancel_task',
   'send_task_message',
@@ -286,6 +287,11 @@ function resolveReceiptLanguage(
     return {
       verb: byPhase('Starting', 'Started', 'Failed to Start'),
       object: 'Coding Task',
+    };
+  if (toolName === 'review_pull_request')
+    return {
+      verb: byPhase('Starting', 'Started', 'Failed to Start'),
+      object: 'Code Review',
     };
   if (toolName === 'cancel_task')
     return {

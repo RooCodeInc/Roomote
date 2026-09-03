@@ -97,6 +97,24 @@ describe('notifyFastAgentParentOnSettle', () => {
     expect(mocks.updateSet).not.toHaveBeenCalled();
   });
 
+  it('announces a successful review settle when the session requested it', async () => {
+    await notifyFastAgentParentOnSettle(
+      makeRun({
+        type: TaskPayloadKind.GithubPrReview,
+        fastAgentParent: fastParent,
+        fastParentRequestedReview: true,
+      }),
+      RunStatus.Idle,
+      'Review acme/app#42',
+    );
+
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ type: 'task_settled' }),
+      }),
+    );
+  });
+
   it('still announces a failed review child settle', async () => {
     await notifyFastAgentParentOnSettle(
       makeRun({
