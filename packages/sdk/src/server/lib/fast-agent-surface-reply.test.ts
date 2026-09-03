@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   slackPostThreadMessage: vi.fn(),
   slackUpdateMessage: vi.fn(),
   admitHumanFollowUp: vi.fn(),
+  persistInline: vi.fn(),
+  acquireTurnLock: vi.fn(),
+  answerQuestion: vi.fn(),
   resolveLinearClient: vi.fn(),
   linearEmitResponse: vi.fn(),
   linearGetIssue: vi.fn(),
@@ -63,8 +66,15 @@ vi.mock('./source-control-fast-delivery', async (importOriginal) => {
   };
 });
 
+vi.mock('@roomote/cloud-agents/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/cloud-agents/server')>()),
+  acquireFastAgentTurnLock: mocks.acquireTurnLock,
+  answerFastAgentQuestion: mocks.answerQuestion,
+}));
+
 vi.mock('./fast-agent-human-follow-up', () => ({
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
+  persistFastAgentInlineHumanTurn: mocks.persistInline,
 }));
 
 import {
@@ -610,6 +620,73 @@ describe('continueFastAgentSurfaceReply admission hooks', () => {
 
     expect(onAccepted).toHaveBeenCalledWith(abort);
     expect(onRejected).not.toHaveBeenCalled();
+  });
+
+  it('admits a reaction turn durably with its input and resumes a still-pending row', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'web',
+    });
+    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: new AbortController().signal,
+      abort: vi.fn().mockResolvedValue(undefined),
+    });
+    mocks.acquireTurnLock.mockResolvedValue(release);
+    // The row was still pending from an earlier attempt (a redelivered
+    // event), so this run is a resumption.
+    mocks.persistInline.mockResolvedValue({
+      id: 'row-1',
+      eventKey: 'key-1',
+      resumed: true,
+    });
+    mocks.answerQuestion.mockResolvedValue('');
+    const externalInput = {
+      type: 'reaction_added' as const,
+      provider: 'slack' as const,
+      reactions: [{ name: 'eyes' }],
+      reactor: { externalUserId: 'U1' },
+      message: {
+        workspaceId: 'T1',
+        channelId: 'C1',
+        messageId: '100.001',
+        threadId: '100.000',
+      },
+      eventId: '102.000',
+    };
+
+    await expect(
+      continueFastAgentSurfaceReply({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Matt',
+        question: '<external_input>{}</external_input>',
+        currentMessageId: 'slack-reaction:102.000',
+        externalInput,
+      }),
+    ).resolves.toBe(true);
+
+    // Reactions take the lock directly rather than queueing, but they are
+    // admitted durably like any other turn, with the reaction recorded so
+    // the queue can resume them as a reaction turn.
+    expect(mocks.admitHumanFollowUp).not.toHaveBeenCalled();
+    expect(mocks.persistInline).toHaveBeenCalledWith({
+      parent: expect.objectContaining({ sessionId: conversation.id }),
+      event: expect.objectContaining({
+        type: 'human_follow_up',
+        currentMessageId: 'slack-reaction:102.000',
+        senderExternalId: 'U1',
+        input: { type: 'reaction', externalInput },
+      }),
+    });
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: { type: 'reaction', externalInput },
+        durableAdmission: { eventId: 'row-1' },
+        resumedAfterInterruption: true,
+      }),
+    );
+    expect(release).toHaveBeenCalledOnce();
   });
 
   it('reports rejection when the session has no delivery route', async () => {

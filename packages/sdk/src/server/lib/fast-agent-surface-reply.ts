@@ -663,33 +663,42 @@ async function runFastAgentSurfaceReply(
           ...(await getActiveFastAgentTasks(params.sessionId)),
         ]
       : params.activeTasks;
-    // Durable admission for human turns (reactions are not replayable
-    // requests): persisted under this owner's claim before the turn runs.
-    const durableTurn = params.externalInput
-      ? null
-      : ((admission?.kind === 'turn' ? admission.durable : null) ??
-        (await persistFastAgentInlineHumanTurn({
-          parent: {
-            sessionId: params.sessionId,
-            conversation: delivery.conversation,
-          },
-          event: {
-            type: 'human_follow_up',
-            eventId: params.currentMessageId,
-            currentMessageId: params.currentMessageId,
-            userId: params.userId,
-            question: params.question,
-            ...(params.images?.length ? { images: params.images } : {}),
-            ...(params.senderDisplayName
-              ? { senderDisplayName: params.senderDisplayName }
-              : {}),
-          },
-        }).catch((error) => {
-          console.error(
-            `[Fast Agent] Failed to persist surface turn admission: ${error instanceof Error ? error.message : String(error)}`,
-          );
-          return null;
-        })));
+    // Durable admission: persisted under this owner's claim before the turn
+    // runs. A reaction rides the same row with its input recorded, so the
+    // queue resumes it as a reaction turn rather than a typed message.
+    const durableTurn =
+      (admission?.kind === 'turn' ? admission.durable : null) ??
+      (await persistFastAgentInlineHumanTurn({
+        parent: {
+          sessionId: params.sessionId,
+          conversation: delivery.conversation,
+        },
+        event: {
+          type: 'human_follow_up',
+          eventId: params.currentMessageId,
+          currentMessageId: params.currentMessageId,
+          userId: params.userId,
+          question: params.question,
+          ...(params.images?.length ? { images: params.images } : {}),
+          ...(params.senderDisplayName
+            ? { senderDisplayName: params.senderDisplayName }
+            : {}),
+          ...(params.externalInput
+            ? {
+                senderExternalId: params.externalInput.reactor.externalUserId,
+                input: {
+                  type: 'reaction' as const,
+                  externalInput: params.externalInput,
+                },
+              }
+            : {}),
+        },
+      }).catch((error) => {
+        console.error(
+          `[Fast Agent] Failed to persist surface turn admission: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return null;
+      }));
     if (durableTurn) {
       release.durableRowId = durableTurn.id;
       release.durableResume = () =>
@@ -710,6 +719,9 @@ async function runFastAgentSurfaceReply(
       currentMessageId: params.currentMessageId,
       signal: release.signal,
       ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
+      // A redelivered message whose earlier inline attempt never settled
+      // resumes that attempt instead of repeating its recorded actions.
+      ...(durableTurn?.resumed ? { resumedAfterInterruption: true } : {}),
       senderDisplayName: params.senderDisplayName ?? undefined,
       ...(activeTasks ? { activeTasks } : {}),
       ...(params.externalInput
