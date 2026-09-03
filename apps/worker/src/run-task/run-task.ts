@@ -18,6 +18,7 @@ import {
   getSlackThreadTsFromTaskPayload,
   getTaskReportConsumerFromPayload,
   isCommunicationProvider,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   SANDBOX_SERVER_PORT,
   SANDBOX_TIMEOUT_MS,
 } from '@roomote/types';
@@ -713,13 +714,19 @@ export const runTask = async ({
       githubTokenRefreshInterval: undefined,
     };
 
+    const taskEnvVars = Object.fromEntries(
+      Object.entries(envVars).filter(
+        ([name]) => name !== SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+      ),
+    );
     const unsanitizedEnv = workerEnv
       ? {
           ...workerEnv.buildUserFacingEnv(),
           ...(workerEnv.buildOpenCodeHarnessEnv?.() ?? {}),
-          ...envVars,
+          ...taskEnvVars,
         }
-      : { ...process.env, ...envVars };
+      : { ...process.env, ...taskEnvVars };
+    delete unsanitizedEnv[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
 
     const sanitizedEnv = sanitizeEnv(unsanitizedEnv);
     const openCodeHarnessEnv = buildOpenCodeHarnessEnv(unsanitizedEnv);
@@ -729,7 +736,7 @@ export const runTask = async ({
     // sanitized allowlist always take precedence. This prevents an org from
     // accidentally (or maliciously) overriding vars the worker relies on.
     const deploymentEnvVars: Record<string, string> = Object.fromEntries(
-      Object.entries(envVars).filter(
+      Object.entries(taskEnvVars).filter(
         (entry): entry is [string, string] => entry[1] !== undefined,
       ),
     );

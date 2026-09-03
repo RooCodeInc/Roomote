@@ -425,6 +425,9 @@ export const dequeueResumeTaskRun = async (
     try {
       resolvedEnvVars = await fetchResolvedRuntimeEnvVars(result.envVars, {
         sourceControlProvider: result.sourceControlProviders,
+        includeSandboxOpenRouterApiKey: Boolean(
+          result.taskRun.payload.environmentId,
+        ),
       });
     } catch (error) {
       const message =

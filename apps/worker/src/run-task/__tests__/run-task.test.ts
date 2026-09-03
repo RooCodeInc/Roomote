@@ -4114,7 +4114,9 @@ describe('runTask', () => {
         payload: {},
         result: null,
       } as never,
-      envVars: {},
+      envVars: {
+        SANDBOX_OPENROUTER_API_KEY: 'dequeued-sandbox-key',
+      },
       workspacePath: '/tmp/workspace',
       prompt: '',
       harnessInstructions: undefined,
@@ -4138,6 +4140,7 @@ describe('runTask', () => {
         buildUserFacingEnv: vi.fn(() => ({
           HOME: '/tmp/home',
           PATH: '/usr/bin',
+          SANDBOX_OPENROUTER_API_KEY: 'worker-runtime-sandbox-key',
         })),
         buildOpenCodeHarnessEnv: vi.fn(() => ({
           R_MODEL: 'openrouter/openai/gpt-5.4',
@@ -4177,6 +4180,9 @@ describe('runTask', () => {
     expect(
       createHarnessMock.mock.calls.at(-1)?.[0]?.runtimeEnv,
     ).not.toHaveProperty('R_VISION_MODEL');
+    expect(
+      createHarnessMock.mock.calls.at(-1)?.[0]?.runtimeEnv,
+    ).not.toHaveProperty('SANDBOX_OPENROUTER_API_KEY');
   });
 
   it('isolates the task runtime HOME while keeping packaged skill sourcing on the worker HOME', async () => {

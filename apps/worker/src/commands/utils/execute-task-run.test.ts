@@ -247,6 +247,46 @@ describe('executeTaskRun', () => {
     });
   });
 
+  it('scrubs the sandbox OpenRouter source key before shell and repository setup', async () => {
+    const runFn = vi.fn().mockResolvedValue({ status: RunStatus.Idle });
+    const fetchFn = vi.fn().mockResolvedValue({
+      taskRun: {
+        id: 42,
+        taskId: 'task-42',
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        payload: { environmentId: 'environment-1' },
+      },
+      envVars: {
+        FOO: 'bar',
+        SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+      },
+    });
+
+    await executeTaskRun({
+      runId: 42,
+      setupMode: 'full',
+      fetchFn,
+      workspaceConfigFn: vi.fn().mockResolvedValue({ env: {} }),
+      runFn,
+    });
+
+    expect(injectEnvVarsMock.mock.calls[0]?.[0]).toEqual(
+      expect.not.objectContaining({
+        SANDBOX_OPENROUTER_API_KEY: expect.anything(),
+      }),
+    );
+    const setupArgs = setupMock.mock.calls[0]?.[0];
+    expect(setupArgs.sandboxOpenRouterApiKey).toBe('sandbox-openrouter-key');
+    expect(setupArgs.workspace.envVars).not.toHaveProperty(
+      'SANDBOX_OPENROUTER_API_KEY',
+    );
+    expect(setupArgs.workspace.userEnvVars).toEqual({ FOO: 'bar' });
+    expect(runFn.mock.calls[0]?.[0]?.jobContext.envVars).not.toHaveProperty(
+      'SANDBOX_OPENROUTER_API_KEY',
+    );
+  });
+
   it('passes environment setup warnings through to the task runtime', async () => {
     const runFn = vi.fn().mockResolvedValue({
       status: RunStatus.Idle,

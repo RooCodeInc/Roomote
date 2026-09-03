@@ -24,9 +24,11 @@ const {
   mockEnvironmentSetupStatusWriter,
   mockTimedStep,
   mockGetRuntimeEnv,
+  mockSetRuntimeEnv,
   mockSetUserEnv,
 } = vi.hoisted(() => {
   const mockGetRuntimeEnv = vi.fn(() => ({}));
+  const mockSetRuntimeEnv = vi.fn();
   const mockSetUserEnv = vi.fn();
 
   return {
@@ -65,6 +67,7 @@ const {
       ): Promise<T> => run(),
     ),
     mockGetRuntimeEnv,
+    mockSetRuntimeEnv,
     mockSetUserEnv,
   };
 });
@@ -129,6 +132,7 @@ const mockWorkerEnv = {
   sandboxOpenRouterApiKey: 'sandbox-openrouter-key',
   getRuntimeEnv: mockGetRuntimeEnv,
   refreshSystemEnv: vi.fn(),
+  setRuntimeEnv: mockSetRuntimeEnv,
   setUserEnv: mockSetUserEnv,
 } as unknown as WorkerEnv;
 
@@ -151,7 +155,15 @@ const environmentWorkspaceOptions = {
       repositories: [{ repository: 'owner/repo' }],
     },
   },
-  envVars: { FOO: 'bar' },
+  envVars: {
+    FOO: 'bar',
+    R_TRIAL_OPENROUTER_API_KEY: 'trial-key',
+    R_MODEL: 'roomote/openai/broken-model',
+    R_SMALL_MODEL: 'roomote/openai/broken-small-model',
+    R_MODEL_REASONING_EFFORT: 'high',
+    R_MODEL_ENV_KEYS: 'R_TRIAL_OPENROUTER_API_KEY',
+    R_INFERENCE_GATEWAY_KEYS: 'R_TRIAL_OPENROUTER_API_KEY',
+  },
   taskRunType: TaskPayloadKind.StandardTask,
 };
 
@@ -353,6 +365,62 @@ describe('setup mode behavior', () => {
       environmentWorkspaceOptions.workspace.environmentConfig.repositories,
       repoPaths,
     );
+  });
+
+  it('maps a stored sandbox OpenRouter key without inheriting outer model configuration', async () => {
+    const storedKeyWorkerEnv = {
+      ...mockWorkerEnv,
+      sandboxOpenRouterApiKey: undefined,
+    } as unknown as WorkerEnv;
+
+    await setup({
+      mode: 'directDispatch',
+      workspace: {
+        ...environmentWorkspaceOptions,
+        envVars: {
+          ...environmentWorkspaceOptions.envVars,
+          R_CODE_REVIEW_MODEL: 'roomote/openai/broken-review-model',
+          ROOMOTE_PLANNING_MODEL: 'roomote/openai/broken-planning-model',
+        },
+      },
+      logger,
+      workerEnv: storedKeyWorkerEnv,
+      sandboxOpenRouterApiKey: 'stored-sandbox-openrouter-key',
+    });
+
+    expect(mockInitializeWorkspaceRepositories).toHaveBeenCalledWith(
+      logger,
+      expect.objectContaining({
+        envVars: {
+          BASE: 'base',
+          FOO: 'bar',
+          OPENROUTER_API_KEY: 'stored-sandbox-openrouter-key',
+        },
+      }),
+    );
+    expect(mockSetUserEnv).toHaveBeenCalledWith({
+      BASE: 'base',
+      FOO: 'bar',
+      OPENROUTER_API_KEY: 'stored-sandbox-openrouter-key',
+    });
+  });
+
+  it('removes the sandbox OpenRouter source name from the worker runtime env', async () => {
+    mockGetRuntimeEnv.mockReturnValueOnce({
+      SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+      R_MODEL: 'roomote/openai/outer-model',
+    });
+
+    await setup({
+      mode: 'directDispatch',
+      workspace: environmentWorkspaceOptions,
+      logger,
+      workerEnv: mockWorkerEnv,
+    });
+
+    expect(mockSetRuntimeEnv).toHaveBeenCalledWith({
+      R_MODEL: 'roomote/openai/outer-model',
+    });
   });
 
   it('keeps environment repository commands fatal for snapshot creation setup', async () => {

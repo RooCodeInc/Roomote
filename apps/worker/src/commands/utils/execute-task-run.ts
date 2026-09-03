@@ -2,6 +2,7 @@ import * as path from 'node:path';
 
 import {
   RunStatus,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   type SourceControlTokenMetadata,
   type TaskPayloadKind,
   WORKER_HEARTBEAT_INTERVAL_MS,
@@ -343,6 +344,9 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
     }
 
     const { envVars } = jobContext;
+    const sandboxOpenRouterApiKey =
+      envVars[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
+    delete envVars[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
     taskRun = jobContext.taskRun;
     const runIdForEvents = taskRun.id;
     callbacks = mergeRunTaskCallbacks(
@@ -553,6 +557,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
           },
           logger: startupLogger,
           workerEnv: currentWorkerEnv,
+          sandboxOpenRouterApiKey,
           backgroundEnvironmentSetup: runEnvironmentSetupInBackground,
           recordPhase: ({
             label,
