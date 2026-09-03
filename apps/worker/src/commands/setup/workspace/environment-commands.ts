@@ -1,6 +1,9 @@
+import type { NamedPort } from '@roomote/types';
+
 import type { EnvironmentWorkspace } from '../../../workspace';
 import { ExecutionError } from '../../../command-executor';
 import type { StartupLogger } from '../../../logging';
+import { resolveLoopback } from '../../../services/auth-proxy';
 import type { PhaseRecorder } from '../logging';
 import type { EnvironmentSetupWarning, PrepareWorkspaceResult } from './types';
 import type { EnvironmentSetupStatusWriter } from './setup-status';
@@ -16,6 +19,92 @@ interface SetupOrganizationEnvironmentOptions {
   setupStatusWriter?: EnvironmentSetupStatusWriter;
   /** Records one durable task-run phase event per repository command. */
   recordPhase?: PhaseRecorder;
+}
+
+const PREVIEW_READINESS_TIMEOUT_MS = 60_000;
+const PREVIEW_READINESS_POLL_INTERVAL_MS = 1_000;
+const PREVIEW_READINESS_PROBE_TIMEOUT_MS = 5_000;
+
+function previewUrl(port: NamedPort, host = '127.0.0.1'): string {
+  return new URL(
+    port.initial_path ?? '/',
+    `http://${host}:${port.port}`,
+  ).toString();
+}
+
+async function probePreview(
+  port: NamedPort,
+  deadline: number,
+): Promise<boolean> {
+  const loopbackTimeoutMs = deadline - Date.now();
+  if (loopbackTimeoutMs <= 0) {
+    return false;
+  }
+
+  let loopbackTimeout: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    const host = await Promise.race([
+      resolveLoopback(port.port),
+      new Promise<never>((_, reject) => {
+        loopbackTimeout = setTimeout(
+          () => reject(new Error('Loopback resolution timed out')),
+          loopbackTimeoutMs,
+        );
+      }),
+    ]);
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      return false;
+    }
+
+    const url = previewUrl(port, host);
+    const response = await fetch(url, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(
+        Math.min(PREVIEW_READINESS_PROBE_TIMEOUT_MS, remainingMs),
+      ),
+    });
+    await response.body?.cancel().catch(() => {});
+    return response.status < 500;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(loopbackTimeout);
+  }
+}
+
+export async function waitForPreviewPorts(
+  ports: NamedPort[],
+): Promise<EnvironmentSetupWarning[]> {
+  return (
+    await Promise.all(
+      ports.map(async (port) => {
+        const url = previewUrl(port);
+        const deadline = Date.now() + PREVIEW_READINESS_TIMEOUT_MS;
+
+        while (Date.now() < deadline) {
+          if (await probePreview(port, deadline)) {
+            return undefined;
+          }
+
+          const remainingMs = deadline - Date.now();
+          if (remainingMs > 0) {
+            await new Promise((resolve) =>
+              setTimeout(
+                resolve,
+                Math.min(PREVIEW_READINESS_POLL_INTERVAL_MS, remainingMs),
+              ),
+            );
+          }
+        }
+
+        return {
+          message: `Preview "${port.name}" at ${url} did not become ready within ${PREVIEW_READINESS_TIMEOUT_MS / 1_000} seconds after its detached startup command launched.`,
+        };
+      }),
+    )
+  ).filter((warning) => warning !== undefined);
 }
 
 function getEnvironmentRepoPaths(
@@ -76,6 +165,7 @@ export async function executeOrganizationEnvironmentRepositoryCommands(
 ): Promise<EnvironmentSetupWarning[]> {
   const repoPaths = getEnvironmentRepoPaths(preparedWorkspace);
   const warnings: EnvironmentSetupWarning[] = [];
+  let startedDetachedCommand = false;
 
   if (!repoPaths) {
     // Nothing to execute, but the status file must still reach a terminal
@@ -98,6 +188,10 @@ export async function executeOrganizationEnvironmentRepositoryCommands(
         },
         onCommandResult: ({ repository, result }) => {
           setupStatusWriter?.markCommandResult(repository, result);
+
+          if (result.success && result.command.detached) {
+            startedDetachedCommand = true;
+          }
 
           if (recordPhase) {
             const endedAtMs = Date.now();
@@ -135,6 +229,21 @@ export async function executeOrganizationEnvironmentRepositoryCommands(
         },
       },
     );
+
+    if (startedDetachedCommand) {
+      if ((environment.environmentConfig.ports?.length ?? 0) > 0) {
+        logger.userLog.log('Waiting for configured previews to become ready');
+      }
+
+      const previewWarnings = await waitForPreviewPorts(
+        environment.environmentConfig.ports ?? [],
+      );
+      warnings.push(...previewWarnings);
+
+      for (const warning of previewWarnings) {
+        logger.userLog.warn(warning.message);
+      }
+    }
   } catch (error) {
     setupStatusWriter?.finalize({
       warnings: warnings.map((warning) => warning.message),
