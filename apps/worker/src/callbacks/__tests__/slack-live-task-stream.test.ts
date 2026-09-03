@@ -704,8 +704,15 @@ describe('Slack live task card', () => {
   it('retries the settle on exit with the real output when its render was rejected', async () => {
     const taskRun = createTaskRun();
     const context = {};
-    mocks.renderCard.mockResolvedValueOnce({ card: true, updated: false });
+    mocks.renderCard
+      .mockResolvedValueOnce({ card: true, updated: true })
+      .mockResolvedValueOnce({ card: true, updated: false });
 
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 999, text: 'Almost there.' },
+      context,
+    );
     await updateSlackLiveTaskStream(
       taskRun,
       { type: 'completion', ts: 1000, text: 'Ready for review.' },
@@ -713,16 +720,18 @@ describe('Slack live task card', () => {
     );
     await finishSlackLiveTaskStream(taskRun, RunStatus.Completed, context);
 
-    expect(mocks.renderCard).toHaveBeenCalledTimes(2);
-    expect(renderedCard(2)).toMatchObject({
+    expect(mocks.renderCard).toHaveBeenCalledTimes(3);
+    expect(renderedCard(3)).toMatchObject({
       status: 'complete',
       output: 'Ready for review.',
     });
-    expect(renderedPayload(2)).toEqual({
+    expect(renderedPayload(3)).toEqual({
       runId: taskRun.id,
       status: 'complete',
+      details: 'Almost there.',
       output: 'Ready for review.',
     });
+    expect(renderedPayload(3)).toEqual(renderedPayload(2));
   });
 
   it('settles a completed run as a fallback when the completion event was lost', async () => {

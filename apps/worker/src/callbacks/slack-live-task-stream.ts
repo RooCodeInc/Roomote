@@ -408,9 +408,10 @@ export async function finishSlackLiveTaskStream(
     }
     state.status = 'complete';
     if (!state.awaitingInput) {
-      state.message =
-        state.finalMessage ?? SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.completed;
-      state.provisionalCompletion = state.finalMessage === undefined;
+      if (state.finalMessage === undefined) {
+        state.message = SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.completed;
+        state.provisionalCompletion = true;
+      }
     }
     await renderCard(taskRun, context, { settle: true });
     return;
@@ -426,8 +427,9 @@ export async function finishSlackLiveTaskStream(
       return;
     }
     state.status = 'complete';
-    state.message =
-      state.finalMessage ?? SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.completed;
+    if (state.finalMessage === undefined) {
+      state.message = SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.completed;
+    }
     state.provisionalCompletion = false;
     await renderCard(taskRun, context, { settle: true });
     return;
