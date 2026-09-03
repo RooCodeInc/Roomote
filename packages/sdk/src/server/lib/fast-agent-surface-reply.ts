@@ -614,8 +614,11 @@ async function admitFastAgentSurfaceHumanFollowUp(
   delivery: FastAgentSurfaceReplyDelivery,
   forceQueue = false,
 ): Promise<FastAgentSurfaceHumanFollowUpAdmission> {
-  if (params.externalInput) return null;
-
+  // A reaction is admitted like a message so its row exists before the
+  // webhook is acknowledged: inline under this owner's claim when the
+  // conversation is idle, steered into the active turn otherwise. It is
+  // never force-queued, because the reaction's reply targets the reacted-to
+  // message and only the inline surface delivery knows how to do that.
   return admitFastAgentHumanFollowUp({
     parent: {
       sessionId: params.sessionId,
@@ -631,8 +634,17 @@ async function admitFastAgentSurfaceHumanFollowUp(
       ...(params.senderDisplayName
         ? { senderDisplayName: params.senderDisplayName }
         : {}),
+      ...(params.externalInput
+        ? {
+            senderExternalId: params.externalInput.reactor.externalUserId,
+            input: {
+              type: 'reaction' as const,
+              externalInput: params.externalInput,
+            },
+          }
+        : {}),
     },
-    forceQueue,
+    forceQueue: forceQueue && !params.externalInput,
   });
 }
 
@@ -797,7 +809,9 @@ export async function queueFastAgentSurfaceReply(
     delivery,
     true,
   );
-  if (admission?.kind === 'queued') return true;
+  // Queued messages and steered reactions are on record for the active or
+  // next turn; only an inline admission still needs this process to run it.
+  if (admission && admission.kind !== 'turn') return true;
 
   void runFastAgentSurfaceReply({ ...params, delivery, admission }).catch(
     (error) => {
