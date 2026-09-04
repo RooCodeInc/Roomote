@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -145,6 +145,37 @@ export const SideNav = ({
     [isAdmin],
   );
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      const isEditingText =
+        target instanceof HTMLElement &&
+        !!target.closest(
+          'input, textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"]',
+        );
+
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.repeat ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.key.toLowerCase() !== 'n' ||
+        !window.matchMedia('(min-width: 768px)').matches ||
+        isEditingText
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      setIsNewTaskDialogOpen(true);
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   return (
     <nav
       className={cn(
@@ -219,7 +250,11 @@ export const SideNav = ({
         <SideNavItem
           icon={Plus}
           label="New Session"
-          tooltip="New Session"
+          tooltip={
+            <>
+              New Session (<span className="font-mono">N</span>)
+            </>
+          }
           description="Start a session from anywhere"
           expanded={isSideNavExpanded}
           active={false}

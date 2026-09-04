@@ -45,6 +45,7 @@ vi.mock('@/components/system', () => ({
       {children}
     </button>
   ),
+  Plus: () => <svg aria-hidden="true" />,
   Search: () => <svg aria-hidden="true" />,
 }));
 
@@ -60,6 +61,12 @@ vi.mock('@/hooks/useUser', () => ({
 
 vi.mock('../UserMenu', () => ({
   UserMenu: () => <div>UserMenu</div>,
+}));
+
+vi.mock('@/components/tasks/NewTaskDialog', () => ({
+  NewTaskDialog: ({ open }: { open: boolean }) => (
+    <div data-testid="new-task-dialog" data-open={String(open)} />
+  ),
 }));
 
 vi.mock('./NavbarDrawer', () => ({
@@ -101,5 +108,25 @@ describe('NavbarHeader', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 
     expect(state.setOpen).toHaveBeenCalledWith(true);
+  });
+
+  it('opens a new session dialog from beside the mobile logo', () => {
+    render(<NavbarHeader />);
+
+    const logo = screen.getByAltText('Roomote');
+    const newSessionButton = screen.getByRole('button', {
+      name: 'New Session',
+    });
+
+    expect(logo.compareDocumentPosition(newSessionButton)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+
+    fireEvent.click(newSessionButton);
+
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+      'data-open',
+      'true',
+    );
   });
 });

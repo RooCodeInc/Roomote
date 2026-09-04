@@ -12,7 +12,12 @@ export function NewTaskDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="2xl" aria-describedby={undefined}>
+      <DialogContent
+        size="2xl"
+        aria-describedby={undefined}
+        className="p-0"
+        overlayClassName="bg-black/75"
+      >
         <DialogTitle className="sr-only">New Session</DialogTitle>
         <NewTaskForm
           animate={false}

@@ -183,13 +183,15 @@ vi.mock('./SideNavItem', () => ({
     href,
     onClick,
     tooltip,
+    label,
     expanded,
     disabled,
     description,
   }: {
     href?: string;
     onClick?: () => void;
-    tooltip: string;
+    tooltip: ReactNode;
+    label?: string;
     expanded?: boolean;
     disabled?: boolean;
     description?: ReactNode;
@@ -205,7 +207,7 @@ vi.mock('./SideNavItem', () => ({
     ) : (
       <button
         type="button"
-        data-testid={`nav-action-${tooltip}`}
+        data-testid={`nav-action-${typeof tooltip === 'string' ? tooltip : label}`}
         data-expanded={String(expanded)}
         onClick={onClick}
       >
@@ -285,6 +287,16 @@ describe('SideNav recent sessions', () => {
       { id: 'session-2', title: 'Session 2' },
     ];
     useLiveTaskStatusMock.mockReturnValue(null);
+    vi.mocked(window.matchMedia).mockImplementation((query) => ({
+      matches: query === '(min-width: 768px)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
   });
 
   it('extracts task and session ids only from detail routes', () => {
@@ -421,6 +433,61 @@ describe('SideNav recent sessions', () => {
     expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
       'data-open',
       'true',
+    );
+  });
+
+  it('opens the new session dialog with the desktop N shortcut', () => {
+    render(<SideNav />);
+
+    fireEvent.keyDown(document, { key: 'n' });
+
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+      'data-open',
+      'true',
+    );
+  });
+
+  it('does not handle the N shortcut while a text field is focused', () => {
+    render(<SideNav />);
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+
+    fireEvent.keyDown(input, { key: 'n' });
+
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+      'data-open',
+      'false',
+    );
+    input.remove();
+  });
+
+  it('does not handle the N shortcut on mobile', () => {
+    vi.mocked(window.matchMedia).mockImplementation((query) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    render(<SideNav />);
+
+    fireEvent.keyDown(document, { key: 'n' });
+
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+      'data-open',
+      'false',
+    );
+  });
+
+  it('advertises the N shortcut in the new session tooltip', () => {
+    render(<SideNav />);
+
+    expect(screen.getByTestId('nav-action-New Session')).toHaveTextContent(
+      'New Session (N)',
     );
   });
 
