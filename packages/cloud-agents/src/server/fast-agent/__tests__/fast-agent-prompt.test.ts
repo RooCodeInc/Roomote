@@ -4,6 +4,28 @@ import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { createMemoryMcpInstructions } from '@roomote/types';
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('adds safe memory disclosure guidance only when therapist mode is enabled', () => {
+    const enabledPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      therapistModeEnabled: true,
+    });
+    const disabledPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+
+    expect(enabledPrompt).toContain('<therapist_mode>');
+    expect(enabledPrompt).toContain(
+      'which remembered fact you retrieved and how you used it',
+    );
+    expect(enabledPrompt).toContain(
+      'Never expose internal memory IDs, page slugs, storage paths, raw metadata, source fields, or other internal provenance',
+    );
+    expect(disabledPrompt).not.toContain('<therapist_mode>');
+    expect(disabledPrompt).not.toContain(
+      'which remembered fact you retrieved and how you used it',
+    );
+  });
+
   it('includes a resolved release identifier before turn startup and environments', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
