@@ -434,7 +434,7 @@ export default {
   args: {
     integrationId: z.string().min(1).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.integrationId)}),
     toolName: z.string().min(1).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.toolName)}),
-    args: z.record(z.string(), z.unknown()).optional().describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args)}),
+    args: z.record(z.string(), z.json()).optional().describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args)}),
   },
   execute: (args, context) => invoke(${JSON.stringify(CALL_INTEGRATION_TOOL_TOOL.name)}, args, context),
 }

@@ -80,6 +80,17 @@ export const CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS = {
   args: "Tool arguments matching the tool's input schema",
 } as const;
 
+const integrationToolArgumentValueSchema: z.ZodType<unknown> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(integrationToolArgumentValueSchema),
+    z.record(integrationToolArgumentValueSchema),
+  ]),
+);
+
 /**
  * The on-demand integration tools as the model sees them on every surface.
  * Fast mounts them as OpenCode custom tools; task sandboxes register them on
@@ -144,7 +155,7 @@ export const CALL_INTEGRATION_TOOL_TOOL = {
       .min(1)
       .describe(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.toolName),
     args: z
-      .record(z.unknown())
+      .record(integrationToolArgumentValueSchema)
       .optional()
       .describe(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args),
   },
