@@ -9,12 +9,18 @@ import { buildFastSessionReplyFooterText } from '@roomote/communication';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
+  formatErrorForLog,
   linkedWorkItemProviderSchema,
   TaskPayloadKind,
   type FastAgentConversation,
   type FastAgentSourceControlConversation,
   type FastAgentSourceControlSurface,
 } from '@roomote/types';
+
+import {
+  getSourceControlThreadCommentRecord,
+  setSourceControlThreadCommentRecord,
+} from './source-control-thread-comment-state';
 
 export type SourceControlDiscussionKind = 'pull' | 'issues';
 
@@ -853,12 +859,30 @@ async function buildAdoFastDelivery(
 }
 
 /**
+ * True when a provider rejected a comment edit because the comment is gone.
+ * Every provider client (Octokit's RequestError and the GitLab, Bitbucket,
+ * Gitea, and Azure DevOps API errors) carries the HTTP status on the error.
+ * Anything else (a timeout, a 5xx) is indeterminate: the edit may have
+ * landed, so it must not be answered with a second comment.
+ */
+function isCommentGoneError(error: unknown): boolean {
+  const status =
+    error && typeof error === 'object' && 'status' in error
+      ? (error as { status?: unknown }).status
+      : undefined;
+  return status === 404 || status === 410;
+}
+
+/**
  * The reply surface a Session uses in a discussion: replies post as comments
  * with the Session footer, and tasks launch against the discussion's target.
  *
  * A turn owns one comment: the first reply opens it and later replies append
  * to it by editing in place, so a turn never stacks comments on the
- * discussion. The footer is rendered once, at the bottom, on every edit.
+ * discussion. The footer is rendered once, at the bottom, on every edit. A
+ * review thread holds one Roomote comment per human message: a turn that
+ * reports on delegated work (`continuesThreadComment`) extends the comment
+ * the last human turn opened there instead of adding another.
  */
 export function buildSourceControlFastAdapter(params: {
   conversation: FastAgentSourceControlConversation;
@@ -876,6 +900,11 @@ export function buildSourceControlFastAdapter(params: {
    * sits under the comment it answers, so the quote is dropped there.
    */
   quote?: string | null;
+  /**
+   * True for a turn no human wrote (a delegated task reporting back). In a
+   * review thread it appends to the comment the last human turn opened.
+   */
+  continuesThreadComment?: boolean;
   onReplyPosted?: () => void;
 }): {
   launchTask: LaunchFastAgentTask;
@@ -886,16 +915,89 @@ export function buildSourceControlFastAdapter(params: {
   ) => Promise<{ messageId: string }>;
 } {
   const discussion = parseSourceControlFastConversation(params.conversation);
+  const threadId = params.conversation.replyTarget.threadId;
+  const threaded = Boolean(discussion?.reviewCommentId && threadId);
   const footer = discussion
     ? buildFastSessionReplyFooterText({
         provider: discussion.provider,
         sessionId: params.sessionId,
       })
     : '';
-  const quote = discussion?.reviewCommentId ? null : params.quote;
+  const quote = threaded ? null : params.quote;
   let turnComment: SourceControlPostedComment | null = null;
   let turnBody = '';
+  // True while the turn is editing a comment it adopted from the thread's
+  // record rather than one it posted itself.
+  let adoptedThreadComment = false;
   const renderBody = () => `${turnBody}\n\n${footer}`;
+  const editorFor = (messageId: string): SourceControlPostedComment => ({
+    messageId,
+    ...(params.delivery.updateCommentById && discussion
+      ? {
+          update: (nextBody: string) =>
+            params.delivery.updateCommentById!({
+              discussion,
+              messageId,
+              body: nextBody,
+            }),
+        }
+      : {}),
+  });
+  // The thread's comment record is a best-effort nicety: losing it costs one
+  // extra comment, never the reply.
+  const rememberThreadComment = async () => {
+    if (!threaded || !threadId || !turnComment) {
+      return;
+    }
+    await setSourceControlThreadCommentRecord(params.sessionId, threadId, {
+      messageId: turnComment.messageId,
+      body: turnBody,
+    }).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to remember the review thread comment: ${formatErrorForLog(error)}`,
+      );
+    });
+  };
+  const adoptThreadComment = async (): Promise<boolean> => {
+    if (
+      !threaded ||
+      !threadId ||
+      !params.continuesThreadComment ||
+      !params.delivery.updateCommentById
+    ) {
+      return false;
+    }
+    const record = await getSourceControlThreadCommentRecord(
+      params.sessionId,
+      threadId,
+    ).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to look up the review thread comment: ${formatErrorForLog(error)}`,
+      );
+      return null;
+    });
+    if (!record) {
+      return false;
+    }
+    turnComment = editorFor(record.messageId);
+    turnBody = record.body;
+    adoptedThreadComment = true;
+    return true;
+  };
+  const postTurnComment = async (
+    discussion: SourceControlFastDiscussion,
+    message: string,
+  ) => {
+    turnBody = quote ? `${quote}\n\n${message}` : message;
+    turnComment = await params.delivery.postComment({
+      discussion,
+      body: renderBody(),
+    });
+    adoptedThreadComment = false;
+    await rememberThreadComment();
+    params.onReplyPosted?.();
+    return { messageId: turnComment.messageId };
+  };
   return {
     launchTask: createFastAgentSourceControlTaskLauncher({
       userId: params.userId,
@@ -911,19 +1013,35 @@ export function buildSourceControlFastAdapter(params: {
           'The discussion for this Session could not be resolved.',
         );
       }
+      if (!turnComment) {
+        await adoptThreadComment();
+      }
       if (turnComment?.update) {
+        const previousBody = turnBody;
         turnBody = `${turnBody}\n\n${message}`;
-        await turnComment.update(renderBody());
+        try {
+          await turnComment.update(renderBody());
+        } catch (error) {
+          // The remembered comment can be gone (deleted by its author or a
+          // maintainer). Treat that as a miss on the thread record and post
+          // this turn's own comment, which replaces the stale record so
+          // later turns stop adopting it. Any other failure rethrows so the
+          // normal retry path keeps one comment per human turn.
+          if (!adoptedThreadComment || !isCommentGoneError(error)) {
+            throw error;
+          }
+          console.warn(
+            `[Fast Agent] The remembered review thread comment could not be updated; posting a new comment: ${formatErrorForLog(error)}`,
+          );
+          turnBody = previousBody;
+          turnComment = null;
+          return postTurnComment(discussion, message);
+        }
+        await rememberThreadComment();
         params.onReplyPosted?.();
         return { messageId: turnComment.messageId };
       }
-      turnBody = quote ? `${quote}\n\n${message}` : message;
-      turnComment = await params.delivery.postComment({
-        discussion,
-        body: renderBody(),
-      });
-      params.onReplyPosted?.();
-      return { messageId: turnComment.messageId };
+      return postTurnComment(discussion, message);
     },
     ...(params.delivery.updateCommentById && discussion
       ? {
@@ -931,15 +1049,11 @@ export function buildSourceControlFastAdapter(params: {
           // editor from it, replace the comment's body, and adopt it as the
           // turn's comment so later replies keep appending in place.
           replaceReply: async ({ messageId }, { message }) => {
-            const update = (nextBody: string) =>
-              params.delivery.updateCommentById!({
-                discussion,
-                messageId,
-                body: nextBody,
-              });
+            turnComment = editorFor(messageId);
+            adoptedThreadComment = false;
             turnBody = message;
-            await update(renderBody());
-            turnComment = { messageId, update };
+            await turnComment.update!(renderBody());
+            await rememberThreadComment();
             params.onReplyPosted?.();
             return { messageId };
           },

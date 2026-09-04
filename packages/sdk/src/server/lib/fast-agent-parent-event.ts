@@ -1653,6 +1653,7 @@ async function createSourceControlFastAgentParentTurn(params: {
         params.event.type === 'human_follow_up'
           ? buildSourceControlReplyQuote({ text: params.event.question })
           : null,
+      continuesThreadComment: params.event.type !== 'human_follow_up',
       onReplyPosted: params.onReplyPosted,
     }),
   };
