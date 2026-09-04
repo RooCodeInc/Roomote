@@ -18,6 +18,7 @@ import {
 } from '@/components/system';
 import { PullRequestBadge, WorkspaceBadge } from '@/components/sandbox';
 import { WorkspaceHeader } from '@/components/layout';
+import { TaskRobotIcon } from '@/components/tasks/TaskRobotIcon';
 
 import { useTRPC } from '@/trpc/client';
 import { useSandboxLayout } from '../../use-sandbox-layout';
@@ -37,6 +38,14 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
   const [titleDraft, setTitleDraft] = useState(task?.title ?? '');
   const { data: parentSession } = useQuery(
     trpc.sessions.forTask.queryOptions({ taskId }),
+  );
+  const iconSessionId =
+    parentSession?.sessionId ?? taskRun?.payload?.fastAgentSessionId ?? null;
+  const { data: iconSession } = useQuery(
+    trpc.sessions.byId.queryOptions(
+      { sessionId: iconSessionId ?? '' },
+      { enabled: Boolean(iconSessionId) },
+    ),
   );
 
   const environmentId = taskRun?.payload?.environmentId;
@@ -190,9 +199,15 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
             onKeyDown={handleTitleKeyDown}
             aria-label="Edit task title"
             title="Edit task title"
-            className={`min-w-0 max-w-full cursor-pointer overflow-hidden rounded-md border border-transparent px-2 py-1 text-sm font-medium text-ellipsis whitespace-nowrap hover:border-border hover:bg-muted/40 focus-visible:border-border focus-visible:bg-muted/40 focus-visible:outline-none @[600px]:flex-[0_1_auto] ${sessionHref ? '-ml-2' : '-ml-3'} ${!isSidebarVisible ? 'pr-8' : ''}`}
+            className={`flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap hover:border-border hover:bg-muted/40 focus-visible:border-border focus-visible:bg-muted/40 focus-visible:outline-none @[600px]:flex-[0_1_auto] ${sessionHref ? '-ml-2' : '-ml-3'} ${!isSidebarVisible ? 'pr-8' : ''}`}
           >
-            {title}
+            <TaskRobotIcon
+              taskId={taskId}
+              sessionId={iconSessionId}
+              orderedTaskIds={iconSession?.tasks.map((item) => item.taskId)}
+              className="size-6"
+            />
+            <span className="truncate">{title}</span>
           </h1>
         </div>
         {badges.length > 0 && (

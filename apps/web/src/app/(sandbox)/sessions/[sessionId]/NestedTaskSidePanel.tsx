@@ -20,6 +20,7 @@ import {
 } from '@/components/system';
 import { WorkspaceBadge } from '@/components/sandbox';
 import { FramedSurface } from '@/components/layout';
+import { TaskRobotIcon } from '@/components/tasks/TaskRobotIcon';
 
 import { ArtifactLinkProvider } from '../../task/[taskId]/hooks/ArtifactLinkProvider';
 import { HistoricalSandboxProvider } from '../../task/[taskId]/hooks/HistoricalSandboxProvider';
@@ -323,6 +324,7 @@ export function NestedTaskSidePanel({
                   variant="ghost"
                   className="relative -left-2 flex h-7 w-full min-w-0 justify-start gap-1.5 px-2 text-sm hover:text-accent-foreground"
                 >
+                  <TaskRobotIcon taskId={taskId} className="size-6" />
                   <span className="shrink-0 font-semibold">Task:</span>
                   <span className="min-w-0 flex-1 truncate text-left font-medium">
                     {title}
@@ -350,7 +352,11 @@ export function NestedTaskSidePanel({
             </DropdownMenu>
           ) : (
             <h2 className="truncate text-sm font-medium whitespace-nowrap">
-              <span className="font-semibold">Task:</span> {title}
+              <span className="inline-flex min-w-0 items-center gap-1.5">
+                <TaskRobotIcon taskId={taskId} className="size-6" />
+                <span className="font-semibold">Task:</span>
+                <span className="truncate">{title}</span>
+              </span>
             </h2>
           )
         }

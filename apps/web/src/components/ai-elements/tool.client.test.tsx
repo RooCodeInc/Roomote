@@ -14,6 +14,22 @@ vi.mock('@/components/system', async (importOriginal) => {
 });
 
 describe('ToolHeader', () => {
+  it('keeps running feedback beside a custom task icon', () => {
+    render(
+      <ToolHeader
+        action="Sending"
+        object="Task Message"
+        icon={Search}
+        iconElement={<span data-testid="task-icon" />}
+        state="input-available"
+        collapsible={false}
+      />,
+    );
+
+    expect(screen.getByTestId('task-icon')).toBeInTheDocument();
+    expect(screen.getByTestId('spinner')).toBeInTheDocument();
+  });
+
   it('shows running and failed states textually while success stays implied', () => {
     const { rerender } = render(
       <ToolHeader

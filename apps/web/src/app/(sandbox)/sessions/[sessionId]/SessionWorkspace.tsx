@@ -92,6 +92,7 @@ import {
   type SessionArtifactViewerSelection,
 } from './session-task-panel-context';
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
+import { TaskRobotIconProvider } from '@/components/tasks/TaskRobotIcon';
 import { useArtifactByPath } from '../../task/[taskId]/hooks/use-artifact-by-path';
 import { PreviewPaneProvider } from '../../task/[taskId]/hooks/use-preview-pane';
 import { humanizePortName } from '../../task/[taskId]/preview-port-utils';
@@ -843,6 +844,10 @@ export function SessionWorkspace({
     () => computeTaskStateRevision(taskCards),
     [taskCards],
   );
+  const orderedTaskIds = useMemo(
+    () => taskCards.map((task) => task.taskId),
+    [taskCards],
+  );
   const singleRunningTaskId =
     runningTaskCount === 1 ? runningTasks[0]?.taskId : null;
   const selectedTask = taskCards.find((task) => task.taskId === selectedTaskId);
@@ -1339,39 +1344,44 @@ export function SessionWorkspace({
             className="flex min-h-0 min-w-0 flex-1"
             onKeyDownCapture={handlePromptFocusNavigation}
           >
-            <ResponsiveWorkspacePanels
-              isPanelOpen={panelOpen}
-              dimUnfocusedPanelIds={[
-                'main',
-                ...visibleTaskPanels
-                  .filter(({ taskId }) => !taskArtifacts[taskId])
-                  .map(({ taskId }) => `task:${taskId}`),
-              ]}
-              mainMinSize={mainMinSize}
-              panelMinSize={panelMinSize}
-              main={
-                <SessionPullRequestsContext.Provider
-                  value={sessionPullRequests}
-                >
-                  <SessionRunningTaskCountContext.Provider
-                    value={runningTaskCount}
+            <TaskRobotIconProvider
+              sessionId={session.id}
+              orderedTaskIds={orderedTaskIds}
+            >
+              <ResponsiveWorkspacePanels
+                isPanelOpen={panelOpen}
+                dimUnfocusedPanelIds={[
+                  'main',
+                  ...visibleTaskPanels
+                    .filter(({ taskId }) => !taskArtifacts[taskId])
+                    .map(({ taskId }) => `task:${taskId}`),
+                ]}
+                mainMinSize={mainMinSize}
+                panelMinSize={panelMinSize}
+                main={
+                  <SessionPullRequestsContext.Provider
+                    value={sessionPullRequests}
                   >
-                    <SessionTaskStateRevisionContext.Provider
-                      value={taskStateRevision}
+                    <SessionRunningTaskCountContext.Provider
+                      value={runningTaskCount}
                     >
-                      <OpenSessionTasksPanelContext.Provider
-                        value={openTasksPanel}
+                      <SessionTaskStateRevisionContext.Provider
+                        value={taskStateRevision}
                       >
-                        {children}
-                      </OpenSessionTasksPanelContext.Provider>
-                    </SessionTaskStateRevisionContext.Provider>
-                  </SessionRunningTaskCountContext.Provider>
-                </SessionPullRequestsContext.Provider>
-              }
-              panel={primaryPanel?.content ?? utilityPanelContent}
-              panelId={primaryPanel?.id}
-              additionalPanels={renderedPanels.slice(1)}
-            />
+                        <OpenSessionTasksPanelContext.Provider
+                          value={openTasksPanel}
+                        >
+                          {children}
+                        </OpenSessionTasksPanelContext.Provider>
+                      </SessionTaskStateRevisionContext.Provider>
+                    </SessionRunningTaskCountContext.Provider>
+                  </SessionPullRequestsContext.Provider>
+                }
+                panel={primaryPanel?.content ?? utilityPanelContent}
+                panelId={primaryPanel?.id}
+                additionalPanels={renderedPanels.slice(1)}
+              />
+            </TaskRobotIconProvider>
           </div>
         </WorkspaceSurface>
       </OpenSessionArtifactViewerContext.Provider>

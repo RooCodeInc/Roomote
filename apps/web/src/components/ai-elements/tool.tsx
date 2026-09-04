@@ -1,6 +1,6 @@
 'use client';
 
-import { type ComponentProps } from 'react';
+import { type ComponentProps, type ReactNode } from 'react';
 
 import type { AcpToolCallPayload, AcpToolResultPayload } from '@roomote/types';
 
@@ -48,6 +48,7 @@ type ToolHeaderProps = {
   suffix?: string;
   suffixPrefix?: string;
   icon: LucideIcon;
+  iconElement?: ReactNode;
   state: ToolState;
   params?: AcpToolCallPayload | AcpToolResultPayload;
   additions?: number;
@@ -62,6 +63,7 @@ export const ToolHeader = ({
   suffix,
   suffixPrefix = 'from',
   icon: ActionIcon,
+  iconElement,
   state,
   params: _params,
   additions,
@@ -88,7 +90,12 @@ export const ToolHeader = ({
         !collapsible && 'cursor-default',
       )}
     >
-      {isRunning ? (
+      {iconElement ? (
+        <span className="flex shrink-0 items-center gap-1">
+          {iconElement}
+          {isRunning ? <Spinner size="sm" /> : null}
+        </span>
+      ) : isRunning ? (
         <Spinner size="sm" className="shrink-0" />
       ) : collapsible ? (
         <CollapsibleIconTrigger icon={ActionIcon} />

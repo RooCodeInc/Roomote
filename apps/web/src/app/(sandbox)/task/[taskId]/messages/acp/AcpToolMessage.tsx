@@ -9,6 +9,10 @@ import {
 
 import { AlertCircle } from '@/components/system';
 import {
+  TaskRobotIcon,
+  useTaskRobotIconContext,
+} from '@/components/tasks/TaskRobotIcon';
+import {
   Message,
   MessageContent,
   Tool,
@@ -57,6 +61,11 @@ export function AcpToolMessage({
       : 'output-available';
 
   const presentation = resolveToolPresentation(msg.data, msg.partial);
+  const taskIconContext = useTaskRobotIconContext();
+  const referencedTaskId = resolveReferencedTaskId(
+    msg,
+    taskIconContext?.orderedTaskIds,
+  );
   const ToolIcon = isFailed
     ? AlertCircle
     : presentation.integrationIcon
@@ -119,6 +128,11 @@ export function AcpToolMessage({
             suffix={suffix}
             suffixPrefix={suffixPrefix}
             icon={ToolIcon}
+            iconElement={
+              !isFailed && referencedTaskId ? (
+                <TaskRobotIcon taskId={referencedTaskId} className="size-4" />
+              ) : undefined
+            }
             state={toolState}
             params={sanitizedToolData}
             collapsible={showCollapsibleContent}
@@ -152,6 +166,58 @@ export function AcpToolMessage({
       </MessageContent>
     </Message>
   );
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function resolveReferencedTaskId(
+  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
+  orderedTaskIds?: readonly string[],
+): string | null {
+  const toolName = (msg.data.toolName ?? msg.data.mcpToolName)
+    ?.trim()
+    .toLowerCase();
+  if (
+    !toolName ||
+    ![
+      'launch_task',
+      'review_pull_request',
+      'send_task_message',
+      'cancel_task',
+      'retry_task_start',
+    ].includes(toolName)
+  ) {
+    return null;
+  }
+
+  const rawInput = asRecord(
+    (msg.data as unknown as Record<string, unknown>).rawInput,
+  );
+  const argumentsRecord = asRecord(rawInput?.arguments);
+  const inputTaskId = argumentsRecord?.taskId;
+  if (typeof inputTaskId === 'string' && inputTaskId.trim()) {
+    return inputTaskId.trim();
+  }
+
+  if (msg.kind === 'tool_result') {
+    try {
+      const output = asRecord(JSON.parse(msg.data.output));
+      const result =
+        asRecord(output?.result) ?? asRecord(output?.data) ?? output;
+      const outputTaskId = result?.taskId;
+      if (typeof outputTaskId === 'string' && outputTaskId.trim()) {
+        return outputTaskId.trim();
+      }
+    } catch {
+      // Keep the normal tool icon when a result is not structured JSON.
+    }
+  }
+
+  return orderedTaskIds?.length === 1 ? orderedTaskIds[0]! : null;
 }
 
 interface SubagentActivity {
