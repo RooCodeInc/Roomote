@@ -111,6 +111,7 @@ export async function startSourceControlFastSessionTurn(input: {
   discussion: SourceControlFastDiscussion;
   userId: string;
   senderDisplayName: string | null;
+  sourceUrl?: string;
   question: string;
   agentContext: string;
   currentMessageId: string;
@@ -124,7 +125,8 @@ export async function startSourceControlFastSessionTurn(input: {
     activeTasks,
   });
   if (owningSession) {
-    const url = buildSourceControlDiscussionUrl(input.discussion);
+    const url =
+      input.sourceUrl || buildSourceControlDiscussionUrl(input.discussion);
     const admission = await admitFastAgentHumanFollowUp({
       parent: {
         sessionId: owningSession.id,

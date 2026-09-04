@@ -2308,7 +2308,7 @@ describe('deliverFastAgentParentEvent', () => {
             kind: 'pull',
             number: 42,
             reviewCommentId: '800',
-            url: 'https://github.com/acme/api/pull/42',
+            url: 'https://github.com/acme/api/pull/42#discussion_r900',
           },
         },
       },
@@ -2344,7 +2344,7 @@ describe('deliverFastAgentParentEvent', () => {
     // The Slack thread gets the same answer with attribution to the mention.
     const slackPosts = JSON.stringify(mocks.postMessage.mock.calls);
     expect(slackPosts).toContain(
-      '**alice** on [acme/api#42](https://github.com/acme/api/pull/42):',
+      '**alice** on [acme/api#42](https://github.com/acme/api/pull/42#discussion_r900):',
     );
     expect(slackPosts).toContain('Done: the changelog now mentions the fix.');
   });
