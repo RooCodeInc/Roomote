@@ -2,7 +2,7 @@ import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { Hono } from 'hono';
-import type { RunTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
@@ -68,11 +68,19 @@ function createRunToken(): RunTokenContext {
   };
 }
 
-function createApp() {
+function createAuthToken(): AuthTokenContext {
+  return {
+    userId: 'user-1',
+    tokenType: 'auth',
+    version: 1,
+  };
+}
+
+function createApp(authContext: Variables['authContext'] = createRunToken()) {
   const app = new Hono<{ Variables: Variables }>();
 
   app.use('*', async (c, next) => {
-    c.set('authContext', createRunToken());
+    c.set('authContext', authContext);
     await next();
   });
 
@@ -186,6 +194,21 @@ describe('createCustomMcpProxy', () => {
 
     expect(response.status).toBe(404);
     expect(mockFindCustomServer).not.toHaveBeenCalled();
+  });
+
+  it('accepts user auth tokens for Fast mode without validating a task run', async () => {
+    mockFindCustomServer.mockResolvedValue(
+      buildServerRow({ url: upstreamUrl() }),
+    );
+
+    const response = await postMcp(
+      createApp(createAuthToken()),
+      initializeRequest,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockFindTaskRun).not.toHaveBeenCalled();
+    expect(lastUpstreamHeaders?.['x-api-key']).toBe('secret-one');
   });
 
   it('404s for unknown servers', async () => {
