@@ -7,6 +7,7 @@ import {
   TaskPayloadKind,
 } from '@roomote/types';
 import { enqueueTask } from '@roomote/cloud-agents/server';
+import { and, db, eq, taskPullRequests } from '@roomote/db/server';
 import {
   acquireGithubPrReviewLifecycleLock,
   publishGithubPrReviewCheck,
@@ -35,7 +36,12 @@ export async function handlePrOpen(
     | WebhookPullRequestOpened
     | WebhookPullRequestReadyForReview
     | WebhookPullRequestReopened,
-  options?: { isDraftToReady?: boolean },
+  options?: {
+    isDraftToReady?: boolean;
+    isExplicitReviewRequest?: boolean;
+    expectedGithubCheckRunId?: number;
+    expectedHeadSha?: string;
+  },
 ): Promise<WebhookResponse> {
   if (pr.locked) {
     return { status: 'error', message: 'PR is locked' };
@@ -56,6 +62,10 @@ export async function handlePrOpen(
   const { targets: allTargets } = result;
 
   const targets = allTargets.filter((target) => {
+    if (options?.isExplicitReviewRequest) {
+      return true;
+    }
+
     const settings = target.settings as PrReviewSettings | null;
     const reviewOnCommit =
       settings?.reviewOnCommit ?? DEFAULT_PR_REVIEW_SETTINGS.reviewOnCommit;
@@ -75,19 +85,6 @@ export async function handlePrOpen(
 
   if (targets.length === 0) {
     return { status: 'ok', message: 'No PR reviewer targets found.' };
-  }
-
-  const headSha = await getCurrentGitHubPrHeadSha({
-    installationId: installation!.id,
-    repository: repository.full_name,
-    prNumber: pr.number,
-  });
-
-  if (!headSha) {
-    return {
-      status: 'error',
-      message: `Could not resolve the live head for ${repository.full_name}#${pr.number}.`,
-    };
   }
 
   console.log(
@@ -117,6 +114,48 @@ export async function handlePrOpen(
 
     try {
       releaseLifecycleLock.signal.throwIfAborted();
+
+      if (options?.expectedGithubCheckRunId) {
+        const currentLinkage = await db.query.taskPullRequests.findFirst({
+          where: and(
+            eq(taskPullRequests.sourceControlProvider, 'github'),
+            eq(taskPullRequests.repository, repository.full_name),
+            eq(taskPullRequests.prNumber, pr.number),
+            eq(
+              taskPullRequests.githubCheckRunId,
+              options.expectedGithubCheckRunId,
+            ),
+          ),
+          columns: { id: true },
+        });
+
+        if (!currentLinkage) {
+          console.log(
+            `[handlePrOpen] ${repository.full_name}#${pr.number} -> skip_replaced_rerequested_check`,
+          );
+          return null;
+        }
+      }
+
+      const headSha = await getCurrentGitHubPrHeadSha({
+        installationId: installation!.id,
+        repository: repository.full_name,
+        prNumber: pr.number,
+      });
+
+      if (!headSha) {
+        throw new Error(
+          `Could not resolve the live head for ${repository.full_name}#${pr.number}.`,
+        );
+      }
+
+      if (options?.expectedHeadSha && headSha !== options.expectedHeadSha) {
+        console.log(
+          `[handlePrOpen] ${repository.full_name}#${pr.number} -> skip_stale_rerequested_check`,
+        );
+        return null;
+      }
+
       const launch = await enqueueTask({
         task: {
           type: TaskPayloadKind.GithubPrReview,
@@ -153,7 +192,10 @@ export async function handlePrOpen(
         },
       });
 
-      if (target.settings?.publishGithubCheck) {
+      if (
+        target.settings?.publishGithubCheck ||
+        options?.isExplicitReviewRequest
+      ) {
         releaseLifecycleLock.signal.throwIfAborted();
         await publishGithubPrReviewCheck({
           installationId: installation!.id,

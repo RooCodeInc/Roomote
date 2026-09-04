@@ -19,6 +19,7 @@ import {
 import type { FastAgentActiveTask } from './fast-agent-session';
 import { isFastAgentNativeIntegration } from './fast-agent-tool-policy';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
+import { buildTherapistModeInstructions } from '../therapist-mode';
 
 function formatRepositoriesForPrompt(
   availableEnvironments: RoutableEnvironment[],
@@ -125,6 +126,7 @@ export function buildFastAgentSystemPrompt({
   releaseVersion,
   setupSnapshot,
   setupSession = false,
+  therapistModeEnabled = false,
 }: {
   availableEnvironments: RoutableEnvironment[];
   availableTaskModels?: TaskModelOption[];
@@ -147,6 +149,7 @@ export function buildFastAgentSystemPrompt({
   setupSnapshot?: string;
   /** True only for the active conversational setup session. */
   setupSession?: boolean;
+  therapistModeEnabled?: boolean;
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
@@ -210,6 +213,8 @@ ${
     ? '- After a successful human turn, offer automation only when the completed work is clearly periodic-shaped (such as a report, digest, scan, sweep, monitor, triage, reminder, or status check), and the user signals repetition (such as "again", "like last time", or a repeated request) or the task is canonically periodic (such as a standup summary, PR review sweep, dependency check, or inbox/issue triage). Never offer for one-off fixes, edits, questions, or exploration; when in doubt, do not offer.\n- Append at most one short, unobtrusive sentence to the closeout: "By the way — if you want this weekly, I can save it as an automation. Just say the word." Do not interrupt the answer. Do not offer on failures, blockers, clarifications, automation-triggered turns, or after an offer was already made or declined in this conversation.\n'
     : '- Do not proactively offer to save work as an automation on this turn.\n'
 }`;
+  const therapistModeInstructions =
+    buildTherapistModeInstructions(therapistModeEnabled);
 
   return `You are ${PRODUCT_NAME} in fast mode on ${surfaceName}. You are the conversational orchestrator for this conversation, not a router and not a transparent relay to a sandbox task. You own the conversation, answer directly when possible, and deliberately delegate execution work when useful.
 
@@ -233,6 +238,7 @@ ${formatActiveTasksForPrompt(activeTasks)}
 
 ## Deployment MCP Servers
 ${formatIntegrationsForPrompt(availableIntegrations)}
+${therapistModeInstructions ? `\n${therapistModeInstructions}\n` : ''}
 ${
   setupSession
     ? `
