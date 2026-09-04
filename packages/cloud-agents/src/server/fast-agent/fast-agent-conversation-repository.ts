@@ -135,6 +135,11 @@ async function reconcileInferenceRetryNotices(
   // Stamping it as interrupted here would post a false interruption and
   // leave the eventual answer beside it. The caller's own row (a new turn
   // that has not superseded the older one, such as a reaction) is excluded.
+  //
+  // The expired-lease sweep is the backstop for a hand-off whose queue
+  // wakeup never runs, so there only a live claim or a scheduled retry
+  // counts as owned; a released or expired row must not block it forever.
+  const now = new Date();
   const [pendingTurn] = await database
     .select({ id: fastAgentParentEvents.id })
     .from(fastAgentParentEvents)
@@ -146,6 +151,14 @@ async function reconcileInferenceRetryNotices(
         isNull(fastAgentParentEvents.discardedAt),
         ...(options.excludeEventId
           ? [ne(fastAgentParentEvents.id, options.excludeEventId)]
+          : []),
+        ...(requireExpiredLease
+          ? [
+              or(
+                gt(fastAgentParentEvents.claimedUntil, now),
+                gt(fastAgentParentEvents.retryAt, now),
+              ),
+            ]
           : []),
       ),
     )

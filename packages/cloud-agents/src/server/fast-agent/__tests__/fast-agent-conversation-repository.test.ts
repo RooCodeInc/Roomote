@@ -1656,10 +1656,12 @@ describe('Fast conversation repository', () => {
     await reconcileExpiredFastAgentInferenceRetryNotices();
     expect(await readNotice()).toMatchObject({ inferenceRetryActive: true });
 
-    // Once the row is settled, the same notice is an orphan again.
+    // A hand-off whose claim was released and whose retry time has passed
+    // is only owned while its queue wakeup runs; the expired-lease sweep is
+    // the backstop for one that never does, so such a row does not block it.
     await db
       .update(fastAgentParentEvents)
-      .set({ deliveredAt: new Date() })
+      .set({ retryAt: new Date(Date.now() - 1_000), claimedUntil: null })
       .where(eq(fastAgentParentEvents.conversationId, session.id));
     await reconcileExpiredFastAgentInferenceRetryNotices();
     expect(await readNotice()).toMatchObject({
