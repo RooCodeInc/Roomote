@@ -379,5 +379,27 @@ describe('getTaskRelayUpdates', () => {
         { text: 'Submitted input response' },
       ],
     });
+
+    const firstPageResponse = await app.request(
+      `/tasks/${task.id}/updates?limit=1`,
+    );
+    const firstPage = (await firstPageResponse.json()) as {
+      narrative: Array<{ text: string }>;
+      responseNeeded: boolean;
+      hasMore: boolean;
+      nextCursor: string;
+    };
+    expect(firstPage).toMatchObject({
+      responseNeeded: true,
+      hasMore: true,
+      narrative: [{ text: expect.stringContaining('Which rollout') }],
+    });
+    const secondPageResponse = await app.request(
+      `/tasks/${task.id}/updates?limit=1&cursor=${encodeURIComponent(firstPage.nextCursor)}`,
+    );
+    await expect(secondPageResponse.json()).resolves.toMatchObject({
+      responseNeeded: false,
+      narrative: [{ text: 'Submitted input response' }],
+    });
   });
 });

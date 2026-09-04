@@ -209,20 +209,11 @@ function buildResponse(params: {
           row.payload,
         )
       : null;
-    if (visible) {
-      if (row.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput) {
-        requestedInput = true;
-      } else if (
-        row.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse
-      ) {
-        requestedInput = false;
-      }
-    }
     const text = sanitized
       ? (getTextFromContentBlocks(sanitized.contentBlocks)?.trim() ??
         getStructuredInputNarrative(row.eventType, sanitized.payload ?? {}))
       : null;
-    if (!visible || !text) {
+    if (!visible) {
       nextPosition = positionForRow(row);
       continue;
     }
@@ -236,6 +227,19 @@ function buildResponse(params: {
       hasMore = true;
       break;
     }
+
+    if (row.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput) {
+      requestedInput = true;
+    } else if (
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse
+    ) {
+      requestedInput = false;
+    }
+    if (!text) {
+      nextPosition = positionForRow(row);
+      continue;
+    }
+
     const maxChars = Math.min(
       MAX_RELAY_TEXT_CHARS,
       available || MAX_RELAY_TEXT_CHARS,
