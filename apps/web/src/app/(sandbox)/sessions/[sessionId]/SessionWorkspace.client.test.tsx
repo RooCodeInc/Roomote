@@ -160,6 +160,7 @@ vi.mock('./NestedTaskSidePanel', () => ({
   }) => (
     <div aria-label={`Full task ${taskId}`}>
       Nested panel {taskId}
+      <textarea aria-label={`Task prompt ${taskId}`} />
       <button
         type="button"
         onClick={() => onOpenArtifact('proof/nested.png', 3)}
@@ -937,6 +938,11 @@ describe('SessionWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
 
     expect(screen.getByRole('heading', { name: 'Tasks' })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'When opened side by side, use Alt/Option + ←/→ to move between panels',
+      ),
+    ).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', {
         name: 'View coding task: Update homepage background',
@@ -994,6 +1000,51 @@ describe('SessionWorkspace', () => {
     expect(screen.getByLabelText('Full task task-1')).toBeVisible();
     expect(screen.getByLabelText('Full task task-2')).toBeVisible();
     expect(screen.getByText('Session transcript')).toBeVisible();
+  });
+
+  it('moves focus between visible prompt inputs with Alt+Arrow keys', async () => {
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Add homepage tests',
+    };
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1600,
+      children: <textarea aria-label="Session prompt" />,
+      sessionOverride: { tasks: [singleTask, secondTask, thirdTask] },
+    });
+
+    expect(await screen.findByLabelText('Task prompt task-3')).toBeVisible();
+    const sessionPrompt = screen.getByLabelText('Session prompt');
+    const firstTaskPrompt = screen.getByLabelText('Task prompt task-1');
+    const secondTaskPrompt = screen.getByLabelText('Task prompt task-2');
+    const thirdTaskPrompt = screen.getByLabelText('Task prompt task-3');
+
+    sessionPrompt.focus();
+    fireEvent.keyDown(sessionPrompt, { key: 'ArrowRight', altKey: true });
+    expect(firstTaskPrompt).toHaveFocus();
+
+    fireEvent.keyDown(firstTaskPrompt, { key: 'ArrowRight', altKey: true });
+    expect(secondTaskPrompt).toHaveFocus();
+
+    fireEvent.keyDown(secondTaskPrompt, { key: 'ArrowRight', altKey: true });
+    expect(thirdTaskPrompt).toHaveFocus();
+
+    fireEvent.keyDown(thirdTaskPrompt, { key: 'ArrowRight', altKey: true });
+    expect(thirdTaskPrompt).toHaveFocus();
+
+    fireEvent.keyDown(thirdTaskPrompt, { key: 'ArrowLeft', altKey: true });
+    expect(secondTaskPrompt).toHaveFocus();
+
+    fireEvent.keyDown(secondTaskPrompt, { key: 'ArrowLeft', altKey: true });
+    expect(firstTaskPrompt).toHaveFocus();
+
+    fireEvent.keyDown(firstTaskPrompt, { key: 'ArrowLeft', altKey: true });
+    expect(sessionPrompt).toHaveFocus();
+
+    fireEvent.keyDown(sessionPrompt, { key: 'ArrowLeft', altKey: true });
+    expect(sessionPrompt).toHaveFocus();
   });
 
   it('replaces the URL-selected task when a task card opens at one-panel capacity', () => {

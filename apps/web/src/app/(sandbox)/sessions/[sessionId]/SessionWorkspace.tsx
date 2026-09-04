@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -598,6 +599,9 @@ function SessionTasksPanel({
             onOpen={onOpenTask}
           />
         ))}
+        <p className="py-2 text-xs text-muted-foreground">
+          When opened side by side, use Alt/Option + ←/→ to move between panels
+        </p>
       </div>
     </FramedSurface>
   );
@@ -1086,6 +1090,38 @@ export function SessionWorkspace({
     : undefined;
   const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
   useResponsiveSandboxSidebar(session.id);
+  const handlePromptFocusNavigation = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (
+        !event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')
+      ) {
+        return;
+      }
+
+      const promptInputs = Array.from(
+        event.currentTarget.querySelectorAll<HTMLTextAreaElement>(
+          '[data-slot="resizable-panel"] textarea:not(:disabled)',
+        ),
+      );
+      if (promptInputs.length < 2) return;
+
+      const activeIndex = promptInputs.findIndex(
+        (input) => input === document.activeElement,
+      );
+      if (activeIndex < 0) return;
+
+      const offset = event.key === 'ArrowLeft' ? -1 : 1;
+      const nextInput = promptInputs[activeIndex + offset];
+      if (!nextInput) return;
+
+      event.preventDefault();
+      nextInput.focus();
+    },
+    [],
+  );
 
   return (
     <OpenSessionTaskPanelContext.Provider value={openTaskPanel}>
@@ -1150,7 +1186,11 @@ export function SessionWorkspace({
           </>
         }
       >
-        <div ref={workspacePanelsRef} className="flex min-h-0 min-w-0 flex-1">
+        <div
+          ref={workspacePanelsRef}
+          className="flex min-h-0 min-w-0 flex-1"
+          onKeyDownCapture={handlePromptFocusNavigation}
+        >
           <ResponsiveWorkspacePanels
             isPanelOpen={panelOpen}
             mainMinSize={mainMinSize}
