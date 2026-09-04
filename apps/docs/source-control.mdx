@@ -79,6 +79,11 @@ the same lines are already under discussion. On Gitea, that reply becomes a
 pull request comment that references the original thread. Roomote can anchor
 new findings to added, changed, or deleted lines.
 
+When a Fast Session starts from an issue or pull request comment, its response
+quotes the triggering comment. Each turn uses one Roomote comment and edits it
+as additional replies arrive instead of stacking separate comments. The footer
+links back to the Session and, when available, its live preview.
+
 If a provider rejects an inline location, Roomote retries with the current diff
 and then includes the finding with a file and line reference in the review
 summary. On later sync reviews, Roomote resolves its inline thread when the

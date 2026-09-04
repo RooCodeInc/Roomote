@@ -15,6 +15,8 @@ automations, and the web dashboard.
 A Session can also run Roomote's structured code review on demand. Ask it to
 review a pull request and the Review Code pipeline runs as a task inside the
 Session; in a pull request discussion, it reviews that pull request.
+Eligible automatic reviews of pull requests opened by Session tasks also appear
+as tasks in the Session that opened the pull request.
 
 When a task in a Session opens a pull request, that pull request belongs to the
 Session. A mention on it joins the Session instead of starting a new one, and
@@ -22,17 +24,16 @@ Roomote answers on the pull request as well as in the Session's home surface.
 
 ## Start a Session from the dashboard
 
-On the home page, leave the workspace selector on **Fast** to start a
-conversation. Roomote answers directly when it can and delegates execution
-when the request needs a repository workspace. Selecting an environment or
-repository still starts a Session: the Session records your request, delegates
-the task into that workspace right away without a model turn, and opens the
-task workspace. You can return to the Session at any time to continue the
-conversation around that task.
+On the home page, enter a request to start a Fast Session. Roomote answers
+directly when it can and delegates execution when the request needs a repository
+workspace. Fast is also the default for unpinned requests from supported chat
+providers.
 
-Fast is the default for unpinned requests across the web dashboard and
-supported chat providers. Choose an environment or repository explicitly when
-you already know where the work should run.
+After creating or editing an environment, choose **Use environment** to open an
+environment-pinned launcher. Submitting there still starts a Session, but it
+delegates the task into that environment immediately and opens the task
+workspace. You can return to the Session at any time to continue the
+conversation around that task.
 
 Select **New Session** in the navigation to open the same launcher from any
 dashboard page.
@@ -56,7 +57,14 @@ task with documents created directly during the conversation, labels each item
 by its Session or task source, and opens previews without leaving the Session.
 Links to a Session-created artifact, including the link the Session shares when
 it creates one, open that artifact directly in the Artifacts panel. Individual
-task details continue to show their own artifacts.
+task details continue to show their own artifacts. For a Markdown artifact,
+choose **Build this** to send it back to its owning Session, where Fast can
+discuss it or delegate its implementation.
+
+The **Live Preview** panel combines active previews from every linked task. When
+more than one task has a preview, service labels include the task name so you
+can tell them apart. Previews disappear when their task finishes or its sandbox
+goes to sleep; open the task workspace to wake a sleeping task.
 
 **Session info** shows the total inference cost for the conversation and its
 attached tasks. Open the cost breakdown to separate direct Session orchestration

@@ -53,6 +53,11 @@ This is intentional. It lets production operators keep secrets and platform
 configuration in the deployment system while still letting admins manage
 non-env settings in the app.
 
+The generic **Deployment Environment Variables** editor also hides and rejects
+Roomote-managed and control-plane keys. Configure provider-owned keys on their
+provider Settings page instead; the generic editor cannot create, edit, or
+delete them.
+
 Use the UI when:
 
 - the value is safe for an admin to rotate from Roomote
