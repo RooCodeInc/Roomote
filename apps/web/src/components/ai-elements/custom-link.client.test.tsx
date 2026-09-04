@@ -101,6 +101,23 @@ describe('CustomLink', () => {
     expect(pushMock).not.toHaveBeenCalled();
   });
 
+  it('opens the latest version when a Session artifact link has an invalid version', () => {
+    mockPathname = '/sessions/session-1';
+    mockArtifactLink = null;
+    mockOpenSessionArtifactViewer = openSessionArtifactViewerMock;
+    const href = `${window.location.origin}/sessions/session-1?artifact=notes%2Fdecision.md&v=1.5`;
+
+    render(<CustomLink href={href}>Open decision</CustomLink>);
+
+    fireEvent.click(screen.getByRole('link', { name: 'Open decision' }));
+
+    expect(openSessionArtifactViewerMock).toHaveBeenCalledWith({
+      owner: { sessionId: 'session-1' },
+      path: 'notes/decision.md',
+      version: undefined,
+    });
+  });
+
   it('opens task artifact links in the Session side panel when viewing a Session', () => {
     mockPathname = '/sessions/session-1';
     mockArtifactLink = null;

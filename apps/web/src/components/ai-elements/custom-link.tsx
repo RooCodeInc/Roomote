@@ -8,6 +8,7 @@ import {
   useOpenSessionArtifactViewer,
   type SessionArtifactViewerSelection,
 } from '@/app/(sandbox)/sessions/[sessionId]/session-task-panel-context';
+import { parseSessionArtifactSearchParams } from '@/lib/artifact-view-urls';
 
 const ARTIFACT_MARKER_PREFIX = 'https://__artifact__/';
 const TASK_ARTIFACT_PATH_PATTERN = /^\/task\/([^/]+)\/artifacts(?:\/(.+))?$/;
@@ -113,7 +114,8 @@ interface ParsedSessionArtifactUrl {
 
 /**
  * Parse Session artifact deep links (`/sessions/<id>?artifact=<path>&v=<n>`),
- * the shape `create_artifact` returns; mirrors `parseSessionArtifactSearchParams`.
+ * the shape `create_artifact` returns. Shares the deep link's param parsing so
+ * a malformed version falls back to the latest version in both places.
  */
 function parseSessionArtifactUrl(
   href: string,
@@ -144,22 +146,12 @@ function parseSessionArtifactUrl(
     return null;
   }
 
-  const path = parsedUrl.searchParams.get('artifact');
-  if (!path) return null;
-
-  const versionParam = parsedUrl.searchParams.get('v');
-  const parsedVersion = versionParam
-    ? Number.parseInt(versionParam, 10)
-    : undefined;
-  const version =
-    parsedVersion !== undefined && !Number.isNaN(parsedVersion)
-      ? parsedVersion
-      : undefined;
+  const selection = parseSessionArtifactSearchParams(parsedUrl.searchParams);
+  if (!selection) return null;
 
   return {
     sessionId,
-    path,
-    version,
+    ...selection,
     href: `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`,
   };
 }
