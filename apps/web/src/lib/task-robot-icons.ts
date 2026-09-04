@@ -1,6 +1,6 @@
 export const TASK_ROBOT_ICON_COUNT = 100;
 
-export type TaskRobotIconId = `robot-${string}`;
+type TaskRobotIconId = `robot-${string}`;
 
 function hashString(value: string): number {
   let hash = 2166136261;
