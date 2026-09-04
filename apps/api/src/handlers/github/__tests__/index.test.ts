@@ -11,6 +11,7 @@ const {
   mockHandlePrReadyForReview,
   mockHandlePrReopen,
   mockHandlePrSynchronize,
+  mockHandleCheckRunRerequested,
   mockHandlePushConflictCheck,
   mockHandleMergeAnnouncerPush,
   mockGetInstallationOctokit,
@@ -51,6 +52,7 @@ const {
   mockHandlePrReadyForReview: vi.fn(),
   mockHandlePrReopen: vi.fn(),
   mockHandlePrSynchronize: vi.fn(),
+  mockHandleCheckRunRerequested: vi.fn(),
   mockHandlePushConflictCheck: vi.fn(),
   mockHandleMergeAnnouncerPush: vi.fn(),
   mockGetInstallationOctokit: vi.fn(),
@@ -181,6 +183,10 @@ vi.mock('../handlePrSynchronize', () => ({
   handlePrSynchronize: mockHandlePrSynchronize,
 }));
 
+vi.mock('../handleCheckRunRerequested', () => ({
+  handleCheckRunRerequested: mockHandleCheckRunRerequested,
+}));
+
 vi.mock('../currentPrHead', () => ({
   getCurrentGitHubPrHeadSha: mockGetCurrentGitHubPrHeadSha,
 }));
@@ -261,6 +267,7 @@ describe('github webhook router', () => {
     mockHandlePrReadyForReview.mockReset();
     mockHandlePrReopen.mockReset();
     mockHandlePrSynchronize.mockReset();
+    mockHandleCheckRunRerequested.mockReset();
     mockHandlePushConflictCheck.mockReset();
     mockHandleMergeAnnouncerPush.mockReset();
     mockIsRepoSkipped.mockReset();
@@ -292,6 +299,7 @@ describe('github webhook router', () => {
     mockHandleGitHubIssueFixer.mockResolvedValue({ status: 'ok' });
     mockHandlePushConflictCheck.mockResolvedValue({ status: 'ok' });
     mockHandlePrSynchronize.mockResolvedValue({ status: 'ok' });
+    mockHandleCheckRunRerequested.mockResolvedValue({ status: 'ok' });
     mockGetCurrentGitHubPrHeadSha.mockResolvedValue('live-head');
     mockRetirePendingPrReviewActionsForPullRequest.mockResolvedValue(undefined);
     mockHandleMergeAnnouncerPush.mockResolvedValue({ status: 'ok' });
@@ -668,6 +676,41 @@ describe('github webhook router', () => {
     expect(
       mockQueuePrCiFailureNotification.mock.invocationCallOrder[0],
     ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
+  });
+
+  it('records and dispatches rerequested check runs through the review handler', async () => {
+    const payload = {
+      action: 'rerequested',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      sender: { id: 20, login: 'reviewer' },
+      check_run: {
+        id: 9001,
+        name: 'Roomote code review',
+        head_sha: 'live-head',
+        app: { slug: 'roomote' },
+      },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-rerequest-1',
+        'x-github-event': 'check_run',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockRecordWebhook).toHaveBeenCalledWith(
+      'delivery-rerequest-1',
+      'check_run.rerequested',
+      payload,
+      expect.any(Function),
+    );
+    expect(mockHandleCheckRunRerequested).toHaveBeenCalledWith(payload);
+    expect(mockQueuePrCiFailureNotification).not.toHaveBeenCalled();
   });
 
   it('retires review actions for older heads using the live PR head on synchronize', async () => {
