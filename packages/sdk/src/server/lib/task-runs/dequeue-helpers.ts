@@ -4,6 +4,7 @@ import {
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   parseInferenceGatewayKeys,
   parseModelProviderEnvKeys,
@@ -266,6 +267,7 @@ export async function fetchResolvedRuntimeEnvVars(
   deploymentEnvVars?: Record<string, string>,
   options?: {
     sourceControlProvider?: SourceControlProvider | SourceControlProvider[];
+    includeSandboxOpenRouterApiKey?: boolean;
   },
 ): Promise<Record<string, string>> {
   const envVars =
@@ -274,7 +276,7 @@ export async function fetchResolvedRuntimeEnvVars(
     deploymentEnvVars: envVars,
   });
 
-  return redactControlPlaneEnvVars(
+  const resolvedEnvVars = redactControlPlaneEnvVars(
     redactSourceControlProviderEnvVars(
       redactInferenceGatewayProviderKeys(
         withLegacySnapshotModelEnvAliases({
@@ -285,6 +287,18 @@ export async function fetchResolvedRuntimeEnvVars(
       options?.sourceControlProvider,
     ),
   );
+
+  if (options?.includeSandboxOpenRouterApiKey) {
+    return resolvedEnvVars;
+  }
+
+  if (!(SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME in resolvedEnvVars)) {
+    return resolvedEnvVars;
+  }
+
+  const ordinaryTaskEnvVars = { ...resolvedEnvVars };
+  delete ordinaryTaskEnvVars[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
+  return ordinaryTaskEnvVars;
 }
 
 /**

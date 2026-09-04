@@ -1,22 +1,3 @@
-const mocks = vi.hoisted(() => ({
-  abortActiveFastAgentTurns: vi.fn(),
-  beginFastAgentTurnDrain: vi.fn(),
-  waitForActiveFastAgentTurnsToSettle: vi.fn(),
-}));
-
-vi.mock('@roomote/cloud-agents/server', () => ({
-  abortActiveFastAgentTurns: mocks.abortActiveFastAgentTurns,
-  beginFastAgentTurnDrain: mocks.beginFastAgentTurnDrain,
-  waitForActiveFastAgentTurnsToSettle:
-    mocks.waitForActiveFastAgentTurnsToSettle,
-  FastAgentProcessShutdownError: class extends Error {
-    constructor(public readonly signal: NodeJS.Signals) {
-      super(`Fast turn interrupted by API shutdown (${signal}).`);
-      this.name = 'FastAgentProcessShutdownError';
-    }
-  },
-}));
-
 import type { ServerType } from '@hono/node-server';
 
 import {

@@ -65,7 +65,7 @@ import {
 } from '@roomote/linear';
 import { publishCommunicationRequestUserInput } from '../lib/communication-request-user-input';
 import { publishFastAgentRequestUserInput } from '../lib/task-runs/publish-fast-agent-request-user-input';
-import { relayFastAgentChildChatReply } from '../lib/task-runs/relay-fast-agent-child-chat-reply';
+import { reportToParentSession } from '../lib/task-runs/report-to-parent-session';
 import { renderSlackLiveTaskCardForRun } from '../lib/task-runs/slack-live-task-stream';
 import {
   authenticatedProcedure,
@@ -111,6 +111,15 @@ import {
   findSlackConversationSubjectByUserId,
   recordSlackConversationMessageBestEffort,
 } from '../lib/slack-conversation-log';
+
+const parentSessionReportSchema = z.object({
+  runId: z.number(),
+  taskId: z.string().min(1),
+  deliverySignature: z.string().regex(/^[a-f0-9]{64}$/),
+  purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
+  message: z.string().trim().min(1),
+  imageArtifactIds: z.array(z.string().min(1)).optional(),
+});
 
 const runtimePersistedEnvelopeSchema = z
   .object({
@@ -440,7 +449,8 @@ export const taskRunsRouter = router({
     z.object({
       runId: z.number(),
       status: z.enum(['in_progress', 'complete', 'error']),
-      message: z.string().optional(),
+      details: z.string().optional(),
+      output: z.string().optional(),
     }),
     'runId',
   )
@@ -456,7 +466,8 @@ export const taskRunsRouter = router({
     .mutation(({ input }) =>
       renderSlackLiveTaskCardForRun(input.runId, {
         status: input.status,
-        ...(input.message ? { message: input.message } : {}),
+        ...(input.details ? { details: input.details } : {}),
+        ...(input.output ? { output: input.output } : {}),
       }),
     ),
   getResolvedGitAuthor: runScoped(
@@ -698,17 +709,15 @@ export const taskRunsRouter = router({
     }),
     'runId',
   ).mutation(async ({ input }) => publishFastAgentRequestUserInput(input)),
+  reportToParentSession: runScoped(parentSessionReportSchema, 'runId').mutation(
+    async ({ input }) => reportToParentSession(input),
+  ),
+  // N-1 compatibility for workers that were already running when the
+  // coding-task-facing tool was renamed to report_to_parent_session.
   relayFastAgentChildChatReply: runScoped(
-    z.object({
-      runId: z.number(),
-      taskId: z.string().min(1),
-      deliverySignature: z.string().regex(/^[a-f0-9]{64}$/),
-      purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
-      message: z.string().trim().min(1),
-      imageArtifactIds: z.array(z.string().min(1)).optional(),
-    }),
+    parentSessionReportSchema,
     'runId',
-  ).mutation(async ({ input }) => relayFastAgentChildChatReply(input)),
+  ).mutation(async ({ input }) => reportToParentSession(input)),
   clearPendingSlackRequestUserInput: runScoped(
     z.object({
       runId: z.number(),

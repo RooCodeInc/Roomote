@@ -17,7 +17,10 @@ vi.mock('@roomote/sdk/client', () => ({
 import { TaskPayloadKind } from '@roomote/types';
 import { type TaskRun, sdk } from '@roomote/sdk/client';
 
-import { linearAgentCallbacks } from '../linear-agent';
+import {
+  getLinearSessionActivityStreamCallbacks,
+  linearAgentCallbacks,
+} from '../linear-agent';
 
 function createTaskRun(): TaskRun {
   return {
@@ -25,6 +28,29 @@ function createTaskRun(): TaskRun {
     taskId: 'task_123',
     payloadKind: TaskPayloadKind.LinearAgentSession,
     payload: { sessionId: 'session_123' },
+  } as unknown as TaskRun;
+}
+
+function createLinearFastChildRun(): TaskRun {
+  return {
+    id: 124,
+    taskId: 'task_124',
+    payloadKind: TaskPayloadKind.StandardTask,
+    payload: {
+      repo: '__all_repositories__',
+      description: 'Fix the retry loop',
+      reportConsumer: 'orchestrator',
+      fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+      fastAgentParent: {
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        conversation: {
+          surface: 'linear',
+          workspaceId: 'org-1',
+          conversationId: 'agent-session-9',
+          replyTarget: { channelId: 'agent-session-9' },
+        },
+      },
+    },
   } as unknown as TaskRun;
 }
 
@@ -275,6 +301,60 @@ describe('linearAgentCallbacks', () => {
           options: [{ value: 'TypeScript' }, { value: 'Rust' }],
         },
       },
+    );
+  });
+
+  it('streams a Linear Fast child’s activity into its parent agent session', async () => {
+    const context = {};
+    const taskRun = createLinearFastChildRun();
+    const callbacks = getLinearSessionActivityStreamCallbacks(taskRun);
+
+    await callbacks.onStart?.(taskRun, 'task_124', context);
+    await callbacks.onMessage?.(
+      taskRun,
+      'task_124',
+      {
+        type: 'tool_action',
+        usage: { action: 'Read file', details: 'README.md' },
+        ts: 1000,
+      },
+      context,
+    );
+
+    expect(emitActionMock).toHaveBeenCalledWith(
+      'agent-session-9',
+      'Read file',
+      'README.md',
+    );
+  });
+
+  it('leaves the final response to the Fast Session for a delegated child', async () => {
+    const context = {};
+    const taskRun = createLinearFastChildRun();
+
+    await linearAgentCallbacks.onStart?.(taskRun, 'task_124', context);
+    await linearAgentCallbacks.onMessage?.(
+      taskRun,
+      'task_124',
+      { type: 'completion', text: 'All done.', ts: 2000 },
+      context,
+    );
+
+    expect(emitResponseMock).not.toHaveBeenCalled();
+    expect(context).toMatchObject({ isCompleted: true });
+  });
+
+  it('adds no stream for runs without a Linear Fast parent', () => {
+    expect(
+      getLinearSessionActivityStreamCallbacks({
+        id: 1,
+        taskId: 'task_1',
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'acme/app' },
+      } as unknown as TaskRun),
+    ).toEqual({});
+    expect(getLinearSessionActivityStreamCallbacks(createTaskRun())).toEqual(
+      {},
     );
   });
 });

@@ -4,14 +4,14 @@ import { z } from 'zod';
 import { PRODUCT_NAME } from './constants';
 import { gitBranchNameSchema } from './git-ref';
 import { collectReservedEnvReferences } from './reserved-mcp-env-vars';
-import { SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME } from './sandbox-openrouter';
+import { SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME } from './sandbox-preview-inference';
 
 const environmentEnvMapSchema = z.record(z.string()).superRefine((env, ctx) => {
   if (SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME in env) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: [SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME],
-      message: `${SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME} is a reserved control-plane secret and cannot be stored in an environment definition`,
+      message: `${SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME} is a deployment-level preview key and cannot be stored in an environment definition`,
     });
   }
 });

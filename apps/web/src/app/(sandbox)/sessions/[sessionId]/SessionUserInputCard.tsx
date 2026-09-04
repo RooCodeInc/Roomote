@@ -219,7 +219,10 @@ export function SessionUserInputCard({
                           <span className="font-medium">{option.label}</span>
                           <span
                             className={cn(
-                              'block text-xs text-muted-foreground',
+                              'block text-muted-foreground',
+                              request.preset === 'setup_starter_tasks'
+                                ? 'text-sm'
+                                : 'text-xs',
                             )}
                           >
                             {option.description}

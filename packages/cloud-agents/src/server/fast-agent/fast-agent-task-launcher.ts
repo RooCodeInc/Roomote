@@ -10,7 +10,11 @@ import {
   type TaskTrigger,
 } from '@roomote/types';
 
-import { enqueueTask } from '../task-run-queue';
+import {
+  enqueueTask,
+  type TaskChannelBindings,
+  type TaskPrLinkage,
+} from '../task-run-queue';
 import { getTaskUrl } from '../task-url';
 import type { LaunchFastAgentTask } from './fast-agent-conversation';
 
@@ -37,6 +41,10 @@ export function createFastAgentTaskLauncher(
     initiator?: TaskInitiator;
     trigger?: TaskTrigger;
     taskUrlCampaign: string;
+    /** Provider bindings recorded on the task, for example a Linear session. */
+    channels?: TaskChannelBindings;
+    /** Pull request the task works on, recorded with the task at launch. */
+    prLinkage?: TaskPrLinkage;
     buildTask: (input: {
       prompt: string;
       environmentId: string | null;
@@ -98,6 +106,8 @@ export function createFastAgentTaskLauncher(
         workflow: 'standard',
         surface: params.surface,
         trigger: params.trigger ?? 'message',
+        ...(params.channels ? { channels: params.channels } : {}),
+        ...(params.prLinkage ? { prLinkage: params.prLinkage } : {}),
       },
       {
         beforeEnqueue: async (taskRun) => {
@@ -158,6 +168,11 @@ export type FastAgentSlackTaskLauncherParams = {
   initiator?: TaskInitiator;
   /** Opt the child into the native Slack task card in the parent thread. */
   liveTaskStream?: boolean;
+  /**
+   * Repository the child runs against when the launch is pinned to a bare
+   * repository rather than an environment. Defaults to all repositories.
+   */
+  repoForPayload?: string;
 } & FastAgentTaskLaunchHooks;
 
 export function createFastAgentSlackTaskLauncher(
@@ -188,7 +203,7 @@ export function createFastAgentSlackTaskLauncher(
     }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
-        repo: ALL_REPOSITORIES,
+        repo: params.repoForPayload ?? ALL_REPOSITORIES,
         description: prompt,
         communicationProvider: 'slack',
         communicationTeamId: params.teamId,

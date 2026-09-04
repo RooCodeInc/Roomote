@@ -1,6 +1,7 @@
 import { Env } from '@roomote/env';
 import {
   and,
+  asc,
   db,
   eq,
   getSessionForFastConversation,
@@ -15,13 +16,21 @@ import {
   type ThreadReplyLinkedPr,
 } from './chat-messages';
 import { chunkDiscordMessage } from './discord-provider';
-import { resolveThreadReplyFooterContext } from './thread-reply-footer-context';
+import {
+  resolveThreadReplyFooterContext,
+  resolveThreadReplyLivePreviewUrl,
+} from './thread-reply-footer-context';
 
 export type FastSessionFooterProvider =
   | 'slack'
   | 'discord'
   | 'teams'
-  | 'telegram';
+  | 'telegram'
+  | 'github'
+  | 'gitlab'
+  | 'bitbucket'
+  | 'ado'
+  | 'gitea';
 
 export type FastSessionPullRequestReference = {
   number: number | null;
@@ -59,12 +68,10 @@ function collectFastSessionLinkedPrs(params: {
   return [...uniquePrs.values()];
 }
 
-export async function resolveFastSessionReplyFooterContext(params: {
-  sessionId: string;
-  pullRequest?: FastSessionPullRequestReference | null;
-  pullRequests?: readonly FastSessionPullRequestReference[];
-}): Promise<FastSessionReplyFooterContext> {
-  const session = await getSessionForFastConversation(db, params.sessionId);
+async function getFastSessionLinkedTaskIds(
+  sessionId: string,
+): Promise<string[]> {
+  const session = await getSessionForFastConversation(db, sessionId);
   const linkedTasks = session
     ? await db
         .select({ taskId: sessionTasks.taskId })
@@ -73,9 +80,35 @@ export async function resolveFastSessionReplyFooterContext(params: {
         .where(
           and(eq(sessionTasks.sessionId, session.id), isNull(tasks.deletedAt)),
         )
+        // Deterministic ordering so "the first task with a preview" is stable
+        // across footer rebuilds.
+        .orderBy(asc(sessionTasks.attachedAt), asc(sessionTasks.taskId))
     : [];
+  return linkedTasks.map(({ taskId }) => taskId);
+}
+
+/**
+ * The live preview URL of the first session-linked task that exposes one, for
+ * footers that skip the full linked-PR context (source-control comments).
+ */
+export async function resolveFastSessionLivePreviewUrl(
+  sessionId: string,
+): Promise<string | null> {
+  const taskIds = await getFastSessionLinkedTaskIds(sessionId);
+  const urls = await Promise.all(
+    taskIds.map((taskId) => resolveThreadReplyLivePreviewUrl(taskId)),
+  );
+  return urls.find((url) => url) ?? null;
+}
+
+export async function resolveFastSessionReplyFooterContext(params: {
+  sessionId: string;
+  pullRequest?: FastSessionPullRequestReference | null;
+  pullRequests?: readonly FastSessionPullRequestReference[];
+}): Promise<FastSessionReplyFooterContext> {
+  const linkedTaskIds = await getFastSessionLinkedTaskIds(params.sessionId);
   const contexts = await Promise.all(
-    linkedTasks.map(({ taskId }) =>
+    linkedTaskIds.map((taskId) =>
       resolveThreadReplyFooterContext({
         taskId,
         prRepo: null,
@@ -132,11 +165,20 @@ export function buildFastSessionReplyFooterText(params: {
 }): string {
   const sessionUrl = buildFastSessionUrl(params.provider, params.sessionId);
 
+  // Chat surfaces route any thread reply to the Session; source-control
+  // discussions only hear @-mentions, so the footer must say so.
+  const explicitMentionRequired =
+    params.provider === 'github' ||
+    params.provider === 'gitlab' ||
+    params.provider === 'bitbucket' ||
+    params.provider === 'ado' ||
+    params.provider === 'gitea';
+
   return buildThreadReplyFooterText({
     taskUrl: sessionUrl,
     linkedPrs: collectFastSessionLinkedPrs(params),
     livePreviewUrl: params.livePreviewUrl,
-    explicitMentionRequired: false,
+    explicitMentionRequired,
     ...(params.provider === 'slack'
       ? { formatLink: (label: string, url: string) => `<${url}|${label}>` }
       : params.provider === 'discord'

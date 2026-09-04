@@ -1537,6 +1537,51 @@ describe('resolveOpenCodeSmallModel', () => {
     });
   });
 
+  it('uses the deployment coding model for Fast inference when no orchestration override is configured', async () => {
+    process.env = {
+      ...originalEnv,
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      OPENROUTER_API_KEY: 'test-key',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {},
+        parts: [{ type: 'text', text: 'ok' }],
+      },
+      error: undefined,
+    });
+
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskTextInOpenCodeSession(
+      {
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        modelRole: 'orchestration',
+        prompt: 'Answer.',
+      },
+      { id: 'default-fast-session' },
+      {
+        directory: '/tmp/roomote-fast-default-test',
+        tools: { '*': false, send_chat_reply: true },
+      },
+    );
+
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'openrouter',
+          modelID: 'z-ai/glm-5.2',
+        },
+      }),
+      expect.any(Object),
+    );
+  });
+
   it('does not apply coding reasoning to a non-reasoning orchestration model', async () => {
     process.env = {
       ...originalEnv,
@@ -2597,6 +2642,160 @@ describe('resolveOpenCodeSmallModel', () => {
       }),
     ).rejects.toBeInstanceOf(NonTaskInputModalityUnsupportedError);
     expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps a native Fast session on its own model when it can view attached images', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      R_ORCHESTRATION_MODEL: 'openrouter/openai/gpt-5.6-sol',
+      R_SMALL_MODEL: 'openrouter/google/gemini-3.8-flash',
+      R_VISION_MODEL: 'openrouter/google/gemini-3.8-flash',
+      R_VISION_MODEL_REASONING_EFFORT: 'low',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'openai/gpt-5.6-sol': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-3.8-flash': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const { resolveNonTaskInputModalityDelivery } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      resolveNonTaskInputModalityDelivery({
+        modality: 'image',
+        modelRole: 'orchestration',
+      }),
+    ).resolves.toEqual({
+      delivery: 'direct',
+      model: 'openrouter/openai/gpt-5.6-sol',
+    });
+  });
+
+  it('hands images to the vision model as a helper when the session model cannot view them', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      R_ORCHESTRATION_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_SMALL_MODEL: 'openrouter/google/gemini-3.8-flash',
+      R_VISION_MODEL: 'openrouter/google/gemini-3.6-pro',
+      R_VISION_MODEL_REASONING_EFFORT: 'low',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'z-ai/glm-5.2': {
+                capabilities: {
+                  input: { image: false },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-3.6-pro': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-3.8-flash': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const { resolveNonTaskInputModalityDelivery } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      resolveNonTaskInputModalityDelivery({
+        modality: 'image',
+        modelRole: 'orchestration',
+      }),
+    ).resolves.toEqual({
+      delivery: 'helper',
+      model: 'openrouter/z-ai/glm-5.2',
+      helperModel: 'openrouter/google/gemini-3.6-pro',
+      helperReasoningEffort: 'low',
+    });
+  });
+
+  it('rejects image delivery when no configured model accepts images', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_VISION_MODEL: 'openrouter/z-ai/glm-5.2',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'z-ai/glm-5.2': {
+                capabilities: {
+                  input: { image: false },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const {
+      resolveNonTaskInputModalityDelivery,
+      NonTaskInputModalityUnsupportedError,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      resolveNonTaskInputModalityDelivery({
+        modality: 'image',
+        modelRole: 'primary',
+      }),
+    ).rejects.toBeInstanceOf(NonTaskInputModalityUnsupportedError);
   });
 
   it('rejects when the plain SDK prompt reports a message error', async () => {

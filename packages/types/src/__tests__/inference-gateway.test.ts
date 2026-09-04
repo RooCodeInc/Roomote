@@ -9,10 +9,6 @@ import {
   isInferenceGatewayCoveredEnvVar,
   parseInferenceGatewayKeys,
 } from '../inference-gateway';
-import {
-  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
-  SANDBOX_OPENROUTER_GATEWAY_PROVIDER_ID,
-} from '../sandbox-openrouter';
 import { getSetupModelProvider } from '../model-provider-config';
 
 describe('inference gateway URL builders', () => {
@@ -73,30 +69,6 @@ describe('inference gateway URL builders', () => {
         provider!,
       ),
     ).toBe('https://api.example.com/api/inference/roomote/v1');
-  });
-
-  it('registers a separate parent-only OpenRouter route for sandbox deployments', () => {
-    const provider = getInferenceGatewayProvider(
-      SANDBOX_OPENROUTER_GATEWAY_PROVIDER_ID,
-    );
-
-    expect(provider).toMatchObject({
-      envVarNames: [SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME],
-      upstreamBaseUrl: 'https://openrouter.ai/api',
-      authHeader: { name: 'authorization', scheme: 'bearer' },
-      openCodeBaseUrlSuffix: '/v1',
-    });
-    expect(
-      buildInferenceGatewayOpenCodeBaseUrl(
-        'https://api.example.com/api/inference',
-        provider!,
-      ),
-    ).toBe('https://api.example.com/api/inference/sandbox-openrouter/v1');
-    expect(
-      getInferenceGatewayProviderByEnvVarName(
-        SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
-      )?.id,
-    ).toBe(SANDBOX_OPENROUTER_GATEWAY_PROVIDER_ID);
   });
 
   it('registers OpenCode Go with its subscription endpoint and API key', () => {

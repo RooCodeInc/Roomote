@@ -10,6 +10,25 @@ const reviewActionMutate = vi.hoisted(() => vi.fn());
 const slackUsersState = vi.hoisted(() => ({
   users: {} as Record<string, { name: string; profileUrl: string | null }>,
 }));
+const artifactViewerState = vi.hoisted(() => ({
+  openSessionArtifactViewer: null as ReturnType<typeof vi.fn> | null,
+  artifactLink: null as {
+    openArtifact: ReturnType<typeof vi.fn>;
+    artifacts: Array<{ path: string }>;
+  } | null,
+}));
+
+vi.mock(
+  '@/app/(sandbox)/sessions/[sessionId]/session-task-panel-context',
+  () => ({
+    useOpenSessionArtifactViewer: () =>
+      artifactViewerState.openSessionArtifactViewer,
+  }),
+);
+
+vi.mock('../../../hooks/ArtifactLinkProvider', () => ({
+  useArtifactLink: () => artifactViewerState.artifactLink,
+}));
 
 vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
@@ -1035,6 +1054,101 @@ describe('AcpTextMessage', () => {
         name: 'Conversation image attachment 1',
       }),
     ).toBeVisible();
+  });
+
+  it('opens artifact-backed images in the Session artifact viewer instead of the media dialog', () => {
+    const openSessionArtifactViewer = vi.fn();
+    artifactViewerState.openSessionArtifactViewer = openSessionArtifactViewer;
+    const url = '/api/artifacts/artifact-1/raw?sig=abc&ts=7200';
+
+    try {
+      render(
+        <AcpTextMessage
+          msg={{
+            id: 'message-1',
+            ts: 123,
+            role: 'assistant',
+            kind: 'text',
+            partial: false,
+            sessionId: 'session-1',
+            updateType: 'roomote_runtime.assistant_message_chunk',
+            text: 'Here is the screenshot',
+            images: [url],
+            imageArtifacts: [
+              {
+                url,
+                owner: { taskId: 'task-1' },
+                path: 'proof/session.png',
+                version: 1,
+              },
+            ],
+            data: {},
+          }}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: 'Open conversation image attachment 1',
+        }),
+      );
+
+      expect(openSessionArtifactViewer).toHaveBeenCalledWith({
+        owner: { taskId: 'task-1' },
+        path: 'proof/session.png',
+        version: 1,
+      });
+      expect(screen.queryByTestId('media-viewer')).toBeNull();
+    } finally {
+      artifactViewerState.openSessionArtifactViewer = null;
+    }
+  });
+
+  it('opens artifact-backed images in the task artifact panel on a task page', () => {
+    const openArtifact = vi.fn();
+    artifactViewerState.artifactLink = {
+      openArtifact,
+      artifacts: [{ path: 'proof/session.png' }],
+    };
+    const url = '/api/artifacts/artifact-1/raw?sig=abc&ts=7200';
+
+    try {
+      render(
+        <AcpTextMessage
+          msg={{
+            id: 'message-1',
+            ts: 123,
+            role: 'assistant',
+            kind: 'text',
+            partial: false,
+            sessionId: 'session-1',
+            updateType: 'roomote_runtime.assistant_message_chunk',
+            text: 'Here is the screenshot',
+            images: [url],
+            imageArtifacts: [
+              {
+                url,
+                owner: { taskId: 'task-1' },
+                path: 'proof/session.png',
+                version: 1,
+              },
+            ],
+            data: {},
+          }}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: 'Open conversation image attachment 1',
+        }),
+      );
+
+      expect(openArtifact).toHaveBeenCalledWith('proof/session.png', 1);
+      expect(screen.queryByTestId('media-viewer')).toBeNull();
+    } finally {
+      artifactViewerState.artifactLink = null;
+    }
   });
 
   it('preserves leading and trailing whitespace in assistant action content', () => {

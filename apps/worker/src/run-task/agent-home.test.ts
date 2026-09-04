@@ -868,13 +868,65 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
-  it('isolates visual and proof agents from unrelated MCP tool schemas', () => {
+  it('runs the judge on the vision model when one is configured', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
         R_MODEL: 'openrouter/openai/gpt-5.6-terra',
         R_VISION_MODEL: 'openrouter/google/gemini-3.6-flash',
-        ROOMOTE_PROOF_BROWSER_TARGET: 'http://127.0.0.1:3000',
+        R_VISION_MODEL_REASONING_EFFORT: 'low',
+        R_CODE_REVIEW_MODEL: 'openrouter/anthropic/claude-sonnet-5',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      agent: Record<
+        string,
+        { model?: string; options?: Record<string, unknown> }
+      >;
+    };
+
+    // The judge opens proof screenshots itself, so the vision model wins
+    // over the code-review model.
+    expect(config.agent.judge?.model).toBe(
+      'openrouter/google/gemini-3.6-flash',
+    );
+    expect(config.agent.judge?.options).toBeDefined();
+    expect(
+      readFileSync(
+        join(
+          result.openCodeConfigDir,
+          'roomote-opencode-judge-model-instructions.md',
+        ),
+        'utf8',
+      ),
+    ).toContain(
+      'When `R_VISION_MODEL` is configured, the judge runs on that vision model so it can open proof screenshots directly.',
+    );
+  });
+
+  it('falls back to the coding model for the judge when no vision model is configured', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        R_CODE_REVIEW_MODEL: 'openrouter/anthropic/claude-sonnet-5',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      agent: Record<string, { model?: string }>;
+    };
+
+    expect(config.agent.judge?.model).toBe('openrouter/openai/gpt-5.6-terra');
+  });
+
+  it('isolates the visual agent from unrelated MCP tool schemas', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        R_VISION_MODEL: 'openrouter/google/gemini-3.6-flash',
         OPENROUTER_API_KEY: 'openrouter-key',
       },
       mcpServers: [
@@ -918,15 +970,6 @@ describe('generateOpenCodeConfig provider support', () => {
       );
     }
 
-    expect(config.agent['proof-runner']?.tools).toMatchObject({
-      'pylon_*': false,
-      'custom-tools_*': false,
-      roomote_manage_source_control: false,
-    });
-    expect(config.agent['proof-runner']?.tools).not.toHaveProperty('roomote_*');
-    expect(config.agent['proof-runner']?.tools).not.toHaveProperty(
-      'roomote_manage_artifacts',
-    );
     expect(config.agent.general?.tools).not.toHaveProperty('pylon_*');
     expect(config.agent.architect?.tools).toBeUndefined();
   });
@@ -936,7 +979,6 @@ describe('generateOpenCodeConfig provider support', () => {
     const runtimeEnv = {
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',
       OPENROUTER_API_KEY: 'openrouter-key',
-      ROOMOTE_PROOF_BROWSER_TARGET: 'http://127.0.0.1:3000',
       ROOMOTE_MCP_PYLON_BEARER_TOKEN: 'run-token',
     };
     const result = generateOpenCodeConfig({
@@ -1006,14 +1048,6 @@ describe('generateOpenCodeConfig provider support', () => {
     });
     expect(statSync(catalogPath).mode & 0o777).toBe(0o600);
     expect(result.configContent).not.toContain('run-token');
-
-    // Agents kept off the integration's mounted tools cannot reach it through
-    // the on-demand tools either; the proof runner keeps its other member tools.
-    expect(config.agent['proof-runner']?.tools).toMatchObject({
-      'pylon_*': false,
-      roomote_find_integration_tools: false,
-      roomote_call_integration_tool: false,
-    });
 
     const integrationInstructions = readFileSync(
       config.instructions.find((entry) => entry.includes('integration'))!,

@@ -238,24 +238,6 @@ describe('launchClaimedTeamsSuggestion', () => {
     expect(postMessage).not.toHaveBeenCalled();
   });
 
-  it('releases the claim with the token when routing replies inline (no task launched)', async () => {
-    const launchTask = vi.fn().mockResolvedValue({ status: 'replied_inline' });
-
-    const outcome = await launchClaimedTeamsSuggestion({
-      suggestion: buildClaimedSuggestion(),
-      launchTask,
-      postMessage: vi.fn(),
-    });
-
-    expect(outcome).toEqual({ result: 'replied_inline' });
-    expect(finalizeWorkItemLaunchedMock).not.toHaveBeenCalled();
-    expect(releaseWorkItemClaimMock).toHaveBeenCalledTimes(1);
-    expect(releaseWorkItemClaimMock).toHaveBeenCalledWith(expect.anything(), {
-      id: 'work-item-1',
-      claimedAt: CLAIMED_AT,
-    });
-  });
-
   it('releases the claim with the token and posts a visible failure when the launch throws', async () => {
     const launchTask = vi.fn().mockRejectedValue(new Error('enqueue exploded'));
     const postMessage = vi.fn();

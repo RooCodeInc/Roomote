@@ -53,9 +53,8 @@ describe('feature-demo skill', () => {
       "Treat the advisor's plan as internal guidance, not finished work",
     );
     // Repository-backed surfaces verify against source; external public
-    // pages have no local source and no separate browser pre-flight (the
-    // proof-runner takes one brief per task), so they rely on capture's own
-    // loud per-selector failure within the allowed retry.
+    // pages have no local source, so they rely on capture's own loud
+    // per-selector failure within the allowed retry.
     expect(skillContent).toContain('Repository-backed surface');
     expect(skillContent).toContain('External public page named by the user');
     expect(skillContent).toContain(
@@ -63,28 +62,17 @@ describe('feature-demo skill', () => {
     );
   });
 
-  it('keeps browser work delegated to proof-runner', () => {
+  it('runs the capture runner directly instead of delegating to a subagent', () => {
     expect(skillContent).toContain(
-      "Browser automation is the proof-runner subagent's exclusive surface",
+      'SCRIPT=/tmp/feature-demo/demo-script.json OUT_DIR=/tmp/feature-demo/work node "$HOME/.agents/skills/feature-demo/capture/capture.mjs"',
+    );
+    expect(skillContent).toContain(
+      'Drive the recording only through the capture runner, which shells the `agent-browser` CLI for every action.',
     );
     expect(skillContent).toContain('proof runtime unavailable');
-    expect(skillContent).toContain(
-      'Never load or invoke `agent-browser` (or any other browser automation) from this skill',
-    );
-  });
-
-  it('stages the capture runner at the sanctioned /tmp path for delegation', () => {
-    // Home-directory paths do not survive the delegation boundary, and the
-    // proof-runner prompt sanctions exactly this staged path.
-    expect(skillContent).toContain(
-      'cp "$HOME/.agents/skills/feature-demo/capture/capture.mjs" /tmp/feature-demo/capture.mjs',
-    );
-    expect(skillContent).toContain('/tmp/feature-demo/capture.mjs');
-    // The parent hands off the paths; the proof-runner owns the integrity-
-    // verified node invocation, so the skill must not dictate a raw node run.
-    expect(skillContent).toContain(
-      'Do not dictate the `node` invocation yourself; the proof-runner owns that.',
-    );
+    expect(skillContent).not.toContain('proof-runner');
+    expect(skillContent).not.toContain('Task tool to `proof-runner`');
+    expect(skillContent).not.toContain('/tmp/feature-demo/capture.mjs');
   });
 
   it('keeps TTS provider keys out of the sandbox', () => {

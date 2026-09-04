@@ -1340,7 +1340,8 @@ function isFailedTerminalChatReply(tool: OpenCodeNormalizedToolPart): boolean {
     tool.status === 'failed' &&
     tool.callPayload.isMcp === true &&
     tool.callPayload.mcpServerName === 'roomote' &&
-    tool.callPayload.mcpToolName === 'send_chat_reply' &&
+    (tool.callPayload.mcpToolName === 'send_chat_reply' ||
+      tool.callPayload.mcpToolName === 'report_to_parent_session') &&
     (purpose === 'closeout' || purpose === 'clarification')
   );
 }

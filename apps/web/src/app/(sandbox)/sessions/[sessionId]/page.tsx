@@ -130,6 +130,7 @@ export default async function SessionDetailPage({
       createdAt: unifiedSession.createdAt,
       status: unifiedSession.status,
       tasks: unifiedSession.tasks,
+      artifacts: unifiedSession.artifacts,
     };
     // The setup session keeps its inline automation-recommendations card on
     // its normal route after activation: recommendations are optional and
@@ -172,7 +173,9 @@ export default async function SessionDetailPage({
                         },
                       }
                     : {})}
-                  headerExtras={<SessionHeaderPullRequests />}
+                  headerExtras={
+                    <SessionHeaderPullRequests key="session-pull-requests" />
+                  }
                   {...(isSetupSession
                     ? { timelineExtras: setupTimelineExtras }
                     : {})}
@@ -227,6 +230,7 @@ export default async function SessionDetailPage({
     createdAt: session.createdAt,
     status: null,
     tasks: [],
+    artifacts: [],
     taskSource: 'fast',
     taskCards: fastTasks,
   };
@@ -251,12 +255,16 @@ export default async function SessionDetailPage({
           sessionReasoningEffort={session.reasoningEffort}
           defaultModelId={defaultModelId}
           defaultReasoningEffort={defaultReasoningEffort}
-          owner={{
-            userId: session.userId,
-            name: session.ownerName,
-            email: session.ownerEmail,
-            imageUrl: session.ownerImageUrl,
-          }}
+          {...(session.userId
+            ? {
+                owner: {
+                  userId: session.userId,
+                  name: session.ownerName,
+                  email: session.ownerEmail,
+                  imageUrl: session.ownerImageUrl,
+                },
+              }
+            : {})}
         />
       </div>
     </SessionWorkspace>

@@ -256,7 +256,10 @@ describe('dequeueResumeTaskRun', () => {
     });
     expect(mockFetchResolvedRuntimeEnvVars).toHaveBeenCalledWith(
       { ORG_ENV: '1' },
-      { sourceControlProvider: ['gitlab', 'github'] },
+      {
+        sourceControlProvider: ['gitlab', 'github'],
+        includeSandboxOpenRouterApiKey: true,
+      },
     );
     expect(result?.harnessInstructions).toBe('preserved instructions');
     expect(result?.sourceSelectedRepositories).toEqual([

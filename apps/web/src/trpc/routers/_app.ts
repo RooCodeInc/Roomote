@@ -55,6 +55,7 @@ import {
   listSessionPins,
   markSessionReadCommand,
   sessionIdInputSchema,
+  sessionTimelineInputSchema,
   sessionsListInputSchema,
   setSessionPinned,
   updateSessionMetadata,
@@ -442,10 +443,6 @@ import {
 } from '../commands/xai-subscription';
 import { getSubscriptionProviderUsageCommand } from '../commands/subscription-usage';
 import { getProviderCreditBalancesCommand } from '../commands/provider-credits';
-import {
-  getRouterDebugSettingsCommand,
-  updateRouterDebugSettingsCommand,
-} from '../commands/router-debug';
 import {
   listCustomSkillsCommand,
   searchCustomSkillsCommand,
@@ -1067,18 +1064,33 @@ export const appRouter = createRouter({
   artifacts: createRouter({
     byPath: protectedProcedure
       .input(
-        z.object({
-          taskId: z.string(),
-          path: z.string(),
-          version: z.number().optional(),
-        }),
+        z
+          .object({
+            taskId: z.string().optional(),
+            sessionId: z.string().uuid().optional(),
+            path: z.string(),
+            version: z.number().optional(),
+          })
+          .refine(
+            (value) => Boolean(value.taskId) !== Boolean(value.sessionId),
+          ),
       )
       .query(({ ctx: { auth }, input }) =>
         getArtifactByPathCommand(auth, input),
       ),
 
     versions: protectedProcedure
-      .input(z.object({ taskId: z.string(), path: z.string() }))
+      .input(
+        z
+          .object({
+            taskId: z.string().optional(),
+            sessionId: z.string().uuid().optional(),
+            path: z.string(),
+          })
+          .refine(
+            (value) => Boolean(value.taskId) !== Boolean(value.sessionId),
+          ),
+      )
       .query(({ ctx: { auth }, input }) =>
         getArtifactVersionsCommand(auth, input),
       ),
@@ -1537,12 +1549,14 @@ export const appRouter = createRouter({
             colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
+            therapistMode: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
-              input.narrationMode !== undefined,
+              input.narrationMode !== undefined ||
+              input.therapistMode !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -2536,26 +2550,6 @@ export const appRouter = createRouter({
     ),
   }),
 
-  routerDebug: createRouter({
-    getSettings: protectedProcedure.query(({ ctx: { auth } }) =>
-      getRouterDebugSettingsCommand(auth),
-    ),
-
-    updateSettings: protectedProcedure
-      .input(
-        z.object({
-          provider: z
-            .enum(['slack', 'teams', 'telegram', 'discord'])
-            .nullable(),
-          channelId: z.string().trim().min(1).max(255).nullable(),
-          disabled: z.boolean(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        updateRouterDebugSettingsCommand(auth, input),
-      ),
-  }),
-
   setup: createRouter({
     status: protectedProcedure.query(({ ctx: { auth } }) =>
       getSetupStatusCommand(auth),
@@ -2976,9 +2970,9 @@ export const appRouter = createRouter({
         getSessionByIdCommand(auth, input.sessionId),
       ),
     timeline: protectedProcedure
-      .input(sessionIdInputSchema.extend({ since: z.number().optional() }))
+      .input(sessionTimelineInputSchema)
       .query(({ ctx: { auth }, input }) =>
-        getSessionTimeline(auth, input.sessionId, input.since),
+        getSessionTimeline(auth, input.sessionId, input.cursor ?? input.since),
       ),
     forTask: protectedProcedure
       .input(z.object({ taskId: z.string().min(1) }))

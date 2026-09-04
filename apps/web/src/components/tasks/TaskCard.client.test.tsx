@@ -238,7 +238,6 @@ describe('TaskCard', () => {
     const { container } = render(
       <TaskCard
         task={createTask({
-          user: null,
           initiatorKind: 'automation',
           initiatorAutomation: 'sentry_triage',
           attributionLabel: 'Sentry Triage Automation',
@@ -255,6 +254,7 @@ describe('TaskCard', () => {
       'sentry_triage',
     );
     expect(container.querySelectorAll('svg')).toHaveLength(1);
+    expect(screen.queryByRole('img', { name: 'Ada Lovelace' })).toBeNull();
   });
 
   it('uses the identity email fallback name when the creator has no stored name', () => {

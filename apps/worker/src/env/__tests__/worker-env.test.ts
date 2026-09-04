@@ -140,13 +140,14 @@ describe('WorkerEnv', () => {
         R_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
         OPENROUTER_API_KEY: 'openrouter-key',
         CUSTOM_PROVIDER_API_KEY: 'custom-key',
-        R_SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+        SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
         JOB_AUTH_PRIVATE_KEY: 'do-not-forward',
       } as NodeJS.ProcessEnv);
 
       env.setRuntimeEnv({ GH_TOKEN: 'gh-token' });
 
       const userEnv = env.buildUserFacingEnv();
+      expect(env.sandboxOpenRouterApiKey).toBe('sandbox-openrouter-key');
       expect(userEnv).not.toHaveProperty('R_MODEL');
       expect(userEnv).not.toHaveProperty('R_SMALL_MODEL');
       expect(userEnv).not.toHaveProperty('R_VISION_MODEL');
@@ -156,6 +157,7 @@ describe('WorkerEnv', () => {
       expect(userEnv).not.toHaveProperty('R_MODEL_REASONING_EFFORT');
       expect(userEnv).not.toHaveProperty('R_PLANNING_MODEL_REASONING_EFFORT');
       expect(userEnv).not.toHaveProperty('OPENROUTER_API_KEY');
+      expect(userEnv).not.toHaveProperty('SANDBOX_OPENROUTER_API_KEY');
 
       const openCodeEnv = env.buildOpenCodeHarnessEnv();
       expect(openCodeEnv.R_MODEL).toBe('openrouter/openai/gpt-5.4');
@@ -177,7 +179,7 @@ describe('WorkerEnv', () => {
       expect(openCodeEnv.R_MODEL_ENV_KEYS).toBe('CUSTOM_PROVIDER_API_KEY');
       expect(openCodeEnv.OPENROUTER_API_KEY).toBe('openrouter-key');
       expect(openCodeEnv.CUSTOM_PROVIDER_API_KEY).toBe('custom-key');
-      expect(openCodeEnv).not.toHaveProperty('R_SANDBOX_OPENROUTER_API_KEY');
+      expect(openCodeEnv).not.toHaveProperty('SANDBOX_OPENROUTER_API_KEY');
       expect(openCodeEnv).not.toHaveProperty('JOB_AUTH_PRIVATE_KEY');
     });
   });
@@ -336,6 +338,7 @@ describe('WorkerEnv', () => {
         JOB_AUTH_PUBLIC_KEY: Buffer.from(publicKey).toString('base64'),
         PREVIEW_AUTH_PUBLIC_KEY: 'outer-preview-key',
         PREVIEW_PROXY_BASE_URL: 'https://preview.example.com',
+        SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
       };
 
       const env = WorkerEnv.fromProcessEnv(fakeProcessEnv as NodeJS.ProcessEnv);
@@ -344,6 +347,7 @@ describe('WorkerEnv', () => {
       expect(fakeProcessEnv.JOB_AUTH_PUBLIC_KEY).toBeUndefined();
       expect(fakeProcessEnv.PREVIEW_AUTH_PUBLIC_KEY).toBeUndefined();
       expect(fakeProcessEnv.PREVIEW_PROXY_BASE_URL).toBeUndefined();
+      expect(fakeProcessEnv.SANDBOX_OPENROUTER_API_KEY).toBeUndefined();
       expect(fakeProcessEnv.R_APP_ENV).toBeUndefined();
 
       expect(env.jobAuthPublicKey).toBe(
@@ -351,6 +355,7 @@ describe('WorkerEnv', () => {
       );
       expect(env.previewAuthPublicKey).toBe('outer-preview-key');
       expect(env.previewProxyBaseUrl).toBe('https://preview.example.com');
+      expect(env.sandboxOpenRouterApiKey).toBe('sandbox-openrouter-key');
       expect(env.appEnv).toBe('preview');
 
       const token = jwt.sign(

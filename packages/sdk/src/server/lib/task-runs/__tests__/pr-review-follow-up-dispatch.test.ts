@@ -74,6 +74,7 @@ vi.mock('@roomote/db/server', () => {
     inArray: vi.fn((left: unknown, right: unknown) => ({ left, right })),
     isNotNull: vi.fn((value: unknown) => ({ isNotNull: value })),
     isNull: vi.fn((value: unknown) => ({ isNull: value })),
+    isSnapshotResumableCondition: vi.fn(() => ({ snapshotResumable: true })),
   };
 });
 

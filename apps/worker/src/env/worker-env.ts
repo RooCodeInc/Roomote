@@ -21,6 +21,7 @@ interface WorkerConfig {
   previewAuthPublicKey?: string;
   previewAuthCookieName?: string;
   appEnv?: string;
+  sandboxOpenRouterApiKey?: string;
 }
 
 const PRESET_SYSTEM_ENV: Record<string, string> = {
@@ -224,6 +225,8 @@ export class WorkerEnv {
       previewAuthCookieName: processEnv.PREVIEW_AUTH_COOKIE_NAME,
       roomoteAppUrl: processEnv.R_APP_URL!,
       appEnv: processEnv.R_APP_ENV ?? processEnv.APP_ENV,
+      sandboxOpenRouterApiKey:
+        processEnv[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME],
     };
 
     const env = new WorkerEnv({
@@ -248,6 +251,7 @@ export class WorkerEnv {
       'JOB_AUTH_PUBLIC_KEY',
       'PREVIEW_PROXY_BASE_URL',
       'PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
+      SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
     ];
 
     for (const key of workerSecretKeys) {
@@ -363,6 +367,10 @@ export class WorkerEnv {
     return { ...this.runtimeEnv };
   }
 
+  getUserEnv(): Record<string, string> {
+    return { ...this.userEnv };
+  }
+
   /** Set a single system base var. */
   setSystemBase(key: string, value: string): void {
     this.systemBase[key] = value;
@@ -404,5 +412,9 @@ export class WorkerEnv {
 
   get appEnv(): string | undefined {
     return this.workerConfig.appEnv;
+  }
+
+  get sandboxOpenRouterApiKey(): string | undefined {
+    return this.workerConfig.sandboxOpenRouterApiKey;
   }
 }

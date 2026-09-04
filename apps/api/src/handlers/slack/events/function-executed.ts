@@ -1,10 +1,18 @@
 import { getRedis } from '@roomote/redis';
+import { Env } from '@roomote/env';
+import { getOrCreateFastAgentSession } from '@roomote/cloud-agents/server';
 import { formatErrorForLog, type TaskInitiator } from '@roomote/types';
-import { and, db, eq, slackUserMappings } from '@roomote/db/server';
 import {
+  and,
+  db,
+  eq,
+  getSessionForFastConversation,
+  slackUserMappings,
+} from '@roomote/db/server';
+import {
+  resolveSlackReactionNames,
   type SlackFunctionExecutedEvent,
   SlackNotifier,
-  startAutoRoutedSlackTask,
 } from '@roomote/slack';
 
 import { apiLogger } from '../../../logging.js';
@@ -23,7 +31,8 @@ import {
   isUnknownRecord,
 } from '../helpers/event-normalization.js';
 import { getSlackAutomationLaunchIdentity } from '../helpers/launch-identity.js';
-import { showManualPickerForAutoRouteFallback } from './auto-route-fallback.js';
+import { lookupSlackUserMapping } from '../helpers/user-mapping.js';
+import { startFastAgentResponse } from './message-entry.js';
 
 function getSlackWorkflowCompletionKey(functionExecutionId: string): string {
   return `${SLACK_WORKFLOW_COMPLETION_PREFIX}${functionExecutionId}`;
@@ -248,73 +257,95 @@ export async function processSlackWorkflowFunctionExecuted(params: {
         }
       : { kind: 'automation', key: 'slack_workflow' };
 
-    const result = await startAutoRoutedSlackTask({
-      slackInstallation: context.slackInstallation,
-      slack: context.slack,
-      initiator,
-      trigger: promptAuthorSlackUserId ? 'manual' : 'webhook',
-      launchUserId: promptAuthorMapping?.userId ?? null,
-      slackUserId: launchIdentity.slackUserId,
-      initiatingSlackUserId:
-        launchIdentity.slackUserId === context.slackInstallation.botUserId
-          ? undefined
-          : launchIdentity.slackUserId,
-      channel: channelId,
-      prompt,
-      threadTs,
-    });
-
-    if (result.status !== 'started') {
-      if (
-        result.status === 'not_started' &&
-        result.code === 'routing_fallback'
-      ) {
-        const targetThreadTs = threadTs?.trim();
-        const launchSlackUserId = launchIdentity.slackUserId?.trim();
-
-        if (targetThreadTs && launchSlackUserId) {
-          const showedManualPicker = await showManualPickerForAutoRouteFallback(
-            {
-              result,
-              event: {
-                type: 'function_executed',
-                channel: channelId,
-                user: launchSlackUserId,
-                text: prompt,
-                ts: targetThreadTs,
-                thread_ts: targetThreadTs,
-              },
-              slackInstallation: context.slackInstallation,
-              userMapping: { userId: launchIdentity.launchUserId },
-              slack: context.slack,
-            },
-          );
-
-          if (showedManualPicker) {
-            await completeError(
-              'Choose an environment in the Slack thread to continue.',
-            );
-            return;
-          }
-        }
-
+    // A workflow step without a thread gets one: the prompt is posted as a
+    // root message so the Fast conversation has a thread to live in.
+    let threadRootTs = threadTs?.trim() || undefined;
+    if (!threadRootTs) {
+      const authorLabel = promptAuthorSlackUserId
+        ? `<@${promptAuthorSlackUserId}>`
+        : 'a Slack workflow';
+      threadRootTs = await context.slack.postMessage({
+        channel: channelId,
+        text: `Workflow request from ${authorLabel}:\n\n${prompt}`,
+        blocks: [
+          {
+            type: 'markdown',
+            text: `Workflow request from ${authorLabel}:\n\n${prompt}`,
+          },
+        ],
+      });
+      if (!threadRootTs) {
         await completeError(
-          'Slack workflow auto-routing needs a thread so Roomote can show the environment picker.',
+          'Roomote could not post the workflow request into the channel.',
         );
         return;
       }
+    }
 
+    // The step enters a Fast Session the way a mention would: under the
+    // prompt author when one is linked, otherwise under the automation
+    // launch identity, with the workflow initiator kept for delegated tasks.
+    const launchUserMapping = promptAuthorSlackUserId
+      ? (
+          await lookupSlackUserMapping({
+            slackUserId: promptAuthorSlackUserId,
+            teamId: context.teamId,
+          })
+        ).activeMapping
+      : null;
+    const fastUserId = launchUserMapping?.userId ?? launchIdentity.launchUserId;
+    const fastSlackUserId = launchUserMapping
+      ? launchUserMapping.slackUserId
+      : launchIdentity.slackUserId;
+    const { ackEmoji } = await resolveSlackReactionNames();
+    const fastStart = await startFastAgentResponse({
+      event: {
+        type: 'app_mention',
+        channel: channelId,
+        user: fastSlackUserId,
+        text: prompt,
+        ts: threadRootTs,
+        thread_ts: threadRootTs,
+      },
+      slackInstallation: context.slackInstallation,
+      ...(launchUserMapping ? { userMapping: launchUserMapping } : {}),
+      slack: context.slack,
+      userId: fastUserId,
+      teamId: context.teamId,
+      continuation: true,
+      directedAtRoomote: true,
+      ...(initiator.kind === 'automation'
+        ? { delegatedTaskInitiator: initiator }
+        : {}),
+      processingReactionName: ackEmoji,
+      errorLogPrefix: `[SlackWorkflow] Fast response failed for ${functionExecutionId}:`,
+    });
+
+    if (!fastStart.accepted) {
       await completeError(
-        result.status === 'not_started'
-          ? result.message
-          : 'Task was not started because Slack auto-routing did not launch a task.',
+        `Roomote could not start a conversation for this workflow step: ${fastStart.reason}`,
       );
       return;
     }
 
+    // The step's outputs point at the Session that now owns the request.
+    const fastSession = await getOrCreateFastAgentSession({
+      userId: fastUserId,
+      conversation: {
+        surface: 'slack',
+        workspaceId: context.teamId,
+        conversationId: threadRootTs,
+        replyTarget: { channelId, threadId: threadRootTs },
+      },
+    });
+    const session = await getSessionForFastConversation(db, fastSession.id);
+    const sessionUrl = session ? `${Env.R_APP_URL}/sessions/${session.id}` : '';
+
     const outputs = {
-      task_id: result.taskId ?? '',
-      task_url: result.taskUrl ?? '',
+      task_id: '',
+      task_url: sessionUrl,
+      session_id: session?.id ?? '',
+      session_url: sessionUrl,
     };
     await storeSlackWorkflowSuccessCompletion({
       functionExecutionId,

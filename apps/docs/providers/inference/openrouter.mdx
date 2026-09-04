@@ -45,49 +45,22 @@ and account balance are authoritative.
 ## Roomote previews inside environment tasks
 
 When an environment task starts another Roomote deployment for development or
-smoke tests, do not put an OpenRouter key in the environment definition. The
-definition and workspace are readable by the sandbox agent.
+smoke tests, create a separate spend-capped OpenRouter key and set it as
+`SANDBOX_OPENROUTER_API_KEY` under **Settings > Environments > Deployment
+Environment Variables**. You can alternatively set it on the parent controller.
+Do not store it in an environment definition.
 
-Instead, create a separate spend-capped OpenRouter key and set it as
-`R_SANDBOX_OPENROUTER_API_KEY` on the parent Roomote deployment. This is a
-reserved control-plane variable, so it cannot be added under **Settings >
-Environments > Deployment Environment Variables**. Configure it in the hosting
-platform's secret manager or process environment and restart the parent API
-service.
+The environment worker maps the value to `OPENROUTER_API_KEY` while preparing
+the workspace. The nested deployment therefore uses Roomote's native OpenRouter
+provider without requiring the parent's normal `OPENROUTER_API_KEY`. Configure
+the nested deployment's models normally in its own Settings. The parent task's
+model mapping, presets, trial provider, and role overrides are not copied into
+the nested deployment.
 
-The target environment can then configure its nested Roomote deployment with
-non-secret references only:
-
-```yaml
-env:
-  OPENAI_COMPATIBLE_BASE_URL: ${ROOMOTE_SANDBOX_OPENROUTER_BASE_URL}
-  OPENAI_COMPATIBLE_API_KEY: ${ROOMOTE_CLOUD_TOKEN}
-  R_MODEL: openai-compatible/google/gemini-3.8-flash
-  R_MODEL_REASONING_EFFORT: low
-  R_ORCHESTRATION_MODEL: openai-compatible/google/gemini-3.8-flash
-  R_ORCHESTRATION_MODEL_REASONING_EFFORT: low
-  R_SMALL_MODEL: openai-compatible/google/gemini-3.8-flash
-  R_SMALL_MODEL_REASONING_EFFORT: low
-```
-
-Roomote supplies the gateway URL and current run-scoped token while preparing
-environment tasks. The nested deployment calls the parent at
-`/api/inference/sandbox-openrouter/v1`; the parent injects the capped provider
-key only when forwarding to OpenRouter. The raw key never enters the worker or
-task sandbox. Environment changes apply to new tasks, so start a new task after
-saving this mapping.
-
-From the sandbox, verify the route without printing either credential:
-
-```sh
-curl --fail --silent --output /dev/null \
-  -H "Authorization: Bearer ${ROOMOTE_CLOUD_TOKEN}" \
-  "${ROOMOTE_SANDBOX_OPENROUTER_BASE_URL}/models"
-```
-
-The command exits successfully when the parent key and run token are valid. A
-missing parent key returns `404`; an invalid or expired run token returns an
-authentication error.
+The mapped key is available to setup commands and services in that environment
+workspace, so use a capped key appropriate for sandbox access. The launcher
+source variable is not exposed there. Deployment environment variable changes
+apply to new tasks, so start a new task after saving or rotating the key.
 
 ## Common issues
 

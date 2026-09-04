@@ -12,6 +12,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   CONTROL_PLANE_ENV_VAR_NAMES,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   isEnvVarRequestFulfillmentClientMessageId,
   isExitedRunStatus,
   deploymentEnvVarNameSchema,
@@ -140,8 +141,10 @@ export async function fulfillTaskEnvVarRequestCommand(
     fulfillTaskEnvVarRequestSchema.parse(input);
   const requestedNames = sortNames(names);
 
-  const reservedName = requestedNames.find((name) =>
-    CONTROL_PLANE_ENV_VAR_NAMES.has(name),
+  const reservedName = requestedNames.find(
+    (name) =>
+      CONTROL_PLANE_ENV_VAR_NAMES.has(name) ||
+      name === SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   );
   if (reservedName) {
     throw new Error(

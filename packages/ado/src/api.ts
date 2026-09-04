@@ -233,7 +233,7 @@ async function requestAdoJson<T>({
 }: {
   organizationApiBaseUrl: string;
   fetchImpl?: typeof fetch;
-  method?: 'GET' | 'POST' | 'PUT';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH';
   path: string;
   params: Record<string, string | number | boolean>;
   token: string;
@@ -1701,4 +1701,123 @@ export async function createTaskRunAdoCredentials(
     ),
     expiresAt: resolvedToken?.expiresAt ?? null,
   };
+}
+
+/** Replaces the content of an existing pull request thread comment. */
+export async function updateAdoPullRequestComment({
+  repositoryFullName,
+  repositoryId,
+  pullRequestNumber,
+  threadId,
+  commentId,
+  body,
+  token,
+  organization,
+  baseUrl,
+  organizationApiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryFullName: string;
+  repositoryId: string;
+  pullRequestNumber: number;
+  threadId: string;
+  commentId: string | number;
+  body: string;
+  token?: string;
+  organization?: string;
+  baseUrl?: string;
+  organizationApiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const adoToken = token ?? (await resolveAdoToken());
+
+  if (!adoToken?.trim()) {
+    throw new Error(
+      'ADO_TOKEN is required to update Azure DevOps pull request comments.',
+    );
+  }
+
+  const parsedRepository = parseAdoRepositoryFullName(repositoryFullName);
+  const resolvedOrganizationApiBaseUrl = await resolveAdoOrganizationApiBaseUrl(
+    {
+      organization: organization ?? parsedRepository.organization,
+      baseUrl,
+      organizationApiBaseUrl,
+    },
+  );
+
+  if (!resolvedOrganizationApiBaseUrl) {
+    throw new Error(
+      'ADO_ORGANIZATION is required to update Azure DevOps pull request comments.',
+    );
+  }
+
+  await requestAdoJson({
+    organizationApiBaseUrl: resolvedOrganizationApiBaseUrl,
+    fetchImpl,
+    method: 'PATCH',
+    path: `/${encodeURIComponent(
+      parsedRepository.project,
+    )}/_apis/git/repositories/${encodeURIComponent(
+      repositoryId,
+    )}/pullRequests/${pullRequestNumber}/threads/${encodeURIComponent(
+      String(threadId),
+    )}/comments/${encodeURIComponent(String(commentId))}`,
+    params: { 'api-version': ADO_API_VERSION },
+    token: adoToken,
+    body: { content: body },
+    schema: z.object({}).passthrough(),
+  });
+}
+
+/** Replaces the text of an existing work item comment. */
+export async function updateAdoWorkItemComment({
+  project,
+  workItemId,
+  commentId,
+  body,
+  token,
+  organization,
+  baseUrl,
+  organizationApiBaseUrl,
+  fetchImpl,
+}: {
+  project: string;
+  workItemId: number;
+  commentId: string | number;
+  body: string;
+  token?: string;
+  organization?: string;
+  baseUrl?: string;
+  organizationApiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const adoToken = token ?? (await resolveAdoToken());
+
+  if (!adoToken?.trim()) {
+    throw new Error(
+      'ADO_TOKEN is required to update Azure DevOps work item comments.',
+    );
+  }
+
+  const resolvedOrganizationApiBaseUrl = await resolveAdoOrganizationApiBaseUrl(
+    { organization, baseUrl, organizationApiBaseUrl },
+  );
+
+  if (!resolvedOrganizationApiBaseUrl) {
+    throw new Error(
+      'ADO_ORGANIZATION is required to update Azure DevOps work item comments.',
+    );
+  }
+
+  await requestAdoJson({
+    organizationApiBaseUrl: resolvedOrganizationApiBaseUrl,
+    fetchImpl,
+    method: 'PATCH',
+    path: `/${encodeURIComponent(project)}/_apis/wit/workItems/${workItemId}/comments/${encodeURIComponent(String(commentId))}`,
+    params: { 'api-version': '7.1-preview.4' },
+    token: adoToken,
+    body: { text: body },
+    schema: z.object({}).passthrough(),
+  });
 }

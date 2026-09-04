@@ -50,16 +50,16 @@ describe('fulfillTaskEnvVarRequestCommand', () => {
       fulfillTaskEnvVarRequestCommand(buildAdminAuth('admin-1'), {
         taskId: 'task-1',
         clientMessageId: CLIENT_MESSAGE_ID,
-        names: ['R_SANDBOX_OPENROUTER_API_KEY'],
+        names: ['SANDBOX_OPENROUTER_API_KEY'],
         values: [
           {
-            name: 'R_SANDBOX_OPENROUTER_API_KEY',
+            name: 'SANDBOX_OPENROUTER_API_KEY',
             value: 'must-not-be-saved',
           },
         ],
       }),
     ).rejects.toThrow(
-      '"R_SANDBOX_OPENROUTER_API_KEY" is a reserved deployment variable and cannot be requested by a task.',
+      '"SANDBOX_OPENROUTER_API_KEY" is a reserved deployment variable and cannot be requested by a task.',
     );
   });
 });

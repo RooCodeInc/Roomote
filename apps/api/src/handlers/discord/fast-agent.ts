@@ -28,6 +28,7 @@ import {
 } from '@roomote/communication';
 import {
   admitFastAgentHumanFollowUp,
+  createFastAgentConversationArtifact,
   persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
@@ -209,6 +210,7 @@ export async function processDiscordFastAgentMessage(
         input.sender.global_name ??
         input.sender.username,
       senderExternalId: input.sender.id,
+      directedAtRoomote: Boolean(input.directedAtRoomote),
     };
     let durableTurn: FastAgentDurableTurn | null = null;
     if (!releaseFastAgentLock) {
@@ -333,6 +335,11 @@ export async function processDiscordFastAgentMessage(
       ...(durableTurnForResume
         ? { durableAdmission: { eventId: durableTurnForResume.id } }
         : {}),
+      // A redelivered event whose earlier inline attempt never settled
+      // resumes that attempt instead of repeating its recorded actions.
+      ...(durableTurnForResume?.resumed
+        ? { resumedAfterInterruption: true }
+        : {}),
       senderDisplayName:
         input.interaction?.interaction.member?.nick ??
         input.sender.global_name ??
@@ -347,6 +354,11 @@ export async function processDiscordFastAgentMessage(
             entry.user !== input.sender.id,
         ),
       adapter: {
+        createArtifact: (artifact) =>
+          createFastAgentConversationArtifact({
+            fastConversationId: session.id,
+            ...artifact,
+          }),
         ...(durableTurnForResume
           ? {
               requestDurableResume: () =>

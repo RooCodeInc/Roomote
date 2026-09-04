@@ -38,6 +38,7 @@ import { isNonTranscriptAcpEvent } from '../../acp-non-transcript';
 import { findStartedTodo } from '../../todo-status';
 import type {
   AcpUiMessage,
+  AcpUiMessageImageArtifact,
   AcpOtherUiMessage,
   AcpPlanUiMessage,
   AcpTodoSectionUiMessage,
@@ -133,6 +134,34 @@ function extractPayloadImageUris(payload: Record<string, unknown>): string[] {
   ]);
 
   return [...directPayloadImages, ...payloadBlockImages];
+}
+
+/**
+ * Fast reply images arrive with their backing artifact (see
+ * `attachFastSessionReplyImages`) so the transcript can open them in the
+ * artifact viewer. Malformed entries are dropped; the URL list still renders.
+ */
+function extractPayloadImageArtifacts(
+  payload: Record<string, unknown>,
+): AcpUiMessageImageArtifact[] | undefined {
+  if (!Array.isArray(payload.imageArtifacts)) return undefined;
+
+  const artifacts = payload.imageArtifacts.flatMap((value) => {
+    const record = asRecord(value);
+    if (!record) return [];
+    const url = asString(record.url);
+    const path = asString(record.path);
+    const ownerRecord = asRecord(record.owner);
+    const taskId = ownerRecord ? asString(ownerRecord.taskId) : undefined;
+    const sessionId = ownerRecord ? asString(ownerRecord.sessionId) : undefined;
+    const owner = taskId ? { taskId } : sessionId ? { sessionId } : null;
+    if (!url || !path || !owner || typeof record.version !== 'number') {
+      return [];
+    }
+    return [{ url, owner, path, version: record.version }];
+  });
+
+  return artifacts.length > 0 ? artifacts : undefined;
 }
 
 function extractMessageImageUris(
@@ -311,6 +340,7 @@ export function toAcpUiMessage(
           normalized.contentBlocks,
           payloadRecord,
         ),
+        imageArtifacts: extractPayloadImageArtifacts(payloadRecord),
         clientMessageId: getAcpClientMessageId(normalized) ?? undefined,
         data: payloadRecord,
       };

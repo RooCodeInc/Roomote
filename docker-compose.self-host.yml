@@ -56,7 +56,6 @@ x-roomote-env: &roomote-env
   R_MODEL_ENV_KEYS: ${R_MODEL_ENV_KEYS:-}
   CUSTOM_PROVIDER_API_KEY: ${CUSTOM_PROVIDER_API_KEY:-}
   OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-  R_SANDBOX_OPENROUTER_API_KEY: ${R_SANDBOX_OPENROUTER_API_KEY:-}
   AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -209,6 +208,9 @@ services:
     container_name: roomote-controller
     image: *roomote-app-image
     command: ['controller']
+    environment:
+      <<: *roomote-env
+      SANDBOX_OPENROUTER_API_KEY: ${SANDBOX_OPENROUTER_API_KEY:-}
     # Spawns and reaches task worker containers on the worker network.
     networks: [default, worker]
     stop_grace_period: 7m

@@ -94,7 +94,7 @@ vi.mock('@/components/system', () => ({
 }));
 
 vi.mock('../hooks/SandboxProvider', () => ({
-  useSandboxClient: useSandboxClientMock,
+  useOptionalSandboxClient: useSandboxClientMock,
 }));
 
 vi.mock('../hooks/use-preview-pane', () => ({

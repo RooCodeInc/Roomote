@@ -16,6 +16,8 @@ export type ClaimedCurrentThreadSuggestion = {
   targetEnvironmentId?: string | null;
   usesRouterLaunch?: boolean;
   launchTarget?: string;
+  /** The scan or onboarding task that produced the suggestion. */
+  sourceTaskId?: string | null;
   launchClaimedAt: Date;
 };
 
@@ -96,6 +98,7 @@ export async function claimCurrentThreadSuggestionByMessage(
       ...(typeof trackedCard.metadata?.launchTarget === 'string'
         ? { launchTarget: trackedCard.metadata.launchTarget }
         : {}),
+      sourceTaskId: claimed.sourceTaskId,
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };

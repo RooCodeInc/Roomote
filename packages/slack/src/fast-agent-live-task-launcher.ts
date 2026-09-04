@@ -157,7 +157,7 @@ export function createFastAgentSlackLiveTaskLauncher(
             taskUpdateId,
             title: PREPARING_WORKSPACE_TITLE,
             status: 'error',
-            message: SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.trackingUnavailable,
+            output: SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.trackingUnavailable,
             taskUrl: destinationUrl,
           }),
         });

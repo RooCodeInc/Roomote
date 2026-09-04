@@ -321,6 +321,11 @@ export const publishFastAgentRequestUserInput = (
   options: AppRouterInput['taskRuns']['publishFastAgentRequestUserInput'],
 ) => client.taskRuns.publishFastAgentRequestUserInput.mutate(options);
 
+export const reportToParentSession = (
+  options: AppRouterInput['taskRuns']['reportToParentSession'],
+) => client.taskRuns.reportToParentSession.mutate(options);
+
+/** @deprecated Kept for workers already running against the prior API contract. */
 export const relayFastAgentChildChatReply = (
   options: AppRouterInput['taskRuns']['relayFastAgentChildChatReply'],
 ) => client.taskRuns.relayFastAgentChildChatReply.mutate(options);

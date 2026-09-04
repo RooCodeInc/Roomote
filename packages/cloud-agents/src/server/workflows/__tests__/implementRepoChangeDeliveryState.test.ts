@@ -20,7 +20,7 @@ describe('implement-changes delivery state contract', () => {
       "Continue until the run reaches the concrete branch, push, or pull-request state required by the invoking workflow's execution policy.",
     );
     expect(skillContent).toContain(
-      'Continue into the policy-selected delivery outcome instead of treating validated local code changes, proof handoff, or a local summary as completion on their own.',
+      'Continue into the policy-selected delivery outcome instead of treating validated local code changes, a proof result, or a local summary as completion on their own.',
     );
     expect(skillContent).toContain(
       'If repository files changed and the active execution policy still requires push or pull-request delivery, the run is not in a completable state after validation; any local summary before delegated delivery resolves is only a progress update.',
@@ -32,7 +32,7 @@ describe('implement-changes delivery state contract', () => {
       'If `capture-visual-proof` returned a no-op, non-applicable, unnecessary, or blocked proof result, continue into the policy-selected delivery skill and pass that proof result forward.',
     );
     expect(skillContent).toContain(
-      'Treat proof applicability, screenshot or screencast retention, uploaded artifact list output, or blocker output as input to the later delivery-state step, not as a terminal completion signal on its own.',
+      'Treat proof applicability, screenshot or screencast retention, uploaded artifact list output, or blocker output as input to the judge pass and the later delivery-state step, not as a terminal completion signal on its own.',
     );
     expect(skillContent).toContain(
       'A blocked, non-applicable, or unnecessary proof result is not a terminal completion state when repository files changed and the active execution policy still requires push or pull-request delivery.',
