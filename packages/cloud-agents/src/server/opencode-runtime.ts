@@ -35,6 +35,7 @@ import {
 } from '../opencode-prompt-subagents';
 import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '../opencode-identity-plugin';
 import { FAST_AGENT_SUBAGENT_TOOL_FILTER } from './fast-agent/fast-agent-tool-policy';
+import { seedOpenCodePluginDependenciesForEnv } from './opencode-plugin-seed';
 
 const ESCAPE_CHARACTER = String.fromCharCode(27);
 const BELL_CHARACTER = String.fromCharCode(7);
@@ -824,8 +825,22 @@ async function startManagedOpenCodeSdkServer(
     `--hostname=${OPENCODE_SDK_SERVER_HOSTNAME}`,
     `--port=${port}`,
   ]);
+  const env = buildOpenCodeCliEnv(extraEnv, options);
+  // OpenCode blocks its first request on an `@opencode-ai/plugin` registry
+  // install into each config directory it loads; a fresh container after a
+  // deploy paid that in full (minutes, or a 300s timeout). Copy the
+  // image-baked install into place first so that check no-ops.
+  try {
+    seedOpenCodePluginDependenciesForEnv(env);
+  } catch (error) {
+    console.warn(
+      `[OpenCode] Failed to seed plugin dependencies before starting the SDK server: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
   const proc = spawn(command.command, command.args, {
-    env: buildOpenCodeCliEnv(extraEnv, options),
+    env,
     stdio: ['ignore', 'pipe', 'pipe'],
     // Own process group, so shutdown can signal the entire tree (shell
     // wrappers included) via the negative pid.

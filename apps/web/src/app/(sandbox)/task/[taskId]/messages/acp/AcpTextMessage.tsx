@@ -46,6 +46,8 @@ import { TerminalProviderErrorMessage } from './TerminalProviderErrorMessage';
 import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
 import { useMessageUiOptions } from '@/components/ai-elements/message-ui-options';
 import { SlackMessageText } from '@/components/ai-elements/slack-message-text';
+import { useOpenSessionArtifactViewer } from '@/app/(sandbox)/sessions/[sessionId]/session-task-panel-context';
+import { useArtifactLink } from '../../hooks/ArtifactLinkProvider';
 
 const UserMessageToggle = ({
   isExpanded,
@@ -195,6 +197,8 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
   );
   const showPersistentTimestamp = useInternalTranscriptRowsVisible();
   const { hidePrReviewActions } = useMessageUiOptions();
+  const openSessionArtifactViewer = useOpenSessionArtifactViewer();
+  const artifactLink = useArtifactLink();
   const isUser = msg.role === 'user';
   const baseContent =
     getReactionReceiptContent(msg) ??
@@ -252,6 +256,36 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
       ? 'Conversation image attachment'
       : `Conversation image attachment ${selectedImageIndex + 1}`;
 
+  // Images backed by an artifact open in the artifact viewer (Session side
+  // panel, or the task's own artifact panel); anything else falls back to the
+  // fullscreen media dialog.
+  const openImage = (index: number) => {
+    const url = msg.images?.[index];
+    const artifact = url
+      ? msg.imageArtifacts?.find((candidate) => candidate.url === url)
+      : undefined;
+    if (artifact && openSessionArtifactViewer) {
+      openSessionArtifactViewer({
+        owner: artifact.owner,
+        path: artifact.path,
+        version: artifact.version,
+      });
+      return;
+    }
+    if (
+      artifact &&
+      artifactLink &&
+      'taskId' in artifact.owner &&
+      artifactLink.artifacts.some(
+        (candidate) => candidate.path === artifact.path,
+      )
+    ) {
+      artifactLink.openArtifact(artifact.path, artifact.version);
+      return;
+    }
+    setSelectedImageIndex(index);
+  };
+
   if (!msg.partial && content === '' && !msg.images?.length) {
     return;
   }
@@ -268,7 +302,7 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
                 imageUrl={msg.userImageUrl}
                 name={msg.userName}
                 email={msg.userEmail}
-                size="sm"
+                size="md"
                 alt={msg.userName ?? msg.userEmail ?? 'User'}
               />
             </div>
@@ -282,7 +316,7 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
                   key={`${msg.ts}-${i}`}
                   type="button"
                   className="rounded-lg bg-transparent p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                  onClick={() => setSelectedImageIndex(i)}
+                  onClick={() => openImage(i)}
                   aria-label={`Open conversation image attachment ${i + 1}`}
                 >
                   <Attachment

@@ -1,8 +1,5 @@
 const mocks = vi.hoisted(() => ({
   createFastAgentTaskLauncher: vi.fn(),
-  resolveFastSessionLivePreviewUrl: vi.fn(
-    async (): Promise<string | null> => null,
-  ),
   repositoriesFindMany: vi.fn(),
   getInstallationOctokit: vi.fn(),
   gitlabCreateIssueNote: vi.fn(),
@@ -36,17 +33,8 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/communication', () => ({
-  buildFastSessionReplyFooterText: ({
-    provider,
-    livePreviewUrl,
-  }: {
-    provider: string;
-    livePreviewUrl?: string | null;
-  }) =>
-    livePreviewUrl
-      ? `[footer:${provider}:${livePreviewUrl}]`
-      : `[footer:${provider}]`,
-  resolveFastSessionLivePreviewUrl: mocks.resolveFastSessionLivePreviewUrl,
+  buildFastSessionReplyFooterText: ({ provider }: { provider: string }) =>
+    `[footer:${provider}]`,
 }));
 
 vi.mock('@roomote/github', () => ({
@@ -89,6 +77,7 @@ vi.mock('@roomote/ado', () => ({
 import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 
 import {
+  buildSourceControlDiscussionUrl,
   buildSourceControlFastAdapter,
   buildSourceControlFastConversation,
   buildSourceControlFastDelivery,
@@ -379,65 +368,7 @@ describe('GitHub Fast delivery', () => {
     });
   });
 
-  it('includes the session live preview link in the comment footer when one exists', async () => {
-    mocks.resolveFastSessionLivePreviewUrl.mockResolvedValueOnce(
-      'https://preview.example/app',
-    );
-    const conversation = buildSourceControlFastConversation({
-      provider: 'github',
-      host: 'github.com',
-      repositoryFullName: 'acme/api',
-      kind: 'pull',
-      number: 42,
-    });
-    const delivery = await buildSourceControlFastDelivery(conversation);
-    const adapter = buildSourceControlFastAdapter({
-      conversation,
-      delivery: delivery!,
-      userId: 'user-1',
-      sessionId: 'fast-1',
-    });
-
-    await adapter.postReply({ message: 'On it.' });
-
-    expect(mocks.resolveFastSessionLivePreviewUrl).toHaveBeenCalledWith(
-      'fast-1',
-    );
-    expect(createComment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        body: 'On it.\n\n[footer:github:https://preview.example/app]',
-      }),
-    );
-  });
-
-  it('still posts the comment when the live preview lookup fails', async () => {
-    mocks.resolveFastSessionLivePreviewUrl.mockRejectedValueOnce(
-      new Error('db down'),
-    );
-    const conversation = buildSourceControlFastConversation({
-      provider: 'github',
-      host: 'github.com',
-      repositoryFullName: 'acme/api',
-      kind: 'pull',
-      number: 42,
-    });
-    const delivery = await buildSourceControlFastDelivery(conversation);
-    const adapter = buildSourceControlFastAdapter({
-      conversation,
-      delivery: delivery!,
-      userId: 'user-1',
-      sessionId: 'fast-1',
-    });
-
-    await expect(adapter.postReply({ message: 'On it.' })).resolves.toEqual({
-      messageId: '5001',
-    });
-    expect(createComment).toHaveBeenCalledWith(
-      expect.objectContaining({ body: 'On it.\n\n[footer:github]' }),
-    );
-  });
-
-  it('edits the turn comment in place for later replies instead of posting again', async () => {
+  function mockGitHubTurnEditing() {
     const updateComment = vi.fn().mockResolvedValue({});
     mocks.getInstallationOctokit.mockResolvedValue({
       rest: {
@@ -451,6 +382,11 @@ describe('GitHub Fast delivery', () => {
       },
       request,
     });
+    return updateComment;
+  }
+
+  it('edits the turn comment in place for later replies, keeping one footer at the bottom', async () => {
+    const updateComment = mockGitHubTurnEditing();
     const conversation = buildSourceControlFastConversation({
       provider: 'github',
       host: 'github.com',
@@ -468,26 +404,59 @@ describe('GitHub Fast delivery', () => {
     });
 
     await adapter.postReply({ message: 'On it.' });
-    const second = await adapter.postReply({
-      message: 'Rebased; running checks.',
-    });
+    await adapter.postReply({ message: 'Rebased; running checks.' });
+    const last = await adapter.postReply({ message: 'Rebased and green.' });
 
     expect(createComment).toHaveBeenCalledTimes(1);
-    expect(updateComment).toHaveBeenCalledWith(
+    expect(createComment).toHaveBeenCalledWith(
       expect.objectContaining({
-        comment_id: 6001,
-        body: expect.stringContaining('On it.\n\nRebased; running checks.'),
+        body: '> @roomote please rebase this\n\nOn it.\n\n[footer:github]',
       }),
     );
-    // The turn opened with the quote and appends keep it at the top.
-    const firstBody = createComment.mock.calls[0]?.[0].body as string;
-    const editedBody = updateComment.mock.calls[0]?.[0].body as string;
-    expect(firstBody.startsWith('> @roomote please rebase this')).toBe(true);
-    expect(editedBody.startsWith('> @roomote please rebase this')).toBe(true);
-    // Footer appears once, at the bottom of the edited body.
-    const body = updateComment.mock.calls[0]?.[0].body as string;
-    expect(body.match(/footer:github/g)).toHaveLength(1);
-    expect(second).toEqual({ messageId: '6001' });
+    expect(updateComment).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        comment_id: 6001,
+        body: '> @roomote please rebase this\n\nOn it.\n\nRebased; running checks.\n\n[footer:github]',
+      }),
+    );
+    expect(updateComment).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        comment_id: 6001,
+        body: '> @roomote please rebase this\n\nOn it.\n\nRebased; running checks.\n\nRebased and green.\n\n[footer:github]',
+      }),
+    );
+    expect(last).toEqual({ messageId: '6001' });
+  });
+
+  it('does not quote the answered comment when replying inside its review thread', async () => {
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+      reviewCommentId: '800',
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    const adapter = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+      quote: '> @roomote is this loop bounded?',
+    });
+
+    await adapter.postReply({ message: 'Yes, it stops after three tries.' });
+
+    expect(request).toHaveBeenCalledWith(
+      'POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies',
+      expect.objectContaining({
+        comment_id: 800,
+        body: 'Yes, it stops after three tries.\n\n[footer:github]',
+      }),
+    );
   });
 
   it('replaces a resumed turn comment by id and keeps appending into it', async () => {
@@ -534,9 +503,7 @@ describe('GitHub Fast delivery', () => {
       2,
       expect.objectContaining({
         comment_id: 7001,
-        body: expect.stringContaining(
-          'Recovered; here is the result.\n\nAnd one more detail.',
-        ),
+        body: 'Recovered; here is the result.\n\nAnd one more detail.\n\n[footer:github]',
       }),
     );
   });
@@ -747,5 +714,64 @@ describe('buildSourceControlReplyQuote', () => {
       buildSourceControlReplyQuote({ text: '    indented code\nplain\n' }),
     ).toBe('>     indented code\n> plain\n>');
     expect(buildSourceControlReplyQuote({ text: '   ' })).toBeNull();
+  });
+});
+
+describe('buildSourceControlDiscussionUrl', () => {
+  it('builds each provider page shape, including Azure DevOps _git and work item paths', () => {
+    expect(
+      buildSourceControlDiscussionUrl({
+        provider: 'github',
+        host: 'github.com',
+        repositoryFullName: 'acme/api',
+        kind: 'pull',
+        number: 42,
+      }),
+    ).toBe('https://github.com/acme/api/pull/42');
+    expect(
+      buildSourceControlDiscussionUrl({
+        provider: 'gitlab',
+        host: 'gitlab.example.com',
+        repositoryFullName: 'group/api',
+        kind: 'issues',
+        number: 7,
+      }),
+    ).toBe('https://gitlab.example.com/group/api/-/issues/7');
+    expect(
+      buildSourceControlDiscussionUrl({
+        provider: 'bitbucket',
+        host: 'bitbucket.org',
+        repositoryFullName: 'acme/api',
+        kind: 'pull',
+        number: 3,
+      }),
+    ).toBe('https://bitbucket.org/acme/api/pull-requests/3');
+    expect(
+      buildSourceControlDiscussionUrl({
+        provider: 'ado',
+        host: 'dev.azure.com',
+        repositoryFullName: 'org/project/repo',
+        kind: 'pull',
+        number: 42,
+      }),
+    ).toBe('https://dev.azure.com/org/project/_git/repo/pullrequest/42');
+    expect(
+      buildSourceControlDiscussionUrl({
+        provider: 'ado',
+        host: 'dev.azure.com',
+        repositoryFullName: 'org/project/repo',
+        kind: 'issues',
+        number: 99,
+      }),
+    ).toBe('https://dev.azure.com/org/project/_workitems/edit/99');
+    expect(
+      buildSourceControlDiscussionUrl({
+        provider: 'gitea',
+        host: 'gitea.example.com',
+        repositoryFullName: 'acme/api',
+        kind: 'pull',
+        number: 5,
+      }),
+    ).toBe('https://gitea.example.com/acme/api/pulls/5');
   });
 });

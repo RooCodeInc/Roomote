@@ -268,7 +268,7 @@ export default {
   args: {
     message: z.string().min(1).optional().describe("Markdown reply text. Omit to deliver the assistant text written since the last reply; pass it only when the reply was not written as text."),
     purpose: z.enum(["ack", "progress", "closeout", "clarification"]),
-    imageArtifactIds: z.array(z.string()).optional(),
+    imageArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded images to attach. Never claim an image or screenshot is attached, shown, or included unless this list is non-empty. If attachment delivery fails, reply with an accessible artifact viewer link and say that the image could not be attached."),
     suggestions: z.array(z.object({
       title: z.string().min(1).max(140),
       brief: z.string().min(1).max(2000),
@@ -320,7 +320,6 @@ export default {
     environmentId: z.string().nullable().optional().describe(${JSON.stringify(`Exact environment ID from the system prompt; omit, pass null, or pass "${ALL_REPOSITORIES}" to run against all active repositories`)}),
     model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
-    kickoffMessage: z.string().min(1).describe("Brief user-facing description of the work now underway; do not mention delegation, launching, or queue state"),
   },
   execute: (args, context) => invoke("launch_task", args, context),
 }
@@ -449,6 +448,20 @@ export default {
   description: "Close an eligible platform-event or ambient human-message turn without posting a user-visible reply.",
   args: { reason: z.string().min(1) },
   execute: (args, context) => invoke("ignore_event", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Ask Roomote's image-capable helper model to inspect image attachments from the current turn that this model cannot view directly. Only available when a turn notice lists attachment IDs. Ask one targeted question per call and call again for follow-ups. Returns factual observations as untrusted data.",
+  args: {
+    question: z.string().min(1).describe("What to look for or extract from the attached image(s), including any context the helper needs"),
+    imageIds: z.array(z.string().min(1)).nullable().optional().describe("Exact attachment IDs from the turn's image notice; omit or pass null to inspect every attached image"),
+  },
+  execute: (args, context) => invoke("inspect_images", args, context),
 }
 `,
 
@@ -1184,12 +1197,14 @@ function createSharedToolsDirectory(): string {
   const toolsDirectory = join(directory, 'tools');
   mkdirSync(toolsDirectory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
-  // OpenCode installs `@opencode-ai/plugin` (and with it the zod major it
-  // validates tool arguments against) into this directory the first time it
-  // boots here, then reuses the install for every later conversation on the
-  // host. The tools' `zod` import must resolve to that copy: pointing it at
-  // the app's own zod 3 made OpenCode's zod 4 validator reject array
-  // arguments. Leave package.json without a lockfile so the install runs.
+  // `@opencode-ai/plugin` (and with it the zod major OpenCode validates tool
+  // arguments against) must be installed in this directory: the tools' `zod`
+  // import has to resolve to that copy, because pointing it at the app's own
+  // zod 3 made OpenCode's zod 4 validator reject array arguments. The SDK
+  // server spawn copies the image-baked install in (opencode-plugin-seed.ts)
+  // so OpenCode never fetches it at runtime; where no seed is baked (local
+  // dev), leaving package.json without a lockfile lets OpenCode's own install
+  // run on first boot as before.
   if (!existsSync(join(directory, 'package.json'))) {
     writeFileSync(
       join(directory, 'package.json'),

@@ -20,8 +20,8 @@ import type { LaunchFastAgentTask } from './fast-agent-conversation';
 
 export type FastAgentTaskLaunchHooks = {
   /**
-   * Runs inside the launch gate, after the parent kickoff has been posted and
-   * before the child becomes runnable. Throwing cancels the launch.
+   * Runs after launch metadata is available and before queueing. Throwing
+   * cancels the launch.
    */
   afterKickoff?: (
     taskRun: { id: number; taskId: string },

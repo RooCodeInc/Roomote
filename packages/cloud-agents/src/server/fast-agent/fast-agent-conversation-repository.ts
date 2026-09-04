@@ -8,6 +8,7 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   fastAgentParentEvents,
+  ensureAutomationRowsOnce,
   ensureSessionForFastConversation,
   advanceSessionNotifiedCursor,
   attachFastConversationToSession,
@@ -26,6 +27,7 @@ import {
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   fastAgentConversationSchema,
+  type FastAgentConversationOwner,
 } from '@roomote/types';
 
 import { FAST_RESPONDING_LEASE_MS } from './fast-agent-constants';
@@ -36,7 +38,8 @@ import {
 
 export type FastAgentConversationRecord = {
   id: string;
-  userId: string;
+  userId: string | null;
+  owner: FastAgentConversationOwner;
   title: string | null;
   conversation: FastAgentConversation;
   /**
@@ -231,6 +234,8 @@ export type FastAgentTurnAttemptReply = {
   text: string;
   /** Recorded for replies the turn posted itself; absent on older rows. */
   purpose?: FastAgentTurnAttemptReplyPurpose;
+  /** System retry notices are visible but do not acknowledge model work. */
+  inferenceRetryNotice?: boolean;
 };
 
 function isFastAgentTurnAttemptReplyPurpose(
@@ -409,6 +414,9 @@ export async function loadFastAgentTurnAttemptSummary(
         kind: 'reply',
         text: reply,
         ...(isFastAgentTurnAttemptReplyPurpose(purpose) ? { purpose } : {}),
+        ...(metadata.inferenceRetryNotice === true
+          ? { inferenceRetryNotice: true }
+          : {}),
       });
     }
   }
@@ -757,7 +765,8 @@ export async function reconcileExpiredFastAgentInferenceRetryNotices(
 
 export interface FastAgentConversationRepository {
   getOrCreate(input: {
-    userId: string;
+    owner?: FastAgentConversationOwner;
+    userId?: string;
     conversation: FastAgentConversation;
     /**
      * Session to bind a newly created conversation to, when that Session has
@@ -765,6 +774,8 @@ export interface FastAgentConversationRepository {
      * Session.
      */
     sessionId?: string;
+    /** Title to seed only when this call creates the conversation. */
+    initialTitle?: string;
   }): Promise<FastAgentConversationGetOrCreateResult>;
   findById(input: {
     id: string;
@@ -780,9 +791,10 @@ export interface FastAgentConversationRepository {
     conversationId: string;
     message: FastAgentMessageWrite;
   }): Promise<FastAgentMessageUpsertResult>;
+  /** `null` forgets the native session so the next turn rebuilds it. */
   setOpenCodeSession(input: {
     conversationId: string;
-    openCodeSessionId: string;
+    openCodeSessionId: string | null;
   }): Promise<void>;
 }
 
@@ -891,10 +903,18 @@ async function loadConversationRecord(
   if (!record || !conversation) {
     throw new Error('Fast conversation has an invalid reply target.');
   }
+  const owner: FastAgentConversationOwner = record.userId
+    ? { kind: 'user', userId: record.userId }
+    : record.ownerAutomation
+      ? { kind: 'automation', automationKey: record.ownerAutomation }
+      : (() => {
+          throw new Error('Fast conversation has an invalid owner.');
+        })();
 
   return {
     id: record.id,
     userId: record.userId,
+    owner,
     title: record.title,
     conversation,
     compatibilityMessages: record.compatibilityMessages as ModelMessage[],
@@ -904,7 +924,21 @@ async function loadConversationRecord(
 
 export const fastAgentConversationRepository: FastAgentConversationRepository =
   {
-    async getOrCreate({ userId, conversation, sessionId }) {
+    async getOrCreate({
+      owner,
+      userId,
+      conversation,
+      sessionId,
+      initialTitle,
+    }) {
+      const resolvedOwner =
+        owner ?? (userId ? { kind: 'user' as const, userId } : null);
+      if (!resolvedOwner) {
+        throw new Error('Fast conversation owner is required.');
+      }
+      if (resolvedOwner.kind === 'automation') {
+        await ensureAutomationRowsOnce();
+      }
       return db.transaction(async (tx) => {
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${buildIdentityKey(conversation)}, 0))`,
@@ -946,7 +980,13 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           const [inserted] = await tx
             .insert(fastAgentConversations)
             .values({
-              userId,
+              userId:
+                resolvedOwner.kind === 'user' ? resolvedOwner.userId : null,
+              ownerAutomation:
+                resolvedOwner.kind === 'automation'
+                  ? resolvedOwner.automationKey
+                  : null,
+              title: initialTitle?.trim() || null,
               surface: conversation.surface,
               workspaceId: conversation.workspaceId,
               conversationId: conversation.conversationId,
@@ -973,6 +1013,23 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         }
         if (!record) {
           throw new Error('Failed to create or load Fast conversation.');
+        }
+        // Only an explicit owner asserts who the conversation belongs to. A
+        // bare userId is the acting sender: it becomes the owner when this
+        // call creates the conversation, and otherwise it is a participant
+        // taking a turn in someone else's thread (a coworker replying in a
+        // bound Slack thread, a human replying to an automation-owned
+        // Session), which must not be rejected.
+        if (
+          owner &&
+          ((owner.kind === 'user' &&
+            (record.userId !== owner.userId ||
+              record.ownerAutomation !== null)) ||
+            (owner.kind === 'automation' &&
+              (record.userId !== null ||
+                record.ownerAutomation !== owner.automationKey)))
+        ) {
+          throw new Error('Fast conversation owner does not match the caller.');
         }
 
         await tx.execute(

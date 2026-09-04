@@ -11,14 +11,11 @@ import {
   type FastAgentReactionExternalInput,
   type FastAgentTurnAdapter,
 } from '@roomote/cloud-agents/server';
+import { and, db, eq, slackInstallations } from '@roomote/db/server';
 import {
-  and,
-  db,
-  ensureSessionForFastConversation,
-  eq,
-  slackInstallations,
-} from '@roomote/db/server';
-import { isFastAgentSourceControlConversation } from '@roomote/types';
+  isFastAgentSourceControlConversation,
+  type FastAgentHumanFollowUpEvent,
+} from '@roomote/types';
 import {
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
@@ -35,6 +32,7 @@ import {
 
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createSlackFastReplyStream } from './fast-agent-slack-reply-stream';
+import { resolveFastAgentSessionImages } from './fast-agent-session-images';
 import { findSlackConversationSubjectByUserId } from './slack-conversation-log';
 import {
   createFastAgentCommunicationTaskLauncher,
@@ -69,7 +67,7 @@ import {
   buildSourceControlFastDelivery,
   buildSourceControlReplyQuote,
 } from './source-control-fast-delivery';
-import { createFastAgentSessionArtifact } from './artifacts/create-session-artifact';
+import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
 const DISCORD_QUOTE_MAX_LENGTH = 280;
@@ -215,6 +213,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     return null;
   }
   const conversation = session.conversation;
+  const createArtifact = buildFastAgentArtifactCreator(session.id);
 
   if (conversation.surface === 'web' || conversation.surface === 'automation') {
     // No side channel to post into: the canonical transcript the service
@@ -223,6 +222,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     return {
       conversation,
       adapter: {
+        createArtifact,
         launchTask: createFastAgentWebTaskLauncher({
           userId: params.userId,
           conversation,
@@ -269,6 +269,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     return {
       conversation,
       adapter: {
+        createArtifact,
         ...(senderSubject
           ? {
               createReplyStream: () =>
@@ -281,6 +282,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                   recipientUserId: senderSubject.subjectSlackUserId,
                   sessionId: session.id,
                   footerContext,
+                  resolveImages: (artifactIds) =>
+                    resolveFastAgentSessionImages({
+                      artifactIds,
+                      sessionId: session.id,
+                    }),
                   getQuote: () => pendingQuote,
                   onDelivered: () => {
                     pendingQuote = null;
@@ -308,9 +314,13 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           channelId: conversation.replyTarget.channelId,
           threadTs: threadId,
         }),
-        postReply: async ({ message }) => {
+        postReply: async ({ message, imageArtifactIds = [] }) => {
           const quote = pendingQuote;
           pendingQuote = null;
+          const images = await resolveFastAgentSessionImages({
+            artifactIds: imageArtifactIds,
+            sessionId: session.id,
+          });
           const messageTs = await postSlackThreadMessageWithFooterText({
             slack,
             channel: conversation.replyTarget.channelId,
@@ -327,6 +337,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                   ]
                 : []),
               { type: 'markdown' as const, text: message },
+              ...images.map((image) => ({
+                type: 'image' as const,
+                image_url: image.url,
+                alt_text: image.altText,
+              })),
             ],
             footerText: buildFastSessionReplyFooterText({
               provider: 'slack',
@@ -371,6 +386,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         });
 
     const adapter: FastAgentTurnAdapter = {
+      createArtifact,
       launchTask: createFastAgentDiscordTaskLauncher({
         provider,
         userId: params.userId,
@@ -457,6 +473,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     return {
       conversation,
       adapter: {
+        createArtifact,
         launchTask: createFastAgentCommunicationTaskLauncher({
           userId: params.userId,
           conversation,
@@ -505,6 +522,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     return {
       conversation,
       adapter: {
+        createArtifact,
         launchTask: createFastAgentLinearTaskLauncher({
           userId: params.userId,
           conversation,
@@ -530,15 +548,18 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     }
     return {
       conversation,
-      adapter: buildSourceControlFastAdapter({
-        conversation,
-        delivery,
-        userId: params.userId,
-        sessionId: session.id,
-        quote: params.externalInput
-          ? null
-          : buildSourceControlReplyQuote({ text: params.question }),
-      }),
+      adapter: {
+        createArtifact,
+        ...buildSourceControlFastAdapter({
+          conversation,
+          delivery,
+          userId: params.userId,
+          sessionId: session.id,
+          quote: params.externalInput
+            ? null
+            : buildSourceControlReplyQuote({ text: params.question }),
+        }),
+      },
     };
   }
 
@@ -552,6 +573,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     return {
       conversation,
       adapter: {
+        createArtifact,
         launchTask: createFastAgentCommunicationTaskLauncher({
           userId: params.userId,
           conversation,
@@ -609,6 +631,38 @@ type FastAgentSurfaceHumanFollowUpAdmission = Awaited<
   ReturnType<typeof admitFastAgentHumanFollowUp>
 > | null;
 
+/**
+ * The durable record of a surface turn. It carries the surface context and
+ * steerable tasks too, so a turn that is queued behind a busy Session or
+ * resumed after an interruption reads the same context the inline turn would.
+ */
+function buildSurfaceHumanFollowUpEvent(
+  params: FastAgentSurfaceReplyParams,
+): FastAgentHumanFollowUpEvent {
+  return {
+    type: 'human_follow_up',
+    eventId: params.currentMessageId,
+    currentMessageId: params.currentMessageId,
+    userId: params.userId,
+    question: params.question,
+    ...(params.images?.length ? { images: params.images } : {}),
+    ...(params.senderDisplayName
+      ? { senderDisplayName: params.senderDisplayName }
+      : {}),
+    ...(params.agentContext ? { agentContext: params.agentContext } : {}),
+    ...(params.activeTasks?.length ? { activeTasks: params.activeTasks } : {}),
+    ...(params.externalInput
+      ? {
+          senderExternalId: params.externalInput.reactor.externalUserId,
+          input: {
+            type: 'reaction' as const,
+            externalInput: params.externalInput,
+          },
+        }
+      : {}),
+  };
+}
+
 async function admitFastAgentSurfaceHumanFollowUp(
   params: FastAgentSurfaceReplyParams,
   delivery: FastAgentSurfaceReplyDelivery,
@@ -624,26 +678,7 @@ async function admitFastAgentSurfaceHumanFollowUp(
       sessionId: params.sessionId,
       conversation: delivery.conversation,
     },
-    event: {
-      type: 'human_follow_up',
-      eventId: params.currentMessageId,
-      currentMessageId: params.currentMessageId,
-      userId: params.userId,
-      question: params.question,
-      ...(params.images?.length ? { images: params.images } : {}),
-      ...(params.senderDisplayName
-        ? { senderDisplayName: params.senderDisplayName }
-        : {}),
-      ...(params.externalInput
-        ? {
-            senderExternalId: params.externalInput.reactor.externalUserId,
-            input: {
-              type: 'reaction' as const,
-              externalInput: params.externalInput,
-            },
-          }
-        : {}),
-    },
+    event: buildSurfaceHumanFollowUpEvent(params),
     forceQueue: forceQueue && !params.externalInput,
   });
 }
@@ -685,26 +720,7 @@ async function runFastAgentSurfaceReply(
           sessionId: params.sessionId,
           conversation: delivery.conversation,
         },
-        event: {
-          type: 'human_follow_up',
-          eventId: params.currentMessageId,
-          currentMessageId: params.currentMessageId,
-          userId: params.userId,
-          question: params.question,
-          ...(params.images?.length ? { images: params.images } : {}),
-          ...(params.senderDisplayName
-            ? { senderDisplayName: params.senderDisplayName }
-            : {}),
-          ...(params.externalInput
-            ? {
-                senderExternalId: params.externalInput.reactor.externalUserId,
-                input: {
-                  type: 'reaction' as const,
-                  externalInput: params.externalInput,
-                },
-              }
-            : {}),
-        },
+        event: buildSurfaceHumanFollowUpEvent(params),
       }).catch((error) => {
         console.error(
           `[Fast Agent] Failed to persist surface turn admission: ${error instanceof Error ? error.message : String(error)}`,
@@ -769,16 +785,7 @@ async function runFastAgentSurfaceReply(
                 ),
             }
           : {}),
-        createArtifact: async (artifact) => {
-          const unifiedSession = await ensureSessionForFastConversation(
-            db,
-            params.sessionId,
-          );
-          return createFastAgentSessionArtifact({
-            sessionId: unifiedSession.id,
-            ...artifact,
-          });
-        },
+        createArtifact: buildFastAgentArtifactCreator(params.sessionId),
         ...delivery.adapter,
       },
     }).catch((error: unknown) => {

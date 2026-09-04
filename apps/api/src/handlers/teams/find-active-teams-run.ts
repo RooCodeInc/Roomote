@@ -39,6 +39,7 @@ const SNAPSHOT_RESUME_TEAMS_JOB_SELECTION = {
   port: taskRuns.port,
   snapshotId: taskRuns.snapshotId,
   snapshotCreatedAt: taskRuns.snapshotCreatedAt,
+  vendor: taskRuns.vendor,
 };
 
 /**
@@ -166,7 +167,10 @@ export async function findCompletedTeamsTaskRunWithSnapshot(input: {
     .orderBy(desc(taskRuns.createdAt))
     .limit(1);
 
-  if (!row?.snapshotId || !isSnapshotResumable(row.snapshotCreatedAt)) {
+  if (
+    !row?.snapshotId ||
+    !isSnapshotResumable(row.snapshotCreatedAt, row.vendor)
+  ) {
     return null;
   }
 

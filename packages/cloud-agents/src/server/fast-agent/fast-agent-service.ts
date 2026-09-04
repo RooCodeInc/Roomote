@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
+import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
@@ -73,6 +74,7 @@ import {
 } from './fast-agent-constants';
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
+import { getTherapistModeEnabledForUser } from '../therapist-mode';
 import {
   appendFastAgentVisibleMessages,
   getActiveFastAgentTasks,
@@ -86,12 +88,16 @@ import {
   classifyNonTaskInferenceError,
   FAST_AGENT_SESSION_PERMISSIONS,
   FAST_AGENT_SESSION_TOOL_FILTER,
+  generateTrackedNonTaskText,
   generateTrackedNonTaskTextInOpenCodeSession,
   isNonTaskOpenCodePromptTimeoutError,
   isNonTaskOpenCodeSessionNotFoundError,
   isNonTaskOpenCodeSessionValidationError,
+  NonTaskInputModalityUnsupportedError,
   NonTaskOpenCodePromptTimeoutError,
   NON_TASK_INFERENCE_SURFACES,
+  resolveNonTaskInputModalityDelivery,
+  type NonTaskInputModalityDelivery,
   type NonTaskPromptFile,
   type NonTaskProviderRetryEvent,
   type NonTaskOpenCodeCompletedMessage,
@@ -179,6 +185,12 @@ import {
   type FastAgentTurnSource,
 } from './fast-agent-conversation';
 import { prepareShowWidget } from '../show-widget';
+import {
+  formatFastAgentStorageFullMessage,
+  inspectFastAgentStorageFullError,
+  isFastAgentStorageFullError,
+  wrapFastAgentStorageFullError,
+} from './fast-agent-storage-diagnostics';
 
 const LEGACY_SLACK_REACTION_TOOL = 'add_reaction_to_slack_message';
 
@@ -228,6 +240,7 @@ const chatReplyArgsSchema = z.object({
     .max(10)
     .optional(),
 });
+
 const chatReactionArgsSchema = z.object({
   name: z.string().trim().min(1),
   purpose: z.enum(['ack', 'closeout']),
@@ -400,7 +413,6 @@ const launchTaskArgsSchema = z.object({
   environmentId: z.string().trim().min(1).nullable().optional(),
   model: z.string().trim().min(1).nullable().optional(),
   includeAttachments: z.boolean().optional().default(false),
-  kickoffMessage: z.string().trim().min(1),
 });
 
 const reviewPullRequestArgsSchema = z.object({
@@ -454,6 +466,10 @@ const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
 const findIntegrationToolsArgsSchema = z.object(
   FIND_INTEGRATION_TOOLS_TOOL.inputSchema,
 );
+const inspectImagesArgsSchema = z.object({
+  question: z.string().min(1),
+  imageIds: z.array(z.string().min(1)).nullable().optional(),
+});
 const callIntegrationToolArgsSchema = z.object(
   CALL_INTEGRATION_TOOL_TOOL.inputSchema,
 );
@@ -596,6 +612,53 @@ const FAST_AGENT_DURABLE_RETRY_IMMEDIATE_PARK_WAIT_MS = 10_000;
 const FAST_AGENT_DURABLE_RETRY_PARK_BASE_DELAY_MS = 2_000;
 const FAST_AGENT_DURABLE_RETRY_PARK_MAX_DELAY_MS = 60_000;
 const FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS = 5 * 60_000;
+const FAST_AGENT_IMAGE_INSPECTION_TIMEOUT_MS = 2 * 60_000;
+const FAST_AGENT_IMAGE_INSPECTION_SYSTEM_PROMPT = [
+  'You are Roomote visual information extraction support for a chat assistant that cannot view images itself.',
+  'Inspect the attached image(s) and answer the question with concise factual observations the assistant can rely on as evidence: visible text, UI state, layout, colors, charts, diagrams, error messages, and any detail relevant to the question.',
+  'If the visual evidence is ambiguous, say what is uncertain and what would disambiguate it. Do not speculate beyond what is visible, do not address the end user directly, and do not make product decisions.',
+].join('\n');
+
+/**
+ * How the images attached to a Fast turn reach a model. Mirrors the task
+ * runtime: the turn model is never swapped for a vision model. When it can
+ * view images they ride along as prompt parts; otherwise a helper model
+ * inspects them on request through `inspect_images`, the way a hidden visual
+ * subagent reads images for a coding model that cannot.
+ */
+type FastAgentImageDelivery =
+  | NonTaskInputModalityDelivery
+  | { delivery: 'unsupported' };
+
+function formatFastAgentImageAttachmentList(
+  entries: Array<{ id: string; file: NonTaskPromptFile }>,
+): string {
+  return entries.map(({ id, file }) => `${id} (${file.mime})`).join(', ');
+}
+
+function buildFastAgentImageNotice(
+  entries: Array<{ id: string; file: NonTaskPromptFile }>,
+  delivery: FastAgentImageDelivery,
+): string {
+  const attachments = formatFastAgentImageAttachmentList(entries);
+  if (delivery.delivery === 'unsupported') {
+    return `[Image attachments: ${attachments}. No configured model accepts image input, so they cannot be viewed in this conversation. Tell the user plainly that the image could not be viewed and answer from the text only.]`;
+  }
+  return `[Image attachments: ${attachments}. The current model cannot view images, so they are not shown here. Call inspect_images with a targeted question (and these IDs when only some apply) so Roomote's image-capable model describes them before answering about their contents. Never claim to have seen them yourself.]`;
+}
+
+function buildFastAgentImageInspectionPrompt(
+  question: string,
+  entries: Array<{ id: string; file: NonTaskPromptFile }>,
+): string {
+  return [
+    `Attached image(s), in order: ${formatFastAgentImageAttachmentList(entries)}.`,
+    '',
+    'Question from the assistant:',
+    question,
+  ].join('\n');
+}
+
 const FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO = 0.2;
 const FAST_AGENT_PROVIDER_RECOVERY_PROMPT =
   buildInferenceProviderRecoveryPrompt({ protectCompletedSideEffects: true });
@@ -609,10 +672,23 @@ type FastAgentInferenceRetryNotice = {
   attemptNumber: number;
   maxAttempts?: number;
   delayMs?: number;
+  /** The one fresh-start retry granted to a rejected request. */
+  freshSession?: boolean;
 };
 
 type FastAgentInferenceRetryOptions = {
   canRetry?: (error: unknown, failure: FastAgentInferenceFailure) => boolean;
+  /**
+   * A provider rejection (a non-retryable `provider_error`, typically a 4xx
+   * on the request as sent) is not worth repeating as-is, but the same
+   * request from a fresh session usually succeeds: a human "try again" is
+   * exactly that. Return true to grant one such retry per turn; the caller
+   * must then rebuild rather than continue the rejected session.
+   */
+  retryRejection?: (
+    error: unknown,
+    failure: FastAgentInferenceFailure,
+  ) => boolean;
   prepareRetry?: () => Promise<void> | void;
   /**
    * Offered the pending backoff after its notice is recorded and before the
@@ -678,6 +754,9 @@ export function findFastAgentDurableRetryScheduledError(
 }
 
 class FastAgentInferenceError extends Error {
+  /** Provider status and message, redacted and bounded, for the closeout. */
+  public readonly detail: string | undefined;
+
   constructor(
     public readonly failure: FastAgentInferenceFailure,
     cause: unknown,
@@ -687,7 +766,88 @@ class FastAgentInferenceError extends Error {
       { cause },
     );
     this.name = 'FastAgentInferenceError';
+    this.detail = describeInferenceErrorForUser(cause);
   }
+}
+
+const FAST_AGENT_INFERENCE_DETAIL_MAX_CHARS = 200;
+
+/**
+ * The provider's own status and message, as OpenCode surfaces them
+ * (`{name, data: {statusCode, message, responseBody}}`, possibly wrapped in
+ * a prompt error's `providerError` or an Error `cause`). Secrets are
+ * redacted and the text is bounded so it can be shown in the thread; a
+ * closeout that only says "the provider returned an error" leaves the
+ * reader guessing which provider and why.
+ */
+function describeInferenceErrorForUser(error: unknown): string | undefined {
+  let statusCode: number | undefined;
+  let message: string | undefined;
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value: error, depth: 0 },
+  ];
+  const seen = new Set<object>();
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current || current.depth > 4) continue;
+    const { value, depth } = current;
+    if (typeof value === 'string') {
+      if (value.trim().startsWith('{')) {
+        try {
+          pending.push({ value: JSON.parse(value), depth: depth + 1 });
+        } catch {
+          // Plain text; nothing nested to read.
+        }
+      }
+      continue;
+    }
+    if (!value || typeof value !== 'object' || seen.has(value)) continue;
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    if (statusCode === undefined) {
+      const candidate = record.statusCode ?? record.status;
+      if (typeof candidate === 'number' && candidate >= 100) {
+        statusCode = candidate;
+      }
+    }
+    // Prefer the innermost provider message over the wrapper's own text.
+    const data = record.data;
+    const dataMessage =
+      data && typeof data === 'object'
+        ? (data as Record<string, unknown>).message
+        : undefined;
+    if (typeof dataMessage === 'string' && dataMessage.trim()) {
+      message = dataMessage;
+    } else if (
+      message === undefined &&
+      typeof record.message === 'string' &&
+      record.message.trim() &&
+      !(value instanceof Error)
+    ) {
+      message = record.message;
+    }
+    for (const key of [
+      'providerError',
+      'cause',
+      'data',
+      'error',
+      'responseBody',
+    ]) {
+      if (key in record) pending.push({ value: record[key], depth: depth + 1 });
+    }
+  }
+  if (message === undefined && error instanceof Error) {
+    message = error.message;
+  }
+  const parts = [
+    statusCode === undefined ? undefined : `HTTP ${statusCode}`,
+    message?.replace(/\s+/gu, ' ').trim() || undefined,
+  ].filter((part): part is string => Boolean(part));
+  if (parts.length === 0) return undefined;
+  const text = redactSecrets(parts.join(': '));
+  return text.length <= FAST_AGENT_INFERENCE_DETAIL_MAX_CHARS
+    ? text
+    : `${text.slice(0, FAST_AGENT_INFERENCE_DETAIL_MAX_CHARS - 1)}…`;
 }
 
 function resolveFastAgentInferenceMaxRetries(
@@ -730,6 +890,9 @@ function resolveFastAgentInferenceRetryDelayMs(
 function formatFastAgentInferenceRetryNotice(
   notice: FastAgentInferenceRetryNotice,
 ): string {
+  if (notice.freshSession) {
+    return 'The inference provider rejected the request. Retrying once from a fresh session…';
+  }
   const headline =
     notice.failure.reason === 'rate_limited'
       ? 'The inference provider is rate limiting requests.'
@@ -748,6 +911,20 @@ function formatFastAgentInferenceRetryNotice(
 }
 
 function formatFastAgentInferenceFailure(
+  failure: FastAgentInferenceFailure,
+  retried: boolean,
+  context: { detail?: string; model?: string } = {},
+): string {
+  const summary = formatFastAgentInferenceFailureSummary(failure, retried);
+  // The specific reasons already say what happened. The generic rejection
+  // is the one that leaves the reader guessing, so it carries the provider's
+  // own status and message, and the model that produced them.
+  if (failure.reason !== 'provider_error' || !context.detail) return summary;
+  const source = context.model ? ` (${context.model})` : '';
+  return `${summary}\n\nProvider error${source}: ${context.detail}`;
+}
+
+function formatFastAgentInferenceFailureSummary(
   failure: FastAgentInferenceFailure,
   retried: boolean,
 ): string {
@@ -809,6 +986,7 @@ async function runFastAgentInferenceWithRetries<T>(
   options: FastAgentInferenceRetryOptions = {},
 ): Promise<T> {
   let totalRetryCount = 0;
+  let rejectionRetryUsed = false;
   for (let retryNumber = 0; ; retryNumber += 1) {
     try {
       options.signal?.throwIfAborted();
@@ -836,14 +1014,20 @@ async function runFastAgentInferenceWithRetries<T>(
         retryNumber = 0;
       }
       const maxRetries = resolveFastAgentInferenceMaxRetries(failure);
+      const rejectionRetry =
+        !failure.retryable &&
+        failure.reason === 'provider_error' &&
+        !rejectionRetryUsed &&
+        options.retryRejection?.(error, failure) === true;
       if (
-        !failure.retryable ||
+        (!failure.retryable && !rejectionRetry) ||
         options.canRetry?.(error, failure) === false ||
         retryNumber >= maxRetries ||
         totalRetryCount >= FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN
       ) {
         throw new FastAgentInferenceError(failure, error);
       }
+      if (rejectionRetry) rejectionRetryUsed = true;
 
       totalRetryCount += 1;
       const attemptNumber = retryNumber + 1;
@@ -858,6 +1042,7 @@ async function runFastAgentInferenceWithRetries<T>(
           attemptNumber,
           maxAttempts: maxRetries,
           delayMs,
+          ...(rejectionRetry ? { freshSession: true } : {}),
         });
       } catch (noticeError) {
         console.warn(
@@ -872,6 +1057,7 @@ async function runFastAgentInferenceWithRetries<T>(
         maxAttempts: maxRetries,
         delayMs,
         inProcessAttempt: attemptNumber,
+        ...(rejectionRetry ? { freshSession: true } : {}),
       });
       if (parkedUntil) {
         throw new FastAgentDurableRetryScheduledError(parkedUntil);
@@ -1403,6 +1589,7 @@ export async function answerFastAgentQuestion({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  defaultImageArtifactIds = [],
   allowSilentAmbientReply = false,
   platformEventTranscriptPayload,
   slackRoomoteUserId,
@@ -1436,6 +1623,9 @@ export async function answerFastAgentQuestion({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  /** Child-selected images to carry through when the parent model omits the
+   * optional attachment argument while composing the child update. */
+  defaultImageArtifactIds?: string[];
   /** True only for an unmentioned turn in a multi-human Fast conversation. */
   allowSilentAmbientReply?: boolean;
   platformEventTranscriptPayload?: Record<string, unknown>;
@@ -1491,9 +1681,26 @@ export async function answerFastAgentQuestion({
   let canonicalConversationId: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
+  /** Last model OpenCode resolved for this turn, for the failure closeout. */
+  let lastResolvedInferenceModel: string | undefined;
   let currentInstructionVersion = 0;
   const assistantInstructionVersions = new Map<string, number>();
   const closedInstructionVersions = new Set<number>();
+  // Set once a native steer injects a follow-up its surface did not mark as
+  // ambient. Ending silently after that drops a request, so it is never
+  // settled as an ignore.
+  let steeredDirectedFollowUp = false;
+  /**
+   * Mirrors the `ignore_event` tool's rule: the turn may end without any
+   * visible reply only when an explicit ignore would have been accepted for
+   * it, and no steered follow-up since then was directed at Roomote.
+   */
+  const silentCompletionAllowed = () =>
+    !(platformEvent && platformEventVisibility === 'required') &&
+    (Boolean(reactionInput) ||
+      Boolean(platformEvent) ||
+      allowSilentAmbientReply) &&
+    !steeredDirectedFollowUp;
   const getInstructionVersion = (messageId?: string) =>
     (messageId ? assistantInstructionVersions.get(messageId) : undefined) ??
     currentInstructionVersion;
@@ -1601,24 +1808,37 @@ export async function answerFastAgentQuestion({
    * (row superseded or withdrawn, write failed) also falls back to the
    * in-process wait, so durability here is best effort like admission.
    */
+  /** Whether a pending retry could leave the process as a durable park. */
+  const canParkDurableRetry = () =>
+    Boolean(
+      durableAdmission &&
+      durableTurnReplayable &&
+      adapter.requestDurableRetry &&
+      !Env.R_FAST_DURABLE_RETRY_DISABLED &&
+      !signal?.aborted &&
+      !isInstructionClosed() &&
+      durableRetriesConsumed < FAST_AGENT_DURABLE_RETRY_MAX_PARKS,
+    );
   const deferInferenceRetry = async (
     notice: FastAgentInferenceRetryNotice & { inProcessAttempt: number },
   ): Promise<Date | null> => {
+    // The explicit checks repeat part of canParkDurableRetry so the
+    // admission row and the wakeup hook are narrowed for the calls below.
     if (
       !durableAdmission ||
-      !durableTurnReplayable ||
       !adapter.requestDurableRetry ||
-      Env.R_FAST_DURABLE_RETRY_DISABLED ||
-      notice.delayMs === undefined ||
-      signal?.aborted ||
-      isInstructionClosed()
+      !canParkDurableRetry() ||
+      notice.delayMs === undefined
     ) {
       return null;
     }
     // A one-off blip is cheapest to ride out where it happened: the first
     // in-process retry stays in place unless its wait is already long.
-    // From the second attempt on, the wait leaves the process.
+    // From the second attempt on, the wait leaves the process. A rejection
+    // always parks: the point of its one retry is a fresh session built
+    // from the recorded transcript, which only the resumed run provides.
     if (
+      !notice.freshSession &&
       notice.inProcessAttempt < 2 &&
       notice.delayMs < FAST_AGENT_DURABLE_RETRY_IMMEDIATE_PARK_WAIT_MS
     ) {
@@ -1663,6 +1883,29 @@ export async function answerFastAgentQuestion({
     durableTurnReplayable = false;
     durableTurnDeferred = true;
     durableRetriesConsumed = inferenceRetries;
+    if (notice.freshSession && canonicalConversationId) {
+      // The provider rejected this session's native history, so the resumed
+      // run must not reattach to it. Forget the durable OpenCode session so
+      // the resume rebuilds from the recorded transcript, which is what a
+      // human "try again" gets. This runs only once the park is committed:
+      // dropping the live session before that would send a failed schedule
+      // down the in-process cold-rebuild path and could repeat the tool
+      // side effects the durable guard exists to prevent. If forgetting
+      // fails, the resumed run reattaches, meets the same rejection, and
+      // closes out honestly, since a resumed run gets no second retry.
+      try {
+        await setFastAgentOpenCodeSession({
+          sessionId: canonicalConversationId,
+          openCodeSessionId: null,
+        });
+        durableOpenCodeSessionId = null;
+        fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
+      } catch (error) {
+        console.warn(
+          `[Fast Agent] Failed to forget the rejected OpenCode session for the parked retry: ${formatErrorForLog(error)}`,
+        );
+      }
+    }
     await adapter.requestDurableRetry(retryAt).catch((error) => {
       console.warn(
         `[Fast Agent] Failed to queue the durable inference retry wakeup: ${formatErrorForLog(error)}`,
@@ -1679,6 +1922,136 @@ export async function answerFastAgentQuestion({
   const humanFollowUpTurnSeqs = new Map<string, number>();
   const injectedHumanFollowUpMessages: ModelMessage[] = [];
   const injectedHumanFollowUpFiles: NonTaskPromptFile[] = [];
+  // Images the turn model cannot view are held here, under IDs stable for
+  // the turn, for `inspect_images` instead of riding along as prompt parts.
+  const turnImages = new Map<string, NonTaskPromptFile>();
+  let imageDeliveryPromise: Promise<FastAgentImageDelivery> | undefined;
+  let resolvedImageDelivery: FastAgentImageDelivery | undefined;
+  const resolveImageDelivery = (): Promise<FastAgentImageDelivery> => {
+    imageDeliveryPromise ??= resolveNonTaskInputModalityDelivery({
+      modality: 'image',
+      modelRole: FAST_AGENT_MODEL_ROLE,
+      ...(model ? { model } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+    })
+      .catch((error: unknown): FastAgentImageDelivery => {
+        if (error instanceof NonTaskInputModalityUnsupportedError) {
+          return { delivery: 'unsupported' };
+        }
+        // The lookup shares the inference server lease, so whatever failed
+        // here fails the prompt too, where the retry policy owns it. Attach
+        // the images directly so that prompt sees the input it always did.
+        console.warn(
+          `[Fast Agent] Could not resolve image delivery for conversation ${canonicalConversationId ?? 'unknown'}; attaching images directly. ${formatErrorForLog(error)}`,
+        );
+        return { delivery: 'direct', model: 'unresolved' };
+      })
+      .then((resolved) => {
+        resolvedImageDelivery = resolved;
+        diagnostics.recordImageDelivery(resolved);
+        return resolved;
+      });
+    return imageDeliveryPromise;
+  };
+  type HeldTurnImage = { id: string; file: NonTaskPromptFile };
+  const commitTurnImages = (held: HeldTurnImage[]) => {
+    for (const { id, file } of held) turnImages.set(id, file);
+  };
+  // Reserves IDs for `files` without holding them yet. The caller commits
+  // once the prompt that names those IDs is actually accepted, so a prompt
+  // abandoned in between leaves nothing behind for its next attempt to
+  // duplicate. Synchronous: nothing may run between reserving and building
+  // the prompt text.
+  const holdImagesForPrompt = (
+    files: NonTaskPromptFile[],
+    text: string,
+    delivery: FastAgentImageDelivery,
+  ): { files: NonTaskPromptFile[]; text: string; held: HeldTurnImage[] } => {
+    if (files.length === 0 || delivery.delivery === 'direct') {
+      return { files, text, held: [] };
+    }
+    const held = files.map((file, index) => ({
+      id: `image-${turnImages.size + index + 1}`,
+      file,
+    }));
+    return {
+      files: [],
+      text: `${text}\n\n${buildFastAgentImageNotice(held, delivery)}`,
+      held,
+    };
+  };
+  const prepareImagesForPrompt = async (
+    files: NonTaskPromptFile[],
+    text: string,
+  ): Promise<{ files: NonTaskPromptFile[]; text: string }> => {
+    if (files.length === 0) return { files, text };
+    const prepared = holdImagesForPrompt(
+      files,
+      text,
+      await resolveImageDelivery(),
+    );
+    commitTurnImages(prepared.held);
+    return prepared;
+  };
+  // Rebuilt prompts (bootstrap, clean retry) restate the whole turn, so they
+  // restate the notice for every held image too. Images are only held once
+  // the delivery has resolved to something other than direct.
+  const withTurnImageNotice = (text: string): string => {
+    if (turnImages.size === 0 || !resolvedImageDelivery) return text;
+    return `${text}\n\n${buildFastAgentImageNotice(
+      [...turnImages].map(([id, file]) => ({ id, file })),
+      resolvedImageDelivery,
+    )}`;
+  };
+  const inspectTurnImages = async (args: {
+    question: string;
+    imageIds?: string[] | null;
+  }): Promise<unknown> => {
+    if (turnImages.size === 0) {
+      return {
+        success: false,
+        error:
+          'No image attachments are held for this turn. Images the current model can view are delivered with the prompt itself.',
+      };
+    }
+    const requestedIds = args.imageIds?.length
+      ? args.imageIds
+      : [...turnImages.keys()];
+    const unknownIds = requestedIds.filter((id) => !turnImages.has(id));
+    if (unknownIds.length > 0) {
+      return {
+        success: false,
+        error: `Unknown image attachment ID(s): ${unknownIds.join(', ')}. Use the IDs listed in the turn's image notice.`,
+      };
+    }
+    const delivery = await resolveImageDelivery();
+    if (delivery.delivery !== 'helper') {
+      return {
+        success: false,
+        error:
+          'No configured model accepts image input, so the attachments cannot be inspected. Tell the user the image could not be viewed.',
+      };
+    }
+    const entries = requestedIds.map((id) => ({
+      id,
+      file: turnImages.get(id)!,
+    }));
+    const observations = await generateTrackedNonTaskText({
+      surface: NON_TASK_INFERENCE_SURFACES.fastAgentImageInspection,
+      userId,
+      fastConversationId: canonicalConversationId,
+      model: delivery.helperModel,
+      ...(delivery.helperReasoningEffort
+        ? { reasoningEffort: delivery.helperReasoningEffort }
+        : {}),
+      system: FAST_AGENT_IMAGE_INSPECTION_SYSTEM_PROMPT,
+      prompt: buildFastAgentImageInspectionPrompt(args.question, entries),
+      files: entries.map(({ file }) => file),
+      requiredInputModality: 'image',
+      timeoutMs: FAST_AGENT_IMAGE_INSPECTION_TIMEOUT_MS,
+    });
+    return { success: true, imageIds: requestedIds, observations };
+  };
   const integrationCallSignatures = new Set<string>();
   const completedChatReactionSignatures = new Set<string>();
   const completedChatReplySignatures = new Set<string>();
@@ -1877,6 +2250,16 @@ export async function answerFastAgentQuestion({
           blockedByDifferentUser = true;
           break;
         }
+        if (followUp.sourceControlReplyTarget) {
+          // A mention routed in from a pull request needs its own turn: the
+          // answer must also post on that discussion and delegated work must
+          // target its branch, which only the whole-turn delivery wires up.
+          // Steering would inject the text into this turn's home adapter and
+          // retire the row without either. Leave it and everything after it
+          // durable, in order.
+          blockedByDifferentUser = true;
+          break;
+        }
 
         const followUpTurnId = buildFastAgentTurnId({
           currentMessageId: followUp.currentMessageId,
@@ -1989,10 +2372,21 @@ export async function answerFastAgentQuestion({
       }
       if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) return;
       const batchMessages = batch.flatMap(({ turnMessages }) => turnMessages);
-      const batchFiles = batch.flatMap(({ files }) => files);
-      const batchPrompt = batch
+      const batchSourceFiles = batch.flatMap(({ files }) => files);
+      const batchText = batch
         .map(({ serializedPrompt }) => serializedPrompt)
         .join('\n\n');
+      const batchImageDelivery =
+        batchSourceFiles.length > 0 ? await resolveImageDelivery() : undefined;
+      // The lookup above may have let a tool start or the turn end. Re-check
+      // before anything is reserved for this batch: it stays pending when
+      // abandoned here and must not have held images already.
+      if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) return;
+      const batchInput = batchImageDelivery
+        ? holdImagesForPrompt(batchSourceFiles, batchText, batchImageDelivery)
+        : { files: batchSourceFiles, text: batchText, held: [] };
+      const batchFiles = batchInput.files;
+      const batchPrompt = batchInput.text;
       const firstRow = batch[0]!.row;
       const previousInstructionVersion = currentInstructionVersion;
       const steerInstructionVersion = previousInstructionVersion + 1;
@@ -2012,11 +2406,21 @@ export async function answerFastAgentQuestion({
         }
         throw error;
       }
+      // Held images become addressable only once OpenCode has accepted the
+      // steer that names them. A rejected steer stays pending and reserves
+      // fresh IDs on its next attempt instead of stacking duplicates.
+      commitTurnImages(batchInput.held);
       if (signal?.aborted) return;
       console.info(
         `[Fast Agent] Native steer accepted. conversationId="${canonicalConversationId}" followUpCount=${batch.length}`,
       );
       for (const { row } of batch) injectedHumanFollowUpIds.add(row.id);
+      // Only a surface that classified the message as ambient may leave it
+      // unanswered; an unmarked follow-up (web, PR, older rows) counts as
+      // directed.
+      if (batch.some(({ followUp }) => followUp.directedAtRoomote !== false)) {
+        steeredDirectedFollowUp = true;
+      }
       injectedHumanFollowUpMessages.push(...batchMessages);
       injectedHumanFollowUpFiles.push(...batchFiles);
       // Native steering starts a new human instruction boundary inside the
@@ -2408,6 +2812,7 @@ export async function answerFastAgentQuestion({
       session,
       discoveredIntegrations,
       currentUser,
+      therapistModeEnabled,
     ] = await Promise.all([
       getAvailableEnvironments(),
       getDeploymentTaskModelOptions().catch((error) => {
@@ -2441,6 +2846,12 @@ export async function answerFastAgentQuestion({
             );
             return { displayName: null, githubLogin: null, isAdmin: false };
           }),
+      getTherapistModeEnabledForUser(userId).catch((error) => {
+        console.warn(
+          `[Fast Agent] Personal preferences unavailable: ${formatErrorForLog(error)}`,
+        );
+        return false;
+      }),
     ]);
     const availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
@@ -2682,6 +3093,7 @@ export async function answerFastAgentQuestion({
       releaseVersion,
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
+      therapistModeEnabled,
     });
     diagnostics.recordPromptContext({
       systemPromptChars: system.length,
@@ -2693,8 +3105,16 @@ export async function answerFastAgentQuestion({
       ),
       activeTaskCount: resolvedActiveTasks.length,
     });
-    let visibleUpdatePosted = false;
-    let substantiveWorkAcknowledged = false;
+    const resumedWithDeliveredAcknowledgement = Boolean(
+      previousAttempt?.events.some(
+        (event) =>
+          event.kind === 'reply' &&
+          (event.purpose === 'ack' ||
+            (event.purpose === 'progress' && !event.inferenceRetryNotice)),
+      ),
+    );
+    let visibleUpdatePosted = resumedWithDeliveredAcknowledgement;
+    let substantiveWorkAcknowledged = resumedWithDeliveredAcknowledgement;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
 
@@ -2723,17 +3143,25 @@ export async function answerFastAgentQuestion({
       /** The streamed partial this reply finalizes, if one was shown. */
       streamedEvent?: { eventId: string; turnSeq: number },
     ) => {
-      const replacedRetry = await replaceInferenceRetryReply(reply, true, () =>
-        diagnostics.recordVisibleReply(),
+      const replyWithImages =
+        !reply.imageArtifactIds?.length && defaultImageArtifactIds.length
+          ? { ...reply, imageArtifactIds: defaultImageArtifactIds }
+          : reply;
+      const replacedRetry = await replaceInferenceRetryReply(
+        replyWithImages,
+        true,
+        () => diagnostics.recordVisibleReply(),
       );
       if (!replacedRetry) {
         const posted =
-          (await surfaceReplyStream.deliver(reply)) ??
-          (await adapter.postReply(reply));
+          (await surfaceReplyStream.deliver(replyWithImages)) ??
+          (await adapter.postReply(replyWithImages));
         diagnostics.recordVisibleReply();
-        turnVisibleMessages.push(buildAssistantTextMessage(reply.message));
+        turnVisibleMessages.push(
+          buildAssistantTextMessage(replyWithImages.message),
+        );
         await persistAssistantReply({
-          reply,
+          reply: replyWithImages,
           event:
             streamedEvent ??
             allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
@@ -2744,13 +3172,16 @@ export async function answerFastAgentQuestion({
       inferenceRetryReply = undefined;
       inferenceRetryMessageIndex = undefined;
       inferenceRetryCanonicalEvent = undefined;
-      lastVisibleMessage = reply.message;
+      lastVisibleMessage = replyWithImages.message;
       visibleUpdatePosted = true;
-      // Any text reply posted by the model (acknowledgement, first progress
-      // update, or task kickoff) is the textual communication the work-start
-      // gate requires. Reactions deliberately do not set this flag.
+      // Any text reply posted by the model (acknowledgement or first progress
+      // update) is the textual communication the work-start gate requires.
+      // Reactions deliberately do not set this flag.
       substantiveWorkAcknowledged = true;
-      if (reply.purpose === 'closeout' || reply.purpose === 'clarification') {
+      if (
+        replyWithImages.purpose === 'closeout' ||
+        replyWithImages.purpose === 'clarification'
+      ) {
         closedInstructionVersions.add(instructionVersion);
       }
       if (mirrorImmediately) {
@@ -2945,18 +3376,19 @@ export async function answerFastAgentQuestion({
       }
     };
     // Single owner of the human-turn work-start gate, applied in-process to
-    // every native and MCP tool call before it runs. Only text communication
-    // (a reply, a first progress note, or a task kickoff) opens the gate; a
-    // reaction never does. The listed tools are the ones allowed to precede
-    // that communication.
+    // every native and MCP tool call before it runs. Only a delivered text
+    // reply opens the gate; a reaction never does. The listed tools are the
+    // ones allowed to precede that communication.
     const acknowledgementExemptToolIds = new Set<string>([
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
-      FAST_AGENT_NATIVE_TOOL_NAMES.launchTask,
       FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
       // A catalog lookup reads nothing external; the call it prepares for is
       // still gated on the acknowledgement.
       FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools,
+      // Reading an attachment the user just sent is part of understanding
+      // the request, not an action taken on their behalf.
+      FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages,
       `${ROOMOTE_MCP_ID}_${CHAT_REACTION_EMOJI_TOOL_NAME}`,
     ]);
     const authorizeToolStart = (toolId: string) =>
@@ -3311,10 +3743,15 @@ export async function answerFastAgentQuestion({
                   'Platform events may post only a closeout or clarification.',
               };
             }
+            const requestedImageArtifactIds = args.imageArtifactIds ?? [];
+            const signatureImageArtifactIds =
+              requestedImageArtifactIds.length > 0
+                ? requestedImageArtifactIds
+                : defaultImageArtifactIds;
             const signature = JSON.stringify([
               args.purpose,
               message,
-              args.imageArtifactIds ?? [],
+              signatureImageArtifactIds,
               args.suggestions ?? [],
             ]);
             if (completedChatReplySignatures.has(signature)) {
@@ -3337,8 +3774,8 @@ export async function answerFastAgentQuestion({
               {
                 purpose: args.purpose,
                 message,
-                ...(args.imageArtifactIds?.length
-                  ? { imageArtifactIds: args.imageArtifactIds }
+                ...(requestedImageArtifactIds.length
+                  ? { imageArtifactIds: requestedImageArtifactIds }
                   : {}),
                 ...(args.suggestions?.length
                   ? { suggestions: args.suggestions }
@@ -3498,8 +3935,14 @@ export async function answerFastAgentQuestion({
               };
             }
             completedTaskActions.add(signature);
-            let kickoffDelivered = false;
-            const deliverKickoff = async (task: {
+            let preparedTaskLink:
+              | {
+                  taskId: string;
+                  taskUrl?: string;
+                  taskLinkRendered?: boolean;
+                }
+              | undefined;
+            const postTaskLink = async (task: {
               taskId: string;
               taskUrl?: string;
               taskLinkRendered?: boolean;
@@ -3510,7 +3953,7 @@ export async function answerFastAgentQuestion({
                 linkedSession = await getSessionForTask(db, task.taskId);
               } catch (error) {
                 console.warn(
-                  `[sessions] Failed to resolve Session kickoff link: ${formatErrorForLog(error)}`,
+                  `[sessions] Failed to resolve Session task link: ${formatErrorForLog(error)}`,
                 );
               }
               const destinationUrl = linkedSession
@@ -3521,26 +3964,21 @@ export async function answerFastAgentQuestion({
                     taskId: task.taskId,
                   })
                 : task.taskUrl;
-              // The delegated task's live Slack card owns the workspace
-              // startup status; the kickoff is a permanent thread message
-              // that nothing can update later, so it must not carry
-              // transient "preparing" copy.
-              const message = [
-                args.kickoffMessage,
-                destinationUrl &&
-                !task.taskLinkRendered &&
-                !args.kickoffMessage.includes(destinationUrl)
-                  ? `[Open in Roomote](${destinationUrl})`
-                  : undefined,
-              ]
-                .filter((part): part is string => Boolean(part))
-                .join('\n\n');
+              if (!destinationUrl || task.taskLinkRendered) return;
               throwIfTurnCancelled();
-              await postReply(
-                { purpose: 'progress', message, kickoff: true },
-                true,
-              );
-              kickoffDelivered = true;
+              try {
+                await postReply(
+                  {
+                    purpose: 'progress',
+                    message: `[Open in Roomote](${destinationUrl})`,
+                  },
+                  true,
+                );
+              } catch (error) {
+                console.warn(
+                  `[Fast Agent] Failed to post task link after launch: ${formatErrorForLog(error)}`,
+                );
+              }
             };
             throwIfTurnCancelled();
             const prompt = args.includeAttachments
@@ -3569,7 +4007,11 @@ export async function answerFastAgentQuestion({
                   .update(signature)
                   .digest('hex')
                   .slice(0, 32)}`,
-                postKickoff: deliverKickoff,
+                // Providers still use this callback for task-card setup. The
+                // fallback link is posted after launch completes.
+                postKickoff: async (task) => {
+                  preparedTaskLink = task;
+                },
               });
             } catch (error) {
               completedTaskActions.delete(signature);
@@ -3585,10 +4027,9 @@ export async function answerFastAgentQuestion({
               currentTasks.set(result.taskId, { taskId: result.taskId });
               if (result.kickoffDelivered) {
                 visibleUpdatePosted = true;
-                substantiveWorkAcknowledged = true;
               }
-              if (!kickoffDelivered && !result.kickoffDelivered) {
-                await deliverKickoff(result);
+              if (!result.kickoffDelivered) {
+                await postTaskLink(preparedTaskLink ?? result);
               }
             }
             return result;
@@ -3875,6 +4316,9 @@ export async function answerFastAgentQuestion({
               findIntegrationToolsArgsSchema.parse(call.args),
             );
           }
+          case FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages: {
+            return inspectTurnImages(inspectImagesArgsSchema.parse(call.args));
+          }
           case FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool: {
             const args = callIntegrationToolArgsSchema.parse(call.args);
             if (isFastAgentNativeIntegration(args.integrationId)) {
@@ -3951,8 +4395,12 @@ export async function answerFastAgentQuestion({
       }
     };
 
-    const imageFiles = getFastAgentImageFiles(images);
-    const serializedTurnPrompt = serializeFastAgentMessages(turnMessages);
+    const turnPromptInput = await prepareImagesForPrompt(
+      getFastAgentImageFiles(images),
+      serializeFastAgentMessages(turnMessages),
+    );
+    const imageFiles = turnPromptInput.files;
+    const serializedTurnPrompt = turnPromptInput.text;
     let inferenceAttemptNumber = 0;
     const persistOpenCodeSession = async (openCodeSessionId: string) => {
       if (durableOpenCodeSessionId === openCodeSessionId) return;
@@ -4000,10 +4448,12 @@ export async function answerFastAgentQuestion({
       persistedSessionId: session.openCodeSessionId,
       prompt: serializedTurnPrompt,
       bootstrapPrompt: () =>
-        serializeFastAgentMessages([
-          ...bootstrapMessages,
-          ...injectedHumanFollowUpMessages,
-        ]),
+        withTurnImageNotice(
+          serializeFastAgentMessages([
+            ...bootstrapMessages,
+            ...injectedHumanFollowUpMessages,
+          ]),
+        ),
       onPathSelected: (path) => {
         diagnostics.recordSessionPath(path);
         console.info(`[Fast Agent] OpenCode session path=${path}.`);
@@ -4197,10 +4647,7 @@ export async function answerFastAgentQuestion({
                         }
                       },
                       ...(imageFilesForAttempt.length
-                        ? {
-                            files: imageFilesForAttempt,
-                            requiredInputModality: 'image' as const,
-                          }
+                        ? { files: imageFilesForAttempt }
                         : {}),
                     },
                     openCodeSession,
@@ -4219,6 +4666,7 @@ export async function answerFastAgentQuestion({
                       tools: FAST_AGENT_SESSION_TOOL_FILTER,
                       onModelResolved: (model) => {
                         resolvedInferenceModel = model;
+                        lastResolvedInferenceModel = model;
                         diagnostics.recordModelResolved(model);
                       },
                       onMessageCompleted: (message) => {
@@ -4416,6 +4864,20 @@ export async function answerFastAgentQuestion({
                 (!nativeToolInvoked || openCodeSession.id !== undefined) &&
                 !isNonTaskOpenCodePromptTimeoutError(error) &&
                 !isNonTaskOpenCodeSessionValidationError(error),
+              // A rejected request is retried once from a fresh start, the
+              // way a human "try again" would run it: before tools ran, an
+              // in-process rebuild from visible history; after tools ran, a
+              // durable park so the resumed run replays from the recorded
+              // transcript instead of the rejected native history.
+              // A run that is itself the resumed retry gets no second one:
+              // a rejection that survives a fresh session is terminal.
+              retryRejection: (error) =>
+                !signal?.aborted &&
+                !isInstructionClosed() &&
+                !resumedAfterInferenceRetry &&
+                !isNonTaskOpenCodePromptTimeoutError(error) &&
+                !isNonTaskOpenCodeSessionValidationError(error) &&
+                (!nativeToolInvoked || canParkDurableRetry()),
               // Grant a fresh bounded budget only when the failed attempt
               // advanced the turn and the next retry continues the same
               // OpenCode session. Cold rebuilds replay from scratch, so
@@ -4441,10 +4903,12 @@ export async function answerFastAgentQuestion({
                   // Before tools run, rebuild from visible history rather than
                   // append the original turn to the failed session again.
                   openCodeSession.id = undefined;
-                  promptForAttempt = serializeFastAgentMessages([
-                    ...bootstrapMessages,
-                    ...injectedHumanFollowUpMessages,
-                  ]);
+                  promptForAttempt = withTurnImageNotice(
+                    serializeFastAgentMessages([
+                      ...bootstrapMessages,
+                      ...injectedHumanFollowUpMessages,
+                    ]),
+                  );
                   imageFilesForAttempt = [
                     ...imageFiles,
                     ...injectedHumanFollowUpFiles,
@@ -4505,21 +4969,34 @@ export async function answerFastAgentQuestion({
           ),
         );
       } else if (!visibleUpdatePosted) {
-        // A delivered update is already a complete visible response. Stay
-        // silent rather than append a generic closeout that contradicts it.
-        const fallback =
-          'I could not complete that request within the available turn.';
-        await postRecordedSystemCloseout(fallback, () =>
-          postReply(
-            { purpose: 'closeout', message: fallback },
-            false,
-            undefined,
-            terminalInstructionVersion,
-          ),
-        );
+        // The model ended the newest instruction with nothing to show: no
+        // reply tool, no undelivered text. Where an explicit ignore would
+        // have been accepted (an ambient message between people, an optional
+        // platform event, a reaction) settle exactly as an ignore does. The
+        // steered URL after an ignored aside is the typical case. Otherwise a
+        // request went unanswered, so say that plainly rather than narrate a
+        // budget that never existed.
+        if (silentCompletionAllowed()) {
+          closedInstructionVersions.add(terminalInstructionVersion);
+          diagnostics.recordSilentCompletion();
+          console.info(
+            `[Fast Agent] Silent completion settled as ignored. conversationId="${canonicalConversationId}" turnId="${turnId}" instructionVersion=${terminalInstructionVersion}`,
+          );
+        } else {
+          const fallback =
+            'I didn’t have a response to that. Could you rephrase it or add a bit more detail?';
+          await postRecordedSystemCloseout(fallback, () =>
+            postReply(
+              { purpose: 'closeout', message: fallback },
+              false,
+              undefined,
+              terminalInstructionVersion,
+            ),
+          );
+        }
       } else if (platformEvent && platformEventVisibility === 'required') {
         // A visibility-required platform event promises a closeout even when
-        // an intro ack or launch kickoff already posted a visible update
+        // an opening acknowledgement already posted a visible update
         // (e.g. the setup kickoff ending on an empty terminal response).
         const fallback = 'I will post updates here as this progresses.';
         await postRecordedSystemCloseout(fallback, () =>
@@ -4549,13 +5026,21 @@ export async function answerFastAgentQuestion({
     }
     const terminalError =
       signal?.aborted && signal.reason instanceof Error ? signal.reason : error;
+    const storageFull = isFastAgentStorageFullError(terminalError);
+    const storageDiagnostic = storageFull
+      ? inspectFastAgentStorageFullError(terminalError)
+      : undefined;
     diagnostics.recordFailure(
       signal?.aborted
         ? 'cancelled'
-        : error instanceof FastAgentInferenceError
-          ? error.failure.reason
-          : 'unclassified',
-      terminalError,
+        : storageFull
+          ? `local_storage_${storageDiagnostic?.kind ?? 'unknown'}`
+          : error instanceof FastAgentInferenceError
+            ? error.failure.reason
+            : 'unclassified',
+      storageDiagnostic
+        ? wrapFastAgentStorageFullError(terminalError, storageDiagnostic)
+        : terminalError,
     );
     if (signal?.aborted) {
       const shutdownInterrupted =
@@ -4659,11 +5144,13 @@ export async function answerFastAgentQuestion({
     }
     if (platformEvent) throw error;
 
-    const message =
-      error instanceof FastAgentInferenceError
+    const message = storageFull
+      ? formatFastAgentStorageFullMessage(storageDiagnostic?.kind ?? 'unknown')
+      : error instanceof FastAgentInferenceError
         ? formatFastAgentInferenceFailure(
             error.failure,
             inferenceRetryAttempted,
+            { detail: error.detail, model: lastResolvedInferenceModel },
           )
         : 'I hit an error while handling that request. Please try again in a moment.';
     // The error closeout is recorded like any other closeout: its intent

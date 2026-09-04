@@ -754,7 +754,7 @@ export function FastSessionTranscript({
           {headerExtras}
         </WorkspaceHeader>
         <Conversation className="min-h-0 flex-1" initial="instant">
-          <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4">
+          <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4 pt-0">
             {hasOlderMessages ? (
               <p className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
                 Older messages in this session are not shown.
@@ -769,7 +769,13 @@ export function FastSessionTranscript({
             {hasVisibleAssistantMessage ? timelineExtras : null}
             {pendingResponseState.pendingAfter !== null &&
             streamMessages.length === 0 ? (
-              <ThinkingMessage />
+              pendingResponseState.pendingAfter.id === '' ? (
+                <div className="mt-4">
+                  <ThinkingMessage />
+                </div>
+              ) : (
+                <ThinkingMessage />
+              )
             ) : !isSending &&
               conversationResponding !== true &&
               runningTaskCount > 0 &&
@@ -809,7 +815,7 @@ export function FastSessionTranscript({
           <ConversationScrollButton />
         </Conversation>
         {canReply && !pendingInputRequest ? (
-          <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card transition-colors @[56rem]:rounded-t-lg">
+          <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card outline-0 outline-offset-[-2px] outline-accent-foreground transition-[background-color,border-color,outline-width] has-[textarea:focus]:outline-2 @[56rem]:rounded-t-lg">
             <SessionPromptInput
               sessionId={sessionId}
               isBusy={isSending}

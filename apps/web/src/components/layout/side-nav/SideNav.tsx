@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -35,7 +35,10 @@ import { useTRPC } from '@/trpc/client';
 import { cn } from '@/lib/utils';
 import { NewTaskDialog } from '@/components/tasks/NewTaskDialog';
 
-import { getVisiblePrimaryNavItems } from '../navigation-items';
+import {
+  getVisiblePrimaryNavItems,
+  SETUP_INCOMPLETE_NAV_TOOLTIP,
+} from '../navigation-items';
 import { SideNavItem } from './SideNavItem';
 import { SideNavSessionItem } from './SideNavSessionItem';
 import { SideNavTaskItem } from './SideNavTaskItem';
@@ -142,6 +145,37 @@ export const SideNav = ({
     [isAdmin],
   );
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      const isEditingText =
+        target instanceof HTMLElement &&
+        !!target.closest(
+          'input, textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"]',
+        );
+
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.repeat ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.key.toLowerCase() !== 'n' ||
+        !window.matchMedia('(min-width: 768px)').matches ||
+        isEditingText
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      setIsNewTaskDialogOpen(true);
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   return (
     <nav
       className={cn(
@@ -155,12 +189,18 @@ export const SideNav = ({
       {/* Logo */}
       {isSideNavExpanded ? (
         <div className="flex w-full items-center justify-between gap-3 px-2 py-1 shrink-0">
-          <Link href="/" className="min-w-0 flex-1">
-            <RoomoteWordmark
-              className="h-7 transition-all duration-300 hover:opacity-80"
-              aria-label="Roomote"
-            />
-          </Link>
+          {setupIncomplete ? (
+            <div className="min-w-0 flex-1 opacity-50">
+              <RoomoteWordmark className="h-7" aria-label="Roomote" />
+            </div>
+          ) : (
+            <Link href="/" className="min-w-0 flex-1">
+              <RoomoteWordmark
+                className="h-7 transition-all duration-300 hover:opacity-80"
+                aria-label="Roomote"
+              />
+            </Link>
+          )}
 
           <Button
             type="button"
@@ -210,7 +250,11 @@ export const SideNav = ({
         <SideNavItem
           icon={Plus}
           label="New Session"
-          tooltip="New Session"
+          tooltip={
+            <>
+              New Session (<span className="font-mono">N</span>)
+            </>
+          }
           description="Start a session from anywhere"
           expanded={isSideNavExpanded}
           active={false}
@@ -219,19 +263,31 @@ export const SideNav = ({
         />
 
         {visibleNavItems.map(
-          ({ icon, href, label, description, matchExact, matchPaths }) => (
+          ({
+            icon,
+            href,
+            label,
+            description,
+            matchExact,
+            matchPaths,
+            requiresSetup,
+          }) => (
             <SideNavItem
               key={href}
               icon={icon}
               href={href}
-              tooltip={label}
-              description={description}
-              disabled={
-                setupIncomplete &&
-                (href === '/' ||
-                  href === '/automations' ||
-                  href === '/analytics')
+              label={label}
+              aria-label={label}
+              tooltip={
+                setupIncomplete && requiresSetup
+                  ? SETUP_INCOMPLETE_NAV_TOOLTIP
+                  : label
               }
+              description={
+                setupIncomplete && requiresSetup ? undefined : description
+              }
+              disabled={setupIncomplete && requiresSetup}
+              focusableWhenDisabled={setupIncomplete && requiresSetup}
               expanded={isSideNavExpanded}
               active={
                 matchExact

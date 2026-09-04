@@ -5,6 +5,7 @@ import {
   type EnvironmentConfig,
   type NamedPort,
   resolveComputeProviderTarget,
+  isSnapshotResumable,
 } from '@roomote/types';
 import {
   type TaskRun,
@@ -118,8 +119,7 @@ export async function getNamedPortsForTaskRun(
       if (
         snapshot?.snapshotId &&
         snapshot.snapshotStatus === 'ready' &&
-        snapshot.snapshotExpiresAt &&
-        snapshot.snapshotExpiresAt > new Date()
+        isSnapshotResumable(snapshot.snapshotCreatedAt, provider)
       ) {
         environmentSnapshotId = snapshot.snapshotId;
       }

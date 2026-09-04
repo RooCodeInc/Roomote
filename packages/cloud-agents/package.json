@@ -30,6 +30,11 @@
       "types": "./src/router-mcp-policy.ts",
       "import": "./src/router-mcp-policy.ts",
       "require": "./src/router-mcp-policy.ts"
+    },
+    "./mcp-nullable-optionals": {
+      "types": "./src/server/mcp-nullable-optionals.ts",
+      "import": "./src/server/mcp-nullable-optionals.ts",
+      "require": "./src/server/mcp-nullable-optionals.ts"
     }
   },
   "typesVersions": {

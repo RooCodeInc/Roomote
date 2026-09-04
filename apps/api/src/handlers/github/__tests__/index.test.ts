@@ -11,6 +11,7 @@ const {
   mockHandlePrReadyForReview,
   mockHandlePrReopen,
   mockHandlePrSynchronize,
+  mockHandleCheckRunRerequested,
   mockHandlePushConflictCheck,
   mockHandleMergeAnnouncerPush,
   mockGetInstallationOctokit,
@@ -51,6 +52,7 @@ const {
   mockHandlePrReadyForReview: vi.fn(),
   mockHandlePrReopen: vi.fn(),
   mockHandlePrSynchronize: vi.fn(),
+  mockHandleCheckRunRerequested: vi.fn(),
   mockHandlePushConflictCheck: vi.fn(),
   mockHandleMergeAnnouncerPush: vi.fn(),
   mockGetInstallationOctokit: vi.fn(),
@@ -181,6 +183,10 @@ vi.mock('../handlePrSynchronize', () => ({
   handlePrSynchronize: mockHandlePrSynchronize,
 }));
 
+vi.mock('../handleCheckRunRerequested', () => ({
+  handleCheckRunRerequested: mockHandleCheckRunRerequested,
+}));
+
 vi.mock('../currentPrHead', () => ({
   getCurrentGitHubPrHeadSha: mockGetCurrentGitHubPrHeadSha,
 }));
@@ -261,6 +267,7 @@ describe('github webhook router', () => {
     mockHandlePrReadyForReview.mockReset();
     mockHandlePrReopen.mockReset();
     mockHandlePrSynchronize.mockReset();
+    mockHandleCheckRunRerequested.mockReset();
     mockHandlePushConflictCheck.mockReset();
     mockHandleMergeAnnouncerPush.mockReset();
     mockIsRepoSkipped.mockReset();
@@ -292,6 +299,7 @@ describe('github webhook router', () => {
     mockHandleGitHubIssueFixer.mockResolvedValue({ status: 'ok' });
     mockHandlePushConflictCheck.mockResolvedValue({ status: 'ok' });
     mockHandlePrSynchronize.mockResolvedValue({ status: 'ok' });
+    mockHandleCheckRunRerequested.mockResolvedValue({ status: 'ok' });
     mockGetCurrentGitHubPrHeadSha.mockResolvedValue('live-head');
     mockRetirePendingPrReviewActionsForPullRequest.mockResolvedValue(undefined);
     mockHandleMergeAnnouncerPush.mockResolvedValue({ status: 'ok' });
@@ -670,6 +678,41 @@ describe('github webhook router', () => {
     ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
   });
 
+  it('records and dispatches rerequested check runs through the review handler', async () => {
+    const payload = {
+      action: 'rerequested',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      sender: { id: 20, login: 'reviewer' },
+      check_run: {
+        id: 9001,
+        name: 'Roomote code review',
+        head_sha: 'live-head',
+        app: { slug: 'roomote' },
+      },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-rerequest-1',
+        'x-github-event': 'check_run',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockRecordWebhook).toHaveBeenCalledWith(
+      'delivery-rerequest-1',
+      'check_run.rerequested',
+      payload,
+      expect.any(Function),
+    );
+    expect(mockHandleCheckRunRerequested).toHaveBeenCalledWith(payload);
+    expect(mockQueuePrCiFailureNotification).not.toHaveBeenCalled();
+  });
+
   it('retires review actions for older heads using the live PR head on synchronize', async () => {
     const payload = makePullRequestPayload('synchronize');
 
@@ -835,7 +878,7 @@ describe('github webhook router', () => {
     expect(mockHandlePrComment).toHaveBeenCalledWith(payload);
   });
 
-  it('notifies linked tasks about PR comments in skipped repositories without handling mentions', async () => {
+  it('still routes PR comments in skipped repositories to mention handling', async () => {
     mockIsRepoSkipped.mockReturnValue(true);
     const payload = {
       action: 'created',
@@ -874,7 +917,80 @@ describe('github webhook router', () => {
       payload,
       'delivery-skipped-pr-comment',
     );
+    // The skip list suppresses unsolicited automations only; the mention
+    // handler decides whether this comment addressed the app.
+    expect(mockHandlePrComment).toHaveBeenCalledWith(payload);
+  });
+
+  it('still routes plain issue comments in skipped repositories to mention handling', async () => {
+    mockIsRepoSkipped.mockReturnValue(true);
+    const payload = {
+      action: 'created',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      issue: { number: 43 },
+      comment: {
+        id: 9,
+        body: '@roomote can you take a look?',
+        user: { login: 'alice' },
+      },
+      sender: { login: 'alice' },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-skipped-issue-comment',
+        'x-github-event': 'issue_comment',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandleGitHubIssueComment).toHaveBeenCalledWith(payload);
     expect(mockHandlePrComment).not.toHaveBeenCalled();
+    expect(mockQueuePrReviewActivityNotification).not.toHaveBeenCalled();
+  });
+
+  it('handles body mentions but skips Triage Issues for opened issues in skipped repositories', async () => {
+    mockIsRepoSkipped.mockReturnValue(true);
+    mockHandleGitHubIssueComment.mockResolvedValue({
+      status: 'ok',
+      message: 'fast_session_queued',
+    });
+    const payload = {
+      action: 'opened',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      issue: {
+        number: 44,
+        title: 'Flaky retry',
+        body: '@roomote please investigate',
+        user: { login: 'alice' },
+      },
+      sender: { login: 'alice' },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-skipped-issue-opened',
+        'x-github-event': 'issues',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandleGitHubIssueComment).toHaveBeenCalledWith({
+      installation: payload.installation,
+      repository: payload.repository,
+      sender: payload.sender,
+      issue: payload.issue,
+      mentionBody: '@roomote please investigate',
+    });
+    expect(mockHandleGitHubIssueFixer).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -905,7 +1021,7 @@ describe('github webhook router', () => {
       },
     },
   ])(
-    'notifies linked tasks for $event callbacks in skipped repositories without handling mentions',
+    'notifies linked tasks and still handles mentions for $event callbacks in skipped repositories',
     async ({ event, action, delivery, activity }) => {
       mockIsRepoSkipped.mockReturnValue(true);
       const payload = {
@@ -937,7 +1053,7 @@ describe('github webhook router', () => {
       expect(
         mockQueuePrReviewActivityNotification.mock.invocationCallOrder[0],
       ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
-      expect(mockHandlePrComment).not.toHaveBeenCalled();
+      expect(mockHandlePrComment).toHaveBeenCalledWith(payload);
     },
   );
 

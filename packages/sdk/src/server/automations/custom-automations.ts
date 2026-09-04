@@ -260,6 +260,17 @@ function isFastDeliveryTarget(target: AutomationTarget): boolean {
   return isCommunicationAutomationTarget(target);
 }
 
+function buildAutomationConversation(
+  automation: CustomAutomation,
+  eventId: string,
+): FastAgentConversation {
+  return {
+    surface: 'automation',
+    workspaceId: automation.id,
+    conversationId: eventId,
+  };
+}
+
 async function buildFastAutomationConversation(params: {
   automation: CustomAutomation;
   eventId: string;
@@ -271,13 +282,7 @@ async function buildFastAutomationConversation(params: {
 }> {
   const { automation, destination, eventId, target } = params;
   if (!destination) {
-    return {
-      conversation: {
-        surface: 'automation',
-        workspaceId: automation.id,
-        conversationId: eventId,
-      },
-    };
+    return { conversation: buildAutomationConversation(automation, eventId) };
   }
 
   if (destination.provider === 'slack') {
@@ -753,12 +758,21 @@ async function launchCustomAutomationRow(
       return result;
     }
 
+    const eventId = `${automation.id}:${eventClaimedAt.toISOString()}`;
+    const conversation = buildAutomationConversation(automation, eventId);
+    const parentSession = await getOrCreateFastAgentSession({
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      conversation,
+      initialTitle: automation.name,
+    });
+
     const launchResult = await enqueueTask({
       task: {
         type: TaskPayloadKind.StandardTask,
         ...(modelOverride?.harness ? { harness: modelOverride.harness } : {}),
         payload: {
           repo: automation.allRepositories ? ALL_REPOSITORIES : '',
+          fastAgentSessionId: parentSession.id,
           ...(automation.environmentId
             ? { environmentId: automation.environmentId }
             : {}),

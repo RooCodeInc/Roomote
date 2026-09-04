@@ -38,6 +38,7 @@ async function createPrLinkedTask({
   sourceControlProvider = 'github',
   host,
   repositoryId,
+  createdByRoomote = false,
 }: {
   repoFullName: string;
   prNumber: number;
@@ -46,6 +47,7 @@ async function createPrLinkedTask({
   sourceControlProvider?: SourceControlProvider;
   host?: string | null;
   repositoryId?: string | null;
+  createdByRoomote?: boolean;
 }) {
   const task = await taskFactory.create({
     initiatorUserId: userId,
@@ -62,6 +64,7 @@ async function createPrLinkedTask({
     host: host ?? null,
     repositoryId: repositoryId ?? null,
     status: 'open',
+    createdByRoomote,
   });
 
   return task.id;
@@ -77,6 +80,7 @@ async function createPrLinkedTaskRun({
   prSha,
   sourceControlProvider,
   host,
+  createdByRoomote,
 }: {
   repoFullName: string;
   prNumber: number;
@@ -87,6 +91,7 @@ async function createPrLinkedTaskRun({
   prSha?: string;
   sourceControlProvider?: SourceControlProvider;
   host?: string | null;
+  createdByRoomote?: boolean;
 }) {
   const taskId = await createPrLinkedTask({
     repoFullName,
@@ -95,6 +100,7 @@ async function createPrLinkedTaskRun({
     prSha,
     sourceControlProvider,
     host,
+    createdByRoomote,
   });
 
   return runFactory.create({

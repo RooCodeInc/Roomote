@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   admitHumanFollowUp: vi.fn(),
   resolveFooterContext: vi.fn(),
   createConversationArtifact: vi.fn(),
+  resolveSessionImages: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -69,6 +70,7 @@ vi.mock('@roomote/sdk/server', () => ({
   persistFastAgentInlineHumanTurn: vi.fn(async () => null),
   wakeFastAgentParentEventNow: vi.fn(async () => undefined),
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
+  resolveFastAgentSessionImages: mocks.resolveSessionImages,
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
 
@@ -124,6 +126,7 @@ describe('processFastAgentMessage', () => {
       linkedPrs: [],
       livePreviewUrl: null,
     });
+    mocks.resolveSessionImages.mockResolvedValue([]);
     mocks.admitHumanFollowUp.mockResolvedValue({
       kind: 'turn',
       turnLock: mocks.releaseLock,
@@ -232,6 +235,68 @@ describe('processFastAgentMessage', () => {
       contentType: 'text/markdown',
       artifactType: 'general',
     });
+  });
+
+  it('attaches an explicitly recovered image on a later human follow-up', async () => {
+    mocks.resolveSessionImages.mockResolvedValueOnce([
+      {
+        url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+        altText: 'result.png',
+        contentType: 'image/png',
+      },
+    ]);
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => Promise<unknown> };
+      }) => {
+        await adapter.postReply({
+          purpose: 'closeout',
+          message: 'Here is the requested result.',
+          imageArtifactIds: ['artifact-1'],
+        });
+        return '';
+      },
+    );
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: 'Please resend the saved result.',
+        ts: '100.004',
+        thread_ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+      isExistingConversation: true,
+    });
+
+    expect(mocks.resolveSessionImages).toHaveBeenCalledWith({
+      artifactIds: ['artifact-1'],
+      sessionId: 'fast-session-1',
+    });
+    expect(mocks.postThreadMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Here is the requested result.',
+        images: [
+          {
+            url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+            altText: 'result.png',
+          },
+        ],
+      }),
+    );
   });
 
   it('durably steers an active Fast generation instead of waiting for its lock', async () => {

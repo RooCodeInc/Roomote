@@ -103,6 +103,7 @@ vi.mock('@/components/system', () => ({
   Check: () => <svg aria-hidden="true" />,
   Globe: () => <svg aria-hidden="true" />,
   LucideLink: () => <svg aria-hidden="true" />,
+  Loader2Icon: () => <svg aria-hidden="true" />,
   Button: ({
     children,
     asChild,
@@ -372,6 +373,14 @@ describe('ArtifactViewerContent', () => {
     expect(screen.getByText('Raw')).toBeInTheDocument();
 
     expect(screen.queryByText('Type: visual-proof')).not.toBeInTheDocument();
+  });
+
+  it('keeps universal toolbar actions mounted and disabled while loading', () => {
+    render(<ArtifactViewerContent taskId="task-1" artifact={null} isLoading />);
+
+    expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Copy URL' })).toBeDisabled();
+    expect(screen.getByLabelText('Loading artifact')).toBeVisible();
   });
 
   it('offers the Build action when a markdown plan has no fetched content', () => {

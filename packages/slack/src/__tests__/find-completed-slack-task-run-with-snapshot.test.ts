@@ -54,6 +54,7 @@ vi.mock('@roomote/db/server', () => {
     })),
     isNotNull: vi.fn((value: unknown) => ({ isNotNull: value })),
     isNull: vi.fn((value: unknown) => ({ isNull: value })),
+    isSnapshotResumableCondition: vi.fn(() => ({ snapshotResumable: true })),
     sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
       sql: [strings.raw.join('?'), ...values],
     })),

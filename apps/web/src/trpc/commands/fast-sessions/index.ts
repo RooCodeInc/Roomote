@@ -16,6 +16,7 @@ import {
   upsertFastAgentMessage,
 } from '@roomote/cloud-agents/server';
 import {
+  buildFastAgentArtifactCreator,
   buildFastAgentSurfaceReplyDelivery,
   createFastAgentSessionArtifact,
   persistFastAgentInlineHumanTurn,
@@ -548,6 +549,7 @@ export async function startSetupFastSessionCommand(
       delivery: {
         conversation,
         adapter: {
+          createArtifact: buildFastAgentArtifactCreator(session.id),
           launchTask: createFastAgentWebTaskLauncher({
             userId: auth.userId,
             conversation,
@@ -833,22 +835,27 @@ export async function submitFastSessionUserInputCommand(
 
   const scheduleResponseTurn = (answers: AcpRequestUserInputAnswers) => {
     const responseTurnId = `input-response:${input.requestId}`;
+    const conversation =
+      session.surface === 'automation'
+        ? {
+            surface: 'automation' as const,
+            workspaceId: session.workspaceId,
+            conversationId: session.conversationId,
+          }
+        : {
+            surface: 'web' as const,
+            workspaceId: session.userId ?? auth.userId,
+            conversationId: session.conversationId,
+          };
     scheduleWebFastAgentTurn({
       userId: auth.userId,
       delivery: {
-        conversation: {
-          surface: 'web',
-          workspaceId: session.userId,
-          conversationId: session.conversationId,
-        },
+        conversation,
         adapter: {
+          createArtifact: buildFastAgentArtifactCreator(session.id),
           launchTask: createFastAgentWebTaskLauncher({
-            userId: session.userId,
-            conversation: {
-              surface: 'web',
-              workspaceId: session.userId,
-              conversationId: session.conversationId,
-            },
+            userId: auth.userId,
+            conversation,
           }),
           postReply: async () => {},
         },

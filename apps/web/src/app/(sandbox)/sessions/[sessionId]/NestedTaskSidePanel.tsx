@@ -45,7 +45,7 @@ import { WakeTaskInput } from '../../task/[taskId]/WakeTaskInput';
 
 function NestedTaskInputTray({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card transition-colors @[56rem]:rounded-t-lg">
+    <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card outline-0 outline-offset-[-2px] outline-accent-foreground transition-[background-color,border-color,outline-width] has-[textarea:focus]:outline-2 @[56rem]:rounded-t-lg">
       {children}
     </div>
   );
@@ -97,7 +97,7 @@ function NestedTaskInteraction({
         session={session}
         scrollRef={messagesRef}
         initialScrollBehavior="instant"
-        conversationClassName="mx-auto w-full max-w-4xl p-4"
+        conversationClassName="mx-auto w-full max-w-4xl p-4 pt-0"
         messageUiOptions={{ displayMode: 'default' }}
         footer={footer}
       />
@@ -143,7 +143,7 @@ function HistoricalNestedTaskInteraction({
       <Messages
         session={session}
         initialScrollBehavior="instant"
-        conversationClassName="mx-auto w-full max-w-4xl p-4"
+        conversationClassName="mx-auto w-full max-w-4xl p-4 pt-0"
         messageUiOptions={{ displayMode: 'default' }}
         footer={footer}
       />
@@ -290,6 +290,7 @@ export function NestedTaskSidePanel({
 
   return (
     <FramedSurface
+      data-session-task-panel={taskId}
       frameClassName="p-0"
       surfaceClassName="relative flex flex-col overflow-hidden"
     >
@@ -320,10 +321,12 @@ export function NestedTaskSidePanel({
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="relative -left-2 h-7 min-w-0 gap-1.5 px-2 text-sm hover:text-accent-foreground"
+                  className="relative -left-2 flex h-7 w-full min-w-0 justify-start gap-1.5 px-2 text-sm hover:text-accent-foreground"
                 >
-                  <span className="font-semibold">Task:</span>
-                  <span className="max-w-48 truncate font-medium">{title}</span>
+                  <span className="shrink-0 font-semibold">Task:</span>
+                  <span className="min-w-0 flex-1 truncate text-left font-medium">
+                    {title}
+                  </span>
                   <ChevronDown className="size-3.5 shrink-0" />
                 </Button>
               </DropdownMenuTrigger>

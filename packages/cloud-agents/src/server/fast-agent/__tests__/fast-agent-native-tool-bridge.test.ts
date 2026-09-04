@@ -138,6 +138,10 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain('__all_repositories__');
     expect(replySource).toContain('__fast__');
     expect(replySource).toContain('Launchable follow-ups');
+    expect(replySource).toContain(
+      'Never claim an image or screenshot is attached, shown, or included unless this list is non-empty',
+    );
+    expect(replySource).toContain('accessible artifact viewer link');
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(createArtifactSource).toContain('invoke("create_artifact"');
     expect(createArtifactSource).toContain('maximum 128 KiB');
@@ -149,12 +153,7 @@ describe('Fast native OpenCode tool bridge', () => {
       'Supported current-turn attachments are forwarded only when includeAttachments is true',
     );
     expect(launchTaskSource).toContain('defaults to false');
-    expect(launchTaskSource).toContain(
-      'Brief user-facing description of the work now underway',
-    );
-    expect(launchTaskSource).toContain(
-      'do not mention delegation, launching, or queue state',
-    );
+    expect(launchTaskSource).not.toContain('kickoffMessage');
     expect(launchTaskSource).not.toContain(
       'explanation of what is being delegated',
     );

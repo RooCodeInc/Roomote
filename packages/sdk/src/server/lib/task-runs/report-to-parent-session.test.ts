@@ -14,7 +14,9 @@ vi.mock('../fast-agent-parent-event-queue', () => ({
   enqueueFastAgentParentEvent: mocks.enqueueParentEvent,
 }));
 
-import { relayFastAgentChildChatReply } from './relay-fast-agent-child-chat-reply';
+import { TaskPayloadKind } from '@roomote/types';
+
+import { reportToParentSession } from './report-to-parent-session';
 
 const parent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
@@ -26,7 +28,7 @@ const parent = {
   },
 };
 
-describe('relayFastAgentChildChatReply', () => {
+describe('reportToParentSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findRun.mockResolvedValue({
@@ -39,7 +41,7 @@ describe('relayFastAgentChildChatReply', () => {
 
   it('durably queues the child update without waiting on the Fast parent', async () => {
     await expect(
-      relayFastAgentChildChatReply({
+      reportToParentSession({
         runId: 42,
         taskId: 'task-1',
         deliverySignature: 'a'.repeat(64),
@@ -63,6 +65,27 @@ describe('relayFastAgentChildChatReply', () => {
     });
   });
 
+  it('drops narration from a review child so the PR feedback relay stays the only signal', async () => {
+    mocks.findRun.mockResolvedValueOnce({
+      id: 42,
+      taskId: 'task-1',
+      payload: { fastAgentParent: parent, fastParentRequestedReview: true },
+      payloadKind: TaskPayloadKind.GithubPrReview,
+    });
+
+    await expect(
+      reportToParentSession({
+        runId: 42,
+        taskId: 'task-1',
+        deliverySignature: 'a'.repeat(64),
+        purpose: 'closeout',
+        message: 'Reviewed the PR and found no issues.',
+      }),
+    ).resolves.toEqual({ relayed: false });
+
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+  });
+
   it('rejects runs that are not owned by a Fast parent', async () => {
     mocks.findRun.mockResolvedValueOnce({
       id: 42,
@@ -71,7 +94,7 @@ describe('relayFastAgentChildChatReply', () => {
     });
 
     await expect(
-      relayFastAgentChildChatReply({
+      reportToParentSession({
         runId: 42,
         taskId: 'task-1',
         deliverySignature: 'a'.repeat(64),
@@ -90,7 +113,7 @@ describe('relayFastAgentChildChatReply', () => {
       purpose: 'progress' as const,
       message: 'Still working.',
     };
-    await relayFastAgentChildChatReply(input);
+    await reportToParentSession(input);
     const firstMessageId = mocks.enqueueParentEvent.mock.calls[0]?.[0]?.event
       ?.messageId as string;
 
@@ -104,7 +127,7 @@ describe('relayFastAgentChildChatReply', () => {
         },
       },
     });
-    await relayFastAgentChildChatReply(input);
+    await reportToParentSession(input);
 
     expect(firstMessageId).toMatch(/^[a-f0-9]{64}$/);
     expect(

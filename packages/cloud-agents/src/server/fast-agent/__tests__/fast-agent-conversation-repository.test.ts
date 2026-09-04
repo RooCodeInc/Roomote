@@ -66,6 +66,7 @@ describe('Fast conversation repository', () => {
     const session = await fastAgentConversationRepository.getOrCreate({
       userId: user.id,
       conversation,
+      initialTitle: 'Weekly product update',
     });
     const stored = await fastAgentConversationRepository.findById({
       id: session.id,
@@ -78,10 +79,66 @@ describe('Fast conversation repository', () => {
       .select({
         channelId: fastAgentConversations.currentReplyChannelId,
         surface: fastAgentConversations.surface,
+        title: fastAgentConversations.title,
       })
       .from(fastAgentConversations)
       .where(eq(fastAgentConversations.id, session.id));
-    expect(row).toEqual({ channelId: null, surface: 'automation' });
+    expect(row).toEqual({
+      channelId: null,
+      surface: 'automation',
+      title: 'Weekly product update',
+    });
+    const [unifiedSession] = await db
+      .select({ title: sessions.title })
+      .from(sessions)
+      .where(eq(sessions.fastConversationId, session.id));
+    expect(unifiedSession?.title).toBe('Weekly product update');
+  });
+
+  it('creates an automation-owned Session without a run-as user', async () => {
+    const conversation = {
+      surface: 'automation' as const,
+      workspaceId: 'ownerless-automation-repository-test',
+      conversationId: crypto.randomUUID(),
+    };
+
+    const created = await fastAgentConversationRepository.getOrCreate({
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      conversation,
+      initialTitle: 'Ownerless weekly update',
+    });
+    const reused = await fastAgentConversationRepository.getOrCreate({
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      conversation,
+      initialTitle: 'Changed title must not replace the original',
+    });
+
+    expect(created).toMatchObject({
+      userId: null,
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+    });
+    expect(reused).toMatchObject({ id: created.id, created: false });
+    const [unifiedSession] = await db
+      .select({
+        id: sessions.id,
+        ownerKind: sessions.ownerKind,
+        ownerUserId: sessions.ownerUserId,
+        ownerAutomation: sessions.ownerAutomation,
+        title: sessions.title,
+      })
+      .from(sessions)
+      .where(eq(sessions.fastConversationId, created.id));
+    expect(unifiedSession).toMatchObject({
+      ownerKind: 'automation',
+      ownerUserId: null,
+      ownerAutomation: 'custom_automation',
+      title: 'Ownerless weekly update',
+    });
+
+    await db.delete(sessions).where(eq(sessions.id, unifiedSession!.id));
+    await db
+      .delete(fastAgentConversations)
+      .where(eq(fastAgentConversations.id, created.id));
   });
 
   it.each(['teams', 'telegram'] as const)(
@@ -256,6 +313,66 @@ describe('Fast conversation repository', () => {
       );
 
     expect(rows).toEqual([{ id: sessions[0]!.id }]);
+  });
+
+  it('lets another participant take a turn in a user-owned conversation', async () => {
+    const owner = await createUser();
+    const participant = await createUser();
+    const conversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-participant-test',
+      conversationId: `thread-participant-${owner.id}`,
+      replyTarget: {
+        channelId: 'channel-participant-test',
+        threadId: `thread-participant-${owner.id}`,
+      },
+    };
+    const created = await fastAgentConversationRepository.getOrCreate({
+      userId: owner.id,
+      conversation,
+    });
+    expect(created.created).toBe(true);
+
+    // A coworker replying in the bound thread is a participant, not a new
+    // owner: the turn reuses the conversation and ownership is unchanged.
+    const reused = await fastAgentConversationRepository.getOrCreate({
+      userId: participant.id,
+      conversation,
+    });
+    expect(reused).toMatchObject({ id: created.id, created: false });
+    expect(reused.owner).toEqual({ kind: 'user', userId: owner.id });
+    expect(reused.userId).toBe(owner.id);
+  });
+
+  it('rejects an explicit owner that does not match the conversation', async () => {
+    const owner = await createUser();
+    const other = await createUser();
+    const conversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-owner-mismatch-test',
+      conversationId: `thread-owner-mismatch-${owner.id}`,
+      replyTarget: {
+        channelId: 'channel-owner-mismatch-test',
+        threadId: `thread-owner-mismatch-${owner.id}`,
+      },
+    };
+    await fastAgentConversationRepository.getOrCreate({
+      owner: { kind: 'user', userId: owner.id },
+      conversation,
+    });
+
+    await expect(
+      fastAgentConversationRepository.getOrCreate({
+        owner: { kind: 'user', userId: other.id },
+        conversation,
+      }),
+    ).rejects.toThrow('Fast conversation owner does not match the caller.');
+    await expect(
+      fastAgentConversationRepository.getOrCreate({
+        owner: { kind: 'automation', automationKey: 'custom_automation' },
+        conversation,
+      }),
+    ).rejects.toThrow('Fast conversation owner does not match the caller.');
   });
 
   it('returns the persisted Fast conversation title', async () => {
@@ -1280,7 +1397,11 @@ describe('Fast conversation repository', () => {
       eventType: 'roomote_runtime.assistant_message',
       role: 'assistant',
       contentBlocks: [{ type: 'text', text: 'Starting on it.' }],
-      metadata: { visibleInTranscript: true, purpose: 'progress' },
+      metadata: {
+        visibleInTranscript: true,
+        purpose: 'progress',
+        inferenceRetryNotice: true,
+      },
       payload: { purpose: 'progress' },
       source: 'slack',
     });
@@ -1366,7 +1487,12 @@ describe('Fast conversation repository', () => {
     ).resolves.toEqual({
       // Transcript order: the reply, then each call with its outcome.
       events: [
-        { kind: 'reply', text: 'Starting on it.', purpose: 'progress' },
+        {
+          kind: 'reply',
+          text: 'Starting on it.',
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+        },
         {
           kind: 'action',
           tool: 'launch_task',

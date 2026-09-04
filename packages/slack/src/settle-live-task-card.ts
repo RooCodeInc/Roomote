@@ -10,12 +10,6 @@ import {
   getSlackLiveTaskStreamData,
 } from './live-task-stream';
 import { SlackNotifier } from './slack-notifier';
-import {
-  removeSlackThreadActiveTaskByTaskId,
-  setSlackThreadActiveTask,
-  type SlackThreadActiveTaskRoute,
-} from './thread-active-tasks';
-import { refreshSlackThreadActiveTaskFooter } from './thread-reply-footer-ops';
 
 export type SlackLiveTaskCardRenderStatus =
   | 'in_progress'
@@ -53,54 +47,15 @@ export async function renderSlackLiveTaskCard(input: {
   /** The task's generated title, rendered in place of the prompt-derived one. */
   taskTitle?: string | null;
 }): Promise<SlackLiveTaskCardRenderResult> {
-  const terminal = input.status !== 'in_progress';
-  let removedRoute: SlackThreadActiveTaskRoute | null = null;
-  let activeTaskUpdated = false;
-  if (terminal) {
-    try {
-      removedRoute = await removeSlackThreadActiveTaskByTaskId(input.taskId);
-    } catch (error) {
-      console.warn(
-        `[renderSlackLiveTaskCard] Failed to remove active task ${input.taskId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-
   const data = await getSlackLiveTaskStreamData(input.taskId);
-  const taskTitle = input.taskTitle?.trim();
-  const title = data
-    ? taskTitle
-      ? buildSlackLiveTaskTitle(taskTitle)
-      : data.title
-    : null;
-  if (data) {
-    try {
-      if (!terminal) {
-        await setSlackThreadActiveTask({
-          teamId: data.teamId,
-          channel: data.channel,
-          threadTs: data.threadTs,
-          task: {
-            taskId: data.taskId,
-            title: title!,
-            ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
-          },
-        });
-        activeTaskUpdated = true;
-      }
-    } catch (error) {
-      console.warn(
-        `[renderSlackLiveTaskCard] Failed to synchronize active task ${data.taskId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+  if (!data) {
+    return { card: false, updated: false };
   }
 
-  const route = data ?? removedRoute;
-  if (!route) return { card: false, updated: false };
   const installation = await db.query.slackInstallations.findFirst({
     where: and(
       eq(slackInstallations.isActive, true),
-      eq(slackInstallations.teamId, route.teamId),
+      eq(slackInstallations.teamId, data.teamId),
     ),
     columns: { botAccessToken: true },
   });
@@ -108,35 +63,21 @@ export async function renderSlackLiveTaskCard(input: {
     return { card: false, updated: false };
   }
 
-  const slack = new SlackNotifier(installation.botAccessToken);
-  if (!data) {
-    await refreshSlackThreadActiveTaskFooter({
-      slack,
-      channel: route.channel,
-      threadTs: route.threadTs,
-    });
-    return { card: false, updated: false };
-  }
-  const updated = await slack.updateMessage({
+  const taskTitle = input.taskTitle?.trim();
+  const updated = await new SlackNotifier(
+    installation.botAccessToken,
+  ).updateMessage({
     channel: data.channel,
     ts: data.messageTs,
     message: buildSlackLiveTaskCardBlocks({
       taskUpdateId: data.taskUpdateId,
-      title: title!,
+      title: taskTitle ? buildSlackLiveTaskTitle(taskTitle) : data.title,
       status: input.status,
       ...(input.details ? { details: input.details } : {}),
       ...(input.output ? { output: input.output } : {}),
       ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
     }),
   });
-
-  if (terminal || activeTaskUpdated) {
-    await refreshSlackThreadActiveTaskFooter({
-      slack,
-      channel: data.channel,
-      threadTs: data.threadTs,
-    });
-  }
 
   return { card: true, updated };
 }

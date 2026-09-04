@@ -10,6 +10,7 @@ const {
   eqMock,
   mockEnvironmentFindFirst,
   mockGetLatestTaskRunsByTaskIds,
+  mockListArtifactsByTask,
   mockSelect,
   selectFromMock,
   selectLimitMock,
@@ -20,6 +21,7 @@ const {
   eqMock: vi.fn((...args) => ({ type: 'eq', args })),
   mockEnvironmentFindFirst: vi.fn(),
   mockGetLatestTaskRunsByTaskIds: vi.fn(),
+  mockListArtifactsByTask: vi.fn(),
   mockSelect: vi.fn(),
   selectFromMock: vi.fn(),
   selectLimitMock: vi.fn(),
@@ -40,6 +42,17 @@ vi.mock('../helpers', () => ({
   },
   getLatestTaskRunsByTaskIds: mockGetLatestTaskRunsByTaskIds,
   visibleTaskHistoryCondition,
+}));
+
+vi.mock('../../artifacts/service', () => ({
+  listArtifactsByTask: mockListArtifactsByTask,
+}));
+
+vi.mock('@roomote/env', () => ({
+  Env: {
+    R_APP_URL: 'https://api.roomote.example',
+    R_PUBLIC_URL: 'https://roomote.example',
+  },
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -124,6 +137,7 @@ describe('getTaskSummary', () => {
       id: 'env-123',
       name: 'Onboarding Sandbox',
     });
+    mockListArtifactsByTask.mockResolvedValue([]);
   });
 
   it('returns the latest task run error in the summary payload', async () => {
@@ -150,6 +164,54 @@ describe('getTaskSummary', () => {
     expect(andMock.mock.calls[0]).toContain(visibleTaskHistoryCondition);
   });
 
+  it('returns stable IDs and viewer links for uploaded task images', async () => {
+    mockListArtifactsByTask.mockResolvedValueOnce([
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        taskId: 'task-1',
+        runId: 101,
+        path: 'proof/final image.png',
+        version: 2,
+        artifactType: 'visual-proof',
+        contentType: 'image/png',
+        size: 123,
+        uploaded: true,
+        createdAt: new Date('2026-04-21T12:00:00Z'),
+      },
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        taskId: 'task-1',
+        runId: 101,
+        path: 'report.txt',
+        version: 1,
+        artifactType: 'general',
+        contentType: 'text/plain',
+        size: 10,
+        uploaded: true,
+        createdAt: new Date('2026-04-21T12:00:01Z'),
+      },
+    ]);
+
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/task-1/summary',
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      imageArtifacts: [
+        {
+          id: '11111111-1111-4111-8111-111111111111',
+          path: 'proof/final image.png',
+          version: 2,
+          artifactType: 'visual-proof',
+          contentType: 'image/png',
+          viewUrl:
+            'https://roomote.example/task/task-1/artifacts/proof/final%20image.png?v=2',
+        },
+      ],
+    });
+  });
+
   it('returns 404 when the task is hidden from task history', async () => {
     selectLimitMock.mockResolvedValueOnce([]);
 
@@ -159,6 +221,7 @@ describe('getTaskSummary', () => {
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: 'Task not found' });
+    expect(mockListArtifactsByTask).not.toHaveBeenCalled();
   });
 
   it('includes the linked environment id and name from the latest task run payload', async () => {

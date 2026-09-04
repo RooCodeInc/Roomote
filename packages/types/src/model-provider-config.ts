@@ -692,6 +692,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'openai/gpt-5.6-sol',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'gpt-6-astra': 'openai/gpt-6-astra',
       'gpt-5-6-sol': 'openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',
@@ -1151,6 +1152,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'openai/gpt-5.6-sol',
     authKind: 'oauth',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'gpt-6-astra': 'openai/gpt-6-astra',
       'gpt-5-6-sol': 'openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',

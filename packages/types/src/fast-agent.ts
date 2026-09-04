@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { BACKGROUND_AUTOMATION_KEYS } from './background-agents';
+
 export const fastAgentSurfaces = [
   'slack',
   'discord',
@@ -17,6 +19,18 @@ export const fastAgentSurfaces = [
 export const fastAgentSurfaceSchema = z.enum(fastAgentSurfaces);
 
 export type FastAgentSurface = z.infer<typeof fastAgentSurfaceSchema>;
+
+export const fastAgentConversationOwnerSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('user'), userId: z.string().min(1) }),
+  z.object({
+    kind: z.literal('automation'),
+    automationKey: z.enum(BACKGROUND_AUTOMATION_KEYS),
+  }),
+]);
+
+export type FastAgentConversationOwner = z.infer<
+  typeof fastAgentConversationOwnerSchema
+>;
 
 export const fastAgentReplyTargetSchema = z.object({
   channelId: z.string().min(1),
@@ -157,6 +171,28 @@ export type FastAgentParent = z.infer<typeof fastAgentParentSchema>;
 
 export const FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE = 'human_follow_up' as const;
 
+/**
+ * A pull request or issue discussion a queued human turn should also answer
+ * in, when the message was posted there but the Session lives on another
+ * surface (the Slack thread or web Session whose task opened the pull
+ * request). Mirrors the sdk's SourceControlFastDiscussion.
+ */
+export const fastAgentSourceControlReplyTargetSchema = z.object({
+  provider: z.enum(fastAgentSourceControlSurfaces),
+  host: z.string().min(1),
+  repositoryFullName: z.string().min(1),
+  kind: z.enum(['pull', 'issues']),
+  number: z.number().int().positive(),
+  reviewCommentId: z.string().min(1).optional(),
+  replyCommentId: z.string().min(1).optional(),
+  /** Public page of the discussion, for attribution on the home surface. */
+  url: z.string().min(1).optional(),
+});
+
+export type FastAgentSourceControlReplyTarget = z.infer<
+  typeof fastAgentSourceControlReplyTargetSchema
+>;
+
 /** An emoji reaction a chat surface delivered as Fast human input. */
 export const fastAgentReactionExternalInputSchema = z.object({
   type: z.literal('reaction_added'),
@@ -203,6 +239,35 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
   images: z.array(z.string()).optional(),
   senderDisplayName: z.string().min(1).optional(),
   senderExternalId: z.string().min(1).optional(),
+  /**
+   * Whether the surface classified the message as addressed to Roomote (a
+   * mention, a DM, a reply to it) rather than ambient conversation between
+   * people. When this message is steered into a running turn, only `false`
+   * lets that turn end without a visible reply; absent means directed.
+   */
+  directedAtRoomote: z.boolean().optional(),
+  /**
+   * Surface context the model reads with the message (the pull request a
+   * mention is on, for example). Persisted so a queued or resumed turn keeps
+   * the context the inline turn would have had.
+   */
+  agentContext: z.string().min(1).optional(),
+  /** Tasks the Session may steer on this turn beyond the ones it delegated. */
+  activeTasks: z
+    .array(
+      z.object({
+        taskId: z.string().min(1),
+        title: z.string().optional(),
+        status: z.string().optional(),
+      }),
+    )
+    .optional(),
+  /**
+   * Set when the message came from a source-control discussion that another
+   * Session owns through a task: the answer posts there as well as on the
+   * Session's home surface.
+   */
+  sourceControlReplyTarget: fastAgentSourceControlReplyTargetSchema.optional(),
   /**
    * Set when the human input was an emoji reaction rather than a message, so
    * a run that resumes the turn keeps reaction semantics.

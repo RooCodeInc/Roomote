@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   acquireLock: vi.fn(),
   answerQuestion: vi.fn(),
+  createArtifact: vi.fn(),
   createActivity: vi.fn(() => ({ start: vi.fn(), settle: vi.fn() })),
   findConversation: vi.fn(),
   findSession: vi.fn(),
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   persistAdmission: vi.fn(),
   postThreadMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
+  resolveSessionImages: vi.fn(),
   releaseLock: vi.fn(),
   wakeParentEventAt: vi.fn(),
   wakeParentEventNow: vi.fn(),
@@ -33,9 +35,11 @@ vi.mock('@roomote/communication', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  buildFastAgentArtifactCreator: vi.fn(() => mocks.createArtifact),
   findFastAgentSessionForProviderMessage: mocks.findSession,
   persistFastAgentInlineHumanTurn: mocks.persistAdmission,
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
+  resolveFastAgentSessionImages: mocks.resolveSessionImages,
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
   wakeFastAgentParentEventAt: mocks.wakeParentEventAt,
   wakeFastAgentParentEventNow: mocks.wakeParentEventNow,
@@ -84,6 +88,7 @@ describe('Fast Slack reaction input', () => {
     });
     mocks.answerQuestion.mockResolvedValue('');
     mocks.persistAdmission.mockResolvedValue(null);
+    mocks.resolveSessionImages.mockResolvedValue([]);
   });
 
   it('admits a reaction turn durably so an interruption resumes it with the same reaction', async () => {
@@ -147,6 +152,7 @@ describe('Fast Slack reaction input', () => {
         durableAdmission: { eventId: 'row-1' },
         resumedAfterInterruption: true,
         adapter: expect.objectContaining({
+          createArtifact: mocks.createArtifact,
           requestDurableResume: expect.any(Function),
           requestDurableRetry: expect.any(Function),
         }),
@@ -218,6 +224,76 @@ describe('Fast Slack reaction input', () => {
     expect(mocks.postThreadMessage).not.toHaveBeenCalled();
   });
 
+  it('attaches a selected Session image in a reaction-triggered reply', async () => {
+    mocks.resolveSessionImages.mockResolvedValueOnce([
+      {
+        url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+        altText: 'result.png',
+        contentType: 'image/png',
+      },
+    ]);
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => Promise<unknown> };
+      }) => {
+        await adapter.postReply({
+          purpose: 'closeout',
+          message: 'Here is the requested result.',
+          imageArtifactIds: ['artifact-1'],
+        });
+        return '';
+      },
+    );
+    mocks.postThreadMessage.mockResolvedValueOnce({
+      status: 'posted',
+      messageId: '103.000',
+    });
+    const slack = {
+      getMessage: vi.fn(async () => ({
+        text: 'Please attach the earlier screenshot.',
+        thread_ts: '100.000',
+      })),
+      normalizeIncomingText: vi.fn(async () => '@alice'),
+      updateMessage: vi.fn(),
+    };
+
+    await expect(
+      maybeRouteFastAgentReaction({
+        context: {
+          teamId: 'T1',
+          slackInstallation: { botUserId: 'UROOMOTE' },
+          slack,
+        } as never,
+        event: {
+          type: 'reaction_added',
+          user: 'UALICE',
+          reaction: 'eyes',
+          item: { type: 'message', channel: 'C1', ts: '101.000' },
+          event_ts: '102.000',
+        },
+      }),
+    ).resolves.toBe(true);
+    await vi.waitFor(() => expect(mocks.answerQuestion).toHaveBeenCalledOnce());
+
+    expect(mocks.resolveSessionImages).toHaveBeenCalledWith({
+      artifactIds: ['artifact-1'],
+      sessionId: 'session-1',
+    });
+    expect(mocks.postThreadMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Here is the requested result.',
+        images: [
+          {
+            url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+            altText: 'result.png',
+          },
+        ],
+      }),
+    );
+  });
+
   it('does not route reactions from users who do not own the bound session', async () => {
     mocks.findSession.mockResolvedValue(null);
 
@@ -237,6 +313,47 @@ describe('Fast Slack reaction input', () => {
         },
       }),
     ).resolves.toBe(false);
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it('does not start a user-scoped reaction turn for an ownerless session', async () => {
+    mocks.findSession.mockResolvedValue({
+      id: 'session-1',
+      userId: null,
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      title: 'Weekly update',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T1',
+        conversationId: '100.000',
+        replyTarget: { channelId: 'C1', threadId: '100.000' },
+      },
+    });
+
+    await expect(
+      maybeRouteFastAgentReaction({
+        context: {
+          teamId: 'T1',
+          slackInstallation: { botUserId: 'UROOMOTE' },
+          slack: {
+            getMessage: vi.fn(async () => ({
+              text: 'Ownerless automation output',
+              thread_ts: '100.000',
+            })),
+            normalizeIncomingText: vi.fn(async () => '@alice'),
+          },
+        } as never,
+        event: {
+          type: 'reaction_added',
+          user: 'UALICE',
+          reaction: 'eyes',
+          item: { type: 'message', channel: 'C1', ts: '101.000' },
+          event_ts: '102.000',
+        },
+      }),
+    ).resolves.toBe(true);
+
+    expect(mocks.acquireLock).not.toHaveBeenCalled();
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
   });
 });

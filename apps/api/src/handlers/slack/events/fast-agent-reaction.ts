@@ -13,9 +13,11 @@ import {
   resolveFastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
+  buildFastAgentArtifactCreator,
   findFastAgentSessionForProviderMessage,
   persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
+  resolveFastAgentSessionImages,
   resolveUserMcpServerConfigs,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
@@ -47,7 +49,8 @@ async function processFastAgentReaction(params: {
 }): Promise<void> {
   const { context, event, session } = params;
   const conversation = session.conversation;
-  if (conversation.surface !== 'slack') {
+  const actorUserId = session.userId;
+  if (conversation.surface !== 'slack' || !actorUserId) {
     params.onRejected();
     return;
   }
@@ -98,7 +101,7 @@ async function processFastAgentReaction(params: {
       type: 'human_follow_up',
       eventId: currentMessageId,
       currentMessageId,
-      userId: session.userId,
+      userId: actorUserId,
       question,
       senderExternalId: event.user,
       ...(params.reactorDisplayName
@@ -130,7 +133,7 @@ async function processFastAgentReaction(params: {
 
     const responseText = await answerFastAgentQuestion({
       question,
-      userId: session.userId,
+      userId: actorUserId,
       conversation,
       currentMessageId,
       senderExternalId: event.user,
@@ -159,6 +162,7 @@ async function processFastAgentReaction(params: {
                 ),
             }
           : {}),
+        createArtifact: buildFastAgentArtifactCreator(session.id),
         activity: createFastAgentSlackSessionActivity({
           slack: context.slack,
           workspaceId: context.teamId,
@@ -171,13 +175,13 @@ async function processFastAgentReaction(params: {
         }),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
-            userId: session.userId,
+            userId: actorUserId,
             apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
             includeRoomoteMemberTools: true,
           }),
         launchTask: createFastAgentSlackLiveTaskLauncher({
           slack: context.slack,
-          userId: session.userId,
+          userId: actorUserId,
           teamId: context.teamId,
           ...(context.slackInstallation.teamDomain
             ? { teamDomain: context.slackInstallation.teamDomain }
@@ -186,7 +190,11 @@ async function processFastAgentReaction(params: {
           threadTs,
           messageId: event.item.ts,
         }),
-        postReply: async ({ message, kickoff }) => {
+        postReply: async ({ message, kickoff, imageArtifactIds = [] }) => {
+          const replyImages = await resolveFastAgentSessionImages({
+            artifactIds: imageArtifactIds,
+            sessionId: session.id,
+          });
           const posted = await postSlackThreadMarkdownMessage({
             slack: context.slack,
             channel: event.item.channel,
@@ -194,11 +202,15 @@ async function processFastAgentReaction(params: {
             text: message,
             sourceMessageTs: event.item.ts,
             conversationLog: {
-              userId: session.userId,
+              userId: actorUserId,
               slackTeamId: context.teamId,
               source: 'fast_agent',
             },
             fastSessionFooter: { sessionId: session.id, ...footerContext },
+            images: replyImages.map((image) => ({
+              url: image.url,
+              altText: image.altText,
+            })),
           });
           if (posted === 'failed') {
             throw new Error('Slack did not accept the Fast reaction reply.');
@@ -271,7 +283,7 @@ async function processFastAgentReaction(params: {
         text: responseText,
         sourceMessageTs: event.item.ts,
         conversationLog: {
-          userId: session.userId,
+          userId: actorUserId,
           slackTeamId: context.teamId,
           source: 'fast_agent',
         },

@@ -89,6 +89,8 @@ export class FastAgentTurnDiagnostics {
   private visibleReplyCount = 0;
   private firstAssistantResponseAt: number | undefined;
   private resolvedModel: string | undefined;
+  private imageDelivery: 'direct' | 'helper' | 'unsupported' | undefined;
+  private imageHelperModel: string | undefined;
   private sessionPath: FastAgentSessionPath | undefined;
   private openCodeSessionId: string | undefined;
   private inferenceQueuedAt: number | undefined;
@@ -104,6 +106,7 @@ export class FastAgentTurnDiagnostics {
   private tokenTotals: TokenTotals | undefined;
   private maxContextTokens: number | undefined;
   private abortedAfterCloseout = false;
+  private silentCompletion = false;
   private openCodeProviderRetryEventCount = 0;
   private firstOpenCodeProviderRetryElapsedMs: number | undefined;
   private lastOpenCodeProviderRetryElapsedMs: number | undefined;
@@ -164,6 +167,11 @@ export class FastAgentTurnDiagnostics {
     this.abortedAfterCloseout = true;
   }
 
+  /** The model ended with nothing visible and the turn settled as ignored. */
+  recordSilentCompletion(): void {
+    this.silentCompletion = true;
+  }
+
   /** One model request per assistant message OpenCode starts in the turn. */
   recordAssistantMessageStarted(): void {
     this.modelRequestCount += 1;
@@ -200,6 +208,16 @@ export class FastAgentTurnDiagnostics {
 
   recordModelResolved(model: string): void {
     this.resolvedModel = model;
+  }
+
+  recordImageDelivery(
+    input:
+      | { delivery: 'direct' | 'unsupported' }
+      | { delivery: 'helper'; helperModel: string },
+  ): void {
+    this.imageDelivery = input.delivery;
+    this.imageHelperModel =
+      input.delivery === 'helper' ? input.helperModel : undefined;
   }
 
   recordSessionPath(path: FastAgentSessionPath): void {
@@ -478,6 +496,7 @@ export class FastAgentTurnDiagnostics {
       firstModelResponseDurationMs,
       postReplyInferenceDurationMs,
       abortedAfterCloseout: this.abortedAfterCloseout,
+      silentCompletion: this.silentCompletion,
       inputTokens: this.tokenTotals?.input,
       cacheReadTokens: this.tokenTotals?.cacheRead,
       cacheWriteTokens: this.tokenTotals?.cacheWrite,
@@ -511,6 +530,8 @@ export class FastAgentTurnDiagnostics {
           : undefined,
       visibleReplyCount: this.visibleReplyCount,
       hasImages: this.context.hasImages,
+      imageDelivery: this.imageDelivery,
+      imageHelperModel: this.imageHelperModel,
       error: this.failed ? formatTerminalError(this.terminalError) : undefined,
     });
 

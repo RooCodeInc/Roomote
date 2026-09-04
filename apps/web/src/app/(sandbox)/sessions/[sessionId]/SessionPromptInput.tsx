@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -8,6 +8,7 @@ import type { ReasoningEffort } from '@roomote/types';
 
 import { ROOMOTE_FILE_ATTACHMENT_ACCEPT } from '@/lib/prompt-attachments';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
+import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
 import {
   SUGGESTION_MIN_HISTORY_MESSAGES,
   useGhostSuggestion,
@@ -99,6 +100,8 @@ export function SessionPromptInput({
     useState<ReasoningEffort | null>(initialReasoningEffort);
   const [isUpdatingModelSelection, setIsUpdatingModelSelection] =
     useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  useAutoFocusOnce(textareaRef, !isBusy);
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => setPrompt(text),
     getPrefix: () => prompt,
@@ -217,6 +220,7 @@ export function SessionPromptInput({
         <PromptInputBody>
           <div className="relative">
             <PromptInputTextarea
+              ref={textareaRef}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               onFocus={() => setIsTextareaFocused(true)}

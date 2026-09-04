@@ -273,7 +273,24 @@ describe('fast-agent integration broker', () => {
       },
     };
     mocks.listMcpTools.mockResolvedValue([
-      { name: 'manage_tasks', inputSchema: { type: 'object' } },
+      {
+        name: 'manage_tasks',
+        description: 'Manage Sessions and tasks, including launch.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['search', 'get_summary', 'launch', 'cancel'],
+            },
+            taskId: { type: 'string' },
+            prompt: { type: 'string' },
+            environmentId: { type: 'string' },
+            branch: { type: 'string' },
+            notifyOnSettle: { type: 'boolean' },
+          },
+        },
+      },
     ]);
 
     const integrations = await listFastAgentIntegrations({
@@ -284,7 +301,25 @@ describe('fast-agent integration broker', () => {
     expect(integrations).toEqual([
       expect.objectContaining({
         id: 'roomote',
-        tools: [{ name: 'manage_tasks', inputSchema: { type: 'object' } }],
+        tools: [
+          {
+            name: 'manage_tasks',
+            description:
+              'Manage Roomote Sessions and inspect or control existing tasks. Use launch_task to start coding work from a Fast Session.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                action: {
+                  type: 'string',
+                  enum: ['search', 'get_summary', 'cancel'],
+                  description:
+                    'The Session or existing-task action to perform.',
+                },
+                taskId: { type: 'string' },
+              },
+            },
+          },
+        ],
       }),
     ]);
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
@@ -292,6 +327,28 @@ describe('fast-agent integration broker', () => {
       headers: { Authorization: 'Bearer control-plane-token' },
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it('omits manage_tasks when its schema cannot safely remove task launch', async () => {
+    mocks.configuredServers = {
+      roomote: {
+        url: 'https://app.example.test/mcp',
+        headers: {},
+      },
+    };
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'manage_tasks', inputSchema: { type: 'object' } },
+      { name: 'manage_custom_automations', inputSchema: { type: 'object' } },
+    ]);
+
+    const integrations = await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://app.example.test/_roomote-api',
+    });
+
+    expect(integrations[0]?.tools).toEqual([
+      { name: 'manage_custom_automations', inputSchema: { type: 'object' } },
+    ]);
   });
 
   it('keeps deployment-disabled Roomote channel tools out of Fast inventory', async () => {
@@ -303,7 +360,15 @@ describe('fast-agent integration broker', () => {
       },
     };
     mocks.listMcpTools.mockResolvedValue([
-      { name: 'manage_tasks' },
+      {
+        name: 'manage_tasks',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            action: { type: 'string', enum: ['search', 'launch'] },
+          },
+        },
+      },
       { name: 'list_chat_channels' },
       { name: 'post_to_channel' },
       { name: 'send_chat_reaction_emoji' },
@@ -590,6 +655,35 @@ describe('fast-agent integration broker', () => {
         { integrationId: 'notion', toolName: 'read_file', args: {} },
       ),
     ).rejects.toThrow('tool is not available to fast mode');
+    expect(mocks.callMcpTool).not.toHaveBeenCalled();
+    expect(mocks.beginIntegrationCall).not.toHaveBeenCalled();
+  });
+
+  it('rejects legacy manage_tasks launches before they can create an untracked Fast child', async () => {
+    await expect(
+      callFastAgentIntegration(
+        auditContext,
+        [
+          {
+            id: 'roomote',
+            name: 'Roomote',
+            description: 'Deployment management',
+            tools: [{ name: 'manage_tasks' }],
+          },
+        ],
+        {
+          integrationId: 'roomote',
+          toolName: 'manage_tasks',
+          args: {
+            action: 'launch',
+            prompt: 'Fix checkout',
+            environmentId: 'environment-1',
+          },
+        },
+      ),
+    ).rejects.toThrow(
+      'Fast Sessions must use launch_task so the child stays attached and reports settlement to its parent Session.',
+    );
     expect(mocks.callMcpTool).not.toHaveBeenCalled();
     expect(mocks.beginIntegrationCall).not.toHaveBeenCalled();
   });

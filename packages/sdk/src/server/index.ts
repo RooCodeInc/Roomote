@@ -113,6 +113,7 @@ export {
   createFastAgentSessionArtifact,
   createSessionArtifact,
 } from './lib/artifacts/create-session-artifact';
+export { buildFastAgentArtifactCreator } from './lib/artifacts/fast-agent-artifact-creator';
 export {
   notifyFastAgentParentOnArtifact,
   type FastArtifactNotificationResult,
@@ -226,6 +227,10 @@ export {
   type FastAgentDurableTurn,
   type FastAgentHumanFollowUpAdmission,
 } from './lib/fast-agent-human-follow-up';
+export {
+  resolveFastAgentSessionImages,
+  type FastAgentReplyImage,
+} from './lib/fast-agent-session-images';
 
 export {
   getCommunicationProviderAdapter,

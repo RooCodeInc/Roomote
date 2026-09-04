@@ -12,6 +12,7 @@ import {
   type PullRequestStatus,
   type SourceControlProvider,
   isPrReviewRun,
+  isSessionRequestedReviewRun,
 } from '@roomote/types';
 
 import {
@@ -114,10 +115,13 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
     return false;
   }
 
-  // Review-pipeline runs never forward PR events to their parent session:
-  // the PR's implementation task already delivers them, and a duplicate from
-  // the attached review task would double-announce in the same session.
-  if (isPrReviewRun(params.run)) {
+  // An automatic review attached to a session for visibility does not forward
+  // PR feedback: the PR's implementation task already delivers it. A review
+  // the session requested itself is that session's only carrier for the
+  // outcome, so it delivers; when an implementation task in the same
+  // conversation also delivers, the conversation-scoped feedback claim keeps
+  // it to one announcement.
+  if (isPrReviewRun(params.run) && !isSessionRequestedReviewRun(params.run)) {
     return false;
   }
 

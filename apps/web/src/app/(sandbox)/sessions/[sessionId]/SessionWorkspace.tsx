@@ -9,11 +9,11 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { useMediaQuery } from 'usehooks-ts';
+import { useMediaQuery, useResizeObserver } from 'usehooks-ts';
 import {
   getReasoningEffortLabel,
   isTaskExecutingTurn,
@@ -26,10 +26,7 @@ import {
   getUserDisplayName,
   humanizeFilename,
 } from '@/lib';
-import {
-  parseSessionArtifactSearchParams,
-  type SessionArtifactSelection,
-} from '@/lib/artifact-view-urls';
+import { type SessionArtifactSelection } from '@/lib/artifact-view-urls';
 import { getSessionPullRequests } from '@/lib/session-pull-requests';
 import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInferenceCostBreakdown';
 import { PullRequestBadge } from '@/components/sandbox';
@@ -45,13 +42,13 @@ import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 import {
   AppWindow,
   ArrowLeftFromLine,
-  ArrowLeft,
   Avatar,
   BasicTooltip,
   BrandIcon,
   Brain,
   Button,
   Calendar,
+  Columns3,
   DollarSign,
   FileText,
   Globe,
@@ -65,7 +62,6 @@ import {
   PopoverTrigger,
   Slack,
   VideoIcon,
-  X,
   Rows4,
 } from '@/components/system';
 import { SandboxSidePanelHeader } from '../../SandboxSidePanelHeader';
@@ -84,10 +80,12 @@ import {
 } from '../../use-sandbox-layout';
 import { NestedTaskSidePanel } from './NestedTaskSidePanel';
 import {
+  OpenSessionArtifactViewerContext,
   OpenSessionTaskPanelContext,
   OpenSessionTasksPanelContext,
   SessionRunningTaskCountContext,
   SessionTaskStateRevisionContext,
+  type SessionArtifactViewerSelection,
 } from './session-task-panel-context';
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
 import { useArtifactByPath } from '../../task/[taskId]/hooks/use-artifact-by-path';
@@ -97,6 +95,11 @@ import {
   PreviewSidePanel,
   type PreviewEntry,
 } from '../../task/[taskId]/sidebar-panels/PreviewSidePanel';
+import {
+  getSessionPanelMinSizes,
+  getSessionTaskPanelCapacity,
+  useSessionWorkspacePanels,
+} from './use-session-workspace-panels';
 
 const ArtifactViewerContent = dynamic(
   () =>
@@ -355,11 +358,7 @@ function SessionArtifactViewer({
   onBack,
   onClose,
 }: {
-  selection: {
-    owner: { taskId: string } | { sessionId: string };
-    path: string;
-    version?: number;
-  };
+  selection: SessionArtifactViewerSelection;
   backLabel: string;
   closeLabel: string;
   onBack: () => void;
@@ -370,64 +369,33 @@ function SessionArtifactViewer({
     isPending,
     isError,
   } = useArtifactByPath(selection.owner, selection.path, selection.version);
+  const selectedArtifact =
+    artifact?.path === selection.path &&
+    (selection.version === undefined || artifact.version === selection.version)
+      ? artifact
+      : null;
 
   return (
     <>
-      <div className="flex min-w-0 shrink-0 items-center gap-2 border-b-2 border-card px-4 py-2">
-        <BasicTooltip content={backLabel}>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7 shrink-0"
-            aria-label={backLabel}
-            onClick={onBack}
-          >
-            <ArrowLeft />
-          </Button>
-        </BasicTooltip>
-        <h2 className="min-w-0 flex-1 truncate text-sm font-medium">
-          {humanizeFilename(selection.path)}
-        </h2>
-        <BasicTooltip content="Close">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={closeLabel}
-            onClick={onClose}
-          >
-            <X />
-          </Button>
-        </BasicTooltip>
-      </div>
+      <SandboxSidePanelHeader
+        title={humanizeFilename(selection.path)}
+        onBack={onBack}
+        backLabel={backLabel}
+        onClose={onClose}
+        closeLabel={closeLabel}
+      />
       <div className="min-h-0 flex-1 bg-zinc-800">
-        {isPending ? (
-          <div
-            className="flex h-full items-center justify-center"
-            aria-label="Loading artifact"
-          >
-            <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
-          </div>
-        ) : isError || !artifact ? (
-          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-            This artifact is unavailable.
-          </div>
-        ) : (
-          <ArtifactViewerContent
-            artifact={artifact}
-            owner={selection.owner}
-            className="h-full border-0"
-          />
-        )}
+        <ArtifactViewerContent
+          artifact={selectedArtifact}
+          owner={selection.owner}
+          className="h-full border-0"
+          isLoading={isPending}
+          emptyMessage={isError ? 'This artifact is unavailable.' : undefined}
+        />
       </div>
     </>
   );
 }
-
-type SessionArtifactViewerSelection = {
-  owner: { taskId: string } | { sessionId: string };
-  path: string;
-  version?: number;
-};
 
 function SessionArtifactsPanel({
   tasks,
@@ -622,10 +590,12 @@ function SessionPreviewsPanel({
 function SessionTasksPanel({
   tasks,
   onOpenTask,
+  onOpenSideBySide,
   onClose,
 }: {
   tasks: Array<Pick<SessionTaskSummary, 'taskId' | 'title'>>;
   onOpenTask: (taskId: string) => void;
+  onOpenSideBySide: () => void;
   onClose: () => void;
 }) {
   return (
@@ -637,6 +607,19 @@ function SessionTasksPanel({
         title="Tasks"
         closeLabel="Close tasks"
         onClose={onClose}
+        actions={
+          <BasicTooltip content="Open side-by-side">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              aria-label="Open side-by-side"
+              onClick={onOpenSideBySide}
+            >
+              <Columns3 />
+            </Button>
+          </BasicTooltip>
+        }
       />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-2">
         {tasks.map((task) => (
@@ -647,6 +630,9 @@ function SessionTasksPanel({
             onOpen={onOpenTask}
           />
         ))}
+        <p className="py-2 text-xs text-muted-foreground">
+          When opened side by side, use Alt/Option + ←/→ to move between panels
+        </p>
       </div>
     </FramedSurface>
   );
@@ -763,23 +749,6 @@ function SessionInfoPanel({
   );
 }
 
-type BaseWorkspacePanel =
-  | { kind: 'info' }
-  | { kind: 'tasks'; autoOpened?: boolean }
-  | { kind: 'artifacts' }
-  | { kind: 'previews' }
-  | { kind: 'nested'; taskId: string };
-
-type WorkspacePanel =
-  | BaseWorkspacePanel
-  | {
-      kind: 'artifact';
-      taskId: string;
-      path: string;
-      version?: number;
-      returnTo: BaseWorkspacePanel | null;
-    };
-
 export function SessionWorkspace({
   session,
   children,
@@ -788,20 +757,10 @@ export function SessionWorkspace({
   children: ReactNode;
 }) {
   const trpc = useTRPC();
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const selectedTaskId = searchParams.get('task');
-  // A `?artifact=<path>&v=<version>` link (the create_artifact result and the
-  // viewer's copy-link URL) opens the Session-owned artifact in the Artifacts
-  // panel unless a URL-selected task already owns the side panel.
-  const requestedArtifact = selectedTaskId
-    ? null
-    : parseSessionArtifactSearchParams(searchParams);
-  // Exactly one local side panel can be active. A URL-selected task normally
-  // takes precedence, except while its artifact detail temporarily overlays it.
-  const [panel, setPanel] = useState<WorkspacePanel | null>(() =>
-    requestedArtifact ? { kind: 'artifacts' } : null,
-  );
+  const workspacePanelsRef = useRef<HTMLDivElement>(null!);
+  const { width: workspaceWidth = 0 } = useResizeObserver<HTMLDivElement>({
+    ref: workspacePanelsRef,
+  });
   const isFastTaskSource = session.taskSource === 'fast';
   const { data: currentSession } = useQuery(
     trpc.sessions.byId.queryOptions(
@@ -843,246 +802,291 @@ export function SessionWorkspace({
   );
   const singleRunningTaskId =
     runningTaskCount === 1 ? runningTasks[0]?.taskId : null;
-  const selectedTask = taskCards.find((task) => task.taskId === selectedTaskId);
-  const panelOpen = panel !== null || Boolean(selectedTask);
   const isMdOrLarger = useMediaQuery('(min-width: 768px)', {
     initializeWithValue: false,
   });
-  const previousTaskStateRef = useRef<{
-    taskCount: number;
-    runningTaskCount: number;
-  } | null>(null);
-
-  useEffect(() => {
-    const previousTaskState = previousTaskStateRef.current;
-    if (
-      isMdOrLarger &&
-      previousTaskState?.taskCount === 1 &&
-      previousTaskState.runningTaskCount > 0 &&
-      taskCards.length >= 2 &&
-      panel === null &&
-      !selectedTask
-    ) {
-      setPanel({ kind: 'tasks', autoOpened: true });
-    }
-
-    previousTaskStateRef.current = {
-      taskCount: taskCards.length,
-      runningTaskCount,
-    };
-  }, [isMdOrLarger, panel, runningTaskCount, selectedTask, taskCards.length]);
-
-  const replaceSearchParams = useCallback(
-    (update: (params: URLSearchParams) => void) => {
-      const params = new URLSearchParams(searchParams);
-      update(params);
-      const query = params.toString();
-      if (query === searchParams.toString()) return;
-      router.replace(`/sessions/${session.id}${query ? `?${query}` : ''}`);
-    },
-    [router, searchParams, session.id],
+  const taskPanelCapacity = getSessionTaskPanelCapacity(
+    workspaceWidth,
+    isMdOrLarger,
   );
-  // Leaving the deep-linked artifact drops it from the URL so a refresh does
-  // not reopen it.
-  const clearRequestedArtifact = useCallback(
-    () =>
-      replaceSearchParams((params) => {
-        params.delete('artifact');
-        params.delete('v');
-      }),
-    [replaceSearchParams],
+  const taskIds = useMemo(
+    () => taskCards.map((task) => task.taskId),
+    [taskCards],
   );
-  const selectTask = useCallback(
-    (taskId: string | null) =>
-      replaceSearchParams((params) => {
-        if (taskId) params.set('task', taskId);
-        else params.delete('task');
-        // Any side-panel change moves away from the deep-linked artifact.
-        params.delete('artifact');
-        params.delete('v');
-      }),
-    [replaceSearchParams],
-  );
-
-  const openTaskPanel = useCallback(
-    (taskId: string) => {
-      setPanel({ kind: 'nested', taskId });
-      selectTask(null);
-    },
-    [selectTask],
-  );
-  const openTasksPanel = useCallback(() => {
-    if (singleRunningTaskId) {
-      setPanel(null);
-      selectTask(singleRunningTaskId);
-      return;
-    }
-
-    setPanel({ kind: 'tasks' });
-    selectTask(null);
-  }, [selectTask, singleRunningTaskId]);
-  const closePanel = () => {
-    setPanel(null);
-    selectTask(null);
-  };
-  const togglePanel = (kind: 'info' | 'tasks' | 'artifacts' | 'previews') => {
-    setPanel((previous) => (previous?.kind === kind ? null : { kind }));
-    selectTask(null);
-  };
-  const panelContent =
-    panel?.kind === 'artifact' ? (
+  const {
+    utilityPanel,
+    taskArtifacts,
+    promptFocusTaskId,
+    requestedArtifact,
+    visibleTaskPanelIds,
+    panelOpen,
+    openTaskPanel,
+    openTasksPanel,
+    openTasksSideBySide,
+    showMain,
+    openArtifactViewer,
+    togglePanel,
+    closeUtilityPanel,
+    closeSessionArtifact,
+    backToSessionArtifacts,
+    clearRequestedArtifact,
+    closeTaskPanel,
+    selectPanelTask,
+    openTaskArtifact,
+    backToTask,
+    clearPromptFocus,
+  } = useSessionWorkspacePanels({
+    sessionId: session.id,
+    taskIds,
+    singleRunningTaskId: singleRunningTaskId ?? null,
+    taskPanelCapacity,
+    isMdOrLarger,
+    workspaceWidth,
+  });
+  const renderTaskPanel = (taskId: string) => {
+    const artifact = taskArtifacts[taskId];
+    return artifact ? (
       <FramedSurface
         frameClassName="p-0"
         surfaceClassName="relative flex flex-col overflow-hidden"
       >
         <SessionArtifactViewer
-          selection={{
-            owner: { taskId: panel.taskId },
-            path: panel.path,
-            version: panel.version,
-          }}
+          selection={{ owner: { taskId }, ...artifact }}
           backLabel="Back to task"
           closeLabel="Close artifact"
-          onBack={() => setPanel(panel.returnTo)}
-          onClose={closePanel}
+          onBack={() => backToTask(taskId)}
+          onClose={() => closeTaskPanel(taskId)}
         />
       </FramedSurface>
-    ) : selectedTask ? (
+    ) : (
       <NestedTaskSidePanel
-        taskId={selectedTask.taskId}
+        key={taskId}
+        taskId={taskId}
         tasks={taskCards}
-        onSelectTask={(taskId) => selectTask(taskId)}
-        onClose={closePanel}
+        onSelectTask={(nextTaskId) => selectPanelTask(taskId, nextTaskId)}
+        onClose={() => closeTaskPanel(taskId)}
         onOpenArtifact={(path, version) =>
-          setPanel({
-            kind: 'artifact',
-            taskId: selectedTask.taskId,
-            path,
-            version,
-            returnTo: null,
-          })
+          openTaskArtifact(taskId, path, version)
         }
       />
-    ) : panel?.kind === 'nested' ? (
-      <NestedTaskSidePanel
-        taskId={panel.taskId}
-        tasks={taskCards}
-        onSelectTask={(taskId) => setPanel({ kind: 'nested', taskId })}
-        onClose={closePanel}
-        onOpenArtifact={(path, version) =>
-          setPanel({
-            kind: 'artifact',
-            taskId: panel.taskId,
-            path,
-            version,
-            returnTo: panel,
-          })
-        }
-      />
-    ) : panel?.kind === 'tasks' ? (
+    );
+  };
+
+  const utilityPanelContent =
+    utilityPanel?.kind === 'tasks' ? (
       <SessionTasksPanel
         tasks={taskCards}
         onOpenTask={openTaskPanel}
-        onClose={closePanel}
+        onOpenSideBySide={openTasksSideBySide}
+        onClose={closeUtilityPanel}
       />
-    ) : panel?.kind === 'artifacts' ? (
+    ) : utilityPanel?.kind === 'artifacts' && utilityPanel.artifact ? (
+      <FramedSurface
+        frameClassName="p-0"
+        surfaceClassName="relative flex flex-col overflow-hidden"
+      >
+        <SessionArtifactViewer
+          selection={utilityPanel.artifact}
+          backLabel="Back to artifacts"
+          closeLabel="Close artifact"
+          onBack={backToSessionArtifacts}
+          onClose={closeSessionArtifact}
+        />
+      </FramedSurface>
+    ) : utilityPanel?.kind === 'artifacts' ? (
       <SessionArtifactsPanel
         tasks={artifactTasks}
         sessionId={session.id}
         sessionArtifacts={session.artifacts ?? []}
         initialSelection={requestedArtifact}
         onDeselect={clearRequestedArtifact}
-        onClose={closePanel}
+        onClose={closeSessionArtifact}
       />
-    ) : panel?.kind === 'previews' ? (
-      <SessionPreviewsPanel tasks={taskCards} onClose={closePanel} />
+    ) : utilityPanel?.kind === 'previews' ? (
+      <SessionPreviewsPanel tasks={taskCards} onClose={closeUtilityPanel} />
     ) : (
-      <SessionInfoPanel session={session} onClose={closePanel} />
+      <SessionInfoPanel session={session} onClose={closeUtilityPanel} />
     );
+  const renderedPanels = utilityPanel
+    ? [{ id: `utility:${utilityPanel.kind}`, content: utilityPanelContent }]
+    : visibleTaskPanelIds.map((taskId) => ({
+        id: `task:${taskId}`,
+        content: renderTaskPanel(taskId),
+      }));
+  useEffect(() => {
+    if (!promptFocusTaskId) return;
+
+    const workspace = workspacePanelsRef.current;
+    const focusPrompt = () => {
+      const taskPanel = Array.from(
+        workspace.querySelectorAll<HTMLElement>('[data-session-task-panel]'),
+      ).find((panel) => panel.dataset.sessionTaskPanel === promptFocusTaskId);
+      const promptInput = taskPanel?.querySelector<HTMLTextAreaElement>(
+        'textarea:not(:disabled)',
+      );
+      if (!promptInput) return false;
+
+      promptInput.focus();
+      if (document.activeElement !== promptInput) return false;
+
+      clearPromptFocus(promptFocusTaskId);
+      return true;
+    };
+
+    if (focusPrompt()) return;
+
+    const observer = new MutationObserver(focusPrompt);
+    observer.observe(workspace, {
+      attributes: true,
+      attributeFilter: ['disabled'],
+      childList: true,
+      subtree: true,
+    });
+
+    return () => observer.disconnect();
+  }, [clearPromptFocus, promptFocusTaskId]);
+  const primaryPanel = renderedPanels[0];
+  const { panelMinSize, mainMinSize } = getSessionPanelMinSizes(workspaceWidth);
   const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
   useResponsiveSandboxSidebar(session.id);
+  const handlePromptFocusNavigation = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (
+        !event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')
+      ) {
+        return;
+      }
+
+      const promptInputs = Array.from(
+        event.currentTarget.querySelectorAll<HTMLTextAreaElement>(
+          '[data-slot="resizable-panel"] textarea:not(:disabled)',
+        ),
+      );
+      if (promptInputs.length < 2) return;
+
+      const activeIndex = promptInputs.findIndex(
+        (input) => input === document.activeElement,
+      );
+      if (activeIndex < 0) return;
+
+      const offset = event.key === 'ArrowLeft' ? -1 : 1;
+      const nextInput = promptInputs[activeIndex + offset];
+      if (!nextInput) return;
+
+      event.preventDefault();
+      nextInput.focus();
+    },
+    [],
+  );
 
   return (
     <OpenSessionTaskPanelContext.Provider value={openTaskPanel}>
-      <WorkspaceSurface
-        className="relative"
-        sideActions={
-          <>
-            <SandboxSideActions isPanelOpen={panelOpen} onShowMain={closePanel}>
-              <SideNavItem
-                side="right"
-                label="Tasks"
-                tooltip="Tasks"
-                active={panel?.kind === 'tasks' && !selectedTask}
-                disabled={taskCards.length === 0}
-                icon={Rows4}
-                onClick={() => togglePanel('tasks')}
-              />
-              <SideNavItem
-                side="right"
-                label="Live Preview"
-                tooltip="Live Preview"
-                active={panel?.kind === 'previews' && !selectedTask}
-                disabled={sessionPreviewCount === 0}
-                icon={AppWindow}
-                onClick={() => togglePanel('previews')}
-              />
-              <SideNavItem
-                side="right"
-                label="Artifacts"
-                tooltip="Artifacts"
-                active={panel?.kind === 'artifacts' && !selectedTask}
-                icon={LayoutGrid}
-                onClick={() => togglePanel('artifacts')}
-              />
-              <SideNavItem
-                side="right"
-                label="Session info"
-                tooltip="Session info"
-                active={panel?.kind === 'info' && !selectedTask}
-                icon={Info}
-                onClick={() => togglePanel('info')}
-              />
-            </SandboxSideActions>
-            {!isSidebarVisible && !panelOpen ? (
-              <BasicTooltip content="Show sidebar">
-                <Button
-                  variant="ghost"
-                  className="absolute top-2.5 right-3 size-8 shrink-0 md:hidden"
-                  aria-label="Show sidebar"
-                  onClick={toggleSidebar}
+      <OpenSessionArtifactViewerContext.Provider value={openArtifactViewer}>
+        <WorkspaceSurface
+          className="relative"
+          sideActions={
+            <>
+              <SandboxSideActions isPanelOpen={panelOpen} onShowMain={showMain}>
+                <SideNavItem
+                  side="right"
+                  label="Tasks"
+                  tooltip="Tasks"
+                  description="Middle-click to open side-by-side"
+                  active={utilityPanel?.kind === 'tasks'}
+                  disabled={taskCards.length === 0}
+                  icon={Rows4}
+                  onClick={() => togglePanel('tasks')}
+                  onAuxClick={(event) => {
+                    if (event.button !== 1) return;
+                    event.preventDefault();
+                    openTasksSideBySide();
+                  }}
+                />
+                <SideNavItem
+                  side="right"
+                  label="Live Preview"
+                  tooltip="Live Preview"
+                  active={utilityPanel?.kind === 'previews'}
+                  disabled={sessionPreviewCount === 0}
+                  icon={AppWindow}
+                  onClick={() => togglePanel('previews')}
+                />
+                <SideNavItem
+                  side="right"
+                  label="Artifacts"
+                  tooltip="Artifacts"
+                  active={utilityPanel?.kind === 'artifacts'}
+                  icon={LayoutGrid}
+                  onClick={() => togglePanel('artifacts')}
+                />
+                <SideNavItem
+                  side="right"
+                  label="Session info"
+                  tooltip="Session info"
+                  active={utilityPanel?.kind === 'info'}
+                  icon={Info}
+                  onClick={() => togglePanel('info')}
+                />
+              </SandboxSideActions>
+              {!isSidebarVisible && !panelOpen ? (
+                <BasicTooltip content="Show sidebar">
+                  <Button
+                    variant="ghost"
+                    className="absolute top-2.5 right-3 size-8 shrink-0 md:hidden"
+                    aria-label="Show sidebar"
+                    onClick={toggleSidebar}
+                  >
+                    <ArrowLeftFromLine className="size-4" />
+                  </Button>
+                </BasicTooltip>
+              ) : null}
+            </>
+          }
+        >
+          <div
+            ref={workspacePanelsRef}
+            className="flex min-h-0 min-w-0 flex-1"
+            onKeyDownCapture={handlePromptFocusNavigation}
+          >
+            <ResponsiveWorkspacePanels
+              isPanelOpen={panelOpen}
+              dimUnfocusedPanelIds={[
+                'main',
+                ...visibleTaskPanelIds
+                  .filter((taskId) => !taskArtifacts[taskId])
+                  .map((taskId) => `task:${taskId}`),
+              ]}
+              mainMinSize={mainMinSize}
+              panelMinSize={panelMinSize}
+              main={
+                <SessionPullRequestsContext.Provider
+                  value={sessionPullRequests}
                 >
-                  <ArrowLeftFromLine className="size-4" />
-                </Button>
-              </BasicTooltip>
-            ) : null}
-          </>
-        }
-      >
-        <ResponsiveWorkspacePanels
-          isPanelOpen={panelOpen}
-          mainSize={
-            panel?.kind === 'tasks' && panel.autoOpened ? 66.6667 : undefined
-          }
-          panelSize={
-            panel?.kind === 'tasks' && panel.autoOpened ? 33.3333 : undefined
-          }
-          main={
-            <SessionPullRequestsContext.Provider value={sessionPullRequests}>
-              <SessionRunningTaskCountContext.Provider value={runningTaskCount}>
-                <SessionTaskStateRevisionContext.Provider
-                  value={taskStateRevision}
-                >
-                  <OpenSessionTasksPanelContext.Provider value={openTasksPanel}>
-                    {children}
-                  </OpenSessionTasksPanelContext.Provider>
-                </SessionTaskStateRevisionContext.Provider>
-              </SessionRunningTaskCountContext.Provider>
-            </SessionPullRequestsContext.Provider>
-          }
-          panel={panelContent}
-        />
-      </WorkspaceSurface>
+                  <SessionRunningTaskCountContext.Provider
+                    value={runningTaskCount}
+                  >
+                    <SessionTaskStateRevisionContext.Provider
+                      value={taskStateRevision}
+                    >
+                      <OpenSessionTasksPanelContext.Provider
+                        value={openTasksPanel}
+                      >
+                        {children}
+                      </OpenSessionTasksPanelContext.Provider>
+                    </SessionTaskStateRevisionContext.Provider>
+                  </SessionRunningTaskCountContext.Provider>
+                </SessionPullRequestsContext.Provider>
+              }
+              panel={primaryPanel?.content ?? utilityPanelContent}
+              panelId={primaryPanel?.id}
+              additionalPanels={renderedPanels.slice(1)}
+            />
+          </div>
+        </WorkspaceSurface>
+      </OpenSessionArtifactViewerContext.Provider>
     </OpenSessionTaskPanelContext.Provider>
   );
 }

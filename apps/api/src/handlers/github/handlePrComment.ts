@@ -2,7 +2,10 @@ import {
   findActiveGitHubPrReviewTask,
   findReusableGitHubPrFollowUpOwner,
 } from '@roomote/db/server';
-import { getInstallationOctokit } from '@roomote/github';
+import {
+  getInstallationOctokit,
+  Schemas as GitHubSchemas,
+} from '@roomote/github';
 import {
   startSourceControlFastSessionTurn,
   type SourceControlFastDiscussion,
@@ -357,11 +360,18 @@ function buildReviewReplyTriggeringComment({
   commentBody: string;
   parentComment: ReviewCommentSnapshot;
 }): string {
+  const parentIsRoomote = GitHubSchemas.isRoomoteGitHubLogin(
+    parentComment.userLogin,
+  );
   const lines = [
-    `${commenter} mentioned Roomote in a reply to review comment #${parentComment.id}:`,
+    parentIsRoomote
+      ? `${commenter} replied to Roomote's review comment #${parentComment.id}:`
+      : `${commenter} mentioned Roomote in a reply to review comment #${parentComment.id}:`,
     formatQuotedText(commentBody),
     '',
-    `${parentComment.userLogin} wrote the following review comment that this reply is in response to:`,
+    parentIsRoomote
+      ? `Roomote (${parentComment.userLogin}) wrote the following review comment that this reply is in response to:`
+      : `${parentComment.userLogin} wrote the following review comment that this reply is in response to:`,
     formatQuotedText(parentComment.body),
   ];
 
@@ -661,7 +671,9 @@ async function resolvePullRequestActiveTasks({
 /**
  * Every @mention on a pull request enters the pull request's Fast Session.
  * The Session reads the discussion, replies as a comment, and delegates work
- * to a task on the pull request's branch when the request needs one.
+ * to a task on the pull request's branch when the request needs one. Only an
+ * explicit @mention counts: a reply inside a review thread without one is
+ * left alone, so people can discuss a finding without summoning Roomote.
  */
 export async function handlePrComment(
   eventPayload: PullRequestMentionEvent,
@@ -669,6 +681,7 @@ export async function handlePrComment(
   const { installation, repository, sender, ...rest } = eventPayload;
   const isSubmittedReview = 'review' in rest;
   const mention = isSubmittedReview ? rest.review : rest.comment;
+  const githubInstallationId = installation?.id;
 
   if (
     !isMention({
@@ -679,7 +692,6 @@ export async function handlePrComment(
     return { status: 'ok', message: 'no_mention' };
   }
 
-  const githubInstallationId = installation?.id;
   const mentionResponseTarget = getMentionResponseTarget(eventPayload);
 
   if (!githubInstallationId) {
@@ -806,6 +818,7 @@ export async function handlePrComment(
     discussion,
     userId: commenterUserId,
     senderDisplayName: sender.login,
+    sourceUrl: mention.html_url,
     question: mention.body ?? '',
     agentContext: buildPullRequestMentionContext({
       details: buildCompactPullRequestDetails({

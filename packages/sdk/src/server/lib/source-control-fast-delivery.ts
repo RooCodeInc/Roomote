@@ -5,15 +5,13 @@ import {
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
 import { and, db, eq, repositories } from '@roomote/db/server';
-import {
-  buildFastSessionReplyFooterText,
-  resolveFastSessionLivePreviewUrl,
-} from '@roomote/communication';
+import { buildFastSessionReplyFooterText } from '@roomote/communication';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
   linkedWorkItemProviderSchema,
   TaskPayloadKind,
+  type FastAgentConversation,
   type FastAgentSourceControlConversation,
   type FastAgentSourceControlSurface,
 } from '@roomote/types';
@@ -111,6 +109,12 @@ export type SourceControlFastLaunchTarget = {
 export function createFastAgentSourceControlTaskLauncher(params: {
   userId: string;
   conversation: FastAgentSourceControlConversation;
+  /**
+   * The Session's home conversation when it differs from the discussion (a
+   * Slack Session answering a mention on the pull request its task opened).
+   * The child attaches to that home so its lifecycle events reach the Session.
+   */
+  parentConversation?: FastAgentConversation;
   resolveTarget: () => Promise<SourceControlFastLaunchTarget>;
 }): LaunchFastAgentTask {
   const discussion = parseSourceControlFastConversation(params.conversation);
@@ -188,7 +192,7 @@ export function createFastAgentSourceControlTaskLauncher(params: {
           ...(linkedIssue ? { linkedWorkItems: [linkedIssue] } : {}),
           ...buildFastAgentChildTaskMetadata({
             sessionId: parentSessionId,
-            conversation: params.conversation,
+            conversation: params.parentConversation ?? params.conversation,
           }),
           ...(environmentId && environmentId !== ALL_REPOSITORIES
             ? { environmentId }
@@ -432,14 +436,33 @@ async function findProviderRepository(discussion: SourceControlFastDiscussion) {
 function pullRequestPageUrl(discussion: SourceControlFastDiscussion): string {
   const base = `https://${discussion.host}/${discussion.repositoryFullName}`;
   switch (discussion.provider) {
+    case 'github':
+      return `${base}/${discussion.kind === 'pull' ? 'pull' : 'issues'}/${discussion.number}`;
     case 'gitlab':
       return `${base}/-/${discussion.kind === 'pull' ? 'merge_requests' : 'issues'}/${discussion.number}`;
     case 'bitbucket':
       return `${base}/pull-requests/${discussion.number}`;
+    case 'ado': {
+      // Azure DevOps names repositories organization/project/repository; a
+      // pull request lives under the repository's _git area and a work item
+      // under the project.
+      const [organization, project, repository, ...extra] =
+        discussion.repositoryFullName.split('/');
+      if (!organization || !project || !repository || extra.length > 0) {
+        return `${base}/${discussion.kind === 'pull' ? 'pullrequest' : '_workitems/edit'}/${discussion.number}`;
+      }
+      const projectBase = `https://${discussion.host}/${organization}/${project}`;
+      return discussion.kind === 'pull'
+        ? `${projectBase}/_git/${repository}/pullrequest/${discussion.number}`
+        : `${projectBase}/_workitems/edit/${discussion.number}`;
+    }
     default:
       return `${base}/${discussion.kind === 'pull' ? 'pulls' : 'issues'}/${discussion.number}`;
   }
 }
+
+/** Public page of a discussion, derived from its identity when the provider's own URL is not at hand. */
+export const buildSourceControlDiscussionUrl = pullRequestPageUrl;
 
 async function buildGitLabFastDelivery(
   discussion: SourceControlFastDiscussion,
@@ -832,13 +855,26 @@ async function buildAdoFastDelivery(
 /**
  * The reply surface a Session uses in a discussion: replies post as comments
  * with the Session footer, and tasks launch against the discussion's target.
+ *
+ * A turn owns one comment: the first reply opens it and later replies append
+ * to it by editing in place, so a turn never stacks comments on the
+ * discussion. The footer is rendered once, at the bottom, on every edit.
  */
 export function buildSourceControlFastAdapter(params: {
   conversation: FastAgentSourceControlConversation;
   delivery: SourceControlFastDelivery;
   userId: string;
   sessionId: string;
-  /** Blockquote of the message this turn answers; opens the turn's comment. */
+  /**
+   * The Session's home conversation when the discussion is not its own (see
+   * createFastAgentSourceControlTaskLauncher). Delegated children attach there.
+   */
+  parentConversation?: FastAgentConversation;
+  /**
+   * Blockquote of the message this turn answers; opens the turn's comment on
+   * the discussion's main thread. Inside a review thread the reply already
+   * sits under the comment it answers, so the quote is dropped there.
+   */
   quote?: string | null;
   onReplyPosted?: () => void;
 }): {
@@ -850,12 +886,23 @@ export function buildSourceControlFastAdapter(params: {
   ) => Promise<{ messageId: string }>;
 } {
   const discussion = parseSourceControlFastConversation(params.conversation);
+  const footer = discussion
+    ? buildFastSessionReplyFooterText({
+        provider: discussion.provider,
+        sessionId: params.sessionId,
+      })
+    : '';
+  const quote = discussion?.reviewCommentId ? null : params.quote;
   let turnComment: SourceControlPostedComment | null = null;
   let turnBody = '';
+  const renderBody = () => `${turnBody}\n\n${footer}`;
   return {
     launchTask: createFastAgentSourceControlTaskLauncher({
       userId: params.userId,
       conversation: params.conversation,
+      ...(params.parentConversation
+        ? { parentConversation: params.parentConversation }
+        : {}),
       resolveTarget: params.delivery.resolveTarget,
     }),
     postReply: async ({ message }) => {
@@ -864,31 +911,19 @@ export function buildSourceControlFastAdapter(params: {
           'The discussion for this Session could not be resolved.',
         );
       }
-      const footer = buildFastSessionReplyFooterText({
-        provider: discussion.provider,
-        sessionId: params.sessionId,
-        // The preview link is a nicety; its lookup never blocks the comment.
-        livePreviewUrl: await resolveFastSessionLivePreviewUrl(
-          params.sessionId,
-        ).catch(() => null),
-      });
-      // One comment per turn: the first reply opens it, later replies append
-      // by editing it in place, so a turn never stacks comments on the
-      // discussion.
       if (turnComment?.update) {
         turnBody = `${turnBody}\n\n${message}`;
-        await turnComment.update(`${turnBody}\n\n${footer}`);
+        await turnComment.update(renderBody());
         params.onReplyPosted?.();
         return { messageId: turnComment.messageId };
       }
-      turnBody = params.quote ? `${params.quote}\n\n${message}` : message;
-      const posted = await params.delivery.postComment({
+      turnBody = quote ? `${quote}\n\n${message}` : message;
+      turnComment = await params.delivery.postComment({
         discussion,
-        body: `${turnBody}\n\n${footer}`,
+        body: renderBody(),
       });
-      turnComment = posted;
       params.onReplyPosted?.();
-      return { messageId: posted.messageId };
+      return { messageId: turnComment.messageId };
     },
     ...(params.delivery.updateCommentById && discussion
       ? {
@@ -896,28 +931,15 @@ export function buildSourceControlFastAdapter(params: {
           // editor from it, replace the comment's body, and adopt it as the
           // turn's comment so later replies keep appending in place.
           replaceReply: async ({ messageId }, { message }) => {
-            const footer = buildFastSessionReplyFooterText({
-              provider: discussion.provider,
-              sessionId: params.sessionId,
-              livePreviewUrl: await resolveFastSessionLivePreviewUrl(
-                params.sessionId,
-              ).catch(() => null),
-            });
-            await params.delivery.updateCommentById!({
-              discussion,
-              messageId,
-              body: `${message}\n\n${footer}`,
-            });
+            const update = (nextBody: string) =>
+              params.delivery.updateCommentById!({
+                discussion,
+                messageId,
+                body: nextBody,
+              });
             turnBody = message;
-            turnComment = {
-              messageId,
-              update: (nextBody: string) =>
-                params.delivery.updateCommentById!({
-                  discussion,
-                  messageId,
-                  body: nextBody,
-                }),
-            };
+            await update(renderBody());
+            turnComment = { messageId, update };
             params.onReplyPosted?.();
             return { messageId };
           },

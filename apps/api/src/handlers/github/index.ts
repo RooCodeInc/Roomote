@@ -25,6 +25,7 @@ import { handlePrOpen } from './handlePrOpen';
 import { handlePrReadyForReview } from './handlePrReadyForReview';
 import { handlePrReopen } from './handlePrReopen';
 import { handlePrSynchronize } from './handlePrSynchronize';
+import { handleCheckRunRerequested } from './handleCheckRunRerequested';
 import { getCurrentGitHubPrHeadSha } from './currentPrHead';
 import type { WebhookPullRequestSynchronize } from './types';
 import { handlePrComment } from './handlePrComment';
@@ -263,22 +264,12 @@ github.post('/', async (c) => {
         `${name}.${payload.action}`,
         payload,
         async () => {
+          // Mentions are not subject to the automated skip list: a person
+          // addressing this app by name gets a response even in repositories
+          // where unsolicited automations are suppressed. The handlers return
+          // `no_mention` for everything else.
           if (!payload.issue.pull_request) {
-            if (isRepoSkipped(payload.repository.full_name)) {
-              return {
-                status: 'ok' as const,
-                message: `Skipping comment webhook for ${payload.repository.full_name}`,
-              };
-            }
-
             return handleGitHubIssueComment(payload);
-          }
-
-          if (isRepoSkipped(payload.repository.full_name)) {
-            return {
-              status: 'ok' as const,
-              message: `Skipping automated comment handling for ${payload.repository.full_name}`,
-            };
           }
 
           return handlePrComment(payload);
@@ -312,13 +303,6 @@ github.post('/', async (c) => {
 
     webhooks.on('issues.opened', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping issue webhook for ${payload.repository.full_name}`,
-          };
-        }
-
         const mentionResult = await handleGitHubIssueComment({
           installation: payload.installation,
           repository: payload.repository,
@@ -326,6 +310,12 @@ github.post('/', async (c) => {
           issue: payload.issue,
           mentionBody: payload.issue.body ?? '',
         });
+
+        // Triage Issues is unsolicited automation, so the skip list applies
+        // to it but not to the body mention above.
+        if (isRepoSkipped(payload.repository.full_name)) {
+          return mentionResult;
+        }
 
         // Always run Triage Issues when enabled (immediate, like Review Code).
         // Mentions and Triage Issues are independent: a mention still starts a
@@ -561,16 +551,7 @@ github.post('/', async (c) => {
           id,
           `${name}.${payload.action}`,
           payload,
-          async () => {
-            if (isRepoSkipped(payload.repository.full_name)) {
-              return {
-                status: 'ok' as const,
-                message: `Skipping automated review handling for ${payload.repository.full_name}`,
-              };
-            }
-
-            return handlePrComment(payload);
-          },
+          async () => handlePrComment(payload),
         );
       },
     );
@@ -584,16 +565,7 @@ github.post('/', async (c) => {
           id,
           `${name}.${payload.action}`,
           payload,
-          async () => {
-            if (isRepoSkipped(payload.repository.full_name)) {
-              return {
-                status: 'ok' as const,
-                message: `Skipping automated comment handling for ${payload.repository.full_name}`,
-              };
-            }
-
-            return handlePrComment(payload);
-          },
+          async () => handlePrComment(payload),
         );
       },
     );
@@ -666,6 +638,12 @@ github.post('/', async (c) => {
         async () => ({ status: 'ok' as const }),
       );
     });
+
+    webhooks.on('check_run.rerequested', ({ id, name, payload }) =>
+      recordWebhook(id, `${name}.${payload.action}`, payload, () =>
+        handleCheckRunRerequested(payload),
+      ),
+    );
 
     webhooks.on('pull_request.closed', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {

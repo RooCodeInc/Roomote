@@ -847,6 +847,13 @@ export const PromptInputTextarea = ({
       return;
     }
 
+    if (e.key === 'Escape' && !isComposing && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.currentTarget.blur();
+      return;
+    }
+
     if (e.key === 'Enter') {
       if (isComposing || e.nativeEvent.isComposing) {
         return;
@@ -1093,7 +1100,7 @@ export const PromptInputSubmit = ({
         aria-label={isGenerating ? 'Stop' : 'Submit'}
         className={cn(
           'rounded-full transition-colors',
-          isGenerating && 'bg-red-500/30 text-red-600 hover:bg-red-500/50',
+          isGenerating && 'bg-chart-4/30 text-chart-4 hover:bg-chart-4/50',
           className,
         )}
         onClick={handleClick}

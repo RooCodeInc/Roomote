@@ -21,6 +21,7 @@ import { NewTaskForm } from '@/components/tasks/NewTaskForm';
 
 import { OnboardingCard } from './OnboardingCard';
 import { BottomSheetTabs } from './BottomSheetTabs';
+import { HOME_HEADINGS } from './headings';
 import {
   HOME_PROMPT_PLACEHOLDERS,
   normalizeHomePromptPlaceholderIndex,
@@ -51,10 +52,14 @@ function persistFeedbackPromptDismissal(): void {
 }
 
 type HomeProps = {
+  initialHeading?: (typeof HOME_HEADINGS)[number];
   initialPlaceholderIndex: number;
 };
 
-export function Home({ initialPlaceholderIndex }: HomeProps) {
+export function Home({
+  initialHeading = HOME_HEADINGS[0],
+  initialPlaceholderIndex,
+}: HomeProps) {
   const [isExiting, setIsExiting] = useState(false);
   const [isBottomSheetExpanded, setIsBottomSheetExpanded] = useState(false);
   const [isFeedbackPromptVisible, setIsFeedbackPromptVisible] = useState(false);
@@ -193,7 +198,7 @@ export function Home({ initialPlaceholderIndex }: HomeProps) {
             )}
           >
             <h1 className="text-2xl tracking-tight font-bold animate-[enter-down_1s_1] pt-10 md:pt-0">
-              New Session
+              {initialHeading}
             </h1>
 
             <NewTaskForm

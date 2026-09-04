@@ -672,6 +672,151 @@ describe('GitHub PR review check lifecycle', () => {
     expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
   });
 
+  it('reconciles a completed finding check after the canonical summary becomes clean', async () => {
+    mockFindFirstLinkage.mockResolvedValue({
+      githubCheckRunId: 20,
+      githubReviewCommentId: 30,
+    });
+    mockGetCheck.mockResolvedValue({
+      data: {
+        head_sha: 'abcdef9',
+        status: 'completed',
+        conclusion: 'failure',
+        external_id: 'roomote-review:2',
+        output: { title: 'Roomote found issues' },
+      },
+    });
+    mockFindFirstRun.mockResolvedValue({
+      startedAt: new Date('2026-08-25T12:00:00.000Z'),
+      status: RunStatus.Completed,
+    });
+    mockGetIssueComment.mockResolvedValue({
+      data: {
+        updated_at: '2026-08-25T12:30:00.000Z',
+        body: '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nAll 1 issue addressed.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n- [x] Fix the authorization check\n<!-- roomote-review-checklist:end -->',
+      },
+    });
+
+    await completeGithubPrReviewCheckFromSummary({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      reviewHeadSha: 'abcdef9',
+      reviewSummaryBody:
+        '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nAll 1 issue addressed.\n<!-- roomote-review-status:end -->',
+      allowCompletedCheckUpdate: true,
+    });
+
+    expect(mockUpdateInstallationCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        check_run_id: 20,
+        status: 'completed',
+        conclusion: 'success',
+      }),
+    );
+    expect(mockReleaseRedisLock).toHaveBeenCalledOnce();
+  });
+
+  it('fails closed when a completed check has no owning review run', async () => {
+    mockFindFirstLinkage.mockResolvedValue({
+      githubCheckRunId: 20,
+      githubReviewCommentId: 30,
+    });
+    mockGetCheck.mockResolvedValue({
+      data: {
+        head_sha: 'abcdef9',
+        status: 'completed',
+        conclusion: 'failure',
+        external_id: null,
+      },
+    });
+
+    await completeGithubPrReviewCheckFromSummary({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      reviewHeadSha: 'abcdef9',
+      reviewSummaryBody:
+        '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->',
+      allowCompletedCheckUpdate: true,
+    });
+
+    expect(mockFindFirstRun).not.toHaveBeenCalled();
+    expect(mockGetIssueComment).not.toHaveBeenCalled();
+    expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
+  });
+
+  it('does not reconcile a completed check for a newer head', async () => {
+    mockFindFirstLinkage.mockResolvedValue({
+      githubCheckRunId: 20,
+      githubReviewCommentId: 30,
+    });
+    mockGetCheck.mockResolvedValue({
+      data: {
+        head_sha: '789abcd',
+        status: 'completed',
+        conclusion: 'failure',
+        external_id: 'roomote-review:3',
+      },
+    });
+
+    await completeGithubPrReviewCheckFromSummary({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      reviewHeadSha: 'abcdef9',
+      reviewSummaryBody:
+        '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->',
+      allowCompletedCheckUpdate: true,
+    });
+
+    expect(mockFindFirstRun).not.toHaveBeenCalled();
+    expect(mockGetIssueComment).not.toHaveBeenCalled();
+    expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
+  });
+
+  it('does not rewrite an already reconciled completed check', async () => {
+    mockFindFirstLinkage.mockResolvedValue({
+      githubCheckRunId: 20,
+      githubReviewCommentId: 30,
+    });
+    mockGetCheck.mockResolvedValue({
+      data: {
+        head_sha: 'abcdef9',
+        status: 'completed',
+        conclusion: 'success',
+        external_id: 'roomote-review:2',
+        output: { title: 'Roomote review passed' },
+      },
+    });
+    mockFindFirstRun.mockResolvedValue({
+      startedAt: new Date('2026-08-25T12:00:00.000Z'),
+      status: RunStatus.Completed,
+    });
+    mockGetIssueComment.mockResolvedValue({
+      data: {
+        updated_at: '2026-08-25T12:30:00.000Z',
+        body: '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+      },
+    });
+
+    await completeGithubPrReviewCheckFromSummary({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      reviewHeadSha: 'abcdef9',
+      reviewSummaryBody:
+        '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->',
+      allowCompletedCheckUpdate: true,
+    });
+
+    expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
+  });
+
   it('does not complete a fresh same-head re-review from the previous terminal summary', async () => {
     mockFindFirstLinkage.mockResolvedValue({
       githubCheckRunId: null,
