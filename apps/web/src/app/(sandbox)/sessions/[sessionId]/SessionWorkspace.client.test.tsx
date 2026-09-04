@@ -158,7 +158,7 @@ vi.mock('./NestedTaskSidePanel', () => ({
     onSelectTask: (taskId: string) => void;
     tasks: Array<{ taskId: string }>;
   }) => (
-    <div aria-label={`Full task ${taskId}`}>
+    <div aria-label={`Full task ${taskId}`} data-session-task-panel={taskId}>
       Nested panel {taskId}
       <textarea aria-label={`Task prompt ${taskId}`} />
       <button
@@ -950,6 +950,7 @@ describe('SessionWorkspace', () => {
     );
 
     expect(screen.getByText('Nested panel task-1')).toBeInTheDocument();
+    expect(screen.getByLabelText('Task prompt task-1')).toHaveFocus();
   });
 
   it('reopens as many tasks as fit from the task list panel', async () => {
@@ -1045,6 +1046,55 @@ describe('SessionWorkspace', () => {
 
     fireEvent.keyDown(sessionPrompt, { key: 'ArrowLeft', altKey: true });
     expect(sessionPrompt).toHaveFocus();
+  });
+
+  it('focuses the first task when several task panels open initially', async () => {
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Add homepage tests',
+    };
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1600,
+      children: <textarea aria-label="Session prompt" />,
+      sessionOverride: { tasks: [singleTask, secondTask, thirdTask] },
+    });
+
+    expect(await screen.findByLabelText('Task prompt task-3')).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByLabelText('Task prompt task-1')).toHaveFocus(),
+    );
+  });
+
+  it('opens and focuses the first task when several delegated tasks start', async () => {
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Add homepage tests',
+    };
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1600,
+      children: <textarea aria-label="Session prompt" />,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    expect(screen.getByRole('heading', { name: 'Tasks' })).toBeVisible();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [singleTask, secondTask, thirdTask],
+      });
+    });
+
+    expect(await screen.findByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-3')).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByLabelText('Task prompt task-2')).toHaveFocus(),
+    );
   });
 
   it('replaces the URL-selected task when a task card opens at one-panel capacity', () => {

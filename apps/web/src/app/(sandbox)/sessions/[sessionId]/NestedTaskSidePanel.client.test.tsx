@@ -229,6 +229,13 @@ describe('NestedTaskSidePanel', () => {
       screen.getByPlaceholderText('Message task, / for commands'),
     ).toBeInTheDocument();
     expect(screen.getByText('Task connection status')).toBeInTheDocument();
+    expect(screen.getByTestId('live-provider')).toHaveAttribute(
+      'data-task-id',
+      'child-1',
+    );
+    expect(
+      screen.getByTestId('live-provider').closest('[data-session-task-panel]'),
+    ).toHaveAttribute('data-session-task-panel', 'child-1');
     expect(screen.getByText('Queued task messages')).toBeInTheDocument();
     expect(screen.getByText('Pending task requests')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Go to task' })).toHaveAttribute(

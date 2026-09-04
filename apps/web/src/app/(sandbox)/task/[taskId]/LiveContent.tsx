@@ -288,6 +288,7 @@ function LiveContentInner({
                     onFileSearchOpen={handleFileSearchOpen}
                     onCommandSearchOpen={handleCommandSearchOpen}
                     scrollToBottom={scrollToBottom}
+                    autoFocus
                   />
                 </PendingUserInputRequestStateProvider>
               </div>

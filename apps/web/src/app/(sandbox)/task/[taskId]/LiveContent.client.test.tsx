@@ -33,8 +33,18 @@ vi.mock('./QueuedMessages', () => ({
 }));
 
 vi.mock('./prompt-input', () => ({
-  PromptInput: ({ placeholder }: { placeholder?: string }) => (
-    <div data-testid="prompt-input" data-placeholder={placeholder} />
+  PromptInput: ({
+    placeholder,
+    autoFocus,
+  }: {
+    placeholder?: string;
+    autoFocus?: boolean;
+  }) => (
+    <div
+      data-testid="prompt-input"
+      data-placeholder={placeholder}
+      data-auto-focus={autoFocus}
+    />
   ),
 }));
 
@@ -98,6 +108,7 @@ describe('TaskInputStack', () => {
         onCommandSearchOpen={() => {}}
         scrollToBottom={() => {}}
         promptPlaceholder="Message task, / for commands"
+        autoFocus
       />,
     );
 
@@ -105,6 +116,10 @@ describe('TaskInputStack', () => {
     expect(screen.getByTestId('prompt-input')).toHaveAttribute(
       'data-placeholder',
       'Message task, / for commands',
+    );
+    expect(screen.getByTestId('prompt-input')).toHaveAttribute(
+      'data-auto-focus',
+      'true',
     );
     expect(screen.getByTestId('todo-list')).toBeInTheDocument();
     expect(screen.getByTestId('active-subtasks')).toBeInTheDocument();

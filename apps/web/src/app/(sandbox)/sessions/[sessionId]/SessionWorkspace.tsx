@@ -806,6 +806,9 @@ export function SessionWorkspace({
     runningTaskCount === 1 ? runningTasks[0]?.taskId : null;
   const selectedTaskId = searchParams.get('task');
   const selectedTask = taskCards.find((task) => task.taskId === selectedTaskId);
+  const [promptFocusTaskId, setPromptFocusTaskId] = useState<string | null>(
+    selectedTaskId,
+  );
   const isMdOrLarger = useMediaQuery('(min-width: 768px)', {
     initializeWithValue: false,
   });
@@ -833,16 +836,18 @@ export function SessionWorkspace({
 
     if (!widePanelsSeededRef.current && taskPanelCapacity >= 2) {
       widePanelsSeededRef.current = true;
+      const initialTaskIds = taskIds.filter(
+        (taskId) => taskId !== selectedTask?.taskId,
+      );
       setTaskPanels((previous) => [
         ...previous,
-        ...taskIds
+        ...initialTaskIds
           .filter(
-            (taskId) =>
-              taskId !== selectedTask?.taskId &&
-              !previous.some((panel) => panel.taskId === taskId),
+            (taskId) => !previous.some((panel) => panel.taskId === taskId),
           )
           .map((taskId) => ({ taskId })),
       ]);
+      setPromptFocusTaskId(selectedTask?.taskId ?? initialTaskIds[0] ?? null);
       return;
     }
 
@@ -853,13 +858,16 @@ export function SessionWorkspace({
     );
     if (newTaskIds.length === 0) return;
 
+    const shouldFocusNewTask =
+      utilityPanel === null || utilityPanel.kind === 'tasks';
+    if (shouldFocusNewTask) {
+      setUtilityPanel(null);
+      setPromptFocusTaskId(newTaskIds[0] ?? null);
+    }
     setTaskPanels((previous) => {
       const next = [...previous];
       const selectedOffset = selectedTask ? 1 : 0;
-      const rightmostVisibleIndex = Math.max(
-        0,
-        taskPanelCapacity - selectedOffset - 1,
-      );
+      let insertionIndex = Math.max(0, taskPanelCapacity - selectedOffset - 1);
       for (const taskId of newTaskIds) {
         if (
           taskId === selectedTask?.taskId ||
@@ -867,9 +875,10 @@ export function SessionWorkspace({
         ) {
           continue;
         }
-        next.splice(Math.min(next.length, rightmostVisibleIndex), 0, {
+        next.splice(Math.min(next.length, insertionIndex), 0, {
           taskId,
         });
+        insertionIndex += 1;
       }
       return next;
     });
@@ -878,6 +887,7 @@ export function SessionWorkspace({
     selectedTask,
     taskCards,
     taskPanelCapacity,
+    utilityPanel,
     workspaceWidth,
   ]);
 
@@ -897,6 +907,13 @@ export function SessionWorkspace({
   const openTaskPanel = useCallback(
     (taskId: string) => {
       setUtilityPanel(null);
+      setPromptFocusTaskId(taskId);
+      setTaskArtifacts((previous) => {
+        if (!previous[taskId]) return previous;
+        const next = { ...previous };
+        delete next[taskId];
+        return next;
+      });
       if (taskId === selectedTask?.taskId) return;
       if (selectedTask && taskPanelCapacity === 1) {
         selectTask(taskId);
@@ -932,6 +949,7 @@ export function SessionWorkspace({
   const openTasksSideBySide = useCallback(() => {
     setUtilityPanel(null);
     setTaskArtifacts({});
+    setPromptFocusTaskId(selectedTask?.taskId ?? taskCards[0]?.taskId ?? null);
     setTaskPanels(
       taskCards
         .filter(({ taskId }) => taskId !== selectedTask?.taskId)
@@ -1081,6 +1099,40 @@ export function SessionWorkspace({
         id: `task:${taskId}`,
         content: renderTaskPanel(taskId),
       }));
+  useEffect(() => {
+    if (!promptFocusTaskId) return;
+
+    const workspace = workspacePanelsRef.current;
+    const focusPrompt = () => {
+      const taskPanel = Array.from(
+        workspace.querySelectorAll<HTMLElement>('[data-session-task-panel]'),
+      ).find((panel) => panel.dataset.sessionTaskPanel === promptFocusTaskId);
+      const promptInput = taskPanel?.querySelector<HTMLTextAreaElement>(
+        'textarea:not(:disabled)',
+      );
+      if (!promptInput) return false;
+
+      promptInput.focus();
+      if (document.activeElement !== promptInput) return false;
+
+      setPromptFocusTaskId((current) =>
+        current === promptFocusTaskId ? null : current,
+      );
+      return true;
+    };
+
+    if (focusPrompt()) return;
+
+    const observer = new MutationObserver(focusPrompt);
+    observer.observe(workspace, {
+      attributes: true,
+      attributeFilter: ['disabled'],
+      childList: true,
+      subtree: true,
+    });
+
+    return () => observer.disconnect();
+  }, [promptFocusTaskId]);
   const primaryPanel = renderedPanels[0];
   const panelMinSize = workspaceWidth
     ? Math.min(40, (SESSION_TASK_PANEL_MIN_WIDTH / workspaceWidth) * 100)

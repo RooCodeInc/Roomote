@@ -290,6 +290,7 @@ export function NestedTaskSidePanel({
 
   return (
     <FramedSurface
+      data-session-task-panel={taskId}
       frameClassName="p-0"
       surfaceClassName="relative flex flex-col overflow-hidden"
     >
