@@ -3003,9 +3003,9 @@ export async function answerFastAgentQuestion({
       inferenceRetryCanonicalEvent = undefined;
       lastVisibleMessage = replyWithImages.message;
       visibleUpdatePosted = true;
-      // Any text reply posted by the model (acknowledgement, first progress
-      // update, or task kickoff) is the textual communication the work-start
-      // gate requires. Reactions deliberately do not set this flag.
+      // Any text reply posted by the model (acknowledgement or first progress
+      // update) is the textual communication the work-start gate requires.
+      // Reactions deliberately do not set this flag.
       substantiveWorkAcknowledged = true;
       if (
         replyWithImages.purpose === 'closeout' ||
@@ -3205,14 +3205,12 @@ export async function answerFastAgentQuestion({
       }
     };
     // Single owner of the human-turn work-start gate, applied in-process to
-    // every native and MCP tool call before it runs. Only text communication
-    // (a reply, a first progress note, or a task kickoff) opens the gate; a
-    // reaction never does. The listed tools are the ones allowed to precede
-    // that communication.
+    // every native and MCP tool call before it runs. Only a delivered text
+    // reply opens the gate; a reaction never does. The listed tools are the
+    // ones allowed to precede that communication.
     const acknowledgementExemptToolIds = new Set<string>([
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
-      FAST_AGENT_NATIVE_TOOL_NAMES.launchTask,
       FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
       // A catalog lookup reads nothing external; the call it prepares for is
       // still gated on the acknowledgement.

@@ -1092,6 +1092,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           await options.onSessionReady('opencode-session-1');
           options.onPromptStarted?.();
           options.onNativeSteerReady?.(mocks.nativeSteer);
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’m checking the current state.',
+          });
           await invokeTool(nativeToolNames.launchTask, {
             prompt: 'Inspect the current state.',
             environmentId: 'env-1',
@@ -1137,7 +1141,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       finishNativeSteer?.();
       await vi.waitFor(() => {
         expect(mocks.getPendingHumanFollowUp).toHaveBeenCalledTimes(3);
-        expect(mocks.updateParentEventWhere).toHaveBeenCalledTimes(2);
+        expect(mocks.updateParentEventWhere).toHaveBeenCalledOnce();
       });
       expect(mocks.nativeSteer).toHaveBeenCalledOnce();
 
@@ -2226,6 +2230,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           options.onPromptStarted?.();
           options.onNativeSteerReady?.(mocks.nativeSteer);
           await toolStartRequested;
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Running the active tool.',
+          });
           await invokeTool(nativeToolNames.launchTask, {
             prompt: 'Run the active tool.',
             environmentId: 'env-1',
@@ -4233,6 +4241,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       mocks.generateText.mockImplementationOnce(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Starting.',
+          });
           await invokeTool(nativeToolNames.launchTask, {
             prompt: 'Fix the bug',
             environmentId: 'env-1',
@@ -4589,6 +4601,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       mocks.generateText.mockImplementationOnce(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Starting.',
+          });
           await invokeTool(nativeToolNames.launchTask, {
             prompt: 'Fix the bug',
             environmentId: 'env-1',
@@ -5189,6 +5205,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         mocks.generateText
           .mockImplementationOnce(async (_params, _session, options) => {
             await options.onSessionReady('opencode-session-1');
+            await invokeTool(nativeToolNames.sendChatReply, {
+              purpose: 'ack',
+              message: 'Starting.',
+            });
             await invokeTool(nativeToolNames.launchTask, {
               prompt: 'Fix the bug',
               environmentId: 'env-1',
@@ -6057,7 +6077,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.appendMemory).toHaveBeenCalledTimes(1);
     });
 
-    it('unlocks task follow-up work after an acknowledgement and launch', async () => {
+    it('rejects launch before acknowledgement and allows the same launch afterward', async () => {
       const results: unknown[] = [];
       const adapter = callbacks({
         launchTask: vi.fn<LaunchFastAgentTask>(async () => ({
@@ -6071,9 +6091,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
           results.push(
-            await invokeTool(nativeToolNames.sendTaskMessage, {
-              taskId: 'task-1',
-              message: 'Too early.',
+            await invokeTool(nativeToolNames.launchTask, {
+              prompt: 'Fix checkout.',
             }),
           );
           await invokeTool(nativeToolNames.sendChatReply, {
@@ -6100,6 +6119,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(results[0]).toEqual(acknowledgementRequired);
       expect(results[1]).toMatchObject({ success: true, taskId: 'task-1' });
       expect(results[2]).toMatchObject({ success: true });
+      expect(adapter.launchTask).toHaveBeenCalledOnce();
     });
 
     it('starts the task after acknowledgement without posting a second message', async () => {
@@ -6957,6 +6977,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m updating every repository.',
+        });
         await expect(
           invokeTool(nativeToolNames.launchTask, {
             prompt: 'Update every repository.',
@@ -7227,6 +7251,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m starting on the checkout fix.',
+        });
         const launch = {
           prompt: 'Fix checkout.',
           environmentId: 'env-1',
@@ -7301,6 +7329,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m starting on the checkout fix.',
+        });
         const rejected = await invokeTool(nativeToolNames.launchTask, {
           prompt: 'Fix checkout.',
           model: 'openrouter/example/not-enabled',
@@ -7340,6 +7372,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m checking whether the workspace is ready.',
+        });
         await expect(
           invokeTool(nativeToolNames.launchTask, {
             prompt: 'Fix checkout.',
@@ -7372,6 +7408,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m starting on the checkout fix.',
+        });
         await invokeTool(nativeToolNames.launchTask, {
           prompt: 'Fix checkout.',
         });
@@ -7401,6 +7441,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m starting on the checkout fix.',
+        });
         await invokeTool(nativeToolNames.launchTask, {
           prompt: 'Fix checkout.',
         });
@@ -7434,12 +7478,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       launchTask,
       postReply: vi
         .fn()
+        .mockResolvedValueOnce(undefined)
         .mockRejectedValueOnce(new Error('provider unavailable'))
         .mockResolvedValue(undefined),
     });
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m starting on the checkout fix.',
+        });
         launchResult = await invokeTool(nativeToolNames.launchTask, {
           prompt: 'Fix checkout.',
         });
@@ -7461,7 +7510,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('does not repost a kickoff or generic fallback for an idempotent surface replay', async () => {
+  it('does not post a task link or generic fallback for an idempotent surface replay', async () => {
     const adapter = callbacks({
       launchTask: vi.fn(async () => ({
         success: true as const,
@@ -7473,6 +7522,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m starting on the checkout fix.',
+        });
         await invokeTool(nativeToolNames.launchTask, {
           prompt: 'Fix checkout.',
           kickoffMessage: 'I’m delegating the Discord checkout fix.',
@@ -7483,7 +7536,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     await answerFastAgentQuestion({ ...baseParams, adapter });
 
-    expect(adapter.postReply).not.toHaveBeenCalled();
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'ack',
+      message: 'I’m starting on the checkout fix.',
+    });
   });
 
   it.each(['running', 'completed'] as const)(

@@ -289,7 +289,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('native JSON schema');
     expect(prompt).toContain(
-      'The runtime additionally rejects non-automation MCP calls and cancellation until a visible update has been delivered',
+      'The runtime rejects those actions until a visible text reply has been delivered',
     );
     expect(prompt).toContain(
       'On a human-authored turn, acknowledge first, then send the instruction immediately',
