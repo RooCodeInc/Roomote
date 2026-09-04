@@ -17,6 +17,7 @@ import {
   OPENCODE_PLUGIN_SEED_DIR_ENV,
   resolveOpenCodePluginInstallDirs,
   seedOpenCodePluginDependencies,
+  OPENCODE_NPM_CONFIG_CONTENT,
   seedOpenCodePluginDependenciesForEnv,
 } from '../opencode-plugin-seed';
 
@@ -168,5 +169,56 @@ describe('OpenCode plugin seed', () => {
     expect(
       isOpenCodePluginSeedComplete(path.join(home, '.config', 'opencode')),
     ).toBe(true);
+    // Both directories also carry the bounded npm settings, so a future
+    // stale seed falls back to a short install rather than a 300s stall.
+    for (const dir of [sharedTools, path.join(home, '.config', 'opencode')]) {
+      expect(readFileSync(path.join(dir, '.npmrc'), 'utf8')).toBe(
+        OPENCODE_NPM_CONFIG_CONTENT,
+      );
+    }
+  });
+
+  it('bounds the install OpenCode runs itself when no seed applies', () => {
+    const home = path.join(root, 'home');
+    const sharedTools = path.join(root, 'shared-tools');
+    const env: NodeJS.ProcessEnv = {
+      HOME: home,
+      OPENCODE_CONFIG_DIR: sharedTools,
+      [OPENCODE_PLUGIN_SEED_DIR_ENV]: path.join(root, 'missing'),
+    };
+
+    expect(seedOpenCodePluginDependenciesForEnv(env)).toEqual({
+      [sharedTools]: 'no-seed',
+      [path.join(home, '.config', 'opencode')]: 'no-seed',
+    });
+    // No seed to copy, but OpenCode's own install must not wait out npm's
+    // default 300s per stalled registry request.
+    for (const dir of [sharedTools, path.join(home, '.config', 'opencode')]) {
+      expect(readFileSync(path.join(dir, '.npmrc'), 'utf8')).toContain(
+        'fetch-timeout=15000',
+      );
+      expect(existsSync(path.join(dir, 'node_modules'))).toBe(false);
+    }
+  });
+
+  it('leaves an existing .npmrc alone', () => {
+    const seedDir = path.join(root, 'seed');
+    writeOpenCodePluginSeedFixture(seedDir, '1.18.10');
+    const home = path.join(root, 'home');
+    const globalDir = path.join(home, '.config', 'opencode');
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(
+      path.join(globalDir, '.npmrc'),
+      'registry=https://npm.example.test\n',
+    );
+
+    seedOpenCodePluginDependenciesForEnv({
+      HOME: home,
+      [OPENCODE_PLUGIN_SEED_DIR_ENV]: seedDir,
+    });
+
+    expect(readFileSync(path.join(globalDir, '.npmrc'), 'utf8')).toBe(
+      'registry=https://npm.example.test\n',
+    );
   });
 });

@@ -192,12 +192,50 @@ export function seedOpenCodePluginDependencies(
   return 'copied';
 }
 
-/** Seeds every directory OpenCode would install into for a server spawned with `env`. */
+const OPENCODE_NPM_CONFIG_FILE = '.npmrc';
+
+/**
+ * npm settings OpenCode's own Arborist install reads from the directory it
+ * installs into. They only matter when the seed is absent or stale (local
+ * development, or an OpenCode bump shipped without a rebuilt seed): npm's
+ * defaults wait 300s for a stalled registry response and retry twice, which
+ * is what turned a missing seed into a five-minute dead Fast turn. Prefer
+ * the local cache, give up on a stalled request in 15s, and retry once, so
+ * the fallback install costs seconds. Measured locally with OpenCode 1.18.10
+ * against an unseeded global config dir: 500s without this file, 3s with it.
+ */
+export const OPENCODE_NPM_CONFIG_CONTENT = [
+  'prefer-offline=true',
+  'fetch-timeout=15000',
+  'fetch-retries=1',
+  'audit=false',
+  'fund=false',
+  '',
+].join('\n');
+
+/**
+ * Writes the bounded npm settings into `configDir` unless the directory
+ * already carries its own `.npmrc`, which is left alone as operator intent.
+ */
+export function writeOpenCodeNpmConfigIfMissing(configDir: string): boolean {
+  const target = join(configDir, OPENCODE_NPM_CONFIG_FILE);
+  if (existsSync(target)) return false;
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(target, OPENCODE_NPM_CONFIG_CONTENT);
+  return true;
+}
+
+/**
+ * Seeds every directory OpenCode would install into for a server spawned
+ * with `env`, and bounds the install OpenCode runs itself wherever the seed
+ * does not apply.
+ */
 export function seedOpenCodePluginDependenciesForEnv(
   env: NodeJS.ProcessEnv,
 ): Record<string, OpenCodePluginSeedResult> {
   const results: Record<string, OpenCodePluginSeedResult> = {};
   for (const dir of resolveOpenCodePluginInstallDirs(env)) {
+    writeOpenCodeNpmConfigIfMissing(dir);
     results[dir] = seedOpenCodePluginDependencies(dir, env);
   }
   return results;
