@@ -69,7 +69,7 @@ interface ResponsiveWorkspacePanelsProps {
   panelSize?: number;
   mainMinSize?: number;
   panelMinSize?: number;
-  dimUnfocusedPanels?: boolean;
+  dimUnfocusedPanelIds?: readonly string[];
 }
 
 export function ResponsiveWorkspacePanels({
@@ -82,7 +82,7 @@ export function ResponsiveWorkspacePanels({
   panelSize = 50,
   mainMinSize = 30,
   panelMinSize = 20,
-  dimUnfocusedPanels = false,
+  dimUnfocusedPanelIds = [],
 }: ResponsiveWorkspacePanelsProps) {
   const isMdOrLarger = useMediaQuery('(min-width: 768px)', {
     initializeWithValue: false,
@@ -105,8 +105,8 @@ export function ResponsiveWorkspacePanels({
         direction="horizontal"
         className={cn(
           'min-h-0 flex-1',
-          dimUnfocusedPanels &&
-            '[&_[data-slot=resizable-panel]]:transition-opacity [&:has([data-slot=resizable-panel]:focus-within)_[data-slot=resizable-panel]:not(:focus-within)]:opacity-80',
+          dimUnfocusedPanelIds.length > 0 &&
+            '[&_[data-dim-when-unfocused=true]]:transition-opacity [&:has([data-dim-when-unfocused=true]:focus-within)_[data-dim-when-unfocused=true]:not(:focus-within)]:opacity-80',
         )}
       >
         <ResizablePanel
@@ -116,6 +116,9 @@ export function ResponsiveWorkspacePanels({
             panelCount > 1 ? equalPanelSize : isPanelOpen ? mainSize : 100
           }
           minSize={mainMinSize}
+          data-dim-when-unfocused={
+            dimUnfocusedPanelIds.includes('main') || undefined
+          }
           className="flex min-h-0 min-w-0 flex-col"
         >
           {main}
@@ -128,6 +131,9 @@ export function ResponsiveWorkspacePanels({
               order={1}
               defaultSize={panelCount > 1 ? equalPanelSize : panelSize}
               minSize={panelMinSize}
+              data-dim-when-unfocused={
+                dimUnfocusedPanelIds.includes(panelId) || undefined
+              }
               className="flex min-h-0 min-w-0 flex-col border-l-2 border-card"
             >
               {panel}
@@ -143,6 +149,10 @@ export function ResponsiveWorkspacePanels({
                   order={index + 2}
                   defaultSize={equalPanelSize}
                   minSize={panelMinSize}
+                  data-dim-when-unfocused={
+                    dimUnfocusedPanelIds.includes(additionalPanel.id) ||
+                    undefined
+                  }
                   className="flex min-h-0 min-w-0 flex-col border-l-2 border-card"
                 >
                   {additionalPanel.content}

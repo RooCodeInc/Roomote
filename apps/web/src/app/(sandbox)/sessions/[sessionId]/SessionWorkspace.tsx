@@ -1341,7 +1341,12 @@ export function SessionWorkspace({
           >
             <ResponsiveWorkspacePanels
               isPanelOpen={panelOpen}
-              dimUnfocusedPanels
+              dimUnfocusedPanelIds={[
+                'main',
+                ...visibleTaskPanels
+                  .filter(({ taskId }) => !taskArtifacts[taskId])
+                  .map(({ taskId }) => `task:${taskId}`),
+              ]}
               mainMinSize={mainMinSize}
               panelMinSize={panelMinSize}
               main={

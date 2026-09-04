@@ -757,6 +757,33 @@ describe('SessionWorkspace', () => {
     expect(screen.queryByLabelText('Full task task-5')).toBeNull();
   });
 
+  it('limits focus dimming to the Session and task conversations', async () => {
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: { tasks: [singleTask, secondTask] },
+    });
+
+    expect(
+      screen
+        .getByText('Session transcript')
+        .closest('[data-slot=resizable-panel]'),
+    ).toHaveAttribute('data-dim-when-unfocused', 'true');
+    expect(
+      (await screen.findByLabelText('Full task task-1')).closest(
+        '[data-slot=resizable-panel]',
+      ),
+    ).toHaveAttribute('data-dim-when-unfocused', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
+
+    expect(
+      screen
+        .getByRole('heading', { name: 'Session Info' })
+        .closest('[data-slot=resizable-panel]'),
+    ).not.toHaveAttribute('data-dim-when-unfocused');
+  });
+
   it('restores task panels after temporarily viewing a utility panel', async () => {
     renderWorkspace({
       isMobile: false,
