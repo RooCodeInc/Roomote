@@ -565,6 +565,31 @@ describe('LivePreviewButton', () => {
     );
   });
 
+  it('keeps old snapshots wakeable for providers without application expiry', () => {
+    render(
+      <LivePreviewButton
+        taskId="task-1"
+        taskRun={
+          {
+            id: 123,
+            vendor: 'modal',
+            snapshotId: 'snapshot-1',
+            snapshotCreatedAt: new Date('2020-01-01T00:00:00.000Z'),
+            payload: { environmentId: 'env-1' },
+          } as never
+        }
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Live Preview' });
+    expect(trigger).toBeEnabled();
+
+    fireEvent.click(trigger);
+    expect(
+      screen.getByRole('heading', { name: 'Wake up Roomote?' }),
+    ).toBeVisible();
+  });
+
   it('disables preview while the task is going to sleep', () => {
     render(
       <LivePreviewButton

@@ -94,7 +94,7 @@ function LivePreviewButtonBase({
   const asleep = isTaskRunAsleep(taskRun);
   const snapshotExpired =
     Boolean(taskRun.snapshotId) &&
-    !isSnapshotResumable(taskRun.snapshotCreatedAt);
+    !isSnapshotResumable(taskRun.snapshotCreatedAt, taskRun.vendor);
   const goingToSleep = asleep && !taskRun.snapshotId;
   const canWakeForPreview =
     asleep && !snapshotExpired && !!taskRun.snapshotId && !!resolvedPreviewUrl;
