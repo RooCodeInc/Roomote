@@ -280,7 +280,7 @@ function LiveContentInner({
                   </>
                 }
               />
-              <div className="mx-auto w-full overflow-clip rounded-t-md bg-card @[56rem]:rounded-t-lg transition-colors border-2 border-background rounded-b-3xl">
+              <div className="mx-auto w-full overflow-clip rounded-t-md bg-card @[56rem]:rounded-t-lg transition-[background-color,border-color,outline-width] border-2 border-background rounded-b-3xl outline-0 outline-offset-[-2px] outline-accent-foreground has-[textarea:focus]:outline-2">
                 <PendingUserInputRequestStateProvider taskId={session.taskId}>
                   <TaskInputStack
                     session={session}

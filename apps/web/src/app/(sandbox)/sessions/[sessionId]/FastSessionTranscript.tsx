@@ -809,7 +809,7 @@ export function FastSessionTranscript({
           <ConversationScrollButton />
         </Conversation>
         {canReply && !pendingInputRequest ? (
-          <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card transition-colors @[56rem]:rounded-t-lg">
+          <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card outline-0 outline-offset-[-2px] outline-accent-foreground transition-[background-color,border-color,outline-width] has-[textarea:focus]:outline-2 @[56rem]:rounded-t-lg">
             <SessionPromptInput
               sessionId={sessionId}
               isBusy={isSending}

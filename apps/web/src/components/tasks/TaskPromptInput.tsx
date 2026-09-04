@@ -153,7 +153,7 @@ export function TaskPromptInput({
       className={cn(
         'flex flex-col gap-2',
         surface === 'default' &&
-          'border rounded-lg p-2 bg-card border-input focus-within:border-accent-bright-foreground',
+          'border rounded-lg p-2 bg-card border-input outline-0 outline-offset-[-2px] outline-accent-foreground transition-[outline-width] has-[textarea:focus]:outline-2',
         animateContainer &&
           surface === 'default' &&
           'animate-[enter-down_1s_1_200ms_backwards]',
