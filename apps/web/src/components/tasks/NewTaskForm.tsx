@@ -21,7 +21,6 @@ import { useStartFastSession } from '@/hooks/task-runs';
 import type { PromptInputMessage } from '@/components/ai-elements';
 import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
 import { useTaskLaunchConfig } from '@/components/tasks/TaskLaunchConfig';
-import { BasicTooltip, Button } from '@/components/system';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
 
@@ -37,7 +36,6 @@ type NewTaskFormProps = {
   placeholder?: string;
   textareaMaxHeight?: number;
   promptContainerRef?: Ref<HTMLDivElement>;
-  allowEmptySession?: boolean;
 };
 
 export function NewTaskForm({
@@ -46,7 +44,6 @@ export function NewTaskForm({
   placeholder = DEFAULT_PROMPT_PLACEHOLDER,
   textareaMaxHeight,
   promptContainerRef,
-  allowEmptySession = false,
 }: NewTaskFormProps) {
   const { defaultComputeProvider } = useTaskLaunchConfig();
   const router = useRouter();
@@ -169,19 +166,6 @@ export function NewTaskForm({
 
   const submitDisabledReason = getTaskLaunchDisabledReason(managedAccess);
 
-  const handleStartEmptySession = useCallback(async () => {
-    emptySessionConversationIdRef.current ??= crypto.randomUUID();
-    await startFastSession({
-      text: '',
-      conversationId: emptySessionConversationIdRef.current,
-      empty: true,
-      model: selectedModelOverrideId,
-      ...(selectedReasoningEffort !== undefined
-        ? { reasoningEffort: selectedReasoningEffort }
-        : {}),
-    });
-  }, [selectedModelOverrideId, selectedReasoningEffort, startFastSession]);
-
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
       const text = message.text.trim();
@@ -199,11 +183,21 @@ export function NewTaskForm({
       };
 
       if (!environmentIdParam) {
-        if (
+        const isEmpty =
           !submission.description &&
           !submission.images?.length &&
-          !submission.attachmentTexts?.length
-        ) {
+          !submission.attachmentTexts?.length;
+        if (isEmpty) {
+          emptySessionConversationIdRef.current ??= crypto.randomUUID();
+          await startFastSession({
+            text: '',
+            conversationId: emptySessionConversationIdRef.current,
+            empty: true,
+            model: selectedModelOverrideId,
+            ...(selectedReasoningEffort !== undefined
+              ? { reasoningEffort: selectedReasoningEffort }
+              : {}),
+          });
           return;
         }
         await startFastSession({
@@ -257,33 +251,14 @@ export function NewTaskForm({
         submitWithMetaKey={false}
         submitDisabledReason={submitDisabledReason}
         tools={
-          <>
-            <SessionModelSwitcher
-              model={selectedModelOverrideId ?? ''}
-              onModelChange={setSelectedModelOverrideId}
-              reasoningEffort={selectedReasoningEffort ?? null}
-              onReasoningEffortChange={setSelectedReasoningEffort}
-              defaultModelId={defaultModelId}
-              defaultReasoningEffort={defaultReasoningEffort}
-            />
-            {allowEmptySession ? (
-              <BasicTooltip
-                content={submitDisabledReason ?? 'Start without a message'}
-              >
-                <span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={isBusy || Boolean(submitDisabledReason)}
-                    onClick={handleStartEmptySession}
-                  >
-                    Start empty session
-                  </Button>
-                </span>
-              </BasicTooltip>
-            ) : null}
-          </>
+          <SessionModelSwitcher
+            model={selectedModelOverrideId ?? ''}
+            onModelChange={setSelectedModelOverrideId}
+            reasoningEffort={selectedReasoningEffort ?? null}
+            onReasoningEffortChange={setSelectedReasoningEffort}
+            defaultModelId={defaultModelId}
+            defaultReasoningEffort={defaultReasoningEffort}
+          />
         }
       />
     </div>

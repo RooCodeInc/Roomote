@@ -7,17 +7,14 @@ const { onOpenChangeMock } = vi.hoisted(() => ({
 vi.mock('./NewTaskForm', () => ({
   NewTaskForm: ({
     animate,
-    allowEmptySession,
     onTaskStarted,
   }: {
     animate?: boolean;
-    allowEmptySession?: boolean;
     onTaskStarted: () => void;
   }) => (
     <button
       type="button"
       data-animate={String(animate)}
-      data-allow-empty-session={String(allowEmptySession)}
       data-testid="new-task-form"
       onClick={onTaskStarted}
     >
@@ -49,10 +46,6 @@ describe('NewTaskDialog', () => {
     expect(screen.getByTestId('new-task-form')).toHaveAttribute(
       'data-animate',
       'false',
-    );
-    expect(screen.getByTestId('new-task-form')).toHaveAttribute(
-      'data-allow-empty-session',
-      'true',
     );
   });
 

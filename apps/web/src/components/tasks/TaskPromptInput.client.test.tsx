@@ -26,12 +26,14 @@ function KeyboardPrompt({
   onSubmit,
   isBusy = false,
   submitDisabledReason,
+  initialText = 'Fix the login bug',
 }: {
-  onSubmit: () => void;
+  onSubmit: (...args: unknown[]) => void;
   isBusy?: boolean;
   submitDisabledReason?: string;
+  initialText?: string;
 }) {
-  const [promptText, setPromptText] = useState('Fix the login bug');
+  const [promptText, setPromptText] = useState(initialText);
 
   return (
     <TaskPromptInput
@@ -79,6 +81,21 @@ describe('TaskPromptInput', () => {
     });
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+  });
+
+  it('submits an empty composer through the existing button and Enter shortcut', async () => {
+    const onSubmit = vi.fn();
+    render(<KeyboardPrompt onSubmit={onSubmit} initialText="" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    fireEvent.keyDown(screen.getByRole('textbox'), {
+      key: 'Enter',
+      code: 'Enter',
+    });
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({ text: '', files: [] });
+    expect(onSubmit.mock.calls[1]?.[0]).toEqual({ text: '', files: [] });
   });
 
   it('advertises the Enter shortcut in plain-Enter mode', async () => {
