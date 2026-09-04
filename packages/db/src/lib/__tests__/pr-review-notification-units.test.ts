@@ -1426,6 +1426,10 @@ describe('canonical PR review notification ownership', () => {
       await expect(deliveryStatusOf(claim.deliveryId)).resolves.toBe(
         'prepared',
       );
+      await db
+        .update(prReviewEvents)
+        .set({ superseded: true })
+        .where(eq(prReviewEvents.eventKey, `${state}-old-head-${task.id}`));
       await expect(
         releaseSupersededCanonicalPrReviewAction({
           deliveryId: claim.deliveryId,

@@ -810,7 +810,7 @@ export async function claimDueCanonicalPrReviewDeliveries(
       join ${prReviewNotificationUnits} u on u.id = d.notification_unit_id
       join ${prReviewNotificationUnitEvents} m on m.unit_id = u.id
       join ${prReviewEvents} e on e.id = m.event_id
-      where e.superseded = false
+      where (e.superseded = false or d.action_claimed_at is not null)
       order by d.id, m.attached_at, e.observed_at, e.id
     `);
 
