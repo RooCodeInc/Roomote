@@ -21,7 +21,7 @@ export function SessionInferenceCostBreakdown({
       <p className="mb-3 text-sm font-medium">Inference cost breakdown</p>
       <dl className="space-y-2 text-xs">
         <div className="flex items-start justify-between gap-4">
-          <dt className="text-muted-foreground">Direct session</dt>
+          <dt className="opacity-70">Direct session</dt>
           <dd className="shrink-0 font-medium tabular-nums">
             ${formatInferenceCost(breakdown.directInferenceCostMicroUsd)}
           </dd>
@@ -31,9 +31,7 @@ export function SessionInferenceCostBreakdown({
             key={task.taskId}
             className="flex items-start justify-between gap-4"
           >
-            <dt className="min-w-0 break-words text-muted-foreground">
-              {task.title}
-            </dt>
+            <dt className="min-w-0 break-words opacity-70">{task.title}</dt>
             <dd className="shrink-0 font-medium tabular-nums">
               ${formatInferenceCost(task.inferenceCostMicroUsd)}
             </dd>
