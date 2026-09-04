@@ -4929,6 +4929,217 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       }
     });
 
+    it('retries a rejected request once from a fresh session before any tool ran', async () => {
+      vi.useFakeTimers();
+      try {
+        mocks.generateText
+          .mockRejectedValueOnce(
+            new Error('BadRequestError: Invalid tool call history'),
+          )
+          .mockImplementationOnce(async (_params, _session, options) => {
+            await options.onSessionReady('opencode-session-2');
+            await invokeTool(nativeToolNames.sendChatReply, {
+              purpose: 'closeout',
+              message: 'Recovered on a fresh session.',
+            });
+            return '';
+          });
+        const postReply = vi.fn().mockResolvedValue(undefined);
+
+        const result = answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ postReply }),
+        });
+        result.catch(() => undefined);
+        await vi.runAllTimersAsync();
+        vi.useRealTimers();
+        await expect(result).resolves.toBe('Recovered on a fresh session.');
+
+        expect(mocks.generateText).toHaveBeenCalledTimes(2);
+        // A quick fresh-session retry stays inside the silent recovery
+        // window: the retry marker is persisted for the reconciler, but
+        // the thread only ever sees the answer.
+        const retryWrites = mocks.upsertMessage.mock.calls
+          .map(([input]) => input.message)
+          .filter((message) => message.eventId === '100.2:retry-notice:0');
+        expect(retryWrites.at(-1)?.metadata).toMatchObject({
+          inferenceRetryNotice: true,
+        });
+        expect(retryWrites.at(0)?.contentBlocks).toEqual([
+          {
+            type: 'text',
+            text: 'The inference provider rejected the request. Retrying once from a fresh session…',
+          },
+        ]);
+        expect(postReply).toHaveBeenCalledTimes(1);
+        expect(postReply).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            purpose: 'closeout',
+            message: 'Recovered on a fresh session.',
+          }),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('gives up after one fresh-session retry and shows the provider error', async () => {
+      vi.useFakeTimers();
+      try {
+        const rejection = Object.assign(
+          new Error('BadRequestError: Invalid tool call history'),
+          {
+            data: { statusCode: 400, message: 'Invalid tool call history' },
+          },
+        );
+        mocks.generateText
+          .mockImplementationOnce(async (_params, _session, options) => {
+            options.onModelResolved?.('openrouter/google/gemini-3.8-flash');
+            throw rejection;
+          })
+          .mockRejectedValueOnce(rejection);
+        const postReply = vi.fn().mockResolvedValue(undefined);
+
+        const result = answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ postReply }),
+        });
+        result.catch(() => undefined);
+        await vi.runAllTimersAsync();
+        vi.useRealTimers();
+        await result.catch(() => undefined);
+
+        expect(mocks.generateText).toHaveBeenCalledTimes(2);
+        expect(postReply).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            purpose: 'closeout',
+            message:
+              'Could not complete the request because the inference provider returned an error. Please try again in a moment.\n\nProvider error (openrouter/google/gemini-3.8-flash): HTTP 400: Invalid tool call history',
+          }),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not retry a rejection after tool use without a durable row', async () => {
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          options.onModelResolved?.('openrouter/google/gemini-3.8-flash');
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'progress',
+            message: 'Checking the code now.',
+          });
+          throw Object.assign(new Error('BadRequestError: Invalid request'), {
+            data: { statusCode: 400, message: 'Invalid request' },
+          });
+        },
+      );
+      const postReply = vi.fn().mockResolvedValue(undefined);
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+      }).catch(() => undefined);
+
+      // Continuing the rejected session would fail the same way and a cold
+      // rebuild could repeat the tool's side effects, so the turn closes out.
+      expect(mocks.generateText).toHaveBeenCalledTimes(1);
+      expect(postReply).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          purpose: 'closeout',
+          message: expect.stringContaining(
+            'Provider error (openrouter/google/gemini-3.8-flash): HTTP 400: Invalid request',
+          ),
+        }),
+      );
+    });
+
+    it('parks a rejection after tool use so the resumed run starts from the recorded transcript', async () => {
+      vi.useFakeTimers();
+      const before = Date.now();
+      mocks.getUnifiedSession.mockResolvedValue({ id: 'session-1' });
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'progress',
+            message: 'Checking the code now.',
+          });
+          throw new Error('BadRequestError: Invalid tool call history');
+        },
+      );
+      const requestDurableRetry = vi.fn().mockResolvedValue(undefined);
+      const postReply = vi.fn().mockResolvedValue(undefined);
+
+      const result = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply, requestDurableRetry }),
+        durableAdmission,
+      });
+      result.catch(() => undefined);
+      await vi.runAllTimersAsync();
+      vi.useRealTimers();
+      await expect(result).rejects.toBeInstanceOf(
+        FastAgentDurableRetryScheduledError,
+      );
+
+      expect(mocks.generateText).toHaveBeenCalledTimes(1);
+      expect(mocks.scheduleDurableRetry).toHaveBeenCalledOnce();
+      const [rowId, schedule] = mocks.scheduleDurableRetry.mock.calls[0]!;
+      expect(rowId).toBe('durable-row-1');
+      expect(schedule.reason).toContain('provider_error');
+      expect(schedule.retryAt.getTime()).toBeGreaterThan(before);
+      expect(requestDurableRetry).toHaveBeenCalledWith(schedule.retryAt);
+      expect(postReply).not.toHaveBeenCalledWith(
+        expect.objectContaining({ purpose: 'closeout' }),
+      );
+      // The rejected native session is forgotten before the park, so the
+      // resumed run rebuilds from the transcript instead of reattaching.
+      expect(mocks.setOpenCodeSession).toHaveBeenLastCalledWith({
+        sessionId: expect.any(String),
+        openCodeSessionId: null,
+      });
+      expect(mocks.invalidateSession).toHaveBeenCalled();
+    });
+
+    it('does not grant a resumed retry a second fresh session', async () => {
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          options.onModelResolved?.('openrouter/google/gemini-3.8-flash');
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'progress',
+            message: 'Checking the code now.',
+          });
+          throw Object.assign(new Error('BadRequestError: Invalid request'), {
+            data: { statusCode: 400, message: 'Invalid request' },
+          });
+        },
+      );
+      const requestDurableRetry = vi.fn().mockResolvedValue(undefined);
+      const postReply = vi.fn().mockResolvedValue(undefined);
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply, requestDurableRetry }),
+        durableAdmission: { eventId: 'durable-row-1', inferenceRetries: 1 },
+        resumedAfterInferenceRetry: true,
+      }).catch(() => undefined);
+
+      expect(mocks.generateText).toHaveBeenCalledTimes(1);
+      expect(mocks.scheduleDurableRetry).not.toHaveBeenCalled();
+      expect(postReply).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          purpose: 'closeout',
+          message: expect.stringContaining(
+            'Provider error (openrouter/google/gemini-3.8-flash): HTTP 400: Invalid request',
+          ),
+        }),
+      );
+    });
+
     it('rides out the first short retry in place and parks from the second', async () => {
       vi.useFakeTimers();
       const before = Date.now();

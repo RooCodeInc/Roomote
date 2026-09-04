@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
+import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
@@ -671,10 +672,23 @@ type FastAgentInferenceRetryNotice = {
   attemptNumber: number;
   maxAttempts?: number;
   delayMs?: number;
+  /** The one fresh-start retry granted to a rejected request. */
+  freshSession?: boolean;
 };
 
 type FastAgentInferenceRetryOptions = {
   canRetry?: (error: unknown, failure: FastAgentInferenceFailure) => boolean;
+  /**
+   * A provider rejection (a non-retryable `provider_error`, typically a 4xx
+   * on the request as sent) is not worth repeating as-is, but the same
+   * request from a fresh session usually succeeds: a human "try again" is
+   * exactly that. Return true to grant one such retry per turn; the caller
+   * must then rebuild rather than continue the rejected session.
+   */
+  retryRejection?: (
+    error: unknown,
+    failure: FastAgentInferenceFailure,
+  ) => boolean;
   prepareRetry?: () => Promise<void> | void;
   /**
    * Offered the pending backoff after its notice is recorded and before the
@@ -740,6 +754,9 @@ export function findFastAgentDurableRetryScheduledError(
 }
 
 class FastAgentInferenceError extends Error {
+  /** Provider status and message, redacted and bounded, for the closeout. */
+  public readonly detail: string | undefined;
+
   constructor(
     public readonly failure: FastAgentInferenceFailure,
     cause: unknown,
@@ -749,7 +766,88 @@ class FastAgentInferenceError extends Error {
       { cause },
     );
     this.name = 'FastAgentInferenceError';
+    this.detail = describeInferenceErrorForUser(cause);
   }
+}
+
+const FAST_AGENT_INFERENCE_DETAIL_MAX_CHARS = 200;
+
+/**
+ * The provider's own status and message, as OpenCode surfaces them
+ * (`{name, data: {statusCode, message, responseBody}}`, possibly wrapped in
+ * a prompt error's `providerError` or an Error `cause`). Secrets are
+ * redacted and the text is bounded so it can be shown in the thread; a
+ * closeout that only says "the provider returned an error" leaves the
+ * reader guessing which provider and why.
+ */
+function describeInferenceErrorForUser(error: unknown): string | undefined {
+  let statusCode: number | undefined;
+  let message: string | undefined;
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value: error, depth: 0 },
+  ];
+  const seen = new Set<object>();
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current || current.depth > 4) continue;
+    const { value, depth } = current;
+    if (typeof value === 'string') {
+      if (value.trim().startsWith('{')) {
+        try {
+          pending.push({ value: JSON.parse(value), depth: depth + 1 });
+        } catch {
+          // Plain text; nothing nested to read.
+        }
+      }
+      continue;
+    }
+    if (!value || typeof value !== 'object' || seen.has(value)) continue;
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    if (statusCode === undefined) {
+      const candidate = record.statusCode ?? record.status;
+      if (typeof candidate === 'number' && candidate >= 100) {
+        statusCode = candidate;
+      }
+    }
+    // Prefer the innermost provider message over the wrapper's own text.
+    const data = record.data;
+    const dataMessage =
+      data && typeof data === 'object'
+        ? (data as Record<string, unknown>).message
+        : undefined;
+    if (typeof dataMessage === 'string' && dataMessage.trim()) {
+      message = dataMessage;
+    } else if (
+      message === undefined &&
+      typeof record.message === 'string' &&
+      record.message.trim() &&
+      !(value instanceof Error)
+    ) {
+      message = record.message;
+    }
+    for (const key of [
+      'providerError',
+      'cause',
+      'data',
+      'error',
+      'responseBody',
+    ]) {
+      if (key in record) pending.push({ value: record[key], depth: depth + 1 });
+    }
+  }
+  if (message === undefined && error instanceof Error) {
+    message = error.message;
+  }
+  const parts = [
+    statusCode === undefined ? undefined : `HTTP ${statusCode}`,
+    message?.replace(/\s+/gu, ' ').trim() || undefined,
+  ].filter((part): part is string => Boolean(part));
+  if (parts.length === 0) return undefined;
+  const text = redactSecrets(parts.join(': '));
+  return text.length <= FAST_AGENT_INFERENCE_DETAIL_MAX_CHARS
+    ? text
+    : `${text.slice(0, FAST_AGENT_INFERENCE_DETAIL_MAX_CHARS - 1)}…`;
 }
 
 function resolveFastAgentInferenceMaxRetries(
@@ -792,6 +890,9 @@ function resolveFastAgentInferenceRetryDelayMs(
 function formatFastAgentInferenceRetryNotice(
   notice: FastAgentInferenceRetryNotice,
 ): string {
+  if (notice.freshSession) {
+    return 'The inference provider rejected the request. Retrying once from a fresh session…';
+  }
   const headline =
     notice.failure.reason === 'rate_limited'
       ? 'The inference provider is rate limiting requests.'
@@ -810,6 +911,20 @@ function formatFastAgentInferenceRetryNotice(
 }
 
 function formatFastAgentInferenceFailure(
+  failure: FastAgentInferenceFailure,
+  retried: boolean,
+  context: { detail?: string; model?: string } = {},
+): string {
+  const summary = formatFastAgentInferenceFailureSummary(failure, retried);
+  // The specific reasons already say what happened. The generic rejection
+  // is the one that leaves the reader guessing, so it carries the provider's
+  // own status and message, and the model that produced them.
+  if (failure.reason !== 'provider_error' || !context.detail) return summary;
+  const source = context.model ? ` (${context.model})` : '';
+  return `${summary}\n\nProvider error${source}: ${context.detail}`;
+}
+
+function formatFastAgentInferenceFailureSummary(
   failure: FastAgentInferenceFailure,
   retried: boolean,
 ): string {
@@ -871,6 +986,7 @@ async function runFastAgentInferenceWithRetries<T>(
   options: FastAgentInferenceRetryOptions = {},
 ): Promise<T> {
   let totalRetryCount = 0;
+  let rejectionRetryUsed = false;
   for (let retryNumber = 0; ; retryNumber += 1) {
     try {
       options.signal?.throwIfAborted();
@@ -898,14 +1014,20 @@ async function runFastAgentInferenceWithRetries<T>(
         retryNumber = 0;
       }
       const maxRetries = resolveFastAgentInferenceMaxRetries(failure);
+      const rejectionRetry =
+        !failure.retryable &&
+        failure.reason === 'provider_error' &&
+        !rejectionRetryUsed &&
+        options.retryRejection?.(error, failure) === true;
       if (
-        !failure.retryable ||
+        (!failure.retryable && !rejectionRetry) ||
         options.canRetry?.(error, failure) === false ||
         retryNumber >= maxRetries ||
         totalRetryCount >= FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN
       ) {
         throw new FastAgentInferenceError(failure, error);
       }
+      if (rejectionRetry) rejectionRetryUsed = true;
 
       totalRetryCount += 1;
       const attemptNumber = retryNumber + 1;
@@ -920,6 +1042,7 @@ async function runFastAgentInferenceWithRetries<T>(
           attemptNumber,
           maxAttempts: maxRetries,
           delayMs,
+          ...(rejectionRetry ? { freshSession: true } : {}),
         });
       } catch (noticeError) {
         console.warn(
@@ -934,6 +1057,7 @@ async function runFastAgentInferenceWithRetries<T>(
         maxAttempts: maxRetries,
         delayMs,
         inProcessAttempt: attemptNumber,
+        ...(rejectionRetry ? { freshSession: true } : {}),
       });
       if (parkedUntil) {
         throw new FastAgentDurableRetryScheduledError(parkedUntil);
@@ -1557,6 +1681,8 @@ export async function answerFastAgentQuestion({
   let canonicalConversationId: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
+  /** Last model OpenCode resolved for this turn, for the failure closeout. */
+  let lastResolvedInferenceModel: string | undefined;
   let currentInstructionVersion = 0;
   const assistantInstructionVersions = new Map<string, number>();
   const closedInstructionVersions = new Set<number>();
@@ -1682,24 +1808,37 @@ export async function answerFastAgentQuestion({
    * (row superseded or withdrawn, write failed) also falls back to the
    * in-process wait, so durability here is best effort like admission.
    */
+  /** Whether a pending retry could leave the process as a durable park. */
+  const canParkDurableRetry = () =>
+    Boolean(
+      durableAdmission &&
+      durableTurnReplayable &&
+      adapter.requestDurableRetry &&
+      !Env.R_FAST_DURABLE_RETRY_DISABLED &&
+      !signal?.aborted &&
+      !isInstructionClosed() &&
+      durableRetriesConsumed < FAST_AGENT_DURABLE_RETRY_MAX_PARKS,
+    );
   const deferInferenceRetry = async (
     notice: FastAgentInferenceRetryNotice & { inProcessAttempt: number },
   ): Promise<Date | null> => {
+    // The explicit checks repeat part of canParkDurableRetry so the
+    // admission row and the wakeup hook are narrowed for the calls below.
     if (
       !durableAdmission ||
-      !durableTurnReplayable ||
       !adapter.requestDurableRetry ||
-      Env.R_FAST_DURABLE_RETRY_DISABLED ||
-      notice.delayMs === undefined ||
-      signal?.aborted ||
-      isInstructionClosed()
+      !canParkDurableRetry() ||
+      notice.delayMs === undefined
     ) {
       return null;
     }
     // A one-off blip is cheapest to ride out where it happened: the first
     // in-process retry stays in place unless its wait is already long.
-    // From the second attempt on, the wait leaves the process.
+    // From the second attempt on, the wait leaves the process. A rejection
+    // always parks: the point of its one retry is a fresh session built
+    // from the recorded transcript, which only the resumed run provides.
     if (
+      !notice.freshSession &&
       notice.inProcessAttempt < 2 &&
       notice.delayMs < FAST_AGENT_DURABLE_RETRY_IMMEDIATE_PARK_WAIT_MS
     ) {
@@ -1727,6 +1866,25 @@ export async function answerFastAgentQuestion({
     }
     const retryAt = new Date(now + parkDelayMs);
     const inferenceRetries = durableRetriesConsumed + 1;
+    if (notice.freshSession && canonicalConversationId) {
+      // The provider rejected this session's native history, so the resumed
+      // run must not reattach to it. Forget the durable OpenCode session
+      // first: the resume then rebuilds from the recorded transcript, which
+      // is what a human "try again" gets.
+      try {
+        await setFastAgentOpenCodeSession({
+          sessionId: canonicalConversationId,
+          openCodeSessionId: null,
+        });
+      } catch (error) {
+        console.warn(
+          `[Fast Agent] Failed to forget the rejected OpenCode session before parking: ${formatErrorForLog(error)}`,
+        );
+        return null;
+      }
+      durableOpenCodeSessionId = null;
+      fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
+    }
     const scheduled = await scheduleFastAgentDurableTurnRetry(
       durableAdmission.eventId,
       {
@@ -4494,6 +4652,7 @@ export async function answerFastAgentQuestion({
                       tools: FAST_AGENT_SESSION_TOOL_FILTER,
                       onModelResolved: (model) => {
                         resolvedInferenceModel = model;
+                        lastResolvedInferenceModel = model;
                         diagnostics.recordModelResolved(model);
                       },
                       onMessageCompleted: (message) => {
@@ -4691,6 +4850,20 @@ export async function answerFastAgentQuestion({
                 (!nativeToolInvoked || openCodeSession.id !== undefined) &&
                 !isNonTaskOpenCodePromptTimeoutError(error) &&
                 !isNonTaskOpenCodeSessionValidationError(error),
+              // A rejected request is retried once from a fresh start, the
+              // way a human "try again" would run it: before tools ran, an
+              // in-process rebuild from visible history; after tools ran, a
+              // durable park so the resumed run replays from the recorded
+              // transcript instead of the rejected native history.
+              // A run that is itself the resumed retry gets no second one:
+              // a rejection that survives a fresh session is terminal.
+              retryRejection: (error) =>
+                !signal?.aborted &&
+                !isInstructionClosed() &&
+                !resumedAfterInferenceRetry &&
+                !isNonTaskOpenCodePromptTimeoutError(error) &&
+                !isNonTaskOpenCodeSessionValidationError(error) &&
+                (!nativeToolInvoked || canParkDurableRetry()),
               // Grant a fresh bounded budget only when the failed attempt
               // advanced the turn and the next retry continues the same
               // OpenCode session. Cold rebuilds replay from scratch, so
@@ -4963,6 +5136,7 @@ export async function answerFastAgentQuestion({
         ? formatFastAgentInferenceFailure(
             error.failure,
             inferenceRetryAttempted,
+            { detail: error.detail, model: lastResolvedInferenceModel },
           )
         : 'I hit an error while handling that request. Please try again in a moment.';
     // The error closeout is recorded like any other closeout: its intent

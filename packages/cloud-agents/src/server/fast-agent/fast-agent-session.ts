@@ -161,7 +161,7 @@ export async function setFastAgentOpenCodeSession({
   openCodeSessionId,
 }: {
   sessionId: string;
-  openCodeSessionId: string;
+  openCodeSessionId: string | null;
 }): Promise<void> {
   await fastAgentConversationRepository.setOpenCodeSession({
     conversationId: sessionId,

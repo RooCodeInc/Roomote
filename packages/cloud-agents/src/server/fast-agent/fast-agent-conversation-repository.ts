@@ -786,9 +786,10 @@ export interface FastAgentConversationRepository {
     conversationId: string;
     message: FastAgentMessageWrite;
   }): Promise<FastAgentMessageUpsertResult>;
+  /** `null` forgets the native session so the next turn rebuilds it. */
   setOpenCodeSession(input: {
     conversationId: string;
-    openCodeSessionId: string;
+    openCodeSessionId: string | null;
   }): Promise<void>;
 }
 
