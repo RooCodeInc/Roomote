@@ -858,7 +858,10 @@ async function buildAdoFastDelivery(
  *
  * A turn owns one comment: the first reply opens it and later replies append
  * to it by editing in place, so a turn never stacks comments on the
- * discussion. The footer is rendered once, at the bottom, on every edit.
+ * discussion. On the discussion's main thread the footer is rendered once, at
+ * the bottom, on every edit. Inside a review thread there is no footer: the
+ * thread is a conversation about one finding, and the Session link belongs
+ * on the top-level comment, not on every reply.
  */
 export function buildSourceControlFastAdapter(params: {
   conversation: FastAgentSourceControlConversation;
@@ -886,16 +889,18 @@ export function buildSourceControlFastAdapter(params: {
   ) => Promise<{ messageId: string }>;
 } {
   const discussion = parseSourceControlFastConversation(params.conversation);
-  const footer = discussion
-    ? buildFastSessionReplyFooterText({
-        provider: discussion.provider,
-        sessionId: params.sessionId,
-      })
-    : '';
-  const quote = discussion?.reviewCommentId ? null : params.quote;
+  const threaded = Boolean(discussion?.reviewCommentId);
+  const footer =
+    discussion && !threaded
+      ? buildFastSessionReplyFooterText({
+          provider: discussion.provider,
+          sessionId: params.sessionId,
+        })
+      : null;
+  const quote = threaded ? null : params.quote;
   let turnComment: SourceControlPostedComment | null = null;
   let turnBody = '';
-  const renderBody = () => `${turnBody}\n\n${footer}`;
+  const renderBody = () => (footer ? `${turnBody}\n\n${footer}` : turnBody);
   return {
     launchTask: createFastAgentSourceControlTaskLauncher({
       userId: params.userId,
