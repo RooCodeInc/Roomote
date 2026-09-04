@@ -1,7 +1,14 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockMutate } = vi.hoisted(() => ({ mockMutate: vi.fn() }));
+const { mockCapture, mockMutate } = vi.hoisted(() => ({
+  mockCapture: vi.fn(),
+  mockMutate: vi.fn(),
+}));
+
+vi.mock('@/hooks/useTelemetry', () => ({
+  useTelemetry: () => ({ enabled: true, capture: mockCapture }),
+}));
 
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
@@ -54,6 +61,7 @@ const multiRequest = {
 
 describe('SessionUserInputCard', () => {
   beforeEach(() => {
+    mockCapture.mockClear();
     mockMutate.mockClear();
   });
 
@@ -184,6 +192,41 @@ describe('SessionUserInputCard', () => {
         'true',
       );
     }
+  });
+
+  it('tracks each displayed starter-task request once', () => {
+    const { rerender } = render(
+      <SetupStarterTasksCard
+        sessionId="s"
+        request={{ ...multiRequest, preset: 'setup_starter_tasks' }}
+      />,
+    );
+
+    expect(mockCapture).toHaveBeenCalledOnce();
+    expect(mockCapture).toHaveBeenCalledWith('setup_starter_tasks_shown', {
+      offeredCount: 3,
+      starterTaskIds: 'speed-up-ci,security-scan,fix-test-flakes',
+    });
+
+    rerender(
+      <SetupStarterTasksCard
+        sessionId="s"
+        request={{ ...multiRequest, preset: 'setup_starter_tasks' }}
+      />,
+    );
+    expect(mockCapture).toHaveBeenCalledOnce();
+
+    rerender(
+      <SetupStarterTasksCard
+        sessionId="s"
+        request={{
+          ...multiRequest,
+          requestId: 'rui:test-multi-next',
+          preset: 'setup_starter_tasks',
+        }}
+      />,
+    );
+    expect(mockCapture).toHaveBeenCalledTimes(2);
   });
 });
 
