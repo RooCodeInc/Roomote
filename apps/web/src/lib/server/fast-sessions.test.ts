@@ -1,5 +1,6 @@
 import {
   db,
+  ensureAutomationRowsOnce,
   ensureSessionForFastConversation,
   eq,
   fastAgentConversations,
@@ -203,6 +204,43 @@ describe('Fast session queries', () => {
     await expect(
       getFastSessionById({ userId: otherUser.id, isAdmin: true }, session.id),
     ).resolves.toMatchObject({ id: session.id, userId: owner.id });
+  });
+
+  it('returns automation-owned Session details to authenticated deployment users', async () => {
+    const viewer = await userFactory.create();
+    await ensureAutomationRowsOnce();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: null,
+        ownerAutomation: 'custom_automation',
+        surface: 'automation',
+        workspaceId: crypto.randomUUID(),
+        conversationId: crypto.randomUUID(),
+        title: 'Weekly product update',
+      })
+      .returning();
+    const unifiedSession = await ensureSessionForFastConversation(
+      db,
+      conversation!.id,
+    );
+
+    await expect(
+      getFastSessionById(
+        { userId: viewer.id, isAdmin: false },
+        conversation!.id,
+      ),
+    ).resolves.toMatchObject({
+      id: conversation!.id,
+      userId: null,
+      ownerAutomation: 'custom_automation',
+      title: 'Weekly product update',
+    });
+
+    await db.delete(sessions).where(eq(sessions.id, unifiedSession.id));
+    await db
+      .delete(fastAgentConversations)
+      .where(eq(fastAgentConversations.id, conversation!.id));
   });
 
   it('resolves reply image artifacts to signed raw URLs', async () => {

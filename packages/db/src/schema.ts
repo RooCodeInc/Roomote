@@ -3097,9 +3097,12 @@ export const fastAgentConversations = pgTable(
   'fast_agent_conversations',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: text('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+    // N-1 keeps writing user-owned rows. Automation-owned rows carry no Fast
+    // parent events, so an older binary safely falls back to its task-only UI.
+    userId: text('user_id').references(() => users.id, {
+      onDelete: 'cascade',
+    }),
+    ownerAutomation: text('owner_automation').$type<BackgroundAutomationKey>(),
     surface: text('surface').notNull().$type<FastAgentSurface>(),
     workspaceId: text('workspace_id').notNull(),
     conversationId: text('conversation_id').notNull(),
@@ -3133,6 +3136,17 @@ export const fastAgentConversations = pgTable(
       table.conversationId,
     ),
     index('fast_agent_conversations_user_idx').on(table.userId),
+    index('fast_agent_conversations_owner_automation_idx').on(
+      table.ownerAutomation,
+    ),
+    check(
+      'fast_agent_conversations_owner_shape_check',
+      sql`(
+        (${table.userId} is not null and ${table.ownerAutomation} is null)
+        or
+        (${table.userId} is null and ${table.ownerAutomation} is not null)
+      )`,
+    ),
     index('fast_agent_conversations_legacy_ids_idx').using(
       'gin',
       table.legacyConversationIds,

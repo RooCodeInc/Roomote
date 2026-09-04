@@ -6,6 +6,7 @@ import {
   getFastAgentParentFromPayload,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
+  getTaskReportConsumerFromPayload,
   isPrReviewRun,
 } from '@roomote/types';
 
@@ -35,7 +36,10 @@ const RESERVED_COMMUNICATION_MCP_ENV_KEYS = [
 export function isFastAgentChildTaskRun(taskRun: {
   payload: unknown;
 }): boolean {
-  return getFastAgentParentFromPayload(taskRun.payload) !== null;
+  return (
+    getFastAgentParentFromPayload(taskRun.payload) !== null &&
+    getTaskReportConsumerFromPayload(taskRun.payload) === 'orchestrator'
+  );
 }
 
 /**

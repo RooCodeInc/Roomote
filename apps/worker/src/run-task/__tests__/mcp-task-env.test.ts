@@ -63,6 +63,7 @@ describe('getCommunicationReplyContext', () => {
         communicationChannelId: 'C123',
         communicationThreadId: '111.222',
         communicationContextInherited: true,
+        reportConsumer: 'orchestrator',
         fastAgentParent: {
           sessionId: '11111111-1111-4111-8111-111111111111',
           conversation: {
@@ -135,6 +136,7 @@ describe('getCommunicationReplyContext', () => {
         communicationChannelId: 'channel-1',
         communicationThreadId: 'child-thread-1',
         communicationContextInherited: true,
+        reportConsumer: 'orchestrator',
         fastAgentParent: {
           sessionId: '11111111-1111-4111-8111-111111111111',
           conversation: {
@@ -386,16 +388,34 @@ describe('getFastAgentChildRuntimeEnv', () => {
   it('marks a coding child and keeps its chat relay', () => {
     expect(
       getFastAgentChildRuntimeEnv({
-        payload: { fastAgentParent },
+        payload: { fastAgentParent, reportConsumer: 'orchestrator' },
         payloadKind: TaskPayloadKind.StandardTask,
       }),
     ).toEqual({ ROOMOTE_FAST_AGENT_CHILD: 'true' });
   });
 
+  it('keeps direct report delivery for a Session-attached task', () => {
+    const taskRun = {
+      payload: {
+        fastAgentParent,
+        slackChannel: 'C123',
+      },
+      payloadKind: TaskPayloadKind.StandardTask,
+    };
+
+    expect(isFastAgentChildTaskRun(taskRun)).toBe(false);
+    expect(getFastAgentChildRuntimeEnv(taskRun)).toEqual({});
+    expect(getSlackReplyContext(taskRun)).toEqual({ channel: 'C123' });
+  });
+
   it('disables the chat relay for review children so the PR feedback relay is the only signal', () => {
     expect(
       getFastAgentChildRuntimeEnv({
-        payload: { fastAgentParent, fastParentRequestedReview: true },
+        payload: {
+          fastAgentParent,
+          fastParentRequestedReview: true,
+          reportConsumer: 'orchestrator',
+        },
         payloadKind: TaskPayloadKind.GithubPrReview,
       }),
     ).toEqual({

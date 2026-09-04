@@ -66,6 +66,7 @@ describe('Fast conversation repository', () => {
     const session = await fastAgentConversationRepository.getOrCreate({
       userId: user.id,
       conversation,
+      initialTitle: 'Weekly product update',
     });
     const stored = await fastAgentConversationRepository.findById({
       id: session.id,
@@ -78,10 +79,66 @@ describe('Fast conversation repository', () => {
       .select({
         channelId: fastAgentConversations.currentReplyChannelId,
         surface: fastAgentConversations.surface,
+        title: fastAgentConversations.title,
       })
       .from(fastAgentConversations)
       .where(eq(fastAgentConversations.id, session.id));
-    expect(row).toEqual({ channelId: null, surface: 'automation' });
+    expect(row).toEqual({
+      channelId: null,
+      surface: 'automation',
+      title: 'Weekly product update',
+    });
+    const [unifiedSession] = await db
+      .select({ title: sessions.title })
+      .from(sessions)
+      .where(eq(sessions.fastConversationId, session.id));
+    expect(unifiedSession?.title).toBe('Weekly product update');
+  });
+
+  it('creates an automation-owned Session without a run-as user', async () => {
+    const conversation = {
+      surface: 'automation' as const,
+      workspaceId: 'ownerless-automation-repository-test',
+      conversationId: crypto.randomUUID(),
+    };
+
+    const created = await fastAgentConversationRepository.getOrCreate({
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      conversation,
+      initialTitle: 'Ownerless weekly update',
+    });
+    const reused = await fastAgentConversationRepository.getOrCreate({
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      conversation,
+      initialTitle: 'Changed title must not replace the original',
+    });
+
+    expect(created).toMatchObject({
+      userId: null,
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+    });
+    expect(reused).toMatchObject({ id: created.id, created: false });
+    const [unifiedSession] = await db
+      .select({
+        id: sessions.id,
+        ownerKind: sessions.ownerKind,
+        ownerUserId: sessions.ownerUserId,
+        ownerAutomation: sessions.ownerAutomation,
+        title: sessions.title,
+      })
+      .from(sessions)
+      .where(eq(sessions.fastConversationId, created.id));
+    expect(unifiedSession).toMatchObject({
+      ownerKind: 'automation',
+      ownerUserId: null,
+      ownerAutomation: 'custom_automation',
+      title: 'Ownerless weekly update',
+    });
+
+    await db.delete(sessions).where(eq(sessions.id, unifiedSession!.id));
+    await db
+      .delete(fastAgentConversations)
+      .where(eq(fastAgentConversations.id, created.id));
   });
 
   it.each(['teams', 'telegram'] as const)(

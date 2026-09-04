@@ -8,6 +8,7 @@ import {
   createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
   resolveApiBaseUrl,
+  type FastAgentConversationRecord,
   type FastAgentTurnLockHandle,
   type FastAgentReplyHandle,
   type FastAgentTurnAdapter,
@@ -109,6 +110,20 @@ import {
 } from './task-runs/pr-review-action';
 
 const EXITED_RUN_STATUSES = new Set<RunStatus>(exitedRunStatuses);
+
+function requireFastAgentActorUserId(
+  session: FastAgentConversationRecord,
+  actorUserId?: string,
+): string {
+  const userId = actorUserId ?? session.userId;
+  if (!userId) {
+    throw new FastAgentParentEventDeliveryError(
+      'Automation-owned Fast sessions require a human actor for this turn.',
+      { replyPosted: false, permanent: true },
+    );
+  }
+  return userId;
+}
 
 /** Deterministic uuid-shaped Slack client_msg_id so a retried delivery of the
  * same event posts with the same idempotency key instead of duplicating. */
@@ -477,7 +492,7 @@ async function createAutomationFastAgentParentTurn(params: {
       { replyPosted: false, permanent: true },
     );
   }
-  const actorUserId = params.actorUserId ?? session.userId;
+  const actorUserId = requireFastAgentActorUserId(session, params.actorUserId);
 
   return {
     userId: actorUserId,
@@ -521,7 +536,7 @@ async function createWebFastAgentParentTurn(params: {
       { replyPosted: false, permanent: true },
     );
   }
-  const actorUserId = params.actorUserId ?? session.userId;
+  const actorUserId = requireFastAgentActorUserId(session, params.actorUserId);
 
   return {
     userId: actorUserId,
@@ -573,7 +588,7 @@ async function createSlackFastAgentParentTurn(
     );
   }
 
-  const actorUserId = params.actorUserId ?? session.userId;
+  const actorUserId = requireFastAgentActorUserId(session, params.actorUserId);
   const conversation = session.conversation;
   const slack = new SlackNotifier(installation.botAccessToken);
   const threadId = conversation.replyTarget.threadId;
@@ -1100,7 +1115,7 @@ async function createDiscordFastAgentParentTurn(
     );
   }
 
-  const actorUserId = params.actorUserId ?? session.userId;
+  const actorUserId = requireFastAgentActorUserId(session, params.actorUserId);
   const conversation = session.conversation;
   const adapter: FastAgentTurnAdapter = {
     launchTask: createFastAgentDiscordTaskLauncher({
@@ -1307,7 +1322,7 @@ async function createTeamsFastAgentParentTurn(
       { replyPosted: false, permanent: true },
     );
   }
-  const actorUserId = params.actorUserId ?? session.userId;
+  const actorUserId = requireFastAgentActorUserId(session, params.actorUserId);
   const conversation = session.conversation;
   const route = await findTeamsConversationRoute(
     conversation.replyTarget.channelId,
@@ -1455,7 +1470,7 @@ async function createTelegramFastAgentParentTurn(
       { replyPosted: false, permanent: true },
     );
   }
-  const actorUserId = params.actorUserId ?? session.userId;
+  const actorUserId = requireFastAgentActorUserId(session, params.actorUserId);
   const conversation = session.conversation;
   return {
     userId: actorUserId,
@@ -1554,7 +1569,7 @@ async function createLinearFastAgentParentTurn(params: {
       { replyPosted: false, permanent: true },
     );
   }
-  const actorUserId = params.actorUserId ?? session.userId;
+  const actorUserId = requireFastAgentActorUserId(session, params.actorUserId);
   const conversation = session.conversation;
   const agentSessionId = conversation.replyTarget.channelId;
   return {
@@ -1616,7 +1631,7 @@ async function createSourceControlFastAgentParentTurn(params: {
       { replyPosted: false, permanent: true },
     );
   }
-  const actorUserId = params.actorUserId ?? session.userId;
+  const actorUserId = requireFastAgentActorUserId(session, params.actorUserId);
   return {
     userId: actorUserId,
     conversation,

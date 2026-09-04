@@ -651,4 +651,49 @@ describe('Fast session PR review actions', () => {
       'dismissed',
     );
   });
+
+  it('uses the replying human as the actor for an automation-owned Session', async () => {
+    const automationSession = {
+      ...session,
+      userId: null,
+      ownerAutomation: 'custom_automation',
+      surface: 'automation',
+      workspaceId: 'automation-1',
+    };
+    const conversation = {
+      surface: 'automation' as const,
+      workspaceId: 'automation-1',
+      conversationId: 'session-1',
+    };
+    const release = vi.fn().mockResolvedValue(undefined);
+    mocks.findAccessibleSession.mockResolvedValue(automationSession);
+    mocks.buildReplyDelivery.mockResolvedValue({
+      conversation,
+      adapter: { launchTask: mocks.launchTask, postReply: vi.fn() },
+    });
+    mocks.acquireTurnLock.mockResolvedValue(release);
+    mocks.answerQuestion.mockResolvedValue('Continued');
+
+    await replyToFastSessionCommand(auth, {
+      sessionId: automationSession.id,
+      text: 'Continue this scheduled run.',
+    });
+
+    expect(mocks.buildReplyDelivery).toHaveBeenCalledWith({
+      sessionId: automationSession.id,
+      userId: 'user-1',
+      senderDisplayName: 'User One',
+      question: 'Continue this scheduled run.',
+    });
+    const scheduled = mocks.after.mock.calls[0]?.[0];
+    expect(scheduled).toBeTypeOf('function');
+    await scheduled?.();
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        conversation,
+      }),
+    );
+    expect(release).toHaveBeenCalledOnce();
+  });
 });
