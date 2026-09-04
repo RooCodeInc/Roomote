@@ -36,6 +36,8 @@ describe('SLACK_STOP_HOOK_SCRIPT', () => {
         ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: undefined,
         ROOMOTE_COMMUNICATION_PROVIDER: undefined,
         ROOMOTE_SLACK_CHANNEL: undefined,
+        ROOMOTE_FAST_AGENT_CHILD: undefined,
+        ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY: undefined,
         ...options.env,
       },
     });
@@ -66,6 +68,22 @@ describe('SLACK_STOP_HOOK_SCRIPT', () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
     expect(result.stderr).toBe('');
+  });
+
+  it('skips enforcement when a PR-review child has no parent report tool', () => {
+    const result = runHook({
+      env: {
+        ROOMOTE_FAST_AGENT_CHILD: 'true',
+        ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY: 'false',
+        ROOMOTE_SLACK_HOOK_DEBUG: 'true',
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: '/tmp/roomote-state.json',
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('decision="allow"');
+    expect(result.stderr).toContain('reason="parent_session_report_disabled"');
   });
 
   it('allows Stop for non-parent subagent threads', () => {
@@ -112,6 +130,52 @@ describe('SLACK_STOP_HOOK_SCRIPT', () => {
       'post a terminal Discord-visible reply for the current turn',
     );
     expect(decision.reason).not.toContain('Slack');
+  });
+
+  it('asks delegated coding tasks to report to the parent Session', () => {
+    const result = runHook({
+      env: {
+        ROOMOTE_FAST_AGENT_CHILD: 'true',
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: '/tmp/roomote-state.json',
+      },
+    });
+
+    expect(result.status).toBe(0);
+    const decision = JSON.parse(result.stdout);
+    expect(decision.decision).toBe('block');
+    expect(decision.reason).toContain(
+      'send a terminal report to the parent Session',
+    );
+    expect(decision.reason).toContain('report_to_parent_session');
+    expect(decision.reason).not.toContain('chat-visible');
+  });
+
+  it('accepts a terminal parent Session report', () => {
+    const stateFilePath = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-stop-state-')),
+      'state.json',
+    );
+    tempDirs.push(path.dirname(stateFilePath));
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        messageTs: 'report-1',
+        tool: 'report_to_parent_session',
+        replyPurpose: 'closeout',
+        recordedAtMs: Date.now(),
+      }),
+      'utf8',
+    );
+
+    const result = runHook({
+      env: {
+        ROOMOTE_FAST_AGENT_CHILD: 'true',
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
   });
 
   it('names Slack in the reminder when a Slack channel is configured', () => {

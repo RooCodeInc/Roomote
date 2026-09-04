@@ -4,21 +4,21 @@ vi.mock('@roomote/sdk/client', () => ({
   createClient: mocks.createClient,
 }));
 
-import { handleRelayFastAgentChatReply } from '../relay-fast-agent-chat-reply';
+import { handleReportToParentSession } from '../report-to-parent-session';
 
-describe('handleRelayFastAgentChatReply', () => {
+describe('handleReportToParentSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.relay.mockResolvedValue({ relayed: true });
     mocks.createClient.mockReturnValue({
       taskRuns: {
-        relayFastAgentChildChatReply: { mutate: mocks.relay },
+        reportToParentSession: { mutate: mocks.relay },
       },
     });
   });
 
   it('relays lifecycle text without posting to a communication provider', async () => {
-    const result = await handleRelayFastAgentChatReply(
+    const result = await handleReportToParentSession(
       {
         runId: 42,
         taskId: 'task-1',
@@ -58,7 +58,7 @@ describe('handleRelayFastAgentChatReply', () => {
   it('does not mark an update successful when the Fast parent is unavailable', async () => {
     mocks.relay.mockResolvedValueOnce({ relayed: false });
 
-    const result = await handleRelayFastAgentChatReply(
+    const result = await handleReportToParentSession(
       {
         runId: 42,
         taskId: 'task-1',
@@ -85,11 +85,11 @@ describe('handleRelayFastAgentChatReply', () => {
       message: 'The targeted tests are running.',
     };
 
-    await handleRelayFastAgentChatReply(input, {
+    await handleReportToParentSession(input, {
       token: 'token',
       platformApiUrl: 'https://api.roomote.example',
     });
-    await handleRelayFastAgentChatReply(input, {
+    await handleReportToParentSession(input, {
       token: 'token',
       platformApiUrl: 'https://api.roomote.example',
     });

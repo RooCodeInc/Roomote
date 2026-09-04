@@ -154,7 +154,7 @@ const automation = {
     targetKind: 'slack_channel',
     externalRef: 'C123',
   },
-  createdByUserId: null,
+  createdByUserId: 'user-1',
   lastRunAt: null,
   lastSucceededAt: null,
   lastFailedAt: null,
@@ -807,6 +807,9 @@ describe('customAutomationsJob', () => {
   });
 
   it('launches a StandardTask for due automations', async () => {
+    const claimAt = new Date('2026-09-04T12:00:00.000Z');
+    vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(claimAt);
+
     const result = await customAutomationsJob();
 
     expect(result.launchedTaskId).toBe('task_abc');
@@ -820,6 +823,16 @@ describe('customAutomationsJob', () => {
         scheduleHourLocal: 3,
       }),
     );
+    const conversation = {
+      surface: 'automation' as const,
+      workspaceId: automation.id,
+      conversationId: `${automation.id}:${claimAt.toISOString()}`,
+    };
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      conversation,
+      initialTitle: automation.name,
+    });
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
@@ -831,6 +844,7 @@ describe('customAutomationsJob', () => {
             customAutomationId: automation.id,
             channel: 'C123',
             slackChannel: 'C123',
+            fastAgentSessionId: '33333333-3333-4333-8333-333333333333',
           }),
         }),
         initiator: {
@@ -848,6 +862,15 @@ describe('customAutomationsJob', () => {
         channels: { slackChannelId: 'C123' },
       }),
     );
+    const enqueued = vi.mocked(enqueueTask).mock.calls[0]?.[0] as {
+      task: { payload: Record<string, unknown> };
+    };
+    expect(enqueued.task.payload).not.toHaveProperty('reportConsumer');
+    expect(enqueued.task.payload).not.toHaveProperty(
+      'communicationContextInherited',
+    );
+    expect(enqueued.task.payload).not.toHaveProperty('fastAgentParent');
+    expect(fastMocks.enqueueParentEvent).not.toHaveBeenCalled();
     expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
       db,
       expect.objectContaining({
@@ -1106,6 +1129,7 @@ describe('customAutomationsJob', () => {
   );
 
   it('adds presentation defaults without channel anchoring when no report channel is configured', async () => {
+    vi.mocked(findUserDirectMessageDestination).mockResolvedValue(null);
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       { ...automation, target: {} } as never,
     ]);
@@ -1136,6 +1160,34 @@ describe('customAutomationsJob', () => {
     expect(enqueued.task.payload.channel).toBeUndefined();
     expect(enqueued.channels).toBeUndefined();
     expect(buildDestinationTaskPayloadFields).not.toHaveBeenCalled();
+  });
+
+  it('launches an ownerless sandbox automation into an automation-owned Session', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      { ...automation, createdByUserId: null } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result.launchedTaskId).toBe('task_abc');
+    expect(fastMocks.getSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        owner: { kind: 'automation', automationKey: 'custom_automation' },
+      }),
+    );
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initiator: expect.objectContaining({
+          kind: 'automation',
+          key: 'custom_automation',
+        }),
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            fastAgentSessionId: '33333333-3333-4333-8333-333333333333',
+          }),
+        }),
+      }),
+    );
   });
 
   it("falls back to the enabling admin's DM when no report channel is configured", async () => {
@@ -1281,6 +1333,10 @@ describe('runCustomAutomationNow', () => {
     vi.mocked(enqueueTask).mockResolvedValue({
       taskId: 'task_manual',
     } as never);
+    fastMocks.getSession.mockResolvedValue({
+      id: '33333333-3333-4333-8333-333333333333',
+      compatibilityMessages: [],
+    });
   });
 
   it('launches with a manual trigger', async () => {

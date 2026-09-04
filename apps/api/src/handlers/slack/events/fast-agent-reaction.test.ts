@@ -242,4 +242,45 @@ describe('Fast Slack reaction input', () => {
     ).resolves.toBe(false);
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
   });
+
+  it('does not start a user-scoped reaction turn for an ownerless session', async () => {
+    mocks.findSession.mockResolvedValue({
+      id: 'session-1',
+      userId: null,
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      title: 'Weekly update',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T1',
+        conversationId: '100.000',
+        replyTarget: { channelId: 'C1', threadId: '100.000' },
+      },
+    });
+
+    await expect(
+      maybeRouteFastAgentReaction({
+        context: {
+          teamId: 'T1',
+          slackInstallation: { botUserId: 'UROOMOTE' },
+          slack: {
+            getMessage: vi.fn(async () => ({
+              text: 'Ownerless automation output',
+              thread_ts: '100.000',
+            })),
+            normalizeIncomingText: vi.fn(async () => '@alice'),
+          },
+        } as never,
+        event: {
+          type: 'reaction_added',
+          user: 'UALICE',
+          reaction: 'eyes',
+          item: { type: 'message', channel: 'C1', ts: '101.000' },
+          event_ts: '102.000',
+        },
+      }),
+    ).resolves.toBe(true);
+
+    expect(mocks.acquireLock).not.toHaveBeenCalled();
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+  });
 });

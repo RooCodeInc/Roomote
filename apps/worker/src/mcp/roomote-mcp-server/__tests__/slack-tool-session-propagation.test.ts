@@ -10,7 +10,7 @@ const mockState = vi.hoisted(() => ({
   registeredTools: [] as RegisteredTool[],
   connect: vi.fn(async () => undefined),
   handleSendChatReply: vi.fn(),
-  handleRelayFastAgentChatReply: vi.fn(),
+  handleReportToParentSession: vi.fn(),
   handleSendChatReactionEmoji: vi.fn(),
   recordChatReplySatisfaction: vi.fn(),
   recordChatReplyDeliveryFailure: vi.fn(),
@@ -45,8 +45,8 @@ vi.mock('../send-chat-reply.js', () => ({
   handleSendChatReply: mockState.handleSendChatReply,
 }));
 
-vi.mock('../relay-fast-agent-chat-reply.js', () => ({
-  handleRelayFastAgentChatReply: mockState.handleRelayFastAgentChatReply,
+vi.mock('../report-to-parent-session.js', () => ({
+  handleReportToParentSession: mockState.handleReportToParentSession,
 }));
 
 vi.mock('../send-chat-reaction-emoji.js', () => ({
@@ -74,7 +74,7 @@ describe('roomote MCP Slack tool session propagation', () => {
     mockState.registeredTools.length = 0;
     mockState.connect.mockClear();
     mockState.handleSendChatReply.mockReset();
-    mockState.handleRelayFastAgentChatReply.mockReset();
+    mockState.handleReportToParentSession.mockReset();
     mockState.handleSendChatReactionEmoji.mockReset();
     mockState.recordChatReplySatisfaction.mockReset();
     mockState.recordChatReplyDeliveryFailure.mockReset();
@@ -123,10 +123,10 @@ describe('roomote MCP Slack tool session propagation', () => {
     });
   });
 
-  it('records a successful Fast parent relay as lifecycle satisfaction', async () => {
+  it('records a successful parent Session report as lifecycle satisfaction', async () => {
     vi.resetModules();
     mockState.registeredTools.length = 0;
-    mockState.handleRelayFastAgentChatReply.mockResolvedValue({
+    mockState.handleReportToParentSession.mockResolvedValue({
       content: [
         {
           type: 'text',
@@ -147,14 +147,14 @@ describe('roomote MCP Slack tool session propagation', () => {
     };
     await import('../index.js');
 
-    await getRegisteredTool('send_chat_reply').handler!(
+    await getRegisteredTool('report_to_parent_session').handler!(
       { message: 'still working', purpose: 'progress' },
       { sessionId: 'fast-child-session' },
     );
 
     expect(mockState.recordChatReplySatisfaction).toHaveBeenCalledWith({
       messageTs: 'relay-1',
-      tool: 'send_chat_reply',
+      tool: 'report_to_parent_session',
       replyPurpose: 'progress',
       sessionId: 'fast-child-session',
     });

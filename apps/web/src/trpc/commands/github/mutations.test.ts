@@ -634,6 +634,39 @@ describe('startAuthenticateGitHubAccountCommand', () => {
     });
   });
 
+  it('keeps the background hint out of redirect_uri and carries it in the signed state', async () => {
+    mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
+      name === 'R_GITHUB_CLIENT_ID' ? 'Iv1.resolved-client' : null,
+    );
+
+    const result = await startAuthenticateGitHubAccountCommand(
+      buildMockAuth(),
+      { redirect: '/settings', bg: 'background' },
+    );
+
+    expect(result.success).toBe(true);
+
+    if (!result.success) {
+      return;
+    }
+
+    const url = new URL(result.url);
+    // GitHub Apps reject any redirect_uri that is not an exact match for a
+    // registered callback URL, including one with extra query parameters.
+    expect(url.searchParams.get('redirect_uri')).toBe(
+      'https://roomote.example.com/github/callback',
+    );
+    const [encodedPayload] = (url.searchParams.get('state') ?? '').split('.');
+    const payload = JSON.parse(
+      Buffer.from(encodedPayload!, 'base64url').toString('utf8'),
+    ) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      mode: 'auth',
+      redirect: '/settings',
+      bg: 'background',
+    });
+  });
+
   it('prefers R_PUBLIC_URL for the OAuth redirect_uri when R_APP_URL is loopback', async () => {
     mockEnvState.R_APP_URL = 'http://127.0.0.1:13000';
     mockEnvState.R_PUBLIC_URL = 'https://customer.example';

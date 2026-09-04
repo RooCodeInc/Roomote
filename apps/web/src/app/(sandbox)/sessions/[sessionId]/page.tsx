@@ -255,12 +255,16 @@ export default async function SessionDetailPage({
           sessionReasoningEffort={session.reasoningEffort}
           defaultModelId={defaultModelId}
           defaultReasoningEffort={defaultReasoningEffort}
-          owner={{
-            userId: session.userId,
-            name: session.ownerName,
-            email: session.ownerEmail,
-            imageUrl: session.ownerImageUrl,
-          }}
+          {...(session.userId
+            ? {
+                owner: {
+                  userId: session.userId,
+                  name: session.ownerName,
+                  email: session.ownerEmail,
+                  imageUrl: session.ownerImageUrl,
+                },
+              }
+            : {})}
         />
       </div>
     </SessionWorkspace>

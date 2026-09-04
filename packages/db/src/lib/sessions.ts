@@ -230,6 +230,7 @@ export async function ensureSessionForFastConversation(
     .select({
       id: fastAgentConversations.id,
       userId: fastAgentConversations.userId,
+      ownerAutomation: fastAgentConversations.ownerAutomation,
       surface: fastAgentConversations.surface,
       title: fastAgentConversations.title,
       titleEditedByUserAt: fastAgentConversations.titleEditedByUserAt,
@@ -256,8 +257,9 @@ export async function ensureSessionForFastConversation(
       title: conversation.title?.trim() || 'New session',
       titleEditedByUserAt: conversation.titleEditedByUserAt,
       llmTitleCheckpoint: conversation.llmTitleCheckpoint,
-      ownerKind: 'user',
+      ownerKind: conversation.ownerAutomation ? 'automation' : 'user',
       ownerUserId: conversation.userId,
+      ownerAutomation: conversation.ownerAutomation,
       sourceSurface: conversation.surface,
       sourceTrigger:
         conversation.surface === 'automation' ? 'schedule' : 'message',
@@ -277,14 +279,16 @@ export async function ensureSessionForFastConversation(
     );
   }
 
-  await tx
-    .insert(sessionParticipants)
-    .values({
-      sessionId: session.id,
-      userId: conversation.userId,
-      role: 'owner',
-    })
-    .onConflictDoNothing();
+  if (conversation.userId) {
+    await tx
+      .insert(sessionParticipants)
+      .values({
+        sessionId: session.id,
+        userId: conversation.userId,
+        role: 'owner',
+      })
+      .onConflictDoNothing();
+  }
 
   return session;
 }

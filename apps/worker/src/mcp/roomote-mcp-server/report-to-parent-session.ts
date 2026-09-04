@@ -13,7 +13,7 @@ import {
 import { catchError, errorResult, successResult } from './tool-result.js';
 import type { ArtifactConfig, ToolResult } from './types.js';
 
-export async function handleRelayFastAgentChatReply(
+export async function handleReportToParentSession(
   input: {
     runId: number;
     taskId: string;
@@ -75,7 +75,7 @@ export async function handleRelayFastAgentChatReply(
       url: artifactConfig.platformApiUrl,
       headers: () => buildApiHeaders(artifactConfig),
     });
-    const result = await client.taskRuns.relayFastAgentChildChatReply.mutate({
+    const result = await client.taskRuns.reportToParentSession.mutate({
       runId: input.runId,
       taskId: input.taskId,
       deliverySignature,
@@ -85,7 +85,7 @@ export async function handleRelayFastAgentChatReply(
     });
 
     if (!result.relayed) {
-      return errorResult('The Fast parent could not receive this update.');
+      return errorResult('The parent Session could not receive this report.');
     }
 
     return successResult({

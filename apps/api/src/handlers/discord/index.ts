@@ -658,7 +658,10 @@ async function processDiscordGatewayEvent(
       : repliedToAutomationReport
         ? repliedToAutomationReport.status === RunStatus.Completed &&
           repliedToAutomationReport.snapshotId &&
-          isSnapshotResumable(repliedToAutomationReport.snapshotCreatedAt)
+          isSnapshotResumable(
+            repliedToAutomationReport.snapshotCreatedAt,
+            repliedToAutomationReport.vendor,
+          )
           ? repliedToAutomationReport
           : null
         : await findCompletedCommunicationTaskRunWithSnapshot(conversation);

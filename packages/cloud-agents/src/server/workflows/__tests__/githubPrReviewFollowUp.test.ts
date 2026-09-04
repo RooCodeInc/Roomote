@@ -64,9 +64,11 @@ describe('githubPrReviewFollowUp', () => {
       gitHubToken: 'token',
       taskRunUrl: 'https://roomote.example/task/1',
       additionalInstructions: 'Focus on authorization boundaries.',
+      therapistModeEnabled: true,
     });
 
     expect(result.prompt).toContain('Additional team instructions:');
     expect(result.prompt).toContain('Focus on authorization boundaries.');
+    expect(result.harnessInstructions).toContain('<therapist_mode>');
   });
 });

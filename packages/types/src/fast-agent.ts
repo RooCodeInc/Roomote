@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { BACKGROUND_AUTOMATION_KEYS } from './background-agents';
+
 export const fastAgentSurfaces = [
   'slack',
   'discord',
@@ -17,6 +19,18 @@ export const fastAgentSurfaces = [
 export const fastAgentSurfaceSchema = z.enum(fastAgentSurfaces);
 
 export type FastAgentSurface = z.infer<typeof fastAgentSurfaceSchema>;
+
+export const fastAgentConversationOwnerSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('user'), userId: z.string().min(1) }),
+  z.object({
+    kind: z.literal('automation'),
+    automationKey: z.enum(BACKGROUND_AUTOMATION_KEYS),
+  }),
+]);
+
+export type FastAgentConversationOwner = z.infer<
+  typeof fastAgentConversationOwnerSchema
+>;
 
 export const fastAgentReplyTargetSchema = z.object({
   channelId: z.string().min(1),
@@ -225,6 +239,13 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
   images: z.array(z.string()).optional(),
   senderDisplayName: z.string().min(1).optional(),
   senderExternalId: z.string().min(1).optional(),
+  /**
+   * Whether the surface classified the message as addressed to Roomote (a
+   * mention, a DM, a reply to it) rather than ambient conversation between
+   * people. When this message is steered into a running turn, only `false`
+   * lets that turn end without a visible reply; absent means directed.
+   */
+  directedAtRoomote: z.boolean().optional(),
   /**
    * Surface context the model reads with the message (the pull request a
    * mention is on, for example). Persisted so a queued or resumed turn keeps

@@ -100,11 +100,13 @@ export type PinnedFastSessionLaunchResult = {
 type ConversationTarget = {
   id: string;
   userId: string;
+  ownerUserId: string | null;
   conversation: FastAgentConversation;
 };
 
 async function findConversationTargetById(
   fastConversationId: string,
+  actorUserId: string,
 ): Promise<ConversationTarget | null> {
   const record = await fastAgentConversationRepository.findById({
     id: fastConversationId,
@@ -112,7 +114,8 @@ async function findConversationTargetById(
   return record
     ? {
         id: record.id,
-        userId: record.userId,
+        userId: actorUserId,
+        ownerUserId: record.userId,
         conversation: record.conversation,
       }
     : null;
@@ -121,9 +124,8 @@ async function findConversationTargetById(
 /**
  * A retry of an earlier launch must land in the Session that launch created,
  * or the queue will refuse the reused idempotency key as belonging to another
- * Session. The earlier task's Fast parent names that Session. Only the person
- * who owns that Session may replay into it; anyone else reusing the id is
- * refused rather than handed someone else's task.
+ * Session. The earlier task's Fast parent names that Session, while the
+ * authenticated caller remains the actor for the retried launch.
  */
 async function findConversationTargetForLaunchKey(
   launchIdempotencyKey: string,
@@ -142,8 +144,8 @@ async function findConversationTargetForLaunchKey(
   if (!parentSessionId) {
     return null;
   }
-  const target = await findConversationTargetById(parentSessionId);
-  if (target && target.userId !== userId) {
+  const target = await findConversationTargetById(parentSessionId, userId);
+  if (target?.ownerUserId && target.ownerUserId !== userId) {
     throw new Error('This launch id already belongs to another Session.');
   }
   return target;
@@ -175,7 +177,10 @@ async function findOriginConversationTarget(
     return null;
   }
   if (session.fastConversationId) {
-    const target = await findConversationTargetById(session.fastConversationId);
+    const target = await findConversationTargetById(
+      session.fastConversationId,
+      input.userId,
+    );
     if (target) {
       return target;
     }
@@ -188,6 +193,7 @@ async function findOriginConversationTarget(
   return {
     id: created.id,
     userId: input.userId,
+    ownerUserId: created.userId,
     conversation: created.conversation,
   };
 }
@@ -197,7 +203,10 @@ async function resolveConversationTarget(
   launchIdempotencyKey: string,
 ): Promise<ConversationTarget> {
   if (input.fastConversationId) {
-    const target = await findConversationTargetById(input.fastConversationId);
+    const target = await findConversationTargetById(
+      input.fastConversationId,
+      input.userId,
+    );
     if (!target) {
       throw new Error('The Session for this launch could not be found.');
     }
@@ -229,6 +238,7 @@ async function resolveConversationTarget(
   return {
     id: created.id,
     userId: input.userId,
+    ownerUserId: created.userId,
     conversation: created.conversation,
   };
 }

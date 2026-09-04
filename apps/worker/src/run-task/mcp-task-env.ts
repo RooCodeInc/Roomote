@@ -6,6 +6,7 @@ import {
   getFastAgentParentFromPayload,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
+  getTaskReportConsumerFromPayload,
   isPrReviewRun,
 } from '@roomote/types';
 
@@ -35,13 +36,16 @@ const RESERVED_COMMUNICATION_MCP_ENV_KEYS = [
 export function isFastAgentChildTaskRun(taskRun: {
   payload: unknown;
 }): boolean {
-  return getFastAgentParentFromPayload(taskRun.payload) !== null;
+  return (
+    getFastAgentParentFromPayload(taskRun.payload) !== null &&
+    getTaskReportConsumerFromPayload(taskRun.payload) === 'orchestrator'
+  );
 }
 
 /**
  * Runtime env that tells the Roomote MCP server how this run talks to its
- * Fast parent. A review child gets no chat relay: its outcome reaches the
- * session through the PR feedback relay alone, so `send_chat_reply` would
+ * parent Session. A review child gets no report tool: its outcome reaches the
+ * Session through the PR feedback relay alone, so an additional report would
  * only produce narration the parent then double-announces.
  */
 export function getFastAgentChildRuntimeEnv(taskRun: {
@@ -174,7 +178,7 @@ export function buildMcpTaskEnv(input: {
 
   if (input.runtimeEnv.ROOMOTE_FAST_AGENT_CHILD === 'true') {
     // Fast children cannot post to the inherited chat surface directly, but
-    // their private parent relay still uses the normal lifecycle hooks.
+    // their private parent report still uses the normal lifecycle hooks.
     mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE ??= [
       input.runtimeEnv.HOME ?? '/tmp',
       '.config',

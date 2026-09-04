@@ -258,6 +258,7 @@ export async function processFastAgentMessage(params: {
         ? { senderDisplayName: currentMessage.username }
         : {}),
       ...(event.user ? { senderExternalId: event.user } : {}),
+      directedAtRoomote,
     };
     let durableTurn: FastAgentDurableTurn | null = null;
     if (needsCanonicalAdmission) {
