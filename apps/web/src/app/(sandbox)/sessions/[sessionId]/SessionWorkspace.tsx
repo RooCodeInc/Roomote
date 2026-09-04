@@ -708,7 +708,7 @@ type TaskPanelState = { taskId: string };
 type TaskArtifactSelection = { path: string; version?: number };
 
 const SESSION_MAIN_MIN_WIDTH = 400;
-const SESSION_TASK_PANEL_MIN_WIDTH = 320;
+const SESSION_TASK_PANEL_MIN_WIDTH = 400;
 
 export function getSessionTaskPanelCapacity(
   workspaceWidth: number,

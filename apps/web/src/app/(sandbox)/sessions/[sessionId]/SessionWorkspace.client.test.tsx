@@ -709,18 +709,18 @@ describe('SessionWorkspace', () => {
     });
 
     expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
-    for (let index = 2; index <= 6; index += 1) {
+    for (let index = 2; index <= 5; index += 1) {
       expect(screen.getByLabelText(`Full task task-${index}`)).toBeVisible();
     }
-    expect(screen.queryByLabelText('Full task task-7')).toBeNull();
+    expect(screen.queryByLabelText('Full task task-6')).toBeNull();
     expect(screen.getByText('Session transcript')).toBeVisible();
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Select task-7 from task-6' }),
+      screen.getByRole('button', { name: 'Select task-7 from task-5' }),
     );
 
     expect(screen.getByLabelText('Full task task-7')).toBeVisible();
-    expect(screen.queryByLabelText('Full task task-6')).toBeNull();
+    expect(screen.queryByLabelText('Full task task-5')).toBeNull();
   });
 
   it('restores task panels after temporarily viewing a utility panel', async () => {
@@ -1485,9 +1485,9 @@ describe('getSessionTaskPanelCapacity', () => {
     { width: 700, isMdOrLarger: false, expected: 1 },
     { width: 1024, isMdOrLarger: true, expected: 1 },
     { width: 1280, isMdOrLarger: true, expected: 2 },
-    { width: 1920, isMdOrLarger: true, expected: 4 },
-    { width: 2560, isMdOrLarger: true, expected: 6 },
-    { width: 3840, isMdOrLarger: true, expected: 10 },
+    { width: 1920, isMdOrLarger: true, expected: 3 },
+    { width: 2560, isMdOrLarger: true, expected: 5 },
+    { width: 3840, isMdOrLarger: true, expected: 8 },
   ])(
     'returns $expected task panels for a $width px workspace',
     ({ width, isMdOrLarger, expected }) => {
