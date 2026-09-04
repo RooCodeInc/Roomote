@@ -6162,13 +6162,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
     });
 
-    it('preserves a delivered acknowledgement when the turn resumes before launch', async () => {
+    it('preserves a delivered acknowledgement that replaced a retry notice', async () => {
       mocks.loadTurnAttempt.mockResolvedValueOnce({
         events: [
           {
             kind: 'reply',
             text: 'I’m starting on the checkout fix.',
             purpose: 'ack',
+            inferenceRetryNotice: true,
           },
         ],
         next: {

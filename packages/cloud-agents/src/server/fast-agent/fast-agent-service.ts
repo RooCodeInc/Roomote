@@ -2946,8 +2946,8 @@ export async function answerFastAgentQuestion({
       previousAttempt?.events.some(
         (event) =>
           event.kind === 'reply' &&
-          !event.inferenceRetryNotice &&
-          (event.purpose === 'ack' || event.purpose === 'progress'),
+          (event.purpose === 'ack' ||
+            (event.purpose === 'progress' && !event.inferenceRetryNotice)),
       ),
     );
     let visibleUpdatePosted = resumedWithDeliveredAcknowledgement;
