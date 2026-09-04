@@ -312,7 +312,6 @@ export async function processSlackWorkflowFunctionExecuted(params: {
       slack: context.slack,
       userId: fastUserId,
       teamId: context.teamId,
-      continuation: true,
       directedAtRoomote: true,
       ...(initiator.kind === 'automation'
         ? { delegatedTaskInitiator: initiator }

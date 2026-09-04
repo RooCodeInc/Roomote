@@ -417,7 +417,7 @@ This release expands Fast and automation workflows, shortens initial setup, adds
 - Keep ChatGPT subscription OAuth credentials on the control plane and out of task sandboxes and restored snapshots.
 - Deliver GitHub installation approval notifications to requesters who use Discord without Slack.
 - Include complete Fast parent and advisor or judge inference usage in Costs analytics.
-- Make empty Fast invocations respond contextually and keep updates focused on useful outcomes instead of orchestration details.
+- Make empty Fast messages respond contextually and keep updates focused on useful outcomes instead of orchestration details.
 - Preserve exact Slack or Discord source-message links in pull requests created by Fast-delegated tasks.
 - Stop pull-request review prompts from reappearing after a user selects automatic Fix all handling.
 - Move completed tasks to Done after their pull request merges and resume settled delegated work under the original task.

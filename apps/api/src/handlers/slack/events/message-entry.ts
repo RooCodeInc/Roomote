@@ -42,10 +42,7 @@ import {
 } from '../constants.js';
 import type { AutomatedSlackAppMentionEvent } from '../types.js';
 import { processActiveRunMessage } from './active-run.js';
-import {
-  isFastCommandInvocation,
-  processFastAgentMessage,
-} from './fast-agent.js';
+import { processFastAgentMessage } from './fast-agent.js';
 import {
   resolveFastAgentEntryMode,
   startAcceptedFastAgentTurn,
@@ -709,7 +706,6 @@ export async function processSlackChannelAutoStartTask(params: {
         slack,
         userId: launchIdentity.launchUserId,
         teamId,
-        continuation: true,
         directedAtRoomote:
           !isBotAuthored ||
           mentionsSlackBot(event, slackInstallation.botUserId),
@@ -1077,7 +1073,6 @@ async function processAutomatedAppMentionTask(params: {
         slack,
         userId: launchIdentity.launchUserId,
         teamId,
-        continuation: true,
         directedAtRoomote: true,
         delegatedTaskInitiator: {
           kind: 'automation',
@@ -1169,7 +1164,6 @@ export function startFastAgentResponse(params: {
   slack: SlackNotifier;
   userId: string;
   teamId: string;
-  continuation?: boolean;
   activeTasks?: { taskId: string }[];
   resolveActiveTasks?: () => Promise<{ taskId: string }[]>;
   processingReactionName: string;
@@ -1322,7 +1316,6 @@ async function handleSlackEntryEvent(params: {
 
   const authoredEventText = event.authoredText ?? event.text;
   const fastAgentEntryMode = resolveFastAgentEntryMode({
-    explicitInvocation: isFastCommandInvocation(authoredEventText),
     userDefaultEnabled: !isRemovedEvalCommandInvocation(authoredEventText),
   });
 
@@ -1342,10 +1335,7 @@ async function handleSlackEntryEvent(params: {
           threadTs: threadId,
           activeTaskId: activeRun?.taskId,
         }),
-      continuation: fastAgentEntryMode === 'default',
-      directedAtRoomote:
-        fastAgentEntryMode === 'explicit' ||
-        mentionsSlackBot(event, slackInstallation.botUserId),
+      directedAtRoomote: mentionsSlackBot(event, slackInstallation.botUserId),
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
     });

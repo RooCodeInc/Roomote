@@ -6,9 +6,9 @@ The core product invariant under test is: **one chat (or forum topic) maps to at
 
 ## 1. private-fast-answer
 
-A linked user DMs `!fast <question>`.
+A linked user sends an ordinary direct message.
 
-- Inject: `message` in private chat `111000111`, text `!fast what file handles Telegram webhooks?`.
+- Inject: `message` in private chat `111000111`, text `what file handles Telegram webhooks?`.
 - Expect: eyes reaction on the inbound message; one inline bot answer in the same chat; **no** cloud job created.
 - Assert: state `.messages` (one bot message), `.messages[].reactions`; DB has no new `cloud_jobs` row.
 

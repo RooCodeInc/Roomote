@@ -117,7 +117,6 @@ describe('resumePendingSlackAuthRequest', () => {
           ts: '111.001',
           thread_ts: '111.000',
         },
-        continuation: true,
         directedAtRoomote: true,
         userId: 'user-1',
       }),

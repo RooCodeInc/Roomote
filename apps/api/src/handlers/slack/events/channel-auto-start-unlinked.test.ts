@@ -175,7 +175,6 @@ describe('channel auto-start unlinked author', () => {
 
     expect(fastAgentMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        continuation: true,
         event: expect.objectContaining({
           text: 'please look into this',
           user: 'U456',

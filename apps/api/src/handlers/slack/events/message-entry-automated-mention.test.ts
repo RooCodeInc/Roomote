@@ -128,7 +128,6 @@ describe('automated Slack message mentions', () => {
       expect.objectContaining({
         userId: 'USER_INSTALLER',
         teamId: 'T123',
-        continuation: true,
         directedAtRoomote: true,
         event: expect.objectContaining({
           channel: 'C123',

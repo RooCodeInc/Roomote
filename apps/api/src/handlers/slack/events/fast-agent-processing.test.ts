@@ -173,7 +173,6 @@ describe('processFastAgentMessage', () => {
       slack: slack as never,
       userId: 'user-1',
       teamId: 'T123',
-      continuation: true,
       isExistingConversation: true,
     });
 
@@ -224,7 +223,6 @@ describe('processFastAgentMessage', () => {
       slack: slack as never,
       userId: 'user-1',
       teamId: 'T123',
-      continuation: true,
       isExistingConversation: true,
     });
 
@@ -278,7 +276,6 @@ describe('processFastAgentMessage', () => {
       slack: slack as never,
       userId: 'user-1',
       teamId: 'T123',
-      continuation: true,
       isExistingConversation: true,
     });
 
@@ -324,7 +321,6 @@ describe('processFastAgentMessage', () => {
       slack: slack as never,
       userId: 'user-1',
       teamId: 'T123',
-      continuation: true,
       isExistingConversation: true,
       onAccepted,
     });
@@ -379,7 +375,7 @@ describe('processFastAgentMessage', () => {
         type: 'message',
         channel: 'D123',
         user: 'U123',
-        text: '!fast investigate this',
+        text: 'investigate this',
         ts: '100.001',
       } as never,
       slack: slack as never,
@@ -421,9 +417,9 @@ describe('processFastAgentMessage', () => {
         type: 'message',
         channel: 'D123',
         user: 'U123',
-        authoredText: '<@U_BOT> !fast investigate this',
+        authoredText: '<@U_BOT> investigate this',
         agentContext: 'Slack block text:\nState: New',
-        text: '<@U_BOT> !fast investigate this\n\nSlack block text:\nState: New',
+        text: '<@U_BOT> investigate this\n\nSlack block text:\nState: New',
         ts: '100.001',
       } as never,
       slack: slack as never,
@@ -438,7 +434,7 @@ describe('processFastAgentMessage', () => {
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
-        question: 'investigate this',
+        question: '<@U_BOT> investigate this',
         slackRoomoteUserId: 'UROOMOTE',
         currentMessageAgentContext: 'Slack block text:\nState: New',
         adapter: expect.objectContaining({ launchTask }),
@@ -482,7 +478,6 @@ describe('processFastAgentMessage', () => {
       slack: slack as never,
       userId: 'user-1',
       teamId: 'T123',
-      continuation: true,
     });
 
     expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
@@ -519,7 +514,6 @@ describe('processFastAgentMessage', () => {
       slack: slack as never,
       userId: 'user-1',
       teamId: 'T123',
-      continuation: true,
     });
 
     await vi.waitFor(() => {
@@ -533,37 +527,7 @@ describe('processFastAgentMessage', () => {
     expect(mocks.getSession).toHaveBeenCalledOnce();
   });
 
-  it('lets the Fast model answer a bare !fast invocation', async () => {
-    const slack = {
-      addReaction: vi.fn().mockResolvedValue(true),
-      removeReaction: vi.fn().mockResolvedValue(true),
-      normalizeIncomingText: vi.fn(async (text: string) => text),
-      fetchThreadMessages: vi.fn(async () => []),
-    };
-
-    await processFastAgentMessage({
-      event: {
-        type: 'message',
-        channel: 'D123',
-        user: 'U123',
-        text: '!fast',
-        ts: '100.001',
-      } as never,
-      slack: slack as never,
-      userId: 'user-1',
-      teamId: 'T123',
-    });
-
-    expect(mocks.answerQuestion).toHaveBeenCalledWith(
-      expect.objectContaining({ question: '' }),
-    );
-    expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
-    expect(mocks.postThreadMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ text: 'Doing well.' }),
-    );
-  });
-
-  it('lets the Fast model answer an empty default-mode invocation', async () => {
+  it('lets the Fast model answer an empty message', async () => {
     const slack = {
       addReaction: vi.fn().mockResolvedValue(true),
       removeReaction: vi.fn().mockResolvedValue(true),
@@ -582,7 +546,6 @@ describe('processFastAgentMessage', () => {
       slack: slack as never,
       userId: 'user-1',
       teamId: 'T123',
-      continuation: true,
     });
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
@@ -617,7 +580,6 @@ describe('processFastAgentMessage', () => {
       slack: slack as never,
       userId: 'user-1',
       teamId: 'T123',
-      continuation: true,
       resolveActiveTasks,
     });
 
@@ -647,7 +609,7 @@ describe('processFastAgentMessage', () => {
         type: 'message',
         channel: 'C123',
         user: 'U123',
-        text: '!fast how are things?',
+        text: 'how are things?',
         ts: '100.001',
       } as never,
       slack: slack as never,
@@ -694,7 +656,7 @@ describe('processFastAgentMessage', () => {
           type: 'message',
           channel: 'C123',
           user: 'U123',
-          text: '!fast how are things?',
+          text: 'how are things?',
           ts: '100.001',
         } as never,
         slack: slack as never,
@@ -730,7 +692,7 @@ describe('processFastAgentMessage', () => {
       fetchThreadMessages: vi.fn(async () => [
         {
           user: 'U123',
-          text: '!fast inspect this screenshot',
+          text: 'inspect this screenshot',
           ts: '100.001',
           type: 'message',
           files,
@@ -745,7 +707,7 @@ describe('processFastAgentMessage', () => {
         channel: 'D123',
         channel_type: 'im',
         user: 'U123',
-        text: '!fast inspect this screenshot',
+        text: 'inspect this screenshot',
         ts: '100.001',
         files,
       } as never,
@@ -780,7 +742,7 @@ describe('processFastAgentMessage', () => {
       fetchThreadMessages: vi.fn(async () => [
         {
           user: 'U123',
-          text: '!fast inspect this screenshot',
+          text: 'inspect this screenshot',
           ts: '100.001',
           type: 'message',
         },
@@ -809,7 +771,6 @@ describe('processFastAgentMessage', () => {
       slack: slack as never,
       userId: 'user-1',
       teamId: 'T123',
-      continuation: true,
     });
 
     expect(slack.processSlackFiles).toHaveBeenCalledWith(files);
@@ -852,7 +813,7 @@ describe('processFastAgentMessage', () => {
         channel: 'D123',
         channel_type: 'im',
         user: 'U123',
-        text: '!fast implement this plan',
+        text: 'implement this plan',
         ts: '100.001',
         files,
       } as never,
@@ -903,7 +864,7 @@ describe('processFastAgentMessage', () => {
         channel: 'D123',
         channel_type: 'im',
         user: 'U123',
-        text: '!fast sounds good',
+        text: 'sounds good',
         ts: '100.001',
       } as never,
       slack: slack as never,
@@ -957,7 +918,7 @@ describe('processFastAgentMessage', () => {
         channel: 'D123',
         channel_type: 'im',
         user: 'U123',
-        text: '!fast take a look',
+        text: 'take a look',
         ts: '100.001',
       } as never,
       slack: slack as never,
@@ -1010,7 +971,7 @@ describe('processFastAgentMessage', () => {
         channel: 'D123',
         channel_type: 'im',
         user: 'U123',
-        text: '!fast investigate this',
+        text: 'investigate this',
         ts: '100.001',
       } as never,
       slack: slack as never,
@@ -1044,7 +1005,7 @@ describe('processFastAgentMessage', () => {
         channel: 'D123',
         channel_type: 'im',
         user: 'U123',
-        text: '!fast hello',
+        text: 'hello',
         ts: '100.001',
       } as never,
       slack: slack as never,
@@ -1074,7 +1035,7 @@ describe('processFastAgentMessage', () => {
           channel: 'D123',
           channel_type: 'im',
           user: 'U123',
-          text: '!fast implement this',
+          text: 'implement this',
           ts: '100.001',
         } as never,
         slack: slack as never,
@@ -1116,7 +1077,7 @@ describe('processFastAgentMessage', () => {
           channel: 'D123',
           channel_type: 'im',
           user: 'U123',
-          text: '!fast implement this',
+          text: 'implement this',
           ts: '100.001',
         } as never,
         slack: slack as never,
@@ -1142,7 +1103,7 @@ describe('processFastAgentMessage', () => {
           channel: 'D123',
           channel_type: 'im',
           user: 'U123',
-          text: '!fast implement this',
+          text: 'implement this',
           ts: '100.001',
         } as never,
         slack: slack as never,
@@ -1161,7 +1122,7 @@ describe('processFastAgentMessage', () => {
         {
           user: 'U123',
           username: 'Matt',
-          text: '!fast hi how are you',
+          text: 'hi how are you',
           ts: '100.001',
           type: 'message',
         },
@@ -1174,7 +1135,7 @@ describe('processFastAgentMessage', () => {
         channel: 'D123',
         channel_type: 'im',
         user: 'U123',
-        text: '!fast hi how are you',
+        text: 'hi how are you',
         ts: '100.001',
       } as never,
       slack: slack as never,
@@ -1237,7 +1198,7 @@ describe('processFastAgentMessage', () => {
         {
           user: 'U_OTHER',
           username: 'Wrong Person',
-          text: '!fast show my PRs',
+          text: 'show my PRs',
           ts: '100.001',
           type: 'message',
         },
@@ -1250,7 +1211,7 @@ describe('processFastAgentMessage', () => {
         channel: 'D123',
         channel_type: 'im',
         user: 'U123',
-        text: '!fast show my PRs',
+        text: 'show my PRs',
         ts: '100.001',
       } as never,
       slack: slack as never,
@@ -1282,7 +1243,7 @@ describe('processFastAgentMessage', () => {
           channel: 'D123',
           channel_type: 'im',
           user: 'U123',
-          text: '!fast hello',
+          text: 'hello',
           ts: '100.001',
         } as never,
         slack: slack as never,
@@ -1320,7 +1281,6 @@ describe('processFastAgentMessage', () => {
       slack: slack as never,
       userId: 'user-1',
       teamId: 'T123',
-      continuation: true,
       isExistingConversation: true,
     });
 
@@ -1341,7 +1301,7 @@ describe('processFastAgentMessage', () => {
       removeReaction: vi.fn().mockResolvedValue(true),
       normalizeIncomingText: vi.fn(async (text: string) => text),
       fetchThreadMessages: vi.fn(async () => [
-        { user: 'U111', username: 'Dan', text: '!fast hi', ts: '100.000' },
+        { user: 'U111', username: 'Dan', text: 'hi', ts: '100.000' },
         {
           user: 'UBOT',
           username: 'Roomote',
@@ -1365,7 +1325,6 @@ describe('processFastAgentMessage', () => {
       slack: slack as never,
       userId: 'user-2',
       teamId: 'T123',
-      continuation: true,
       isExistingConversation: true,
     });
 
@@ -1405,7 +1364,6 @@ describe('processFastAgentMessage', () => {
         slack: slack as never,
         userId: 'user-2',
         teamId: 'T123',
-        continuation: true,
         isExistingConversation: true,
       });
 
@@ -1422,7 +1380,7 @@ describe('processFastAgentMessage', () => {
       normalizeIncomingText: vi.fn(async (text: string) => text),
       fetchThreadMessages: vi.fn(async () => [
         { user: 'U111', username: 'Dan', text: 'Earlier', ts: '100.000' },
-        { user: 'U222', username: 'Matt', text: '!fast help', ts: '100.002' },
+        { user: 'U222', username: 'Matt', text: 'help', ts: '100.002' },
       ]),
     };
 
@@ -1431,14 +1389,13 @@ describe('processFastAgentMessage', () => {
         type: 'message',
         channel: 'C123',
         user: 'U222',
-        text: '!fast help',
+        text: 'help',
         ts: '100.002',
         thread_ts: '100.000',
       } as never,
       slack: slack as never,
       userId: 'user-2',
       teamId: 'T123',
-      continuation: true,
       isExistingConversation: true,
       directedAtRoomote: true,
     });
