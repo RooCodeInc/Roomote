@@ -1,7 +1,9 @@
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
+  extractAutomationTriggeredPromptText,
   extractAcpMessageText,
+  getTextFromContentBlocks,
   parsePrReviewActionOffer,
   type PrReviewActionOfferStatus,
   sanitizeEnvelopeFields,
@@ -107,6 +109,14 @@ const fastSessionMessageSelection = {
 };
 
 const fastSessionMessageUserJoin = sql`${users.id}::text = ${fastAgentMessages.metadata} ->> 'userId'`;
+
+const fastSessionTranscriptVisibilityWhere = sql`(
+  coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'
+  or (
+    ${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+    and ${fastAgentMessages.metadata} ->> 'platformEventKind' = 'automation'
+  )
+)`;
 
 /** Signed raw URLs are bucketed so a polling transcript stays byte-stable. */
 const REPLY_IMAGE_SIGNATURE_WINDOW_SECONDS = 60 * 60;
@@ -507,12 +517,12 @@ export async function getFastSessionTasks(
   }));
 }
 
-function sanitizeFastSessionMessageRow<
+function prepareFastSessionMessageRow<
   T extends Pick<
     FastSessionMessage,
     'eventType' | 'contentBlocks' | 'metadata' | 'payload'
   >,
->(row: T): T {
+>(row: T): T | null {
   const sanitized = sanitizeEnvelopeFields(
     row.eventType,
     row.contentBlocks,
@@ -520,6 +530,26 @@ function sanitizeFastSessionMessageRow<
     (row.payload as Record<string, unknown> | null) ?? null,
     { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
   );
+
+  if (sanitized.metadata?.visibleInTranscript === false) {
+    const prompt = extractAutomationTriggeredPromptText(
+      getTextFromContentBlocks(sanitized.contentBlocks) ?? '',
+    );
+    if (
+      row.eventType !== ACP_ENVELOPE_EVENT_TYPES.UserPrompt ||
+      sanitized.metadata.platformEventKind !== 'automation' ||
+      !prompt
+    ) {
+      return null;
+    }
+
+    return {
+      ...row,
+      contentBlocks: [{ type: 'text', text: prompt }],
+      metadata: { ...sanitized.metadata, visibleInTranscript: true },
+      payload: {},
+    };
+  }
 
   return {
     ...row,
@@ -554,7 +584,7 @@ export async function getFastSessionMessagesSince(
     .where(
       and(
         eq(fastAgentMessages.conversationId, sessionId),
-        sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+        fastSessionTranscriptVisibilityWhere,
         sql`extract(epoch from ${fastAgentMessages.updatedAt}) * 1000 > ${sinceMs}`,
       ),
     )
@@ -568,9 +598,10 @@ export async function getFastSessionMessagesSince(
   let cursor = sinceMs;
   const messages = await attachFastSessionReplyImages(
     sessionId,
-    rows.map(({ updatedAtMs, ...row }) => {
+    rows.flatMap(({ updatedAtMs, ...row }) => {
       cursor = Math.max(cursor, Number(updatedAtMs));
-      return sanitizeFastSessionMessageRow(row);
+      const prepared = prepareFastSessionMessageRow(row);
+      return prepared ? [prepared] : [];
     }),
   );
 
@@ -655,7 +686,7 @@ export async function getFastSessionById(
     .where(
       and(
         eq(fastAgentMessages.conversationId, session.id),
-        sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+        fastSessionTranscriptVisibilityWhere,
       ),
     )
     .orderBy(
@@ -688,9 +719,10 @@ export async function getFastSessionById(
   // serialized into the RSC payload.
   const messages = await attachFastSessionReplyImages(
     session.id,
-    windowed
-      .reverse()
-      .map((row): FastSessionMessage => sanitizeFastSessionMessageRow(row)),
+    windowed.reverse().flatMap((row): FastSessionMessage[] => {
+      const prepared = prepareFastSessionMessageRow(row);
+      return prepared ? [prepared] : [];
+    }),
   );
 
   // Fast usage events carry the OpenCode session id; a conversation can span

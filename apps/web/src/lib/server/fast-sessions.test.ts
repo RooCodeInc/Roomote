@@ -62,6 +62,7 @@ async function createFastMessage({
   role = 'assistant',
   payload = {},
   metadata = { visibleInTranscript: true },
+  contentBlocks,
 }: {
   conversationId: string;
   eventId: string;
@@ -71,6 +72,7 @@ async function createFastMessage({
   role?: 'user' | 'assistant' | 'tool';
   payload?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  contentBlocks?: Array<{ type: 'text'; text: string }>;
 }) {
   const [message] = await db
     .insert(fastAgentMessages)
@@ -82,7 +84,7 @@ async function createFastMessage({
       ts,
       eventType,
       role,
-      contentBlocks: [{ type: 'text', text: eventId }],
+      contentBlocks: contentBlocks ?? [{ type: 'text', text: eventId }],
       metadata,
       payload,
       source: 'slack',
@@ -695,7 +697,7 @@ describe('Fast session queries', () => {
     ).resolves.toMatchObject({ id: session.id });
   });
 
-  it('excludes transcript-hidden messages such as platform-event prompts', async () => {
+  it('shows only the configured prompt from hidden custom automation events', async () => {
     const owner = await userFactory.create();
     const session = await createFastSession({
       userId: owner.id,
@@ -704,16 +706,44 @@ describe('Fast session queries', () => {
     });
     await createFastMessage({
       conversationId: session.id,
-      eventId: 'turn-1:user',
+      eventId: 'turn-1:automation',
       turnSeq: 0,
       role: 'user',
       eventType: 'roomote_runtime.user_prompt',
-      metadata: { visibleInTranscript: false, turnSource: 'platform_event' },
+      contentBlocks: [
+        {
+          type: 'text',
+          text: '<platform_event>{"type":"automation_triggered","prompt":"Find actionable regressions."}</platform_event>',
+        },
+      ],
+      metadata: {
+        visibleInTranscript: false,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+      },
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:delegated-task',
+      turnSeq: 1,
+      role: 'user',
+      eventType: 'roomote_runtime.user_prompt',
+      contentBlocks: [
+        {
+          type: 'text',
+          text: '<platform_event>{"type":"task_settled","secret":"internal"}</platform_event>',
+        },
+      ],
+      metadata: {
+        visibleInTranscript: false,
+        turnSource: 'platform_event',
+        platformEventKind: 'delegated_task',
+      },
     });
     await createFastMessage({
       conversationId: session.id,
       eventId: 'turn-1:assistant:0',
-      turnSeq: 1,
+      turnSeq: 2,
     });
 
     const result = await getFastSessionById(
@@ -722,8 +752,72 @@ describe('Fast session queries', () => {
     );
 
     expect(result?.messages.map((message) => message.eventId)).toEqual([
+      'turn-1:automation',
       'turn-1:assistant:0',
     ]);
+    expect(result?.messages[0]).toMatchObject({
+      contentBlocks: [{ type: 'text', text: 'Find actionable regressions.' }],
+      metadata: {
+        visibleInTranscript: true,
+        platformEventKind: 'automation',
+      },
+      payload: {},
+    });
+    expect(JSON.stringify(result?.messages)).not.toContain('<platform_event>');
+    expect(JSON.stringify(result?.messages)).not.toContain('internal');
+  });
+
+  it('streams only the configured prompt from hidden custom automation events', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'platform-event-stream',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:automation',
+      turnSeq: 0,
+      role: 'user',
+      eventType: 'roomote_runtime.user_prompt',
+      contentBlocks: [
+        {
+          type: 'text',
+          text: '<platform_event>{"type":"automation_triggered","prompt":"Summarize incidents."}</platform_event>',
+        },
+      ],
+      metadata: {
+        visibleInTranscript: false,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+      },
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:malformed-automation',
+      turnSeq: 1,
+      role: 'user',
+      eventType: 'roomote_runtime.user_prompt',
+      contentBlocks: [
+        { type: 'text', text: '<platform_event>{not-json}</platform_event>' },
+      ],
+      metadata: {
+        visibleInTranscript: false,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+      },
+    });
+
+    const result = await getFastSessionMessagesSince(session.id, 0);
+
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]).toMatchObject({
+      eventId: 'turn-1:automation',
+      contentBlocks: [{ type: 'text', text: 'Summarize incidents.' }],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+    });
+    expect(JSON.stringify(result.messages)).not.toContain('<platform_event>');
   });
 
   it('truncates oversized tool output at the read boundary', async () => {
