@@ -274,6 +274,41 @@ describe('custom-automations MCP routes', () => {
       });
     });
 
+    it('returns one configured prompt without unrelated automation fields', async () => {
+      const authContext: AuthTokenContext = {
+        userId: 'admin-1',
+        tokenType: 'auth',
+        version: 1,
+      };
+      const { handler } = registerApiHostedTool({
+        userId: 'admin-1',
+        authContext,
+      });
+      mockGetCustomAutomationById.mockResolvedValue({
+        id: 'automation-1',
+        name: 'Nightly report',
+        prompt: 'Inspect this stored prompt.',
+        enabled: true,
+        lastError: 'previous failure',
+      });
+
+      const result = await handler({
+        action: 'inspect',
+        automationId: 'automation-1',
+      });
+
+      expect(mockGetCustomAutomationById).toHaveBeenCalledWith('automation-1');
+      expect(
+        (result as { structuredContent: unknown }).structuredContent,
+      ).toEqual({
+        automation: {
+          id: 'automation-1',
+          name: 'Nightly report',
+          prompt: 'Inspect this stored prompt.',
+        },
+      });
+    });
+
     it('routes create actions through the existing custom automation domain handler', async () => {
       const authContext: AuthTokenContext = {
         userId: 'admin-1',
@@ -352,9 +387,13 @@ describe('custom-automations MCP routes', () => {
       mockResolveActingUserIdOrNull.mockResolvedValue('member-1');
       mockUsersFindFirst.mockResolvedValue(null);
 
-      const result = await handler({ action: 'list' });
+      const result = await handler({
+        action: 'inspect',
+        automationId: 'automation-1',
+      });
 
       expect(mockListCustomAutomations).not.toHaveBeenCalled();
+      expect(mockGetCustomAutomationById).not.toHaveBeenCalled();
       expect(result).toMatchObject({
         isError: true,
         structuredContent: {
@@ -374,6 +413,40 @@ describe('custom-automations MCP routes', () => {
     await expect(res.json()).resolves.toEqual({
       models: ENABLED_MODELS,
       defaultModelId: 'openai/gpt-5.6-luna',
+    });
+  });
+
+  it('returns a bounded stored prompt record by automation ID', async () => {
+    const { app } = createApp();
+    mockGetCustomAutomationById.mockResolvedValue({
+      id: 'automation-1',
+      name: 'Nightly report',
+      prompt: 'Inspect this stored prompt.',
+      enabled: true,
+      lastError: 'previous failure',
+    });
+
+    const res = await app.request('/custom-automations/automation-1');
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      automation: {
+        id: 'automation-1',
+        name: 'Nightly report',
+        prompt: 'Inspect this stored prompt.',
+      },
+    });
+  });
+
+  it('returns not found when inspecting a missing automation', async () => {
+    const { app } = createApp();
+    mockGetCustomAutomationById.mockResolvedValue(null);
+
+    const res = await app.request('/custom-automations/missing');
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({
+      error: 'Custom automation was not found.',
     });
   });
 
