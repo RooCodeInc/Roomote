@@ -49,7 +49,7 @@ export function SandboxSidePanelHeader({
         {title ? (
           <div className="min-w-0 flex-1 overflow-hidden">
             <h2
-              className="truncate text-sm font-medium whitespace-nowrap"
+              className="cursor-default truncate text-sm font-medium whitespace-nowrap"
               title={title}
             >
               {title}
