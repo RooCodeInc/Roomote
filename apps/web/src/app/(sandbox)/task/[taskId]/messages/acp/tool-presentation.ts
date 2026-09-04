@@ -86,6 +86,7 @@ const READ_TOOL_NAMES = new Set([
   'read_file',
   'spill_read',
   'load_skill',
+  'inspect_images',
 ]);
 const TASK_TOOL_NAMES = new Set([
   'launch_task',
@@ -384,6 +385,11 @@ function resolveReceiptLanguage(
     return {
       verb: byPhase('Searching', 'Searched', 'Failed to Search'),
       object: 'integration tools',
+    };
+  if (toolName === 'inspect_images')
+    return {
+      verb: byPhase('Inspecting', 'Inspected', 'Failed to Inspect'),
+      object: 'Images',
     };
   return null;
 }
