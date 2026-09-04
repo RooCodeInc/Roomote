@@ -160,6 +160,30 @@ describe('AuthenticatedLayoutClient', () => {
     });
   });
 
+  it('unlocks authenticated pages when the setup Session completes before the setup-status cache refreshes', () => {
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: 'setup-session-id', completed: true }
+          : {
+              hasGitHub: true,
+              hasEnvironments: true,
+              setupCompletedAt: null,
+            },
+      isLoading: false,
+      isError: false,
+    }));
+
+    render(
+      <AuthenticatedLayoutClient>
+        <div>Home content</div>
+      </AuthenticatedLayoutClient>,
+    );
+
+    expect(screen.getByText('Home content')).toBeVisible();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
   it('keeps non-setup pages gated while an incomplete admin setup-session lookup is pending', () => {
     useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
       data:
@@ -206,6 +230,31 @@ describe('AuthenticatedLayoutClient', () => {
     );
 
     expect(screen.getByText('Home content')).toBeVisible();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps Settings accessible while admin setup is incomplete', () => {
+    mockPathname = '/settings/integrations';
+    useQueryMock.mockImplementation((options: { queryKey: string[] }) => ({
+      data:
+        options.queryKey[0] === 'setup.sessionStatus'
+          ? { sessionId: 'setup-session-id', completed: false }
+          : {
+              hasGitHub: false,
+              hasEnvironments: false,
+              setupCompletedAt: null,
+            },
+      isLoading: options.queryKey[0] === 'setup.sessionStatus',
+      isError: false,
+    }));
+
+    render(
+      <AuthenticatedLayoutClient>
+        <div>Settings content</div>
+      </AuthenticatedLayoutClient>,
+    );
+
+    expect(screen.getByText('Settings content')).toBeVisible();
     expect(replaceMock).not.toHaveBeenCalled();
   });
 

@@ -195,12 +195,14 @@ recommendations. Detailed provider instructions and credential entry open in a
 dialog from the source-control card; Roomote never asks for credentials in
 chat.
 
-When repositories are connected, Roomote offers the preselected starter tasks
-in one structured multi-select question. Choosing at least one completes setup
-immediately, then Roomote launches each choice as visible work attached to the
-same session. A launch failure does not reopen setup; ask Roomote to retry that
-item. Automation recommendations are analyzed after repository sync and appear
-only after at least one starter task launches. They remain optional.
+Setup completes once inference and a sandbox provider are ready, source control
+is successfully configured, and at least one repository has synchronized.
+Roomote then offers preselected starter tasks in one structured multi-select
+question. Starter work is optional and does not gate setup completion; selected
+work launches visibly in the same session. A launch failure does not reopen
+setup; ask Roomote to retry that item. Automation recommendations are analyzed
+after repository sync and appear only after at least one starter task launches.
+They remain optional.
 
 After setup, run a small task that uses the first environment if you did not
 start one from the starter list. A healthy deployment should let you:

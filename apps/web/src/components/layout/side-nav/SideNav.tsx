@@ -35,7 +35,10 @@ import { useTRPC } from '@/trpc/client';
 import { cn } from '@/lib/utils';
 import { NewTaskDialog } from '@/components/tasks/NewTaskDialog';
 
-import { getVisiblePrimaryNavItems } from '../navigation-items';
+import {
+  getVisiblePrimaryNavItems,
+  SETUP_INCOMPLETE_NAV_TOOLTIP,
+} from '../navigation-items';
 import { SideNavItem } from './SideNavItem';
 import { SideNavSessionItem } from './SideNavSessionItem';
 import { SideNavTaskItem } from './SideNavTaskItem';
@@ -53,7 +56,11 @@ export function getSessionIdFromPathname(pathname: string): string | null {
   return match?.[1] ?? null;
 }
 
-export const SideNav = () => {
+export const SideNav = ({
+  setupIncomplete = false,
+}: {
+  setupIncomplete?: boolean;
+}) => {
   useHydrateLayoutStore();
 
   const pathname = usePathname();
@@ -151,12 +158,18 @@ export const SideNav = () => {
       {/* Logo */}
       {isSideNavExpanded ? (
         <div className="flex w-full items-center justify-between gap-3 px-2 py-1 shrink-0">
-          <Link href="/" className="min-w-0 flex-1">
-            <RoomoteWordmark
-              className="h-7 transition-all duration-300 hover:opacity-80"
-              aria-label="Roomote"
-            />
-          </Link>
+          {setupIncomplete ? (
+            <div className="min-w-0 flex-1 opacity-50">
+              <RoomoteWordmark className="h-7" aria-label="Roomote" />
+            </div>
+          ) : (
+            <Link href="/" className="min-w-0 flex-1">
+              <RoomoteWordmark
+                className="h-7 transition-all duration-300 hover:opacity-80"
+                aria-label="Roomote"
+              />
+            </Link>
+          )}
 
           <Button
             type="button"
@@ -215,13 +228,31 @@ export const SideNav = () => {
         />
 
         {visibleNavItems.map(
-          ({ icon, href, label, description, matchExact, matchPaths }) => (
+          ({
+            icon,
+            href,
+            label,
+            description,
+            matchExact,
+            matchPaths,
+            requiresSetup,
+          }) => (
             <SideNavItem
               key={href}
               icon={icon}
               href={href}
-              tooltip={label}
-              description={description}
+              label={label}
+              aria-label={label}
+              tooltip={
+                setupIncomplete && requiresSetup
+                  ? SETUP_INCOMPLETE_NAV_TOOLTIP
+                  : label
+              }
+              description={
+                setupIncomplete && requiresSetup ? undefined : description
+              }
+              disabled={setupIncomplete && requiresSetup}
+              focusableWhenDisabled={setupIncomplete && requiresSetup}
               expanded={isSideNavExpanded}
               active={
                 matchExact

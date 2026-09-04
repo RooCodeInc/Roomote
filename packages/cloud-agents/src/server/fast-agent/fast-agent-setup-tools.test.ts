@@ -94,15 +94,16 @@ describe('setup prompt guidance and snapshot injection', () => {
     expect(prompt).toContain(
       'I need a workspace where I can run the work you selected',
     );
+    expect(prompt).toContain('Starter work is optional');
     expect(prompt).toContain(
-      'you must call `request_user_input` with exactly `{ preset: "setup_starter_tasks" }`',
+      'call `request_user_input` with exactly `{ preset: "setup_starter_tasks" }`',
     );
     expect(prompt).toContain('the server emits a starter-request setup event');
     expect(prompt).toContain(
       'Do not send a closeout first: that tool call creates the user-visible first-work control and is the terminal response for the turn',
     );
     expect(prompt).toContain(
-      'Do not replace the required tool call with prose asking the user to choose',
+      'Do not replace the tool call with prose asking the user to choose',
     );
     expect(prompt).not.toContain(
       'Direct the administrator to the relevant card',

@@ -28,6 +28,7 @@ import {
   getDeploymentPrAction,
   resolveDeploymentEnvVar,
   repositories,
+  sql,
   setDeploymentPrAction,
   setDeploymentGitHubRoomoteMentionEnabled,
   setDeploymentMarkRoomotePrReadyAfterCleanReview,
@@ -1271,23 +1272,30 @@ export async function clearSourceControlConfigCommand(
       : Promise.resolve({} as Record<string, string>),
   ]);
 
-  if (input.provider === 'github') {
-    const disableResult = await disableGitHubAppCommand(auth);
-    if (!disableResult.success) {
-      throw new Error(disableResult.error);
-    }
-  }
-
-  const warnings =
-    input.provider === 'github'
-      ? []
-      : await removeProviderHooks(input.provider, providerRepositories);
-  warnings.push(...(await deleteProviderOAuthConnection(input.provider)));
-
   const adoLinkedAccountId = persistedValues['ADO_LINKED_ACCOUNT_ID'];
   const now = new Date();
 
-  await db.transaction(async (tx) => {
+  // Serialize the full destructive path with setup completion so its final
+  // readiness check cannot race provider disconnect or repository teardown.
+  const warnings = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('setup-complete'))`,
+    );
+    if (input.provider === 'github') {
+      const disableResult = await disableGitHubAppCommand(auth);
+      if (!disableResult.success) {
+        throw new Error(disableResult.error);
+      }
+    }
+
+    const cleanupWarnings =
+      input.provider === 'github'
+        ? []
+        : await removeProviderHooks(input.provider, providerRepositories);
+    cleanupWarnings.push(
+      ...(await deleteProviderOAuthConnection(input.provider)),
+    );
+
     await deleteDeploymentEnvironmentVariables(tx, envVarNames);
     await tx
       .update(repositories)
@@ -1304,6 +1312,7 @@ export async function clearSourceControlConfigCommand(
           ),
         );
     }
+    return cleanupWarnings;
   });
 
   return {
