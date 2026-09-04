@@ -185,18 +185,22 @@ vi.mock('./SideNavItem', () => ({
     tooltip,
     expanded,
     disabled,
+    description,
   }: {
     href?: string;
     onClick?: () => void;
     tooltip: string;
     expanded?: boolean;
     disabled?: boolean;
+    description?: ReactNode;
   }) =>
     href ? (
       <div
         data-testid={`nav-${href}`}
         data-expanded={String(expanded)}
         data-disabled={String(disabled ?? false)}
+        data-description={typeof description === 'string' ? description : ''}
+        data-tooltip={typeof tooltip === 'string' ? tooltip : ''}
       />
     ) : (
       <button
@@ -506,6 +510,16 @@ describe('SideNav recent sessions', () => {
       'data-disabled',
       'true',
     );
+    for (const href of ['/', '/automations', '/analytics']) {
+      expect(screen.getByTestId(`nav-${href}`)).toHaveAttribute(
+        'data-tooltip',
+        'Available when setup is completed.',
+      );
+      expect(screen.getByTestId(`nav-${href}`)).toHaveAttribute(
+        'data-description',
+        '',
+      );
+    }
     expect(screen.getByTestId('nav-/sessions')).toHaveAttribute(
       'data-disabled',
       'false',
@@ -514,5 +528,15 @@ describe('SideNav recent sessions', () => {
       'data-disabled',
       'false',
     );
+  });
+
+  it('removes the expanded wordmark Home link during setup', () => {
+    state.isSideNavExpanded = true;
+
+    render(<SideNav setupIncomplete />);
+
+    expect(
+      screen.getByRole('img', { name: 'Roomote' }).closest('a'),
+    ).toBeNull();
   });
 });
