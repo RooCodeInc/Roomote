@@ -42,9 +42,26 @@ const CLIENT_SECRET_TTL_SECONDS = 600;
 const CLIENT_SECRET_TIMEOUT_MS = 15_000;
 const VOICE_TTS_TIMEOUT_MS = 60_000;
 
+/**
+ * Spoken replies arrive one sentence at a time, so the key lookup (a
+ * settings read plus decryption) is memoized briefly instead of repeated on
+ * every synthesis request.
+ */
+const VOICE_KEY_CACHE_TTL_MS = 30_000;
+let cachedVoiceKey: { value: string | undefined; expiresAt: number } | null =
+  null;
+
 export async function resolveVoiceOpenAiKey(): Promise<string | undefined> {
+  const now = Date.now();
+
+  if (cachedVoiceKey && cachedVoiceKey.expiresAt > now) {
+    return cachedVoiceKey.value;
+  }
+
   const apiKey = await resolveModelProviderEnvValue(VOICE_OPENAI_ENV_VAR_NAMES);
-  return apiKey?.trim() || undefined;
+  const value = apiKey?.trim() || undefined;
+  cachedVoiceKey = { value, expiresAt: now + VOICE_KEY_CACHE_TTL_MS };
+  return value;
 }
 
 export type VoiceRealtimeClientSecret = {

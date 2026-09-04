@@ -41,6 +41,7 @@ import {
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
+import { findSpeakableBoundary } from '@/lib/voice-speech';
 import {
   SessionPromptInput,
   type SessionModelSelection,
@@ -749,9 +750,14 @@ export function FastSessionTranscript({
     model: sessionModel,
     reasoningEffort: sessionReasoningEffort,
   });
-  /** Assistant messages at or before this ts have already been spoken. */
-  const lastSpokenTsRef = useRef(0);
-  const previousAgentWorkingRef = useRef(false);
+  /** Assistant messages at or before this ts predate the conversation. */
+  const voiceCutoffTsRef = useRef(0);
+  /**
+   * Per assistant message (keyed by transcript id), how many characters of
+   * its text have already been handed to speech. `Infinity` marks a reply
+   * the user interrupted, which stays silent even as more of it arrives.
+   */
+  const spokenCursorsRef = useRef(new Map<string, number>());
   const pendingUtterancesRef = useRef<string[]>([]);
   const [utteranceQueueVersion, setUtteranceQueueVersion] = useState(0);
 
@@ -798,12 +804,6 @@ export function FastSessionTranscript({
     });
   }, [isSending, utteranceQueueVersion, sendReply]);
 
-  // Speak the agent's reply once the turn settles. `pendingAfter` alone clears
-  // on the first visible assistant message, which for Fast can be a progress
-  // kickoff ahead of the real result, so this waits for the composite
-  // "agent working" signal (send in flight, turn responding, or response
-  // pending) to fall back to false and then reads every not-yet-spoken
-  // assistant message as a single reply.
   const agentWorking =
     isSending ||
     conversationResponding === true ||
@@ -812,34 +812,64 @@ export function FastSessionTranscript({
   const speakRef = useRef(liveVoice.speak);
   speakRef.current = liveVoice.speak;
 
+  // Speak replies as they arrive rather than after the turn settles: each
+  // completed sentence of a streaming reply is queued the moment it lands,
+  // and whatever remains is queued when the persisted row finalizes it. The
+  // per-message cursor means a persisted row that replaces its streamed
+  // chunks continues where the stream left off instead of repeating.
   useEffect(() => {
-    const wasWorking = previousAgentWorkingRef.current;
-    previousAgentWorkingRef.current = agentWorking;
-
-    if (!liveVoiceActive || !wasWorking || agentWorking) {
+    if (!liveVoiceActive) {
       return;
     }
 
-    const unspoken = messages.filter(
-      (message) =>
-        message.role !== 'user' &&
-        message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
-        message.metadata?.visibleInTranscript !== false &&
-        message.ts > lastSpokenTsRef.current,
-    );
-    const texts = unspoken
-      .map((message) => getTextFromContentBlocks(message.contentBlocks)?.trim())
-      .filter((text): text is string => Boolean(text));
+    for (const message of uiMessages) {
+      if (
+        message.role !== 'assistant' ||
+        message.visibleInTranscript === false ||
+        message.ts <= voiceCutoffTsRef.current ||
+        !message.text ||
+        (message.kind !== 'text' &&
+          message.updateType !== ACP_ENVELOPE_EVENT_TYPES.AssistantMessage)
+      ) {
+        continue;
+      }
 
-    if (texts.length === 0) {
+      const cursor = spokenCursorsRef.current.get(message.id) ?? 0;
+
+      if (cursor === Infinity) {
+        continue;
+      }
+
+      const boundary = message.partial
+        ? findSpeakableBoundary(message.text, cursor)
+        : message.text.length;
+
+      if (boundary <= cursor) {
+        continue;
+      }
+
+      spokenCursorsRef.current.set(message.id, boundary);
+      speakRef.current(message.text.slice(cursor, boundary).trim());
+    }
+  }, [uiMessages, liveVoiceActive]);
+
+  // Talking over a reply drops the rest of it: every reply known at the
+  // moment of interruption is muted so later chunks of it stay silent.
+  const uiMessagesRef = useRef(uiMessages);
+  uiMessagesRef.current = uiMessages;
+  const liveVoiceInterruptions = liveVoice.interruptions;
+
+  useEffect(() => {
+    if (liveVoiceInterruptions === 0) {
       return;
     }
 
-    lastSpokenTsRef.current = Math.max(
-      ...unspoken.map((message) => message.ts),
-    );
-    speakRef.current(texts.join('\n\n'));
-  }, [agentWorking, liveVoiceActive, messages]);
+    for (const message of uiMessagesRef.current) {
+      if (message.role === 'assistant') {
+        spokenCursorsRef.current.set(message.id, Infinity);
+      }
+    }
+  }, [liveVoiceInterruptions]);
 
   const handleVoiceToggle = useCallback(() => {
     // Toggling while the handshake is still connecting cancels it.
@@ -851,10 +881,11 @@ export function FastSessionTranscript({
     // Replies that predate the conversation stay silent. The cutoff comes
     // from the transcript's own (server-assigned) timestamps rather than the
     // browser clock, which may run ahead of the server.
-    lastSpokenTsRef.current = messages.reduce(
+    voiceCutoffTsRef.current = messages.reduce(
       (latest, message) => Math.max(latest, message.ts),
       0,
     );
+    spokenCursorsRef.current.clear();
     pendingUtterancesRef.current = [];
     void liveVoice.start();
   }, [liveVoice, messages]);

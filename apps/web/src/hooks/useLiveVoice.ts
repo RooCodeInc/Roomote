@@ -21,11 +21,19 @@ const TTS_SAMPLE_RATE = 24_000;
 /** Feed the player in ~250ms batches so playback starts almost immediately. */
 const MIN_PLAYBACK_SAMPLES = TTS_SAMPLE_RATE / 4;
 
+/**
+ * Each synthesis request stays short so its first audio byte arrives fast;
+ * sentences queued while a request is in flight coalesce up to this size.
+ */
+const TTS_CHUNK_CHARS = 400;
+/** Synthesis requests kept in flight ahead of the one being played. */
+const TTS_PREFETCH = 2;
+
 const VAD_INTERVAL_MS = 50;
 /** RMS above this counts as the user speaking. */
 const VAD_SPEECH_RMS = 0.02;
 /** A pause this long ends the utterance and commits it. */
-const VAD_SILENCE_MS = 800;
+const VAD_SILENCE_MS = 600;
 /** Shorter bursts (a cough, a keyboard clack) are not worth committing. */
 const VAD_MIN_SPEECH_MS = 250;
 
@@ -52,10 +60,25 @@ interface UseLiveVoiceReturn {
   error: string | null;
   start: () => Promise<void>;
   stop: () => void;
-  /** Speak an agent reply (raw markdown; it is cleaned before synthesis). */
+  /**
+   * Queue agent reply text for speech (raw markdown; it is cleaned before
+   * synthesis). Calls append to whatever is already playing, so a reply can
+   * be spoken sentence by sentence as it streams in.
+   */
   speak: (markdown: string) => void;
   stopSpeaking: () => void;
+  /**
+   * Incremented each time the user talks over a reply. Callers use it to
+   * drop the rest of the interrupted reply instead of resuming it later.
+   */
+  interruptions: number;
 }
+
+type SpeechQueueItem = {
+  text: string;
+  /** Prefetched synthesis response, once the request has been started. */
+  response?: Promise<Response>;
+};
 
 type RealtimeServerEvent = {
   type?: string;
@@ -73,6 +96,7 @@ export function useLiveVoice({
   const [status, setStatus] = useState<LiveVoiceStatus>('idle');
   const [interimTranscript, setInterimTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [interruptions, setInterruptions] = useState(0);
 
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
@@ -95,6 +119,8 @@ export function useLiveVoice({
   const scheduledSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextPlaybackTimeRef = useRef(0);
   const speakingRef = useRef(false);
+  const speechQueueRef = useRef<SpeechQueueItem[]>([]);
+  const drainingRef = useRef(false);
 
   const setSpeaking = useCallback((speaking: boolean) => {
     speakingRef.current = speaking;
@@ -108,6 +134,8 @@ export function useLiveVoice({
     playbackGenerationRef.current += 1;
     playbackAbortRef.current?.abort();
     playbackAbortRef.current = null;
+    speechQueueRef.current = [];
+    drainingRef.current = false;
 
     for (const source of scheduledSourcesRef.current) {
       try {
@@ -123,6 +151,15 @@ export function useLiveVoice({
       setSpeaking(false);
     }
   }, [setSpeaking]);
+
+  /** Barge-in: the user talking over a reply silences it for good. */
+  const interrupt = useCallback(() => {
+    if (!speakingRef.current && speechQueueRef.current.length === 0) {
+      return;
+    }
+    stopSpeaking();
+    setInterruptions((count) => count + 1);
+  }, [stopSpeaking]);
 
   // Local VAD state: an analyser taps the mic stream and a timer classifies
   // each 50ms window as speech or silence.
@@ -211,8 +248,7 @@ export function useLiveVoice({
           if (!state.speaking) {
             state.speaking = true;
             state.speechStartAt = now;
-            // Barge-in: the user talking over a reply silences it.
-            stopSpeaking();
+            interrupt();
           }
           state.lastVoiceAt = now;
           state.hadSpeech = true;
@@ -231,7 +267,7 @@ export function useLiveVoice({
         }
       }, VAD_INTERVAL_MS);
     },
-    [commitUtterance, ensureAudioContext, stopSpeaking],
+    [commitUtterance, ensureAudioContext, interrupt],
   );
 
   const stop = useCallback(() => {
@@ -265,8 +301,7 @@ export function useLiveVoice({
 
       switch (event.type) {
         case 'input_audio_buffer.speech_started':
-          // Barge-in: the user talking over a reply silences it.
-          stopSpeaking();
+          interrupt();
           break;
         case 'conversation.item.input_audio_transcription.delta':
           if (event.delta) {
@@ -288,7 +323,7 @@ export function useLiveVoice({
           break;
       }
     },
-    [stopSpeaking],
+    [interrupt],
   );
 
   const start = useCallback(async () => {
@@ -426,116 +461,190 @@ export function useLiveVoice({
     [setSpeaking],
   );
 
+  const fetchSpeech = useCallback(
+    (text: string, signal: AbortSignal) =>
+      fetch('/api/voice/tts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text }),
+        signal,
+      }),
+    [],
+  );
+
+  /** Stream one synthesis response into the audio scheduler. */
+  const playResponse = useCallback(
+    async (
+      context: AudioContext,
+      response: Response,
+      generation: number,
+    ): Promise<boolean> => {
+      if (!response.ok || !response.body) {
+        throw new Error('Speech synthesis failed');
+      }
+
+      const reader = response.body.getReader();
+      // 16-bit samples can split across network chunks; carry the odd byte
+      // over, and batch small reads so sources aren't tiny.
+      let carry = new Uint8Array(0);
+      let pending: Float32Array[] = [];
+      let pendingSamples = 0;
+
+      const flush = () => {
+        if (pendingSamples === 0) return;
+        const merged = new Float32Array(pendingSamples);
+        let offset = 0;
+        for (const part of pending) {
+          merged.set(part, offset);
+          offset += part.length;
+        }
+        pending = [];
+        pendingSamples = 0;
+        schedulePcm(context, merged);
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (playbackGenerationRef.current !== generation) {
+          await reader.cancel().catch(() => undefined);
+          return false;
+        }
+
+        if (done) {
+          break;
+        }
+
+        const bytes = new Uint8Array(carry.length + value.length);
+        bytes.set(carry, 0);
+        bytes.set(value, carry.length);
+        const usable = bytes.length - (bytes.length % 2);
+        carry = bytes.slice(usable);
+
+        if (usable === 0) {
+          continue;
+        }
+
+        const ints = new Int16Array(bytes.buffer.slice(0, usable));
+        const floats = new Float32Array(ints.length);
+        for (let i = 0; i < ints.length; i++) {
+          floats[i] = (ints[i] ?? 0) / 32_768;
+        }
+        pending.push(floats);
+        pendingSamples += floats.length;
+
+        if (pendingSamples >= MIN_PLAYBACK_SAMPLES) {
+          flush();
+        }
+      }
+
+      flush();
+      return true;
+    },
+    [schedulePcm],
+  );
+
+  /**
+   * Drain the speech queue: synthesize each item in order while keeping the
+   * next few requests in flight, so the gap between sentences is playback
+   * time rather than round-trip time.
+   */
+  const drainSpeechQueue = useCallback(() => {
+    if (drainingRef.current) {
+      return;
+    }
+
+    const generation = playbackGenerationRef.current;
+    const abortController = new AbortController();
+    playbackAbortRef.current = abortController;
+    drainingRef.current = true;
+
+    const context = ensureAudioContext();
+    if (scheduledSourcesRef.current.size === 0) {
+      nextPlaybackTimeRef.current = context.currentTime;
+    }
+    setSpeaking(true);
+
+    const prefetch = () => {
+      for (const item of speechQueueRef.current.slice(0, TTS_PREFETCH)) {
+        if (!item.response) {
+          item.response = fetchSpeech(item.text, abortController.signal);
+          // The drain loop awaits this later; keep an early failure from
+          // surfacing as an unhandled rejection in the meantime.
+          item.response.catch(() => undefined);
+        }
+      }
+    };
+
+    void (async () => {
+      try {
+        while (speechQueueRef.current.length > 0) {
+          if (playbackGenerationRef.current !== generation) {
+            return;
+          }
+
+          prefetch();
+          const item = speechQueueRef.current.shift();
+          if (!item) break;
+          const response = await (item.response ??
+            fetchSpeech(item.text, abortController.signal));
+          if (playbackGenerationRef.current !== generation) {
+            return;
+          }
+          prefetch();
+          if (!(await playResponse(context, response, generation))) {
+            return;
+          }
+        }
+      } catch {
+        // Aborted playback or a failed synthesis: fall back to silence.
+      } finally {
+        if (playbackGenerationRef.current === generation) {
+          drainingRef.current = false;
+          playbackAbortRef.current = null;
+          if (scheduledSourcesRef.current.size === 0) {
+            setSpeaking(false);
+          }
+        }
+      }
+    })();
+  }, [ensureAudioContext, fetchSpeech, playResponse, setSpeaking]);
+
   const speak = useCallback(
     (markdown: string) => {
       if (!activeRef.current) {
         return;
       }
 
-      const chunks = chunkSpeakableText(toSpeakableText(markdown));
+      const chunks = chunkSpeakableText(
+        toSpeakableText(markdown),
+        TTS_CHUNK_CHARS,
+      );
 
       if (chunks.length === 0) {
         return;
       }
 
-      stopSpeaking();
-
-      const generation = playbackGenerationRef.current;
-      const abortController = new AbortController();
-      playbackAbortRef.current = abortController;
-
-      const context = ensureAudioContext();
-      nextPlaybackTimeRef.current = context.currentTime;
-      setSpeaking(true);
-
-      void (async () => {
-        try {
-          for (const chunk of chunks) {
-            if (playbackGenerationRef.current !== generation) {
-              return;
-            }
-
-            const response = await fetch('/api/voice/tts', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ text: chunk }),
-              signal: abortController.signal,
-            });
-
-            if (!response.ok || !response.body) {
-              throw new Error('Speech synthesis failed');
-            }
-
-            const reader = response.body.getReader();
-            // 16-bit samples can split across network chunks; carry the odd
-            // byte over, and batch small reads so sources aren't tiny.
-            let carry = new Uint8Array(0);
-            let pending: Float32Array[] = [];
-            let pendingSamples = 0;
-
-            const flush = () => {
-              if (pendingSamples === 0) return;
-              const merged = new Float32Array(pendingSamples);
-              let offset = 0;
-              for (const part of pending) {
-                merged.set(part, offset);
-                offset += part.length;
-              }
-              pending = [];
-              pendingSamples = 0;
-              schedulePcm(context, merged);
-            };
-
-            while (true) {
-              const { done, value } = await reader.read();
-
-              if (playbackGenerationRef.current !== generation) {
-                await reader.cancel().catch(() => undefined);
-                return;
-              }
-
-              if (done) {
-                break;
-              }
-
-              const bytes = new Uint8Array(carry.length + value.length);
-              bytes.set(carry, 0);
-              bytes.set(value, carry.length);
-              const usable = bytes.length - (bytes.length % 2);
-              carry = bytes.slice(usable);
-
-              if (usable === 0) {
-                continue;
-              }
-
-              const ints = new Int16Array(bytes.buffer.slice(0, usable));
-              const floats = new Float32Array(ints.length);
-              for (let i = 0; i < ints.length; i++) {
-                floats[i] = (ints[i] ?? 0) / 32_768;
-              }
-              pending.push(floats);
-              pendingSamples += floats.length;
-
-              if (pendingSamples >= MIN_PLAYBACK_SAMPLES) {
-                flush();
-              }
-            }
-
-            flush();
-          }
-        } catch {
-          // Aborted playback or a failed synthesis: fall back to silence.
-        } finally {
-          if (playbackGenerationRef.current === generation) {
-            playbackAbortRef.current = null;
-            if (scheduledSourcesRef.current.size === 0) {
-              setSpeaking(false);
-            }
-          }
+      const queue = speechQueueRef.current;
+      for (const chunk of chunks) {
+        // Text arriving while earlier sentences are still waiting for their
+        // request merges into the last unsent item: fewer round trips when
+        // the agent is ahead of playback, no extra delay when it is not.
+        const last = queue.at(-1);
+        if (
+          last &&
+          !last.response &&
+          last.text.length + chunk.length + 1 <= TTS_CHUNK_CHARS
+        ) {
+          last.text = `${last.text} ${chunk}`;
+        } else {
+          queue.push({ text: chunk });
         }
-      })();
+      }
+
+      drainSpeechQueue();
     },
-    [ensureAudioContext, schedulePcm, setSpeaking, stopSpeaking],
+    [drainSpeechQueue],
   );
 
   // `stop` is stable (its dependency chain bottoms out in setState), so this
@@ -555,5 +664,6 @@ export function useLiveVoice({
     stop,
     speak,
     stopSpeaking,
+    interruptions,
   };
 }

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { chunkSpeakableText, toSpeakableText } from './voice-speech';
+import {
+  chunkSpeakableText,
+  findSpeakableBoundary,
+  toSpeakableText,
+} from './voice-speech';
 
 describe('toSpeakableText', () => {
   it('summarizes fenced code blocks instead of reading them', () => {
@@ -64,5 +68,38 @@ describe('chunkSpeakableText', () => {
     const chunks = chunkSpeakableText('a'.repeat(25), 10);
 
     expect(chunks).toEqual(['a'.repeat(10), 'a'.repeat(10), 'a'.repeat(5)]);
+  });
+});
+
+describe('findSpeakableBoundary', () => {
+  it('returns the end of the last complete sentence', () => {
+    const text = 'First sentence. Second sentence! Third is still going';
+    expect(findSpeakableBoundary(text, 0)).toBe(
+      'First sentence. Second sentence!'.length,
+    );
+  });
+
+  it('treats a newline as a boundary', () => {
+    const text = 'A heading\nStill typing';
+    expect(findSpeakableBoundary(text, 0)).toBe('A heading\n'.length);
+  });
+
+  it('returns the start when no sentence has finished', () => {
+    expect(findSpeakableBoundary('Still typing', 0)).toBe(0);
+    expect(findSpeakableBoundary('Version 3.5 is out', 0)).toBe(0);
+  });
+
+  it('only advances past the given start', () => {
+    const text = 'Done. More coming';
+    const first = findSpeakableBoundary(text, 0);
+    expect(first).toBe('Done.'.length);
+    expect(findSpeakableBoundary(text, first)).toBe(first);
+  });
+
+  it('holds back text inside an unclosed code fence', () => {
+    const open = 'Here is code. ```ts\nconst a = 1. Or so;';
+    expect(findSpeakableBoundary(open, 0)).toBe('Here is code.'.length);
+    const closed = `${open}\n\`\`\`\nAll done. `;
+    expect(findSpeakableBoundary(closed, 0)).toBe(closed.length - 1);
   });
 });

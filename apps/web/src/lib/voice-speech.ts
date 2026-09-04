@@ -107,3 +107,36 @@ function findLastSentenceEnd(window: string): number {
 
   return -1;
 }
+
+/**
+ * Find where a reply that is still streaming can safely be cut for speech:
+ * the end of the last complete sentence (or line) at or after `from`. Text
+ * inside an unclosed code fence is held back until the fence closes, since
+ * `toSpeakableText` summarizes fenced blocks as a whole. Returns `from` when
+ * nothing new is ready.
+ */
+export function findSpeakableBoundary(text: string, from: number): number {
+  let limit = text.length;
+  const fences = [...text.slice(from).matchAll(/```/g)];
+
+  if (fences.length % 2 === 1) {
+    limit = from + (fences[fences.length - 1]?.index ?? 0);
+  }
+
+  for (let i = limit - 1; i > from; i--) {
+    const char = text[i];
+
+    if (char === '\n') {
+      return i + 1;
+    }
+
+    if (
+      (char === '.' || char === '!' || char === '?') &&
+      /\s/.test(text[i + 1] ?? '')
+    ) {
+      return i + 1;
+    }
+  }
+
+  return from;
+}
