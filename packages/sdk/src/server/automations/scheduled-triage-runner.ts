@@ -17,7 +17,6 @@ import {
 } from './destination';
 import { resolveDeploymentTimeZone } from './custom-automation-schedule';
 import { isRunDue } from './scheduling-utils';
-import { postScheduledTriageRoutingDebug } from './triage-routing-debug';
 import {
   emptyJobResult,
   type AutomationJobResult,
@@ -135,17 +134,6 @@ export function createScheduledTriageJob(
           }));
 
         if (!destination) {
-          if (deployment.slackBotToken) {
-            await postScheduledTriageRoutingDebug({
-              automationKey: config.automationKey,
-              slackBotToken: deployment.slackBotToken,
-              manualTrigger: opts.manualTrigger === true,
-              outcome: 'skipped',
-              taskSlackChannelId: null,
-              details:
-                'Manager channel not configured, so the task was not queued.',
-            });
-          }
           console.log(
             `${logPrefix} Skipping deployment: manager channel not configured`,
           );
@@ -232,22 +220,6 @@ export function createScheduledTriageJob(
           status: 'succeeded',
           at: new Date(),
         });
-
-        if (deployment.slackBotToken) {
-          await postScheduledTriageRoutingDebug({
-            automationKey: config.automationKey,
-            slackBotToken: deployment.slackBotToken,
-            manualTrigger: opts.manualTrigger === true,
-            outcome: 'queued',
-            taskSlackChannelId:
-              destination.provider === 'slack' ? channelId : null,
-            ...(destination.provider === 'slack'
-              ? {}
-              : {
-                  details: `Task reports to the ${destination.provider} conversation ${channelId}.`,
-                }),
-          });
-        }
 
         result.launchedTaskId ??= firstLaunchedTaskId;
         processed++;

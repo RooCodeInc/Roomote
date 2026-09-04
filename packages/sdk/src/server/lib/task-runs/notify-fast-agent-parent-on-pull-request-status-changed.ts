@@ -9,15 +9,12 @@ import {
 import {
   getFastAgentParentFromPayload,
   type SourceControlProvider,
+  isPrReviewRun,
 } from '@roomote/types';
 
-import {
-  deliverFastAgentParentEvent,
-  type FastAgentPullRequestContext,
-} from '../fast-agent-parent-event';
+import type { FastAgentPullRequestContext } from '../fast-agent-parent-event';
+import { enqueueFastAgentParentEvent } from '../fast-agent-parent-event-queue';
 import { deliverFastAgentParentPrEvent } from './deliver-fast-agent-parent-pr-event';
-
-const PR_STATUS_DELIVERY_LOCK_WAIT_MS = 30_000;
 
 function buildNotifiedResultKey(params: {
   prUrl: string;
@@ -32,7 +29,7 @@ function buildNotifiedResultKey(params: {
 
 /** Pass a terminal task PR status to the Fast conversation that delegated it. */
 export async function notifyFastAgentParentOnPullRequestStatusChanged(params: {
-  run: Pick<TaskRun, 'id' | 'taskId' | 'payload'>;
+  run: Pick<TaskRun, 'id' | 'taskId' | 'payload' | 'payloadKind'>;
   pullRequest: {
     provider: SourceControlProvider;
     host?: string | null;
@@ -47,6 +44,13 @@ export async function notifyFastAgentParentOnPullRequestStatusChanged(params: {
 }): Promise<void> {
   const parent = getFastAgentParentFromPayload(params.run.payload);
   if (!parent) {
+    return;
+  }
+
+  // Review-pipeline runs never forward PR events to their parent session:
+  // the PR's implementation task already delivers them, and a duplicate from
+  // the attached review task would double-announce in the same session.
+  if (isPrReviewRun(params.run)) {
     return;
   }
 
@@ -69,8 +73,8 @@ export async function notifyFastAgentParentOnPullRequestStatusChanged(params: {
     run: params.run,
     deliveryKey: notifiedResultKey,
     logPrefix: 'notifyFastAgentParentOnPullRequestStatusChanged',
-    deliver: () =>
-      deliverFastAgentParentEvent({
+    deliver: async () => {
+      await enqueueFastAgentParentEvent({
         parent,
         event: {
           type: 'pull_request_status_changed',
@@ -87,14 +91,15 @@ export async function notifyFastAgentParentOnPullRequestStatusChanged(params: {
           status: params.pullRequest.status,
           actorLogin: params.actorLogin,
         },
-        lockWaitMs: PR_STATUS_DELIVERY_LOCK_WAIT_MS,
-      }),
+      });
+      return 'delivered';
+    },
     recordLifecycle: () =>
       recordTaskRunLifecycleEvent(db, {
         runId: params.run.id,
         taskId: params.run.taskId,
         eventType: 'decision',
-        message: `Passed ${params.pullRequest.status} pull request ${pullRequest.repository ?? 'unknown'}#${pullRequest.number ?? 'unknown'} to the Fast parent orchestrator.`,
+        message: `Queued ${params.pullRequest.status} pull request ${pullRequest.repository ?? 'unknown'}#${pullRequest.number ?? 'unknown'} for the Fast parent orchestrator.`,
         details: {
           reason: 'fast_agent_parent_pr_status_event',
           fastAgentSessionId: parent.sessionId,

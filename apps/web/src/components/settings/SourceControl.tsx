@@ -16,9 +16,11 @@ import {
 
 import {
   usePrAction,
+  useMarkRoomotePrReadyAfterCleanReview,
   useGitHubRoomoteMention,
   useRepositories,
   useSetPrAction,
+  useSetMarkRoomotePrReadyAfterCleanReview,
   useSetGitHubRoomoteMention,
   useSourceControlConfigStatus,
   useSyncRepositories,
@@ -460,12 +462,7 @@ export function SourceControl() {
       ) : null}
       <Section icon={GitMerge} title="Source Control Settings">
         <div className="space-y-6">
-          {isAdmin ? (
-            <>
-              <PrActionSetting />
-              <GitHubRoomoteMentionSetting />
-            </>
-          ) : null}
+          {isAdmin ? <SourceControlAdminSettings /> : null}
         </div>
       </Section>
       {providerBlocks.map((providerBlock) => (
@@ -474,6 +471,56 @@ export function SourceControl() {
           {...providerBlock}
         />
       ))}
+    </div>
+  );
+}
+
+function SourceControlAdminSettings() {
+  const prActionQuery = usePrAction();
+  const currentPrAction = prActionQuery.data?.prAction ?? 'draft';
+
+  return (
+    <>
+      <PrActionSetting prActionQuery={prActionQuery} />
+      {currentPrAction === 'draft' ? (
+        <MarkRoomotePrReadyAfterCleanReviewSetting />
+      ) : null}
+      <GitHubRoomoteMentionSetting />
+    </>
+  );
+}
+
+function MarkRoomotePrReadyAfterCleanReviewSetting() {
+  const settingQuery = useMarkRoomotePrReadyAfterCleanReview();
+  const setSetting = useSetMarkRoomotePrReadyAfterCleanReview();
+  const enabled = settingQuery.data?.enabled ?? false;
+
+  return (
+    <div className="flex gap-3">
+      <Switch
+        aria-label="Mark Roomote PR ready after clean review"
+        checked={enabled}
+        disabled={settingQuery.isLoading || setSetting.isPending}
+        onCheckedChange={(checked) => {
+          setSetting.mutate(checked === true, {
+            onSuccess: () => toast.success('Source control settings saved.'),
+            onError: (error) =>
+              toast.error(
+                `Failed to update clean review setting: ${error.message}`,
+              ),
+          });
+        }}
+      />
+      <div>
+        <div className="text-sm font-medium">
+          Mark Roomote PR ready after clean review
+        </div>
+        <p className="text-sm text-muted-foreground">
+          When Roomote creates a draft pull request or merge request, mark it
+          ready for human review after the automated reviewer finds no issues.
+          This does not approve or merge it.
+        </p>
+      </div>
     </div>
   );
 }
@@ -488,8 +535,11 @@ const PR_ACTION_LABELS: Record<PrAction, string> = {
  * Deployment-wide default for how repository-changing tasks deliver their
  * work, mirroring the task-run `prAction` setting.
  */
-function PrActionSetting() {
-  const prActionQuery = usePrAction();
+function PrActionSetting({
+  prActionQuery,
+}: {
+  prActionQuery: ReturnType<typeof usePrAction>;
+}) {
   const setPrAction = useSetPrAction();
   const currentPrAction = prActionQuery.data?.prAction ?? 'draft';
 

@@ -129,7 +129,7 @@ describe('provider usage limit automation', () => {
       title: { text: 'Inference Provider Usage Alert' },
       subtitle: {
         type: 'mrkdwn',
-        text: 'OpenRouter is at 90% ($90.00 of $100.00)',
+        text: 'OpenRouter is at 90%',
       },
       icon: {
         image_url: expect.stringContaining(
@@ -163,6 +163,28 @@ describe('provider usage limit automation', () => {
           ],
         },
       ],
+    });
+  });
+
+  it('keeps the alert concise when raw usage and limit are not reported', () => {
+    const message = buildProviderUsageLimitWarningMessage({
+      alerts: [
+        {
+          snapshot: snapshot({
+            providerName: 'ChatGPT (subscription)',
+            usedPercent: 89,
+            used: undefined,
+            limit: undefined,
+          }),
+          threshold: 85,
+        },
+      ],
+    });
+
+    expect(message.blocks[0]).toMatchObject({
+      subtitle: {
+        text: 'ChatGPT (subscription) is at 89%',
+      },
     });
   });
 
@@ -225,7 +247,7 @@ describe('provider usage limit automation', () => {
 
     expect(deps.postMessage).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(deps.postMessage.mock.calls[1]?.[0])).toContain(
-      'OpenRouter is at 100% ($100.00 of $100.00)',
+      'OpenRouter is at 100%',
     );
   });
 

@@ -403,6 +403,8 @@ This gate applies when the request involves factual claims, recommendations, com
 
 Brain-first does not mean Brain-only. Treat Brain as context, not a stopping point; if it doesn't fully answer the question, continue with the relevant sources. Use the narrowest lookup needed to close that specific gap; do not sweep an entire integration when the Brain already answers the question. Reading is read-only and cheap next to the work it saves, and this ordering lets the Brain prevent redundant source exploration.
 
+Memories about operational state, including integration availability, permissions, configuration, and deployment state, are time-sensitive. Before relying on one, revalidate it with the cheapest authoritative tool call available. Recalled context must never suppress that check.
+
 Which tool:
 - \`query\` when you are describing a concept and do not know how the Brain words it. It expands your phrasing into related queries, so it finds pages that talk about the same thing in different language. This is the default, and the right choice for that first pass.
 - \`search\` when you already know the exact token: a slug, a repository name, an error string, a person's handle. Cheaper than \`query\` because it skips the expansion step.

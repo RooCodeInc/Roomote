@@ -21,9 +21,12 @@ When anonymous telemetry is enabled, your deployment sends:
   the provider type and, where Roomote can determine it from deployment state,
   whether it was configured before the wizard. Other events include
   non-identifying facts like the harness, model, source surface, and sandbox
-  provider used. Fast session events include bounded outcome, retry count, and
-  phase-duration measurements, plus whether a turn is the session's first human
-  message, but not conversation or message identifiers.
+  provider used. Fast session events include bounded outcome and retry counts;
+  setup and response phase durations; aggregate model-request and token-usage
+  counts; prompt-size, context-size, environment, integration, and active-task
+  counts; and whether a turn is the session's first human message. They do not
+  include conversation or message identifiers, prompt or reply text, or tool
+  content.
 - **A daily instance report** — aggregate deployment metadata and usage:
   setup timestamps; counts of users, environments, and connected repositories;
   task, model, token, and cost totals for the past day; pull-request statistics
@@ -31,7 +34,7 @@ When anonymous telemetry is enabled, your deployment sends:
   integrations.
 
 What is **never** sent: names, emails, repository names, task contents,
-prompts, code, tokens, or credentials.
+prompts, code, access tokens, or credentials.
 
 ## How it is identified
 

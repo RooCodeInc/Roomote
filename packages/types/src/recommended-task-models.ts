@@ -28,16 +28,22 @@ type RecommendedTaskModel = {
  * per-provider slug maps is how the recommended set changes.
  */
 export const RECOMMENDED_TASK_MODELS = [
+  {
+    id: 'claude-fable-5-1',
+    displayName: 'Claude Fable 5.1',
+    family: 'Fable',
+  },
   { id: 'claude-fable-5', displayName: 'Claude Fable 5', family: 'Fable' },
   { id: 'claude-haiku-4-5', displayName: 'Claude Haiku 4.5', family: 'Haiku' },
   { id: 'claude-opus-5', displayName: 'Claude Opus 5', family: 'Opus' },
   { id: 'claude-sonnet-5', displayName: 'Claude Sonnet 5', family: 'Sonnet' },
+  { id: 'gpt-6-astra', displayName: 'GPT-6 Astra', family: 'GPT' },
   { id: 'gpt-5-6-sol', displayName: 'GPT 5.6 Sol', family: 'GPT' },
   { id: 'gpt-5-6-terra', displayName: 'GPT 5.6 Terra', family: 'GPT' },
   { id: 'gpt-5-6-luna', displayName: 'GPT 5.6 Luna', family: 'GPT' },
   {
-    id: 'gemini-3-7-flash',
-    displayName: 'Gemini 3.7 Flash',
+    id: 'gemini-3-8-flash',
+    displayName: 'Gemini 3.8 Flash',
     family: 'Gemini',
   },
   {
@@ -95,14 +101,16 @@ export function mapRecommendedTaskModels(
  * lab in the recommended list).
  */
 export const OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS = {
+  'claude-fable-5-1': 'openrouter/anthropic/claude-fable-5.1',
   'claude-fable-5': 'openrouter/anthropic/claude-fable-5',
   'claude-haiku-4-5': 'openrouter/anthropic/claude-haiku-4.5',
   'claude-opus-5': 'openrouter/anthropic/claude-opus-5',
   'claude-sonnet-5': 'openrouter/anthropic/claude-sonnet-5',
+  'gpt-6-astra': 'openrouter/openai/gpt-6-astra',
   'gpt-5-6-sol': 'openrouter/openai/gpt-5.6-sol',
   'gpt-5-6-terra': 'openrouter/openai/gpt-5.6-terra',
   'gpt-5-6-luna': 'openrouter/openai/gpt-5.6-luna',
-  'gemini-3-7-flash': 'openrouter/google/gemini-3.7-flash',
+  'gemini-3-8-flash': 'openrouter/google/gemini-3.8-flash',
   'deepseek-v4-flash-0731': 'openrouter/deepseek/deepseek-v4-flash-0731',
   'deepseek-v4-pro-0813': 'openrouter/deepseek/deepseek-v4-pro-0813',
   'glm-5-3-flash': 'openrouter/z-ai/glm-5.3-flash',

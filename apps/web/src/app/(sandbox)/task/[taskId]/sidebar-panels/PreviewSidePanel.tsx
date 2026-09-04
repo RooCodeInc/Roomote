@@ -37,21 +37,25 @@ import {
 } from '@/components/system';
 
 import { buildPreviewIframeUrl } from '../preview-iframe-url';
-import { useSandboxClient } from '../hooks/SandboxProvider';
+import { useOptionalSandboxClient } from '../hooks/SandboxProvider';
 import { usePreviewPane } from '../hooks/use-preview-pane';
 import { usePreviewUrls } from '../hooks/use-preview-urls';
 import { useTaskSidePanel } from '../hooks/use-task-side-panel';
-import { shouldIncludeInPreviewServiceList } from '../preview-port-utils';
+import {
+  humanizePortName,
+  shouldIncludeInPreviewServiceList,
+} from '../preview-port-utils';
 
 import { PreviewHelpDialog } from './PreviewHelpDialog';
 import { PreviewSetupState } from './PreviewSetupState';
 import { SidePanelHeader } from './SidePanelHeader';
 
-interface PreviewEntry {
+export interface PreviewEntry {
   name: string;
   label: string;
   url: string;
   isPrimary: boolean;
+  runId: number;
 }
 
 const KEEPALIVE_TOUCH_THROTTLE_MS = 5_000;
@@ -60,13 +64,6 @@ const INITIAL_RETRY_DELAY_MS = 2_000;
 const MAX_RETRY_DELAY_MS = 10_000;
 const MOBILE_WIDTH = 375;
 const MOBILE_HEIGHT = 667;
-
-function humanizePortName(portName: string): string {
-  return portName
-    .toLowerCase()
-    .replaceAll('_', ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
 
 function getDisplayPath(previewUrl: string | null): string {
   if (!previewUrl) {
@@ -121,9 +118,16 @@ function formatElementContext(context: {
 
 export function PreviewSidePanel({
   taskRun,
+  entries,
   onClose,
 }: {
   taskRun?: TaskRun;
+  /**
+   * Pre-collated preview entries (e.g. the Session workspace's cross-task
+   * list). When provided they replace the entries derived from `taskRun`,
+   * and each entry's own runId scopes its preview-iframe auth.
+   */
+  entries?: PreviewEntry[];
   onClose: () => void;
 }) {
   const {
@@ -142,7 +146,7 @@ export function PreviewSidePanel({
   const { previewUrls, initialPaths, primaryPortName } = usePreviewUrls(
     taskRun ?? {},
   );
-  const client = useSandboxClient();
+  const client = useOptionalSandboxClient();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
   const navigatingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -197,8 +201,13 @@ export function PreviewSidePanel({
     [taskRun?.machineDomain, taskRun?.machineDomains, primaryPortName],
   );
 
+  const taskRunId = taskRun?.id;
   const serviceEntries = useMemo<PreviewEntry[]>(() => {
-    if (!previewUrls) {
+    if (entries) {
+      return entries;
+    }
+
+    if (!previewUrls || taskRunId == null) {
       return [];
     }
 
@@ -215,15 +224,18 @@ export function PreviewSidePanel({
           label: humanizePortName(name),
           url: appendInitialPath(url, pathForPort),
           isPrimary: name === resolvedPrimaryPortName,
+          runId: taskRunId,
         };
       })
       .sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary));
   }, [
+    entries,
     initialPaths,
     previewPath,
     previewServiceName,
     previewUrls,
     resolvedPrimaryPortName,
+    taskRunId,
   ]);
 
   const activeEntry = useMemo(() => {
@@ -266,19 +278,20 @@ export function PreviewSidePanel({
   ]);
 
   const effectivePreviewUrl = previewPaneUrl ?? activeEntry?.url ?? null;
-  const effectiveRunId = previewPaneRunId ?? taskRun?.id ?? null;
+  const effectiveRunId =
+    previewPaneRunId ?? activeEntry?.runId ?? taskRun?.id ?? null;
   const iframeSrc =
     effectivePreviewUrl && effectiveRunId
       ? buildPreviewIframeUrl(effectivePreviewUrl, effectiveRunId)
       : null;
 
   useEffect(() => {
-    if (!taskRun || !activeEntry) {
+    if (!activeEntry) {
       return;
     }
 
     const hasMatchingPreviewSelection =
-      previewPaneRunId === taskRun.id &&
+      previewPaneRunId === activeEntry.runId &&
       (previewPaneServiceName
         ? previewPaneServiceName === activeEntry.name
         : previewPaneUrl === activeEntry.url);
@@ -305,10 +318,9 @@ export function PreviewSidePanel({
       return;
     }
 
-    openPreviewPane(activeEntry.url, taskRun.id, activeEntry.name);
+    openPreviewPane(activeEntry.url, activeEntry.runId, activeEntry.name);
   }, [
     activeEntry,
-    taskRun,
     currentUrl,
     openPreviewPane,
     previewPaneRunId,
@@ -463,12 +475,8 @@ export function PreviewSidePanel({
   };
 
   const handleSelectEntry = (entry: PreviewEntry) => {
-    if (!taskRun) {
-      return;
-    }
-
-    openPreviewPane(entry.url, taskRun.id, entry.name);
-    openPreviewView(entry.url, taskRun.id, entry.name);
+    openPreviewPane(entry.url, entry.runId, entry.name);
+    openPreviewView(entry.url, entry.runId, entry.name);
   };
 
   const postPreviewNavigation = useCallback(
@@ -633,6 +641,31 @@ export function PreviewSidePanel({
       setLoadTimedOut(true);
     }
   }, []);
+
+  const handleRetryPreview = useCallback(() => {
+    if (isNavigating) {
+      return;
+    }
+
+    retryStartRef.current = null;
+    retryCountRef.current = 0;
+    hasInitiallyLoadedRef.current = false;
+    setIsLoadWarningDismissed(false);
+    beginNavigationRequest();
+
+    const iframe = iframeRef.current;
+    if (!iframe?.src) {
+      return;
+    }
+
+    try {
+      iframe.contentWindow?.location.reload();
+    } catch {
+      const src = iframe.src;
+      iframe.src = '';
+      iframe.src = src;
+    }
+  }, [beginNavigationRequest, isNavigating]);
 
   const activeUrl = currentUrl ?? effectivePreviewUrl;
   const displayUrl = getDisplayPath(activeUrl);
@@ -912,7 +945,11 @@ export function PreviewSidePanel({
             {!hasLoadedOnce &&
             environmentSetupRunning &&
             !isSetupNoticeDismissed ? (
-              <div className="absolute inset-x-3 bottom-3 z-10 flex items-center justify-between gap-3 rounded-md border bg-background/95 p-3 shadow-md">
+              <div
+                role="status"
+                aria-live="polite"
+                className="absolute inset-x-3 bottom-3 z-10 flex items-center justify-between gap-3 rounded-md border bg-background/95 p-3 shadow-md"
+              >
                 <span className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="size-3.5 shrink-0 animate-spin" />
                   Environment services are still starting. The preview will load
@@ -929,13 +966,27 @@ export function PreviewSidePanel({
                 </Button>
               </div>
             ) : loadTimedOut && !isLoadWarningDismissed ? (
-              <div className="absolute inset-x-3 bottom-3 z-10 flex items-center justify-between gap-3 rounded-md border bg-background/95 p-3 shadow-md">
+              <div
+                role="status"
+                aria-live="polite"
+                className="absolute inset-x-3 bottom-3 z-10 flex items-center justify-between gap-3 rounded-md border bg-background/95 p-3 shadow-md"
+              >
                 <span className="text-sm text-muted-foreground">
                   {environmentSetupTroubled
                     ? 'Environment setup reported problems, which may be why the preview is not loading.'
                     : "The preview hasn't reported loading. It may still be starting, or something may be blocking it."}
                 </span>
                 <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleRetryPreview}
+                    disabled={isNavigating}
+                    aria-busy={isNavigating}
+                  >
+                    {isNavigating ? <Loader2 className="animate-spin" /> : null}
+                    {isNavigating ? 'Retrying...' : 'Try again'}
+                  </Button>
                   <Button
                     size="sm"
                     variant="outline"

@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import {
   and,
@@ -61,7 +61,7 @@ async function resolveNotionConnection() {
 function createNotionMcpServer(
   config: Awaited<ReturnType<typeof resolveNotionConnection>>,
 ) {
-  const server = new McpServer(NOTION_MCP_SERVER_INFO, {
+  const server = new NullableOptionalsMcpServer(NOTION_MCP_SERVER_INFO, {
     instructions:
       'Use these Notion tools only for content explicitly shared with the deployment internal integration. Unshared pages, including private pages, are inaccessible to the stored token.',
   });

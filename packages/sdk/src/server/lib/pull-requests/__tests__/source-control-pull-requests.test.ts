@@ -1399,6 +1399,44 @@ describe('optional targetBranch', () => {
     );
   });
 
+  it('falls back to default attribution when an automation task has no eligible participants', async () => {
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockTaskParticipantRows.mockResolvedValue([]);
+    mockGetTaskHumanOwnerUserIds.mockResolvedValue([]);
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      kind: 'roomote',
+      displayName: 'Roomote',
+      publicDisplayName: null,
+      prAssigneeLogin: null,
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: { ...makeTaskRun({ repo: 'acme/web' }), actingUserId: null },
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: attributionBody('Opened on behalf of Someone Invented.'),
+        prAttribution: 'Someone Invented',
+      },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: attributionBody('Created by Roomote.'),
+      }),
+    );
+  });
+
   it('rejects explicit PR attribution to someone outside the task conversation', async () => {
     mockTaskParticipantRows.mockResolvedValue([
       { userId: 'user-matt', name: 'Matt Rubens' },

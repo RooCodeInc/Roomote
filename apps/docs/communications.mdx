@@ -54,7 +54,10 @@ the exact suggestion you want by reacting to its message:
 - on Telegram, add a new 👍 reaction or use the suggestion's **Start** button
 
 The person starting the suggestion must have a linked Roomote account. Roomote
-also needs an environment that can run the suggestion's target repository.
+also needs an environment that can run the suggestion's target repository. A
+suggestion with a pinned workspace starts its task inside the Session that
+produced the report, so the task, the report, and any follow-up conversation
+share one transcript.
 Configured **Call Roomote via emoji** automations are separate from these
 suggestion reactions.
 
@@ -101,8 +104,9 @@ linked, Roomote can attribute a task to the right user, respect access rules,
 and continue the right thread when someone replies later.
 
 If someone asks Roomote to do work from chat before their account is linked,
-Roomote prompts them to link the account. After linking, they may need to send
-the request again.
+Roomote prompts them to link the account. Slack resumes the original request
+through Fast after linking; on other providers, they may need to send the
+request again.
 
 Telegram and Discord use one-time link codes instead of acting as sign-in
 providers. Generate a code under **Settings > Personal > Linked Accounts** and

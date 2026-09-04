@@ -12,12 +12,14 @@ Use `<public-url>` below for your stable public Roomote URL.
 
 ## Fast path
 
-Open `/setup`, choose GitHub, and click **Create GitHub App**. Roomote sends
-GitHub a manifest with the callback, webhook, permissions, and events
-preconfigured. After GitHub redirects back, Roomote saves the generated app ID,
-app slug, OAuth client credentials, webhook secret, and private key, then sends
-you to install the app on repositories. You pick the account or organization
-to install on during that install step.
+Open `/setup` and complete the short account and inference bootstrap. In the
+setup conversation, choose GitHub in the source-control card, open its
+configuration dialog, and click **Create GitHub App**. Roomote sends GitHub a
+manifest with the callback, webhook, permissions, and events preconfigured.
+After GitHub redirects back, Roomote saves the generated app ID, app slug,
+OAuth client credentials, webhook secret, and private key, then sends you to
+install the app on repositories. You pick the account or organization to
+install on during that install step.
 
 By default the app is created on your personal GitHub account and marked as
 installable on any account, so you can install it on any organization you
@@ -137,8 +139,8 @@ manifest, confirm it is enabled under the app's **Permissions & events** page
 
 ## Save credentials
 
-Copy these values into the `/setup` manual form, deployment env vars, or your
-local `.env.local`:
+Copy these values into the source-control card's configuration dialog,
+deployment env vars, or your local `.env.local`:
 
 ```sh
 R_GITHUB_APP_ID=<app-id>
@@ -174,8 +176,8 @@ awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' ~/Downloads/<your-key>.private-key.
 ```
 
 Install the GitHub App on the repositories Roomote should use. Then sign in,
-complete the GitHub step in `/setup`, and confirm repository sync sees the
-expected repositories.
+complete the GitHub card in the setup conversation, and confirm repository
+sync sees the expected repositories.
 
 To replace a saved GitHub App, open **Settings > Source Control** and select
 **Remove**. Roomote removes the saved deployment credentials and disconnects
@@ -215,14 +217,39 @@ issue-search URL, but it does not represent that URL as a saved GitHub view.
 Once the app is installed and an environment maps the repository:
 
 - mention `@roomote` (or your deployment's GitHub App slug) in a pull request
-  comment to start PR review or follow-up work
+  comment, review comment, or review to talk to Roomote about that pull request
 - mention the same handle in a GitHub issue comment, or in a new issue body, to
-  start a standard task against that repository
+  talk to Roomote about that issue
 - link your GitHub account under Settings -> Linked Accounts so Roomote can
-  attribute the task to you
+  run the conversation as you
 
-Issue mentions use the environment mapped to the repository. Map the repository
-to an environment before mentioning Roomote on issues.
+Each pull request or issue is a Roomote Session. Roomote reads the discussion,
+answers as a comment when no workspace is needed, and otherwise starts a task
+on the pull request's branch (or the issue's repository) and reports back in
+the same discussion. Mention it again to redirect it, ask a follow-up, or
+steer a running task. Replies to a review comment stay in that review thread.
+Ask for a review in the mention (for example `@roomote review this`) and
+Roomote runs the Review Code automation's structured review on the current
+head, posts the findings on the pull request, and reports back in the same
+discussion.
+
+To request a fresh review through GitHub, use **Re-run** on the Roomote code
+review check for the pull request's current head. Roomote ignores rerun events
+for stale commits and checks that were not created by the configured Roomote
+GitHub App.
+
+Roomote only responds to comments that `@mention` it, including replies inside
+a review thread it opened, so people can discuss a finding among themselves
+without summoning it. On a pull request that a Roomote task opened, replies in
+its review threads are collected as review feedback for the owning Session,
+described below.
+
+A pull request that a Roomote task opened already belongs to the Session that
+started the work, for example the Slack thread where the task was requested.
+Mentions on that pull request join that Session instead of opening a second
+one: Roomote answers on the pull request and in the Session's home surface,
+and any work it delegates runs on the pull request's branch from the same
+Session.
 
 When a Roomote task opens a pull request, actionable review feedback returns to
 the owning Session and appears in both Fast and standard web task transcripts.

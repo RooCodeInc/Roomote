@@ -20,6 +20,7 @@ import {
 } from '@roomote/db/server';
 import type {
   AuthTokenContext,
+  ComputeProvider,
   TaskPayload,
   RunTokenContext,
   PullRequestStatus,
@@ -128,6 +129,7 @@ type LatestTaskRun = {
   actingUserId: string | null;
   snapshotId: string | null;
   snapshotCreatedAt: Date | null;
+  vendor: ComputeProvider | null;
   sourceRunId: number | null;
   payload: Record<string, unknown> | null;
   port: number | null;
@@ -207,9 +209,7 @@ async function fetchSandboxRpcResponseOrThrowIfNotReady(
   });
 }
 
-export async function getTrackedUserDisplayName(
-  userId: string,
-): Promise<string> {
+async function getTrackedUserDisplayName(userId: string): Promise<string> {
   const user = await db.query.users.findFirst({
     where: eq(users.id, userId),
     columns: {
@@ -524,7 +524,7 @@ async function resumeTaskFromSnapshot({
     return null;
   }
 
-  if (!isSnapshotResumable(sourceRun.snapshotCreatedAt)) {
+  if (!isSnapshotResumable(sourceRun.snapshotCreatedAt, sourceRun.vendor)) {
     return {
       success: false,
       error: EXPIRED_SNAPSHOT_RESUME_ERROR,
@@ -913,6 +913,7 @@ export async function sendMessageToTask({
       actingUserId: true,
       snapshotId: true,
       snapshotCreatedAt: true,
+      vendor: true,
       sourceRunId: true,
       payload: true,
       port: true,
@@ -955,6 +956,7 @@ export async function sendMessageToTask({
           id: run.id,
           taskId,
           payload: run.payload,
+          payloadKind: run.payloadKind,
         },
         feedbackSourceIds: [feedbackSourceId],
         reviewTaskId: fastHandoff.reviewTaskId,
@@ -1179,6 +1181,7 @@ export async function steerMessageToTask({
       actingUserId: true,
       snapshotId: true,
       snapshotCreatedAt: true,
+      vendor: true,
       sourceRunId: true,
       payload: true,
       port: true,
@@ -1293,6 +1296,7 @@ export async function steerMessageToTask({
         actingUserId: true,
         snapshotId: true,
         snapshotCreatedAt: true,
+        vendor: true,
         sourceRunId: true,
         payload: true,
         port: true,

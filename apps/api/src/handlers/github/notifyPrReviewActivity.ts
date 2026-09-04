@@ -11,6 +11,7 @@ import { Schemas as GitHubSchemas } from '@roomote/github';
 import {
   completeGithubPrReviewCheckFromSummary,
   enqueuePrReviewNotification,
+  markRoomotePullRequestReadyAfterCleanReview,
   startPrReviewNotificationCycle,
   type EnqueuePrReviewNotificationInput,
   type StartPrReviewNotificationCycleInput,
@@ -337,7 +338,12 @@ type PrReviewSummaryNotification = {
 
 type PrReviewSummaryLifecycle =
   | { kind: 'started'; input: StartPrReviewNotificationCycleInput }
-  | { kind: 'completed'; notification: PrReviewSummaryNotification };
+  | { kind: 'completed'; notification: PrReviewSummaryNotification }
+  | {
+      kind: 'reconciled';
+      taskId: string;
+      reviewHeadSha: string;
+    };
 
 function getReviewStatusFirstLine(body: string): string | null {
   const statusContent = getMarkedSection({
@@ -435,16 +441,19 @@ function buildPrReviewSummaryLifecycle(
     };
   }
 
-  // Edited events: require an in-progress → terminal status transition so
-  // bookkeeping edits of an already-finished summary do not look like a new
-  // review pass. `changes` is only present on issue_comment.edited payloads.
+  // Edited events only notify for an in-progress -> terminal transition.
+  // Later terminal rewrites reconcile the app-owned check directly without
+  // trying to send another event to a task that may already be completed.
+  // `changes` is only present on issue_comment.edited payloads.
   if ('changes' in eventPayload) {
-    if (typeof previousBody !== 'string') {
-      return null;
-    }
-
     if (!previousInProgress) {
-      return null;
+      return markerSha && reviewTaskId
+        ? {
+            kind: 'reconciled',
+            taskId: reviewTaskId,
+            reviewHeadSha: markerSha,
+          }
+        : null;
     }
   }
 
@@ -522,7 +531,12 @@ export async function queuePrReviewSummaryNotification(
   const reference =
     lifecycle.kind === 'started'
       ? lifecycle.input
-      : lifecycle.notification.input;
+      : lifecycle.kind === 'completed'
+        ? lifecycle.notification.input
+        : {
+            repository: eventPayload.repository.full_name,
+            prNumber: eventPayload.issue.number,
+          };
 
   try {
     if (lifecycle.kind === 'started') {
@@ -530,10 +544,31 @@ export async function queuePrReviewSummaryNotification(
       return;
     }
 
+    if (lifecycle.kind === 'reconciled') {
+      if (!eventPayload.installation?.id) {
+        console.warn(
+          `[queuePrReviewSummaryNotification] Skipping check reconciliation for ${reference.repository}#${reference.prNumber}: summary is missing installation id`,
+        );
+        return;
+      }
+
+      await completeGithubPrReviewCheckFromSummary({
+        installationId: eventPayload.installation.id,
+        repository: reference.repository,
+        prNumber: reference.prNumber,
+        taskId: lifecycle.taskId,
+        reviewHeadSha: lifecycle.reviewHeadSha,
+        reviewSummaryBody: eventPayload.comment.body ?? '',
+        allowCompletedCheckUpdate: true,
+      });
+      return;
+    }
+
     const { event } = lifecycle.notification.input;
-    const operations: Promise<unknown>[] = [
-      enqueuePrReviewNotification(lifecycle.notification.input),
-    ];
+    const notificationResult = await enqueuePrReviewNotification(
+      lifecycle.notification.input,
+    );
+    const operations: Promise<unknown>[] = [];
     if (
       eventPayload.installation?.id &&
       event.reviewTaskId &&
@@ -559,6 +594,23 @@ export async function queuePrReviewSummaryNotification(
         .join(', ');
       console.warn(
         `[queuePrReviewSummaryNotification] Skipping check completion for ${reference.repository}#${reference.prNumber}: summary is missing ${missing}`,
+      );
+    }
+    if (
+      notificationResult.reason !== 'stale_review_cycle' &&
+      event.reviewHeadSha &&
+      event.reviewResult?.outcome === 'clean' &&
+      (event.reviewResult.findingCount === null ||
+        event.reviewResult.findingCount === 0)
+    ) {
+      operations.push(
+        markRoomotePullRequestReadyAfterCleanReview({
+          sourceControlProvider: 'github',
+          repository: lifecycle.notification.input.repository,
+          prNumber: lifecycle.notification.input.prNumber,
+          reviewHeadSha: event.reviewHeadSha,
+          reviewResult: event.reviewResult,
+        }),
       );
     }
     await Promise.all(operations);

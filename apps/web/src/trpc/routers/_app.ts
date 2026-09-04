@@ -3,13 +3,13 @@ import {
   publicAuthTokenTimeoutMsSchema,
   runTokenTimeoutMsSchema,
 } from '@roomote/auth';
-import { FeatureFlag } from '@roomote/feature-flags';
 
 import {
+  SLACK_RESOLVE_CHANNELS_MAX_IDS,
+  SLACK_RESOLVE_USERS_MAX_IDS,
   ALL_REPOSITORIES,
   FAST_EXECUTION,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
-  launchCodingHarnesses,
   computeProviders,
   environmentConfigSchema,
   workspaceRoutingSettingsSchema,
@@ -25,17 +25,19 @@ import {
   prActions,
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
-  standardTaskSchema,
   taskGoalInputSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
 
 import {
+  getFastSessionMessagesCommand,
+  getFastSessionComposerSuggestionCommand,
   getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
   replyToFastSessionCommand,
   startFastSessionCommand,
+  submitFastSessionUserInputCommand,
   updateFastSessionModelSelectionCommand,
 } from '../commands/fast-sessions';
 import {
@@ -53,6 +55,7 @@ import {
   listSessionPins,
   markSessionReadCommand,
   sessionIdInputSchema,
+  sessionTimelineInputSchema,
   sessionsListInputSchema,
   setSessionPinned,
   updateSessionMetadata,
@@ -83,6 +86,7 @@ import { protectedProcedure, publicProcedure, createRouter } from '../init';
 import {
   getTasksCommand,
   generateTaskSummaryCommand,
+  getComposerSuggestionCommand,
   getTaskMessageEnvelopesCommand,
   getTaskRunEventsCommand,
   getTaskByIdCommand,
@@ -121,17 +125,18 @@ import {
 } from '../commands/github';
 import {
   getPrActionCommand,
+  getMarkRoomotePrReadyAfterCleanReviewCommand,
   getGitHubRoomoteMentionCommand,
   getRepositoriesCommand,
   getSourceControlConfigStatusCommand,
   clearSourceControlConfigCommand,
   saveSourceControlConfigCommand,
   setPrActionCommand,
+  setMarkRoomotePrReadyAfterCleanReviewCommand,
   setGitHubRoomoteMentionCommand,
   syncRepositoriesCommand,
 } from '../commands/source-control';
 import {
-  createStandardTaskRunCommand,
   cancelTaskRunCommand,
   retryFailedTaskStartCommand,
   startTaskGoalCommand,
@@ -146,6 +151,7 @@ import {
   startAuthenticateSlackAccountCommand,
   finishAuthenticateSlackAccountCommand,
   completePendingSlackAuthenticationCommand,
+  resolveSlackUsersCommand,
 } from '../commands/slack';
 import {
   getLinearInstallationCommand,
@@ -299,6 +305,14 @@ import {
   getSetupStatusCommand,
 } from '../commands/setup';
 import { completeSetupWithStarterTasksCommand } from '../commands/setup/starter-tasks';
+import {
+  getOrCreateSetupSessionCommand,
+  getSetupSessionStatusCommand,
+  notifySetupSourceControlSynchronized,
+  persistSetupRecommendationApplicationReceipt,
+  reconcileSetupPlatformEvents,
+  submitSetupSessionUserInputCommand,
+} from '../commands/setup/setup-session';
 import { SETUP_STARTER_TASK_IDS } from '@/lib/setup-starter-tasks';
 import {
   getSetupNewStatusCommand,
@@ -358,7 +372,6 @@ import {
   listTaskSuggestionsCommand,
   listTaskSuggestionHistoryCommand,
   dismissTaskSuggestionCommand,
-  implementTaskSuggestionCommand,
   triggerTaskSuggestionsCommand,
 } from '../commands/task-suggestions';
 import {
@@ -431,10 +444,6 @@ import {
 import { getSubscriptionProviderUsageCommand } from '../commands/subscription-usage';
 import { getProviderCreditBalancesCommand } from '../commands/provider-credits';
 import {
-  getRouterDebugSettingsCommand,
-  updateRouterDebugSettingsCommand,
-} from '../commands/router-debug';
-import {
   listCustomSkillsCommand,
   searchCustomSkillsCommand,
   setCustomSkillAvailabilityCommand,
@@ -449,10 +458,6 @@ import {
   getAnalyticsOverviewCommand,
   getPullRequestAnalyticsOverviewCommand,
 } from '../commands/analytics';
-import {
-  getExperimentalFlagsCommand,
-  updateExperimentalFlagCommand,
-} from '../commands/feature-flags';
 import {
   getMiscSettingsCommand,
   setDeploymentTimeZoneCommand,
@@ -473,7 +478,6 @@ import {
 } from '../commands/product-releases';
 import { getStatuspageIncident } from '@roomote/slack';
 
-const standardTaskPayloadSchema = standardTaskSchema.shape.payload;
 const stateRecordSchema = z.record(z.string());
 
 function assertAdmin(auth: { isAdmin: boolean }) {
@@ -546,11 +550,23 @@ const automationsRouter = createRouter({
     .mutation(({ ctx: { auth }, input }) =>
       setSetupRecommendationEnabledCommand(auth, input),
     ),
-  applyRecommendations: protectedProcedure.mutation(({ ctx: { auth } }) =>
-    applySetupRecommendationsCommand(auth),
+  applyRecommendations: protectedProcedure.mutation(
+    async ({ ctx: { auth } }) => {
+      const batch = await applySetupRecommendationsCommand(auth);
+      await persistSetupRecommendationApplicationReceipt(auth, batch, 'saved');
+      return batch;
+    },
   ),
-  skipRecommendations: protectedProcedure.mutation(({ ctx: { auth } }) =>
-    skipSetupRecommendationsCommand(auth),
+  skipRecommendations: protectedProcedure.mutation(
+    async ({ ctx: { auth } }) => {
+      const batch = await skipSetupRecommendationsCommand(auth);
+      await persistSetupRecommendationApplicationReceipt(
+        auth,
+        batch,
+        'skipped',
+      );
+      return batch;
+    },
   ),
   runRecommendationNow: protectedProcedure
     .input(z.object({ id: z.string().min(1) }))
@@ -826,6 +842,7 @@ const automationsRouter = createRouter({
           .regex(/^[^/\s]+\/.+$/u, 'Model must use provider/model format.')
           .nullable()
           .optional(),
+        reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),
@@ -866,6 +883,7 @@ const automationsRouter = createRouter({
           .regex(/^[^/\s]+\/.+$/u, 'Model must use provider/model format.')
           .nullable()
           .optional(),
+        reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),
@@ -983,6 +1001,21 @@ export const appRouter = createRouter({
         generateTaskSummaryCommand(auth, input),
       ),
 
+    composerSuggestion: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+          // Client-side cache key: bumps when the live transcript meaningfully
+          // changes so stale suggestions are never shown for newer history.
+          // The server derives its own regeneration bucket from persisted
+          // messages, so this field only shapes client caching.
+          historyRevision: z.number().int().nonnegative().optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getComposerSuggestionCommand(auth, { taskId: input.taskId }),
+      ),
+
     recentPullRequests: protectedProcedure.query(({ ctx: { auth } }) =>
       getRecentPullRequestsCommand(auth),
     ),
@@ -1031,18 +1064,33 @@ export const appRouter = createRouter({
   artifacts: createRouter({
     byPath: protectedProcedure
       .input(
-        z.object({
-          taskId: z.string(),
-          path: z.string(),
-          version: z.number().optional(),
-        }),
+        z
+          .object({
+            taskId: z.string().optional(),
+            sessionId: z.string().uuid().optional(),
+            path: z.string(),
+            version: z.number().optional(),
+          })
+          .refine(
+            (value) => Boolean(value.taskId) !== Boolean(value.sessionId),
+          ),
       )
       .query(({ ctx: { auth }, input }) =>
         getArtifactByPathCommand(auth, input),
       ),
 
     versions: protectedProcedure
-      .input(z.object({ taskId: z.string(), path: z.string() }))
+      .input(
+        z
+          .object({
+            taskId: z.string().optional(),
+            sessionId: z.string().uuid().optional(),
+            path: z.string(),
+          })
+          .refine(
+            (value) => Boolean(value.taskId) !== Boolean(value.sessionId),
+          ),
+      )
       .query(({ ctx: { auth }, input }) =>
         getArtifactVersionsCommand(auth, input),
       ),
@@ -1066,23 +1114,6 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         startTaskGoalCommand(auth, input),
-      ),
-
-    createStandardTask: protectedProcedure
-      .input(
-        z.object({
-          harness: z.enum(launchCodingHarnesses).optional(),
-          model: z.string().trim().min(1).optional(),
-          computeProvider: z.enum(computeProviders).optional(),
-          sourceTaskId: z.string().optional(),
-          sourceArtifactId: z.string().uuid().optional(),
-          sourceArtifactPath: z.string().optional(),
-          sourceArtifactVersion: z.number().int().optional(),
-          payload: standardTaskPayloadSchema,
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        createStandardTaskRunCommand(auth, input),
       ),
 
     cancel: protectedProcedure
@@ -1197,12 +1228,18 @@ export const appRouter = createRouter({
 
     syncInstallation: protectedProcedure
       .input(z.object({ installationId: z.number().int().positive() }))
-      .mutation(({ ctx: { auth }, input }) =>
-        syncGitHubInstallationCommand(auth, input),
-      ),
+      .mutation(async ({ ctx: { auth }, input }) => {
+        const result = await syncGitHubInstallationCommand(auth, input);
+        await notifySetupSourceControlSynchronized(auth);
+        return result;
+      }),
 
-    syncInstallations: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      syncGitHubInstallationsCommand(auth),
+    syncInstallations: protectedProcedure.mutation(
+      async ({ ctx: { auth } }) => {
+        const result = await syncGitHubInstallationsCommand(auth);
+        await notifySetupSourceControlSynchronized(auth);
+        return result;
+      },
     ),
 
     disableApp: protectedProcedure.mutation(({ ctx: { auth } }) =>
@@ -1256,6 +1293,16 @@ export const appRouter = createRouter({
       .input(z.object({ prAction: z.enum(prActions) }))
       .mutation(({ ctx: { auth }, input }) => setPrActionCommand(auth, input)),
 
+    markRoomotePrReadyAfterCleanReview: protectedProcedure.query(
+      ({ ctx: { auth } }) => getMarkRoomotePrReadyAfterCleanReviewCommand(auth),
+    ),
+
+    setMarkRoomotePrReadyAfterCleanReview: protectedProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setMarkRoomotePrReadyAfterCleanReviewCommand(auth, input),
+      ),
+
     githubRoomoteMention: protectedProcedure.query(({ ctx: { auth } }) =>
       getGitHubRoomoteMentionCommand(auth),
     ),
@@ -1272,9 +1319,11 @@ export const appRouter = createRouter({
           provider: sourceControlTokenBackedProviderSchema,
         }),
       )
-      .mutation(({ ctx: { auth }, input }) =>
-        syncRepositoriesCommand(auth, input),
-      ),
+      .mutation(async ({ ctx: { auth }, input }) => {
+        const result = await syncRepositoriesCommand(auth, input);
+        if (result.success) await notifySetupSourceControlSynchronized(auth);
+        return result;
+      }),
 
     saveConfig: protectedProcedure
       .input(
@@ -1298,6 +1347,32 @@ export const appRouter = createRouter({
     installation: protectedProcedure.query(({ ctx: { auth } }) =>
       getSlackInstallationCommand(auth),
     ),
+
+    resolveUsers: protectedProcedure
+      .input(
+        z.object({
+          scope: z.discriminatedUnion('kind', [
+            z.object({
+              kind: z.literal('task'),
+              taskId: z.string().trim().min(1).max(64),
+            }),
+            z.object({
+              kind: z.literal('session'),
+              sessionId: z.string().trim().min(1).max(64),
+            }),
+          ]),
+          userIds: z
+            .array(z.string().trim().min(1).max(64))
+            .max(SLACK_RESOLVE_USERS_MAX_IDS),
+          channelIds: z
+            .array(z.string().trim().min(1).max(64))
+            .max(SLACK_RESOLVE_CHANNELS_MAX_IDS)
+            .optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        resolveSlackUsersCommand(auth, input),
+      ),
 
     connectApp: protectedProcedure
       .input(z.object({ redirectPath: z.string().optional() }).optional())
@@ -1474,12 +1549,14 @@ export const appRouter = createRouter({
             colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
+            therapistMode: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
-              input.narrationMode !== undefined,
+              input.narrationMode !== undefined ||
+              input.therapistMode !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -2473,26 +2550,6 @@ export const appRouter = createRouter({
     ),
   }),
 
-  routerDebug: createRouter({
-    getSettings: protectedProcedure.query(({ ctx: { auth } }) =>
-      getRouterDebugSettingsCommand(auth),
-    ),
-
-    updateSettings: protectedProcedure
-      .input(
-        z.object({
-          provider: z
-            .enum(['slack', 'teams', 'telegram', 'discord'])
-            .nullable(),
-          channelId: z.string().trim().min(1).max(255).nullable(),
-          disabled: z.boolean(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        updateRouterDebugSettingsCommand(auth, input),
-      ),
-  }),
-
   setup: createRouter({
     status: protectedProcedure.query(({ ctx: { auth } }) =>
       getSetupStatusCommand(auth),
@@ -2547,6 +2604,26 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         completeSetupWithStarterTasksCommand(auth, input),
+      ),
+
+    getOrCreateSession: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      getOrCreateSetupSessionCommand(auth),
+    ),
+
+    sessionStatus: protectedProcedure.query(({ ctx: { auth } }) =>
+      getSetupSessionStatusCommand(auth),
+    ),
+
+    submitSessionUserInput: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          requestId: z.string().min(1),
+          answers: z.record(z.object({ answers: z.array(z.string()).max(50) })),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        submitSetupSessionUserInputCommand(auth, input),
       ),
   }),
 
@@ -2620,9 +2697,14 @@ export const appRouter = createRouter({
           provider: z.enum(computeProviders),
         }),
       )
-      .mutation(({ ctx: { auth }, input }) =>
-        saveSetupNewComputeProviderChoiceCommand(auth, input),
-      ),
+      .mutation(async ({ ctx: { auth }, input }) => {
+        const result = await saveSetupNewComputeProviderChoiceCommand(
+          auth,
+          input,
+        );
+        await reconcileSetupPlatformEvents(auth);
+        return result;
+      }),
 
     saveComputeConfig: protectedProcedure
       .input(
@@ -2631,9 +2713,11 @@ export const appRouter = createRouter({
           values: z.record(z.string().trim()).optional(),
         }),
       )
-      .mutation(({ ctx: { auth }, input }) =>
-        saveSetupNewComputeConfigCommand(auth, input),
-      ),
+      .mutation(async ({ ctx: { auth }, input }) => {
+        const result = await saveSetupNewComputeConfigCommand(auth, input);
+        await reconcileSetupPlatformEvents(auth);
+        return result;
+      }),
 
     saveSourceControlProviderChoice: protectedProcedure
       .input(
@@ -2641,9 +2725,14 @@ export const appRouter = createRouter({
           provider: sourceControlProviderSchema,
         }),
       )
-      .mutation(({ ctx: { auth }, input }) =>
-        saveSetupNewSourceControlProviderChoiceCommand(auth, input),
-      ),
+      .mutation(async ({ ctx: { auth }, input }) => {
+        const result = await saveSetupNewSourceControlProviderChoiceCommand(
+          auth,
+          input,
+        );
+        await reconcileSetupPlatformEvents(auth);
+        return result;
+      }),
 
     saveSourceControlConfig: protectedProcedure
       .input(
@@ -2803,16 +2892,6 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         dismissTaskSuggestionCommand(auth, input),
       ),
-
-    implement: protectedProcedure
-      .input(
-        z.object({
-          suggestionId: z.string().uuid(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        implementTaskSuggestionCommand(auth, input),
-      ),
   }),
 
   backgroundAgents: automationsRouter,
@@ -2845,6 +2924,40 @@ export const appRouter = createRouter({
       .query(({ ctx: { auth }, input }) =>
         getFastSessionTasksCommand(auth, input.sessionId),
       ),
+    messages: protectedProcedure
+      .input(z.object({ sessionId: z.string().uuid() }))
+      .query(({ ctx: { auth }, input }) =>
+        getFastSessionMessagesCommand(auth, input.sessionId),
+      ),
+    submitUserInput: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          requestId: z.string().min(1),
+          answers: z.record(z.object({ answers: z.array(z.string()).max(50) })),
+          resolution: z.enum(['submitted', 'cancelled']).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        submitFastSessionUserInputCommand(auth, input),
+      ),
+    composerSuggestion: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          // Client-side cache keys: bump when the live transcript or the
+          // delegated tasks' state meaningfully change so stale suggestions
+          // are never shown. The server derives its own cache keys from
+          // persisted data, so these fields only shape client caching.
+          historyRevision: z.number().int().nonnegative().optional(),
+          taskStateRevision: z.string().max(64).optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getFastSessionComposerSuggestionCommand(auth, {
+          sessionId: input.sessionId,
+        }),
+      ),
   }),
 
   sessions: createRouter({
@@ -2857,9 +2970,9 @@ export const appRouter = createRouter({
         getSessionByIdCommand(auth, input.sessionId),
       ),
     timeline: protectedProcedure
-      .input(sessionIdInputSchema.extend({ since: z.number().optional() }))
+      .input(sessionTimelineInputSchema)
       .query(({ ctx: { auth }, input }) =>
-        getSessionTimeline(auth, input.sessionId, input.since),
+        getSessionTimeline(auth, input.sessionId, input.cursor ?? input.since),
       ),
     forTask: protectedProcedure
       .input(z.object({ taskId: z.string().min(1) }))
@@ -3064,23 +3177,6 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         removeCustomSkillCommand(auth, input),
-      ),
-  }),
-
-  featureFlags: createRouter({
-    getExperimental: protectedProcedure.query(({ ctx: { auth } }) =>
-      getExperimentalFlagsCommand(auth),
-    ),
-
-    setExperimental: protectedProcedure
-      .input(
-        z.object({
-          flag: z.nativeEnum(FeatureFlag),
-          value: z.boolean(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        updateExperimentalFlagCommand(auth, input),
       ),
   }),
 

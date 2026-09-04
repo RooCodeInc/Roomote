@@ -760,6 +760,19 @@ describe('fast conversation memory pages', () => {
     expect(page.content).not.toContain('saved_by');
   });
 
+  it('omits user attribution for automation-owned conversation memory', () => {
+    const page = buildFastMemoryPage({
+      ...baseInput,
+      userId: null,
+      userName: null,
+      surface: 'automation',
+    });
+
+    expect(page.content).not.toContain('roomote_user_id');
+    expect(page.content).not.toContain('saved_by');
+    expect(page.content).toContain('surface: automation');
+  });
+
   it('redacts credential-shaped strings before ingestion', () => {
     const page = buildFastMemoryPage({
       ...baseInput,

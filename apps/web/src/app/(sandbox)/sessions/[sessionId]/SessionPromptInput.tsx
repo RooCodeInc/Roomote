@@ -1,12 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import type { ReasoningEffort } from '@roomote/types';
 
 import { ROOMOTE_FILE_ATTACHMENT_ACCEPT } from '@/lib/prompt-attachments';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
+import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
+import {
+  SUGGESTION_MIN_HISTORY_MESSAGES,
+  useGhostSuggestion,
+} from '@/hooks/useGhostSuggestion';
 import {
   type PromptInputMessage,
   PromptInput as PromptInputRoot,
@@ -23,10 +29,10 @@ import {
   usePromptInputAttachments,
 } from '@/components/ai-elements';
 import { BasicTooltip } from '@/components/system';
-import { useTRPCClient } from '@/trpc/client';
+import { SessionModelSwitcher } from '@/components/tasks/SessionModelSwitcher';
+import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/AttachmentsDisplay';
-import { SessionModelSwitcher } from './SessionModelSwitcher';
 
 export type SessionPromptSubmission = PromptInputMessage & {
   model: string | null;
@@ -56,6 +62,10 @@ export function SessionPromptInput({
   sessionId,
   isBusy,
   onSend,
+  historyMessageCount = 0,
+  assistantMessageCount = 0,
+  taskStateRevision = '',
+  agentWorking = false,
   initialModel = null,
   initialReasoningEffort = null,
   defaultModelId = null,
@@ -64,29 +74,79 @@ export function SessionPromptInput({
   sessionId: string;
   isBusy: boolean;
   onSend: (submission: SessionPromptSubmission) => Promise<boolean>;
+  /** Persisted user/assistant messages with text; gates suggestions. */
+  historyMessageCount?: number;
+  /** Persisted assistant messages with text; each completed agent turn
+   * advances the suggestion query key. */
+  assistantMessageCount?: number;
+  /** Fingerprint of the delegated tasks' state; a task finishing while the
+   * session is idle refreshes the suggestion through this key. */
+  taskStateRevision?: string;
+  /** True while the agent is still responding; suggestions only exist while
+   * the agent is waiting for the human. */
+  agentWorking?: boolean;
   initialModel?: string | null;
   initialReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
   defaultReasoningEffort?: ReasoningEffort | null;
 }) {
+  const trpc = useTRPC();
   const trpcClient = useTRPCClient();
   const [prompt, setPrompt] = useState('');
+  const [isTextareaFocused, setIsTextareaFocused] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const [model, setModel] = useState(initialModel ?? '');
   const [reasoningEffort, setReasoningEffort] =
     useState<ReasoningEffort | null>(initialReasoningEffort);
   const [isUpdatingModelSelection, setIsUpdatingModelSelection] =
     useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  useAutoFocusOnce(textareaRef, !isBusy);
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => setPrompt(text),
     getPrefix: () => prompt,
     disabled: isBusy,
   });
 
+  const composerSuggestionQuery = useQuery(
+    trpc.fastSessions.composerSuggestion.queryOptions(
+      {
+        sessionId,
+        historyRevision: assistantMessageCount,
+        taskStateRevision: taskStateRevision || undefined,
+      },
+      {
+        // The mid-turn gate matters here too: assistant messages land while
+        // the agent is still working, and each would otherwise generate and
+        // surface a premature suggestion.
+        enabled:
+          !agentWorking &&
+          historyMessageCount >= SUGGESTION_MIN_HISTORY_MESSAGES,
+        staleTime: Number.POSITIVE_INFINITY,
+        refetchOnWindowFocus: false,
+      },
+    ),
+  );
+  const suggestion = composerSuggestionQuery.data?.suggestion?.trim() || null;
+  const {
+    ghostSuggestion,
+    suggestionHintId,
+    acceptGhostSuggestion,
+    consumeSuggestion,
+    handleSuggestionKeyDown,
+  } = useGhostSuggestion({
+    suggestion,
+    active: !prompt && !isBusy && !isUpdatingModelSelection && !agentWorking,
+    surface: 'session',
+    onAccept: (text) => setPrompt(text),
+  });
+
   const handleSubmit = async (message: PromptInputMessage) => {
     if (isBusy || isUpdatingModelSelection) {
       return;
     }
+
+    consumeSuggestion();
 
     // Always send the current picker state: it round-trips the persisted
     // choice and clears it when the picker is reset to the default. The
@@ -99,6 +159,7 @@ export function SessionPromptInput({
     });
     if (sent) {
       setPrompt('');
+      setIsTextareaFocused(false);
       // Remount the root to clear held attachments.
       setResetKey((previous) => previous + 1);
     }
@@ -157,12 +218,40 @@ export function SessionPromptInput({
       >
         <AttachmentsDisplay />
         <PromptInputBody>
-          <PromptInputTextarea
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="Message agent"
-            disabled={isBusy}
-          />
+          <div className="relative">
+            <PromptInputTextarea
+              ref={textareaRef}
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              onFocus={() => setIsTextareaFocused(true)}
+              onBlur={() => setIsTextareaFocused(false)}
+              onKeyDown={(event) => {
+                handleSuggestionKeyDown(event);
+              }}
+              placeholder={ghostSuggestion ?? 'Message agent'}
+              aria-describedby={ghostSuggestion ? suggestionHintId : undefined}
+              disabled={isBusy}
+            />
+            {ghostSuggestion && (
+              <>
+                <span id={suggestionHintId} className="sr-only">
+                  Suggested message: {ghostSuggestion}. Press Tab to accept or
+                  Escape to dismiss.
+                </span>
+                {isTextareaFocused && (
+                  <button
+                    type="button"
+                    aria-label="Insert suggested message"
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={acceptGhostSuggestion}
+                    className="absolute right-4 top-4 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
+                  >
+                    Tab to accept
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         </PromptInputBody>
         <PromptInputFooter className="px-4 pt-0 pb-4">
           <PromptInputTools>

@@ -181,6 +181,53 @@ describe('getTaskMessages', () => {
     expect(mockGetFastSessionMessagesForUser).not.toHaveBeenCalled();
   });
 
+  it('uses message id as a deterministic ordering tie-breaker', async () => {
+    await createApp(authContext).request(
+      'http://localhost/tasks/task-1/messages?order=desc',
+    );
+
+    expect(descMock).toHaveBeenCalledWith('taskMessages.id');
+  });
+
+  it('returns linked subagent identity through the existing transcript serialization', async () => {
+    selectOrderByMock.mockResolvedValueOnce([
+      {
+        id: 'message-child-1',
+        taskId: 'task-1',
+        ts: 124n,
+        eventType: 'roomote_runtime.tool_call',
+        role: 'assistant',
+        contentBlocks: [],
+        metadata: {
+          sessionId: 'session-child',
+          parentSessionId: 'session-parent',
+          agentType: 'proof-runner',
+          isSubagent: true,
+        },
+        payload: { kind: 'execute' },
+        createdAt: new Date('2026-04-21T12:00:01Z'),
+      },
+    ]);
+
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/task-1/messages',
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      messages: [
+        {
+          taskId: 'task-1',
+          metadata: {
+            sessionId: 'session-child',
+            parentSessionId: 'session-parent',
+            agentType: 'proof-runner',
+            isSubagent: true,
+          },
+        },
+      ],
+    });
+  });
+
   it('adds the hidden-task-history condition to the task lookup', async () => {
     const response = await createApp(authContext).request(
       'http://localhost/tasks/task-1/messages',

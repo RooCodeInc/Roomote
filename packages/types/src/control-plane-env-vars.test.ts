@@ -68,6 +68,12 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
     }
   });
 
+  it('allows the sandbox OpenRouter key in deployment environment variables', () => {
+    expect(CONTROL_PLANE_ENV_VAR_NAMES.has('SANDBOX_OPENROUTER_API_KEY')).toBe(
+      false,
+    );
+  });
+
   it('includes disabled-provider credentials', () => {
     expect(
       CONTROL_PLANE_ENV_VAR_NAMES.has('GOOGLE_APPLICATION_CREDENTIALS'),

@@ -132,6 +132,7 @@ export const ToolHeader = ({
         aria-live="polite"
         className={cn(
           showStatus ? 'shrink-0 text-xs' : 'sr-only',
+          isRunning && 'relative top-px',
           state === 'output-error' && 'text-destructive',
         )}
       >

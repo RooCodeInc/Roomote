@@ -1,25 +1,13 @@
 const mocks = vi.hoisted(() => ({
-  buildRoutingContext: vi.fn(),
   findSourceRun: vi.fn(),
   getTaskUrl: vi.fn(),
   launchTask: vi.fn(),
   processAttachments: vi.fn(),
   reply: vi.fn(),
-  requestConfirmation: vi.fn(),
-  resolveWorkspace: vi.fn(),
-  routeTask: vi.fn(),
-  shouldAutoConfirm: vi.fn(),
-  findInstallation: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  buildDiscordRoutingContext: mocks.buildRoutingContext,
   getTaskUrl: mocks.getTaskUrl,
-  routeTask: mocks.routeTask,
-}));
-
-vi.mock('@roomote/sdk/server', () => ({
-  findDiscordInstallationByGuildId: mocks.findInstallation,
 }));
 
 vi.mock('@roomote/sdk/server/communication', () => ({
@@ -28,14 +16,8 @@ vi.mock('@roomote/sdk/server/communication', () => ({
 
 vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
 
-vi.mock('../routing-confirmation.js', () => ({
-  requestDiscordRoutingConfirmation: mocks.requestConfirmation,
-  shouldAutoConfirmDiscordRoute: mocks.shouldAutoConfirm,
-}));
-
 vi.mock('../task-launch.js', () => ({
   launchDiscordTask: mocks.launchTask,
-  resolveDiscordWorkspace: mocks.resolveWorkspace,
 }));
 
 vi.mock('../attachments.js', () => ({
@@ -52,27 +34,18 @@ vi.mock('../thread-delivery.js', () => ({
 
 import { startNewDiscordTask } from '../task-orchestration.js';
 
+const WORKSPACE = {
+  environmentId: 'env-1',
+  repoForPayload: 'acme/repo',
+  workspaceDisplayName: 'Acme',
+};
+
 describe('startNewDiscordTask', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getTaskUrl.mockReturnValue('https://roomote.example/task/task-1');
     mocks.reply.mockResolvedValue({ messageId: 'reply-1' });
     mocks.findSourceRun.mockResolvedValue(null);
-    mocks.findInstallation.mockResolvedValue(null);
-    mocks.shouldAutoConfirm.mockReturnValue(true);
-    mocks.buildRoutingContext.mockResolvedValue({ source: 'discord' });
-    mocks.routeTask.mockResolvedValue({
-      status: 'routed',
-      result: {
-        workspace: { type: 'environment', id: 'env-1' },
-        kickoffMessage: 'On it.',
-      },
-    });
-    mocks.resolveWorkspace.mockResolvedValue({
-      environmentId: 'env-1',
-      repoForPayload: 'acme/repo',
-      workspaceDisplayName: 'Acme',
-    });
     mocks.launchTask.mockResolvedValue({
       launchResult: { id: 9, taskId: 'task-1' },
       taskUrl: 'https://roomote.example/task/task-1',
@@ -112,11 +85,10 @@ describe('startNewDiscordTask', () => {
         isDirectMessage: true,
         isThread: false,
       },
-      workspaceOverride: {
+      workspace: {
         repoForPayload: 'acme/repo',
         workspaceDisplayName: 'Acme',
       },
-      skipRoutingConfirmation: true,
       beforeEnqueueKickoff,
     });
 
@@ -141,6 +113,7 @@ describe('startNewDiscordTask', () => {
       provider: {} as never,
       applicationId: 'application-1',
       requesterDiscordUserId: 'discord-user-1',
+      workspace: WORKSPACE,
       launchOwnerUserId: 'user-1',
       queuedMessage: {
         provider: 'discord',
@@ -165,8 +138,7 @@ describe('startNewDiscordTask', () => {
     });
 
     expect(result.status).toBe('already_started');
-    expect(mocks.buildRoutingContext).not.toHaveBeenCalled();
-    expect(mocks.routeTask).not.toHaveBeenCalled();
+    expect(mocks.launchTask).not.toHaveBeenCalled();
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining('already started'),
@@ -189,6 +161,7 @@ describe('startNewDiscordTask', () => {
       provider: {} as never,
       applicationId: 'application-1',
       requesterDiscordUserId: 'discord-user-1',
+      workspace: WORKSPACE,
       launchOwnerUserId: 'user-1',
       queuedMessage: {
         provider: 'discord',
@@ -214,7 +187,6 @@ describe('startNewDiscordTask', () => {
 
     expect(result.status).toBe('already_started');
     expect(mocks.reply).not.toHaveBeenCalled();
-    expect(mocks.routeTask).not.toHaveBeenCalled();
     expect(mocks.launchTask).not.toHaveBeenCalled();
   });
 
@@ -234,6 +206,7 @@ describe('startNewDiscordTask', () => {
       provider: { removeReaction } as never,
       applicationId: 'application-1',
       requesterDiscordUserId: 'discord-user-1',
+      workspace: WORKSPACE,
       launchOwnerUserId: 'user-1',
       intakeAckPinned: true,
       queuedMessage: {
@@ -315,6 +288,7 @@ describe('startNewDiscordTask', () => {
       provider: provider as never,
       applicationId: 'application-1',
       requesterDiscordUserId: 'discord-user-1',
+      workspace: WORKSPACE,
       launchOwnerUserId: 'user-1',
       queuedMessage: {
         provider: 'discord',
@@ -357,22 +331,14 @@ describe('startNewDiscordTask', () => {
         url: 'https://cdn.discordapp.com/attachments/log.txt',
       }),
     ]);
-    expect(mocks.buildRoutingContext).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskDescription: expect.stringContaining('log.txt contents'),
-        threadMessages: [
-          {
-            user: 'Sky',
-            text: 'Tested the PR and the task failed while preparing the workspace.',
-          },
-          { user: 'Alice', text: 'Deploy failed on main' },
-          { user: 'Matt', text: '@Roomote investigate the flaky build' },
-        ],
-        images: [
-          'data:image/png;base64,current',
-          'data:image/png;base64,thread',
-        ],
-      }),
+    const threadLaunch = mocks.launchTask.mock.calls[0]?.[0] as {
+      agentPromptText?: string;
+      queuedMessage: { images?: string[] };
+    };
+    expect(threadLaunch.agentPromptText).toContain('log.txt contents');
+    expect(threadLaunch.agentPromptText).toContain('Deploy failed on main');
+    expect(threadLaunch.queuedMessage.images).toContain(
+      'data:image/png;base64,thread',
     );
     expect(mocks.launchTask).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -437,6 +403,7 @@ describe('startNewDiscordTask', () => {
       provider: provider as never,
       applicationId: 'application-1',
       requesterDiscordUserId: 'discord-user-1',
+      workspace: WORKSPACE,
       launchOwnerUserId: 'user-1',
       contextThroughMessageId: '200',
       queuedMessage: {
@@ -499,6 +466,7 @@ describe('startNewDiscordTask', () => {
       provider: provider as never,
       applicationId: 'application-1',
       requesterDiscordUserId: 'discord-user-1',
+      workspace: WORKSPACE,
       launchOwnerUserId: 'user-1',
       queuedMessage: {
         provider: 'discord',
@@ -528,12 +496,6 @@ describe('startNewDiscordTask', () => {
     expect(result.status).toBe('started');
     expect(provider.fetchChannelMessages).not.toHaveBeenCalled();
     expect(mocks.processAttachments).not.toHaveBeenCalled();
-    expect(mocks.buildRoutingContext).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskDescription: 'Start something unrelated',
-        threadMessages: [{ user: 'Matt', text: 'Start something unrelated' }],
-      }),
-    );
     expect(mocks.launchTask).toHaveBeenCalledWith(
       expect.objectContaining({
         forceNewThread: true,
@@ -566,6 +528,7 @@ describe('startNewDiscordTask', () => {
       provider: provider as never,
       applicationId: 'application-1',
       requesterDiscordUserId: 'discord-user-1',
+      workspace: WORKSPACE,
       launchOwnerUserId: 'user-1',
       replyToMessageId: '100',
       replyToChannelId: 'channel-1',
@@ -598,20 +561,6 @@ describe('startNewDiscordTask', () => {
       channelId: 'channel-1',
       messageId: '100',
     });
-    expect(mocks.buildRoutingContext).toHaveBeenCalledWith(
-      expect.objectContaining({
-        threadMessages: [
-          {
-            user: 'Alice',
-            text: 'pnpm build triggers codebase indexing with hundreds of temporary files',
-          },
-          {
-            user: 'Toray',
-            text: 'can you check if this issue already exists?',
-          },
-        ],
-      }),
-    );
     const agentPrompt = mocks.launchTask.mock.calls[0]?.[0]
       .agentPromptText as string;
     expect(agentPrompt).toContain(
@@ -622,205 +571,6 @@ describe('startNewDiscordTask', () => {
     );
   });
 
-  it('stores thread context on routing confirmation for later launch', async () => {
-    mocks.shouldAutoConfirm.mockReturnValue(false);
-    mocks.requestConfirmation.mockResolvedValue({
-      pendingRouteId: 'pending-1',
-    });
-    const provider = {
-      fetchChannelMessages: vi.fn().mockResolvedValue({
-        messages: [
-          {
-            id: '100',
-            user: 'u-alice',
-            username: 'Alice',
-            text: 'Earlier detail',
-          },
-          {
-            id: '200',
-            user: 'u-matt',
-            username: 'Matt',
-            text: 'please fix it',
-          },
-        ],
-      }),
-    };
-
-    const result = await startNewDiscordTask({
-      provider: provider as never,
-      applicationId: 'application-1',
-      requesterDiscordUserId: 'discord-user-1',
-      launchOwnerUserId: 'user-1',
-      queuedMessage: {
-        provider: 'discord',
-        text: 'please fix it',
-        user: 'Matt',
-        userId: 'user-1',
-        ts: '200',
-      },
-      metadata: {
-        communicationProvider: 'discord',
-        communicationChannelId: 'channel-1',
-        communicationThreadId: 'discussion-thread',
-        communicationMessageId: '200',
-      },
-      channel: {
-        channelId: 'discussion-thread',
-        channelName: 'General discussion',
-        channelType: 11,
-        guildId: 'guild-1',
-        parentChannelId: 'channel-1',
-        isDirectMessage: false,
-        isThread: true,
-      },
-    });
-
-    expect(result.status).toBe('confirmation_pending');
-    expect(mocks.requestConfirmation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentPromptText: expect.stringContaining('Alice: Earlier detail'),
-      }),
-    );
-  });
-
-  it('clears intake eyes when a platform answer is handled inline', async () => {
-    mocks.routeTask.mockResolvedValue({
-      status: 'platform_answer',
-      result: { answer: 'Use the npm scripts in package.json.' },
-    });
-    const removeReaction = vi.fn().mockResolvedValue(undefined);
-
-    const result = await startNewDiscordTask({
-      provider: { removeReaction } as never,
-      applicationId: 'application-1',
-      requesterDiscordUserId: 'discord-user-1',
-      launchOwnerUserId: 'user-1',
-      intakeAckPinned: true,
-      queuedMessage: {
-        provider: 'discord',
-        text: 'How do I run tests?',
-        user: 'Matt',
-        userId: 'user-1',
-        ts: 'message-1',
-      },
-      metadata: {
-        communicationProvider: 'discord',
-        communicationChannelId: 'channel-1',
-        communicationMessageId: 'message-1',
-        communicationAnchorMessageId: 'message-1',
-      },
-      channel: {
-        channelId: 'channel-1',
-        channelName: 'general',
-        channelType: 0,
-        guildId: 'guild-1',
-        isDirectMessage: false,
-        isThread: false,
-      },
-    });
-
-    expect(result.status).toBe('replied_inline');
-    expect(mocks.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: 'Use the npm scripts in package.json.',
-      }),
-    );
-    expect(mocks.launchTask).not.toHaveBeenCalled();
-    expect(removeReaction).toHaveBeenCalledWith({
-      channelId: 'channel-1',
-      messageId: 'message-1',
-      name: 'eyes',
-    });
-  });
-
-  it('clears intake eyes when auto-start skips a platform answer', async () => {
-    mocks.routeTask.mockResolvedValue({
-      status: 'platform_answer',
-      result: { answer: 'Should not post in monitored channel.' },
-    });
-    const removeReaction = vi.fn().mockResolvedValue(undefined);
-
-    const result = await startNewDiscordTask({
-      provider: { removeReaction } as never,
-      applicationId: 'application-1',
-      requesterDiscordUserId: 'discord-user-1',
-      launchOwnerUserId: 'user-1',
-      intakeAckPinned: true,
-      channelAutoStart: {
-        initiator: { kind: 'user', userId: 'user-1' },
-      },
-      queuedMessage: {
-        provider: 'discord',
-        text: 'what is 2+2?',
-        user: 'Matt',
-        userId: 'user-1',
-        ts: 'message-2',
-      },
-      metadata: {
-        communicationProvider: 'discord',
-        communicationChannelId: 'channel-2',
-        communicationMessageId: 'message-2',
-        communicationAnchorMessageId: 'message-2',
-      },
-      channel: {
-        channelId: 'channel-2',
-        channelName: 'bugs',
-        channelType: 0,
-        guildId: 'guild-1',
-        isDirectMessage: false,
-        isThread: false,
-      },
-    });
-
-    expect(result.status).toBe('skipped_platform_answer');
-    expect(mocks.reply).not.toHaveBeenCalled();
-    expect(removeReaction).toHaveBeenCalledWith({
-      channelId: 'channel-2',
-      messageId: 'message-2',
-      name: 'eyes',
-    });
-  });
-
-  it('does not remove eyes when intake ack was never pinned', async () => {
-    mocks.routeTask.mockResolvedValue({
-      status: 'platform_answer',
-      result: { answer: 'No eyes were pinned.' },
-    });
-    const removeReaction = vi.fn().mockResolvedValue(undefined);
-
-    const result = await startNewDiscordTask({
-      provider: { removeReaction } as never,
-      applicationId: 'application-1',
-      requesterDiscordUserId: 'discord-user-1',
-      launchOwnerUserId: 'user-1',
-      intakeAckPinned: false,
-      queuedMessage: {
-        provider: 'discord',
-        text: 'How do I run tests?',
-        user: 'Matt',
-        userId: 'user-1',
-        ts: 'message-3',
-      },
-      metadata: {
-        communicationProvider: 'discord',
-        communicationChannelId: 'channel-1',
-        communicationMessageId: 'message-3',
-        communicationAnchorMessageId: 'message-3',
-      },
-      channel: {
-        channelId: 'channel-1',
-        channelName: 'general',
-        channelType: 0,
-        guildId: 'guild-1',
-        isDirectMessage: false,
-        isThread: false,
-      },
-    });
-
-    expect(result.status).toBe('replied_inline');
-    expect(removeReaction).not.toHaveBeenCalled();
-  });
-
   it.each([
     {
       name: 'the source event lookup fails',
@@ -828,22 +578,9 @@ describe('startNewDiscordTask', () => {
         mocks.findSourceRun.mockRejectedValue(new Error('lookup failed')),
     },
     {
-      name: 'routing fails',
+      name: 'the launch fails',
       setup: () =>
-        mocks.routeTask.mockRejectedValue(new Error('routing failed')),
-    },
-    {
-      name: 'routing confirmation fails',
-      setup: () => {
-        mocks.shouldAutoConfirm.mockReturnValue(false);
-        mocks.requestConfirmation.mockRejectedValue(
-          new Error('confirmation failed'),
-        );
-      },
-    },
-    {
-      name: 'the routed workspace is unavailable',
-      setup: () => mocks.resolveWorkspace.mockResolvedValue(null),
+        mocks.launchTask.mockRejectedValue(new Error('launch failed')),
     },
   ])('clears intake eyes when $name', async ({ setup }) => {
     setup();
@@ -854,6 +591,7 @@ describe('startNewDiscordTask', () => {
         provider: { removeReaction } as never,
         applicationId: 'application-1',
         requesterDiscordUserId: 'discord-user-1',
+        workspace: WORKSPACE,
         launchOwnerUserId: 'user-1',
         intakeAckPinned: true,
         queuedMessage: {

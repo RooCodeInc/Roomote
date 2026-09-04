@@ -4,9 +4,15 @@ import type { ComponentPropsWithoutRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 
 import { useArtifactLink } from '@/app/(sandbox)/task/[taskId]/hooks/ArtifactLinkProvider';
+import {
+  useOpenSessionArtifactViewer,
+  type SessionArtifactViewerSelection,
+} from '@/app/(sandbox)/sessions/[sessionId]/session-task-panel-context';
+import { parseSessionArtifactSearchParams } from '@/lib/artifact-view-urls';
 
 const ARTIFACT_MARKER_PREFIX = 'https://__artifact__/';
-const TASK_ARTIFACT_PATH_PATTERN = /^\/task\/([^/]+)\/artifacts\/(.+)$/;
+const TASK_ARTIFACT_PATH_PATTERN = /^\/task\/([^/]+)\/artifacts(?:\/(.+))?$/;
+const SESSION_PATH_PATTERN = /^\/sessions\/([^/]+)\/?$/;
 
 interface ParsedTaskArtifactUrl {
   taskId: string;
@@ -61,18 +67,26 @@ function parseTaskArtifactUrl(href: string): ParsedTaskArtifactUrl | null {
   }
 
   const match = parsedUrl.pathname.match(TASK_ARTIFACT_PATH_PATTERN);
-  if (!match || !match[1] || !match[2]) {
+  if (!match || !match[1]) {
     return null;
   }
 
   let taskId: string;
-  let path: string;
   try {
     taskId = decodeURIComponent(match[1]);
-    path = decodeURIComponent(match[2]);
   } catch {
     return null;
   }
+
+  let path = parsedUrl.searchParams.get('path');
+  if (match[2]) {
+    try {
+      path = decodeURIComponent(match[2]);
+    } catch {
+      return null;
+    }
+  }
+  if (!path) return null;
 
   const versionParam = parsedUrl.searchParams.get('v');
   const parsedVersion = versionParam
@@ -87,6 +101,57 @@ function parseTaskArtifactUrl(href: string): ParsedTaskArtifactUrl | null {
     taskId,
     path,
     version,
+    href: `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`,
+  };
+}
+
+interface ParsedSessionArtifactUrl {
+  sessionId: string;
+  path: string;
+  version?: number;
+  href: string;
+}
+
+/**
+ * Parse Session artifact deep links (`/sessions/<id>?artifact=<path>&v=<n>`),
+ * the shape `create_artifact` returns. Shares the deep link's param parsing so
+ * a malformed version falls back to the latest version in both places.
+ */
+function parseSessionArtifactUrl(
+  href: string,
+): ParsedSessionArtifactUrl | null {
+  let parsedUrl: URL;
+
+  try {
+    parsedUrl = new URL(href, 'http://localhost');
+  } catch {
+    return null;
+  }
+
+  if (
+    isAbsoluteUrl(href) &&
+    typeof window !== 'undefined' &&
+    parsedUrl.origin !== window.location.origin
+  ) {
+    return null;
+  }
+
+  const match = parsedUrl.pathname.match(SESSION_PATH_PATTERN);
+  if (!match || !match[1]) return null;
+
+  let sessionId: string;
+  try {
+    sessionId = decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+
+  const selection = parseSessionArtifactSearchParams(parsedUrl.searchParams);
+  if (!selection) return null;
+
+  return {
+    sessionId,
+    ...selection,
     href: `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`,
   };
 }
@@ -165,6 +230,7 @@ type CustomLinkProps = ComponentPropsWithoutRef<'a'>;
  * Custom link component for Streamdown that handles URL transformation
  * - Artifact marker URLs open ArtifactDialog via ArtifactLinkContext (if available)
  * - Absolute task artifact URLs open in-app (same-task links use ArtifactLinkContext)
+ * - Artifact URLs on a Session page open the Session side-panel viewer
  * - External URLs open in new tab
  * - Internal task URLs (plans/, artifacts/) use client-side navigation
  * - Invalid URLs render as plain text
@@ -179,8 +245,17 @@ export const CustomLink = ({
   const pathname = usePathname();
   const router = useRouter();
   const artifactLink = useArtifactLink();
+  const openSessionArtifactViewer = useOpenSessionArtifactViewer();
   const parsedTaskArtifactUrl = href ? parseTaskArtifactUrl(href) : null;
+  const parsedSessionArtifactUrl = href ? parseSessionArtifactUrl(href) : null;
   const currentTaskId = pathname.match(/^\/task\/([^/]+)/)?.[1];
+  const currentSessionId = pathname.match(SESSION_PATH_PATTERN)?.[1];
+  // On a Session page, artifact links open the side-panel viewer in place.
+  const openInSessionViewer =
+    openSessionArtifactViewer && currentSessionId
+      ? (selection: SessionArtifactViewerSelection) =>
+          openSessionArtifactViewer(selection)
+      : null;
 
   // Handle artifact marker URLs produced by remark-artifact-links
   if (href && isArtifactMarkerUrl(href)) {
@@ -244,7 +319,43 @@ export const CustomLink = ({
             return;
           }
 
+          if (openInSessionViewer) {
+            openInSessionViewer({ owner: { taskId }, path, version });
+            return;
+          }
+
           router.push(taskArtifactHref, { scroll: false });
+        }}
+        className="text-primary underline underline-offset-2 hover:text-primary/80"
+        data-streamdown="link"
+        {...props}
+      >
+        {children}
+      </a>
+    );
+  }
+
+  if (parsedSessionArtifactUrl) {
+    const {
+      sessionId,
+      path,
+      version,
+      href: sessionArtifactHref,
+    } = parsedSessionArtifactUrl;
+    const canOpenInCurrentSession =
+      openInSessionViewer && currentSessionId === sessionId;
+
+    return (
+      <a
+        href={sessionArtifactHref}
+        onClick={(e) => {
+          e.preventDefault();
+          if (canOpenInCurrentSession) {
+            openInSessionViewer({ owner: { sessionId }, path, version });
+            return;
+          }
+
+          router.push(sessionArtifactHref, { scroll: false });
         }}
         className="text-primary underline underline-offset-2 hover:text-primary/80"
         data-streamdown="link"

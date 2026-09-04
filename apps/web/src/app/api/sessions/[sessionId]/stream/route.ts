@@ -16,6 +16,7 @@ import {
   getFastSessionMessagesSince,
   getFastSessionDisplayTitle,
 } from '@/lib/server/fast-sessions';
+import { subscribeFastSessionReplyStream } from '@/lib/server/fast-session-reply-stream';
 
 export const runtime = 'nodejs';
 
@@ -65,65 +66,83 @@ export async function GET(
 
   return createResponse(request, async (sseSession) => {
     const startTime = Date.now();
+    // A reply streams in as assistant text chunks while the model writes
+    // it; the persisted row later arrives through the poll under the same
+    // eventId and replaces the live text.
+    const replyStream = await subscribeFastSessionReplyStream(
+      session.id,
+      (event) => {
+        if (!sseSession.isConnected) return;
+        try {
+          void sseSession.push({ event }, 'chunk');
+        } catch {
+          // The poll loop notices the disconnect.
+        }
+      },
+    );
 
-    while (startTime + STREAM_MAX_MS > Date.now()) {
-      if (!sseSession.isConnected) {
-        break;
-      }
+    try {
+      while (startTime + STREAM_MAX_MS > Date.now()) {
+        if (!sseSession.isConnected) {
+          break;
+        }
 
-      try {
-        const { messages, cursor: nextCursor } =
-          await getFastSessionMessagesSince(session.id, cursor);
-        cursor = nextCursor;
+        try {
+          const { messages, cursor: nextCursor } =
+            await getFastSessionMessagesSince(session.id, cursor);
+          cursor = nextCursor;
 
-        const [conversation] = await db
-          .select({
-            title: fastAgentConversations.title,
-            unifiedSessionId: unifiedSessions.id,
-            respondingUntil: unifiedSessions.respondingUntil,
-          })
-          .from(fastAgentConversations)
-          .leftJoin(
-            unifiedSessions,
-            eq(unifiedSessions.fastConversationId, fastAgentConversations.id),
-          )
-          .where(eq(fastAgentConversations.id, session.id))
-          .limit(1);
-        const title = await getFastSessionDisplayTitle(
-          session.id,
-          conversation?.title ?? null,
-        );
-        const conversationResponding = conversation?.unifiedSessionId
-          ? isSessionConversationResponding({
-              respondingUntil: conversation.respondingUntil,
+          const [conversation] = await db
+            .select({
+              title: fastAgentConversations.title,
+              unifiedSessionId: unifiedSessions.id,
+              respondingUntil: unifiedSessions.respondingUntil,
             })
-          : null;
-        if (messages.length > 0) {
-          await sseSession.push(
-            { messages, conversationResponding },
-            'messages',
+            .from(fastAgentConversations)
+            .leftJoin(
+              unifiedSessions,
+              eq(unifiedSessions.fastConversationId, fastAgentConversations.id),
+            )
+            .where(eq(fastAgentConversations.id, session.id))
+            .limit(1);
+          const title = await getFastSessionDisplayTitle(
+            session.id,
+            conversation?.title ?? null,
           );
+          const conversationResponding = conversation?.unifiedSessionId
+            ? isSessionConversationResponding({
+                respondingUntil: conversation.respondingUntil,
+              })
+            : null;
+          if (messages.length > 0) {
+            await sseSession.push(
+              { messages, conversationResponding },
+              'messages',
+            );
+          }
+          const sessionUpdate: {
+            title?: string;
+            conversationResponding?: boolean | null;
+          } = {};
+          if (title && title !== lastTitle) {
+            lastTitle = title;
+            sessionUpdate.title = title;
+          }
+          if (conversationResponding !== lastConversationResponding) {
+            lastConversationResponding = conversationResponding;
+            sessionUpdate.conversationResponding = conversationResponding;
+          }
+          if (Object.keys(sessionUpdate).length > 0) {
+            await sseSession.push(sessionUpdate, 'session');
+          }
+        } catch {
+          break;
         }
-        const sessionUpdate: {
-          title?: string;
-          conversationResponding?: boolean | null;
-        } = {};
-        if (title && title !== lastTitle) {
-          lastTitle = title;
-          sessionUpdate.title = title;
-        }
-        if (conversationResponding !== lastConversationResponding) {
-          lastConversationResponding = conversationResponding;
-          sessionUpdate.conversationResponding = conversationResponding;
-        }
-        if (Object.keys(sessionUpdate).length > 0) {
-          await sseSession.push(sessionUpdate, 'session');
-        }
-      } catch {
-        break;
-      }
 
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      }
+    } finally {
+      await replyStream.close();
     }
 
     if (sseSession.isConnected) {

@@ -106,6 +106,14 @@ look for:
 - a diff or pull request for code changes
 - a clear explanation when something could not be verified
 
+Visual proof should use genuine application, authentication, database, and
+backend state when practical. When an artifact instead uses disclosed simulated
+state to make a UI reachable, treat it as evidence only for the rendered
+appearance, layout, or interaction under that setup. It does not verify real
+data flow, authorization, backend behavior, network behavior, or an end-to-end
+journey. The task report and artifact metadata should identify the simulation
+and state those limits explicitly.
+
 | Surface           | What to look for                                                                           |
 | ----------------- | ------------------------------------------------------------------------------------------ |
 | Transcript        | Whether Roomote understood the ask, adapted to new context, and explained blockers clearly |
@@ -122,7 +130,9 @@ without needing to enter the sandbox workspace.
 
 You can send follow-up instructions while a task is active. If a task has
 completed and Roomote has a restorable snapshot, a follow-up can resume from
-that prior workspace instead of starting over.
+that prior workspace instead of starting over. Snapshot retention depends on
+the sandbox provider: Modal-backed snapshots do not have Roomote's seven-day
+application expiry, while other providers may use a bounded window.
 
 When a task delegated from a Fast session asks for input, reply naturally in
 the originating session. If one input request is pending, Roomote

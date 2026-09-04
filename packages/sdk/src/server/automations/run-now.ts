@@ -78,6 +78,10 @@ export async function runAutomationNow(
     return { outcome: 'skipped', reason: result.skippedReason };
   }
 
+  if (result.queued) {
+    return { outcome: 'queued' };
+  }
+
   if (result.completed) {
     return { outcome: 'completed' };
   }

@@ -189,4 +189,37 @@ describe('setup funnel telemetry', () => {
       ]),
     );
   });
+
+  it('does not derive source-control configuration from selection alone', () => {
+    const milestones = evaluateSetupFunnelMilestones({
+      setupNewState: {
+        ...createEmptySetupNewState(),
+        sourceControlProvider: 'github',
+      },
+      hasSlack: false,
+      authSetup: {
+        providers: [],
+      } as unknown as SetupAuthStatus,
+      modelSetup: { setupSatisfied: false } as unknown as SetupModelStatus,
+      computeSetup: {
+        providers: [],
+      } as unknown as SetupComputeStatus,
+      sourceControlSetup: {
+        providers: [
+          {
+            provider: 'github',
+            configStepSatisfied: false,
+            connected: false,
+          },
+        ],
+        setupSatisfied: false,
+      } as unknown as SetupSourceControlStatus,
+    });
+
+    expect(milestones).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ milestone: 'source_control_configured' }),
+      ]),
+    );
+  });
 });

@@ -77,7 +77,7 @@ describe('tool presentation resolver', () => {
     });
   });
 
-  it('uses Memory as the provider label without changing canonical identity', () => {
+  it('uses Memory language without exposing the internal provider identity', () => {
     expect(
       resolveToolPresentation(
         toolData({
@@ -90,9 +90,139 @@ describe('tool presentation resolver', () => {
       ),
     ).toMatchObject({
       category: 'memory',
-      providerLabel: 'Memory',
+      providerLabel: undefined,
+      verb: 'Searched',
+      object: 'my memory',
       identity: { serverName: 'gbrain', toolName: 'query' },
     });
+  });
+
+  it.each([
+    ['query', 'Searched', 'my memory'],
+    ['search', 'Searched', 'my memory'],
+    ['entity', 'Looked Up', 'a memory'],
+    ['get_page', 'Read', 'a memory'],
+    ['list_pages', 'Listed', 'memories'],
+    ['synthesize', 'Summarized', 'my memory'],
+    ['recall', 'Recalled From', 'my memory'],
+  ] as const)(
+    'uses natural Memory wording for %s',
+    (toolName, verb, object) => {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            isMcp: true,
+            serverName: 'gbrain',
+            toolName,
+          }),
+        ),
+      ).toMatchObject({ verb, object, iconKey: 'memory' });
+    },
+  );
+
+  it('describes Session-targeted manage_tasks actions accurately', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'manage_tasks',
+          rawInput: {
+            arguments: { action: 'send_message', sessionId: 'session-1' },
+          },
+        } as never),
+      ),
+    ).toMatchObject({ verb: 'Sent', object: 'message to session' });
+  });
+
+  it('describes saved memories with an optional subject', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'save_memory',
+          rawInput: {
+            arguments: { memory: 'Bruno prefers Memory in UI copy.' },
+          },
+        } as never),
+      ),
+    ).toMatchObject({
+      verb: 'Added',
+      object: 'a memory about Bruno prefers Memory in UI copy.',
+      iconKey: 'memory',
+    });
+    expect(
+      resolveToolPresentation(toolData({ toolName: 'save_memory' })),
+    ).toMatchObject({ verb: 'Added', object: 'a memory' });
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'save_task_memory',
+          rawInput: { outcome: 'Documented the conversation renderer.' },
+        } as never),
+      ),
+    ).toMatchObject({
+      verb: 'Added',
+      object: 'a memory about Documented the conversation renderer.',
+      providerLabel: undefined,
+      iconKey: 'memory',
+    });
+  });
+
+  it.each([
+    ['start', 'Started', 'session'],
+    ['search', 'Searched', 'sessions'],
+    ['get_summary', 'Received', 'summary from task'],
+    ['get_messages', 'Received', 'message from task'],
+    ['send_message', 'Sent', 'message to task'],
+    ['search_tasks', 'Searched', 'tasks'],
+    ['get_compute_logs', 'Received', 'logs from task'],
+    ['launch', 'Started', 'task'],
+    ['cancel', 'Cancelled', 'task'],
+    ['list_environments', 'Listed', 'environments'],
+    ['list_models', 'Listed', 'models'],
+    ['update_models', 'Updated', 'task model'],
+  ] as const)(
+    'uses natural manage_tasks wording for %s',
+    (action, verb, object) => {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            isMcp: true,
+            serverName: 'roomote',
+            toolName: 'manage_tasks',
+            rawInput: { arguments: { action } },
+          } as never),
+        ),
+      ).toMatchObject({ verb, object, providerLabel: undefined });
+    },
+  );
+
+  it('suppresses only first-party Roomote attribution', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'manage_goal',
+        }),
+      ).providerLabel,
+    ).toBeUndefined();
+    expect(
+      resolveToolPresentation(
+        toolData({ isMcp: true, serverName: 'gbrain', toolName: 'query' }),
+      ).providerLabel,
+    ).toBeUndefined();
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'custom-roomote',
+          toolName: 'run',
+        }),
+      ).providerLabel,
+    ).toBe('Custom Roomote');
   });
 
   it('uses a known MCP integration’s catalog label and icon', () => {
@@ -129,12 +259,12 @@ describe('tool presentation resolver', () => {
   it('uses meaningful receipt language for consequential task actions', () => {
     expect(
       resolveToolPresentation(toolData({ toolName: 'launch_task' })),
-    ).toMatchObject({ verb: 'Started', object: 'Coding Task' });
+    ).toMatchObject({ verb: 'Started', object: 'coding task' });
     expect(
       resolveToolPresentation(
         toolData({ toolName: 'launch_task', status: 'failed' }),
       ),
-    ).toMatchObject({ verb: 'Failed to Start', object: 'Coding Task' });
+    ).toMatchObject({ verb: 'Failed to Start', object: 'coding task' });
   });
 
   it('sanitizes native fallback titles without using them for identity', () => {
@@ -159,6 +289,30 @@ describe('tool presentation policy', () => {
     expect(
       resolveToolPresentationPolicy(
         toolMessage({ toolName: 'save_memory', kind: 'memory' }),
+      ).activityMode,
+    ).toBe('keep-visible');
+  });
+
+  it('collapses settled chat reply receipts outside narration mode', () => {
+    const message = toolMessage({
+      toolName: 'send_chat_reply',
+      kind: 'communication',
+    });
+
+    expect(resolveToolPresentationPolicy(message).activityMode).toBe(
+      'collapsible',
+    );
+    expect(
+      resolveToolPresentationPolicy(message, { displayMode: 'narration' })
+        .activityMode,
+    ).toBe('keep-visible');
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'send_chat_reply',
+          kind: 'communication',
+          status: 'failed',
+        }),
       ).activityMode,
     ).toBe('keep-visible');
   });
@@ -201,6 +355,25 @@ describe('tool presentation policy', () => {
       title: 'ignore_event',
       toolName: 'ignore_event',
       kind: 'communication',
+    });
+
+    expect(
+      resolveToolPresentationPolicy(message, {
+        showInternalMessages: false,
+      }).rowVisibility,
+    ).toBe('debug-only');
+    expect(
+      resolveToolPresentationPolicy(message, {
+        showInternalMessages: true,
+      }).rowVisibility,
+    ).toBe('visible');
+  });
+
+  it('hides integration tool discovery outside internal transcript debugging', () => {
+    const message = toolMessage({
+      title: 'find_integration_tools',
+      toolName: 'find_integration_tools',
+      kind: 'search',
     });
 
     expect(

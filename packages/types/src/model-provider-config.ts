@@ -541,7 +541,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         roles: {
           coding: { modelId: DEFAULT_TASK_MODEL_ID, reasoningEffort: 'medium' },
           helper: {
-            modelId: 'openrouter/google/gemini-3.7-flash',
+            modelId: 'openrouter/google/gemini-3.8-flash',
             reasoningEffort: 'low',
           },
           codeReview: {
@@ -549,7 +549,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'medium',
           },
           explore: {
-            modelId: 'openrouter/google/gemini-3.7-flash',
+            modelId: 'openrouter/google/gemini-3.8-flash',
             reasoningEffort: 'low',
           },
           planning: {
@@ -563,11 +563,11 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         label: 'Quick turnaround',
         roles: {
           coding: {
-            modelId: 'openrouter/google/gemini-3.7-flash',
+            modelId: 'openrouter/google/gemini-3.8-flash',
             reasoningEffort: 'low',
           },
           helper: {
-            modelId: 'openrouter/google/gemini-3.7-flash',
+            modelId: 'openrouter/google/gemini-3.8-flash',
             reasoningEffort: 'low',
           },
           codeReview: {
@@ -575,7 +575,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'medium',
           },
           explore: {
-            modelId: 'openrouter/google/gemini-3.7-flash',
+            modelId: 'openrouter/google/gemini-3.8-flash',
             reasoningEffort: 'low',
           },
           planning: {
@@ -594,6 +594,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'vercel/openai/gpt-5.6-terra',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'vercel/anthropic/claude-fable-5.1',
       'claude-fable-5': 'vercel/anthropic/claude-fable-5',
       'claude-haiku-4-5': 'vercel/anthropic/claude-haiku-4.5',
       'claude-opus-5': 'vercel/anthropic/claude-opus-5',
@@ -601,7 +602,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'vercel/openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'vercel/openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'vercel/openai/gpt-5.6-luna',
-      'gemini-3-7-flash': 'vercel/google/gemini-3.7-flash',
+      'gemini-3-8-flash': 'vercel/google/gemini-3.8-flash',
       'deepseek-v4-flash-0731': 'vercel/deepseek/deepseek-v4-flash-0731',
       'deepseek-v4-pro-0813': 'vercel/deepseek/deepseek-v4-pro-0813',
       'glm-5-3-flash': 'vercel/zai/glm-5.3-flash',
@@ -615,9 +616,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // Vision is unset: the recommended coding model is multimodal, so image
     // work follows the coding model ("same as coding").
     recommendedRoleModels: {
-      helper: 'vercel/google/gemini-3.7-flash',
+      helper: 'vercel/google/gemini-3.8-flash',
       codeReview: 'vercel/anthropic/claude-sonnet-5',
-      explore: 'vercel/google/gemini-3.7-flash',
+      explore: 'vercel/google/gemini-3.8-flash',
       planning: 'vercel/anthropic/claude-opus-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
@@ -630,6 +631,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     authKind: 'api-key',
     // Requesty's models.dev slugs are provider-local rather than lab/model.
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'requesty/claude-fable-5-1',
       'claude-fable-5': 'requesty/claude-fable-5',
       'claude-haiku-4-5': 'requesty/claude-haiku-4-5',
       'claude-opus-5': 'requesty/claude-opus-5',
@@ -637,7 +639,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'requesty/gpt-5.6-sol@eu',
       'gpt-5-6-terra': 'requesty/gpt-5.6-terra@eu',
       'gpt-5-6-luna': 'requesty/gpt-5.6-luna@eu',
-      'gemini-3-7-flash': 'requesty/gemini-3.7-flash',
+      'gemini-3-8-flash': 'requesty/vertex/gemini-3.8-flash',
       'deepseek-v4-flash-0731': 'requesty/deepseek-v4-flash-0731',
       'glm-5-3-flash': 'requesty/glm-5.3-flash',
       'glm-5-3': 'requesty/glm-5.3',
@@ -645,9 +647,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'grok-4-6': 'requesty/grok-4.6',
     }),
     recommendedRoleModels: {
-      helper: 'requesty/gemini-3.7-flash',
+      helper: 'requesty/vertex/gemini-3.8-flash',
       codeReview: 'requesty/claude-sonnet-5',
-      explore: 'requesty/gemini-3.7-flash',
+      explore: 'requesty/vertex/gemini-3.8-flash',
       planning: 'requesty/claude-opus-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
@@ -690,6 +692,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'openai/gpt-5.6-sol',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'gpt-6-astra': 'openai/gpt-6-astra',
       'gpt-5-6-sol': 'openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',
@@ -767,6 +770,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'anthropic/claude-sonnet-5',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'anthropic/claude-fable-5-1',
       'claude-fable-5': 'anthropic/claude-fable-5',
       'claude-haiku-4-5': 'anthropic/claude-haiku-4-5',
       'claude-opus-5': 'anthropic/claude-opus-5',
@@ -844,6 +848,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'opencode/big-pickle',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'opencode/claude-fable-5-1',
       'claude-fable-5': 'opencode/claude-fable-5',
       'claude-haiku-4-5': 'opencode/claude-haiku-4-5',
       'claude-opus-5': 'opencode/claude-opus-5',
@@ -851,7 +856,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'opencode/gpt-5.6-sol',
       'gpt-5-6-terra': 'opencode/gpt-5.6-terra',
       'gpt-5-6-luna': 'opencode/gpt-5.6-luna',
-      'gemini-3-7-flash': 'opencode/gemini-3.7-flash',
+      'gemini-3-8-flash': 'opencode/gemini-3.8-flash',
       // Zen serves the dated Flash release under this stable model alias.
       'deepseek-v4-flash-0731': 'opencode/deepseek-v4-flash',
       'deepseek-v4-pro-0813': 'opencode/deepseek-v4-pro',
@@ -865,10 +870,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // so vision gets an explicit multimodal recommendation instead of the
     // usual same-as-coding fallback.
     recommendedRoleModels: {
-      helper: 'opencode/gemini-3.7-flash',
+      helper: 'opencode/gemini-3.8-flash',
       vision: 'opencode/claude-sonnet-5',
       codeReview: 'opencode/claude-sonnet-5',
-      explore: 'opencode/gemini-3.7-flash',
+      explore: 'opencode/gemini-3.8-flash',
       planning: 'opencode/claude-opus-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
@@ -931,6 +936,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'bedrock-mantle/anthropic.claude-sonnet-5',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'bedrock-mantle/anthropic.claude-fable-5-1',
       'claude-fable-5': 'bedrock-mantle/anthropic.claude-fable-5',
       'claude-haiku-4-5': 'bedrock-mantle/anthropic.claude-haiku-4-5',
       'claude-opus-5': 'bedrock-mantle/anthropic.claude-opus-5',
@@ -953,10 +959,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'google',
     label: 'Google Gemini',
     envVarName: 'GEMINI_API_KEY',
-    defaultRoomoteModel: 'google/gemini-3.7-flash',
+    defaultRoomoteModel: 'google/gemini-3.8-flash',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
-      'gemini-3-7-flash': 'google/gemini-3.7-flash',
+      'gemini-3-8-flash': 'google/gemini-3.8-flash',
     }),
     // All non-coding roles follow the Flash coding default.
   },
@@ -1049,6 +1055,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'github-copilot/gpt-5.6-luna',
     authKind: 'oauth',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'github-copilot/claude-fable-5.1',
       'claude-fable-5': 'github-copilot/claude-fable-5',
       'claude-haiku-4-5': 'github-copilot/claude-haiku-4.5',
       'claude-opus-5': 'github-copilot/claude-opus-5',
@@ -1145,6 +1152,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'openai/gpt-5.6-sol',
     authKind: 'oauth',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'gpt-6-astra': 'openai/gpt-6-astra',
       'gpt-5-6-sol': 'openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',

@@ -16,6 +16,13 @@ ChatGPT subscription or inference provider API key. You also need source control
 and a sandbox provider. Connect communications providers and other tools when
 your team needs them.
 
+<Tip>
+  Asking a coding agent to install Roomote? Send it this page. Agents should
+  follow the [agent installation guide](/self-hosting/agent-installation). It
+  uses the standard installer on Linux and creates a Linux VM plus temporary
+  HTTPS ingress when the current machine is macOS or Windows.
+</Tip>
+
 <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
   <a href="https://cloud.roomote.dev/sign-up"><img src="https://roomote.dev/images/deploy-button.png" alt="Deploy on Roomote Cloud" style={{ height: "40px", width: "auto" }} /></a>
   <a href="https://railway.com/deploy/Rj2cFo?referralCode=roomote"><img src="https://railway.com/button.svg" alt="Deploy on Railway" style={{ height: "40px", width: "auto" }} /></a>
@@ -48,14 +55,14 @@ in the repository.
 SSH into a fresh Ubuntu or Debian server (x86_64 or arm64, 4 GB+ RAM) and run:
 
 ```sh
-curl -fsSL https://get.roomote.dev | bash
+curl -fsSL https://get.roomote.dev | sudo bash
 ```
 
 The installer brings up the full stack from published images and prints a setup
-link. For this self-hosted path, open it in a browser and the wizard walks you
-through the rest: sign-in provider, source-control provider, a ChatGPT
-subscription or inference provider API key, communications provider,
-repositories, and a first task.
+link. Open it in a browser to create the first administrator and configure
+inference. Roomote then opens a persistent setup conversation where trusted
+cards guide you through source control, your first task, a sandbox provider,
+and recommended automations.
 
 No DNS setup is needed to try it out; pass `--domain roomote.example.com` for a
 production install on your own domain.
@@ -71,7 +78,7 @@ sudo bash install.sh
 
 ## Setup checklist
 
-Have these ready before the wizard asks for them:
+Have these ready before setup asks for them:
 
 - a public HTTPS URL for the deployment, especially when source-control or chat
   callbacks need to reach it
@@ -180,19 +187,29 @@ Roomote surfaces release history and available updates in the web app:
 - Managed Roomote inference from an eligible host, or a ChatGPT subscription or
   inference provider API key (OpenRouter, Anthropic, OpenAI, and others).
 - An account with a supported source-control provider. For GitHub, the setup
-  wizard creates the GitHub App; other providers use their documented OAuth or
-  credential flow.
+  conversation creates the GitHub App; other providers use their documented
+  OAuth or credential flow.
 - For Slack, Microsoft Teams, Telegram, and Discord: a workspace or server where
-  you can install an app or bot; the setup wizard prefills the Slack app
+  you can install an app or bot; the setup assistant prefills the Slack app
   manifest and creates Discord's installation link for you.
 
 ## Verify the deployment
 
-The final setup step offers a small set of preselected starter tasks. Keep the
-ones you want, clear any you do not want to run yet, then select **Go**. If you
-keep any selected, Roomote completes setup and opens one **Set up Roomote**
-Session that launches the starter tasks and keeps their progress together. You
-can also clear every selection and finish setup without starting a Session.
+After sign-in and inference are ready, setup continues entirely in a persistent
+conversation with Roomote. Trusted action cards appear beside the relevant
+messages for source control, first work, sandbox configuration, and automation
+recommendations. Detailed provider instructions and credential entry open in a
+dialog from the source-control card; Roomote never asks for credentials in
+chat.
+
+Setup completes once inference and a sandbox provider are ready, source control
+is successfully configured, and at least one repository has synchronized.
+Roomote then offers preselected starter tasks in one structured multi-select
+question. Starter work is optional and does not gate setup completion; selected
+work launches visibly in the same session. A launch failure does not reopen
+setup; ask Roomote to retry that item. Automation recommendations are analyzed
+after repository sync and appear only after at least one starter task launches.
+They remain optional.
 
 After setup, run a small task that uses the first environment if you did not
 start one from the starter list. A healthy deployment should let you:
@@ -220,6 +237,11 @@ start one from the starter list. A healthy deployment should let you:
   variables, setup commands, or tool versions to the environment.
 - **Chat messages do not reach Roomote.** Confirm the app is installed, invited
   to the channel, and using the current callback URL.
+- **Fast reports that local working storage is full.** Clean up container
+  storage, then recreate the affected application containers. Installer-managed
+  Compose deployments can raise `ROOMOTE_APP_TMPFS_SIZE` above its `512m`
+  default before recreating them; keep the limit within the host's available
+  memory.
 - **Memory climbs for hours, or a service is OOM-killed under a container
   memory limit.** Node sizes its heap from the memory it can see (the host's,
   not the container's), so it defers garbage collection and lets memory drift
@@ -229,3 +251,10 @@ start one from the starter list. A healthy deployment should let you:
   bullmq, reduced to ~75% of the container's memory when a cgroup limit is
   set). Set `NODE_OPTIONS=--max-old-space-size=<MB>` on a service to override
   the default, or on older images to add the cap manually.
+
+## Agent-guided installation
+
+The [agent installation guide](/self-hosting/agent-installation) keeps the
+one-command Linux installer as the single deployment path. On macOS or Windows,
+an agent runs it inside a Linux VM and adds temporary HTTPS ingress for OAuth
+callbacks and webhooks.
