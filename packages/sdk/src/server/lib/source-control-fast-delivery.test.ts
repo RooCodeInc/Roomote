@@ -430,7 +430,7 @@ describe('GitHub Fast delivery', () => {
     expect(last).toEqual({ messageId: '6001' });
   });
 
-  it('does not quote the answered comment when replying inside its review thread', async () => {
+  it('posts a bare reply inside a review thread: no quote and no footer', async () => {
     const conversation = buildSourceControlFastConversation({
       provider: 'github',
       host: 'github.com',
@@ -454,7 +454,7 @@ describe('GitHub Fast delivery', () => {
       'POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies',
       expect.objectContaining({
         comment_id: 800,
-        body: 'Yes, it stops after three tries.\n\n[footer:github]',
+        body: 'Yes, it stops after three tries.',
       }),
     );
   });
