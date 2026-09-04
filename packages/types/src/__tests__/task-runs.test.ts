@@ -40,6 +40,7 @@ import {
   shouldUseAppTokenOnly,
 } from '../task-runs';
 import { ALL_REPOSITORIES } from '../constants';
+import { getSnapshotExpiresAt } from '../compute-providers/snapshot-retention';
 
 describe('isSourceControlTaskSurface', () => {
   it.each(['github', 'gitlab', 'gitea', 'bitbucket', 'ado'] as const)(
@@ -180,16 +181,37 @@ describe('snapshot resume helpers', () => {
   });
 
   it('treats snapshots inside the ttl as resumable', () => {
-    expect(isSnapshotResumable(new Date('2026-05-14T00:00:00.000Z'))).toBe(
-      true,
-    );
+    expect(
+      isSnapshotResumable(new Date('2026-05-14T00:00:00.000Z'), 'vercel'),
+    ).toBe(true);
   });
 
-  it('treats expired or missing snapshots as not resumable', () => {
-    expect(isSnapshotResumable(new Date('2026-05-12T23:59:59.000Z'))).toBe(
-      false,
-    );
-    expect(isSnapshotResumable(null)).toBe(false);
+  it('keeps old Modal filesystem snapshots resumable', () => {
+    expect(
+      isSnapshotResumable(new Date('2026-04-01T00:00:00.000Z'), 'modal'),
+    ).toBe(true);
+    expect(
+      getSnapshotExpiresAt(new Date('2026-04-01T00:00:00.000Z'), 'modal'),
+    ).toBeNull();
+  });
+
+  it('expires Vercel snapshots at the seven-day boundary', () => {
+    expect(
+      isSnapshotResumable(new Date('2026-05-13T00:00:00.001Z'), 'vercel'),
+    ).toBe(true);
+    expect(
+      isSnapshotResumable(new Date('2026-05-13T00:00:00.000Z'), 'vercel'),
+    ).toBe(false);
+    expect(
+      getSnapshotExpiresAt(new Date('2026-05-13T00:00:00.000Z'), 'vercel'),
+    ).toEqual(new Date('2026-05-20T00:00:00.000Z'));
+  });
+
+  it('preserves the seven-day safeguard for unknown providers', () => {
+    expect(
+      isSnapshotResumable(new Date('2026-05-12T23:59:59.000Z'), null),
+    ).toBe(false);
+    expect(isSnapshotResumable(null, 'modal')).toBe(false);
   });
 
   it('exports a stable expired snapshot error message', () => {
