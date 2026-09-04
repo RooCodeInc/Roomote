@@ -18,7 +18,10 @@ import {
   eq,
   slackInstallations,
 } from '@roomote/db/server';
-import { isFastAgentSourceControlConversation } from '@roomote/types';
+import {
+  isFastAgentSourceControlConversation,
+  type FastAgentHumanFollowUpEvent,
+} from '@roomote/types';
 import {
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
@@ -609,6 +612,38 @@ type FastAgentSurfaceHumanFollowUpAdmission = Awaited<
   ReturnType<typeof admitFastAgentHumanFollowUp>
 > | null;
 
+/**
+ * The durable record of a surface turn. It carries the surface context and
+ * steerable tasks too, so a turn that is queued behind a busy Session or
+ * resumed after an interruption reads the same context the inline turn would.
+ */
+function buildSurfaceHumanFollowUpEvent(
+  params: FastAgentSurfaceReplyParams,
+): FastAgentHumanFollowUpEvent {
+  return {
+    type: 'human_follow_up',
+    eventId: params.currentMessageId,
+    currentMessageId: params.currentMessageId,
+    userId: params.userId,
+    question: params.question,
+    ...(params.images?.length ? { images: params.images } : {}),
+    ...(params.senderDisplayName
+      ? { senderDisplayName: params.senderDisplayName }
+      : {}),
+    ...(params.agentContext ? { agentContext: params.agentContext } : {}),
+    ...(params.activeTasks?.length ? { activeTasks: params.activeTasks } : {}),
+    ...(params.externalInput
+      ? {
+          senderExternalId: params.externalInput.reactor.externalUserId,
+          input: {
+            type: 'reaction' as const,
+            externalInput: params.externalInput,
+          },
+        }
+      : {}),
+  };
+}
+
 async function admitFastAgentSurfaceHumanFollowUp(
   params: FastAgentSurfaceReplyParams,
   delivery: FastAgentSurfaceReplyDelivery,
@@ -624,26 +659,7 @@ async function admitFastAgentSurfaceHumanFollowUp(
       sessionId: params.sessionId,
       conversation: delivery.conversation,
     },
-    event: {
-      type: 'human_follow_up',
-      eventId: params.currentMessageId,
-      currentMessageId: params.currentMessageId,
-      userId: params.userId,
-      question: params.question,
-      ...(params.images?.length ? { images: params.images } : {}),
-      ...(params.senderDisplayName
-        ? { senderDisplayName: params.senderDisplayName }
-        : {}),
-      ...(params.externalInput
-        ? {
-            senderExternalId: params.externalInput.reactor.externalUserId,
-            input: {
-              type: 'reaction' as const,
-              externalInput: params.externalInput,
-            },
-          }
-        : {}),
-    },
+    event: buildSurfaceHumanFollowUpEvent(params),
     forceQueue: forceQueue && !params.externalInput,
   });
 }
@@ -685,26 +701,7 @@ async function runFastAgentSurfaceReply(
           sessionId: params.sessionId,
           conversation: delivery.conversation,
         },
-        event: {
-          type: 'human_follow_up',
-          eventId: params.currentMessageId,
-          currentMessageId: params.currentMessageId,
-          userId: params.userId,
-          question: params.question,
-          ...(params.images?.length ? { images: params.images } : {}),
-          ...(params.senderDisplayName
-            ? { senderDisplayName: params.senderDisplayName }
-            : {}),
-          ...(params.externalInput
-            ? {
-                senderExternalId: params.externalInput.reactor.externalUserId,
-                input: {
-                  type: 'reaction' as const,
-                  externalInput: params.externalInput,
-                },
-              }
-            : {}),
-        },
+        event: buildSurfaceHumanFollowUpEvent(params),
       }).catch((error) => {
         console.error(
           `[Fast Agent] Failed to persist surface turn admission: ${error instanceof Error ? error.message : String(error)}`,

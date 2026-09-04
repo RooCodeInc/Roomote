@@ -1126,6 +1126,100 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('leaves a same-user follow-up routed in from a pull request out of native steering', async () => {
+    vi.useFakeTimers();
+    try {
+      const steerable = {
+        id: '66666666-6666-4666-8666-666666666666',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.8',
+          currentMessageId: '100.8',
+          userId: 'user-1',
+          question: 'Steer this one.',
+        },
+      };
+      const routedFromPullRequest = {
+        id: '77777777-7777-4777-8777-777777777777',
+        createdAt: new Date('2026-08-31T12:00:01.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: 'github:comment:900',
+          currentMessageId: 'github:comment:900',
+          userId: 'user-1',
+          question: 'Also update the changelog on the PR.',
+          sourceControlReplyTarget: {
+            provider: 'github',
+            host: 'github.com',
+            repositoryFullName: 'acme/api',
+            kind: 'pull',
+            number: 42,
+          },
+        },
+      };
+      const afterRouted = {
+        id: '88888888-8888-4888-8888-888888888888',
+        createdAt: new Date('2026-08-31T12:00:02.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.9',
+          currentMessageId: '100.9',
+          userId: 'user-1',
+          question: 'Do not jump ahead of the pull request mention.',
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([steerable, routedFromPullRequest, afterRouted])
+        .mockResolvedValue([routedFromPullRequest, afterRouted]);
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+
+      // Only the plain follow-up is injected; the routed mention and every
+      // later row stay durable for the whole-turn delivery that answers on
+      // the pull request too.
+      const steer = mocks.nativeSteer.mock.calls[0]?.[0];
+      expect(steer?.text).toContain('Steer this one.');
+      expect(steer?.text).not.toContain('Also update the changelog on the PR.');
+      expect(steer?.text).not.toContain(
+        'Do not jump ahead of the pull request mention.',
+      );
+      expect(mocks.inArray).toHaveBeenCalledWith('id', [steerable.id]);
+      expect(mocks.upsertMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({
+            eventId: 'github:comment:900:user',
+          }),
+        }),
+      );
+
+      finishGeneration?.('Steered answer');
+      await expect(resultPromise).resolves.toBe('Steered answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('batches rapidly arriving messages at the next assistant boundary', async () => {
     vi.useFakeTimers();
     try {

@@ -89,6 +89,7 @@ vi.mock('@roomote/ado', () => ({
 import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 
 import {
+  buildSourceControlDiscussionUrl,
   buildSourceControlFastAdapter,
   buildSourceControlFastConversation,
   buildSourceControlFastDelivery,
@@ -747,5 +748,64 @@ describe('buildSourceControlReplyQuote', () => {
       buildSourceControlReplyQuote({ text: '    indented code\nplain\n' }),
     ).toBe('>     indented code\n> plain\n>');
     expect(buildSourceControlReplyQuote({ text: '   ' })).toBeNull();
+  });
+});
+
+describe('buildSourceControlDiscussionUrl', () => {
+  it('builds each provider page shape, including Azure DevOps _git and work item paths', () => {
+    expect(
+      buildSourceControlDiscussionUrl({
+        provider: 'github',
+        host: 'github.com',
+        repositoryFullName: 'acme/api',
+        kind: 'pull',
+        number: 42,
+      }),
+    ).toBe('https://github.com/acme/api/pull/42');
+    expect(
+      buildSourceControlDiscussionUrl({
+        provider: 'gitlab',
+        host: 'gitlab.example.com',
+        repositoryFullName: 'group/api',
+        kind: 'issues',
+        number: 7,
+      }),
+    ).toBe('https://gitlab.example.com/group/api/-/issues/7');
+    expect(
+      buildSourceControlDiscussionUrl({
+        provider: 'bitbucket',
+        host: 'bitbucket.org',
+        repositoryFullName: 'acme/api',
+        kind: 'pull',
+        number: 3,
+      }),
+    ).toBe('https://bitbucket.org/acme/api/pull-requests/3');
+    expect(
+      buildSourceControlDiscussionUrl({
+        provider: 'ado',
+        host: 'dev.azure.com',
+        repositoryFullName: 'org/project/repo',
+        kind: 'pull',
+        number: 42,
+      }),
+    ).toBe('https://dev.azure.com/org/project/_git/repo/pullrequest/42');
+    expect(
+      buildSourceControlDiscussionUrl({
+        provider: 'ado',
+        host: 'dev.azure.com',
+        repositoryFullName: 'org/project/repo',
+        kind: 'issues',
+        number: 99,
+      }),
+    ).toBe('https://dev.azure.com/org/project/_workitems/edit/99');
+    expect(
+      buildSourceControlDiscussionUrl({
+        provider: 'gitea',
+        host: 'gitea.example.com',
+        repositoryFullName: 'acme/api',
+        kind: 'pull',
+        number: 5,
+      }),
+    ).toBe('https://gitea.example.com/acme/api/pulls/5');
   });
 });

@@ -238,6 +238,13 @@ Roomote, so no `@mention` is needed there; Roomote answers in that thread. On
 a pull request that a Roomote task opened, those replies are instead collected
 as review feedback for the owning Session, described below.
 
+A pull request that a Roomote task opened already belongs to the Session that
+started the work, for example the Slack thread where the task was requested.
+Mentions on that pull request join that Session instead of opening a second
+one: Roomote answers on the pull request and in the Session's home surface,
+and any work it delegates runs on the pull request's branch from the same
+Session.
+
 When a Roomote task opens a pull request, actionable review feedback returns to
 the owning Session and appears in both Fast and standard web task transcripts.
 Use **Resolve these issues** to address the current feedback, **Auto-resolve on

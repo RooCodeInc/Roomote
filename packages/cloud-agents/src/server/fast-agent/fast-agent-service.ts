@@ -1877,6 +1877,16 @@ export async function answerFastAgentQuestion({
           blockedByDifferentUser = true;
           break;
         }
+        if (followUp.sourceControlReplyTarget) {
+          // A mention routed in from a pull request needs its own turn: the
+          // answer must also post on that discussion and delegated work must
+          // target its branch, which only the whole-turn delivery wires up.
+          // Steering would inject the text into this turn's home adapter and
+          // retire the row without either. Leave it and everything after it
+          // durable, in order.
+          blockedByDifferentUser = true;
+          break;
+        }
 
         const followUpTurnId = buildFastAgentTurnId({
           currentMessageId: followUp.currentMessageId,
