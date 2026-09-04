@@ -97,7 +97,11 @@ export function ResponsiveWorkspacePanels({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
-      <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
+      <ResizablePanelGroup
+        key={panelCount}
+        direction="horizontal"
+        className="min-h-0 flex-1"
+      >
         <ResizablePanel
           id="main"
           order={0}
