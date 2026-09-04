@@ -149,6 +149,7 @@ describe('SideNavItem', () => {
         tooltip="Analytics"
         description="View analytics"
         onClick={onClick}
+        focusableWhenDisabled
         disabled
       />,
     );
@@ -168,6 +169,14 @@ describe('SideNavItem', () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
+  it('preserves native disabled behavior by default', () => {
+    render(
+      <SideNavItem icon={TestIcon} href="/tasks" tooltip="Tasks" disabled />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Tasks' })).toBeDisabled();
+  });
+
   it('keeps the setup explanation available when a disabled item is expanded', () => {
     render(
       <SideNavItem
@@ -175,6 +184,7 @@ describe('SideNavItem', () => {
         href="/analytics"
         tooltip="Available when setup is completed."
         expanded
+        focusableWhenDisabled
         disabled
       />,
     );

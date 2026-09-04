@@ -37,6 +37,7 @@ type SideNavItemProps = Omit<
   active?: boolean;
   isActive?: boolean;
   highlight?: boolean;
+  focusableWhenDisabled?: boolean;
   useNativeLink?: boolean;
   linkProps?: Omit<
     ComponentPropsWithoutRef<'a'>,
@@ -58,6 +59,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
       active,
       isActive,
       highlight = false,
+      focusableWhenDisabled = false,
       useNativeLink = false,
       linkProps,
       asChild = false,
@@ -74,6 +76,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
       label ?? (typeof tooltip === 'string' ? tooltip : undefined);
     const isLeftSide = side === 'left';
     const isCurrentItem = active ?? isActive ?? false;
+    const isFocusableDisabled = disabled && focusableWhenDisabled;
     const handleClick: MouseEventHandler<HTMLButtonElement> | undefined =
       disabled
         ? (event) => {
@@ -183,7 +186,8 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
         ref={ref}
         type={type ?? 'button'}
         variant="ghost"
-        aria-disabled={disabled || undefined}
+        disabled={disabled && !focusableWhenDisabled}
+        aria-disabled={isFocusableDisabled || undefined}
         className={itemClasses}
         onClick={handleClick}
         aria-label={ariaLabel ?? (!isLeftSide ? resolvedLabel : undefined)}
@@ -193,7 +197,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
       </Button>
     );
 
-    if ((expanded && !disabled) || !tooltip) {
+    if ((expanded && !isFocusableDisabled) || !tooltip) {
       return control;
     }
 

@@ -252,6 +252,7 @@ export const SideNav = ({
                 setupIncomplete && requiresSetup ? undefined : description
               }
               disabled={setupIncomplete && requiresSetup}
+              focusableWhenDisabled={setupIncomplete && requiresSetup}
               expanded={isSideNavExpanded}
               active={
                 matchExact
