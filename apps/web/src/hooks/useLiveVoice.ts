@@ -79,6 +79,12 @@ export function useLiveVoice({
   const micStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const activeRef = useRef(false);
+  // Bumped by every start() and stop(). An in-flight start compares its own
+  // generation after each await so a stop() (or a second start()) issued
+  // mid-handshake makes the stale attempt release its resources instead of
+  // activating a conversation the user already cancelled.
+  const startGenerationRef = useRef(0);
+  const connectingRef = useRef(false);
   const onUtteranceRef = useRef(onUtterance);
   onUtteranceRef.current = onUtterance;
 
@@ -229,6 +235,8 @@ export function useLiveVoice({
   );
 
   const stop = useCallback(() => {
+    startGenerationRef.current += 1;
+    connectingRef.current = false;
     activeRef.current = false;
     stopVad();
     stopSpeaking();
@@ -284,16 +292,28 @@ export function useLiveVoice({
   );
 
   const start = useCallback(async () => {
-    if (activeRef.current || disabled) {
+    if (activeRef.current || connectingRef.current || disabled) {
       return;
     }
 
+    const generation = ++startGenerationRef.current;
+    const isStale = () => startGenerationRef.current !== generation;
+    connectingRef.current = true;
     setError(null);
     setStatus('connecting');
 
+    let micStream: MediaStream | null = null;
+    let peer: RTCPeerConnection | null = null;
+    const releaseAttempt = () => {
+      peer?.close();
+      micStream?.getTracks().forEach((track) => track.stop());
+    };
+
     try {
       const token = await trpcClient.voice.createRealtimeToken.mutate();
-      const micStream = await navigator.mediaDevices.getUserMedia({
+      if (isStale()) return;
+
+      micStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           // Echo cancellation keeps the agent's own spoken reply (played
           // through the speakers) from triggering barge-in.
@@ -302,8 +322,12 @@ export function useLiveVoice({
           autoGainControl: true,
         },
       });
+      if (isStale()) {
+        releaseAttempt();
+        return;
+      }
 
-      const peer = new RTCPeerConnection();
+      peer = new RTCPeerConnection();
       const [audioTrack] = micStream.getAudioTracks();
 
       if (!audioTrack) {
@@ -317,6 +341,10 @@ export function useLiveVoice({
 
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
+      if (isStale()) {
+        releaseAttempt();
+        return;
+      }
 
       const response = await fetch(OPENAI_REALTIME_CALLS_URL, {
         method: 'POST',
@@ -331,19 +359,34 @@ export function useLiveVoice({
         throw new Error('Voice session handshake failed');
       }
 
-      await peer.setRemoteDescription({
-        type: 'answer',
-        sdp: await response.text(),
-      });
+      const answerSdp = await response.text();
+      if (isStale()) {
+        releaseAttempt();
+        return;
+      }
+
+      await peer.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+      if (isStale()) {
+        releaseAttempt();
+        return;
+      }
 
       peerRef.current = peer;
       dataChannelRef.current = dataChannel;
       micStreamRef.current = micStream;
+      connectingRef.current = false;
       activeRef.current = true;
       startVad(micStream);
       setActive(true);
       setStatus('listening');
     } catch (caught) {
+      if (isStale()) {
+        // A stop() already reset the hook; just drop what this attempt held.
+        releaseAttempt();
+        return;
+      }
+
+      releaseAttempt();
       stop();
       setStatus('error');
       setError(

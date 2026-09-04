@@ -751,9 +751,7 @@ export function FastSessionTranscript({
   });
   /** Assistant messages at or before this ts have already been spoken. */
   const lastSpokenTsRef = useRef(0);
-  const previousPendingRef = useRef<typeof pendingResponseState.pendingAfter>(
-    pendingResponseState.pendingAfter,
-  );
+  const previousAgentWorkingRef = useRef(false);
   const pendingUtterancesRef = useRef<string[]>([]);
   const [utteranceQueueVersion, setUtteranceQueueVersion] = useState(0);
 
@@ -800,22 +798,25 @@ export function FastSessionTranscript({
     });
   }, [isSending, utteranceQueueVersion, sendReply]);
 
-  // Speak the agent's reply once it settles: when the pending-response state
-  // clears, every not-yet-spoken assistant message since the last spoken one
-  // is read aloud as a single reply.
+  // Speak the agent's reply once the turn settles. `pendingAfter` alone clears
+  // on the first visible assistant message, which for Fast can be a progress
+  // kickoff ahead of the real result, so this waits for the composite
+  // "agent working" signal (send in flight, turn responding, or response
+  // pending) to fall back to false and then reads every not-yet-spoken
+  // assistant message as a single reply.
+  const agentWorking =
+    isSending ||
+    conversationResponding === true ||
+    pendingResponseState.pendingAfter !== null;
   const liveVoiceActive = liveVoice.active;
   const speakRef = useRef(liveVoice.speak);
   speakRef.current = liveVoice.speak;
 
   useEffect(() => {
-    const wasPending = previousPendingRef.current !== null;
-    previousPendingRef.current = pendingResponseState.pendingAfter;
+    const wasWorking = previousAgentWorkingRef.current;
+    previousAgentWorkingRef.current = agentWorking;
 
-    if (
-      !liveVoiceActive ||
-      !wasPending ||
-      pendingResponseState.pendingAfter !== null
-    ) {
+    if (!liveVoiceActive || !wasWorking || agentWorking) {
       return;
     }
 
@@ -838,10 +839,11 @@ export function FastSessionTranscript({
       ...unspoken.map((message) => message.ts),
     );
     speakRef.current(texts.join('\n\n'));
-  }, [pendingResponseState.pendingAfter, liveVoiceActive, messages]);
+  }, [agentWorking, liveVoiceActive, messages]);
 
   const handleVoiceToggle = useCallback(() => {
-    if (liveVoice.active) {
+    // Toggling while the handshake is still connecting cancels it.
+    if (liveVoice.active || liveVoice.status === 'connecting') {
       liveVoice.stop();
       return;
     }
@@ -933,10 +935,7 @@ export function FastSessionTranscript({
               <LiveVoiceStatusBar
                 status={liveVoice.status}
                 interimTranscript={liveVoice.interimTranscript}
-                thinking={
-                  pendingResponseState.pendingAfter !== null ||
-                  conversationResponding === true
-                }
+                thinking={agentWorking}
                 error={liveVoice.error}
                 onStop={liveVoice.stop}
               />
@@ -948,11 +947,7 @@ export function FastSessionTranscript({
               historyMessageCount={suggestionHistory.messageCount}
               assistantMessageCount={suggestionHistory.assistantCount}
               taskStateRevision={taskStateRevision}
-              agentWorking={
-                isSending ||
-                conversationResponding === true ||
-                pendingResponseState.pendingAfter !== null
-              }
+              agentWorking={agentWorking}
               initialModel={sessionModel}
               initialReasoningEffort={sessionReasoningEffort}
               defaultModelId={defaultModelId}
