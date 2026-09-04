@@ -48,6 +48,7 @@ Roomote 1.3 brings every supported entry point into continuous Sessions, expands
 - Render Slack links, channel references, and bare URLs correctly in web Session transcripts. Thanks to @mrubens for contributing this improvement.
 - Keep source-control conversations accurate by quoting the triggering comment, editing one reply throughout a Fast turn, linking forwarded Slack notifications to the exact GitHub comment, and resolving comment-edit endpoints safely. Thanks to @mrubens for contributing this improvement.
 - Revoke a removed user's existing run-token access to task artifacts while preserving deployment-owned task access.
+- Require an explicit `@mention` before Roomote responds inside GitHub review threads, omit the redundant quoted comment there, and use a plain source-control reply footer. Thanks to @mrubens for contributing this improvement.
 
 ## 1.2.4 (2026-09-04)
 
