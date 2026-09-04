@@ -315,6 +315,66 @@ describe('Fast conversation repository', () => {
     expect(rows).toEqual([{ id: sessions[0]!.id }]);
   });
 
+  it('lets another participant take a turn in a user-owned conversation', async () => {
+    const owner = await createUser();
+    const participant = await createUser();
+    const conversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-participant-test',
+      conversationId: `thread-participant-${owner.id}`,
+      replyTarget: {
+        channelId: 'channel-participant-test',
+        threadId: `thread-participant-${owner.id}`,
+      },
+    };
+    const created = await fastAgentConversationRepository.getOrCreate({
+      userId: owner.id,
+      conversation,
+    });
+    expect(created.created).toBe(true);
+
+    // A coworker replying in the bound thread is a participant, not a new
+    // owner: the turn reuses the conversation and ownership is unchanged.
+    const reused = await fastAgentConversationRepository.getOrCreate({
+      userId: participant.id,
+      conversation,
+    });
+    expect(reused).toMatchObject({ id: created.id, created: false });
+    expect(reused.owner).toEqual({ kind: 'user', userId: owner.id });
+    expect(reused.userId).toBe(owner.id);
+  });
+
+  it('rejects an explicit owner that does not match the conversation', async () => {
+    const owner = await createUser();
+    const other = await createUser();
+    const conversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-owner-mismatch-test',
+      conversationId: `thread-owner-mismatch-${owner.id}`,
+      replyTarget: {
+        channelId: 'channel-owner-mismatch-test',
+        threadId: `thread-owner-mismatch-${owner.id}`,
+      },
+    };
+    await fastAgentConversationRepository.getOrCreate({
+      owner: { kind: 'user', userId: owner.id },
+      conversation,
+    });
+
+    await expect(
+      fastAgentConversationRepository.getOrCreate({
+        owner: { kind: 'user', userId: other.id },
+        conversation,
+      }),
+    ).rejects.toThrow('Fast conversation owner does not match the caller.');
+    await expect(
+      fastAgentConversationRepository.getOrCreate({
+        owner: { kind: 'automation', automationKey: 'custom_automation' },
+        conversation,
+      }),
+    ).rejects.toThrow('Fast conversation owner does not match the caller.');
+  });
+
   it('returns the persisted Fast conversation title', async () => {
     const user = await createUser();
     const session = await fastAgentConversationRepository.getOrCreate({

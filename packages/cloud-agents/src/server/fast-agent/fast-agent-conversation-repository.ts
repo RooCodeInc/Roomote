@@ -1008,13 +1008,20 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         if (!record) {
           throw new Error('Failed to create or load Fast conversation.');
         }
+        // Only an explicit owner asserts who the conversation belongs to. A
+        // bare userId is the acting sender: it becomes the owner when this
+        // call creates the conversation, and otherwise it is a participant
+        // taking a turn in someone else's thread (a coworker replying in a
+        // bound Slack thread, a human replying to an automation-owned
+        // Session), which must not be rejected.
         if (
-          (resolvedOwner.kind === 'user' &&
-            (record.userId !== resolvedOwner.userId ||
+          owner &&
+          ((owner.kind === 'user' &&
+            (record.userId !== owner.userId ||
               record.ownerAutomation !== null)) ||
-          (resolvedOwner.kind === 'automation' &&
-            (record.userId !== null ||
-              record.ownerAutomation !== resolvedOwner.automationKey))
+            (owner.kind === 'automation' &&
+              (record.userId !== null ||
+                record.ownerAutomation !== owner.automationKey)))
         ) {
           throw new Error('Fast conversation owner does not match the caller.');
         }
