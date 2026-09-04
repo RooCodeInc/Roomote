@@ -172,7 +172,9 @@ export default async function SessionDetailPage({
                         },
                       }
                     : {})}
-                  headerExtras={<SessionHeaderPullRequests />}
+                  headerExtras={
+                    <SessionHeaderPullRequests key="session-pull-requests" />
+                  }
                   {...(isSetupSession
                     ? { timelineExtras: setupTimelineExtras }
                     : {})}
