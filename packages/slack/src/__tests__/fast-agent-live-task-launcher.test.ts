@@ -167,8 +167,11 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       thread_ts: '100.001',
       text: 'Preparing workspace…\n<https://roomote.example/task/task-1|Open in Roomote>',
       blocks: [
-        expect.objectContaining({
+        {
           type: 'task_card',
+          block_id: expect.stringMatching(
+            /^roomote-task-task-1-card-[0-9a-f-]{36}$/,
+          ),
           task_id: 'roomote-task-task-1',
           title: 'Preparing workspace…',
           status: 'in_progress',
@@ -179,7 +182,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
               text: 'Open in Roomote',
             },
           ],
-        }),
+        },
       ],
       unfurl_links: false,
       unfurl_media: false,
