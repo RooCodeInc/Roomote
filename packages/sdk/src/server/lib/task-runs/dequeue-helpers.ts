@@ -3,9 +3,12 @@ import {
   DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
+  NESTED_COMPUTE_ENV_VAR_NAME,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
+  buildNestedComputeEnv,
+  serializeNestedComputeEnv,
   parseInferenceGatewayKeys,
   parseModelProviderEnvKeys,
   RunStatus,
@@ -20,8 +23,11 @@ import {
 import {
   type TaskRun,
   db,
+  environments,
   taskRuns,
   markTaskStartParallelCountEndedAt,
+  resolveComputeProviderEnvValues,
+  resolveDefaultComputeProvider,
   resolveSandboxModelRuntimeEnv,
   resolveWorkspaceSourceControlProvider,
   resolveWorkspaceSourceControlHost,
@@ -263,11 +269,45 @@ function redactModelRuntimeManagedEnvVars(
   );
 }
 
+/**
+ * Resolves the compute forwarding value for an environment that opted in with
+ * `inherit_compute: true`: the deployment's default compute provider plus the
+ * resolved setup-catalog values for it, serialized under a single name that
+ * the worker expands for the nested Roomote app. Returns null when the
+ * environment did not opt in, the provider cannot be nested, or the provider
+ * is not fully configured.
+ */
+async function resolveNestedComputeEnvVar(
+  environmentId: string,
+): Promise<string | null> {
+  const environment = await db.query.environments.findFirst({
+    where: eq(environments.id, environmentId),
+    columns: { config: true },
+  });
+
+  if (environment?.config?.inherit_compute !== true) {
+    return null;
+  }
+
+  const provider = await resolveDefaultComputeProvider();
+  const nestedComputeEnv = buildNestedComputeEnv({
+    provider,
+    resolvedEnvValues: await resolveComputeProviderEnvValues(provider),
+  });
+
+  return nestedComputeEnv ? serializeNestedComputeEnv(nestedComputeEnv) : null;
+}
+
 export async function fetchResolvedRuntimeEnvVars(
   deploymentEnvVars?: Record<string, string>,
   options?: {
     sourceControlProvider?: SourceControlProvider | SourceControlProvider[];
     includeSandboxOpenRouterApiKey?: boolean;
+    /**
+     * Environment the task runs in. When it opted in with `inherit_compute`,
+     * the result carries NESTED_COMPUTE_ENV_VAR_NAME for the nested app.
+     */
+    nestedComputeEnvironmentId?: string;
   },
 ): Promise<Record<string, string>> {
   const envVars =
@@ -288,15 +328,22 @@ export async function fetchResolvedRuntimeEnvVars(
     ),
   );
 
+  const nestedComputeEnvVar = options?.nestedComputeEnvironmentId
+    ? await resolveNestedComputeEnvVar(options.nestedComputeEnvironmentId)
+    : null;
+  const environmentTaskEnvVars = nestedComputeEnvVar
+    ? { ...resolvedEnvVars, [NESTED_COMPUTE_ENV_VAR_NAME]: nestedComputeEnvVar }
+    : resolvedEnvVars;
+
   if (options?.includeSandboxOpenRouterApiKey) {
-    return resolvedEnvVars;
+    return environmentTaskEnvVars;
   }
 
-  if (!(SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME in resolvedEnvVars)) {
-    return resolvedEnvVars;
+  if (!(SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME in environmentTaskEnvVars)) {
+    return environmentTaskEnvVars;
   }
 
-  const ordinaryTaskEnvVars = { ...resolvedEnvVars };
+  const ordinaryTaskEnvVars = { ...environmentTaskEnvVars };
   delete ordinaryTaskEnvVars[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
   return ordinaryTaskEnvVars;
 }

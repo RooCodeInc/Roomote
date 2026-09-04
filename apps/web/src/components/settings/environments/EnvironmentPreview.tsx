@@ -409,6 +409,18 @@ function getAdvancedItems(config: EnvironmentConfig) {
     );
   }
 
+  if (config.inherit_compute) {
+    items.push(
+      <div key="inherit_compute" className="space-y-2">
+        <div className="text-xs text-muted-foreground">Nested compute</div>
+        <div className="rounded border border-border/70 px-3 py-2 text-sm">
+          Tasks receive this deployment&apos;s compute provider credentials so a
+          nested Roomote instance can spawn its own sandboxes.
+        </div>
+      </div>,
+    );
+  }
+
   if (config.skills && Object.keys(config.skills).length > 0) {
     items.push(
       <div key="skills" className="space-y-2">

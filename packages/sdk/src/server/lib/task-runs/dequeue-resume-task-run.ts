@@ -428,6 +428,7 @@ export const dequeueResumeTaskRun = async (
         includeSandboxOpenRouterApiKey: Boolean(
           result.taskRun.payload.environmentId,
         ),
+        nestedComputeEnvironmentId: result.taskRun.payload.environmentId,
       });
     } catch (error) {
       const message =

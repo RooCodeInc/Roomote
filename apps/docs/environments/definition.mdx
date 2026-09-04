@@ -153,6 +153,7 @@ agentInstructions: |
 | `docker_projects`         | list              | no       | Existing Compose or Dockerfile projects to build and start. See [Docker projects](#docker-projects).                      |
 | `ports`                   | list              | no       | Named preview ports. See [Ports](#ports).                                                                                 |
 | `oidc`                    | map               | no       | Sandbox OIDC targets. See [OIDC](#oidc).                                                                                  |
+| `inherit_compute`         | boolean           | no       | Forward the deployment's compute provider credentials into tasks. See [Nested compute](#nested-compute).                  |
 | `mcpServers`              | map               | no       | Custom MCP servers for this environment. See [MCP servers](#mcp-servers).                                                 |
 | `skills`                  | map               | no       | Installable skills by `owner/repo`. See [Skills](#skills).                                                                |
 | `manualSkills`            | list              | no       | Inline skills defined in the environment. See [Skills](#skills).                                                          |
@@ -451,6 +452,30 @@ oidc:
 ```
 
 Each `token_file` must be an absolute path and must be unique across targets.
+
+## Nested compute
+
+Roomote strips every compute provider credential from task sandboxes. That is
+the right default, but it means a Roomote instance running _inside_ an
+environment (for example Roomote's own development environment) cannot spawn
+task sandboxes of its own. Set `inherit_compute: true` to forward the
+deployment's default compute provider and its credentials into tasks in this
+environment:
+
+```yaml
+inherit_compute: true
+```
+
+Tasks then see `DEFAULT_COMPUTE_PROVIDER` plus that provider's variables (for
+example `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`, or the Roomote Cloud token
+pair), exactly as the deployment resolves them. Local Docker cannot be nested
+and is never forwarded.
+
+Every task in the environment can read the forwarded values, so enable this
+only for environments you trust with the deployment's compute credentials. The
+nested instance also needs to be reachable by the sandboxes it spawns: expose
+its API on an unproxied port (`proxied: false`) so `ROOMOTE_<NAME>_HOST` is a
+direct machine URL those sandboxes can call.
 
 ## Write a definition with a coding agent
 

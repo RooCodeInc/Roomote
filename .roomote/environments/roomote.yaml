@@ -20,6 +20,10 @@ description:
   (Redis, API, BullMQ, controller) plus a local Mintlify preview of the public
   docs site (apps/docs) on the `docs` port.
 initialUrl: http://127.0.0.1:3000/auth/dev-login
+# Forward this deployment's compute provider credentials so the nested Roomote
+# controller can spawn its own task sandboxes (see "Nested compute" in the
+# environment definition docs).
+inherit_compute: true
 ports:
   - name: web
     port: 3000
@@ -27,6 +31,11 @@ ports:
     primary: true
   - name: docs
     port: 3333
+  # Unproxied so the nested controller's sandboxes can reach the nested API
+  # directly; the controller command below reads it from ROOMOTE_API_HOST.
+  - name: api
+    port: 13001
+    proxied: false
 services:
   - postgres16
 repositories:

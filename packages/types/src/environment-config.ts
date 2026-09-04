@@ -737,6 +737,16 @@ export const environmentConfigSchema = z
      */
     oidc: environmentOidcSchema.optional(),
     /**
+     * Forward the deployment's own compute provider configuration
+     * (`DEFAULT_COMPUTE_PROVIDER` plus that provider's credentials) into this
+     * environment so a nested Roomote instance running inside it can spawn
+     * its own task sandboxes. Compute credentials are otherwise stripped from
+     * every sandbox. Every task in the environment can read the forwarded
+     * values, so enable this only for environments you trust with them.
+     * Local Docker cannot be nested and is never forwarded.
+     */
+    inherit_compute: z.boolean().optional(),
+    /**
      * Named preview ports for human-facing application URLs.
      * Each port gets an authenticated shareable URL in
      * `ROOMOTE_<NAME>_PREVIEW_URL`. `ROOMOTE_<NAME>_HOST` points to that same

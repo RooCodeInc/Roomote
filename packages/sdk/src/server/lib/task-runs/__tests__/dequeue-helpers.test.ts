@@ -12,6 +12,9 @@ const {
   mockCreateTaskRunBitbucketCredentials,
   mockResolveSandboxModelRuntimeEnv,
   mockTaskRunsFindFirst,
+  mockEnvironmentsFindFirst,
+  mockResolveDefaultComputeProvider,
+  mockResolveComputeProviderEnvValues,
   mockNotifySourceRunOnSettle,
   mockCaptureTaskSettled,
 } = vi.hoisted(() => ({
@@ -25,6 +28,9 @@ const {
   mockCreateTaskRunBitbucketCredentials: vi.fn(),
   mockResolveSandboxModelRuntimeEnv: vi.fn(),
   mockTaskRunsFindFirst: vi.fn(),
+  mockEnvironmentsFindFirst: vi.fn(),
+  mockResolveDefaultComputeProvider: vi.fn(),
+  mockResolveComputeProviderEnvValues: vi.fn(),
   mockNotifySourceRunOnSettle: vi.fn(),
   mockCaptureTaskSettled: vi.fn(),
 }));
@@ -43,6 +49,9 @@ vi.mock('@roomote/db/server', () => ({
       taskRuns: {
         findFirst: (...args: unknown[]) => mockTaskRunsFindFirst(...args),
       },
+      environments: {
+        findFirst: (...args: unknown[]) => mockEnvironmentsFindFirst(...args),
+      },
     },
     select: () => ({
       from: () => ({
@@ -52,6 +61,11 @@ vi.mock('@roomote/db/server', () => ({
     transaction: vi.fn(),
   },
   taskRuns: { id: 'taskRuns.id' },
+  environments: { id: 'environments.id' },
+  resolveDefaultComputeProvider: (...args: unknown[]) =>
+    mockResolveDefaultComputeProvider(...args),
+  resolveComputeProviderEnvValues: (...args: unknown[]) =>
+    mockResolveComputeProviderEnvValues(...args),
   repositories: {
     fullName: 'repositories.fullName',
     sourceControlProvider: 'repositories.sourceControlProvider',
@@ -1006,6 +1020,83 @@ describe('fetchResolvedRuntimeEnvVars', () => {
 
     expect(envVars.SANDBOX_OPENROUTER_API_KEY).toBe('sandbox-openrouter-key');
     expect(envVars.MY_APP_CONFIG).toBe('value');
+  });
+
+  it('forwards the deployment compute config for inherit_compute environments', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+    mockEnvironmentsFindFirst.mockResolvedValueOnce({
+      config: { inherit_compute: true },
+    });
+    mockResolveDefaultComputeProvider.mockResolvedValueOnce('modal');
+    mockResolveComputeProviderEnvValues.mockResolvedValueOnce({
+      MODAL_TOKEN_ID: 'ak-id',
+      MODAL_TOKEN_SECRET: 'as-secret',
+      MODAL_BASE_IMAGE_REF: 'ghcr.io/roocodeinc/roomote-worker:develop',
+    });
+
+    const envVars = await fetchResolvedRuntimeEnvVars(
+      {
+        // Stored under its real name: still stripped from the sandbox.
+        MODAL_TOKEN_SECRET: 'stored-secret',
+        MY_APP_CONFIG: 'value',
+      },
+      { nestedComputeEnvironmentId: 'env-nested' },
+    );
+
+    expect(envVars).not.toHaveProperty('MODAL_TOKEN_SECRET');
+    expect(envVars.MY_APP_CONFIG).toBe('value');
+    expect(JSON.parse(envVars.R_NESTED_COMPUTE_ENV!)).toEqual({
+      DEFAULT_COMPUTE_PROVIDER: 'modal',
+      MODAL_TOKEN_ID: 'ak-id',
+      MODAL_TOKEN_SECRET: 'as-secret',
+      MODAL_BASE_IMAGE_REF: 'ghcr.io/roocodeinc/roomote-worker:develop',
+    });
+    expect(mockResolveComputeProviderEnvValues).toHaveBeenCalledWith('modal');
+  });
+
+  it('withholds compute config when the environment did not opt in', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+    mockResolveDefaultComputeProvider.mockClear();
+    mockEnvironmentsFindFirst.mockResolvedValueOnce({
+      config: { name: 'Plain' },
+    });
+
+    const envVars = await fetchResolvedRuntimeEnvVars(
+      { MY_APP_CONFIG: 'value' },
+      { nestedComputeEnvironmentId: 'env-plain' },
+    );
+
+    expect(envVars).not.toHaveProperty('R_NESTED_COMPUTE_ENV');
+    expect(mockResolveDefaultComputeProvider).not.toHaveBeenCalled();
+  });
+
+  it('withholds compute config when the deployment provider cannot be nested', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+    mockEnvironmentsFindFirst.mockResolvedValueOnce({
+      config: { inherit_compute: true },
+    });
+    mockResolveDefaultComputeProvider.mockResolvedValueOnce('docker');
+    mockResolveComputeProviderEnvValues.mockResolvedValueOnce({});
+
+    const envVars = await fetchResolvedRuntimeEnvVars(
+      { MY_APP_CONFIG: 'value' },
+      { nestedComputeEnvironmentId: 'env-docker' },
+    );
+
+    expect(envVars).not.toHaveProperty('R_NESTED_COMPUTE_ENV');
+  });
+
+  it('strips an operator-stored forwarding value for tasks without an environment', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+    mockEnvironmentsFindFirst.mockClear();
+
+    const envVars = await fetchResolvedRuntimeEnvVars({
+      R_NESTED_COMPUTE_ENV: '{"DEFAULT_COMPUTE_PROVIDER":"modal"}',
+      MY_APP_CONFIG: 'value',
+    });
+
+    expect(envVars).not.toHaveProperty('R_NESTED_COMPUTE_ENV');
+    expect(mockEnvironmentsFindFirst).not.toHaveBeenCalled();
   });
 
   it('mirrors resolved model env to legacy ROOMOTE_* aliases for pre-rename snapshot workers', async () => {
