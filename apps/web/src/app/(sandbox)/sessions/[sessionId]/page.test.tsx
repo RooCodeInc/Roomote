@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { isValidElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 const {
@@ -15,9 +15,13 @@ const {
   getFastSessionTasksMock: vi.fn(),
   getSessionByIdCommandMock: vi.fn(),
   transcriptMock: vi.fn(
-    ({ footer }: { messages: unknown[]; footer?: ReactNode }) => (
-      <div data-testid="transcript">{footer}</div>
-    ),
+    ({
+      footer,
+    }: {
+      messages: unknown[];
+      footer?: ReactNode;
+      headerExtras?: ReactNode;
+    }) => <div data-testid="transcript">{footer}</div>,
   ),
   sessionTaskTimelineMock: vi.fn(() => (
     <div data-testid="session-task-timeline" />
@@ -339,6 +343,11 @@ describe('Session detail page', () => {
       'timelineExtras',
     );
     expect(transcriptMock.mock.calls[0]?.[0]).toHaveProperty('headerExtras');
+    const headerExtras = transcriptMock.mock.calls[0]?.[0].headerExtras;
+    expect(isValidElement(headerExtras)).toBe(true);
+    expect(isValidElement(headerExtras) ? headerExtras.key : null).toBe(
+      'session-pull-requests',
+    );
   });
 
   it('renders a task-only workspace for unified sessions without a Fast conversation', async () => {
@@ -385,7 +394,7 @@ describe('Session detail page', () => {
       'data-content-class-name="flex-row flex-wrap items-center gap-2 pr-12 @[600px]:gap-3 @[600px]:pr-4"',
     );
     expect(html).toContain(
-      'class="min-w-0 max-w-full flex-[0_1_auto] break-words text-sm font-medium @[600px]:truncate"',
+      'class="min-w-0 max-w-full flex-[0_1_auto] cursor-default break-words text-sm font-medium @[600px]:truncate"',
     );
     expect(html).toContain('session-header-pull-requests');
     expect(html).toContain('session-task-timeline');

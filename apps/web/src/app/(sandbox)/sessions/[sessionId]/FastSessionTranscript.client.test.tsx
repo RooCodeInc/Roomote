@@ -1454,6 +1454,7 @@ describe('FastSessionTranscript', () => {
     );
 
     const input = screen.getByPlaceholderText('Message agent');
+    expect(input).toHaveFocus();
     fireEvent.change(input, { target: { value: 'Follow up question' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 

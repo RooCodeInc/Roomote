@@ -302,7 +302,7 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
                 imageUrl={msg.userImageUrl}
                 name={msg.userName}
                 email={msg.userEmail}
-                size="sm"
+                size="md"
                 alt={msg.userName ?? msg.userEmail ?? 'User'}
               />
             </div>

@@ -49,7 +49,7 @@ export function SandboxSidePanelHeader({
         {title ? (
           <div className="min-w-0 flex-1 overflow-hidden">
             <h2
-              className="truncate text-sm font-medium whitespace-nowrap"
+              className="cursor-default truncate text-sm font-medium whitespace-nowrap"
               title={title}
             >
               {title}
@@ -57,7 +57,9 @@ export function SandboxSidePanelHeader({
           </div>
         ) : null}
         {titleAdornment ? (
-          <div className="min-w-0 shrink">{titleAdornment}</div>
+          <div className={title ? 'min-w-0 shrink' : 'min-w-0 flex-1'}>
+            {titleAdornment}
+          </div>
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
