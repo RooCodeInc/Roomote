@@ -210,6 +210,7 @@ export async function processDiscordFastAgentMessage(
         input.sender.global_name ??
         input.sender.username,
       senderExternalId: input.sender.id,
+      directedAtRoomote: Boolean(input.directedAtRoomote),
     };
     let durableTurn: FastAgentDurableTurn | null = null;
     if (!releaseFastAgentLock) {

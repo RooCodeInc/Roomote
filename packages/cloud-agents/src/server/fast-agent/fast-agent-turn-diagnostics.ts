@@ -104,6 +104,7 @@ export class FastAgentTurnDiagnostics {
   private tokenTotals: TokenTotals | undefined;
   private maxContextTokens: number | undefined;
   private abortedAfterCloseout = false;
+  private silentCompletion = false;
   private openCodeProviderRetryEventCount = 0;
   private firstOpenCodeProviderRetryElapsedMs: number | undefined;
   private lastOpenCodeProviderRetryElapsedMs: number | undefined;
@@ -162,6 +163,11 @@ export class FastAgentTurnDiagnostics {
   /** The trailing model request after the closeout was cut short. */
   recordCloseoutAbort(): void {
     this.abortedAfterCloseout = true;
+  }
+
+  /** The model ended with nothing visible and the turn settled as ignored. */
+  recordSilentCompletion(): void {
+    this.silentCompletion = true;
   }
 
   /** One model request per assistant message OpenCode starts in the turn. */
@@ -478,6 +484,7 @@ export class FastAgentTurnDiagnostics {
       firstModelResponseDurationMs,
       postReplyInferenceDurationMs,
       abortedAfterCloseout: this.abortedAfterCloseout,
+      silentCompletion: this.silentCompletion,
       inputTokens: this.tokenTotals?.input,
       cacheReadTokens: this.tokenTotals?.cacheRead,
       cacheWriteTokens: this.tokenTotals?.cacheWrite,
