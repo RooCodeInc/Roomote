@@ -380,7 +380,7 @@ describe('AcpToolMessage', () => {
     );
   });
 
-  it('renders Roomote Slack lifecycle tools as compact title-only rows', () => {
+  it('renders Roomote chat replies as expandable receipts like task messages', () => {
     render(
       <AcpToolMessage
         msg={buildResultMessage('mcp', {
@@ -390,7 +390,32 @@ describe('AcpToolMessage', () => {
           mcpToolName: 'send_chat_reply',
           serverName: 'roomote',
           toolName: 'send_chat_reply',
+          rawInput: { arguments: { message: 'Brief Slack update.' } },
           output: '{"success":true,"summary":"Brief Slack update."}',
+        } as Partial<AcpToolResultUiMessage['data']>)}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'Sent',
+        object: 'Chat Reply',
+        collapsible: true,
+      }),
+    );
+  });
+
+  it('renders effect-free Roomote lifecycle tools as compact title-only rows', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'ignore_event',
+          isMcp: true,
+          mcpServerName: 'roomote',
+          mcpToolName: 'ignore_event',
+          serverName: 'roomote',
+          toolName: 'ignore_event',
+          output: '{"success":true,"ignored":true}',
         })}
       />,
     );
@@ -398,7 +423,7 @@ describe('AcpToolMessage', () => {
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'Used',
-        object: 'Send Chat Reply',
+        object: 'Ignore Event',
         suffix: 'Roomote',
         collapsible: false,
       }),
@@ -640,6 +665,12 @@ describe('AcpToolMessage', () => {
     expect(screen.getByRole('img', { name: 'Visual proof' })).toHaveAttribute(
       'src',
       '/api/artifacts/art-1/raw?sig=fresh',
+    );
+    expect(screen.getByRole('img', { name: 'Visual proof' })).toHaveClass(
+      'h-auto',
+      'max-h-[200px]',
+      'w-auto',
+      'max-w-[min(100%,40rem)]',
     );
     // The subagent row keeps its collapsible prompt/details alongside the
     // always-visible preview.

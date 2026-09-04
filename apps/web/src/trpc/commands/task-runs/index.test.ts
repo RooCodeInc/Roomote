@@ -1,11 +1,8 @@
-import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
-
 import type { UserAuthSuccess } from '@/types';
 
 const {
   mockEnqueueTask,
   mockGetRepositories,
-  mockDbWhere,
   mockDbSelect,
   mockGoalCommit,
   mockGoalRollback,
@@ -16,7 +13,6 @@ const {
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockGetRepositories: vi.fn(),
-  mockDbWhere: vi.fn(),
   mockDbSelect: vi.fn(),
   mockGoalCommit: vi.fn(),
   mockGoalRollback: vi.fn(),
@@ -119,7 +115,7 @@ vi.mock('../sandbox-session', () => ({
     mockSendSandboxPrompt(...args),
 }));
 
-import { createStandardTaskRunCommand, startTaskGoalCommand } from './index';
+import { startTaskGoalCommand } from './index';
 
 const auth = {
   success: true,
@@ -128,7 +124,6 @@ const auth = {
   name: 'Test User',
   primaryEmail: 'test@example.com',
   isAdmin: true,
-  featureFlags: {},
   anonymousAnalyticsEnabled: false,
   cloudEnabled: false,
   cookieConsentedAt: null,
@@ -143,13 +138,6 @@ const auth = {
     createdAt: null,
   },
 } satisfies UserAuthSuccess;
-
-function mockSuccessfulEnqueue() {
-  mockEnqueueTask.mockResolvedValue({
-    id: 123,
-    taskId: 'task-123',
-  });
-}
 
 describe('startTaskGoalCommand', () => {
   beforeEach(() => {
@@ -246,240 +234,5 @@ describe('startTaskGoalCommand', () => {
 
     expect(mockGoalCommit).not.toHaveBeenCalled();
     expect(mockGoalRollback).toHaveBeenCalledOnce();
-  });
-});
-
-describe('createStandardTaskRunCommand', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockDbSelect.mockReturnValue({
-      from: vi.fn(() => ({
-        innerJoin: vi.fn(() => ({
-          where: mockDbWhere,
-        })),
-      })),
-    });
-    mockDbWhere.mockResolvedValue([]);
-    // Shared resolver defaults to unresolved; the environment test overrides it.
-    mockResolveWorkspaceProvider.mockResolvedValue({});
-    mockSuccessfulEnqueue();
-  });
-
-  it('stamps the selected repository source-control provider onto manual task payloads', async () => {
-    mockGetRepositories.mockResolvedValue([
-      {
-        id: 'repo-ado',
-        fullName: 'acme/Platform/backend',
-        sourceControlProvider: 'ado',
-      },
-    ]);
-
-    const result = await createStandardTaskRunCommand(auth, {
-      payload: {
-        repo: 'acme/Platform/backend',
-        environmentId: '7bb91386-6282-4c98-9b31-0eb181116822',
-        description: 'Update the backend',
-      },
-    });
-
-    expect(result).toEqual({
-      success: true,
-      id: 123,
-      taskId: 'task-123',
-    });
-    expect(mockEnqueueTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          type: TaskPayloadKind.StandardTask,
-          payload: expect.objectContaining({
-            repo: 'acme/Platform/backend',
-            environmentId: '7bb91386-6282-4c98-9b31-0eb181116822',
-            sourceControlProvider: 'ado',
-          }),
-        }),
-        initiator: { kind: 'user', userId: 'user-123' },
-        workflow: 'standard',
-        surface: 'web',
-        trigger: 'manual',
-      }),
-    );
-  });
-
-  it('allows a bare-repo launch without an environment', async () => {
-    mockGetRepositories.mockResolvedValue([
-      {
-        id: 'repo-ado',
-        fullName: 'acme/Platform/backend',
-        sourceControlProvider: 'ado',
-      },
-    ]);
-
-    const result = await createStandardTaskRunCommand(auth, {
-      payload: {
-        repo: 'acme/Platform/backend',
-        description: 'Update the backend',
-      },
-    });
-
-    expect(result).toEqual({
-      success: true,
-      id: 123,
-      taskId: 'task-123',
-    });
-    expect(mockEnqueueTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          type: TaskPayloadKind.StandardTask,
-          payload: expect.not.objectContaining({
-            environmentId: expect.anything(),
-          }),
-        }),
-        initiator: { kind: 'user', userId: 'user-123' },
-        workflow: 'standard',
-        surface: 'web',
-        trigger: 'manual',
-      }),
-    );
-  });
-
-  it('allows an all-repositories launch without an environment', async () => {
-    const result = await createStandardTaskRunCommand(auth, {
-      payload: {
-        repo: ALL_REPOSITORIES,
-        description: 'Update everything',
-      },
-    });
-
-    expect(result).toEqual({
-      success: true,
-      id: 123,
-      taskId: 'task-123',
-    });
-    expect(mockEnqueueTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          type: TaskPayloadKind.StandardTask,
-          payload: expect.objectContaining({
-            repo: ALL_REPOSITORIES,
-          }),
-        }),
-        initiator: { kind: 'user', userId: 'user-123' },
-        workflow: 'standard',
-        surface: 'web',
-        trigger: 'manual',
-      }),
-    );
-  });
-
-  it('rejects launches without an environment or repository target', async () => {
-    const result = await createStandardTaskRunCommand(auth, {
-      payload: {
-        repo: '',
-        description: 'Update the backend',
-      },
-    });
-
-    expect(result).toEqual({
-      success: false,
-      error: 'Select an environment before starting a task.',
-    });
-    expect(mockEnqueueTask).not.toHaveBeenCalled();
-  });
-
-  it('stamps an environment source-control provider from its repository mappings', async () => {
-    // The environment resolver delegates to the shared @roomote/db resolver.
-    mockResolveWorkspaceProvider.mockResolvedValue({
-      'acme/Platform/backend': 'ado',
-    });
-
-    const result = await createStandardTaskRunCommand(auth, {
-      payload: {
-        repo: ALL_REPOSITORIES,
-        environmentId: '7bb91386-6282-4c98-9b31-0eb181116822',
-        description: 'Update the environment',
-      },
-    });
-
-    expect(result).toEqual({
-      success: true,
-      id: 123,
-      taskId: 'task-123',
-    });
-    expect(mockEnqueueTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          type: TaskPayloadKind.StandardTask,
-          payload: expect.objectContaining({
-            environmentId: '7bb91386-6282-4c98-9b31-0eb181116822',
-            sourceControlProvider: 'ado',
-          }),
-        }),
-        initiator: { kind: 'user', userId: 'user-123' },
-        workflow: 'standard',
-        surface: 'web',
-        trigger: 'manual',
-      }),
-    );
-  });
-
-  it('uses the first repository provider for a mixed environment', async () => {
-    mockResolveWorkspaceProvider.mockResolvedValue({
-      'octo/api': 'github',
-      'group/web': 'gitlab',
-    });
-
-    const result = await createStandardTaskRunCommand(auth, {
-      payload: {
-        repo: ALL_REPOSITORIES,
-        environmentId: '7bb91386-6282-4c98-9b31-0eb181116822',
-        description: 'Update the environment',
-      },
-    });
-
-    expect(result.success).toBe(true);
-    expect(mockEnqueueTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          payload: expect.objectContaining({
-            sourceControlProvider: 'github',
-          }),
-        }),
-      }),
-    );
-  });
-
-  it('allows mixed selected repositories and keeps selection order for the primary provider', async () => {
-    mockGetRepositories.mockResolvedValue([
-      {
-        id: 'repo-github',
-        fullName: 'octo/api',
-        sourceControlProvider: 'github',
-      },
-      {
-        id: 'repo-gitlab',
-        fullName: 'group/web',
-        sourceControlProvider: 'gitlab',
-      },
-    ]);
-
-    const result = await createStandardTaskRunCommand(auth, {
-      payload: {
-        repo: ALL_REPOSITORIES,
-        selectedRepositories: ['octo/api', 'group/web'],
-        description: 'Update selected repositories',
-      },
-    });
-
-    expect(result.success).toBe(true);
-    expect(mockEnqueueTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          payload: expect.objectContaining({
-            selectedRepositories: ['octo/api', 'group/web'],
-            sourceControlProvider: 'github',
-          }),
-        }),
-      }),
-    );
   });
 });

@@ -44,6 +44,7 @@ const WORKLOAD_READY_RETRY_BUDGET_MS = 60_000;
 const WORKLOAD_READY_INITIAL_DELAY_MS = 500;
 const WORKLOAD_READY_MAX_DELAY_MS = 30_000;
 const DEFAULT_BLAXEL_STANDBY_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
+const BLAXEL_LIST_PAGE_SIZE = 50;
 
 export class BlaxelClient implements ComputeProviderClient {
   public readonly vendor: ComputeProvider = 'blaxel';
@@ -64,16 +65,31 @@ export class BlaxelClient implements ComputeProviderClient {
     input: ListInstancesInput,
   ): Promise<InstanceSummary[]> {
     const instances: InstanceSummary[] = [];
-    const page = await raceWithAbort({
-      promise: SandboxInstance.list({ limit: 100 }),
-      signal: input.signal,
-      abortMessage: 'Listing Blaxel sandboxes was aborted',
-    });
+    const seenCursors = new Set<string>();
+    let cursor: string | undefined;
 
-    for await (const sandbox of page) {
-      throwIfAborted(input.signal);
-      if (sandbox.status !== 'TERMINATED') instances.push(summarize(sandbox));
-    }
+    do {
+      const page = await raceWithAbort({
+        promise: SandboxInstance.list({
+          limit: BLAXEL_LIST_PAGE_SIZE,
+          ...(cursor ? { cursor } : {}),
+        }),
+        signal: input.signal,
+        abortMessage: 'Listing Blaxel sandboxes was aborted',
+      });
+
+      for (const sandbox of page.data) {
+        throwIfAborted(input.signal);
+        if (sandbox.status !== 'TERMINATED') instances.push(summarize(sandbox));
+      }
+      const nextCursor = page.nextCursor;
+      if (nextCursor && seenCursors.has(nextCursor)) {
+        throw new Error('Blaxel pagination returned a repeated cursor');
+      }
+      if (nextCursor) seenCursors.add(nextCursor);
+      cursor = nextCursor;
+    } while (cursor);
+
     return instances;
   }
 

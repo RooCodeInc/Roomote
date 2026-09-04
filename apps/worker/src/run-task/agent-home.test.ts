@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  statSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -867,13 +868,65 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
-  it('isolates visual and proof agents from unrelated MCP tool schemas', () => {
+  it('runs the judge on the vision model when one is configured', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
         R_MODEL: 'openrouter/openai/gpt-5.6-terra',
         R_VISION_MODEL: 'openrouter/google/gemini-3.6-flash',
-        ROOMOTE_PROOF_BROWSER_TARGET: 'http://127.0.0.1:3000',
+        R_VISION_MODEL_REASONING_EFFORT: 'low',
+        R_CODE_REVIEW_MODEL: 'openrouter/anthropic/claude-sonnet-5',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      agent: Record<
+        string,
+        { model?: string; options?: Record<string, unknown> }
+      >;
+    };
+
+    // The judge opens proof screenshots itself, so the vision model wins
+    // over the code-review model.
+    expect(config.agent.judge?.model).toBe(
+      'openrouter/google/gemini-3.6-flash',
+    );
+    expect(config.agent.judge?.options).toBeDefined();
+    expect(
+      readFileSync(
+        join(
+          result.openCodeConfigDir,
+          'roomote-opencode-judge-model-instructions.md',
+        ),
+        'utf8',
+      ),
+    ).toContain(
+      'When `R_VISION_MODEL` is configured, the judge runs on that vision model so it can open proof screenshots directly.',
+    );
+  });
+
+  it('falls back to the coding model for the judge when no vision model is configured', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        R_CODE_REVIEW_MODEL: 'openrouter/anthropic/claude-sonnet-5',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      agent: Record<string, { model?: string }>;
+    };
+
+    expect(config.agent.judge?.model).toBe('openrouter/openai/gpt-5.6-terra');
+  });
+
+  it('isolates the visual agent from unrelated MCP tool schemas', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        R_VISION_MODEL: 'openrouter/google/gemini-3.6-flash',
         OPENROUTER_API_KEY: 'openrouter-key',
       },
       mcpServers: [
@@ -917,17 +970,117 @@ describe('generateOpenCodeConfig provider support', () => {
       );
     }
 
-    expect(config.agent['proof-runner']?.tools).toMatchObject({
-      'pylon_*': false,
-      'custom-tools_*': false,
-      roomote_manage_source_control: false,
-    });
-    expect(config.agent['proof-runner']?.tools).not.toHaveProperty('roomote_*');
-    expect(config.agent['proof-runner']?.tools).not.toHaveProperty(
-      'roomote_manage_artifacts',
-    );
     expect(config.agent.general?.tools).not.toHaveProperty('pylon_*');
     expect(config.agent.architect?.tools).toBeUndefined();
+  });
+
+  it('keeps remote integrations off the mounted config and reachable on demand', () => {
+    const homeDir = createHomeDir();
+    const runtimeEnv = {
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      OPENROUTER_API_KEY: 'openrouter-key',
+      ROOMOTE_MCP_PYLON_BEARER_TOKEN: 'run-token',
+    };
+    const result = generateOpenCodeConfig({
+      homeDir,
+      runtimeEnv,
+      mcpServers: [
+        {
+          type: 'local',
+          name: 'roomote',
+          command: 'node',
+          args: ['roomote-mcp-server.js'],
+          environment: { ROOMOTE_CLOUD_TOKEN: 'cloud-token' },
+        },
+        {
+          type: 'remote',
+          name: 'gbrain',
+          url: 'https://api.example.com/api/mcp/gbrain',
+        },
+        {
+          type: 'remote',
+          name: 'pylon',
+          url: 'https://api.example.com/api/mcp/pylon',
+          headers: {
+            Authorization: 'Bearer {env:ROOMOTE_MCP_PYLON_BEARER_TOKEN}',
+          },
+        },
+        {
+          type: 'local',
+          name: 'custom-tools',
+          command: 'custom-mcp',
+        },
+      ],
+    });
+    const config = JSON.parse(result.configContent) as {
+      agent: Record<string, { tools?: Record<string, boolean> }>;
+      instructions: string[];
+      mcp: Record<string, { environment?: Record<string, string> }>;
+    };
+
+    // Member server, memory server, and local servers stay mounted; the
+    // remote integration does not.
+    expect(Object.keys(config.mcp).sort()).toEqual([
+      'custom-tools',
+      'gbrain',
+      'roomote',
+    ]);
+    const catalogPath = join(
+      result.openCodeConfigDir,
+      'on-demand-mcp-servers.json',
+    );
+    expect(config.mcp.roomote?.environment).toMatchObject({
+      ROOMOTE_CLOUD_TOKEN: 'cloud-token',
+      ROOMOTE_ON_DEMAND_MCP_CATALOG_PATH: catalogPath,
+    });
+    // The catalog carries the resolved proxy credential for the member
+    // server's own process, and only that process can read it.
+    expect(JSON.parse(readFileSync(catalogPath, 'utf8'))).toEqual({
+      servers: [
+        {
+          name: 'pylon',
+          displayName: 'Pylon',
+          description: expect.any(String),
+          url: 'https://api.example.com/api/mcp/pylon',
+          headers: { Authorization: 'Bearer run-token' },
+        },
+      ],
+    });
+    expect(statSync(catalogPath).mode & 0o777).toBe(0o600);
+    expect(result.configContent).not.toContain('run-token');
+
+    const integrationInstructions = readFileSync(
+      config.instructions.find((entry) => entry.includes('integration'))!,
+      'utf8',
+    );
+    expect(integrationInstructions).toContain('# On-demand integrations');
+    expect(integrationInstructions).toContain('- Pylon [id: pylon]');
+    expect(integrationInstructions).toContain('roomote_find_integration_tools');
+    expect(integrationInstructions).toContain('roomote_call_integration_tool');
+  });
+
+  it('mounts every server when no Roomote member server can proxy on-demand calls', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+      mcpServers: [
+        {
+          type: 'remote',
+          name: 'pylon',
+          url: 'https://api.example.com/api/mcp/pylon',
+        },
+      ],
+    });
+    const config = JSON.parse(result.configContent) as {
+      mcp: Record<string, unknown>;
+    };
+    expect(Object.keys(config.mcp)).toEqual(['pylon']);
+    expect(
+      existsSync(join(result.openCodeConfigDir, 'on-demand-mcp-servers.json')),
+    ).toBe(false);
   });
 
   it('prefixes bare LiteLLM route names when LITELLM_BASE_URL is set', () => {

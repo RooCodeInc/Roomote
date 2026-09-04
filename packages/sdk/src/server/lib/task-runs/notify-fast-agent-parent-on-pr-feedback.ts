@@ -11,6 +11,8 @@ import {
   getFastAgentParentFromPayload,
   type PullRequestStatus,
   type SourceControlProvider,
+  isPrReviewRun,
+  isSessionRequestedReviewRun,
 } from '@roomote/types';
 
 import {
@@ -82,7 +84,7 @@ function getPayloadBranchName(payload: TaskRun['payload']): string {
 
 /** Pass triaged PR feedback to the Fast conversation that delegated the task. */
 export async function notifyFastAgentParentOnPrFeedback(params: {
-  run: Pick<TaskRun, 'id' | 'taskId' | 'payload'>;
+  run: Pick<TaskRun, 'id' | 'taskId' | 'payload' | 'payloadKind'>;
   reviewTaskId?: string;
   reviewHeadSha?: string;
   pullRequest: {
@@ -110,6 +112,16 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
 }): Promise<boolean> {
   const parent = getFastAgentParentFromPayload(params.run.payload);
   if (!parent) {
+    return false;
+  }
+
+  // An automatic review attached to a session for visibility does not forward
+  // PR feedback: the PR's implementation task already delivers it. A review
+  // the session requested itself is that session's only carrier for the
+  // outcome, so it delivers; when an implementation task in the same
+  // conversation also delivers, the conversation-scoped feedback claim keeps
+  // it to one announcement.
+  if (isPrReviewRun(params.run) && !isSessionRequestedReviewRun(params.run)) {
     return false;
   }
 

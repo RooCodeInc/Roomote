@@ -550,7 +550,7 @@ describe('platform-managed draft state', () => {
     sourceControlProvider: 'github' as const,
   };
 
-  it('creates GitHub PRs as drafts from the deployment setting', async () => {
+  it('creates GitHub PRs as drafts after durable parent-event admission', async () => {
     const octokit = makeOctokit({
       created: {
         number: 9,
@@ -609,7 +609,7 @@ describe('platform-managed draft state', () => {
     });
   });
 
-  it('propagates a transient Fast notification failure and retries it through the existing PR', async () => {
+  it('propagates a transient parent-event admission failure and retries it through the existing PR', async () => {
     const pullRequest = {
       number: 9,
       node_id: 'node-9',
@@ -627,7 +627,7 @@ describe('platform-managed draft state', () => {
       .mockResolvedValueOnce({ data: [] })
       .mockResolvedValueOnce({ data: [pullRequest] });
     mockNotifyFastAgentParentOnPullRequestOpened
-      .mockRejectedValueOnce(new Error('Fast turn lock unavailable'))
+      .mockRejectedValueOnce(new Error('parent event admission unavailable'))
       .mockResolvedValueOnce(undefined);
 
     await expect(
@@ -635,7 +635,7 @@ describe('platform-managed draft state', () => {
         taskRun: makeTaskRun({ repo: 'acme/web' }),
         input: { ...githubInput },
       }),
-    ).rejects.toThrow('Fast turn lock unavailable');
+    ).rejects.toThrow('parent event admission unavailable');
 
     const retry = await createOrUpdateSourceControlPullRequestForTaskRun({
       taskRun: makeTaskRun({ repo: 'acme/web' }),
@@ -1395,6 +1395,44 @@ describe('optional targetBranch', () => {
     expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({
         body: attributionBody('Opened on behalf of Matt Rubens.'),
+      }),
+    );
+  });
+
+  it('falls back to default attribution when an automation task has no eligible participants', async () => {
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockTaskParticipantRows.mockResolvedValue([]);
+    mockGetTaskHumanOwnerUserIds.mockResolvedValue([]);
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      kind: 'roomote',
+      displayName: 'Roomote',
+      publicDisplayName: null,
+      prAssigneeLogin: null,
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: { ...makeTaskRun({ repo: 'acme/web' }), actingUserId: null },
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: attributionBody('Opened on behalf of Someone Invented.'),
+        prAttribution: 'Someone Invented',
+      },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: attributionBody('Created by Roomote.'),
       }),
     );
   });

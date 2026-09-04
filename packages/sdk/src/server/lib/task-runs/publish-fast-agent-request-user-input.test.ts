@@ -190,6 +190,7 @@ describe('publishFastAgentRequestUserInput', () => {
     mocks.findSession.mockResolvedValue({
       id: parent.sessionId,
       userId: 'u1',
+      owner: { kind: 'user', userId: 'u1' },
       conversation: pendingConversation,
       messages: [],
     });
@@ -221,7 +222,7 @@ describe('publishFastAgentRequestUserInput', () => {
       }),
     );
     expect(mocks.bindSession).toHaveBeenCalledWith({
-      userId: 'u1',
+      owner: { kind: 'user', userId: 'u1' },
       conversation: {
         ...pendingConversation,
         replyTarget: { channelId: 'C123', threadId: '100.001' },

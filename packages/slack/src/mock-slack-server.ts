@@ -908,6 +908,42 @@ export class MockSlackServer {
         return;
       }
 
+      case 'POST chat.startStream': {
+        const ts = this.nextTs();
+        const message = this.storeOutgoingMessage({
+          ts,
+          payload: {
+            channel: jsonBody.channel,
+            thread_ts: jsonBody.thread_ts,
+            text: String(jsonBody.markdown_text ?? ''),
+          },
+          ephemeral: false,
+        });
+        json(response, 200, { ok: true, channel: message.channel, ts });
+        return;
+      }
+
+      case 'POST chat.appendStream':
+      case 'POST chat.stopStream': {
+        const channel = String(jsonBody.channel ?? '');
+        const ts = String(jsonBody.ts ?? '');
+        const message = (this.state.messages ?? []).find(
+          (entry) => entry.channel === channel && entry.ts === ts,
+        );
+
+        if (!message) {
+          json(response, 200, { ok: false, error: 'message_not_found' });
+          return;
+        }
+
+        message.text += String(jsonBody.markdown_text ?? '');
+        if (Array.isArray(jsonBody.blocks)) {
+          message.blocks = [...(message.blocks ?? []), ...jsonBody.blocks];
+        }
+        json(response, 200, { ok: true, channel, ts });
+        return;
+      }
+
       case 'POST chat.update': {
         const channel = String(jsonBody.channel ?? '');
         const ts = String(jsonBody.ts ?? '');
@@ -1012,6 +1048,17 @@ export class MockSlackServer {
       }
 
       case 'POST reactions.add':
+      case 'POST agents.sessions.setStatus':
+      case 'POST agents.sessions.rename':
+      case 'POST agents.sessions.setTitle':
+      case 'POST assistant.threads.setStatus':
+      case 'POST assistant.threads.setTitle':
+      case 'POST assistant.threads.setSuggestedPrompts': {
+        // Assistant thread presentation calls are accepted and ignored so the
+        // Fast session activity adapter does not retry a 404 for minutes.
+        json(response, 200, { ok: true });
+        return;
+      }
       case 'POST reactions.remove': {
         const channel = String(jsonBody.channel ?? '');
         const timestamp = String(jsonBody.timestamp ?? '');
@@ -1111,6 +1158,13 @@ export class MockSlackServer {
       }
 
       default:
+        if (method === 'POST' && /^[a-z]+\.[a-zA-Z.]+$/.test(path)) {
+          // Slack answers an unknown Web API method with HTTP 200 and
+          // ok:false, which the WebClient surfaces immediately; a 404 would
+          // make it retry with backoff for minutes and hold turn locks.
+          json(response, 200, { ok: false, error: 'unknown_method' });
+          return;
+        }
         text(response, 404, `Unhandled mock Slack route: ${method} ${path}`);
     }
   }

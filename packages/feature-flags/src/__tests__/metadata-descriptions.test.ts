@@ -12,6 +12,7 @@ describe('metadata descriptions', () => {
     'background_subagents',
     'opencode_background_subagents',
     'opencode_code_mode',
+    'composerSuggestions',
   ])('classifies removed experiment metadata %s as legacy', (key) => {
     expect(getBooleanMetadataDescriptorByKey(key)).toEqual({
       kind: 'legacy',

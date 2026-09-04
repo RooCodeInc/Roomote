@@ -1,4 +1,7 @@
-import { getComputeProviderCapabilities } from '../compute-providers/capabilities';
+import {
+  getComputeProviderCapabilities,
+  getComputeProviderCommandOutputSource,
+} from '../compute-providers/capabilities';
 import {
   sleepCheckManagedComputeProviders,
   snapshotCapableComputeProviders,
@@ -8,6 +11,22 @@ import { getWorkerComputeProviderLabel } from '../compute-providers/worker-conte
 import { resolveConfiguredComputeProviderResources } from '../compute-provider-usage';
 
 describe('compute provider capabilities', () => {
+  it.each([
+    ['roomote', 'central'],
+    ['modal', 'none'],
+    ['docker', 'none'],
+    ['daytona', 'provider'],
+    ['e2b', 'provider'],
+    ['blaxel', 'provider'],
+    ['box', 'provider'],
+    ['azure', 'provider'],
+  ] as const)(
+    'resolves %s command output from %s storage',
+    (provider, source) => {
+      expect(getComputeProviderCommandOutputSource(provider)).toBe(source);
+    },
+  );
+
   it.each([
     'docker',
     'modal',

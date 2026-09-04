@@ -7,12 +7,16 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { GitMergeIcon } from '@primer/octicons-react';
 import {
-  ChartColumnIncreasing,
   BatteryWarning,
+  BellElectric,
+  ChartColumnIncreasing,
   GitCommitVertical,
   GitMergeConflict,
+  GitPullRequest,
   Lightbulb,
   Megaphone,
+  MessagesSquare,
+  Smile,
   SquarePen,
   TriangleAlert,
   Wrench,
@@ -28,11 +32,15 @@ const outputDirectory = path.resolve(
 
 const lucideIcons = {
   'battery-warning': BatteryWarning,
+  'bell-electric': BellElectric,
   'chart-column-increasing': ChartColumnIncreasing,
   'git-commit-vertical': GitCommitVertical,
   'git-merge-conflict': GitMergeConflict,
+  'git-pull-request': GitPullRequest,
   lightbulb: Lightbulb,
   megaphone: Megaphone,
+  'messages-square': MessagesSquare,
+  smile: Smile,
   'square-pen': SquarePen,
   'triangle-alert': TriangleAlert,
   wrench: Wrench,

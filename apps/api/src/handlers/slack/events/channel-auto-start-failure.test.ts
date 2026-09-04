@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   startTask: vi.fn(),
   processAttachments: vi.fn(),
   recordInboundMessage: vi.fn(),
-  postRoutingDebug: vi.fn(),
   automationLaunchIdentity: vi.fn(),
   processFastAgentMessage: vi.fn(),
   liveTaskLauncher: vi.fn(() => vi.fn()),
@@ -73,10 +72,6 @@ vi.mock('../helpers/launch-identity.js', () => ({
   getSlackAutomationLaunchIdentity: mocks.automationLaunchIdentity,
 }));
 
-vi.mock('../helpers/channel-auto-start-routing-debug.js', () => ({
-  postChannelAutoStartRoutingDebug: mocks.postRoutingDebug,
-}));
-
 vi.mock('../helpers/conversation-log.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../helpers/conversation-log.js')>()),
   recordInboundSlackConversationMessage: mocks.recordInboundMessage,
@@ -120,7 +115,6 @@ async function runHandler(
     },
     teamId: 'T123',
     ackEmoji: 'eyes',
-    channelAutoStartLaunchMode: 'always_start',
     ...(launchCriteria ? { launchCriteria } : {}),
   });
 }
@@ -142,7 +136,6 @@ describe('Slack channel auto-start failures', () => {
       videoDescriptions: [],
     });
     mocks.recordInboundMessage.mockResolvedValue(undefined);
-    mocks.postRoutingDebug.mockResolvedValue(undefined);
     mocks.automationLaunchIdentity.mockResolvedValue({
       launchUserId: 'installer-1',
       slackUserId: 'UBOT',
@@ -176,24 +169,6 @@ describe('Slack channel auto-start failures', () => {
     expect(mocks.startTask).not.toHaveBeenCalled();
   });
 
-  it('stays silent when criteria skip diagnostics cannot be posted', async () => {
-    mocks.evaluateGate.mockResolvedValue({
-      shouldLaunch: false,
-      skipReason: 'criteria_not_met',
-      debug: { llmDecision: 'skip', reason: 'not actionable' },
-    });
-    mocks.postRoutingDebug.mockRejectedValue(new Error('debug post failed'));
-
-    await expect(runHandler('Only actionable requests')).resolves.toBe(true);
-    await flushBackgroundWork();
-
-    expect(postMessage).not.toHaveBeenCalled();
-    expect(mocks.startTask).not.toHaveBeenCalled();
-    expect(mocks.logWarn).toHaveBeenCalledWith(
-      expect.stringContaining('debug post failed'),
-    );
-  });
-
   it('replies when the launch classifier fails', async () => {
     mocks.evaluateGate.mockResolvedValue({
       shouldLaunch: false,
@@ -220,29 +195,6 @@ describe('Slack channel auto-start failures', () => {
     mocks.startTask.mockRejectedValue(new Error('task queue unavailable'));
 
     await expect(runHandler()).resolves.toBe(true);
-    await flushBackgroundWork();
-
-    expect(postMessage).toHaveBeenCalledWith({
-      channel: 'C123',
-      thread_ts: '111.000',
-      text: FAILURE_MESSAGE,
-      blocks: [{ type: 'markdown', text: FAILURE_MESSAGE }],
-    });
-    errorSpy.mockRestore();
-  });
-
-  it('still replies when startup and routing diagnostics both fail', async () => {
-    const errorSpy = vi
-      .spyOn(console, 'error')
-      .mockImplementation(() => undefined);
-    mocks.evaluateGate.mockResolvedValue({
-      shouldLaunch: true,
-      debug: { llmDecision: 'launch', reason: 'actionable' },
-    });
-    mocks.startTask.mockRejectedValue(new Error('task queue unavailable'));
-    mocks.postRoutingDebug.mockRejectedValue(new Error('debug post failed'));
-
-    await expect(runHandler('Only actionable requests')).resolves.toBe(true);
     await flushBackgroundWork();
 
     expect(postMessage).toHaveBeenCalledWith({

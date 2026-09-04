@@ -137,6 +137,8 @@ describe('channel auto-start unlinked author', () => {
       expect.objectContaining({ teamId: 'T123' }),
       expect.anything(),
     );
+    expect(fastAgentMessageMock).not.toHaveBeenCalled();
+    expect(startTaskMock).not.toHaveBeenCalled();
   }, 30000);
 
   it('routes an opted-in linked author to fast mode before channel auto-start', async () => {

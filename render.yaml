@@ -289,7 +289,66 @@ services:
     # deploy replaces the container; 300 is Render's maximum grace period.
     maxShutdownDelaySeconds: 300
     dockerCommand: /roomote/.docker/app/entrypoint.sh controller
-    envVars: *roomote-app-env
+    # Render cannot extend the shared env-var sequence alias with one
+    # controller-only secret, so keep this list aligned with roomote-app-env.
+    envVars:
+      - fromGroup: roomote-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: roomote-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: roomote-redis
+          property: connectionString
+      - key: S3_SECRET_ACCESS_KEY
+        fromService:
+          type: web
+          name: roomote-minio
+          envVarKey: MINIO_ROOT_PASSWORD
+      - key: ROOMOTE_WEB_HOST
+        fromService:
+          type: web
+          name: roomote-web
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
+      - key: ROOMOTE_API_HOST
+        fromService:
+          type: web
+          name: roomote-api
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
+      - key: ROOMOTE_MINIO_HOST
+        fromService:
+          type: web
+          name: roomote-minio
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
+      - key: ROOMOTE_MINIO_HOSTPORT
+        fromService:
+          type: web
+          name: roomote-minio
+          property: hostport
+      - key: SANDBOX_OPENROUTER_API_KEY
+        sync: false
+      - key: R_GBRAIN_ADMIN_TOKEN
+        fromService:
+          type: pserv
+          name: roomote-gbrain
+          envVarKey: GBRAIN_ADMIN_BOOTSTRAP_TOKEN
+      - key: R_BRAIN_OPENROUTER_API_KEY
+        value: ''
+      - key: R_BRAIN_OPENAI_API_KEY
+        value: ''
+      - key: R_BRAIN_GATEWAY_TOKEN
+        generateValue: true
+      - key: R_BRAIN_MODEL
+        sync: false
+      - key: R_BRAIN_EMBEDDING_MODEL
+        sync: false
+      - key: ROOMOTE_GBRAIN_HOSTPORT
+        fromService:
+          type: pserv
+          name: roomote-gbrain
+          property: hostport
 
   - type: worker
     name: roomote-bullmq

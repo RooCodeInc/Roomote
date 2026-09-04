@@ -13,30 +13,22 @@ import {
   isDiscordBotMentioned,
   isDiscordTaskEntryEvent,
   parseDiscordGatewayEvent,
-  stripDiscordBotMention,
   type DiscordGatewayEvent,
 } from '@roomote/communication/discord-event';
 import {
   DiscordApiError,
   DiscordApiTransportError,
 } from '@roomote/communication/discord-provider';
-import {
-  queueCommunicationMessageOnce,
-  setLatestInboundMessageId,
-} from '@roomote/communication/messages';
 import { reactionEmojiMatches } from '@roomote/communication/reaction-emoji';
 import {
   buildFastAgentReactionExternalInputQuestion,
-  getTaskUrl,
   hasFastAgentSession,
   type FastAgentReactionExternalInput,
 } from '@roomote/cloud-agents/server';
 import {
-  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   RunStatus,
   activeRunStatuses,
   isSnapshotResumable,
-  isDeploymentReadOnlyError,
 } from '@roomote/types';
 import {
   consumeDiscordLinkCode,
@@ -54,18 +46,12 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
-import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
+import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
 import {
-  attachOutOfBandContextToCommunicationMessage,
   findActiveCommunicationTaskRun,
-  findCommunicationTaskRunBySourceEvent,
   findCompletedCommunicationTaskRunWithSnapshot,
   findTaskBackedAutomationReportRun,
-  releaseCommunicationOutOfBandClaim,
-  resumeCommunicationTaskFromSnapshot,
 } from '@roomote/sdk/server/communication';
-import { tryHandleDiscordRequestUserInputMessage } from './request-user-input.js';
-import { retireDiscordPrReviewOffersBestEffort } from './pr-review-action.js';
 import { promptDiscordAccountLink } from './account-link.js';
 import { processDiscordAttachments } from './attachments.js';
 import {
@@ -98,21 +84,13 @@ import {
 } from './provider.js';
 import { replyToDiscordEvent } from './replies.js';
 import {
-  findDiscordPendingRoutingReply,
-  hasPendingDiscordRouteCallback,
-  handleDiscordRoutingReply,
-} from './routing-confirmation.js';
-import {
   discordMetadataForChannel,
   resolveDiscordChannelContext,
 } from './task-launch.js';
-import { startNewDiscordTask } from './task-orchestration.js';
 import { startDiscordTaskGoal } from './goal-command.js';
 import {
-  buildDiscordContinuationPrompt,
+  fetchDiscordRepliedToMessageBestEffort,
   fetchDiscordThreadHistoryBestEffort,
-  releaseDiscordContinuationClaim,
-  markDiscordThreadHistoryDelivered,
 } from './thread-context.js';
 import { shouldRouteUnmentionedDiscordThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
@@ -444,15 +422,6 @@ async function processDiscordGatewayEvent(
 
   const interaction = getDiscordInteractionCreate(event);
   const message = getDiscordMessageCreate(event);
-  if (interaction?.type === 3) {
-    const routePending = await hasPendingDiscordRouteCallback(
-      interaction.data?.custom_id,
-    );
-    if (routePending === false) {
-      return { ok: true, ignored: 'expired_routing_interaction' };
-    }
-  }
-
   const resolved = await resolveDiscordProvider();
   const channelId = interaction?.channel_id ?? message?.channel_id;
   if (!channelId) {
@@ -673,7 +642,7 @@ async function processDiscordGatewayEvent(
           messageId: message.message_reference.message_id,
         })
       : null;
-  let activeRun =
+  const activeRun =
     !forceNewTask && repliedToAutomationReport
       ? activeRunStatuses.some(
           (status) => status === repliedToAutomationReport.status,
@@ -693,15 +662,6 @@ async function processDiscordGatewayEvent(
           ? repliedToAutomationReport
           : null
         : await findCompletedCommunicationTaskRunWithSnapshot(conversation);
-  const pendingRoutingReply =
-    message && senderUserId && !forceNewTask
-      ? await findDiscordPendingRoutingReply({
-          channel,
-          replyToMessageId: message.message_reference?.message_id,
-          requesterDiscordUserId: sender.id,
-          launchOwnerUserId: senderUserId,
-        })
-      : null;
   const isFastAgentConversation = Boolean(
     repliedFastSession ??
     (channel.isThread || channel.isDirectMessage
@@ -719,7 +679,6 @@ async function processDiscordGatewayEvent(
   const isRoomoteThread = Boolean(
     activeRun ||
     completedRun ||
-    pendingRoutingReply ||
     repliedToAutomationReport ||
     isFastAgentConversation,
   );
@@ -800,7 +759,7 @@ async function processDiscordGatewayEvent(
           activeRun?.userId ??
           completedRun?.userId ??
           repliedToAutomationReport?.userId ??
-          (pendingRoutingReply ? senderUserId : null),
+          null,
         isAutomationReportThread: Boolean(repliedToAutomationReport),
         isOpenConversationThread: isFastAgentConversation,
         fetchThreadMessages: async () => {
@@ -881,15 +840,107 @@ async function processDiscordGatewayEvent(
     return { ok: true, goalStarted: result.success, runId: activeRun.id };
   }
 
+  const messageAttachments = message
+    ? getDiscordMessageAttachments(message)
+    : [];
+  const processedAttachments = messageAttachments.length
+    ? messageAttachments.some(isDiscordAudioAttachment)
+      ? await processDiscordAttachments(messageAttachments, {
+          userId: senderUserId,
+          userTextContext: message
+            ? getDiscordMessageContent(message)
+            : undefined,
+        })
+      : await processDiscordAttachments(messageAttachments)
+    : { images: [], attachmentTexts: [], warnings: [] };
+  for (const warning of processedAttachments.warnings) {
+    apiLogger.warn(`[discord] Attachment warning: ${warning}`);
+  }
+  // The queued-message builder already folds attachment summaries and any
+  // extracted attachment text into one prompt, so an attachment-only message
+  // still has something to say to Fast.
+  const fastEntryText = message
+    ? (discordEventToQueuedCommunicationMessage(event, {
+        botUserId: resolved.botUserId,
+        userId: senderUserId,
+        isTaskThread: isRoomoteThread,
+        parentChannelId: channel.parentChannelId,
+        attachmentImages: processedAttachments.images,
+        attachmentText: processedAttachments.attachmentTexts,
+      })?.text ?? '')
+    : '';
+  const fastAttachments = processedAttachments.images.length
+    ? { images: processedAttachments.images }
+    : {};
+
+  if (command?.name === 'new' && command.request && interaction) {
+    // `/new` opens a fresh conversation. In a server it gets its own thread
+    // beside the current one; a DM keeps one conversation, so the request
+    // simply joins it.
+    let fastChannel = channel;
+    let fastMetadata = metadata;
+    // In a DM the interaction reply is the conversation, so Fast answers
+    // through it. In a server the answer belongs in the new thread, so the
+    // interaction only gets a pointer and Fast posts directly to the thread.
+    let fastInteraction:
+      | ReturnType<typeof interactionReplyContext>
+      | undefined = interactionReplyContext(event);
+    if (!channel.isDirectMessage) {
+      const parentId = channel.parentChannelId ?? channel.channelId;
+      const thread = await resolved.provider.createTaskThread({
+        channelId: parentId,
+        name: buildCommunicationTaskThreadName(command.request),
+        initialText: `Request from ${getDiscordInteractionUser(interaction)?.global_name?.trim() || sender.username}:\n\n${command.request}`,
+      });
+      fastChannel = {
+        ...channel,
+        channelId: thread.channelId,
+        channelName: thread.name,
+        channelType: channel.channelType === 5 ? 10 : 11,
+        parentChannelId: thread.parentChannelId,
+        isThread: true,
+      };
+      fastMetadata = {
+        ...metadata,
+        communicationChannelId: thread.parentChannelId,
+        communicationThreadId: thread.channelId,
+      };
+      // The Gateway deferred this command publicly, so the pointer is a
+      // public message in the invoking channel, the way the old task starter
+      // acknowledgement was.
+      await replyToDiscordEvent({
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        channel,
+        interaction: fastInteraction,
+        text: `Started a new conversation in <#${thread.channelId}>.`,
+      });
+      fastInteraction = undefined;
+    }
+    await processDiscordFastAgentMessage({
+      event,
+      question: command.request,
+      sender,
+      senderUserId,
+      provider: resolved.provider,
+      applicationId: resolved.applicationId,
+      channel: fastChannel,
+      metadata: fastMetadata,
+      conversationId: getDiscordFastConversationId(fastChannel, interaction.id),
+      createAnchoredThread: false,
+      ...(fastInteraction ? { interaction: fastInteraction } : {}),
+      directedAtRoomote: true,
+    });
+    return { ok: true, fastAnswered: true, fastStartedNew: true };
+  }
+
   if (message && !command && isFastAgentConversation) {
-    const question = stripDiscordBotMention(
-      getDiscordMessageContent(message),
-      resolved.botUserId,
-    );
+    const question = fastEntryText;
     if (question) {
       await processDiscordFastAgentMessage({
         event,
         question,
+        ...fastAttachments,
         sender,
         senderUserId,
         provider: resolved.provider,
@@ -913,14 +964,28 @@ async function processDiscordGatewayEvent(
       return { ok: true, fastAnswered: true, fastContinued: true };
     }
   }
-  const defaultFastQuestion = defaultFastMessage
-    ? stripDiscordBotMention(
-        getDiscordMessageContent(defaultFastMessage),
-        resolved.botUserId,
-      )
-    : '';
+  const defaultFastQuestion = defaultFastMessage ? fastEntryText : '';
   if (defaultFastMessage && defaultFastQuestion) {
     let fastQuestion = defaultFastQuestion;
+    let agentContext: string | undefined;
+    if (
+      !reactionTarget &&
+      !channel.isThread &&
+      !channel.isDirectMessage &&
+      defaultFastMessage.message_reference?.message_id
+    ) {
+      // A channel-level reply mention carries the message it answers, the
+      // way a task launch used to, without dumping whole-channel history.
+      const repliedTo = await fetchDiscordRepliedToMessageBestEffort({
+        provider: resolved.provider,
+        channelId:
+          defaultFastMessage.message_reference.channel_id ?? channel.channelId,
+        messageId: defaultFastMessage.message_reference.message_id,
+      });
+      if (repliedTo?.text) {
+        agentContext = `The person is replying to this Discord message from ${repliedTo.username ?? repliedTo.user}:\n${repliedTo.text}`;
+      }
+    }
     if (reactionTarget) {
       // Match Slack's emoji summon: inline the reacted-on message so the fast
       // agent sees what it was asked to act on even without thread history.
@@ -941,6 +1006,8 @@ async function processDiscordGatewayEvent(
     await processDiscordFastAgentMessage({
       event,
       question: fastQuestion,
+      ...fastAttachments,
+      ...(agentContext ? { agentContext } : {}),
       sender,
       senderUserId,
       provider: resolved.provider,
@@ -962,406 +1029,9 @@ async function processDiscordGatewayEvent(
     return { ok: true, fastAnswered: true, fastDefaulted: true };
   }
 
-  const messageAttachments = message
-    ? getDiscordMessageAttachments(message)
-    : [];
-  const processedAttachments = messageAttachments.length
-    ? messageAttachments.some(isDiscordAudioAttachment)
-      ? await processDiscordAttachments(messageAttachments, {
-          userId: senderUserId,
-          userTextContext: message
-            ? getDiscordMessageContent(message)
-            : undefined,
-        })
-      : await processDiscordAttachments(messageAttachments)
-    : { images: [], attachmentTexts: [], warnings: [] };
-  for (const warning of processedAttachments.warnings) {
-    apiLogger.warn(`[discord] Attachment warning: ${warning}`);
-  }
-  const queuedMessage = discordEventToQueuedCommunicationMessage(event, {
-    botUserId: resolved.botUserId,
-    userId: senderUserId,
-    isTaskThread: isRoomoteThread,
-    parentChannelId: channel.parentChannelId,
-    attachmentImages: processedAttachments.images,
-    attachmentText: processedAttachments.attachmentTexts,
-  });
-  if (!queuedMessage) {
-    return { ok: true, ignored: 'empty_task_entry' };
-  }
-
-  if (pendingRoutingReply) {
-    let routingReplyAckPinned = false;
-    try {
-      await resolved.provider.addReaction({
-        channelId: channel.channelId,
-        messageId: queuedMessage.ts,
-        name: '👀',
-      });
-      routingReplyAckPinned = true;
-    } catch {
-      // Routing ownership is already durable; the reaction is only an ack.
-    }
-
-    let handled: boolean;
-    try {
-      handled = await handleDiscordRoutingReply({
-        provider: resolved.provider,
-        applicationId: resolved.applicationId,
-        pendingRouteId: pendingRoutingReply.pendingRouteId,
-        requesterDiscordUserId: sender.id,
-        launchOwnerUserId: senderUserId,
-        queuedMessage,
-        channel,
-      });
-    } finally {
-      // A routing reply is a transient continuation, not the task's durable
-      // intake target. Its eyes must end when routing finishes; a launched
-      // worker separately clears the original request's intake reaction.
-      if (routingReplyAckPinned && resolved.provider.removeReaction) {
-        await resolved.provider
-          .removeReaction({
-            channelId: channel.channelId,
-            messageId: queuedMessage.ts,
-            name: 'eyes',
-          })
-          .catch(() => undefined);
-      }
-    }
-    if (handled) {
-      return { ok: true, routingReplyHandled: true };
-    }
-
-    // The auto-confirm timer may have claimed the card between lookup and
-    // classification. If it launched, this message is now a normal task
-    // follow-up and should enter that run instead of becoming a new task.
-    activeRun = await findActiveCommunicationTaskRun(conversation);
-    if (!activeRun) {
-      return { ok: true, ignored: 'routing_reply_expired' };
-    }
-  }
-
-  // Check the upstream event before conversation routing. In a DM, a retry
-  // after task creation would otherwise discover that new run as "active"
-  // and enqueue the original launch request as a second user turn.
-  const existingSourceRun = await findCommunicationTaskRunBySourceEvent({
-    provider: 'discord',
-    sourceEventId: queuedMessage.ts,
-  });
-  if (existingSourceRun) {
-    const taskUrl = getTaskUrl({
-      taskId: existingSourceRun.taskId,
-      utm: { source: 'discord', campaign: 'discord.event_retry' },
-    });
-    await replyToDiscordEvent({
-      provider: resolved.provider,
-      applicationId: resolved.applicationId,
-      channel,
-      ...(interaction ? { interaction: interactionReplyContext(event) } : {}),
-      text: taskUrl
-        ? `This request already started a task: ${taskUrl}`
-        : 'This request already started a task.',
-    }).catch(() => undefined);
-    return {
-      ok: true,
-      duplicate: true,
-      runId: existingSourceRun.id,
-    };
-  }
-
-  if (activeRun) {
-    await syncActingUserForInboundMessage({
-      logContext: 'discord.activeRunMessage',
-      runId: activeRun.id,
-      senderUserId,
-    });
-
-    if (message && queuedMessage) {
-      const handledRequestUserInput =
-        await tryHandleDiscordRequestUserInputMessage({
-          provider: resolved.provider,
-          applicationId: resolved.applicationId,
-          channel,
-          activeRun: { id: activeRun.id },
-          userId: senderUserId,
-          text: queuedMessage.text,
-          replyToMessageId: message.id,
-        });
-      if (handledRequestUserInput) {
-        return {
-          ok: true,
-          queued: true,
-          runId: activeRun.id,
-          requestUserInput: true,
-        };
-      }
-    }
-
-    // Mirror Slack: rebuild undelivered thread context + latest bot reply into
-    // the follow-up prompt so agents keep full Discord conversation context.
-    let continuationClaim: {
-      channelId: string;
-      claimedMessageIds: string[];
-    } | null = null;
-    let messageForQueue = queuedMessage;
-    try {
-      const continuation = await buildDiscordContinuationPrompt({
-        provider: resolved.provider,
-        channelId: channel.channelId,
-        ...(channel.parentChannelId
-          ? { parentChannelId: channel.parentChannelId }
-          : {}),
-        botUserId: resolved.botUserId,
-        queuedMessage,
-        ...(reactionTarget?.messageId
-          ? { contextThroughMessageId: reactionTarget.messageId }
-          : {}),
-        ...(message?.message_reference?.message_id
-          ? {
-              replyToMessageId: message.message_reference.message_id,
-              ...(message.message_reference.channel_id
-                ? { replyToChannelId: message.message_reference.channel_id }
-                : {}),
-            }
-          : {}),
-      });
-      messageForQueue = continuation.message;
-      continuationClaim = {
-        channelId: continuation.channelId,
-        claimedMessageIds: continuation.claimedMessageIds,
-      };
-    } catch (error) {
-      apiLogger.warn(
-        `[discord] Failed to build thread continuation for active run ${activeRun.id}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-    // Mirror Slack: out-of-band PR review/status notifications are posted
-    // outside the harness session and must be re-surfaced on the next user
-    // turn so the agent knows what the user is replying to.
-    const { message: messageWithOutOfBand, claim: outOfBandClaim } =
-      await attachOutOfBandContextToCommunicationMessage({
-        taskId: activeRun.taskId,
-        provider: 'discord',
-        message: messageForQueue,
-      });
-    try {
-      const queued = await queueCommunicationMessageOnce(
-        'discord',
-        activeRun.id,
-        messageWithOutOfBand,
-      );
-      // A typed reply supersedes any pending PR review offers here.
-      retireDiscordPrReviewOffersBestEffort({
-        provider: resolved.provider,
-        channelId: metadata.communicationChannelId,
-        threadId: metadata.communicationThreadId ?? null,
-      });
-      // Dedupe hit: nothing new will be delivered, so put claimed OOB
-      // messages and undelivered thread claims back for a later real follow-up.
-      if (!queued) {
-        await releaseCommunicationOutOfBandClaim(outOfBandClaim);
-        await releaseDiscordContinuationClaim(continuationClaim);
-      } else {
-        // Match Slack: mark the current follow-up delivered so the next turn
-        // does not re-inject it as thread_context background.
-        await markDiscordThreadHistoryDelivered({
-          channelId: channel.channelId,
-          messageIds: [queuedMessage.ts],
-        });
-      }
-    } catch (error) {
-      await releaseCommunicationOutOfBandClaim(outOfBandClaim);
-      await releaseDiscordContinuationClaim(continuationClaim);
-      throw error;
-    }
-    await setLatestInboundMessageId(
-      'discord',
-      activeRun.id,
-      reactionTarget?.messageId ?? queuedMessage.ts,
-    );
-    // Match Slack: eyes is an intake-only platform ack. Active follow-ups are
-    // already durable once queued; agents may still react when turn policy allows.
-    return { ok: true, queued: true, runId: activeRun.id };
-  }
-
-  if (completedRun) {
-    // Snapshot resume also carries Slack-style thread context so the restored
-    // session sees earlier Discord messages, not only the resume trigger text.
-    let resumeMessage = queuedMessage;
-    let continuationClaim: {
-      channelId: string;
-      claimedMessageIds: string[];
-    } | null = null;
-    // Match Slack wake-up: temporary 👀 on the follow-up that resumes a
-    // sleeping task. Worker onStart clears it via discordIntakeAckPending.
-    let wakeAckPinned = false;
-    if (message?.id) {
-      try {
-        await resolved.provider.addReaction({
-          channelId: channel.channelId,
-          messageId: message.id,
-          name: '👀',
-        });
-        wakeAckPinned = true;
-      } catch {
-        // Soft ack only; resume still proceeds without a pending cleanup flag.
-      }
-    }
-    try {
-      const continuation = await buildDiscordContinuationPrompt({
-        provider: resolved.provider,
-        channelId: channel.channelId,
-        ...(channel.parentChannelId
-          ? { parentChannelId: channel.parentChannelId }
-          : {}),
-        botUserId: resolved.botUserId,
-        queuedMessage,
-        ...(reactionTarget?.messageId
-          ? { contextThroughMessageId: reactionTarget.messageId }
-          : {}),
-        ...(message?.message_reference?.message_id
-          ? {
-              replyToMessageId: message.message_reference.message_id,
-              ...(message.message_reference.channel_id
-                ? { replyToChannelId: message.message_reference.channel_id }
-                : {}),
-            }
-          : {}),
-      });
-      resumeMessage = continuation.message;
-      continuationClaim = {
-        channelId: continuation.channelId,
-        claimedMessageIds: continuation.claimedMessageIds,
-      };
-    } catch (error) {
-      apiLogger.warn(
-        `[discord] Failed to build thread continuation for snapshot resume: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-    try {
-      const resumed = await resumeCommunicationTaskFromSnapshot({
-        provider: 'discord',
-        completedRun,
-        queuedMessage: resumeMessage,
-        channelId: metadata.communicationChannelId,
-        threadId: metadata.communicationThreadId,
-        messageId: metadata.communicationMessageId,
-        guildId: metadata.communicationGuildId,
-        preservePayloadFlags: ['discordTaskThread'],
-        ...(message?.id
-          ? {
-              discordWakeAckReaction: {
-                channelId: channel.channelId,
-                messageId: message.id,
-                intakeAckPinned: wakeAckPinned,
-              },
-            }
-          : {}),
-      });
-      await markDiscordThreadHistoryDelivered({
-        channelId: channel.channelId,
-        messageIds: [queuedMessage.ts],
-      });
-      // A typed reply supersedes any pending PR review offers here.
-      retireDiscordPrReviewOffersBestEffort({
-        provider: resolved.provider,
-        channelId: metadata.communicationChannelId,
-        threadId: metadata.communicationThreadId ?? null,
-      });
-      return { ok: true, resumed: true, runId: resumed.id };
-    } catch (error) {
-      await releaseDiscordContinuationClaim(continuationClaim);
-      if (wakeAckPinned && message?.id && resolved.provider.removeReaction) {
-        await resolved.provider
-          .removeReaction({
-            channelId: channel.channelId,
-            messageId: message.id,
-            name: 'eyes',
-          })
-          .catch(() => undefined);
-      }
-      if (isDeploymentReadOnlyError(error)) {
-        await replyToDiscordEvent({
-          provider: resolved.provider,
-          applicationId: resolved.applicationId,
-          channel,
-          ...(interaction
-            ? { interaction: interactionReplyContext(event) }
-            : {}),
-          text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
-        }).catch(() => undefined);
-
-        return { ok: true, repliedInline: true };
-      }
-      throw error;
-    }
-  }
-
-  // Match Slack intake: ack the origin message with 👀 before launch work.
-  // Only real MESSAGE_CREATE messages can receive Discord reactions; slash-
-  // command interaction ids are not message targets and would 404.
-  let intakeAckPinned = false;
-  if (message?.id) {
-    try {
-      await resolved.provider.addReaction({
-        channelId: reactionTarget?.channelId ?? channel.channelId,
-        messageId: reactionTarget?.messageId ?? message.id,
-        name: '👀',
-      });
-      intakeAckPinned = true;
-    } catch {
-      // Soft ack only.
-    }
-  }
-
-  let started: Awaited<ReturnType<typeof startNewDiscordTask>>;
-  try {
-    started = await startNewDiscordTask({
-      provider: resolved.provider,
-      applicationId: resolved.applicationId,
-      requesterDiscordUserId: sender.id,
-      launchOwnerUserId: senderUserId,
-      queuedMessage,
-      metadata,
-      channel,
-      ...(interaction ? { interaction: interactionReplyContext(event) } : {}),
-      // Match Slack: a mention inside an existing thread continues in that same
-      // thread (with thread history as context). Only `/new` forces a sibling
-      // task thread; known task threads were already handled above.
-      forceNewThread: forceNewTask,
-      ...(intakeAckPinned ? { intakeAckPinned: true } : {}),
-      ...(message?.message_reference?.message_id
-        ? {
-            replyToMessageId: message.message_reference.message_id,
-            ...(message.message_reference.channel_id
-              ? { replyToChannelId: message.message_reference.channel_id }
-              : {}),
-          }
-        : {}),
-      ...(reactionTarget?.messageId
-        ? { contextThroughMessageId: reactionTarget.messageId }
-        : {}),
-    });
-  } catch (error) {
-    if (isDeploymentReadOnlyError(error)) {
-      await replyToDiscordEvent({
-        provider: resolved.provider,
-        applicationId: resolved.applicationId,
-        channel,
-        ...(interaction ? { interaction: interactionReplyContext(event) } : {}),
-        text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
-      }).catch(() => undefined);
-
-      return { ok: true, repliedInline: true };
-    }
-
-    throw error;
-  }
-  return { ok: true, ...started };
+  // Every remaining entry shape already entered Fast above; a message with
+  // nothing to say and nothing attached has no conversation to join.
+  return { ok: true, ignored: 'no_fast_entry' };
 }
 
 export const discord = new Hono();

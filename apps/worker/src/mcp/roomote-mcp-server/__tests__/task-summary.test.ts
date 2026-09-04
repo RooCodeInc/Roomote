@@ -71,6 +71,41 @@ describe('handleGetTaskSummary', () => {
     expect(result.content[0]?.text).toContain('Linked Environment ID: env-123');
   });
 
+  it('surfaces stable image artifact IDs and viewer links', async () => {
+    vi.mocked(tasksApiClient.getTaskSummary).mockResolvedValueOnce({
+      id: 'task-proof',
+      title: 'Capture proof',
+      mode: 'standard',
+      completed: true,
+      repositoryName: 'owner/repo',
+      harness: 'opencode-server',
+      createdAt: 1700000000,
+      taskRunStatus: 'completed',
+      taskPhase: null,
+      taskRunError: null,
+      environmentSetupState: null,
+      linkedEnvironmentId: null,
+      linkedEnvironmentName: null,
+      imageArtifacts: [
+        {
+          id: '11111111-1111-4111-8111-111111111111',
+          path: 'proof/final.png',
+          version: 1,
+          artifactType: 'visual-proof',
+          contentType: 'image/png',
+          viewUrl:
+            'https://roomote.example/task/task-proof/artifacts/proof/final.png?v=1',
+        },
+      ],
+    });
+
+    const result = await handleGetTaskSummary({ taskId: 'task-proof' }, config);
+
+    expect(result.content[0]?.text).toContain(
+      'Image Artifact: proof/final.png [id: 11111111-1111-4111-8111-111111111111] [view: https://roomote.example/task/task-proof/artifacts/proof/final.png?v=1]',
+    );
+  });
+
   it('falls back to completed/active when no task run data is present', async () => {
     vi.mocked(tasksApiClient.getTaskSummary).mockResolvedValueOnce({
       id: 'task-2',

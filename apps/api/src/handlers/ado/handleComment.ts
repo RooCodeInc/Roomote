@@ -1,33 +1,22 @@
 import {
-  buildMentionRequestBlock,
-  buildUntrustedContentPolicy,
-  enqueueTask,
-  escapeTaskContextText,
-  getTaskUrl,
-} from '@roomote/cloud-agents/server';
-import {
-  findActiveGitHubPrReviewTask,
-  findReusableGitHubPrFollowUpOwner,
-} from '@roomote/db/server';
-import {
   createAdoPullRequestComment,
   getAdoDeploymentUser,
   type AdoCurrentUser,
 } from '@roomote/ado';
-import {
-  type TaskPayload,
-  TaskPayloadKind,
-  PRODUCT_NAME,
-  isActivelyRunningTask,
-} from '@roomote/types';
+import { PRODUCT_NAME } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
 import { toHostFromUrl } from '../utils';
-import {
-  sendMessageToTask,
-  steerMessageToTask,
-} from '../tasks/sendMessageToTask';
 import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
+import {
+  startSourceControlFastSessionTurn,
+  type SourceControlFastDiscussion,
+} from '@roomote/sdk/server';
+import {
+  buildSourceControlPullRequestMentionContext,
+  resolveSourceControlPullRequestActiveTasks,
+  SOURCE_CONTROL_FAST_UNAVAILABLE_MESSAGE,
+} from '../shared/source-control-mention';
 import {
   getAdoAutomationTargets,
   getAdoIdentityName,
@@ -47,11 +36,6 @@ import type {
 } from './types';
 
 const ADO_MENTION_HANDLE = '@roomote';
-
-type AdoPrMentionReplyKind =
-  | 'active_follow_up'
-  | 'active_review'
-  | 'review_started';
 
 function isAdoMention(commentBody: string | undefined): boolean {
   return commentBody?.toLowerCase().includes(ADO_MENTION_HANDLE) ?? false;
@@ -145,107 +129,14 @@ async function postMentionResponseComment({
   }
 }
 
-function tryBuildTaskLink({
-  taskId,
-  campaign,
-}: {
-  taskId: string;
-  campaign: string;
-}): string | null {
-  try {
-    return getTaskUrl({
-      taskId,
-      utm: { source: 'ado-comment', campaign },
-    });
-  } catch (error) {
-    console.warn(
-      `[handleAdoComment] failed to build task link for ${taskId}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-
-    return null;
-  }
-}
-
-function formatAdoPrMentionReply(
-  kind: AdoPrMentionReplyKind,
-  link: string | null,
-): string {
-  const replyCopy = (() => {
-    switch (kind) {
-      case 'active_follow_up':
-        return {
-          intro:
-            "I'm on it. I routed this request into the existing task for this pull request so follow-up work stays on one Roomote thread, and I'll keep updates here.",
-          fallback:
-            'I could not generate the task link for this comment, but the follow-up was delivered.',
-        };
-      case 'active_review':
-        return {
-          intro:
-            'I found a pull request review already running for this request, and I will keep updates here.',
-          fallback:
-            'I could not generate the task link for this comment, but the review is already in progress.',
-        };
-      case 'review_started':
-        return {
-          intro:
-            'I started a pull request review task for this request, and I will keep updates here.',
-          fallback:
-            'I could not generate the task link for this comment, but the review task is already running.',
-        };
-    }
-  })();
-
-  if (!link) {
-    return `${replyCopy.intro} ${replyCopy.fallback}`;
-  }
-
-  return `${replyCopy.intro} [See task](${link})`;
-}
-
 function buildReviewerGateMissComment(): string {
   return `I saw the mention, but I could not start work on this pull request with the current ${PRODUCT_NAME} Azure DevOps setup.`;
 }
 
-function buildTaskStartFailedComment(): string {
-  return 'I saw the mention, but I could not start a task for this pull request right now. Please try again in a moment.';
-}
-
-function buildExistingTaskFollowUpMessage({
-  repoFullName,
-  pullRequest,
-  commenter,
-  commentBody,
-}: {
-  repoFullName: string;
-  pullRequest: AdoPullRequestResource;
-  commenter: string;
-  commentBody: string;
-}): string {
-  const lines = [
-    `${commenter} mentioned Roomote in a comment on Azure DevOps pull request #${pullRequest.pullRequestId} (${escapeTaskContextText(pullRequest.title)}) in ${repoFullName}.`,
-    '',
-    'Please act on this comment as a follow-up to your existing work on this pull request.',
-  ];
-  const branchName = stripAdoGitRefPrefix(pullRequest.sourceRefName);
-
-  if (branchName) {
-    lines.push(`The pull request source branch is \`${branchName}\`.`);
-  }
-
-  lines.push(
-    '',
-    'Mention comment (the request to act on):',
-    buildMentionRequestBlock(commentBody),
-    '',
-    buildUntrustedContentPolicy(),
-  );
-
-  return lines.join('\n');
-}
-
+/**
+ * Every @roomote comment on a pull request enters that pull request's Fast
+ * Session. Replies stay in the comment thread the mention came from.
+ */
 export async function handleAdoComment(
   payload: AdoPullRequestCommentWebhook,
 ): Promise<WebhookResponse> {
@@ -286,6 +177,12 @@ export async function handleAdoComment(
     pullRequest,
     comment,
   };
+  const prUrl = getAdoPullRequestUrl({
+    resourceContainers: payload.resourceContainers,
+    pullRequest,
+    repositoryFullName: repoFullName,
+  });
+  const webhookHost = toHostFromUrl(prUrl);
   const targetsResult = await getAdoAutomationTargets({
     workflow: 'pr_review',
     payload: {
@@ -295,13 +192,7 @@ export async function handleAdoComment(
     },
     // The PR web URL (or the account/collection base URL it is built from)
     // carries the instance host, matching repositories.host.
-    webhookHost: toHostFromUrl(
-      getAdoPullRequestUrl({
-        resourceContainers: payload.resourceContainers,
-        pullRequest,
-        repositoryFullName: repoFullName,
-      }),
-    ),
+    webhookHost,
     ignoreAuthorPolicy: true,
     requireLinkedSenderAccount: true,
   });
@@ -316,10 +207,7 @@ export async function handleAdoComment(
         ? await buildSourceControlAccountLinkRequiredMessage('ado')
         : buildReviewerGateMissComment();
 
-    await postMentionResponseComment({
-      ...mentionResponseTarget,
-      body,
-    });
+    await postMentionResponseComment({ ...mentionResponseTarget, body });
 
     return {
       status: 'ok',
@@ -332,157 +220,61 @@ export async function handleAdoComment(
   }
 
   const branchName = stripAdoGitRefPrefix(pullRequest.sourceRefName) ?? '';
-  const activeOwner = await findReusableGitHubPrFollowUpOwner({
-    repoFullName,
+  const headSha = getAdoPullRequestHeadSha(pullRequest);
+  const threadId = getThreadId(comment);
+  const discussion: SourceControlFastDiscussion = {
+    provider: 'ado',
+    host: target.repo.host ?? webhookHost ?? 'dev.azure.com',
+    repositoryFullName: repoFullName,
+    kind: 'pull',
+    number: pullRequest.pullRequestId,
+    ...(threadId ? { reviewCommentId: threadId } : {}),
+    ...(threadId && comment.id !== undefined
+      ? { replyCommentId: String(comment.id) }
+      : {}),
+  };
+  const activeTasks = await resolveSourceControlPullRequestActiveTasks({
+    provider: 'ado',
+    repositoryFullName: repoFullName,
     prNumber: pullRequest.pullRequestId,
     branchName,
-    sourceControlProvider: 'ado',
+    headSha,
+    host: discussion.host,
   });
 
-  if (activeOwner?.taskId) {
-    const followUpMessage = buildExistingTaskFollowUpMessage({
-      repoFullName,
-      pullRequest,
+  const started = await startSourceControlFastSessionTurn({
+    discussion,
+    userId: target.userId,
+    senderDisplayName: commenter,
+    question: comment.content ?? '',
+    agentContext: buildSourceControlPullRequestMentionContext({
+      providerLabel: 'Azure DevOps',
+      pullRequestLabel: 'Pull request',
+      repositoryFullName: repoFullName,
+      number: pullRequest.pullRequestId,
+      title: pullRequest.title,
+      body: pullRequest.description ?? null,
+      headRef: branchName || null,
+      baseRef: stripAdoGitRefPrefix(pullRequest.targetRefName) ?? null,
+      authorLogin: getAdoIdentityName(pullRequest.createdBy) ?? null,
       commenter,
       commentBody: comment.content ?? '',
-    });
-    const delivery = isActivelyRunningTask(
-      activeOwner.status,
-      activeOwner.taskPhase,
-    )
-      ? await steerMessageToTask({
-          taskId: activeOwner.taskId,
-          userId: target.userId,
-          message: followUpMessage,
-          senderMode: 'github_pr_follow_up',
-        })
-      : await sendMessageToTask({
-          taskId: activeOwner.taskId,
-          userId: target.userId,
-          message: followUpMessage,
-          senderMode: 'github_pr_follow_up',
-        });
-
-    if (delivery.success) {
-      await postMentionResponseComment({
-        ...mentionResponseTarget,
-        body: formatAdoPrMentionReply(
-          'active_follow_up',
-          tryBuildTaskLink({
-            taskId: activeOwner.taskId,
-            campaign: 'ado.pr.mention.active-owner',
-          }),
-        ),
-      });
-
-      return { status: 'ok', message: 'active_pr_owner_routed' };
-    }
-
-    console.warn(
-      `[handleAdoComment] failed to deliver PR mention to reusable task ${activeOwner.taskId}: ${delivery.error}`,
-    );
-  }
-
-  const headSha = getAdoPullRequestHeadSha(pullRequest);
-
-  if (headSha) {
-    const activeReview = await findActiveGitHubPrReviewTask({
-      repoFullName,
-      prNumber: pullRequest.pullRequestId,
-      headSha,
-    });
-
-    if (activeReview?.taskId) {
-      await postMentionResponseComment({
-        ...mentionResponseTarget,
-        body: formatAdoPrMentionReply(
-          'active_review',
-          tryBuildTaskLink({
-            taskId: activeReview.taskId,
-            campaign: 'ado.pr.mention.review.active',
-          }),
-        ),
-      });
-
-      return { status: 'ok', message: 'active_pr_review_linked' };
-    }
-  }
-
-  const reviewPayload = {
-    repo: repoFullName,
-    sourceControlProvider: 'ado',
-    // Pin repository resolution to the webhook repository's host so
-    // same-name repositories on other hosts cannot be picked up. Legacy
-    // rows without a recorded host omit the field.
-    ...(target.repo.host ? { sourceControlHost: target.repo.host } : {}),
-    prNumber: pullRequest.pullRequestId,
-    prTitle: pullRequest.title,
-    prUrl: getAdoPullRequestUrl({
-      resourceContainers: payload.resourceContainers,
-      pullRequest,
-      repositoryFullName: repoFullName,
     }),
-    headSha,
-    branchName,
-    ...(branchName ? { branch: branchName } : {}),
-    ...(headSha ? { sha: headSha } : {}),
-    targetBranch: stripAdoGitRefPrefix(pullRequest.targetRefName),
-  } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>;
+    currentMessageId: `ado:comment:${comment.id ?? `${pullRequest.pullRequestId}:${Date.now()}`}`,
+    activeTasks,
+  });
 
-  try {
-    // A human @roomote mention started this review: the commenter is the
-    // initiator (the old automatic/ado attribution override is gone).
-    const launch = await enqueueTask({
-      task: {
-        type: TaskPayloadKind.GithubPrReview,
-        payload: reviewPayload,
-      },
-      initiator: { kind: 'user', userId: target.userId },
-      workflow: 'pr_review',
-      surface: 'ado',
-      trigger: 'message',
-      prLinkage: {
-        provider: 'ado',
-        ...(target.repo.host ? { host: target.repo.host } : {}),
-        repositoryId: target.repo.id,
-        repository: repoFullName,
-        prNumber: pullRequest.pullRequestId,
-        prUrl: reviewPayload.prUrl,
-        prTitle: pullRequest.title,
-        prSha: headSha || null,
-        prBaseRef: stripAdoGitRefPrefix(pullRequest.targetRefName) ?? null,
-      },
-    });
-
+  if (started.status !== 'queued') {
     await postMentionResponseComment({
       ...mentionResponseTarget,
-      body: formatAdoPrMentionReply(
-        'review_started',
-        tryBuildTaskLink({
-          taskId: launch.taskId,
-          campaign: 'ado.pr.mention.review',
-        }),
-      ),
+      body: SOURCE_CONTROL_FAST_UNAVAILABLE_MESSAGE,
     });
-
-    return { status: 'ok', metadata: { ids: [launch.id] } };
-  } catch (error) {
-    console.warn(
-      `[handleAdoComment] failed to start PR review task for ${repoFullName}#${pullRequest.pullRequestId}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-
-    await postMentionResponseComment({
-      ...mentionResponseTarget,
-      body: buildTaskStartFailedComment(),
-    });
-
-    return {
-      status: 'error',
-      message: `review_start_failed:${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    };
+    return { status: 'error', message: 'fast_unavailable' };
   }
+
+  return {
+    status: 'ok',
+    message: 'fast_session_queued',
+    metadata: { fastConversationId: started.fastConversationId },
+  };
 }

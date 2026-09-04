@@ -142,8 +142,13 @@ export function isTelemetryEnvAllowed(): boolean {
   return isTelemetryEnvAllowedFor(input);
 }
 
-function getAppVersion(): string | undefined {
-  return Env.RELEASE_VERSION?.trim() || undefined;
+function getAppVersion(): string {
+  return (
+    Env.RELEASE_VERSION?.trim() ||
+    process.env.VERCEL_GIT_COMMIT_SHA?.trim() ||
+    process.env.GITHUB_SHA?.trim() ||
+    'unknown'
+  );
 }
 
 function getPingBaseUrl(): string {

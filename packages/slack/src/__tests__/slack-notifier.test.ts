@@ -3211,6 +3211,65 @@ describe('SlackNotifier', () => {
       expect(getUsersInfoSpy).toHaveBeenCalledWith(['U123', 'U456']);
       expect(output).toBe('Hi @Alice and @Alice plus @Bob.');
     });
+
+    it('replaces the installed Roomote app mention without fetching user info', async () => {
+      notifier = new SlackNotifier(token, {
+        botUserId: 'UROOMOTE',
+        botName: 'Roomote',
+      });
+      const getUsersInfoSpy = vi.spyOn(
+        SlackNotifier.prototype as unknown as {
+          getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+        },
+        'getUsersInfo',
+      );
+
+      const output = await notifier.replaceMentionsWithNames(
+        '<@UROOMOTE> please inspect this',
+      );
+
+      expect(output).toBe('@Roomote please inspect this');
+      expect(getUsersInfoSpy).not.toHaveBeenCalled();
+    });
+
+    it('uses installation metadata for Roomote while resolving user mentions normally', async () => {
+      notifier = new SlackNotifier(token, {
+        botUserId: 'UROOMOTE',
+        appName: 'Roomote',
+      });
+      const getUsersInfoSpy = vi
+        .spyOn(
+          SlackNotifier.prototype as unknown as {
+            getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+          },
+          'getUsersInfo',
+        )
+        .mockResolvedValue(new Map([['U123', 'Alice']]));
+
+      const output = await notifier.replaceMentionsWithNames(
+        '<@U123> tagged <@UROOMOTE>',
+      );
+
+      expect(getUsersInfoSpy).toHaveBeenCalledWith(['U123']);
+      expect(output).toBe('@Alice tagged @Roomote');
+    });
+
+    it('falls back to user info when installation metadata has no readable bot name', async () => {
+      notifier = new SlackNotifier(token, { botUserId: 'UROOMOTE' });
+      const getUsersInfoSpy = vi
+        .spyOn(
+          SlackNotifier.prototype as unknown as {
+            getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+          },
+          'getUsersInfo',
+        )
+        .mockResolvedValue(new Map([['UROOMOTE', 'Roomote']]));
+
+      const output = await notifier.replaceMentionsWithNames('<@UROOMOTE>');
+
+      expect(getUsersInfoSpy).toHaveBeenCalledWith(['UROOMOTE']);
+      expect(output).toBe('@Roomote');
+    });
   });
 
   describe('normalizeIncomingText', () => {
@@ -3224,6 +3283,18 @@ describe('SlackNotifier', () => {
       );
 
       expect(output).toBe('Hi @Alice [Example](https://example.com/path)');
+    });
+
+    it('keeps raw mention tokens when preserveMentions is set', async () => {
+      const replaceSpy = vi.spyOn(notifier, 'replaceMentionsWithNames');
+
+      const output = await notifier.normalizeIncomingText(
+        'Hi <@U123> <https://example.com/path|Example>',
+        { preserveMentions: true },
+      );
+
+      expect(output).toBe('Hi <@U123> [Example](https://example.com/path)');
+      expect(replaceSpy).not.toHaveBeenCalled();
     });
   });
 

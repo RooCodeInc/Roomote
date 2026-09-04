@@ -62,6 +62,8 @@ import {
   tasks,
   users,
   environments,
+  sessions,
+  sessionTasks,
   and,
   desc,
   eq,
@@ -93,7 +95,7 @@ import {
   isFallbackTaskTitle,
   LLM_TITLE_LOCKED_CHECKPOINT,
 } from './llm-task-title';
-import { resolveRequestedWorkKindDecision } from './router/requested-work-kind';
+import { resolveRequestedWorkKindDecision } from './requested-work-kind';
 
 enum TaskRunQueueKeys {
   // Keep the v2 layout during the debounce rollout. Old and new producers and
@@ -1562,18 +1564,82 @@ async function enqueueFreshLaunch(
   const fastParent = getFastAgentParentFromPayload(
     taskWithHarnessOverrides.payload,
   );
+  const fastAgentSessionId =
+    taskWithHarnessOverrides.payload.fastAgentSessionId ??
+    fastParent?.sessionId ??
+    null;
+  const launchIdempotencyKey =
+    taskWithHarnessOverrides.payload.launchIdempotencyKey;
 
   // Fresh runs are persisted atomically with either a new task or the existing
   // durable task they continue.
   const runPersistTransaction = () =>
     db.transaction(async (tx) => {
-      if (fastParent) {
+      if (fastAgentSessionId) {
         // Parallel launch_task calls from one Fast turn write the same
         // session and conversation rows; serializing per parent conversation
         // prevents lock-order deadlocks (40P01) between them.
         await tx.execute(
-          sql`select pg_advisory_xact_lock(hashtextextended(${`fast-parent-launch:${fastParent.sessionId}`}, 0))`,
+          sql`select pg_advisory_xact_lock(hashtextextended(${`fast-parent-launch:${fastAgentSessionId}`}, 0))`,
         );
+      }
+      if (launchIdempotencyKey) {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`task-launch:${launchIdempotencyKey}`}, 0))`,
+        );
+        const [existingRun] = await tx
+          .select()
+          .from(taskRuns)
+          .where(
+            and(
+              sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
+              isNull(taskRuns.canceledAt),
+            ),
+          )
+          .limit(1)
+          .for('update');
+        if (existingRun) {
+          const existingFastParent = getFastAgentParentFromPayload(
+            existingRun.payload,
+          );
+          const existingFastAgentSessionId =
+            existingRun.fastAgentSessionId ?? existingFastParent?.sessionId;
+          if (
+            fastAgentSessionId &&
+            existingFastAgentSessionId !== fastAgentSessionId
+          ) {
+            throw new Error(
+              'Launch idempotency key is already attached to another Fast Session.',
+            );
+          }
+          if (fastAgentSessionId) {
+            const [existingSession] = await tx
+              .select({ fastConversationId: sessions.fastConversationId })
+              .from(sessionTasks)
+              .innerJoin(sessions, eq(sessionTasks.sessionId, sessions.id))
+              .where(eq(sessionTasks.taskId, existingRun.taskId))
+              .limit(1);
+            if (
+              existingSession &&
+              existingSession.fastConversationId !== fastAgentSessionId
+            ) {
+              throw new Error(
+                'Launch idempotency key is already attached to another Session.',
+              );
+            }
+          }
+          await ensureSessionForTask(tx, {
+            taskId: existingRun.taskId,
+            fastConversationId: fastAgentSessionId,
+            origin: fastAgentSessionId ? 'fast_delegation' : 'direct_launch',
+            existingTaskReused: true,
+          });
+          return {
+            taskRun: existingRun,
+            createdRun: false,
+            reusedTask: true,
+          };
+        }
       }
       const chatgptConnected = effectiveTaskModel.startsWith('openai/')
         ? await isChatGptSubscriptionConnected(tx)
@@ -1730,8 +1796,8 @@ async function enqueueFreshLaunch(
 
       await ensureSessionForTask(tx, {
         taskId,
-        fastConversationId: fastParent?.sessionId ?? null,
-        origin: fastParent
+        fastConversationId: fastAgentSessionId,
+        origin: fastAgentSessionId
           ? 'fast_delegation'
           : existingTask
             ? 'follow_up'
@@ -1872,10 +1938,7 @@ async function enqueueFreshLaunch(
     return taskRun;
   }
 
-  const delegated = Boolean(
-    reusedTask ||
-    getFastAgentParentFromPayload(taskWithHarnessOverrides.payload),
-  );
+  const delegated = Boolean(reusedTask || fastAgentSessionId);
   void captureEvent(delegated ? 'session_task_delegated' : 'session_created', {
     ...(linkedUserId ? { userId: linkedUserId } : {}),
     properties: { surface, outcome: 'created' },

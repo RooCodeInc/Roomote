@@ -183,19 +183,31 @@ vi.mock('./SideNavItem', () => ({
     href,
     onClick,
     tooltip,
+    label,
     expanded,
+    disabled,
+    description,
   }: {
     href?: string;
     onClick?: () => void;
-    tooltip: string;
+    tooltip: ReactNode;
+    label?: string;
     expanded?: boolean;
+    disabled?: boolean;
+    description?: ReactNode;
   }) =>
     href ? (
-      <div data-testid={`nav-${href}`} data-expanded={String(expanded)} />
+      <div
+        data-testid={`nav-${href}`}
+        data-expanded={String(expanded)}
+        data-disabled={String(disabled ?? false)}
+        data-description={typeof description === 'string' ? description : ''}
+        data-tooltip={typeof tooltip === 'string' ? tooltip : ''}
+      />
     ) : (
       <button
         type="button"
-        data-testid={`nav-action-${tooltip}`}
+        data-testid={`nav-action-${typeof tooltip === 'string' ? tooltip : label}`}
         data-expanded={String(expanded)}
         onClick={onClick}
       >
@@ -275,6 +287,16 @@ describe('SideNav recent sessions', () => {
       { id: 'session-2', title: 'Session 2' },
     ];
     useLiveTaskStatusMock.mockReturnValue(null);
+    vi.mocked(window.matchMedia).mockImplementation((query) => ({
+      matches: query === '(min-width: 768px)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
   });
 
   it('extracts task and session ids only from detail routes', () => {
@@ -414,6 +436,61 @@ describe('SideNav recent sessions', () => {
     );
   });
 
+  it('opens the new session dialog with the desktop N shortcut', () => {
+    render(<SideNav />);
+
+    fireEvent.keyDown(document, { key: 'n' });
+
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+      'data-open',
+      'true',
+    );
+  });
+
+  it('does not handle the N shortcut while a text field is focused', () => {
+    render(<SideNav />);
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+
+    fireEvent.keyDown(input, { key: 'n' });
+
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+      'data-open',
+      'false',
+    );
+    input.remove();
+  });
+
+  it('does not handle the N shortcut on mobile', () => {
+    vi.mocked(window.matchMedia).mockImplementation((query) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    render(<SideNav />);
+
+    fireEvent.keyDown(document, { key: 'n' });
+
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+      'data-open',
+      'false',
+    );
+  });
+
+  it('advertises the N shortcut in the new session tooltip', () => {
+    render(<SideNav />);
+
+    expect(screen.getByTestId('nav-action-New Session')).toHaveTextContent(
+      'New Session (N)',
+    );
+  });
+
   it('keeps the new session action above Home', () => {
     render(<SideNav />);
 
@@ -483,5 +560,50 @@ describe('SideNav recent sessions', () => {
 
     expect(screen.getByTestId('nav-/settings')).toBeInTheDocument();
     expect(screen.queryByTestId('nav-/automations')).not.toBeInTheDocument();
+  });
+
+  it('disables inaccessible destinations during setup while keeping Settings enabled', () => {
+    render(<SideNav setupIncomplete />);
+
+    expect(screen.getByTestId('nav-/')).toHaveAttribute(
+      'data-disabled',
+      'true',
+    );
+    expect(screen.getByTestId('nav-/automations')).toHaveAttribute(
+      'data-disabled',
+      'true',
+    );
+    expect(screen.getByTestId('nav-/analytics')).toHaveAttribute(
+      'data-disabled',
+      'true',
+    );
+    for (const href of ['/', '/automations', '/analytics']) {
+      expect(screen.getByTestId(`nav-${href}`)).toHaveAttribute(
+        'data-tooltip',
+        'Available when setup is completed.',
+      );
+      expect(screen.getByTestId(`nav-${href}`)).toHaveAttribute(
+        'data-description',
+        '',
+      );
+    }
+    expect(screen.getByTestId('nav-/sessions')).toHaveAttribute(
+      'data-disabled',
+      'false',
+    );
+    expect(screen.getByTestId('nav-/settings')).toHaveAttribute(
+      'data-disabled',
+      'false',
+    );
+  });
+
+  it('removes the expanded wordmark Home link during setup', () => {
+    state.isSideNavExpanded = true;
+
+    render(<SideNav setupIncomplete />);
+
+    expect(
+      screen.getByRole('img', { name: 'Roomote' }).closest('a'),
+    ).toBeNull();
   });
 });

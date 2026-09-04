@@ -1,11 +1,6 @@
 'use client';
 
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/system';
+import { Dialog, DialogContent, DialogTitle } from '@/components/system';
 import { NewTaskForm } from './NewTaskForm';
 
 export function NewTaskDialog({
@@ -17,11 +12,17 @@ export function NewTaskDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="2xl" aria-describedby={undefined}>
-        <DialogHeader>
-          <DialogTitle>New Session</DialogTitle>
-        </DialogHeader>
-        <NewTaskForm onTaskStarted={() => onOpenChange(false)} />
+      <DialogContent
+        size="2xl"
+        aria-describedby={undefined}
+        className="p-0"
+        overlayClassName="bg-black/75"
+      >
+        <DialogTitle className="sr-only">New Session</DialogTitle>
+        <NewTaskForm
+          animate={false}
+          onTaskStarted={() => onOpenChange(false)}
+        />
       </DialogContent>
     </Dialog>
   );

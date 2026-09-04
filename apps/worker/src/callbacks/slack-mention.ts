@@ -12,7 +12,6 @@ import {
   buildSlackAnsweredRequestUserInputBlocks,
   buildSlackCancelledRequestUserInputBlocks,
   buildSlackRequestUserInputBlocks,
-  buildStartedBlocks,
   convertMarkdownToSlack,
   getSlackRequestUserInputCurrentQuestion,
 } from '@roomote/slack/client';
@@ -127,31 +126,6 @@ async function resolveSlackConversation(
   return getSlackConversation(taskRun);
 }
 
-function getInitiatingSlackUserIdForStartedMessage(
-  taskRun: TaskRun,
-  startedData: {
-    initiatingSlackUserId?: string;
-  },
-): string | undefined {
-  if (startedData.initiatingSlackUserId) {
-    return startedData.initiatingSlackUserId;
-  }
-
-  const payload = taskRun.payload;
-
-  if (
-    taskRun.payloadKind === TaskPayloadKind.SlackAppMention &&
-    payload &&
-    typeof payload === 'object' &&
-    'user' in payload &&
-    typeof payload.user === 'string'
-  ) {
-    return payload.user;
-  }
-
-  return undefined;
-}
-
 async function recordOutboundSlackMessageForTaskRun(params: {
   taskRun: TaskRun;
   messageTs: string | null | undefined;
@@ -209,70 +183,6 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
       );
       console.error(
         `[slackMentionCallbacks#onStart] Failed Slack reaction cleanup for task run ${taskRun.id}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-
-    try {
-      // Build a single task URL that includes preview params for the primary service.
-      const taskUrlObj = new URL(
-        `/task/${taskRun.taskId}`,
-        process.env.R_APP_URL,
-      );
-      taskUrlObj.searchParams.set('utm_source', 'slack');
-      taskUrlObj.searchParams.set('utm_medium', 'link');
-      taskUrlObj.searchParams.set('utm_campaign', 'slack.app.mention');
-
-      // Retrieve the started message metadata so we can rebuild the blocks.
-      const startedData = await sdk.taskRuns.getSlackStartedMessageData({
-        runId: taskRun.id,
-      });
-
-      if (!startedData) {
-        console.log(
-          `[slackMentionCallbacks#onStart] No started message data for job ${taskRun.id}, skipping Follow button`,
-        );
-
-        return;
-      }
-
-      const taskUrl = taskUrlObj.toString();
-      const initiatingSlackUserId = getInitiatingSlackUserIdForStartedMessage(
-        taskRun,
-        startedData,
-      );
-
-      // Rebuild the started message blocks with the Follow button included
-      const blocks = buildStartedBlocks({
-        workspaceDisplayName: startedData.workspaceDisplayName,
-        modelDisplayName: startedData.modelDisplayName,
-        kickoffMessage: startedData.kickoffMessage,
-        runId: taskRun.id,
-        otherRunningTasksCount: startedData.otherRunningTasksCount,
-        taskId: taskRun.taskId,
-        initiatingSlackUserId,
-        taskUrl,
-        warningText: startedData.warningText,
-      });
-
-      const { channel, thread_ts: threadTs } = getSlackConversation(taskRun);
-
-      if (threadTs) {
-        await slack.updateMessage({
-          channel,
-          ts: startedData.ts,
-          message: { blocks },
-        });
-      }
-    } catch (error) {
-      reportSlackCallbackError(
-        error,
-        'slackMentionCallbacks.onStart.refreshStartedMessage',
-        taskRun.id,
-      );
-      console.error(
-        `[slackMentionCallbacks#onStart] Failed Slack started-message refresh for task run ${taskRun.id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

@@ -81,6 +81,18 @@ const PROVIDER_MANAGED_ENV_VAR_NAME_LIST = [
   ...ROOMOTE_MANAGED_ENV_VAR_NAMES,
 ];
 
+function assertGenericEnvironmentVariableName(name: string) {
+  if (CONTROL_PLANE_ENV_VAR_NAMES.has(name)) {
+    throw new Error(
+      `"${name}" is a reserved deployment variable and cannot be set here.`,
+    );
+  }
+
+  if (ROOMOTE_MANAGED_ENV_VAR_NAMES.has(name)) {
+    throw new Error(`"${name}" is managed by Roomote and cannot be set here.`);
+  }
+}
+
 export async function upsertDeploymentEnvironmentVariables(
   tx: DatabaseOrTransaction,
   {
@@ -193,6 +205,8 @@ export async function deleteEnvVarCommand(
     return { success: false as const, error: 'Environment variable not found' };
   }
 
+  assertGenericEnvironmentVariableName(envVar.name);
+
   await db.transaction(async (tx) => {
     await tx
       .delete(environmentVariables)
@@ -235,15 +249,7 @@ export async function createEnvVarCommand(
     );
   }
 
-  if (CONTROL_PLANE_ENV_VAR_NAMES.has(name)) {
-    throw new Error(
-      `"${name}" is a reserved deployment variable and cannot be set here.`,
-    );
-  }
-
-  if (ROOMOTE_MANAGED_ENV_VAR_NAMES.has(name)) {
-    throw new Error(`"${name}" is managed by Roomote and cannot be set here.`);
-  }
+  assertGenericEnvironmentVariableName(name);
 
   const [existing] = await db
     .select()
@@ -289,6 +295,8 @@ export async function updateEnvVarCommand(
   if (!envVar) {
     throw new Error('Environment variable not found');
   }
+
+  assertGenericEnvironmentVariableName(envVar.name);
 
   const [updatedEnvVar] = await db
     .update(environmentVariables)

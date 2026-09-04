@@ -50,7 +50,11 @@ type DiscordSuggestionLaunchClaim = {
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
   targetEnvironmentId?: string | null;
+  /** The card's explicit launch target, kept even when its environment FK was cleared. */
+  launchTarget?: string;
   usesRouterLaunch: boolean;
+  /** The scan or onboarding task that produced the suggestion. */
+  sourceTaskId: string | null;
   launchClaimedAt: Date;
 };
 
@@ -220,7 +224,11 @@ export async function claimDiscordSuggestionLaunch(input: {
     investigationContext: routed ? null : claimed.investigationContext,
     targetRepositoryFullName: routed ? null : claimed.targetRepositoryFullName,
     targetEnvironmentId: routed ? null : claimed.targetEnvironmentId,
+    ...(!routed && typeof trackedCard.metadata?.launchTarget === 'string'
+      ? { launchTarget: trackedCard.metadata.launchTarget }
+      : {}),
     usesRouterLaunch: routed,
+    sourceTaskId: claimed.sourceTaskId,
     launchClaimedAt: claimed.launchClaimedAt,
   };
 }

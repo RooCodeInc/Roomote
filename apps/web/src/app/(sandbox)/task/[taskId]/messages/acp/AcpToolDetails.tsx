@@ -214,9 +214,13 @@ function getVisibleToolInput(
   const visibleField =
     serverName === 'gbrain' && (toolName === 'search' || toolName === 'query')
       ? 'query'
-      : toolName === 'send_task_message'
+      : toolName === 'send_task_message' || toolName === 'send_chat_reply'
         ? 'message'
-        : null;
+        : toolName === 'post_to_channel'
+          ? 'text'
+          : toolName === 'send_chat_reaction_emoji'
+            ? 'name'
+            : null;
   if (!visibleField) {
     return null;
   }

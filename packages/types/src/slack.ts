@@ -194,3 +194,227 @@ export function parseSlackChannelPermalink(raw: string): {
 
   return null;
 }
+
+/**
+ * Slack-native inline references that can appear in raw message text.
+ * Roomote persists inbound Slack text verbatim so the model sees exactly
+ * what the sender typed; the web transcript uses these tokens to render
+ * readable, linked equivalents without rewriting the stored text.
+ */
+export type SlackMessageToken =
+  | { type: 'text'; text: string }
+  | { type: 'user'; userId: string; label: string | null }
+  | { type: 'channel'; channelId: string; label: string | null }
+  | { type: 'usergroup'; usergroupId: string; label: string | null }
+  | { type: 'broadcast'; name: string }
+  | { type: 'link'; url: string; label: string | null };
+
+/** Upper bound on Slack user IDs resolved in one `slack.resolveUsers` call. */
+export const SLACK_RESOLVE_USERS_MAX_IDS = 50;
+/**
+ * Upper bound on Slack channel IDs resolved in one `slack.resolveUsers` call.
+ * Channel names come from `conversations.info`, one call per cold ID, so this
+ * stays small to keep a single transcript message well under Slack's quota.
+ */
+export const SLACK_RESOLVE_CHANNELS_MAX_IDS = 10;
+
+// Each pattern is anchored and applied only to the bounded text between one
+// `<` and the next `>`, so parsing stays linear in the message length even
+// for sender-controlled text full of unterminated `<@U0|` fragments.
+const SLACK_USER_REFERENCE_PATTERN = /^@([UW][A-Z0-9]+)(?:\|([^|]*))?$/;
+const SLACK_CHANNEL_REFERENCE_PATTERN = /^#([CDG][A-Z0-9]+)(?:\|([^|]*))?$/;
+const SLACK_USERGROUP_REFERENCE_PATTERN =
+  /^!subteam\^([A-Z0-9]+)(?:\|([^|]*))?$/;
+const SLACK_BROADCAST_REFERENCE_PATTERN = /^!(here|channel|everyone)(?:\|.*)?$/;
+const SLACK_LINK_REFERENCE_PATTERN =
+  /^((?:https?:\/\/|mailto:)[^|\s]+)(?:\|(.*))?$/;
+
+function normalizeSlackTokenLabel(label: string | undefined): string | null {
+  const trimmed = label?.trim().replace(/^@/, '') ?? '';
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseSlackReference(inner: string): SlackMessageToken | null {
+  const user = SLACK_USER_REFERENCE_PATTERN.exec(inner);
+  if (user?.[1]) {
+    return {
+      type: 'user',
+      userId: user[1],
+      label: normalizeSlackTokenLabel(user[2]),
+    };
+  }
+
+  const channel = SLACK_CHANNEL_REFERENCE_PATTERN.exec(inner);
+  if (channel?.[1]) {
+    return {
+      type: 'channel',
+      channelId: channel[1],
+      label: normalizeSlackTokenLabel(channel[2]),
+    };
+  }
+
+  const usergroup = SLACK_USERGROUP_REFERENCE_PATTERN.exec(inner);
+  if (usergroup?.[1]) {
+    return {
+      type: 'usergroup',
+      usergroupId: usergroup[1],
+      label: normalizeSlackTokenLabel(usergroup[2]),
+    };
+  }
+
+  const broadcast = SLACK_BROADCAST_REFERENCE_PATTERN.exec(inner);
+  if (broadcast?.[1]) {
+    return { type: 'broadcast', name: broadcast[1] };
+  }
+
+  const link = SLACK_LINK_REFERENCE_PATTERN.exec(inner);
+  if (link?.[1]) {
+    const url = link[1];
+    const label = link[2]?.trim() ?? '';
+    // Slack repeats the url (or the address behind `mailto:`) as the label
+    // when the sender typed a bare link; that adds nothing, so drop it.
+    const redundantLabels = new Set([url, url.replace(/^mailto:/, '')]);
+    return {
+      type: 'link',
+      url,
+      label: label.length > 0 && !redundantLabels.has(label) ? label : null,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Splits raw Slack message text into plain-text runs and Slack references
+ * (`<@U123>`, `<@U123|name>`, `<#C123|general>`, `<!subteam^S123|@team>`,
+ * `<!here>`, `<https://example.com|label>`). Text without references comes
+ * back as a single text token.
+ *
+ * Single forward scan: a `<` opens a candidate, the candidate ends at the
+ * next `>`, and another `<` before that restarts the candidate there, so no
+ * character is examined more than a constant number of times.
+ */
+export function parseSlackMessageTokens(text: string): SlackMessageToken[] {
+  const tokens: SlackMessageToken[] = [];
+  let textStart = 0;
+  let index = 0;
+
+  while (index < text.length) {
+    const open = text.indexOf('<', index);
+    if (open === -1) {
+      break;
+    }
+
+    let cursor = open + 1;
+    while (
+      cursor < text.length &&
+      text[cursor] !== '>' &&
+      text[cursor] !== '<'
+    ) {
+      cursor += 1;
+    }
+
+    if (cursor >= text.length) {
+      break;
+    }
+
+    if (text[cursor] === '<') {
+      index = cursor;
+      continue;
+    }
+
+    const token = parseSlackReference(text.slice(open + 1, cursor));
+    if (token) {
+      if (open > textStart) {
+        tokens.push({ type: 'text', text: text.slice(textStart, open) });
+      }
+      tokens.push(token);
+      textStart = cursor + 1;
+    }
+    index = cursor + 1;
+  }
+
+  if (textStart < text.length) {
+    tokens.push({ type: 'text', text: text.slice(textStart) });
+  }
+
+  return tokens;
+}
+
+/** Unique Slack user IDs referenced by `<@U…>` tokens, in first-seen order. */
+export function extractSlackUserMentionIds(text: string): string[] {
+  const userIds = new Set<string>();
+  for (const token of parseSlackMessageTokens(text)) {
+    if (token.type === 'user') {
+      userIds.add(token.userId);
+    }
+  }
+  return [...userIds];
+}
+
+/** Unique Slack channel IDs referenced by `<#C…>` tokens, in first-seen order. */
+export function extractSlackChannelMentionIds(text: string): string[] {
+  const channelIds = new Set<string>();
+  for (const token of parseSlackMessageTokens(text)) {
+    if (token.type === 'channel') {
+      channelIds.add(token.channelId);
+    }
+  }
+  return [...channelIds];
+}
+
+/**
+ * Link to a Slack channel. Prefers the workspace web URL when the domain is
+ * known and falls back to Slack's app redirect when only the team ID is
+ * available.
+ */
+export function buildSlackChannelUrl(params: {
+  slackChannelId: string;
+  slackTeamId?: string | null;
+  slackWorkspaceDomain?: string | null;
+}): string | null {
+  const slackChannelId = params.slackChannelId.trim();
+  if (!slackChannelId) {
+    return null;
+  }
+
+  const slackWorkspaceDomain = params.slackWorkspaceDomain?.trim();
+  if (slackWorkspaceDomain) {
+    return `https://${encodeURIComponent(slackWorkspaceDomain)}.slack.com/archives/${encodeURIComponent(slackChannelId)}`;
+  }
+
+  const slackTeamId = params.slackTeamId?.trim();
+  if (slackTeamId) {
+    return `https://slack.com/app_redirect?channel=${encodeURIComponent(slackChannelId)}&team=${encodeURIComponent(slackTeamId)}`;
+  }
+
+  return null;
+}
+
+/**
+ * Link to a Slack member profile. Prefers the workspace web URL when the
+ * workspace domain is known and falls back to the `slack://` deep link that
+ * the desktop app handles when only the team ID is available.
+ */
+export function buildSlackUserProfileUrl(params: {
+  slackUserId: string;
+  slackTeamId?: string | null;
+  slackWorkspaceDomain?: string | null;
+}): string | null {
+  const slackUserId = params.slackUserId.trim();
+  if (!slackUserId) {
+    return null;
+  }
+
+  const slackWorkspaceDomain = params.slackWorkspaceDomain?.trim();
+  if (slackWorkspaceDomain) {
+    return `https://${encodeURIComponent(slackWorkspaceDomain)}.slack.com/team/${encodeURIComponent(slackUserId)}`;
+  }
+
+  const slackTeamId = params.slackTeamId?.trim();
+  if (slackTeamId) {
+    return `slack://user?team=${encodeURIComponent(slackTeamId)}&id=${encodeURIComponent(slackUserId)}`;
+  }
+
+  return null;
+}

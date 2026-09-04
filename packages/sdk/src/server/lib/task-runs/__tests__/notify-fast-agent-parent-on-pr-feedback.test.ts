@@ -1,4 +1,5 @@
 import type { TaskRun } from '@roomote/db/server';
+import { TaskPayloadKind } from '@roomote/types';
 
 const mocks = vi.hoisted(() => {
   class FastAgentParentEventDeliveryError extends Error {
@@ -150,6 +151,43 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
     mocks.findClaimRun.mockResolvedValue({ id: 200 });
     mocks.deliverParentEvent.mockResolvedValue('delivered');
     mocks.recordLifecycle.mockResolvedValue(undefined);
+  });
+
+  it('does not forward feedback from an automatic review attached for visibility', async () => {
+    await expect(
+      notifyFastAgentParentOnPrFeedback({
+        run: {
+          ...makeRun({ fastAgentParent: fastParent }),
+          payloadKind: TaskPayloadKind.GithubPrReview,
+        },
+        ...input,
+      }),
+    ).resolves.toBe(false);
+
+    expect(mocks.claimConversationDelivery).not.toHaveBeenCalled();
+    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('forwards feedback from a review the session requested itself', async () => {
+    await expect(
+      notifyFastAgentParentOnPrFeedback({
+        run: {
+          ...makeRun({
+            fastAgentParent: fastParent,
+            fastParentRequestedReview: true,
+          }),
+          payloadKind: TaskPayloadKind.GithubPrReview,
+        },
+        ...input,
+      }),
+    ).resolves.toBe(true);
+
+    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent: fastParent,
+        event: expect.objectContaining({ type: 'pull_request_feedback' }),
+      }),
+    );
   });
 
   it('passes structured, actionable feedback to the Fast parent', async () => {

@@ -15,7 +15,9 @@ import {
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  SETUP_RECEIPT_INPUT_KIND,
   asRecord,
+  extractAutomationTriggeredPromptText,
   extractAcpMessageText,
   extractVisibleAcpPromptText,
   formatErrorForLog,
@@ -53,21 +55,6 @@ function checkpointForUserMessageCount(count: number): number {
 
 function normalizeTaskMessageText(value: string | undefined): string {
   return normalizeTranscriptUserText(value)?.replace(/\s+/g, ' ').trim() ?? '';
-}
-
-function extractAutomationPromptText(text: string): string {
-  const match = /^<platform_event>(.*)<\/platform_event>$/su.exec(text.trim());
-  if (!match?.[1]) return text;
-
-  try {
-    const event = asRecord(JSON.parse(match[1]));
-    return event?.type === 'automation_triggered' &&
-      typeof event.prompt === 'string'
-      ? event.prompt
-      : text;
-  } catch {
-    return text;
-  }
 }
 
 export async function refreshTaskSessionTitle({
@@ -226,6 +213,7 @@ export async function refreshFastAgentSessionTitle({
             coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'
             or ${fastAgentMessages.metadata} ->> 'platformEventKind' = 'automation'
           )`,
+          sql`coalesce(${fastAgentMessages.metadata} ->> 'inputKind', 'message') <> ${SETUP_RECEIPT_INPUT_KIND}`,
         ),
       )
       .orderBy(asc(fastAgentMessages.ts), asc(fastAgentMessages.turnSeq))
@@ -241,7 +229,7 @@ export async function refreshFastAgentSessionTitle({
       const metadata = asRecord(row.metadata);
       const text =
         rawText && metadata?.platformEventKind === 'automation'
-          ? extractAutomationPromptText(rawText).trim()
+          ? (extractAutomationTriggeredPromptText(rawText) ?? rawText).trim()
           : rawText;
       if (!text) {
         continue;

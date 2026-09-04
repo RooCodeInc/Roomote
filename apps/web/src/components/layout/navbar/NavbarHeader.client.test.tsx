@@ -9,10 +9,16 @@ import { fireEvent, render, screen } from '@testing-library/react';
 const state = vi.hoisted(() => ({
   setOpen: vi.fn(),
   user: {},
+  drawerSetupIncomplete: false,
 }));
 
 vi.mock('next/image', () => ({
-  default: (props: ImgHTMLAttributes<HTMLImageElement>) => {
+  default: ({
+    priority: _priority,
+    ...props
+  }: ImgHTMLAttributes<HTMLImageElement> & {
+    priority?: boolean;
+  }) => {
     // eslint-disable-next-line @next/next/no-img-element
     return <img {...props} />;
   },
@@ -39,6 +45,7 @@ vi.mock('@/components/system', () => ({
       {children}
     </button>
   ),
+  Plus: () => <svg aria-hidden="true" />,
   Search: () => <svg aria-hidden="true" />,
 }));
 
@@ -56,8 +63,17 @@ vi.mock('../UserMenu', () => ({
   UserMenu: () => <div>UserMenu</div>,
 }));
 
+vi.mock('@/components/tasks/NewTaskDialog', () => ({
+  NewTaskDialog: ({ open }: { open: boolean }) => (
+    <div data-testid="new-task-dialog" data-open={String(open)} />
+  ),
+}));
+
 vi.mock('./NavbarDrawer', () => ({
-  NavbarDrawer: () => <div>NavbarDrawer</div>,
+  NavbarDrawer: ({ setupIncomplete }: { setupIncomplete?: boolean }) => {
+    state.drawerSetupIncomplete = setupIncomplete ?? false;
+    return <div>NavbarDrawer</div>;
+  },
 }));
 
 import { NavbarHeader } from './NavbarHeader';
@@ -65,6 +81,15 @@ import { NavbarHeader } from './NavbarHeader';
 describe('NavbarHeader', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    state.drawerSetupIncomplete = false;
+  });
+
+  it('disables Home and passes incomplete setup state to the drawer', () => {
+    render(<NavbarHeader setupIncomplete />);
+
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(screen.getByAltText('Roomote')).toHaveClass('opacity-50');
+    expect(state.drawerSetupIncomplete).toBe(true);
   });
 
   it('renders the current Roomote mark in the mobile header', () => {
@@ -83,5 +108,25 @@ describe('NavbarHeader', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 
     expect(state.setOpen).toHaveBeenCalledWith(true);
+  });
+
+  it('opens a new session dialog from beside the mobile logo', () => {
+    render(<NavbarHeader />);
+
+    const logo = screen.getByAltText('Roomote');
+    const newSessionButton = screen.getByRole('button', {
+      name: 'New Session',
+    });
+
+    expect(logo.compareDocumentPosition(newSessionButton)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+
+    fireEvent.click(newSessionButton);
+
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+      'data-open',
+      'true',
+    );
   });
 });

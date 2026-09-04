@@ -1,5 +1,6 @@
 import { acquireRedisLock } from '@roomote/redis';
 import type { FastAgentConversation } from './fast-agent-conversation';
+import { releaseFastAgentDurableTurnClaim } from './fast-agent-conversation-repository';
 
 const FAST_AGENT_TURN_LOCK_PREFIX = 'fast-agent:conversation-lock:';
 const FAST_AGENT_TURN_LOCK_TTL_SECONDS = 600;
@@ -18,9 +19,14 @@ export class FastAgentTurnLockLostError extends Error {
   }
 }
 
+/**
+ * Abort reason for a Fast turn whose process is shutting down. Raised by
+ * every process that executes turns (the API for the turns it admits, the
+ * bullmq service for the turns the queue resumes).
+ */
 export class FastAgentProcessShutdownError extends Error {
-  constructor(signal: NodeJS.Signals) {
-    super(`Fast turn interrupted by API shutdown (${signal}).`);
+  constructor(public readonly signal: NodeJS.Signals) {
+    super(`Fast turn interrupted by process shutdown (${signal}).`);
     this.name = 'FastAgentProcessShutdownError';
   }
 }
@@ -32,6 +38,16 @@ export type FastAgentTurnLockHandle = (() => Promise<void>) & {
   /** Resolves after shutdown closeout delivery settles, without waiting for
    * unrelated inference cleanup that may itself be stuck. */
   shutdownCloseoutSettled: Promise<void>;
+  /**
+   * The inline-admitted durable row this turn executes, when durable
+   * admission applied. Bound by the accepting handler so a shutdown can
+   * release the row's claim even if the turn is interrupted before it
+   * reaches its own abort handling (for example during setup).
+   */
+  durableRowId?: string;
+  /** Wakes the queue for the bound row after a shutdown release so recovery
+   * does not wait for the periodic sweep. Best effort. */
+  durableResume?: () => Promise<void>;
 };
 
 /** Mark the user-visible shutdown closeout as posted and persisted (or as
@@ -60,7 +76,72 @@ export async function abortActiveFastAgentTurns(
   await Promise.allSettled(
     activeLocks.map((lock) => lock.abortForShutdown(processShutdownReason!)),
   );
+  // A turn interrupted before it reached its own abort handling (still in
+  // setup, no inference yet) never releases its durable claim, and the row
+  // would wait out the full claim lease before recovery. Release here for
+  // every bound row; the release is a guarded no-op for rows the turn
+  // already revoked or settled, so replay safety is unaffected.
+  await Promise.allSettled(
+    activeLocks
+      .filter((lock) => lock.durableRowId)
+      .map(async (lock) => {
+        const released = await releaseFastAgentDurableTurnClaim(
+          lock.durableRowId!,
+        ).catch((error) => {
+          console.warn(
+            `[Fast Agent] Failed to release durable turn claim during shutdown: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return false;
+        });
+        if (released) {
+          await lock.durableResume?.().catch((error) => {
+            console.warn(
+              `[Fast Agent] Failed to wake durable turn resume during shutdown: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+        }
+      }),
+  );
   return activeLocks.length;
+}
+
+const turnSettleWaiters = new Set<() => void>();
+
+function notifyTurnSettleWaitersIfIdle() {
+  if (activeFastAgentTurnLocks.size > 0) return;
+  for (const waiter of [...turnSettleWaiters]) waiter();
+}
+
+/**
+ * Refuse new Fast turn admissions without aborting the active ones, so a
+ * shutdown can let in-flight turns finish before interrupting the remainder.
+ */
+export function beginFastAgentTurnDrain(
+  reason: FastAgentProcessShutdownError,
+): void {
+  processShutdownReason ??= reason;
+}
+
+/**
+ * Resolve once every active Fast turn has settled or the deadline passes.
+ * Returns the number of turns still active at that point.
+ */
+export async function waitForActiveFastAgentTurnsToSettle(
+  timeoutMs: number,
+): Promise<number> {
+  if (timeoutMs > 0 && activeFastAgentTurnLocks.size > 0) {
+    await new Promise<void>((resolve) => {
+      const settle = () => {
+        clearTimeout(deadline);
+        turnSettleWaiters.delete(settle);
+        resolve();
+      };
+      turnSettleWaiters.add(settle);
+      const deadline = setTimeout(settle, timeoutMs);
+      deadline.unref();
+    });
+  }
+  return activeFastAgentTurnLocks.size;
 }
 
 /** Serialize every human and platform-generated Fast turn for one chat. */
@@ -140,6 +221,7 @@ export async function acquireFastAgentTurnLock(params: {
         if (turnSettled) return;
         turnSettled = true;
         activeFastAgentTurnLocks.delete(releaseTurnLock);
+        notifyTurnSettleWaitersIfIdle();
         try {
           if (
             ownership.signal.reason instanceof FastAgentProcessShutdownError
