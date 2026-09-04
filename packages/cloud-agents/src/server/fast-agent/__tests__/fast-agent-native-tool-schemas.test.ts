@@ -284,6 +284,37 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     expect(failures).toEqual([]);
   });
 
+  it('exposes integration call args as an object with arbitrary JSON values', () => {
+    const callTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
+    );
+    const schema = toOpenCodeJsonSchema(zod, callTool?.args ?? {}) as {
+      properties?: Record<string, unknown>;
+      $defs?: Record<string, unknown>;
+    };
+    const argsSchema = schema.properties?.args as
+      | { type?: string; additionalProperties?: { $ref?: string } }
+      | undefined;
+    const valueSchemaName = argsSchema?.additionalProperties?.$ref?.replace(
+      '#/$defs/',
+      '',
+    );
+    const valueSchema = valueSchemaName
+      ? (schema.$defs?.[valueSchemaName] as
+          | { anyOf?: Array<{ type?: string }> }
+          | undefined)
+      : undefined;
+
+    expect(argsSchema?.type).toBe('object');
+    expect(valueSchema?.anyOf).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'string' }),
+        expect.objectContaining({ type: 'object' }),
+        expect.objectContaining({ type: 'array' }),
+      ]),
+    );
+  });
+
   it('rejects a bare union or object as args, the shape that broke OpenAI models', () => {
     const { z } = zod;
     const question = z.object({ id: z.string() });
