@@ -168,6 +168,30 @@ describe('deleteTasksCommand', () => {
     );
   });
 
+  it('preserves task metadata when artifact deletion has partial errors', async () => {
+    mockDeleteArtifactsBatch.mockResolvedValue({ deleted: 0, errors: 1 });
+
+    await expect(
+      deleteTasksCommand(auth, { taskIds: ['task-1'] }),
+    ).rejects.toThrow('Failed to delete 1 artifact objects for tasks: task-1');
+
+    expect(deleteCalls).toHaveLength(0);
+    expect(updateCalls).toHaveLength(0);
+    expect(mockMarkParallelCounts).not.toHaveBeenCalled();
+  });
+
+  it('preserves task metadata when artifact deletion throws', async () => {
+    mockDeleteArtifactsBatch.mockRejectedValue(new Error('S3 unavailable'));
+
+    await expect(
+      deleteTasksCommand(auth, { taskIds: ['task-1'] }),
+    ).rejects.toThrow('S3 unavailable');
+
+    expect(deleteCalls).toHaveLength(0);
+    expect(updateCalls).toHaveLength(0);
+    expect(mockMarkParallelCounts).not.toHaveBeenCalled();
+  });
+
   it('archives a session left with no live tasks', async () => {
     await deleteTasksCommand(auth, { taskIds: ['task-1'] });
 
