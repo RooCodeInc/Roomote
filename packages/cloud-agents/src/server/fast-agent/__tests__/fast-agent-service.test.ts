@@ -4470,10 +4470,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
       expect(mocks.releaseDurableClaim).not.toHaveBeenCalled();
       expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
-      expect(mocks.reconcileRetryNotices).not.toHaveBeenCalledWith(
-        expect.anything(),
-        'turn_settled_reconcile',
-      );
+      expect(
+        mocks.reconcileRetryNotices.mock.calls.map((call) => call[1]),
+      ).not.toContain('turn_settled_reconcile');
       expect(
         mocks.touchSessionActivity.mock.calls.map((call) => call[3]),
       ).not.toContainEqual({ respondingUntil: null });
@@ -4881,10 +4880,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.any(String),
         '100.2',
       );
-      expect(mocks.reconcileRetryNotices).not.toHaveBeenCalledWith(
-        expect.anything(),
-        'next_turn_reconcile',
-      );
+      expect(
+        mocks.reconcileRetryNotices.mock.calls.map((call) => call[1]),
+      ).not.toContain('next_turn_reconcile');
       // The answer replaces the predecessor's visible notice in place and
       // retires the same canonical event instead of posting beside it.
       expect(replaceReply).toHaveBeenCalledWith(

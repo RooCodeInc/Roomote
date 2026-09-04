@@ -17,6 +17,7 @@ import {
   isNotNull,
   isNull,
   lt,
+  ne,
   or,
   sessions,
   sql,
@@ -112,6 +113,7 @@ async function reconcileInferenceRetryNotices(
   conversationId: string,
   requireExpiredLease: boolean,
   reason: FastAgentInterruptionReason,
+  options: { excludeEventId?: string } = {},
 ): Promise<number> {
   await database.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
@@ -125,6 +127,31 @@ async function reconcileInferenceRetryNotices(
     if (session?.respondingUntil && session.respondingUntil > new Date()) {
       return 0;
     }
+  }
+
+  // An active notice whose turn still has a pending durable row is not
+  // orphaned: that turn is parked for a retry, waiting for the queue, or
+  // running elsewhere, and its resumed run edits the notice into the answer.
+  // Stamping it as interrupted here would post a false interruption and
+  // leave the eventual answer beside it. The caller's own row (a new turn
+  // that has not superseded the older one, such as a reaction) is excluded.
+  const [pendingTurn] = await database
+    .select({ id: fastAgentParentEvents.id })
+    .from(fastAgentParentEvents)
+    .where(
+      and(
+        eq(fastAgentParentEvents.conversationId, conversationId),
+        eq(fastAgentParentEvents.admission, 'inline'),
+        isNull(fastAgentParentEvents.deliveredAt),
+        isNull(fastAgentParentEvents.discardedAt),
+        ...(options.excludeEventId
+          ? [ne(fastAgentParentEvents.id, options.excludeEventId)]
+          : []),
+      ),
+    )
+    .limit(1);
+  if (pendingTurn) {
+    return 0;
   }
 
   // One set-based statement with no prior read: the terminal metadata is
@@ -172,9 +199,14 @@ export async function reconcileFastAgentInferenceRetryNotices(
     FastAgentInterruptionReason,
     'next_turn_reconcile' | 'turn_settled_reconcile'
   >,
+  options: {
+    /** The calling turn's own durable row, which must not count as a pending
+     * turn that owns the notices. */
+    excludeEventId?: string;
+  } = {},
 ): Promise<number> {
   return db.transaction((tx) =>
-    reconcileInferenceRetryNotices(tx, conversationId, false, reason),
+    reconcileInferenceRetryNotices(tx, conversationId, false, reason, options),
   );
 }
 
