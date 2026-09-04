@@ -13,7 +13,6 @@ import {
   buildSlackThreadFooterText,
   resolveSlackThreadFooterContext,
 } from './thread-footer';
-import { registerSlackThreadActiveTask } from './thread-active-tasks';
 import {
   beginSlackThreadReplyStream,
   endSlackThreadReplyStream,
@@ -96,19 +95,6 @@ function removeSlackThreadStickyBlocks(blocks: unknown[]): unknown[] {
   );
 }
 
-function getSlackThreadReplyFooterFallbackText(block: unknown): string {
-  if (!block || typeof block !== 'object') return '';
-  const record = block as { text?: unknown; elements?: unknown };
-  if (typeof record.text === 'string') return record.text;
-  if (!Array.isArray(record.elements)) return '';
-  const first = record.elements[0];
-  return first &&
-    typeof first === 'object' &&
-    typeof (first as { text?: unknown }).text === 'string'
-    ? (first as { text: string }).text
-    : '';
-}
-
 async function relocateActiveCardsBestEffort(params: {
   slack: Pick<SlackNotifier, 'getRawMessage' | 'postMessage' | 'deleteMessage'>;
   channel: string;
@@ -182,7 +168,10 @@ export async function withSlackThreadReplyFooterLock<T>(params: {
 }
 
 export async function removeSlackThreadReplyFooter(params: {
-  slack: Pick<SlackNotifier, 'getMessageBlocks' | 'updateMessage'>;
+  slack: Pick<
+    SlackNotifier,
+    'getMessageBlocks' | 'updateMessage' | 'deleteMessage'
+  >;
   channel: string;
   threadTs: string;
   messageTs: string;
@@ -200,6 +189,19 @@ export async function removeSlackThreadReplyFooter(params: {
   const updatedBlocks = removeSlackThreadStickyBlocks(blocks);
 
   if (updatedBlocks.length === blocks.length) {
+    return;
+  }
+
+  if (updatedBlocks.length === 0) {
+    const deleted = await params.slack.deleteMessage({
+      channel: params.channel,
+      ts: params.messageTs,
+    });
+    if (!deleted) {
+      console.error(
+        `[slackThreadFooter] Failed to delete empty prior Slack message ${params.messageTs}`,
+      );
+    }
     return;
   }
 
@@ -472,71 +474,6 @@ export async function finalizeSlackThreadReplyStreamWithFooterText(params: {
       token: params.streamToken,
     });
   }
-}
-
-/** Register a card and, when needed, place the exact existing footer below it. */
-export async function registerSlackThreadActiveTaskAndMoveFooter(params: {
-  slack: Pick<
-    SlackNotifier,
-    | 'getMessageBlocks'
-    | 'getRawMessage'
-    | 'postMessage'
-    | 'updateMessage'
-    | 'deleteMessage'
-  >;
-  teamId: string;
-  channel: string;
-  threadTs: string;
-  taskId: string;
-}): Promise<void> {
-  await withSlackThreadReplyFooterLock({
-    channel: params.channel,
-    threadTs: params.threadTs,
-    fn: async () => {
-      await registerSlackThreadActiveTask(params);
-      const previousFooterMessageTs = await getSlackThreadReplyFooterMessageTs(
-        params.channel,
-        params.threadTs,
-      );
-      await relocateActiveCardsBestEffort(params);
-      if (!previousFooterMessageTs) return;
-
-      const blocks = await params.slack.getMessageBlocks({
-        channel: params.channel,
-        threadTs: params.threadTs,
-        messageTs: previousFooterMessageTs,
-      });
-      const footerBlock = blocks?.find(isSlackThreadReplyFooterBlock);
-      if (!footerBlock) return;
-      const nextFooterMessageTs = await params.slack.postMessage({
-        channel: params.channel,
-        thread_ts: params.threadTs,
-        text: getSlackThreadReplyFooterFallbackText(footerBlock),
-        blocks: [footerBlock],
-      });
-      if (!nextFooterMessageTs) return;
-
-      try {
-        await setSlackThreadReplyFooterMessageTs(
-          params.channel,
-          params.threadTs,
-          nextFooterMessageTs,
-        );
-      } catch (error) {
-        await params.slack.deleteMessage({
-          channel: params.channel,
-          ts: nextFooterMessageTs,
-        });
-        throw error;
-      }
-      await removeSlackThreadReplyFooter({
-        slack: params.slack,
-        channel: params.channel,
-        threadTs: params.threadTs,
-        messageTs: previousFooterMessageTs,
-      });
-    },
-  });
 }
 
 /**

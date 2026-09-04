@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   updateMessage: vi.fn(),
   normalizeIncomingText: vi.fn(async (text: string) => text),
   settleSlackLiveTaskCardForRun: vi.fn(),
-  registerSlackThreadActiveTaskAndMoveFooter: vi.fn(),
+  registerSlackThreadActiveTask: vi.fn(),
   taskUrl: 'https://roomote.example/task/task-1',
 }));
 
@@ -83,9 +83,8 @@ vi.mock('../settle-live-task-card', () => ({
   settleSlackLiveTaskCardForRun: mocks.settleSlackLiveTaskCardForRun,
 }));
 
-vi.mock('../thread-reply-footer-ops', () => ({
-  registerSlackThreadActiveTaskAndMoveFooter:
-    mocks.registerSlackThreadActiveTaskAndMoveFooter,
+vi.mock('../thread-active-tasks', () => ({
+  registerSlackThreadActiveTask: mocks.registerSlackThreadActiveTask,
 }));
 
 import { RunStatus } from '@roomote/types';
@@ -98,9 +97,6 @@ function createLauncher() {
       postMessage: mocks.postMessage,
       postMessageDetailed: mocks.postMessageDetailed,
       updateMessage: mocks.updateMessage,
-      getMessageBlocks: vi.fn(),
-      getRawMessage: vi.fn(),
-      deleteMessage: vi.fn(),
       normalizeIncomingText: mocks.normalizeIncomingText,
     },
     userId: 'user-1',
@@ -126,9 +122,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     mocks.setSlackLiveTaskStreamData.mockResolvedValue(undefined);
     mocks.updateMessage.mockResolvedValue(true);
     mocks.settleSlackLiveTaskCardForRun.mockResolvedValue(undefined);
-    mocks.registerSlackThreadActiveTaskAndMoveFooter.mockResolvedValue(
-      undefined,
-    );
+    mocks.registerSlackThreadActiveTask.mockResolvedValue(undefined);
     mocks.taskUrl = 'https://roomote.example/task/task-1';
   });
 
@@ -146,7 +140,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     unfurl_media: false,
   };
 
-  it('posts a starting placeholder card in the parent thread and records the task title', async () => {
+  it('posts only the task card and leaves the kickoff footer in place', async () => {
     const launchTask = createLauncher();
 
     await expect(
@@ -200,15 +194,13 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       title: 'Add a regression test',
       taskUrl: 'https://roomote.example/task/task-1',
     });
-    expect(
-      mocks.registerSlackThreadActiveTaskAndMoveFooter,
-    ).toHaveBeenCalledWith({
-      slack: expect.any(Object),
+    expect(mocks.registerSlackThreadActiveTask).toHaveBeenCalledWith({
       teamId: 'T123',
       channel: 'C123',
       threadTs: '100.001',
       taskId: 'task-1',
     });
+    expect(mocks.postMessage).not.toHaveBeenCalled();
     expect(mocks.enqueueTask).toHaveBeenCalledWith({
       userId: 'user-1',
       teamId: 'T123',
@@ -318,9 +310,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
 
     expect(mocks.postMessageDetailed).not.toHaveBeenCalled();
     expect(mocks.setSlackLiveTaskStreamData).not.toHaveBeenCalled();
-    expect(
-      mocks.registerSlackThreadActiveTaskAndMoveFooter,
-    ).toHaveBeenCalledWith(
+    expect(mocks.registerSlackThreadActiveTask).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: 'task-1',
       }),
@@ -328,7 +318,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
   });
 
   it('launches normally when the card movement registry cannot be saved', async () => {
-    mocks.registerSlackThreadActiveTaskAndMoveFooter.mockRejectedValueOnce(
+    mocks.registerSlackThreadActiveTask.mockRejectedValueOnce(
       new Error('redis unavailable'),
     );
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});

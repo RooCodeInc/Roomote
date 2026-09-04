@@ -51,7 +51,6 @@ import {
   finalizeSlackThreadReplyStreamWithFooterText,
   isSlackThreadReplyFooterBlock,
   postSlackThreadMessageWithStickyFooter,
-  registerSlackThreadActiveTaskAndMoveFooter,
   removeSlackThreadReplyFooter,
 } from '../thread-reply-footer-ops';
 
@@ -246,51 +245,47 @@ describe('thread-reply-footer-ops', () => {
     );
   });
 
-  it('moves an existing exact footer into a footer-only carrier after registration', async () => {
+  it('deletes a prior footer-only carrier when a later real reply arrives', async () => {
     const footerBlock = {
       type: 'context',
       block_id: 'roomote_thread_reply_footer',
       elements: [{ type: 'mrkdwn', text: '_Exact footer._' }],
     };
     const slack = {
-      postMessage: vi.fn().mockResolvedValue('footer-new'),
-      getMessageBlocks: vi
-        .fn()
-        .mockResolvedValue([
-          { type: 'markdown', text: 'prior body' },
-          footerBlock,
-        ]),
-      updateMessage: vi.fn().mockResolvedValue(true),
+      postMessage: vi.fn().mockResolvedValue('222.000'),
+      getMessageBlocks: vi.fn().mockResolvedValue([footerBlock]),
+      updateMessage: vi.fn(),
       getRawMessage: vi.fn(),
       deleteMessage: vi.fn().mockResolvedValue(true),
     };
-    mockRedisEval.mockResolvedValueOnce(
-      JSON.stringify({
-        teamId: 'T1',
-        channel: 'C1',
-        threadTs: '100.000',
-        version: 'v1',
-      }),
-    );
 
-    await registerSlackThreadActiveTaskAndMoveFooter({
+    await postSlackThreadMessageWithStickyFooter({
       slack,
-      teamId: 'T1',
       channel: 'C1',
       threadTs: '100.000',
       taskId: 'task-1',
+      text: 'real reply',
     });
 
-    expect(mockRelocate.mock.invocationCallOrder[0]).toBeLessThan(
-      slack.postMessage.mock.invocationCallOrder[0]!,
+    expect(slack.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'real reply',
+        blocks: [
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: 'real reply' },
+          },
+          expect.objectContaining({
+            block_id: 'roomote_thread_reply_footer',
+          }),
+        ],
+      }),
     );
-    expect(slack.postMessage).toHaveBeenCalledWith({
+    expect(slack.deleteMessage).toHaveBeenCalledWith({
       channel: 'C1',
-      thread_ts: '100.000',
-      text: '_Exact footer._',
-      blocks: [footerBlock],
+      ts: '111.000',
     });
-    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', 'footer-new');
+    expect(slack.updateMessage).not.toHaveBeenCalled();
   });
 
   it('finalizes all streamed reply content before relocating cards and posting the footer', async () => {
@@ -401,6 +396,7 @@ describe('thread-reply-footer-ops', () => {
           { type: 'section', text: { type: 'mrkdwn', text: 'body' } },
         ]),
       updateMessage: vi.fn(),
+      deleteMessage: vi.fn(),
     };
 
     await removeSlackThreadReplyFooter({
