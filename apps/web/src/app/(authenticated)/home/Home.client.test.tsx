@@ -267,11 +267,15 @@ describe('Home', () => {
   });
 
   it('leaves an untouched Fast session on the orchestration default', async () => {
-    render(<Home initialPlaceholderIndex={0} />);
+    render(<Home initialHeading="Let's cook!" initialPlaceholderIndex={0} />);
 
+    expect(screen.getByRole('heading', { name: "Let's cook!" })).toHaveClass(
+      'animate-[enter-down_1s_1]',
+    );
     expect(
-      screen.getByRole('heading', { name: 'New Session' }),
-    ).toBeInTheDocument();
+      screen.getByRole('textbox', { name: 'Task prompt' }).closest('form')
+        ?.parentElement,
+    ).toHaveClass('animate-[enter-down_1s_1_100ms_backwards]');
     expect(
       screen.queryByText(/^Choose where Roomote should work/),
     ).not.toBeInTheDocument();

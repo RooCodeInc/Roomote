@@ -3,7 +3,7 @@ import type {
   ButtonHTMLAttributes,
   ReactNode,
 } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 
 const state = vi.hoisted(() => ({
   pathname: '/',
@@ -38,7 +38,6 @@ vi.mock('@/hooks/useUser', () => ({
 
 vi.mock('@/components/system', () => ({
   Menu: Icon,
-  Plus: Icon,
   X: Icon,
   House: Icon,
   Rows4: Icon,
@@ -80,12 +79,6 @@ vi.mock('@/components/system', () => ({
   ),
 }));
 
-vi.mock('@/components/tasks/NewTaskDialog', () => ({
-  NewTaskDialog: ({ open }: { open: boolean }) => (
-    <div data-testid="new-task-dialog" data-open={String(open)} />
-  ),
-}));
-
 import { NavbarDrawer } from './NavbarDrawer';
 
 describe('NavbarDrawer', () => {
@@ -114,24 +107,6 @@ describe('NavbarDrawer', () => {
     expect(
       screen.queryByRole('button', { name: /support/i }),
     ).not.toBeInTheDocument();
-  });
-
-  it('opens a new session dialog from an action above Home', () => {
-    render(<NavbarDrawer />);
-
-    const newTaskButton = screen.getByRole('button', { name: 'New Session' });
-    const homeLink = screen.getByRole('link', { name: 'Home' });
-
-    expect(newTaskButton.compareDocumentPosition(homeLink)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-
-    fireEvent.click(newTaskButton);
-
-    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
-      'data-open',
-      'true',
-    );
   });
 
   it('keeps setup-gated destinations visible but disabled with an explanation', () => {

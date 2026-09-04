@@ -31,6 +31,7 @@ type SubmissionSnapshot = {
 };
 
 type NewTaskFormProps = {
+  animate?: boolean;
   onTaskStarted?: () => void;
   placeholder?: string;
   textareaMaxHeight?: number;
@@ -38,6 +39,7 @@ type NewTaskFormProps = {
 };
 
 export function NewTaskForm({
+  animate = true,
   onTaskStarted,
   placeholder = DEFAULT_PROMPT_PLACEHOLDER,
   textareaMaxHeight,
@@ -219,7 +221,9 @@ export function NewTaskForm({
   return (
     <div
       ref={promptContainerRef}
-      className="animate-[enter-down_1s_1_100ms_backwards]"
+      className={
+        animate ? 'animate-[enter-down_1s_1_100ms_backwards]' : undefined
+      }
     >
       <TaskPromptInput
         promptKey={promptParam}
