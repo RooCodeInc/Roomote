@@ -537,7 +537,7 @@ const manageTasksToolDescription =
   'Always call action "list_environments" immediately before action "launch" so you can copy a valid environmentId. ' +
   'Use action "list_environments" to list launch targets (named environments and the org-wide target). ' +
   'Use action "search_tasks" only to search direct tasks by query or status. ' +
-  `Use action "get_summary" with taskId to inspect a specific task's latest status and failure details. ` +
+  `Use action "get_summary" with taskId to inspect a specific task's latest status, failure details, and uploaded image artifact IDs and viewer links. Use those stable IDs to attach a delegated task's images to a later reply. ` +
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
   'Use action "get_messages" with sessionId for Session history, or taskId for a specific task transcript; results are newest first. ' +
   `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
@@ -1536,7 +1536,7 @@ if (shouldRegisterSlackThreadReplyTool() || fastAgentChildRelaysChatReplies()) {
           .array(z.string())
           .optional()
           .describe(
-            'Optional already-uploaded artifact IDs for images to attach.',
+            'Optional already-uploaded artifact IDs for images to attach. A reply must not claim an image or screenshot is attached, shown, or included unless the matching imageArtifactIds or imagePaths are supplied. If attachment delivery fails, provide an accessible artifact viewer link and say that the image could not be attached.',
           ),
         ...(supportsChatReplySuggestions
           ? {
