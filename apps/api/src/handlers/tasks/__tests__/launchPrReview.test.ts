@@ -236,7 +236,7 @@ describe('handlePrReviewLaunch', () => {
       id: 900,
       taskId: 'review-task',
       // The automatic review carries the same parent attachment but not the
-      // session-requested flag, so its settle stays suppressed.
+      // session-requested flag, so its feedback stays with the PR's own task.
       payload: {
         repo: 'acme/api',
         prNumber: 42,

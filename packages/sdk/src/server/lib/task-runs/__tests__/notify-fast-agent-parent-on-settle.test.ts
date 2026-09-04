@@ -98,7 +98,8 @@ describe('notifyFastAgentParentOnSettle', () => {
     expect(mocks.updateSet).not.toHaveBeenCalled();
   });
 
-  it('announces a successful review settle when the session requested it', async () => {
+  it('stays quiet for a successful session-requested review settle', async () => {
+    // The PR feedback relay is the session's single carrier for the outcome.
     await notifyFastAgentParentOnSettle(
       makeRun(
         { fastAgentParent: fastParent, fastParentRequestedReview: true },
@@ -108,9 +109,26 @@ describe('notifyFastAgentParentOnSettle', () => {
       'Review acme/app#42',
     );
 
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+    expect(mocks.updateSet).not.toHaveBeenCalled();
+  });
+
+  it('still announces a failed session-requested review settle', async () => {
+    await notifyFastAgentParentOnSettle(
+      makeRun(
+        { fastAgentParent: fastParent, fastParentRequestedReview: true },
+        { payloadKind: TaskPayloadKind.GithubPrReview },
+      ),
+      RunStatus.Failed,
+      'Review acme/app#42',
+    );
+
     expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        event: expect.objectContaining({ type: 'task_settled' }),
+        event: expect.objectContaining({
+          type: 'task_settled',
+          status: RunStatus.Failed,
+        }),
       }),
     );
   });

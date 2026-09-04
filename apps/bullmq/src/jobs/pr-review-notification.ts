@@ -57,6 +57,7 @@ import {
   isTaskExecutingTurn,
   getFastAgentParentFromPayload,
   isPrReviewRun,
+  isSessionRequestedReviewRun,
   WORKER_HEARTBEAT_STALE_MS,
 } from '@roomote/types';
 
@@ -162,9 +163,11 @@ function isButtonRoute(
 function getFastParentButtonRoute(
   run: Pick<typeof taskRuns.$inferSelect, 'payload' | 'payloadKind'>,
 ): ButtonPrReviewNotificationRoute | null {
-  // Review-pipeline runs carry a Fast parent for session visibility only;
-  // their PR notifications must not route buttons into the parent thread.
-  if (isPrReviewRun(run)) {
+  // An automatic review carries a Fast parent for session visibility only;
+  // its PR notifications must not route buttons into the parent thread. A
+  // review the session requested is that session's carrier for the outcome,
+  // so it keeps the buttons.
+  if (isPrReviewRun(run) && !isSessionRequestedReviewRun(run)) {
     return null;
   }
   const parent = getFastAgentParentFromPayload(run.payload);

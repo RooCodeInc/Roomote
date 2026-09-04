@@ -32,7 +32,8 @@ const SOURCE_CONTROL_PROVIDERS: FastAgentSourceControlSurface[] = [
  * Launches the structured review pipeline on a pull request, on behalf of a
  * Fast session. The review task attaches to the requesting session (so it
  * shows up there like any delegated task) and, unlike automatic reviews, its
- * settle announces back into that session because the requester is waiting.
+ * outcome reaches that session as pull-request feedback because the
+ * requester is waiting.
  */
 export async function handlePrReviewLaunch(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
@@ -183,10 +184,10 @@ export async function handlePrReviewLaunch(
 
   // An already-active review run for this PR is returned as-is by the queue:
   // this launch's payload (and its Session binding) never lands, so the
-  // caller must not promise a settle announcement into the Session. Matching
+  // caller must not promise a feedback announcement into the Session. Matching
   // the parent alone is not enough — an automatic review of a PR this same
   // Session opened carries the parent attachment but not the
-  // session-requested flag, and its settle stays suppressed.
+  // session-requested flag, and its feedback stays with the PR's own task.
   const launchedPayload = launch.payload as {
     fastParentRequestedReview?: boolean;
   } | null;
