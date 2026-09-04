@@ -284,6 +284,27 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     expect(failures).toEqual([]);
   });
 
+  it('accepts only canonical pull request review overrides', () => {
+    const reviewTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest,
+    );
+    const schema = zod.z.object(reviewTool?.args as Record<string, never>);
+
+    expect(
+      schema.safeParse({
+        kickoffMessage: 'Reviewing this now.',
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'xhigh',
+      }).success,
+    ).toBe(true);
+    expect(
+      schema.safeParse({
+        kickoffMessage: 'Reviewing this now.',
+        reasoningEffort: 'extreme',
+      }).success,
+    ).toBe(false);
+  });
+
   it('exposes integration call args as an object with arbitrary JSON values', () => {
     const callTool = tools.find(
       (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,

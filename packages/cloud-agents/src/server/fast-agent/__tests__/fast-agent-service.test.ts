@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   callIntegration: vi.fn(),
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
+  launchPrReview: vi.fn(),
   getUserIdentity: vi.fn(),
   getTherapistMode: vi.fn(),
   refreshTitle: vi.fn(),
@@ -77,6 +78,7 @@ const nativeToolNames = vi.hoisted(
       ignoreEvent: 'ignore_event',
       inspectImages: 'inspect_images',
       launchTask: 'launch_task',
+      reviewPullRequest: 'review_pull_request',
       retryTaskStart: 'retry_task_start',
       saveMemory: 'save_memory',
       sendChatReaction: 'send_chat_reaction',
@@ -231,6 +233,7 @@ vi.mock('../fast-agent-context-telemetry', () => ({
 vi.mock('../fast-agent-tasks', () => ({
   sendFastAgentTaskMessage: mocks.sendTaskMessage,
   cancelFastAgentTask: mocks.cancelTask,
+  launchFastAgentPrReview: mocks.launchPrReview,
 }));
 
 vi.mock('../fast-agent-user-identity', () => ({
@@ -495,6 +498,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.callIntegration.mockResolvedValue({ matches: ['fast-agent.ts'] });
     mocks.sendTaskMessage.mockResolvedValue({ success: true });
     mocks.cancelTask.mockResolvedValue({ success: true });
+    mocks.launchPrReview.mockResolvedValue({
+      success: true,
+      taskId: 'review-task',
+      taskUrl: 'https://roomote.example/task/review-task',
+      prUrl: 'https://github.com/acme/api/pull/42',
+    });
     mocks.getUserIdentity.mockResolvedValue({
       displayName: 'Matt Rubens',
       githubLogin: 'mrubens',
@@ -7664,6 +7673,54 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(launchTask).toHaveBeenCalledOnce();
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'anthropic/claude-sonnet-5' }),
+    );
+  });
+
+  it('validates and forwards pull request review model overrides', async () => {
+    const adapter = callbacks();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m starting the review.',
+        });
+        await expect(
+          invokeTool(nativeToolNames.reviewPullRequest, {
+            repository: 'acme/api',
+            pullRequestNumber: 42,
+            model: 'openrouter/example/not-enabled',
+            reasoningEffort: 'high',
+            kickoffMessage: 'Reviewing this now.',
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: expect.stringContaining('not enabled for new tasks'),
+        });
+        await expect(
+          invokeTool(nativeToolNames.reviewPullRequest, {
+            repository: 'acme/api',
+            pullRequestNumber: 42,
+            model: 'anthropic/claude-sonnet-5',
+            reasoningEffort: 'xhigh',
+            kickoffMessage: 'Reviewing this now.',
+          }),
+        ).resolves.toMatchObject({ success: true, taskId: 'review-task' });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(mocks.launchPrReview).toHaveBeenCalledOnce();
+    expect(mocks.launchPrReview).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        repository: 'acme/api',
+        pullRequestNumber: 42,
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'xhigh',
+      }),
     );
   });
 

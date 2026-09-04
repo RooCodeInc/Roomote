@@ -15,6 +15,7 @@ import {
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
   ROOMOTE_MCP_ID,
+  REASONING_EFFORT_VALUES,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
   fastAgentHumanFollowUpEventSchema,
@@ -418,6 +419,8 @@ const launchTaskArgsSchema = z.object({
 const reviewPullRequestArgsSchema = z.object({
   repository: z.string().trim().min(1).optional(),
   pullRequestNumber: z.number().int().positive().optional(),
+  model: z.string().trim().min(1).nullable().optional(),
+  reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
   kickoffMessage: z.string().trim().min(1),
 });
 
@@ -4050,6 +4053,15 @@ export async function answerFastAgentQuestion({
                   'Name the repository (owner/name) and pull request number to review.',
               };
             }
+            if (
+              args.model &&
+              !taskModelOptions.models.some((model) => model.id === args.model)
+            ) {
+              return {
+                success: false,
+                error: `Model "${args.model}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
+              };
+            }
             const signature = `review_pull_request:${repository}#${pullRequestNumber}`;
             if (completedTaskActions.has(signature)) {
               return {
@@ -4068,6 +4080,8 @@ export async function answerFastAgentQuestion({
                   repository,
                   pullRequestNumber,
                   fastConversationId: session.id,
+                  model: args.model ?? undefined,
+                  reasoningEffort: args.reasoningEffort ?? undefined,
                 },
               );
             } catch (error) {

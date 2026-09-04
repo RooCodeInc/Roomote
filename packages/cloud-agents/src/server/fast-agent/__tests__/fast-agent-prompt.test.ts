@@ -295,6 +295,9 @@ describe('buildFastAgentSystemPrompt', () => {
       'On a human-authored turn, acknowledge first, then send the instruction immediately',
     );
     expect(prompt).toContain('Its "kickoffMessage" should describe the review');
+    expect(prompt).toContain(
+      'set "reasoningEffort" only to low, medium, high, xhigh, or max',
+    );
     expect(prompt).toContain('"includeAttachments"');
     expect(prompt).toContain('attachments are not forwarded by default');
     expect(prompt).toContain(
