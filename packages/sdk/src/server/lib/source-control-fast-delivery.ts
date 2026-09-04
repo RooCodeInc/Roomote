@@ -5,10 +5,7 @@ import {
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
 import { and, db, eq, repositories } from '@roomote/db/server';
-import {
-  buildFastSessionReplyFooterText,
-  resolveFastSessionLivePreviewUrl,
-} from '@roomote/communication';
+import { buildFastSessionReplyFooterText } from '@roomote/communication';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
@@ -858,18 +855,26 @@ async function buildAdoFastDelivery(
 /**
  * The reply surface a Session uses in a discussion: replies post as comments
  * with the Session footer, and tasks launch against the discussion's target.
+ *
+ * A turn owns one comment: the first reply opens it and later replies append
+ * to it by editing in place, so a turn never stacks comments on the
+ * discussion. The footer is rendered once, at the bottom, on every edit.
  */
 export function buildSourceControlFastAdapter(params: {
   conversation: FastAgentSourceControlConversation;
   delivery: SourceControlFastDelivery;
   userId: string;
   sessionId: string;
-  /** Blockquote of the message this turn answers; opens the turn's comment. */
   /**
    * The Session's home conversation when the discussion is not its own (see
    * createFastAgentSourceControlTaskLauncher). Delegated children attach there.
    */
   parentConversation?: FastAgentConversation;
+  /**
+   * Blockquote of the message this turn answers; opens the turn's comment on
+   * the discussion's main thread. Inside a review thread the reply already
+   * sits under the comment it answers, so the quote is dropped there.
+   */
   quote?: string | null;
   onReplyPosted?: () => void;
 }): {
@@ -881,8 +886,16 @@ export function buildSourceControlFastAdapter(params: {
   ) => Promise<{ messageId: string }>;
 } {
   const discussion = parseSourceControlFastConversation(params.conversation);
+  const footer = discussion
+    ? buildFastSessionReplyFooterText({
+        provider: discussion.provider,
+        sessionId: params.sessionId,
+      })
+    : '';
+  const quote = discussion?.reviewCommentId ? null : params.quote;
   let turnComment: SourceControlPostedComment | null = null;
   let turnBody = '';
+  const renderBody = () => `${turnBody}\n\n${footer}`;
   return {
     launchTask: createFastAgentSourceControlTaskLauncher({
       userId: params.userId,
@@ -898,31 +911,19 @@ export function buildSourceControlFastAdapter(params: {
           'The discussion for this Session could not be resolved.',
         );
       }
-      const footer = buildFastSessionReplyFooterText({
-        provider: discussion.provider,
-        sessionId: params.sessionId,
-        // The preview link is a nicety; its lookup never blocks the comment.
-        livePreviewUrl: await resolveFastSessionLivePreviewUrl(
-          params.sessionId,
-        ).catch(() => null),
-      });
-      // One comment per turn: the first reply opens it, later replies append
-      // by editing it in place, so a turn never stacks comments on the
-      // discussion.
       if (turnComment?.update) {
         turnBody = `${turnBody}\n\n${message}`;
-        await turnComment.update(`${turnBody}\n\n${footer}`);
+        await turnComment.update(renderBody());
         params.onReplyPosted?.();
         return { messageId: turnComment.messageId };
       }
-      turnBody = params.quote ? `${params.quote}\n\n${message}` : message;
-      const posted = await params.delivery.postComment({
+      turnBody = quote ? `${quote}\n\n${message}` : message;
+      turnComment = await params.delivery.postComment({
         discussion,
-        body: `${turnBody}\n\n${footer}`,
+        body: renderBody(),
       });
-      turnComment = posted;
       params.onReplyPosted?.();
-      return { messageId: posted.messageId };
+      return { messageId: turnComment.messageId };
     },
     ...(params.delivery.updateCommentById && discussion
       ? {
@@ -930,28 +931,15 @@ export function buildSourceControlFastAdapter(params: {
           // editor from it, replace the comment's body, and adopt it as the
           // turn's comment so later replies keep appending in place.
           replaceReply: async ({ messageId }, { message }) => {
-            const footer = buildFastSessionReplyFooterText({
-              provider: discussion.provider,
-              sessionId: params.sessionId,
-              livePreviewUrl: await resolveFastSessionLivePreviewUrl(
-                params.sessionId,
-              ).catch(() => null),
-            });
-            await params.delivery.updateCommentById!({
-              discussion,
-              messageId,
-              body: `${message}\n\n${footer}`,
-            });
+            const update = (nextBody: string) =>
+              params.delivery.updateCommentById!({
+                discussion,
+                messageId,
+                body: nextBody,
+              });
             turnBody = message;
-            turnComment = {
-              messageId,
-              update: (nextBody: string) =>
-                params.delivery.updateCommentById!({
-                  discussion,
-                  messageId,
-                  body: nextBody,
-                }),
-            };
+            await update(renderBody());
+            turnComment = { messageId, update };
             params.onReplyPosted?.();
             return { messageId };
           },

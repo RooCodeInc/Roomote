@@ -1,6 +1,5 @@
 import {
   findActiveGitHubPrReviewTask,
-  findRoomoteOpenedPullRequestTask,
   findReusableGitHubPrFollowUpOwner,
 } from '@roomote/db/server';
 import {
@@ -395,7 +394,6 @@ async function buildTriggeringCommentContext({
   repositoryFullName,
   commenter,
   commentBody,
-  parentComment: knownParentComment,
 }: {
   eventPayload:
     | WebhookPullRequestCommentCreated
@@ -405,20 +403,16 @@ async function buildTriggeringCommentContext({
   repositoryFullName: string;
   commenter: string;
   commentBody: string;
-  /** The review thread parent when the mention gate already fetched it. */
-  parentComment?: ReviewCommentSnapshot | null;
 }): Promise<string> {
   if ('comment' in eventPayload && 'pull_request' in eventPayload) {
     const reviewComment = eventPayload.comment;
 
     if (reviewComment.in_reply_to_id) {
-      const parentComment =
-        knownParentComment ??
-        (await fetchReviewCommentSnapshot({
-          installationId,
-          repositoryFullName,
-          commentId: reviewComment.in_reply_to_id,
-        }));
+      const parentComment = await fetchReviewCommentSnapshot({
+        installationId,
+        repositoryFullName,
+        commentId: reviewComment.in_reply_to_id,
+      });
 
       if (parentComment) {
         return buildReviewReplyTriggeringComment({
@@ -675,64 +669,11 @@ async function resolvePullRequestActiveTasks({
 }
 
 /**
- * A reply inside a review thread Roomote opened is addressed to Roomote the
- * way GitHub trains people to reply to a reviewer, so it counts as a mention
- * without the @-handle. Only pull requests Roomote did not open qualify: on a
- * Roomote-opened pull request the review-feedback pipeline already batches
- * these replies into the owning Session with its Resolve / Dismiss actions,
- * and handling them here too would answer twice. Opening is recorded on the
- * durable linkage row, so a finished task still owns its pull request, while
- * a pull request a task merely mentioned stays human-opened.
- */
-async function resolveImplicitReviewThreadMention({
-  eventPayload,
-  installationId,
-}: {
-  eventPayload: PullRequestMentionEvent;
-  installationId: number;
-}): Promise<{ parentComment: ReviewCommentSnapshot } | null> {
-  if (!('comment' in eventPayload) || !('pull_request' in eventPayload)) {
-    return null;
-  }
-  const { comment, pull_request: pullRequest, repository } = eventPayload;
-  const commenterLogin = comment.user?.login;
-  if (
-    !comment.in_reply_to_id ||
-    !commenterLogin ||
-    GitHubSchemas.isRoomoteGitHubLogin(commenterLogin)
-  ) {
-    return null;
-  }
-
-  const parentComment = await fetchReviewCommentSnapshot({
-    installationId,
-    repositoryFullName: repository.full_name,
-    commentId: comment.in_reply_to_id,
-  });
-  if (
-    !parentComment ||
-    !GitHubSchemas.isRoomoteGitHubLogin(parentComment.userLogin)
-  ) {
-    return null;
-  }
-
-  const linkedTask = await findRoomoteOpenedPullRequestTask({
-    repoFullName: repository.full_name,
-    prNumber: pullRequest.number,
-    host: toHostFromUrl(pullRequest.html_url ?? '') ?? 'github.com',
-  }).catch(() => null);
-  if (linkedTask) {
-    return null;
-  }
-
-  return { parentComment };
-}
-
-/**
  * Every @mention on a pull request enters the pull request's Fast Session.
  * The Session reads the discussion, replies as a comment, and delegates work
- * to a task on the pull request's branch when the request needs one. A reply
- * in a review thread Roomote opened enters the same way without an @mention.
+ * to a task on the pull request's branch when the request needs one. Only an
+ * explicit @mention counts: a reply inside a review thread without one is
+ * left alone, so people can discuss a finding without summoning Roomote.
  */
 export async function handlePrComment(
   eventPayload: PullRequestMentionEvent,
@@ -742,22 +683,13 @@ export async function handlePrComment(
   const mention = isSubmittedReview ? rest.review : rest.comment;
   const githubInstallationId = installation?.id;
 
-  const explicitMention = isMention({
-    body: mention.body ?? '',
-    user: mention.user ? { login: mention.user.login } : null,
-  });
-  let reviewThreadParent: ReviewCommentSnapshot | null = null;
-  if (!explicitMention) {
-    const implicitMention = githubInstallationId
-      ? await resolveImplicitReviewThreadMention({
-          eventPayload,
-          installationId: githubInstallationId,
-        })
-      : null;
-    if (!implicitMention) {
-      return { status: 'ok', message: 'no_mention' };
-    }
-    reviewThreadParent = implicitMention.parentComment;
+  if (
+    !isMention({
+      body: mention.body ?? '',
+      user: mention.user ? { login: mention.user.login } : null,
+    })
+  ) {
+    return { status: 'ok', message: 'no_mention' };
   }
 
   const mentionResponseTarget = getMentionResponseTarget(eventPayload);
@@ -851,7 +783,6 @@ export async function handlePrComment(
         repositoryFullName: repository.full_name,
         commenter: sender.login,
         commentBody: mention.body ?? '',
-        parentComment: reviewThreadParent,
       }),
     ]);
 

@@ -238,10 +238,11 @@ review check for the pull request's current head. Roomote ignores rerun events
 for stale commits and checks that were not created by the configured Roomote
 GitHub App.
 
-Replying inside a review thread that Roomote opened counts as talking to
-Roomote, so no `@mention` is needed there; Roomote answers in that thread. On
-a pull request that a Roomote task opened, those replies are instead collected
-as review feedback for the owning Session, described below.
+Roomote only responds to comments that `@mention` it, including replies inside
+a review thread it opened, so people can discuss a finding among themselves
+without summoning it. On a pull request that a Roomote task opened, replies in
+its review threads are collected as review feedback for the owning Session,
+described below.
 
 A pull request that a Roomote task opened already belongs to the Session that
 started the work, for example the Slack thread where the task was requested.
