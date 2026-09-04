@@ -130,7 +130,9 @@ without needing to enter the sandbox workspace.
 
 You can send follow-up instructions while a task is active. If a task has
 completed and Roomote has a restorable snapshot, a follow-up can resume from
-that prior workspace instead of starting over.
+that prior workspace instead of starting over. Snapshot retention depends on
+the sandbox provider: Modal-backed snapshots do not have Roomote's seven-day
+application expiry, while other providers may use a bounded window.
 
 When a task delegated from a Fast session asks for input, reply naturally in
 the originating session. If one input request is pending, Roomote
