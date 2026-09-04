@@ -132,6 +132,25 @@ describe('PromptInput', () => {
     expect(document.body).toHaveFocus();
   });
 
+  it('keeps prompt focus when an external handler consumes Escape', () => {
+    render(
+      <PromptInput onSubmit={() => {}}>
+        <PromptInputBody>
+          <PromptInputTextarea
+            aria-label="Prompt"
+            onKeyDown={(event) => event.preventDefault()}
+          />
+        </PromptInputBody>
+      </PromptInput>,
+    );
+    const textarea = screen.getByLabelText('Prompt');
+
+    textarea.focus();
+    fireEvent.keyDown(textarea, { key: 'Escape', code: 'Escape' });
+
+    expect(textarea).toHaveFocus();
+  });
+
   it('accepts attachments that match extension-based filters', () => {
     const { container } = render(
       <PromptInput accept=".md,.pdf" onSubmit={() => {}}>

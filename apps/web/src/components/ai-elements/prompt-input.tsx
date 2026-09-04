@@ -842,15 +842,15 @@ export const PromptInputTextarea = ({
     // Call the external onKeyDown handler first.
     onKeyDown?.(e);
 
+    // If the external handler prevented default, don't run internal logic.
+    if (e.defaultPrevented) {
+      return;
+    }
+
     if (e.key === 'Escape' && !isComposing && !e.nativeEvent.isComposing) {
       e.preventDefault();
       e.stopPropagation();
       e.currentTarget.blur();
-      return;
-    }
-
-    // If the external handler prevented default, don't run internal logic.
-    if (e.defaultPrevented) {
       return;
     }
 
