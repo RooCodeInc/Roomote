@@ -25,6 +25,7 @@ import { handlePrOpen } from './handlePrOpen';
 import { handlePrReadyForReview } from './handlePrReadyForReview';
 import { handlePrReopen } from './handlePrReopen';
 import { handlePrSynchronize } from './handlePrSynchronize';
+import { handleCheckRunRerequested } from './handleCheckRunRerequested';
 import { getCurrentGitHubPrHeadSha } from './currentPrHead';
 import type { WebhookPullRequestSynchronize } from './types';
 import { handlePrComment } from './handlePrComment';
@@ -637,6 +638,12 @@ github.post('/', async (c) => {
         async () => ({ status: 'ok' as const }),
       );
     });
+
+    webhooks.on('check_run.rerequested', ({ id, name, payload }) =>
+      recordWebhook(id, `${name}.${payload.action}`, payload, () =>
+        handleCheckRunRerequested(payload),
+      ),
+    );
 
     webhooks.on('pull_request.closed', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
