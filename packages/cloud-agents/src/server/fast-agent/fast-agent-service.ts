@@ -1505,6 +1505,21 @@ export async function answerFastAgentQuestion({
   let currentInstructionVersion = 0;
   const assistantInstructionVersions = new Map<string, number>();
   const closedInstructionVersions = new Set<number>();
+  // Set once a native steer injects a follow-up its surface did not mark as
+  // ambient. Ending silently after that drops a request, so it is never
+  // settled as an ignore.
+  let steeredDirectedFollowUp = false;
+  /**
+   * Mirrors the `ignore_event` tool's rule: the turn may end without any
+   * visible reply only when an explicit ignore would have been accepted for
+   * it, and no steered follow-up since then was directed at Roomote.
+   */
+  const silentCompletionAllowed = () =>
+    !(platformEvent && platformEventVisibility === 'required') &&
+    (Boolean(reactionInput) ||
+      Boolean(platformEvent) ||
+      allowSilentAmbientReply) &&
+    !steeredDirectedFollowUp;
   const getInstructionVersion = (messageId?: string) =>
     (messageId ? assistantInstructionVersions.get(messageId) : undefined) ??
     currentInstructionVersion;
@@ -2038,6 +2053,12 @@ export async function answerFastAgentQuestion({
         `[Fast Agent] Native steer accepted. conversationId="${canonicalConversationId}" followUpCount=${batch.length}`,
       );
       for (const { row } of batch) injectedHumanFollowUpIds.add(row.id);
+      // Only a surface that classified the message as ambient may leave it
+      // unanswered; an unmarked follow-up (web, PR, older rows) counts as
+      // directed.
+      if (batch.some(({ followUp }) => followUp.directedAtRoomote !== false)) {
+        steeredDirectedFollowUp = true;
+      }
       injectedHumanFollowUpMessages.push(...batchMessages);
       injectedHumanFollowUpFiles.push(...batchFiles);
       // Native steering starts a new human instruction boundary inside the
@@ -4550,18 +4571,31 @@ export async function answerFastAgentQuestion({
           ),
         );
       } else if (!visibleUpdatePosted) {
-        // A delivered update is already a complete visible response. Stay
-        // silent rather than append a generic closeout that contradicts it.
-        const fallback =
-          'I could not complete that request within the available turn.';
-        await postRecordedSystemCloseout(fallback, () =>
-          postReply(
-            { purpose: 'closeout', message: fallback },
-            false,
-            undefined,
-            terminalInstructionVersion,
-          ),
-        );
+        // The model ended the newest instruction with nothing to show: no
+        // reply tool, no undelivered text. Where an explicit ignore would
+        // have been accepted (an ambient message between people, an optional
+        // platform event, a reaction) settle exactly as an ignore does. The
+        // steered URL after an ignored aside is the typical case. Otherwise a
+        // request went unanswered, so say that plainly rather than narrate a
+        // budget that never existed.
+        if (silentCompletionAllowed()) {
+          closedInstructionVersions.add(terminalInstructionVersion);
+          diagnostics.recordSilentCompletion();
+          console.info(
+            `[Fast Agent] Silent completion settled as ignored. conversationId="${canonicalConversationId}" turnId="${turnId}" instructionVersion=${terminalInstructionVersion}`,
+          );
+        } else {
+          const fallback =
+            'I didn’t have a response to that. Could you rephrase it or add a bit more detail?';
+          await postRecordedSystemCloseout(fallback, () =>
+            postReply(
+              { purpose: 'closeout', message: fallback },
+              false,
+              undefined,
+              terminalInstructionVersion,
+            ),
+          );
+        }
       } else if (platformEvent && platformEventVisibility === 'required') {
         // A visibility-required platform event promises a closeout even when
         // an intro ack or launch kickoff already posted a visible update

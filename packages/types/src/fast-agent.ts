@@ -240,6 +240,13 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
   senderDisplayName: z.string().min(1).optional(),
   senderExternalId: z.string().min(1).optional(),
   /**
+   * Whether the surface classified the message as addressed to Roomote (a
+   * mention, a DM, a reply to it) rather than ambient conversation between
+   * people. When this message is steered into a running turn, only `false`
+   * lets that turn end without a visible reply; absent means directed.
+   */
+  directedAtRoomote: z.boolean().optional(),
+  /**
    * Surface context the model reads with the message (the pull request a
    * mention is on, for example). Persisted so a queued or resumed turn keeps
    * the context the inline turn would have had.
