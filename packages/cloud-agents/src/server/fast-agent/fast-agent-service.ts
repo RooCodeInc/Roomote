@@ -236,26 +236,6 @@ const chatReplyArgsSchema = z.object({
     .optional(),
 });
 
-const FAST_AGENT_MISSING_CLAIMED_IMAGE_ERROR =
-  'This reply says an image is attached but supplies no imageArtifactIds. Include the stable image artifact ID, or say that the image could not be attached and provide its viewer link.';
-
-function claimsImageAttachment(message: string): boolean {
-  if (
-    /\b(?:could\s+not|couldn't|cannot|can't|was\s+not|is\s+not|isn't|not)\s+(?:be\s+)?attached\b/i.test(
-      message,
-    )
-  ) {
-    return false;
-  }
-  return (
-    /\b(?:attaching|attached|showing|shown|including|included)\b.{0,80}\b(?:image|screenshot|artifact)\b/i.test(
-      message,
-    ) ||
-    /\b(?:image|screenshot|artifact)\b.{0,80}\b(?:attached|shown|included|above|below)\b/i.test(
-      message,
-    )
-  );
-}
 const chatReactionArgsSchema = z.object({
   name: z.string().trim().min(1),
   purpose: z.enum(['ack', 'closeout']),
@@ -3373,16 +3353,6 @@ export async function answerFastAgentQuestion({
               };
             }
             const requestedImageArtifactIds = args.imageArtifactIds ?? [];
-            if (
-              requestedImageArtifactIds.length === 0 &&
-              defaultImageArtifactIds.length === 0 &&
-              claimsImageAttachment(message)
-            ) {
-              return {
-                success: false,
-                error: FAST_AGENT_MISSING_CLAIMED_IMAGE_ERROR,
-              };
-            }
             const signatureImageArtifactIds =
               requestedImageArtifactIds.length > 0
                 ? requestedImageArtifactIds

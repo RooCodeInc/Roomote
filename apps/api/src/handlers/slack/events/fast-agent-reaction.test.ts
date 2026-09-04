@@ -240,7 +240,7 @@ describe('Fast Slack reaction input', () => {
       }) => {
         await adapter.postReply({
           purpose: 'closeout',
-          message: 'The requested screenshot is attached.',
+          message: 'Here is the requested result.',
           imageArtifactIds: ['artifact-1'],
         });
         return '';
@@ -283,7 +283,7 @@ describe('Fast Slack reaction input', () => {
     });
     expect(mocks.postThreadMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'The requested screenshot is attached.',
+        text: 'Here is the requested result.',
         images: [
           {
             url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',

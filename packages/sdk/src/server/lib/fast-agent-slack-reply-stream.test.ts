@@ -126,14 +126,14 @@ describe('createSlackFastReplyStream', () => {
     expect(slack.stopMessageStream).toHaveBeenCalledTimes(1);
   });
 
-  it('adds explicitly selected images when finalizing a streamed reply', async () => {
+  it('resolves structured image artifact IDs when finalizing a streamed reply', async () => {
     const slack = slackMock();
     const { stream } = build(slack, null);
 
-    await stream.append('Attaching the screenshot');
+    await stream.append('Preparing the result');
     await stream.finish({
       purpose: 'closeout',
-      message: 'Attaching the screenshot via imageArtifactIds now.',
+      message: 'Here is the requested result.',
       imageArtifactIds: ['artifact-1'],
     });
 
@@ -142,7 +142,7 @@ describe('createSlackFastReplyStream', () => {
         bodyBlocks: [
           {
             type: 'markdown',
-            text: 'Attaching the screenshot via imageArtifactIds now.',
+            text: 'Here is the requested result.',
           },
           {
             type: 'image',

@@ -253,7 +253,7 @@ describe('processFastAgentMessage', () => {
       }) => {
         await adapter.postReply({
           purpose: 'closeout',
-          message: 'Attaching the screenshot via imageArtifactIds now.',
+          message: 'Here is the requested result.',
           imageArtifactIds: ['artifact-1'],
         });
         return '';
@@ -271,7 +271,7 @@ describe('processFastAgentMessage', () => {
         type: 'message',
         channel: 'C123',
         user: 'U123',
-        text: 'use imageArtifactIds for me to test',
+        text: 'Please resend the saved result.',
         ts: '100.004',
         thread_ts: '100.001',
       } as never,
@@ -288,7 +288,7 @@ describe('processFastAgentMessage', () => {
     });
     expect(mocks.postThreadMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'Attaching the screenshot via imageArtifactIds now.',
+        text: 'Here is the requested result.',
         images: [
           {
             url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
