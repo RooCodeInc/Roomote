@@ -946,6 +946,56 @@ describe('SessionWorkspace', () => {
     expect(screen.getByText('Nested panel task-1')).toBeInTheDocument();
   });
 
+  it('reopens as many tasks as fit from the task list panel', async () => {
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Add homepage tests',
+    };
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1600,
+      sessionOverride: { tasks: [singleTask, secondTask, thirdTask] },
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    for (const taskId of ['task-1', 'task-2', 'task-3']) {
+      fireEvent.click(
+        screen.getByRole('button', { name: `Close panel ${taskId}` }),
+      );
+    }
+    expect(screen.queryByLabelText('Full task task-1')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open side-by-side' }));
+
+    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-3')).toBeVisible();
+    expect(screen.getByText('Session transcript')).toBeVisible();
+  });
+
+  it('opens tasks side-by-side when the Tasks rail item is middle-clicked', async () => {
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: { tasks: [singleTask, secondTask] },
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel task-1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel task-2' }));
+
+    fireEvent(
+      screen.getByRole('button', { name: 'Tasks' }),
+      new MouseEvent('auxclick', { bubbles: true, button: 1 }),
+    );
+
+    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.getByText('Session transcript')).toBeVisible();
+  });
+
   it('replaces the URL-selected task when a task card opens at one-panel capacity', () => {
     renderWorkspace({
       isMobile: false,

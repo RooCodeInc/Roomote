@@ -48,6 +48,7 @@ import {
   Brain,
   Button,
   Calendar,
+  Columns3,
   DollarSign,
   FileText,
   Globe,
@@ -557,10 +558,12 @@ function SessionPreviewsPanel({
 function SessionTasksPanel({
   tasks,
   onOpenTask,
+  onOpenSideBySide,
   onClose,
 }: {
   tasks: Array<Pick<SessionTaskSummary, 'taskId' | 'title'>>;
   onOpenTask: (taskId: string) => void;
+  onOpenSideBySide: () => void;
   onClose: () => void;
 }) {
   return (
@@ -572,6 +575,19 @@ function SessionTasksPanel({
         title="Tasks"
         closeLabel="Close tasks"
         onClose={onClose}
+        actions={
+          <BasicTooltip content="Open side-by-side">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              aria-label="Open side-by-side"
+              onClick={onOpenSideBySide}
+            >
+              <Columns3 />
+            </Button>
+          </BasicTooltip>
+        }
       />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-2">
         {tasks.map((task) => (
@@ -909,6 +925,15 @@ export function SessionWorkspace({
 
     setUtilityPanel({ kind: 'tasks' });
   }, [selectTask, singleRunningTaskId]);
+  const openTasksSideBySide = useCallback(() => {
+    setUtilityPanel(null);
+    setTaskArtifacts({});
+    setTaskPanels(
+      taskCards
+        .filter(({ taskId }) => taskId !== selectedTask?.taskId)
+        .map(({ taskId }) => ({ taskId })),
+    );
+  }, [selectedTask?.taskId, taskCards]);
   const showMain = () => {
     setUtilityPanel(null);
     setTaskPanels([]);
@@ -1027,6 +1052,7 @@ export function SessionWorkspace({
       <SessionTasksPanel
         tasks={taskCards}
         onOpenTask={openTaskPanel}
+        onOpenSideBySide={openTasksSideBySide}
         onClose={() => setUtilityPanel(null)}
       />
     ) : utilityPanel?.kind === 'artifacts' ? (
@@ -1072,10 +1098,16 @@ export function SessionWorkspace({
                 side="right"
                 label="Tasks"
                 tooltip="Tasks"
+                description="Middle-click to open side-by-side"
                 active={utilityPanel?.kind === 'tasks'}
                 disabled={taskCards.length === 0}
                 icon={Rows4}
                 onClick={() => togglePanel('tasks')}
+                onAuxClick={(event) => {
+                  if (event.button !== 1) return;
+                  event.preventDefault();
+                  openTasksSideBySide();
+                }}
               />
               <SideNavItem
                 side="right"
