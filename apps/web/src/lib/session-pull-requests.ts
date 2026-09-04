@@ -1,3 +1,5 @@
+import { ALL_REPOSITORIES } from '@roomote/types';
+
 type SessionPullRequest = {
   repository: string;
   number: number;
@@ -24,6 +26,7 @@ export function getSessionPullRequests(
     for (const pullRequest of task.pullRequests) {
       if (
         !pullRequest.repository ||
+        pullRequest.repository === ALL_REPOSITORIES ||
         pullRequest.number === null ||
         (pullRequest.status &&
           TERMINAL_PULL_REQUEST_STATUSES.has(pullRequest.status))

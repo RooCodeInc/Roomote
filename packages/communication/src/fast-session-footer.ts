@@ -1,4 +1,5 @@
 import { Env } from '@roomote/env';
+import { ALL_REPOSITORIES } from '@roomote/types';
 import {
   and,
   asc,
@@ -59,6 +60,13 @@ function collectFastSessionLinkedPrs(params: {
   const uniquePrs = new Map<string, ThreadReplyLinkedPr>();
 
   for (const pullRequest of [...directPrs, ...(params.linkedPrs ?? [])]) {
+    if (
+      pullRequest.prUrl.startsWith(
+        `https://github.com/${ALL_REPOSITORIES}/pull/`,
+      )
+    ) {
+      continue;
+    }
     uniquePrs.set(pullRequest.prUrl, pullRequest);
   }
 

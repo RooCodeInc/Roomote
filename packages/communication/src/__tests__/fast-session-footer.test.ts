@@ -101,6 +101,29 @@ describe('buildFastSessionReplyFooterText', () => {
     );
   });
 
+  it('omits invalid pull requests derived from the all-repositories target', () => {
+    const footer = buildFastSessionReplyFooterText({
+      provider: 'slack',
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      pullRequests: [
+        {
+          number: 2228,
+          url: 'https://github.com/__all_repositories__/pull/2228',
+        },
+        {
+          number: 2228,
+          url: 'https://github.com/RooCodeInc/Roomote/pull/2228',
+        },
+      ],
+    });
+
+    expect(footer).not.toContain('github.com/__all_repositories__');
+    expect(footer.match(/PR #2228/g)).toHaveLength(1);
+    expect(footer).toContain(
+      '<https://github.com/RooCodeInc/Roomote/pull/2228|PR #2228>',
+    );
+  });
+
   it('omits terminal pull requests', () => {
     const footer = buildFastSessionReplyFooterText({
       provider: 'telegram',
