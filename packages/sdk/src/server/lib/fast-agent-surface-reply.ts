@@ -11,12 +11,7 @@ import {
   type FastAgentReactionExternalInput,
   type FastAgentTurnAdapter,
 } from '@roomote/cloud-agents/server';
-import {
-  and,
-  db,
-  eq,
-  slackInstallations,
-} from '@roomote/db/server';
+import { and, db, eq, slackInstallations } from '@roomote/db/server';
 import {
   isFastAgentSourceControlConversation,
   type FastAgentHumanFollowUpEvent,
