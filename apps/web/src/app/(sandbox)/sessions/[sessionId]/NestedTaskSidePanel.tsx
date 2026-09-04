@@ -97,7 +97,7 @@ function NestedTaskInteraction({
         session={session}
         scrollRef={messagesRef}
         initialScrollBehavior="instant"
-        conversationClassName="mx-auto w-full max-w-4xl p-4"
+        conversationClassName="mx-auto w-full max-w-4xl p-4 pt-0"
         messageUiOptions={{ displayMode: 'default' }}
         footer={footer}
       />
@@ -143,7 +143,7 @@ function HistoricalNestedTaskInteraction({
       <Messages
         session={session}
         initialScrollBehavior="instant"
-        conversationClassName="mx-auto w-full max-w-4xl p-4"
+        conversationClassName="mx-auto w-full max-w-4xl p-4 pt-0"
         messageUiOptions={{ displayMode: 'default' }}
         footer={footer}
       />

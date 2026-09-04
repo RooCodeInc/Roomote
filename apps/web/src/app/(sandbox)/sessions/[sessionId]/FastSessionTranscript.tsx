@@ -754,7 +754,7 @@ export function FastSessionTranscript({
           {headerExtras}
         </WorkspaceHeader>
         <Conversation className="min-h-0 flex-1" initial="instant">
-          <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4">
+          <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4 pt-0">
             {hasOlderMessages ? (
               <p className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
                 Older messages in this session are not shown.
