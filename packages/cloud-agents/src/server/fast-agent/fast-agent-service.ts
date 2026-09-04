@@ -111,6 +111,7 @@ import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill
 import {
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+  RESTARTED_ACTIVE_TURN_MESSAGE,
   findFastAgentActiveInferenceRetryNotice,
   markFastAgentDurableTurnDelivered,
   markFastAgentInferenceRetryNoticeInterruption,
@@ -4584,6 +4585,17 @@ export async function answerFastAgentQuestion({
         durableTurnReplayable &&
         Boolean(durableAdmission) &&
         (shutdownInterrupted || lockOwnershipLost);
+      // A restart with nothing to resume the turn: no inline row (the
+      // admission write failed), and not a queue-delivered row, which the
+      // queue re-runs on its own. A platform event stays silent as it does
+      // on every other error; its scheduler re-runs it when it never
+      // completed. Only here does the user have to send the request again,
+      // so only here is it worth saying so.
+      const restartedWithoutRecovery =
+        shutdownInterrupted &&
+        !durableAdmission &&
+        !currentDurableHumanFollowUpEventId &&
+        !platformEvent;
       console.error(
         `[Fast Agent] Turn interrupted (reason=${interruptionReason}, conversation=${canonicalConversationId ?? 'unknown'}, retryNoticeVisible=${Boolean(inferenceRetryReply)}, resumable=${resumable}, error=${formatErrorForLog(terminalError)})`,
       );
@@ -4630,12 +4642,41 @@ export async function answerFastAgentQuestion({
           await replaceInferenceRetryReply(
             {
               purpose: 'closeout',
-              message: INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+              message: restartedWithoutRecovery
+                ? RESTARTED_ACTIVE_TURN_MESSAGE
+                : INTERRUPTED_INFERENCE_RETRY_MESSAGE,
             },
             true,
             undefined,
             interruptionReason,
           );
+        } else if (restartedWithoutRecovery && !isInstructionClosed()) {
+          // Recorded like every other closeout, so the transcript shows the
+          // turn ended here and why.
+          const reply = {
+            purpose: 'closeout' as const,
+            message: RESTARTED_ACTIVE_TURN_MESSAGE,
+          };
+          try {
+            await postRecordedSystemCloseout(reply.message, async () => {
+              const posted =
+                (await surfaceReplyStream.deliver(reply)) ??
+                (await adapter.postReply(reply));
+              diagnostics.recordVisibleReply();
+              await persistAssistantReply({
+                reply,
+                event: allocateCanonicalEvent(
+                  `assistant:${nextAssistantOrdinal++}`,
+                ),
+                platformMessageId: posted?.messageId,
+                interruptionReason,
+              });
+            });
+          } catch (postError) {
+            console.error(
+              `[Fast Agent] Failed to post restart closeout: ${formatErrorForLog(postError)}`,
+            );
+          }
         } else if (
           lockOwnershipLost &&
           canonicalConversationId &&

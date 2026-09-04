@@ -138,8 +138,10 @@ type WebFastAgentTurnInput = {
   /** Deterministic turn ID override. Canonical event IDs derive from it, so a
    * fixed value lets a turn be claimed idempotently across retries. */
   currentMessageId?: string;
-  /** Fast conversation id for durable admission of a human turn. Platform
-   * turns (kickoffs, artifact builds) omit it and stay non-replayable. */
+  /** Fast conversation id for durable admission. Every turn passes it;
+   * only setup-session turns (adapter extensions, setup snapshot) are still
+   * process-bound, and their scheduler re-runs them when they never
+   * completed. */
   durableSessionId?: string;
   /** Skip the turn if this exact canonical event row already exists when the
    * turn acquires its lock. This is the atomic claim for the setup kickoff:

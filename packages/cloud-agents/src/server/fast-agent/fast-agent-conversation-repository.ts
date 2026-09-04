@@ -62,6 +62,14 @@ export type FastAgentMessageUpsertResult = {
   initialHumanTurn: boolean;
 };
 
+/**
+ * Closeout for a turn a restart cut off with no way to resume it: the turn
+ * had no durable row (its admission write failed), so nothing will re-run
+ * it and the user has to ask again. Every admitted turn resumes instead.
+ */
+export const RESTARTED_ACTIVE_TURN_MESSAGE =
+  'Roomote restarted while working on this request. Please send it again.';
+
 export const INTERRUPTED_INFERENCE_RETRY_MESSAGE =
   'The inference retry was interrupted before it completed. Please send the request again.';
 

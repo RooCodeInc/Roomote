@@ -103,6 +103,8 @@ vi.mock('../fast-agent-session', () => ({
 vi.mock('../fast-agent-conversation-repository', () => ({
   INTERRUPTED_INFERENCE_RETRY_MESSAGE:
     'The inference retry was interrupted before it completed. Please send the request again.',
+  RESTARTED_ACTIVE_TURN_MESSAGE:
+    'Roomote restarted while working on this request. Please send it again.',
   reconcileFastAgentInferenceRetryNotices: mocks.reconcileRetryNotices,
   markFastAgentInferenceRetryNoticeInterruption:
     mocks.markRetryNoticeInterruption,
@@ -4923,26 +4925,29 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('posts nothing when API shutdown cuts off an unadmitted turn during silent retry backoff', async () => {
-    // No durable row (the admission write failed) and no visible retry
-    // notice to correct: there is no restart notice any more, so the turn
-    // ends without a user-facing message.
-    const controller = new AbortController();
-    const shutdown = new FastAgentProcessShutdownError('SIGTERM');
-    const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
+  function abortOnFirstTimer(controller: AbortController, reason: Error) {
     const originalSetTimeout = globalThis.setTimeout;
     let shouldAbort = true;
-    const timeout = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+    return vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
       callback: () => void,
     ) => {
       return originalSetTimeout(() => {
         callback();
         if (shouldAbort) {
           shouldAbort = false;
-          controller.abort(shutdown);
+          controller.abort(reason);
         }
       }, 0);
     }) as typeof setTimeout);
+  }
+
+  it('tells the user to resend when API shutdown cuts off a turn that has no row to resume from', async () => {
+    // No durable row (the admission write failed): nothing will re-run this
+    // turn, so the honest outcome is a recorded restart closeout.
+    const controller = new AbortController();
+    const shutdown = new FastAgentProcessShutdownError('SIGTERM');
+    const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
+    const timeout = abortOnFirstTimer(controller, shutdown);
     mocks.generateText.mockRejectedValue(new Error('TypeError: fetch failed'));
 
     try {
@@ -4955,15 +4960,58 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ).rejects.toBe(shutdown);
 
       expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message:
+          'Roomote restarted while working on this request. Please send it again.',
+      });
+      const persisted = mocks.upsertMessage.mock.calls.map(
+        ([input]) => input.message,
+      );
+      const closeout = persisted.find(
+        (message) =>
+          message.eventId.startsWith('100.2:assistant:') &&
+          (message.metadata as { purpose?: string } | undefined)?.purpose ===
+            'closeout',
+      );
+      expect(closeout?.metadata).toMatchObject({
+        interruptionReason: 'api_shutdown',
+      });
+      // The closeout is recorded as a call and a result like any other.
+      expect(
+        persisted.some(
+          (message) =>
+            message.eventId.startsWith('100.2:tool:') &&
+            (message.payload as { toolName?: string } | undefined)?.toolName ===
+              'send_chat_reply',
+        ),
+      ).toBe(true);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('posts nothing when API shutdown cuts off a queue-delivered follow-up the queue will re-run', async () => {
+    const controller = new AbortController();
+    const shutdown = new FastAgentProcessShutdownError('SIGTERM');
+    const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
+    const timeout = abortOnFirstTimer(controller, shutdown);
+    mocks.generateText.mockRejectedValue(new Error('TypeError: fetch failed'));
+
+    try {
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ postReply }),
+          signal: controller.signal,
+          currentDurableHumanFollowUpEventId: '100.2',
+        }),
+      ).rejects.toBe(shutdown);
+
       expect(postReply).not.toHaveBeenCalled();
       const persisted = mocks.upsertMessage.mock.calls.map(
         ([input]) => input.message,
       );
-      expect(
-        persisted.filter((message) =>
-          message.eventId.startsWith('100.2:assistant:'),
-        ),
-      ).toHaveLength(0);
       expect(
         persisted.some(
           (message) =>
