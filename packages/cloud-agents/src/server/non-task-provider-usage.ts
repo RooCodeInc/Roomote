@@ -11,6 +11,7 @@ import {
   resolveEffectiveModelRuntimeEnv,
 } from '@roomote/db/server';
 import {
+  isReasoningEffort,
   toBedrockMantleRuntimeModelId,
   type ReasoningEffort,
 } from '@roomote/types';
@@ -111,6 +112,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   chatVideoDescription: 'chat_video_description',
   composerSuggestionGeneration: 'composer_suggestion_generation',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
+  fastAgentImageInspection: 'fast_agent_image_inspection',
   fastAgentQuestionAnswering: 'fast_agent',
   inferenceValidation: 'inference_validation',
   prReviewNotificationTriage: 'pr_review_notification_triage',
@@ -888,34 +890,18 @@ type NonTaskSdkPromptOptions = {
   >;
 };
 
-async function resolveModelForInputModality(
-  params: GenerateTrackedNonTaskTextParams,
-  runtime: {
-    model: string;
-    resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
-  },
-): Promise<string> {
-  const modality = params.requiredInputModality;
-  if (!modality) {
-    return runtime.model;
-  }
-
-  const modalityModels =
-    modality === 'image' || modality === 'video'
-      ? [
-          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
-          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
-        ]
-      : [
-          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
-          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
-        ];
-  const candidates = [
-    params.model,
-    ...modalityModels,
-    runtime.resolvedModelRuntimeEnv.R_MODEL,
-    runtime.model,
-  ]
+/**
+ * Returns the first candidate model whose OpenCode provider catalog entry
+ * accepts `modality` input and produces text output, or undefined when none
+ * does. Leases (or reuses) the helper server for `env` for the lookup.
+ */
+async function findModelSupportingInputModality(input: {
+  env: NonTaskModelRuntimeEnv;
+  modality: NonTaskInputModality;
+  candidates: Array<string | undefined>;
+  timeoutMs?: number | null;
+}): Promise<string | undefined> {
+  const candidates = input.candidates
     .map((candidate) =>
       candidate ? toBedrockMantleRuntimeModelId(candidate) : candidate,
     )
@@ -923,9 +909,12 @@ async function resolveModelForInputModality(
       (candidate, index, values): candidate is string =>
         Boolean(candidate) && values.indexOf(candidate) === index,
     );
-  const timeoutMs = params.timeoutMs === undefined ? 120_000 : params.timeoutMs;
+  if (candidates.length === 0) {
+    return undefined;
+  }
+  const timeoutMs = input.timeoutMs === undefined ? 120_000 : input.timeoutMs;
   const server = await leaseOpenCodeSdkServer({
-    env: runtime.resolvedModelRuntimeEnv,
+    env: input.env,
     startTimeoutMs:
       timeoutMs === null
         ? DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS
@@ -954,7 +943,7 @@ async function resolveModelForInputModality(
       const model = provider?.models[modelID];
 
       if (
-        model?.capabilities.input[modality] &&
+        model?.capabilities.input[input.modality] &&
         model.capabilities.output.text
       ) {
         return candidate;
@@ -964,7 +953,118 @@ async function resolveModelForInputModality(
     server.release();
   }
 
-  throw new NonTaskInputModalityUnsupportedError(modality);
+  return undefined;
+}
+
+async function resolveModelForInputModality(
+  params: GenerateTrackedNonTaskTextParams,
+  runtime: {
+    model: string;
+    resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
+  },
+): Promise<string> {
+  const modality = params.requiredInputModality;
+  if (!modality) {
+    return runtime.model;
+  }
+
+  const modalityModels =
+    modality === 'image' || modality === 'video'
+      ? [
+          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
+          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
+        ]
+      : [
+          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
+          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
+        ];
+  const model = await findModelSupportingInputModality({
+    env: runtime.resolvedModelRuntimeEnv,
+    modality,
+    candidates: [
+      params.model,
+      ...modalityModels,
+      runtime.resolvedModelRuntimeEnv.R_MODEL,
+      runtime.model,
+    ],
+    timeoutMs: params.timeoutMs,
+  });
+  if (!model) {
+    throw new NonTaskInputModalityUnsupportedError(modality);
+  }
+  return model;
+}
+
+/**
+ * How a native (Fast) session should receive input of a given modality.
+ *
+ * `direct`: the session model accepts the modality itself, so the files ride
+ * along as prompt parts. `helper`: the session model cannot read the input;
+ * the session keeps running on its own model and a separate helper model
+ * (the deployment vision model, then the helper model, then the coding model)
+ * inspects the files on request. The session model is never swapped for the
+ * modality. This is the same split tasks use, where a hidden visual subagent
+ * reads images for a coding model that cannot.
+ */
+export type NonTaskInputModalityDelivery =
+  | { delivery: 'direct'; model: string }
+  | {
+      delivery: 'helper';
+      model: string;
+      helperModel: string;
+      helperReasoningEffort?: ReasoningEffort;
+    };
+
+export async function resolveNonTaskInputModalityDelivery(params: {
+  modality: NonTaskInputModality;
+  model?: string;
+  modelRole?: 'primary' | 'small' | 'orchestration';
+  reasoningEffort?: ReasoningEffort;
+  timeoutMs?: number | null;
+}): Promise<NonTaskInputModalityDelivery> {
+  const runtime = await resolveNonTaskModelRuntime(
+    params.model,
+    params.modelRole,
+    params.reasoningEffort,
+  );
+  const env = runtime.resolvedModelRuntimeEnv;
+  const sessionModel = runtime.model;
+  const helperCandidates = [env.R_VISION_MODEL, env.R_SMALL_MODEL, env.R_MODEL]
+    .map((candidate) =>
+      candidate ? toBedrockMantleRuntimeModelId(candidate) : candidate,
+    )
+    .filter(
+      (candidate): candidate is string =>
+        Boolean(candidate) && candidate !== sessionModel,
+    );
+  const model = await findModelSupportingInputModality({
+    env,
+    modality: params.modality,
+    candidates: [sessionModel, ...helperCandidates],
+    timeoutMs: params.timeoutMs,
+  });
+  if (!model) {
+    throw new NonTaskInputModalityUnsupportedError(params.modality);
+  }
+  if (model === sessionModel) {
+    return { delivery: 'direct', model: sessionModel };
+  }
+  const runtimeModelId = (candidate: string | undefined) =>
+    candidate ? toBedrockMantleRuntimeModelId(candidate) : undefined;
+  const helperReasoningEffort =
+    model === runtimeModelId(env.R_VISION_MODEL)
+      ? env.R_VISION_MODEL_REASONING_EFFORT
+      : model === runtimeModelId(env.R_SMALL_MODEL)
+        ? env.R_SMALL_MODEL_REASONING_EFFORT
+        : undefined;
+  return {
+    delivery: 'helper',
+    model: sessionModel,
+    helperModel: model,
+    ...(isReasoningEffort(helperReasoningEffort)
+      ? { helperReasoningEffort }
+      : {}),
+  };
 }
 
 /**
@@ -1712,7 +1812,10 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
     params.modelRole,
     params.reasoningEffort,
   );
-  const model = await resolveModelForInputModality(params, runtime);
+  // A native session always runs on its own model. Callers decide up front,
+  // via resolveNonTaskInputModalityDelivery, whether attached files ride along
+  // as prompt parts or are inspected by a helper model instead.
+  const model = runtime.model;
   options.onModelResolved?.(model);
   const data = await runNonTaskSdkPrompt(
     params,

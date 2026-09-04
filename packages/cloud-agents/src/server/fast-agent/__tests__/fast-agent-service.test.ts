@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   appendMemory: vi.fn(),
   isBrainEnabled: vi.fn(),
   generateText: vi.fn(),
+  generateHelperText: vi.fn(),
+  resolveImageDelivery: vi.fn(),
   classifyInferenceError: vi.fn(),
   invalidateSession: vi.fn(),
   runSession: vi.fn(),
@@ -73,6 +75,7 @@ const nativeToolNames = vi.hoisted(
       createArtifact: 'create_artifact',
       findIntegrationTools: 'find_integration_tools',
       ignoreEvent: 'ignore_event',
+      inspectImages: 'inspect_images',
       launchTask: 'launch_task',
       retryTaskStart: 'retry_task_start',
       saveMemory: 'save_memory',
@@ -154,14 +157,28 @@ vi.mock('@roomote/db/server', () => ({
   touchSessionActivity: mocks.touchSessionActivity,
 }));
 
+const NonTaskInputModalityUnsupportedError = vi.hoisted(
+  () =>
+    class NonTaskInputModalityUnsupportedError extends Error {
+      constructor(public readonly modality: string) {
+        super(`No configured model supports ${modality} input.`);
+        this.name = 'NonTaskInputModalityUnsupportedError';
+      }
+    },
+);
+
 vi.mock('../../non-task-provider-usage', () => ({
   FAST_AGENT_SESSION_PERMISSIONS: fastAgentSessionPermissions,
   FAST_AGENT_SESSION_TOOL_FILTER: fastAgentSessionToolFilter,
   NON_TASK_INFERENCE_SURFACES: {
+    fastAgentImageInspection: 'fast_agent_image_inspection',
     fastAgentQuestionAnswering: 'fast_agent',
   },
+  NonTaskInputModalityUnsupportedError,
   classifyNonTaskInferenceError: mocks.classifyInferenceError,
+  generateTrackedNonTaskText: mocks.generateHelperText,
   generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
+  resolveNonTaskInputModalityDelivery: mocks.resolveImageDelivery,
   NonTaskOpenCodePromptTimeoutError: class extends Error {
     constructor(timeoutMs: number) {
       super(`Timed out waiting for OpenCode output after ${timeoutMs}ms.`);
@@ -370,6 +387,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.refreshTitle.mockResolvedValue(null);
+    mocks.resolveImageDelivery.mockResolvedValue({
+      delivery: 'direct',
+      model: 'openrouter/openai/gpt-5.4',
+    });
     mocks.nativeExecutor = undefined;
     mocks.mcpExecutor = undefined;
     mocks.mcpCapabilityAvailable = false;
@@ -5312,13 +5333,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(answer).rejects.toBe(shutdown);
   });
 
-  it('passes image data URLs to the Fast model as image-capable file input', async () => {
+  it('passes image data URLs to the Fast model as file input when it can view images', async () => {
     await answerFastAgentQuestion({
       ...baseParams,
       images: ['data:image/png;base64,aGVsbG8=', 'not-an-image'],
       adapter: callbacks(),
     });
 
+    expect(mocks.resolveImageDelivery).toHaveBeenCalledWith({
+      modality: 'image',
+      modelRole: 'orchestration',
+    });
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.objectContaining({
         files: [
@@ -5327,11 +5352,162 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             url: 'data:image/png;base64,aGVsbG8=',
           },
         ],
-        requiredInputModality: 'image',
       }),
       expect.any(Object),
       expect.any(Object),
     );
+    expect(mocks.generateText.mock.calls[0]?.[0]).not.toHaveProperty(
+      'requiredInputModality',
+    );
+    expect(mocks.generateText.mock.calls[0]?.[0].prompt).not.toContain(
+      'inspect_images',
+    );
+  });
+
+  it('keeps the orchestration model and inspects images through a helper model when it cannot view them', async () => {
+    mocks.resolveImageDelivery.mockResolvedValue({
+      delivery: 'helper',
+      model: 'openrouter/openai/gpt-5.4',
+      helperModel: 'openrouter/google/gemini-3.8-flash',
+      helperReasoningEffort: 'low',
+    });
+    mocks.generateHelperText.mockResolvedValue(
+      'A settings page with a red error banner reading "Review check failed".',
+    );
+    let inspection: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        inspection = await invokeTool(nativeToolNames.inspectImages, {
+          question: 'What does the screenshot show?',
+          imageIds: null,
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The screenshot shows a failed review check.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      images: [
+        'data:image/png;base64,aGVsbG8=',
+        'data:image/jpeg;base64,d29ybGQ=',
+      ],
+      adapter: callbacks(),
+    });
+
+    const promptParams = mocks.generateText.mock.calls[0]?.[0];
+    expect(promptParams).not.toHaveProperty('files');
+    expect(promptParams.prompt).toContain(
+      'Image attachments: image-1 (image/png), image-2 (image/jpeg)',
+    );
+    expect(promptParams.prompt).toContain('inspect_images');
+    expect(inspection).toEqual({
+      success: true,
+      imageIds: ['image-1', 'image-2'],
+      observations:
+        'A settings page with a red error banner reading "Review check failed".',
+    });
+    expect(mocks.generateHelperText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surface: 'fast_agent_image_inspection',
+        userId: 'user-1',
+        fastConversationId: 'conversation-1',
+        model: 'openrouter/google/gemini-3.8-flash',
+        reasoningEffort: 'low',
+        requiredInputModality: 'image',
+        files: [
+          { mime: 'image/png', url: 'data:image/png;base64,aGVsbG8=' },
+          { mime: 'image/jpeg', url: 'data:image/jpeg;base64,d29ybGQ=' },
+        ],
+      }),
+    );
+    expect(mocks.generateHelperText.mock.calls[0]?.[0].prompt).toContain(
+      'What does the screenshot show?',
+    );
+  });
+
+  it('rejects unknown attachment IDs passed to inspect_images', async () => {
+    mocks.resolveImageDelivery.mockResolvedValue({
+      delivery: 'helper',
+      model: 'openrouter/openai/gpt-5.4',
+      helperModel: 'openrouter/google/gemini-3.8-flash',
+    });
+    let inspection: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        inspection = await invokeTool(nativeToolNames.inspectImages, {
+          question: 'Describe it.',
+          imageIds: ['image-9'],
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Done.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      images: ['data:image/png;base64,aGVsbG8='],
+      adapter: callbacks(),
+    });
+
+    expect(inspection).toEqual({
+      success: false,
+      error: expect.stringContaining('Unknown image attachment ID(s): image-9'),
+    });
+    expect(mocks.generateHelperText).not.toHaveBeenCalled();
+  });
+
+  it('tells the model no image-capable model exists instead of failing the turn', async () => {
+    mocks.resolveImageDelivery.mockRejectedValue(
+      new NonTaskInputModalityUnsupportedError('image'),
+    );
+    let inspection: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        inspection = await invokeTool(nativeToolNames.inspectImages, {
+          question: 'Describe it.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I could not view the image.',
+        });
+        return '';
+      },
+    );
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        images: ['data:image/png;base64,aGVsbG8='],
+        adapter: callbacks(),
+      }),
+    ).resolves.toBe('I could not view the image.');
+
+    const promptParams = mocks.generateText.mock.calls[0]?.[0];
+    expect(promptParams).not.toHaveProperty('files');
+    expect(promptParams.prompt).toContain(
+      'No configured model accepts image input',
+    );
+    expect(inspection).toEqual({
+      success: false,
+      error: expect.stringContaining('No configured model accepts image input'),
+    });
+    expect(mocks.generateHelperText).not.toHaveBeenCalled();
   });
 
   it('still answers when the canonical user prompt cannot persist', async () => {

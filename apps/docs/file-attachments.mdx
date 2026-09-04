@@ -61,6 +61,12 @@ Roomote can inspect them directly. `.svg` files are normally read as text
 markup, but Discord treats an SVG reported with the `image/svg+xml` content type
 as an image input.
 
+Images never change which model handles your request. When the active model
+accepts image input, it sees the image itself. When it does not, Roomote keeps
+that model in charge and has the configured vision model (or, failing that,
+the helper or coding model) describe the image on request, the same way a
+coding task delegates visual inspection to a hidden subagent.
+
 That means you can ask things like:
 
 - "Compare this export to the expected format and tell me what is broken."
