@@ -1,5 +1,6 @@
 import type { UserAuthSuccess } from '@/types';
 import { getSourceControlConnectionSummary } from '@/lib/server/source-control';
+import { isSetupComputeReadyForCompletion } from '../compute';
 import { completeSetupCommand } from './index';
 import type { getSetupNewStatusCommand } from '../setup-new';
 
@@ -28,9 +29,15 @@ export async function completeConversationalSetupIfReady(
   const result = await completeSetupCommand(auth, undefined, {
     requireIncomplete: true,
     validateBeforeCompletion: async (tx) => {
-      const sourceControl = await getSourceControlConnectionSummary(tx);
-      return Object.values(sourceControl.repositoryCounts).some(
-        (repositoryCount) => repositoryCount > 0,
+      const [computeReady, sourceControl] = await Promise.all([
+        isSetupComputeReadyForCompletion(tx),
+        getSourceControlConnectionSummary(tx),
+      ]);
+      return (
+        computeReady &&
+        Object.values(sourceControl.repositoryCounts).some(
+          (repositoryCount) => repositoryCount > 0,
+        )
       );
     },
   });

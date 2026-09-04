@@ -22,6 +22,7 @@ import {
   isSetupProvisionableComputeProvider,
   NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   normalizeDeploymentComputeConfig,
+  normalizeSetupNewState,
   presentSetupNewComputeProvisioning,
   resolveDerivedModalBaseImageRef,
   SHARED_WORKER_IMAGE_ENV_VAR,
@@ -84,6 +85,39 @@ export async function savePersistedRuntimeComputeConfig(
     });
 
   return runtimeComputeConfig;
+}
+
+export async function isSetupComputeReadyForCompletion(
+  executor: DatabaseOrTransaction,
+): Promise<boolean> {
+  const [settings, persistedEnvVarNames, persistedEnvVarValues] =
+    await Promise.all([
+      executor
+        .select({
+          runtimeComputeConfig: deploymentSettings.runtimeComputeConfig,
+          setupNewState: deploymentSettings.setupNewState,
+        })
+        .from(deploymentSettings)
+        .where(eq(deploymentSettings.id, 'default'))
+        .limit(1),
+      getPersistedEnvironmentVariableNames(executor),
+      getPersistedEnvironmentVariableValues(
+        [...NON_SECRET_COMPUTE_ENV_VAR_NAMES],
+        executor,
+      ),
+    ]);
+  const deployment = settings[0];
+  const setupNewState = normalizeSetupNewState(deployment?.setupNewState ?? {});
+
+  return buildSetupComputeStatus({
+    runtimeEnv: process.env,
+    persistedEnvVarNames,
+    persistedEnvVarValues,
+    persistedComputeConfig: normalizeDeploymentComputeConfig(
+      deployment?.runtimeComputeConfig,
+    ),
+    selectedProvider: setupNewState.computeProvider,
+  }).setupSatisfied;
 }
 
 /**

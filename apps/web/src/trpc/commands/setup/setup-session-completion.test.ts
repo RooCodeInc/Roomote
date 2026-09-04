@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { completeSetupCommandMock } = vi.hoisted(() => ({
+const {
+  completeSetupCommandMock,
+  getSourceControlConnectionSummaryMock,
+  isSetupComputeReadyForCompletionMock,
+} = vi.hoisted(() => ({
   completeSetupCommandMock: vi.fn(),
+  getSourceControlConnectionSummaryMock: vi.fn(),
+  isSetupComputeReadyForCompletionMock: vi.fn(),
 }));
 
 vi.mock('./index', () => ({
@@ -10,7 +16,11 @@ vi.mock('./index', () => ({
 }));
 
 vi.mock('@/lib/server/source-control', () => ({
-  getSourceControlConnectionSummary: vi.fn(),
+  getSourceControlConnectionSummary: getSourceControlConnectionSummaryMock,
+}));
+
+vi.mock('../compute', () => ({
+  isSetupComputeReadyForCompletion: isSetupComputeReadyForCompletionMock,
 }));
 
 import type { UserAuthSuccess } from '@/types';
@@ -53,6 +63,30 @@ describe('completeConversationalSetupIfReady', () => {
       success: true,
       completionState: 'completed',
     });
+    getSourceControlConnectionSummaryMock.mockResolvedValue({
+      repositoryCounts: { github: 1 },
+    });
+    isSetupComputeReadyForCompletionMock.mockResolvedValue(true);
+  });
+
+  it('rechecks compute readiness inside the locked completion transaction', async () => {
+    const tx = { id: 'completion-transaction' };
+    isSetupComputeReadyForCompletionMock.mockResolvedValue(false);
+    completeSetupCommandMock.mockImplementation(
+      async (_auth, _input, options) => ({
+        success: true,
+        completionState: (await options.validateBeforeCompletion(tx))
+          ? 'completed'
+          : 'not_ready',
+      }),
+    );
+
+    await expect(
+      completeConversationalSetupIfReady(auth, buildStatus()),
+    ).resolves.toBe(false);
+
+    expect(isSetupComputeReadyForCompletionMock).toHaveBeenCalledWith(tx);
+    expect(getSourceControlConnectionSummaryMock).toHaveBeenCalledWith(tx);
   });
 
   it('completes setup once prerequisites and repository synchronization are ready without starter work', async () => {
