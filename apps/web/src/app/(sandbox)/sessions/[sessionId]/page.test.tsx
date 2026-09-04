@@ -394,7 +394,7 @@ describe('Session detail page', () => {
       'data-content-class-name="flex-row flex-wrap items-center gap-2 pr-12 @[600px]:gap-3 @[600px]:pr-4"',
     );
     expect(html).toContain(
-      'class="min-w-0 max-w-full flex-[0_1_auto] break-words text-sm font-medium @[600px]:truncate"',
+      'class="min-w-0 max-w-full flex-[0_1_auto] cursor-default break-words text-sm font-medium @[600px]:truncate"',
     );
     expect(html).toContain('session-header-pull-requests');
     expect(html).toContain('session-task-timeline');
