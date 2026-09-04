@@ -111,11 +111,22 @@ const fastSessionMessageUserJoin = sql`${users.id}::text = ${fastAgentMessages.m
 /** Signed raw URLs are bucketed so a polling transcript stays byte-stable. */
 const REPLY_IMAGE_SIGNATURE_WINDOW_SECONDS = 60 * 60;
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+/**
+ * The reply schema only requires strings, and web turns have no surface-side
+ * artifact lookup, so a model-authored id can be anything. Keep only
+ * UUID-shaped ids: `task_artifacts.id` is a uuid column and a malformed value
+ * would make Postgres reject the whole lookup instead of dropping that id.
+ */
 function readReplyImageArtifactIds(payload: unknown): string[] {
   const ids = (payload as { imageArtifactIds?: unknown } | null)
     ?.imageArtifactIds;
   return Array.isArray(ids)
-    ? ids.filter((id): id is string => typeof id === 'string' && id !== '')
+    ? ids.filter(
+        (id): id is string => typeof id === 'string' && UUID_PATTERN.test(id),
+      )
     : [];
 }
 

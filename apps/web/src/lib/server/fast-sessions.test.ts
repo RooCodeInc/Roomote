@@ -267,6 +267,8 @@ describe('Fast session queries', () => {
           report!.id,
           foreignImage!.id,
           crypto.randomUUID(),
+          'not-a-uuid',
+          '',
         ],
       },
     });
