@@ -14,6 +14,8 @@ vi.mock('../fast-agent-parent-event-queue', () => ({
   enqueueFastAgentParentEvent: mocks.enqueueParentEvent,
 }));
 
+import { TaskPayloadKind } from '@roomote/types';
+
 import { relayFastAgentChildChatReply } from './relay-fast-agent-child-chat-reply';
 
 const parent = {
@@ -61,6 +63,27 @@ describe('relayFastAgentChildChatReply', () => {
         imageArtifactIds: ['artifact-1'],
       },
     });
+  });
+
+  it('drops narration from a review child so the PR feedback relay stays the only signal', async () => {
+    mocks.findRun.mockResolvedValueOnce({
+      id: 42,
+      taskId: 'task-1',
+      payload: { fastAgentParent: parent, fastParentRequestedReview: true },
+      payloadKind: TaskPayloadKind.GithubPrReview,
+    });
+
+    await expect(
+      relayFastAgentChildChatReply({
+        runId: 42,
+        taskId: 'task-1',
+        deliverySignature: 'a'.repeat(64),
+        purpose: 'closeout',
+        message: 'Reviewed the PR and found no issues.',
+      }),
+    ).resolves.toEqual({ relayed: false });
+
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
   });
 
   it('rejects runs that are not owned by a Fast parent', async () => {

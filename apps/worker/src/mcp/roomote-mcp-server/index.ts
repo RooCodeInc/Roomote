@@ -459,6 +459,14 @@ function isFastAgentChild(): boolean {
   return process.env.ROOMOTE_FAST_AGENT_CHILD === 'true';
 }
 
+/** Review children report through the PR feedback relay, not chat replies. */
+function fastAgentChildRelaysChatReplies(): boolean {
+  return (
+    isFastAgentChild() &&
+    process.env.ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY !== 'false'
+  );
+}
+
 function hasSlackChatContext(): boolean {
   return Boolean(process.env.ROOMOTE_SLACK_CHANNEL?.trim());
 }
@@ -1430,7 +1438,7 @@ if (!isFastAgentChild()) {
   );
 }
 
-if (shouldRegisterSlackThreadReplyTool() || isFastAgentChild()) {
+if (shouldRegisterSlackThreadReplyTool() || fastAgentChildRelaysChatReplies()) {
   const chatReplySurfaceLabel = getChatReplySurfaceLabel();
   const relaysThroughFastParent = isFastAgentChild();
   const supportsChatReplySuggestions =
