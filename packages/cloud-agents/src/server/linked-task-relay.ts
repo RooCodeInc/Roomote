@@ -9,7 +9,9 @@ import {
 } from '@roomote/db/server';
 import {
   getFastAgentParentFromPayload,
+  type FastAgentParent,
   type PrReviewSettings,
+  type SourceControlProvider,
 } from '@roomote/types';
 
 export type LinkedTaskRelayState = {
@@ -129,4 +131,48 @@ export async function isLinkedTaskCreatorRelayEnabled({
       reviewerSettings,
     })
   ).relayEnabled;
+}
+
+/**
+ * The Fast parent of the session-delegated task that opened this PR, for
+ * attaching follow-on work (like the PR's review task) to the same session.
+ */
+export async function getPrOriginFastAgentParent({
+  repository,
+  prNumber,
+  branchName,
+  sourceControlProvider = 'github',
+  host,
+  repositoryId,
+}: {
+  repository: string;
+  prNumber: number;
+  branchName: string;
+  sourceControlProvider?: SourceControlProvider;
+  host?: string | null;
+  /**
+   * The reviewing repository's own row id. Required so legacy null-host
+   * linkage rows on another instance can never supply the session; the
+   * origin task must be linked to this exact connected repository.
+   */
+  repositoryId: string;
+}): Promise<FastAgentParent | null> {
+  const owner = await findReusableGitHubPrFollowUpOwner({
+    repoFullName: repository,
+    prNumber,
+    branchName,
+    sourceControlProvider,
+    ...(host ? { host } : {}),
+    repositoryId,
+  });
+  if (!owner?.taskId) {
+    return null;
+  }
+
+  const latestRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.taskId, owner.taskId),
+    orderBy: [desc(taskRuns.createdAt)],
+    columns: { payload: true },
+  });
+  return getFastAgentParentFromPayload(latestRun?.payload);
 }

@@ -4,29 +4,54 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { createTaskRunState, queryOptionsMock } = vi.hoisted(() => ({
-  createTaskRunState: {
-    mutate: vi.fn(),
-    options: undefined as
-      | {
-          onSuccess: (
-            result: {
-              success: boolean;
-              taskId?: string;
-              error?: string;
-            },
-            variables: { sourceArtifactPath?: string },
-          ) => void;
-        }
-      | undefined,
+const {
+  navigationState,
+  queryOptionsMock,
+  forTaskQueryMock,
+  replyMutationMock,
+} = vi.hoisted(() => ({
+  navigationState: {
+    pathname: '/task/task-1/artifacts/plans/widget-plan.md',
+    push: vi.fn(),
   },
+  forTaskQueryMock: vi.fn(),
+  replyMutationMock: vi.fn(),
   queryOptionsMock: vi.fn(() => ({})),
+}));
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => navigationState.pathname,
+  useRouter: () => ({ push: navigationState.push }),
+}));
+
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({
+    artifacts: {
+      versions: {
+        queryOptions: queryOptionsMock,
+      },
+    },
+  }),
+  useTRPCClient: () => ({
+    sessions: { forTask: { query: forTaskQueryMock } },
+    fastSessions: { reply: { mutate: replyMutationMock } },
+  }),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: () => ({ data: [] }),
+  useMutation: (options: {
+    mutationFn: () => Promise<unknown>;
+    onSuccess: (result: unknown) => void;
+    onError: (error: Error) => void;
+  }) => ({
+    isPending: false,
+    mutate: () => {
+      void options.mutationFn().then(options.onSuccess).catch(options.onError);
+    },
+  }),
 }));
 
 vi.mock('streamdown', () => ({
@@ -62,30 +87,6 @@ vi.mock('sonner', () => ({
   },
 }));
 
-vi.mock('@roomote/types', () => ({
-  ALL_REPOSITORIES: [],
-  DEFAULT_MANAGED_DEPLOYMENT_ACCESS: {
-    state: 'active',
-    reason: null,
-    revision: 1,
-    effectiveAt: '2026-01-01T00:00:00.000Z',
-    restrictionStartsAt: null,
-    remediationUrl: null,
-  },
-  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE:
-    'New tasks are paused due to a billing issue. Please check billing.',
-}));
-
-vi.mock('@/trpc/client', () => ({
-  useTRPC: () => ({
-    artifacts: {
-      versions: {
-        queryOptions: queryOptionsMock,
-      },
-    },
-  }),
-}));
-
 vi.mock('@/lib', () => ({
   humanizeFilename: (value: string) => value,
 }));
@@ -95,33 +96,6 @@ vi.mock('@/lib/utils', () => ({
     classes.filter(Boolean).join(' '),
 }));
 
-vi.mock('@/hooks/tasks', () => ({
-  useTask: () => ({ data: null }),
-}));
-
-vi.mock('@/hooks/useUser', () => ({
-  useAuthorizedUser: () => ({
-    managedAccess: {
-      state: 'active',
-      reason: null,
-      revision: 1,
-      effectiveAt: '2026-01-01T00:00:00.000Z',
-      restrictionStartsAt: null,
-      remediationUrl: null,
-    },
-  }),
-}));
-
-vi.mock('@/hooks/task-runs', () => ({
-  useCreateStandardTaskRun: (options: typeof createTaskRunState.options) => {
-    createTaskRunState.options = options;
-    return {
-      isPending: false,
-      mutate: createTaskRunState.mutate,
-    };
-  },
-}));
-
 vi.mock('@/components/system', () => ({
   Download: () => <svg aria-hidden="true" />,
   Hammer: () => <svg aria-hidden="true" />,
@@ -129,6 +103,7 @@ vi.mock('@/components/system', () => ({
   Check: () => <svg aria-hidden="true" />,
   Globe: () => <svg aria-hidden="true" />,
   LucideLink: () => <svg aria-hidden="true" />,
+  Loader2Icon: () => <svg aria-hidden="true" />,
   Button: ({
     children,
     asChild,
@@ -190,40 +165,20 @@ vi.mock('@/components/ai-elements', () => ({
   streamdownPlugins: {},
 }));
 
-vi.mock('./BuildArtifactConfirmDialog', () => ({
-  BuildArtifactConfirmDialog: ({
-    open,
-    onConfirm,
-  }: {
-    open: boolean;
-    onConfirm: (values: {
-      repo: string;
-      environmentId: string;
-      modelId: string;
-    }) => void;
-  }) =>
-    open ? (
-      <button
-        onClick={() =>
-          onConfirm({
-            repo: 'org/repo',
-            environmentId: 'environment-1',
-            modelId: 'model-1',
-          })
-        }
-      >
-        Confirm build
-      </button>
-    ) : null,
-}));
-
-import {
-  ArtifactViewerContent,
-  buildArtifactPlanDescription,
-} from './ArtifactViewerContent';
+import { ArtifactViewerContent } from './ArtifactViewerContent';
 import { toast } from 'sonner';
 
 describe('ArtifactViewerContent', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    navigationState.pathname = '/task/task-1/artifacts/plans/widget-plan.md';
+    forTaskQueryMock.mockResolvedValue({
+      sessionId: 'parent-session-id',
+      title: 'Parent Session',
+    });
+    replyMutationMock.mockResolvedValue({ success: true });
+  });
+
   it.each([
     {
       label: 'normalized content type',
@@ -420,7 +375,15 @@ describe('ArtifactViewerContent', () => {
     expect(screen.queryByText('Type: visual-proof')).not.toBeInTheDocument();
   });
 
-  it('hides the Build action when a markdown plan has no fetched content', () => {
+  it('keeps universal toolbar actions mounted and disabled while loading', () => {
+    render(<ArtifactViewerContent taskId="task-1" artifact={null} isLoading />);
+
+    expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Copy URL' })).toBeDisabled();
+    expect(screen.getByLabelText('Loading artifact')).toBeVisible();
+  });
+
+  it('offers the Build action when a markdown plan has no fetched content', () => {
     render(
       <ArtifactViewerContent
         taskId="task-1"
@@ -439,12 +402,10 @@ describe('ArtifactViewerContent', () => {
       />,
     );
 
-    // A plan larger than the preview byte cap has no content to embed, so the
-    // Build action must not be offered (it would silently produce an empty prompt).
-    expect(screen.queryByText('Build this')).not.toBeInTheDocument();
+    expect(screen.getByText('Build this')).toBeInTheDocument();
   });
 
-  it('shows build progress and links to the new task', () => {
+  it('sends the artifact URL to its parent Session and opens that Session', async () => {
     render(
       <ArtifactViewerContent
         taskId="task-1"
@@ -464,59 +425,167 @@ describe('ArtifactViewerContent', () => {
     );
 
     fireEvent.click(screen.getByText('Build this'));
-    fireEvent.click(screen.getByText('Confirm build'));
 
-    expect(toast.info).toHaveBeenCalledWith(
-      'Starting new task to build plans/widget-plan.md',
-    );
-
-    createTaskRunState.options?.onSuccess(
-      {
-        success: true,
-        taskId: 'new-task-id',
-      },
-      {
-        sourceArtifactPath: 'plans/widget-plan.md',
-      },
-    );
-
-    expect(toast.success).toHaveBeenCalledWith(
-      'Building plans/widget-plan.md.',
-      expect.objectContaining({ action: expect.anything() }),
-    );
-
-    const successToastOptions = vi.mocked(toast.success).mock.calls[0]?.[1];
-    render(successToastOptions?.action as ReactElement);
-
-    const viewTaskLink = screen.getByRole('link', { name: 'View task' });
-    expect(viewTaskLink).toHaveAttribute('href', '/task/new-task-id');
-    expect(viewTaskLink).toHaveAttribute('data-size', 'sm');
-    expect(viewTaskLink).toHaveAttribute('data-variant', 'default');
+    await waitFor(() => {
+      expect(forTaskQueryMock).toHaveBeenCalledWith({ taskId: 'task-1' });
+      expect(replyMutationMock).toHaveBeenCalledWith({
+        sessionId: 'parent-session-id',
+        text: `Build this ${window.location.origin}/task/task-1/artifacts?path=plans%2Fwidget-plan.md&v=1`,
+      });
+      expect(navigationState.push).toHaveBeenCalledWith(
+        '/sessions/parent-session-id',
+      );
+    });
   });
 
-  describe('buildArtifactPlanDescription', () => {
-    it('embeds the plan content directly into the build prompt', () => {
-      const description = buildArtifactPlanDescription({
-        artifactPath: 'plans/widget.md',
-        artifactVersion: 2,
-        artifactContent: '# Widget plan\n\nDo the thing.',
+  it('sends a Session-owned artifact back into the same Session', async () => {
+    render(
+      <ArtifactViewerContent
+        owner={{ sessionId: '11111111-1111-4111-8111-111111111111' }}
+        artifact={{
+          id: 'artifact-2',
+          taskId: null,
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          path: 'plans/session-plan.md',
+          version: 1,
+          artifactType: 'plan',
+          contentType: 'text/markdown',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/session-plan.md',
+          content: '# Session plan',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Build this'));
+
+    await waitFor(() => {
+      expect(forTaskQueryMock).not.toHaveBeenCalled();
+      expect(replyMutationMock).toHaveBeenCalledWith({
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        text: 'Build the plans/session-plan.md artifact (v1) created in this Session.',
       });
-
-      expect(description).toContain('Build the plan from plans/widget.md (v2)');
-      expect(description).toContain('# Widget plan\n\nDo the thing.');
     });
+  });
 
-    it('does not instruct the new task to download via manage_artifacts', () => {
-      const description = buildArtifactPlanDescription({
-        artifactPath: 'plans/widget.md',
-        artifactVersion: 2,
-        artifactContent: '# Widget plan',
+  it('preserves artifact paths in the sent URL', async () => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-2',
+          taskId: 'task-1',
+          path: 'plans/a?# b.md',
+          version: 2,
+          artifactType: 'plan',
+          contentType: 'text/markdown',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/widget-plan.md',
+          content: '# Widget plan',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Build this'));
+
+    await waitFor(() => {
+      expect(replyMutationMock).toHaveBeenCalledWith({
+        sessionId: 'parent-session-id',
+        text: `Build this ${window.location.origin}/task/task-1/artifacts?path=plans%2Fa%3F%23+b.md&v=2`,
       });
-
-      // The plan content is embedded directly so the build is deterministic;
-      // the prompt must not tell the task to fetch the plan via download.
-      expect(description).not.toMatch(/manage_artifacts/);
-      expect(description).not.toMatch(/download/i);
     });
+  });
+
+  it('preserves legacy dot-only path segments in the sent URL', async () => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-2',
+          taskId: 'task-1',
+          path: 'plans/./draft.md',
+          version: 2,
+          artifactType: 'plan',
+          contentType: 'text/markdown',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/widget-plan.md',
+          content: '# Widget plan',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Build this'));
+
+    await waitFor(() => {
+      expect(replyMutationMock).toHaveBeenCalledWith({
+        sessionId: 'parent-session-id',
+        text: `Build this ${window.location.origin}/task/task-1/artifacts?path=plans%2F.%2Fdraft.md&v=2`,
+      });
+    });
+  });
+
+  it('does not navigate when the parent Session is already visible', async () => {
+    navigationState.pathname = '/sessions/parent-session-id';
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-2',
+          taskId: 'task-1',
+          path: 'plans/widget-plan.md',
+          version: 1,
+          artifactType: 'plan',
+          contentType: 'text/markdown',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/widget-plan.md',
+          content: '# Widget plan',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Build this'));
+
+    await waitFor(() => {
+      expect(replyMutationMock).toHaveBeenCalledWith({
+        sessionId: 'parent-session-id',
+        text: `Build this ${window.location.origin}/task/task-1/artifacts?path=plans%2Fwidget-plan.md&v=1`,
+      });
+    });
+    expect(navigationState.push).not.toHaveBeenCalled();
+  });
+
+  it('reports when the artifact task has no parent Session', async () => {
+    forTaskQueryMock.mockResolvedValue(null);
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-2',
+          taskId: 'task-1',
+          path: 'plans/widget-plan.md',
+          version: 1,
+          artifactType: 'plan',
+          contentType: 'text/markdown',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/widget-plan.md',
+          content: '# Widget plan',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Build this'));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        'The task that created this artifact is not attached to a Session.',
+      );
+    });
+    expect(replyMutationMock).not.toHaveBeenCalled();
+    expect(navigationState.push).not.toHaveBeenCalled();
   });
 });

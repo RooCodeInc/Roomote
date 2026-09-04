@@ -138,6 +138,12 @@ describe('native Notion MCP', () => {
         'notion-query-data-sources',
         'notion-get-comments',
         'notion-create-pages',
+        'notion-create-database',
+        'notion-update-database',
+        'notion-update-data-source',
+        'notion-create-view',
+        'notion-update-view',
+        'notion-delete-view',
         'notion-update-page',
         'notion-get-async-task',
         'notion-move-pages',
@@ -208,6 +214,375 @@ describe('native Notion MCP', () => {
         body: JSON.stringify({ children, position: { type: 'start' } }),
       }),
     );
+  });
+
+  it('creates a database with its initial data source and table view', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        object: 'database',
+        id: 'database-id',
+        data_sources: [{ id: 'data-source-id', name: 'Projects' }],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const title = [{ type: 'text', text: { content: 'Projects' } }];
+    const description = [
+      { type: 'text', text: { content: 'Active projects' } },
+    ];
+    const initialDataSource = {
+      properties: {
+        Name: { type: 'title', title: {} },
+        Status: { type: 'status', status: {} },
+      },
+    };
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createToolCallRequest('notion-create-database', {
+        parent: { type: 'page_id', page_id: 'parent-page' },
+        title,
+        description,
+        is_inline: true,
+        initial_data_source: initialDataSource,
+        icon: {
+          type: 'external',
+          external: { url: 'https://example.com/icon.png' },
+        },
+        cover: { type: 'external', external: { url: 'https://example.com' } },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL('https://api.notion.com/v1/databases'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          parent: { type: 'page_id', page_id: 'parent-page' },
+          title,
+          description,
+          is_inline: true,
+          initial_data_source: initialDataSource,
+          icon: {
+            type: 'external',
+            external: { url: 'https://example.com/icon.png' },
+          },
+          cover: {
+            type: 'external',
+            external: { url: 'https://example.com' },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('validates database parents before calling Notion', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createToolCallRequest('notion-create-database', {
+        parent: { type: 'workspace', workspace: false },
+      }),
+    );
+    const body = (await response.json()) as {
+      result: { isError?: boolean; content: Array<{ text: string }> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0]?.text).toContain('workspace');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns Notion capability errors from database creation', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json(
+        {
+          object: 'error',
+          code: 'restricted_resource',
+          message: 'This integration does not have Insert content capability.',
+        },
+        { status: 403 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createToolCallRequest('notion-create-database', {
+        parent: { type: 'page_id', page_id: 'parent-page' },
+      }),
+    );
+    const body = (await response.json()) as {
+      result: { isError?: boolean; content: Array<{ text: string }> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0]?.text).toContain(
+      'does not have Insert content capability',
+    );
+  });
+
+  it('updates supported database metadata', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(Response.json({ object: 'database', id: 'database' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const title = [{ type: 'text', text: { content: 'Projects 2027' } }];
+    const description = [
+      { type: 'text', text: { content: 'Upcoming projects' } },
+    ];
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createToolCallRequest('notion-update-database', {
+        database_id: 'database',
+        parent: { type: 'page_id', page_id: 'new-parent' },
+        title,
+        description,
+        is_inline: false,
+        icon: {
+          type: 'external',
+          external: { url: 'https://example.com/icon.png' },
+        },
+        cover: { type: 'external', external: { url: 'https://example.com' } },
+        in_trash: false,
+        is_locked: true,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL('https://api.notion.com/v1/databases/database'),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          parent: { type: 'page_id', page_id: 'new-parent' },
+          title,
+          description,
+          is_inline: false,
+          icon: {
+            type: 'external',
+            external: { url: 'https://example.com/icon.png' },
+          },
+          cover: {
+            type: 'external',
+            external: { url: 'https://example.com' },
+          },
+          in_trash: false,
+          is_locked: true,
+        }),
+      }),
+    );
+  });
+
+  it('adds, renames, and deletes data source properties', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({ object: 'data_source', id: 'data-source' }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const properties = {
+      Priority: {
+        type: 'select',
+        select: { options: [{ name: 'High', color: 'red' }] },
+      },
+      'status-property-id': { name: 'Stage' },
+      'obsolete-property-id': null,
+    };
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createToolCallRequest('notion-update-data-source', {
+        data_source_id: 'data-source',
+        title: [{ type: 'text', text: { content: 'Project tracker' } }],
+        icon: null,
+        properties,
+        parent: { type: 'database_id', database_id: 'new-database' },
+        in_trash: false,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL('https://api.notion.com/v1/data_sources/data-source'),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: [{ type: 'text', text: { content: 'Project tracker' } }],
+          icon: null,
+          properties,
+          parent: { type: 'database_id', database_id: 'new-database' },
+          in_trash: false,
+        }),
+      }),
+    );
+  });
+
+  it('creates and updates database views', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ object: 'view', id: 'new-view' }))
+      .mockResolvedValueOnce(
+        Response.json({ object: 'view', id: 'existing-view' }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createApp(createRunToken());
+
+    const createResponse = await postMcp(
+      app,
+      createToolCallRequest('notion-create-view', {
+        parent: {
+          type: 'database_id',
+          database_id: 'database',
+          position: { type: 'end' },
+        },
+        data_source_id: 'data-source',
+        name: 'High priority',
+        type: 'table',
+        filter: {
+          property: 'Priority',
+          select: { equals: 'High' },
+        },
+        sorts: [{ property: 'Name', direction: 'ascending' }],
+        configuration: { type: 'table', wrap_cells: true },
+      }),
+    );
+    const updateResponse = await postMcp(
+      app,
+      createToolCallRequest('notion-update-view', {
+        view_id: 'existing-view',
+        name: 'All priorities',
+        filter: null,
+        sorts: null,
+        quick_filters: { Priority: null },
+        configuration: { type: 'table', wrap_cells: false },
+      }),
+    );
+
+    expect(createResponse.status).toBe(200);
+    expect(updateResponse.status).toBe(200);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      new URL('https://api.notion.com/v1/views'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          database_id: 'database',
+          position: { type: 'end' },
+          data_source_id: 'data-source',
+          name: 'High priority',
+          type: 'table',
+          filter: {
+            property: 'Priority',
+            select: { equals: 'High' },
+          },
+          sorts: [{ property: 'Name', direction: 'ascending' }],
+          configuration: { type: 'table', wrap_cells: true },
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      new URL('https://api.notion.com/v1/views/existing-view'),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: 'All priorities',
+          filter: null,
+          sorts: null,
+          quick_filters: { Priority: null },
+          configuration: { type: 'table', wrap_cells: false },
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    {
+      parent: {
+        type: 'view_id',
+        view_id: 'dashboard-view',
+        position: { type: 'end' },
+      },
+      invalidField: 'position',
+    },
+    {
+      parent: {
+        type: 'database_id',
+        database_id: 'database',
+        placement: { type: 'new_row' },
+      },
+      invalidField: 'placement',
+    },
+  ])(
+    'rejects $invalidField for an incompatible view parent',
+    async ({ parent, invalidField }) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+
+      const response = await postMcp(
+        createApp(createRunToken()),
+        createToolCallRequest('notion-create-view', {
+          parent,
+          data_source_id: 'data-source',
+          name: 'Invalid view',
+          type: 'table',
+        }),
+      );
+      const body = (await response.json()) as {
+        result: { isError?: boolean; content: Array<{ text: string }> };
+      };
+
+      expect(response.status).toBe(200);
+      expect(body.result.isError).toBe(true);
+      expect(body.result.content[0]?.text).toContain(invalidField);
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('deletes a database view', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(Response.json({ object: 'view', id: 'old-view' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createToolCallRequest('notion-delete-view', { view_id: 'old-view' }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL('https://api.notion.com/v1/views/old-view'),
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+
+  it.each([
+    ['notion-update-database', { database_id: 'database' }],
+    ['notion-update-data-source', { data_source_id: 'data-source' }],
+    ['notion-update-view', { view_id: 'view' }],
+  ])('rejects empty %s calls', async (toolName, args) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createToolCallRequest(toolName, args),
+    );
+    const body = (await response.json()) as {
+      result: { isError?: boolean; content: Array<{ text: string }> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0]?.text).toContain('at least one');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('inserts newly created blocks after an existing child block', async () => {

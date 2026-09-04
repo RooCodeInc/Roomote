@@ -53,7 +53,11 @@ export function getSessionIdFromPathname(pathname: string): string | null {
   return match?.[1] ?? null;
 }
 
-export const SideNav = () => {
+export const SideNav = ({
+  setupIncomplete = false,
+}: {
+  setupIncomplete?: boolean;
+}) => {
   useHydrateLayoutStore();
 
   const pathname = usePathname();
@@ -222,6 +226,12 @@ export const SideNav = () => {
               href={href}
               tooltip={label}
               description={description}
+              disabled={
+                setupIncomplete &&
+                (href === '/' ||
+                  href === '/automations' ||
+                  href === '/analytics')
+              }
               expanded={isSideNavExpanded}
               active={
                 matchExact

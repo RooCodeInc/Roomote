@@ -9,15 +9,21 @@ const mocks = vi.hoisted(() => ({
   updateOfferStatus: vi.fn(),
   buildReplyDelivery: vi.fn(),
   createWebTaskLauncher: vi.fn(),
+  launchTask: vi.fn(),
+  startPinnedLaunch: vi.fn(),
   getOrCreateSession: vi.fn(),
   getUnifiedSession: vi.fn(),
   getFastSessionTasks: vi.fn(),
   currentEpochSeconds: vi.fn(),
+  createSessionArtifact: vi.fn(),
+  createConversationArtifact: vi.fn(),
   dbUpdate: vi.fn(),
   dbSet: vi.fn(),
   dbWhere: vi.fn(),
   dbSelect: vi.fn(),
+  dbInnerJoin: vi.fn(),
   dbSelectLimit: vi.fn(),
+  sql: vi.fn(),
 }));
 
 vi.mock('next/server', () => ({ after: mocks.after }));
@@ -26,13 +32,19 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
   createFastAgentWebTaskLauncher: mocks.createWebTaskLauncher,
+  FastAgentDurableRetryScheduledError: class FastAgentDurableRetryScheduledError extends Error {},
   getOrCreateFastAgentSession: mocks.getOrCreateSession,
   resolveApiBaseUrl: vi.fn(),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  buildFastAgentArtifactCreator: vi.fn(() => mocks.createConversationArtifact),
   buildFastAgentSurfaceReplyDelivery: mocks.buildReplyDelivery,
+  createFastAgentSessionArtifact: mocks.createSessionArtifact,
+  persistFastAgentInlineHumanTurn: vi.fn().mockResolvedValue(null),
   resolveUserMcpServerConfigs: vi.fn(),
+  wakeFastAgentParentEventAt: vi.fn(),
+  wakeFastAgentParentEventNow: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -40,10 +52,12 @@ vi.mock('@roomote/db/server', () => ({
   retireCanonicalPrReviewActionsForDestinationKey: mocks.retireReviewActions,
   and: vi.fn(),
   eq: vi.fn(),
+  sql: vi.fn(),
   fastAgentConversations: {},
   fastAgentMessages: {},
   sessions: {},
   getSessionForFastConversation: mocks.getUnifiedSession,
+  ensureSessionForFastConversation: mocks.getUnifiedSession,
 }));
 
 vi.mock('@/lib/server/fast-sessions', () => ({
@@ -62,6 +76,10 @@ vi.mock('@/lib/server/artifact-signature', () => ({
 
 vi.mock('@/lib/server/pr-review-actions', () => ({
   handleWebPrReviewAction: mocks.handleReviewAction,
+}));
+
+vi.mock('./pinned-launch', () => ({
+  startPinnedFastSessionLaunch: mocks.startPinnedLaunch,
 }));
 
 import {
@@ -142,6 +160,7 @@ const session = {
 describe('scheduleWebFastAgentTurn', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.answerQuestion.mockResolvedValue('');
     mocks.dbUpdate.mockReturnValue({ set: mocks.dbSet });
     mocks.dbSet.mockReturnValue({ where: mocks.dbWhere });
     mocks.dbWhere.mockResolvedValue(undefined);
@@ -205,12 +224,32 @@ describe('scheduleWebFastAgentTurn', () => {
 describe('startFastSessionCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.createWebTaskLauncher.mockReturnValue(vi.fn());
+    mocks.answerQuestion.mockResolvedValue('');
+    mocks.createWebTaskLauncher.mockReturnValue(mocks.launchTask);
+    mocks.launchTask.mockResolvedValue({ success: true, taskId: 'task-1' });
     mocks.getUnifiedSession.mockResolvedValue({ id: 'unified-session-1' });
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'fast-session-1',
       created: true,
     });
+    mocks.buildReplyDelivery.mockResolvedValue({
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'existing-conversation',
+      },
+      adapter: { launchTask: mocks.launchTask, postReply: vi.fn() },
+    });
+    mocks.dbSelect.mockReturnValue({
+      from: () => ({
+        where: () => ({ limit: mocks.dbSelectLimit }),
+        innerJoin: mocks.dbInnerJoin,
+      }),
+    });
+    mocks.dbInnerJoin.mockReturnValue({
+      where: () => ({ limit: mocks.dbSelectLimit }),
+    });
+    mocks.dbSelectLimit.mockResolvedValue([]);
   });
 
   it('recovers an idempotent Session without scheduling its first turn twice', async () => {
@@ -227,6 +266,7 @@ describe('startFastSessionCommand', () => {
       id: 'fast-session-1',
       created: false,
     });
+    mocks.dbSelectLimit.mockResolvedValueOnce([{ id: 'message-1' }]);
     await expect(startFastSessionCommand(auth, input)).resolves.toEqual({
       sessionId: 'unified-session-1',
       fastConversationId: 'fast-session-1',
@@ -242,6 +282,90 @@ describe('startFastSessionCommand', () => {
       },
     });
     expect(mocks.after).toHaveBeenCalledOnce();
+  });
+
+  it('recovers a deterministic Session kickoff lost after creation', async () => {
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'fast-session-1',
+      created: false,
+    });
+    mocks.dbSelectLimit.mockResolvedValue([]);
+
+    await startFastSessionCommand(auth, {
+      text: 'Build the plan',
+      conversationId: '11111111-1111-4111-8111-111111111111',
+    });
+
+    expect(mocks.after).toHaveBeenCalledOnce();
+  });
+
+  it('lets the initial Fast Session turn create a Session-owned artifact', async () => {
+    let scheduled: (() => Promise<void>) | undefined;
+    mocks.after.mockImplementation((callback) => {
+      scheduled = callback;
+    });
+    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: new AbortController().signal,
+    });
+    mocks.acquireTurnLock.mockResolvedValue(release);
+    mocks.answerQuestion.mockImplementation(async ({ adapter }) =>
+      adapter.createArtifact({
+        path: 'notes/decision.md',
+        content: '# Decision',
+        contentType: 'text/markdown',
+        artifactType: 'general',
+      }),
+    );
+
+    await startFastSessionCommand(auth, { text: 'Create a decision record' });
+    await scheduled?.();
+
+    expect(mocks.createSessionArtifact).toHaveBeenCalledWith({
+      sessionId: 'unified-session-1',
+      path: 'notes/decision.md',
+      content: '# Decision',
+      contentType: 'text/markdown',
+      artifactType: 'general',
+    });
+  });
+
+  it('delegates a pinned launch without scheduling a Fast turn', async () => {
+    mocks.startPinnedLaunch.mockResolvedValue({
+      sessionId: 'session-9',
+      fastConversationId: 'fast-9',
+      taskId: 'task-9',
+    });
+
+    const pinnedLaunch = {
+      launchId: '44444444-4444-4444-8444-444444444444',
+      repo: 'acme/api',
+      branch: 'main',
+      environmentId: '33333333-3333-4333-8333-333333333333',
+    };
+    const result = await startFastSessionCommand(auth, {
+      text: 'Fix the flaky test',
+      images: ['data:image/png;base64,AAAA'],
+      attachmentTexts: ['notes'],
+      model: 'model-1',
+      reasoningEffort: 'high',
+      pinnedLaunch,
+    });
+
+    expect(result).toEqual({
+      sessionId: 'session-9',
+      fastConversationId: 'fast-9',
+      taskId: 'task-9',
+    });
+    expect(mocks.startPinnedLaunch).toHaveBeenCalledWith(auth, {
+      text: 'Fix the flaky test',
+      images: ['data:image/png;base64,AAAA'],
+      attachmentTexts: ['notes'],
+      model: 'model-1',
+      reasoningEffort: 'high',
+      pinnedLaunch,
+    });
+    expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
+    expect(mocks.after).not.toHaveBeenCalled();
   });
 });
 
@@ -287,7 +411,7 @@ describe('startSetupFastSessionCommand', () => {
     expect(mocks.dbSelect).not.toHaveBeenCalled();
   });
 
-  it('skips a scheduled kickoff whose transcript gained messages before the turn lock', async () => {
+  it('skips a scheduled kickoff completed before the turn lock', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: true,
@@ -304,8 +428,8 @@ describe('startSetupFastSessionCommand', () => {
     await startSetupFastSessionCommand(auth, input);
     expect(scheduled).toBeDefined();
 
-    // A concurrent submit's kickoff persisted its prompt row first: the
-    // re-check under the turn lock sees the kickoff event and skips.
+    // A concurrent submit completed its kickoff first. The re-check under the
+    // turn lock sees its terminal output and skips duplicate inference.
     mocks.dbSelectLimit.mockResolvedValue([{ id: 'message-1' }]);
     await scheduled?.();
 
@@ -313,7 +437,7 @@ describe('startSetupFastSessionCommand', () => {
     expect(release).toHaveBeenCalledOnce();
   });
 
-  it('runs a scheduled kickoff whose transcript is still empty at the turn lock', async () => {
+  it('runs a scheduled kickoff that has no terminal output at the turn lock', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: true,
@@ -337,12 +461,66 @@ describe('startSetupFastSessionCommand', () => {
         platformEventKind: 'setup',
         platformEventVisibility: 'required',
         currentMessageId: 'setup-kickoff:setup-conversation-1',
+        adapter: expect.objectContaining({
+          createArtifact: mocks.createConversationArtifact,
+        }),
       }),
     );
+    // The kickoff is admitted durably with its platform framing, so a
+    // restart resumes it as a setup event rather than dropping it.
+    const { persistFastAgentInlineHumanTurn } =
+      await import('@roomote/sdk/server');
+    expect(vi.mocked(persistFastAgentInlineHumanTurn)).toHaveBeenCalledWith({
+      parent: expect.objectContaining({ sessionId: 'setup-conversation-1' }),
+      event: expect.objectContaining({
+        type: 'human_follow_up',
+        currentMessageId: 'setup-kickoff:setup-conversation-1',
+        turnSource: 'platform_event',
+        platformEventKind: 'setup',
+        platformEventVisibility: 'required',
+      }),
+    });
     expect(release).toHaveBeenCalledOnce();
   });
 
-  it('recovers a lost kickoff when reusing a conversation with an empty transcript', async () => {
+  it('runs a re-scheduled kickoff whose row is still pending as a resumption of the earlier attempt', async () => {
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'setup-conversation-1',
+      created: false,
+    });
+    mocks.dbSelectLimit.mockResolvedValue([]);
+    let scheduled: (() => Promise<void>) | undefined;
+    mocks.after.mockImplementation((callback) => {
+      scheduled = callback;
+    });
+    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: new AbortController().signal,
+    });
+    mocks.acquireTurnLock.mockResolvedValue(release);
+    mocks.answerQuestion.mockResolvedValue('Welcome');
+    const { persistFastAgentInlineHumanTurn } =
+      await import('@roomote/sdk/server');
+    vi.mocked(persistFastAgentInlineHumanTurn).mockResolvedValueOnce({
+      id: 'row-1',
+      eventKey: 'key-1',
+      resumed: true,
+    });
+
+    await startSetupFastSessionCommand(auth, input);
+    await scheduled?.();
+
+    // The earlier owner was interrupted after admitting this kickoff; the
+    // new run continues its recorded attempt rather than starting over.
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentMessageId: 'setup-kickoff:setup-conversation-1',
+        durableAdmission: { eventId: 'row-1' },
+        resumedAfterInterruption: true,
+      }),
+    );
+  });
+
+  it('recovers a lost or failed kickoff when no terminal output exists', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: false,
@@ -357,7 +535,7 @@ describe('startSetupFastSessionCommand', () => {
     expect(mocks.after).toHaveBeenCalledOnce();
   });
 
-  it('does not schedule a second kickoff once the kickoff event row exists', async () => {
+  it('does not schedule a second kickoff once the kickoff has terminal output', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: false,

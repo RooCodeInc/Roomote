@@ -1,4 +1,8 @@
-import { bootstrapGeneratedAuthKeypairs } from '@roomote/db/server';
+import {
+  bootstrapGeneratedAuthKeypairs,
+  db,
+  waitForMigrations,
+} from '@roomote/db/server';
 import { assertSecureBootBinding, Env } from '@roomote/env';
 import {
   buildRoomoteDeployMarker,
@@ -80,6 +84,17 @@ process.on('uncaughtException', (error) => {
 });
 
 async function main() {
+  // Migrations run only ahead of the api service while every service rolls
+  // at once; wait for the schema rather than crash-loop on a pending column.
+  const readiness = await waitForMigrations({
+    database: db,
+    log: (message) => console.info(message),
+  });
+  if (readiness.state === 'unmanaged') {
+    console.info(
+      'Database has no migration bookkeeping; assuming its schema is managed directly.',
+    );
+  }
   await bootstrapGeneratedAuthKeypairs();
   assertSecureBootBinding();
 

@@ -184,9 +184,6 @@ export async function syncActingUserId(
   return { result: 'updated', actingUserId: serverUserId };
 }
 
-export const enqueue = (options: AppRouterInput['taskRuns']['enqueue']) =>
-  client.taskRuns.enqueue.mutate(options);
-
 export async function dequeue(
   options: AppRouterInput['taskRuns']['dequeue'],
   { onBootstrapFailure }: TaskRunBootstrapOptions = {},

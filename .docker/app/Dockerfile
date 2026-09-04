@@ -334,6 +334,34 @@ RUN export HOME=/tmp/opencode-build \
   && ln -sf /opt/opencode-cli/node_modules/.bin/opencode /usr/local/bin/opencode \
   && rm -rf /tmp/opencode-build
 
+# OpenCode Arborist-installs @opencode-ai/plugin into every config directory
+# it loads and blocks its first request on that install whenever a plugin is
+# configured. Fresh containers start with empty config dirs under /tmp, so the
+# first Fast turn after each deploy paid a cold registry install (minutes, or
+# a 300s timeout). Bake a complete install here; the runtime copies it into
+# each config dir before `opencode serve` (opencode-plugin-seed.ts), which
+# makes OpenCode's own install check a no-op. Same layout and path as the
+# worker image's sandbox seed. Root-owned and world-readable is enough: the
+# runtime only reads it.
+RUN export HOME=/tmp/opencode-build \
+  && mkdir -p /opt/roomote/opencode-plugin-seed \
+  && printf '%s\n' \
+    '{' \
+    '  "name": "opencode",' \
+    '  "private": true,' \
+    '  "dependencies": {' \
+    "    \"@opencode-ai/plugin\": \"${OPENCODE_CLI_VERSION}\"" \
+    '  }' \
+    '}' > /opt/roomote/opencode-plugin-seed/package.json \
+  && npm install --prefix /opt/roomote/opencode-plugin-seed \
+    --ignore-scripts --no-audit --no-fund \
+  && test -f /opt/roomote/opencode-plugin-seed/package-lock.json \
+  && test "$(node -p "require('/opt/roomote/opencode-plugin-seed/node_modules/@opencode-ai/plugin/package.json').version")" = "${OPENCODE_CLI_VERSION}" \
+  && chmod -R a+rX /opt/roomote \
+  && rm -rf /tmp/opencode-build
+
+ENV ROOMOTE_OPENCODE_PLUGIN_SEED_DIR=/opt/roomote/opencode-plugin-seed
+
 # GitHub PR prompt generation still uses the gh CLI in the API process. Keep
 # the installer isolated so only API-bearing runtime targets receive it.
 FROM runtime-base AS github-cli

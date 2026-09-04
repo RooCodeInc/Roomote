@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server';
 
 import { sdk } from '@roomote/sdk/client';
+import { resolveTaskWorkspace } from '@roomote/types';
 
 import { injectEnvVars } from '../../commands/utils/env-vars';
 import type { WorkerEnv } from '../../env';
@@ -50,11 +51,17 @@ export async function applyDeploymentEnvVarsReload(input: {
 
   const currentRuntimeEnv = workerEnv.getRuntimeEnv();
   const nextRuntimeEnv: Record<string, string> = { ...freshEnvVars };
+  const isEnvironmentWorkspace =
+    resolveTaskWorkspace(taskRun.payload).type === 'environment';
 
   await injectEnvVars(nextRuntimeEnv, taskRun, {
     previewProxyBaseUrl: workerEnv.previewProxyBaseUrl,
     previewProxySubdomainSuffix: workerEnv.previewProxySubdomainSuffix,
     syncSourceControlTokenFiles: false,
+    omitInheritedModelRuntimeEnvFromShell: isEnvironmentWorkspace,
+    explicitShellEnvVars: isEnvironmentWorkspace
+      ? workerEnv.getUserEnv()
+      : undefined,
   });
 
   workerEnv.setRuntimeEnv(nextRuntimeEnv);

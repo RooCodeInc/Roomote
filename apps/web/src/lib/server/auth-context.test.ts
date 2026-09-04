@@ -210,19 +210,6 @@ describe('authorize', () => {
     expect(mockUpdateSet).not.toHaveBeenCalled();
   });
 
-  it('evaluates feature flags to an empty object while ignoring stale metadata', async () => {
-    mockDeploymentFindFirst.mockResolvedValue({
-      metadata: { suggestion_routing: true, sessions_ui: true },
-    });
-
-    const result = await authorize();
-
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.featureFlags).toEqual({});
-    }
-  });
-
   it('keeps an unchanged member with incomplete onboarding read-only', async () => {
     mockUsersFindFirst.mockResolvedValue({
       id: 'user-1',

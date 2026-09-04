@@ -226,6 +226,8 @@ type SlackChannelInfoContext = {
 export class SlackNotifier {
   private readonly token: string;
   private readonly channelInfoCache: SlackChannelInfoCache | null;
+  private readonly botUserId: string | null;
+  private readonly botName: string | null;
   private client?: WebClient;
   private channelDiscovery?: SlackChannelDiscovery;
   private ownBotIdentityPromise?: Promise<{
@@ -235,10 +237,17 @@ export class SlackNotifier {
 
   constructor(
     token: string,
-    options: { channelInfoCache?: SlackChannelInfoCache } = {},
+    options: {
+      channelInfoCache?: SlackChannelInfoCache;
+      botUserId?: string | null;
+      botName?: string | null;
+      appName?: string | null;
+    } = {},
   ) {
     this.token = token;
     this.channelInfoCache = options.channelInfoCache ?? null;
+    this.botUserId = options.botUserId?.trim() || null;
+    this.botName = options.botName?.trim() || options.appName?.trim() || null;
   }
 
   private getClient(): WebClient {
@@ -1291,6 +1300,77 @@ export class SlackNotifier {
    * Uses conversations.replies to find thread replies (the started message
    * is always posted as a thread reply with thread_ts).
    */
+  /**
+   * Message streaming (`chat.startStream` / `appendStream` / `stopStream`):
+   * one reply that renders as it is written. Every method reports failure
+   * instead of throwing so a caller can fall back to a normal post.
+   */
+  public async startMessageStream(params: {
+    channel: string;
+    threadTs: string;
+    recipientTeamId: string;
+    recipientUserId: string;
+    markdownText: string;
+  }): Promise<string | null> {
+    try {
+      const response = await this.getClient().chat.startStream({
+        channel: params.channel,
+        thread_ts: params.threadTs,
+        recipient_team_id: params.recipientTeamId,
+        recipient_user_id: params.recipientUserId,
+        markdown_text: params.markdownText,
+      });
+      return response.ok && typeof response.ts === 'string'
+        ? response.ts
+        : null;
+    } catch (error) {
+      console.error(
+        `[startMessageStream] Slack chat.startStream failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  public async appendMessageStream(params: {
+    channel: string;
+    ts: string;
+    markdownText: string;
+  }): Promise<boolean> {
+    try {
+      const response = await this.getClient().chat.appendStream({
+        channel: params.channel,
+        ts: params.ts,
+        markdown_text: params.markdownText,
+      });
+      return response.ok === true;
+    } catch (error) {
+      console.error(
+        `[appendMessageStream] Slack chat.appendStream failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  }
+
+  public async stopMessageStream(params: {
+    channel: string;
+    ts: string;
+    markdownText?: string;
+  }): Promise<boolean> {
+    try {
+      const response = await this.getClient().chat.stopStream({
+        channel: params.channel,
+        ts: params.ts,
+        ...(params.markdownText ? { markdown_text: params.markdownText } : {}),
+      });
+      return response.ok === true;
+    } catch (error) {
+      console.error(
+        `[stopMessageStream] Slack chat.stopStream failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  }
+
   public async getMessageBlocks({
     channel,
     messageTs,
@@ -1358,6 +1438,58 @@ export class SlackNotifier {
     } catch (error) {
       console.error(
         `[fetchMessageBlocks] Failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  /** Fetch the exact repostable fields of one canonical thread message. */
+  public async getRawMessage({
+    channel,
+    messageTs,
+    threadTs,
+  }: {
+    channel: string;
+    messageTs: string;
+    threadTs: string;
+  }): Promise<Pick<SlackMessage, 'text' | 'blocks' | 'attachments'> | null> {
+    try {
+      const response = await slackFetch(
+        `${buildSlackApiUrl('conversations.replies')}?channel=${encodeURIComponent(channel)}&ts=${encodeURIComponent(threadTs)}&oldest=${encodeURIComponent(messageTs)}&latest=${encodeURIComponent(messageTs)}&inclusive=true`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        },
+      );
+      if (!response.ok) return null;
+
+      const result = (await response.json()) as {
+        ok: boolean;
+        messages?: Array<{
+          ts?: string;
+          text?: unknown;
+          blocks?: unknown;
+          attachments?: unknown;
+        }>;
+      };
+      const message = result.ok
+        ? result.messages?.find((entry) => entry.ts === messageTs)
+        : undefined;
+      if (!message) return null;
+
+      return {
+        ...(typeof message.text === 'string' ? { text: message.text } : {}),
+        ...(Array.isArray(message.blocks) ? { blocks: message.blocks } : {}),
+        ...(Array.isArray(message.attachments)
+          ? { attachments: message.attachments }
+          : {}),
+      };
+    } catch (error) {
+      console.error(
+        `[getRawMessage] Failed: ${error instanceof Error ? error.message : String(error)}`,
       );
       return null;
     }
@@ -1703,69 +1835,6 @@ export class SlackNotifier {
         `[getMessage] Failed: ${error instanceof Error ? error.message : String(error)}`,
       );
       return null;
-    }
-  }
-
-  /**
-   * Removes the cancel button from the started message.
-   * Keeps other buttons (e.g. Follow) in the actions block.
-   * If the actions block becomes empty, removes it entirely.
-   */
-  public async removeCancelButton({
-    channel,
-    messageTs,
-    threadTs,
-  }: {
-    channel: string;
-    messageTs: string;
-    threadTs: string;
-  }): Promise<boolean> {
-    try {
-      const blocks = await this.getMessageBlocks({
-        channel,
-        messageTs,
-        threadTs,
-      });
-
-      if (!blocks) {
-        return false;
-      }
-
-      const updatedBlocks = blocks
-        .map((block) => {
-          if (
-            !block ||
-            typeof block !== 'object' ||
-            (block as { type?: string }).type !== 'actions' ||
-            !Array.isArray((block as { elements?: unknown[] }).elements)
-          ) {
-            return block;
-          }
-
-          // Remove only the cancel_task button, keep others (e.g. Follow)
-          const filteredElements = (
-            block as { elements: Array<{ action_id?: string }> }
-          ).elements.filter((el) => el.action_id !== 'cancel_task');
-
-          // If no elements remain, drop the whole actions block
-          if (filteredElements.length === 0) {
-            return null;
-          }
-
-          return { ...block, elements: filteredElements };
-        })
-        .filter((block): block is unknown => block !== null);
-
-      return await this.updateMessage({
-        channel,
-        ts: messageTs,
-        message: { blocks: updatedBlocks },
-      });
-    } catch (error) {
-      console.error(
-        `[removeCancelButton] Failed to remove cancel button: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return false;
     }
   }
 
@@ -2418,9 +2487,7 @@ export class SlackNotifier {
         matches.map((match) => match[1]).filter((id): id is string => !!id),
       ),
     ];
-
-    // Fetch user display names
-    const usernameMap = await this.getUsersInfo(userIds);
+    const usernameMap = await this.getUserDisplayNames(userIds);
 
     // Replace each mention with the user's display name
     let result = text;
@@ -2441,13 +2508,52 @@ export class SlackNotifier {
   }
 
   /**
+   * Resolves Slack user IDs to display names. The installation's own bot
+   * user resolves from stored metadata without a Slack API call; every other
+   * ID goes through `users.info`. IDs that cannot be resolved are omitted.
+   */
+  public async getUserDisplayNames(
+    userIds: string[],
+  ): Promise<Map<string, string>> {
+    const uniqueUserIds = [...new Set(userIds)];
+    const botNameOverrides = new Map<string, string>();
+    if (
+      this.botUserId &&
+      this.botName &&
+      uniqueUserIds.includes(this.botUserId)
+    ) {
+      botNameOverrides.set(this.botUserId, this.botName);
+    }
+
+    const unresolvedUserIds = uniqueUserIds.filter(
+      (userId) => !botNameOverrides.has(userId),
+    );
+    const usernameMap = unresolvedUserIds.length
+      ? await this.getUsersInfo(unresolvedUserIds)
+      : new Map<string, string>();
+    for (const [userId, botName] of botNameOverrides) {
+      usernameMap.set(userId, botName);
+    }
+
+    return usernameMap;
+  }
+
+  /**
    * Normalizes inbound Slack text for internal model/web consumption.
-   * - Expands user mentions to readable names.
+   * - Expands user mentions to readable names unless `preserveMentions` is
+   *   set, in which case raw `<@U…>` tokens stay in the text so the stored
+   *   message matches what the sender typed and the web transcript can
+   *   render them as linked mentions.
    * - Converts Slack mrkdwn links to standard markdown/plain URLs.
    */
-  public async normalizeIncomingText(text: string): Promise<string> {
+  public async normalizeIncomingText(
+    text: string,
+    options: { preserveMentions?: boolean } = {},
+  ): Promise<string> {
     return convertSlackLinksToMarkdown(
-      await this.replaceMentionsWithNames(text),
+      options.preserveMentions
+        ? text
+        : await this.replaceMentionsWithNames(text),
     );
   }
 }

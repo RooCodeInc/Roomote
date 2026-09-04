@@ -1,66 +1,118 @@
-const mocks = vi.hoisted(() => ({
-  abortActiveFastAgentTurns: vi.fn(),
-}));
-
-vi.mock('@roomote/cloud-agents/server', () => ({
-  abortActiveFastAgentTurns: mocks.abortActiveFastAgentTurns,
-  FastAgentProcessShutdownError: class extends Error {
-    constructor(public readonly signal: NodeJS.Signals) {
-      super(`Fast turn interrupted by API shutdown (${signal}).`);
-      this.name = 'FastAgentProcessShutdownError';
-    }
-  },
-}));
-
 import type { ServerType } from '@hono/node-server';
 
 import {
   gracefullyShutdownApi,
   installApiGracefulShutdown,
+  resolveApiShutdownDrainMs,
 } from '../graceful-shutdown';
+
+describe('resolveApiShutdownDrainMs', () => {
+  it('defaults to a bounded drain window', () => {
+    expect(resolveApiShutdownDrainMs({})).toBe(20_000);
+    expect(resolveApiShutdownDrainMs({ R_API_SHUTDOWN_DRAIN_MS: '' })).toBe(
+      20_000,
+    );
+    expect(
+      resolveApiShutdownDrainMs({ R_API_SHUTDOWN_DRAIN_MS: 'not-a-number' }),
+    ).toBe(20_000);
+    expect(resolveApiShutdownDrainMs({ R_API_SHUTDOWN_DRAIN_MS: '-5' })).toBe(
+      20_000,
+    );
+  });
+
+  it('honors an explicit window, including the abort-immediately kill switch', () => {
+    expect(resolveApiShutdownDrainMs({ R_API_SHUTDOWN_DRAIN_MS: '5000' })).toBe(
+      5_000,
+    );
+    expect(resolveApiShutdownDrainMs({ R_API_SHUTDOWN_DRAIN_MS: '0' })).toBe(0);
+  });
+});
 
 describe('gracefullyShutdownApi', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('aborts Fast turns before waiting for active requests to close', async () => {
+  it('drains active Fast turns before aborting the stragglers', async () => {
     let finishClose: ((error?: Error) => void) | undefined;
     const server = {
       close: vi.fn((callback: (error?: Error) => void) => {
         finishClose = callback;
       }),
     } as unknown as ServerType;
-    let finishAbort: (() => void) | undefined;
-    const abortTurns = vi.fn(
+    const beginDrain = vi.fn();
+    let finishDrain: ((remaining: number) => void) | undefined;
+    const waitForTurns = vi.fn(
       () =>
         new Promise<number>((resolve) => {
-          finishAbort = () => resolve(1);
+          finishDrain = resolve;
         }),
     );
+    const abortTurns = vi.fn().mockResolvedValue(1);
     const exitProcess = vi.fn() as unknown as (code?: number) => never;
     const flushSentry = vi.fn().mockResolvedValue(undefined);
+    const logWarn = vi.fn();
 
     const shutdown = gracefullyShutdownApi(server, 'SIGTERM', {
       abortTurns,
+      beginDrain,
+      waitForTurns,
+      drainMs: 12_345,
       exitProcess,
       flushSentry,
+      logWarn,
     });
 
-    expect(abortTurns).toHaveBeenCalledWith(
+    // Admissions close and the drain starts immediately; nothing is aborted
+    // while in-flight turns still have time to finish on their own.
+    expect(beginDrain).toHaveBeenCalledWith(
       expect.objectContaining({
         name: 'FastAgentProcessShutdownError',
         signal: 'SIGTERM',
       }),
     );
     expect(server.close).toHaveBeenCalledOnce();
-    expect(exitProcess).not.toHaveBeenCalled();
+    expect(waitForTurns).toHaveBeenCalledWith(12_345);
+    expect(abortTurns).not.toHaveBeenCalled();
 
-    finishAbort?.();
+    finishDrain?.(1);
+    await vi.waitFor(() => expect(abortTurns).toHaveBeenCalledOnce());
+    expect(abortTurns).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'FastAgentProcessShutdownError',
+        signal: 'SIGTERM',
+      }),
+    );
+    expect(logWarn).toHaveBeenCalledWith(
+      '[api] Aborting 1 Fast turn(s) still active after the 12345ms shutdown drain.',
+    );
+
     finishClose?.();
     await shutdown;
 
     expect(flushSentry).toHaveBeenCalledOnce();
+    expect(exitProcess).toHaveBeenCalledWith(0);
+  });
+
+  it('stays quiet when every turn settles inside the drain window', async () => {
+    const server = {
+      close: vi.fn((callback: (error?: Error) => void) => callback()),
+    } as unknown as ServerType;
+    const abortTurns = vi.fn().mockResolvedValue(0);
+    const exitProcess = vi.fn() as unknown as (code?: number) => never;
+    const logWarn = vi.fn();
+
+    await gracefullyShutdownApi(server, 'SIGTERM', {
+      abortTurns,
+      beginDrain: vi.fn(),
+      waitForTurns: vi.fn().mockResolvedValue(0),
+      drainMs: 20_000,
+      exitProcess,
+      logWarn,
+    });
+
+    expect(logWarn).not.toHaveBeenCalled();
+    expect(abortTurns).toHaveBeenCalledOnce();
     expect(exitProcess).toHaveBeenCalledWith(0);
   });
 
@@ -76,6 +128,9 @@ describe('gracefullyShutdownApi', () => {
 
     await gracefullyShutdownApi(server, 'SIGINT', {
       abortTurns,
+      beginDrain: vi.fn(),
+      waitForTurns: vi.fn().mockResolvedValue(0),
+      drainMs: 0,
       exitProcess,
       flushSentry,
       logError,
@@ -105,6 +160,8 @@ describe('gracefullyShutdownApi', () => {
       try {
         const cleanup = installApiGracefulShutdown(server, {
           abortTurns: vi.fn(() => new Promise<number>(() => undefined)),
+          beginDrain: vi.fn(),
+          waitForTurns: vi.fn(() => new Promise<number>(() => undefined)),
           exitProcess,
         });
 

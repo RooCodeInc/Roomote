@@ -124,6 +124,8 @@ export interface LaunchTaskResponse {
   success: boolean;
   runId?: number;
   taskId?: string;
+  /** The Session that owns the launched task. */
+  sessionId?: string;
   error?: string;
 }
 

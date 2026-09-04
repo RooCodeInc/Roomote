@@ -8,22 +8,14 @@ import {
   getTaskGoalForRun,
   isNotNull,
   releaseTaskGoalContinuationForRun,
-  sessionTasks,
   slackInstallations,
   taskPullRequests,
 } from '@roomote/db/server';
 
 import {
   RunStatus,
-  TASK_SURFACES,
-  TASK_TRIGGERS,
-  TASK_VISIBILITIES,
-  TASK_WORKFLOWS,
-  taskGoalInputSchema,
-  TaskPayloadKind,
   runEventSources,
   runEventTypes,
-  taskSpecSchema,
   communicationProviderSchema,
   getCommunicationChannelFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
@@ -33,8 +25,6 @@ import {
   environmentSetupStates,
   doneRunStatuses,
   queuedCommunicationMessageSchema,
-  snapshotResumeSchema,
-  sourceControlProviderSchema,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   LLM_USAGE_COST_SOURCES,
   type AcpPersistedEnvelope,
@@ -51,10 +41,6 @@ import {
   queueCommunicationRequestUserInputAnswer,
   setPendingCommunicationRequestUserInput,
 } from '@roomote/communication/request-user-input';
-import {
-  enqueueTask,
-  type EnqueueTaskInput,
-} from '@roomote/cloud-agents/server';
 import {
   activateSlackRunReplyTarget,
   clearActiveSlackRunReplyTarget,
@@ -164,93 +150,6 @@ const acpRequestUserInputAnswersSchema = z.record(
     answers: z.array(z.string()),
   }),
 );
-
-/**
- * Launch-time initiator union. Mirrors the TaskInitiator discriminated shape:
- * a 'user' initiator is either a linked user id or a raw external identity
- * (optionally matched to a user), and an 'automation' initiator carries the
- * automation key plus an optional external actor for context. There is no raw
- * userId/attribution passthrough — attribution derives from this union only.
- */
-const taskInitiatorSchema = z.union([
-  z.object({
-    kind: z.literal('user'),
-    userId: z.string().min(1),
-  }),
-  z.object({
-    kind: z.literal('user'),
-    externalId: z.string().min(1),
-    displayName: z.string().optional(),
-    matchedUserId: z.string().optional(),
-  }),
-  z.object({
-    kind: z.literal('automation'),
-    key: z.string().min(1),
-    actor: z
-      .object({
-        externalId: z.string().min(1),
-        displayName: z.string().optional(),
-      })
-      .optional(),
-  }),
-]);
-
-const taskChannelBindingsSchema = z.object({
-  slackChannelId: z.string().nullish(),
-  slackThreadTs: z.string().nullish(),
-  linearSessionId: z.string().nullish(),
-  linearIssueId: z.string().nullish(),
-  linearOrganizationId: z.string().nullish(),
-});
-
-const taskPrLinkageSchema = z.object({
-  provider: sourceControlProviderSchema,
-  host: z.string().nullish(),
-  repositoryId: z.string().uuid().nullish(),
-  repository: z.string().min(1),
-  prNumber: z.number().int().positive(),
-  prUrl: z.string().min(1),
-  prTitle: z.string().nullish(),
-  prSha: z.string().nullish(),
-  prBaseRef: z.string().nullish(),
-  prBaseSha: z.string().nullish(),
-  githubReactionId: z.number().nullish(),
-  githubCheckRunId: z.number().nullish(),
-  githubReviewCommentId: z.number().nullish(),
-});
-
-/**
- * A fresh launch creates a task (initiator stamp, classification, channel
- * bindings, optional PR linkage) plus its first run.
- */
-const freshEnqueueInputSchema = z.object({
-  task: taskSpecSchema.refine(
-    (task) => task.type !== TaskPayloadKind.SnapshotResume,
-    { message: 'Snapshot resumes must use the resume input shape.' },
-  ),
-  initiator: taskInitiatorSchema,
-  workflow: z.enum(TASK_WORKFLOWS),
-  surface: z.enum(TASK_SURFACES),
-  trigger: z.enum(TASK_TRIGGERS),
-  visibility: z.enum(TASK_VISIBILITIES).optional(),
-  channels: taskChannelBindingsSchema.optional(),
-  prLinkage: taskPrLinkageSchema.optional(),
-  goal: taskGoalInputSchema.optional(),
-});
-
-/**
- * A resume attaches a new run to the source run's task. It never creates a
- * task and never re-attributes; the resumer becomes the run's actingUserId.
- */
-const resumeEnqueueInputSchema = z.object({
-  task: snapshotResumeSchema,
-  actingUserId: z.string().nullish(),
-});
-
-const enqueueTaskInputSchema = z.union([
-  freshEnqueueInputSchema,
-  resumeEnqueueInputSchema,
-]);
 
 const workerReleaseMetadataSchema = z.object({
   workerReleaseTag: z.string().optional(),
@@ -398,21 +297,6 @@ export const taskRunsRouter = router({
     z.object({ runId: z.number(), continuationId: z.string().min(1).max(200) }),
     'runId',
   ).mutation(({ input }) => releaseTaskGoalContinuationForRun(input)),
-  enqueue: userOnlyProcedure
-    .input(enqueueTaskInputSchema)
-    .mutation(async ({ input }) => {
-      const launchResult = await enqueueTask(input as EnqueueTaskInput);
-      const linkedSession = await db.query.sessionTasks.findFirst({
-        where: eq(sessionTasks.taskId, launchResult.taskId),
-        columns: { sessionId: true },
-      });
-
-      return {
-        id: launchResult.id,
-        taskId: launchResult.taskId,
-        sessionId: linkedSession?.sessionId,
-      };
-    }),
   dequeue: runScoped(
     z.object({ runId: z.number() }).merge(workerReleaseMetadataSchema),
     'runId',
@@ -556,7 +440,8 @@ export const taskRunsRouter = router({
     z.object({
       runId: z.number(),
       status: z.enum(['in_progress', 'complete', 'error']),
-      message: z.string().optional(),
+      details: z.string().optional(),
+      output: z.string().optional(),
     }),
     'runId',
   )
@@ -572,7 +457,8 @@ export const taskRunsRouter = router({
     .mutation(({ input }) =>
       renderSlackLiveTaskCardForRun(input.runId, {
         status: input.status,
-        ...(input.message ? { message: input.message } : {}),
+        ...(input.details ? { details: input.details } : {}),
+        ...(input.output ? { output: input.output } : {}),
       }),
     ),
   getResolvedGitAuthor: runScoped(

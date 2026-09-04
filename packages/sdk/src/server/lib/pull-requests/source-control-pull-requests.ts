@@ -16,6 +16,7 @@ import {
   eq,
   getDeploymentGitHubRoomoteMentionEnabled,
   getSessionForTask,
+  getTaskHumanOwnerUserIds,
   isNotNull,
   resolveTelegramRuntimeCredentials,
   taskMessages,
@@ -209,12 +210,14 @@ async function resolveExplicitPrAttribution({
   provider,
   host,
   liveAttribution,
+  durableOwnerUserIds,
 }: {
   selector: string;
   taskRun: TaskRun;
   provider: SourceControlProvider;
   host?: string;
   liveAttribution: ResolvedTaskCommitAuthor;
+  durableOwnerUserIds: string[];
 }): Promise<ResolvedTaskCommitAuthor> {
   const messageParticipants = await db
     .selectDistinct({ userId: users.id, name: users.name })
@@ -227,7 +230,7 @@ async function resolveExplicitPrAttribution({
         isNotNull(taskMessages.userId),
       ),
     );
-  const participants = new Map(
+  const participants = new Map<string, string | null>(
     messageParticipants.map((participant) => [
       participant.userId,
       participant.name,
@@ -235,6 +238,11 @@ async function resolveExplicitPrAttribution({
   );
   if (taskRun.actingUserId && !participants.has(taskRun.actingUserId)) {
     participants.set(taskRun.actingUserId, liveAttribution.displayName);
+  }
+  for (const userId of durableOwnerUserIds) {
+    if (!participants.has(userId)) {
+      participants.set(userId, null);
+    }
   }
 
   const candidates = await Promise.all(
@@ -251,6 +259,14 @@ async function resolveExplicitPrAttribution({
             ),
     })),
   );
+  // Automation-started tasks with no human participants, acting user, or
+  // durable owner have nobody to attribute to. Rejecting every selector there
+  // leaves the agent no way forward (the error can't even list choices), so
+  // fall back to the default attribution instead of blocking PR delivery.
+  if (candidates.length === 0) {
+    return liveAttribution;
+  }
+
   const normalizedSelector = normalizeAttributionSelector(selector);
   const loginMatches = candidates.filter(({ attribution }) =>
     [attribution.publicDisplayName, attribution.githubLogin]
@@ -344,6 +360,20 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     provider,
     host: repository.host ?? payloadHost,
   });
+  const durableOwnerUserIds =
+    input.prAttribution !== undefined || !taskRun.actingUserId
+      ? await getTaskHumanOwnerUserIds(db, taskRun.taskId)
+      : [];
+  const defaultAttribution =
+    input.prAttribution === undefined &&
+    !taskRun.actingUserId &&
+    durableOwnerUserIds.length === 1
+      ? await resolveRunCommitAuthor(
+          db,
+          { taskId: taskRun.taskId, actingUserId: durableOwnerUserIds[0]! },
+          { provider, host: repository.host ?? payloadHost },
+        )
+      : liveAttribution;
   const task = await db.query.tasks.findFirst({
     where: eq(tasks.id, taskRun.taskId),
     columns: {
@@ -354,13 +384,14 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   });
   const bodyAttribution =
     input.prAttribution === undefined
-      ? liveAttribution
+      ? defaultAttribution
       : await resolveExplicitPrAttribution({
           selector: input.prAttribution,
           taskRun,
           provider,
           host: repository.host ?? payloadHost,
           liveAttribution,
+          durableOwnerUserIds,
         });
   const displayName =
     bodyAttribution.kind === 'roomote'
@@ -541,10 +572,9 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     repository,
   });
 
-  // Finish the open event before returning to the child so a very fast
-  // completion cannot overtake it in the parent conversation. Transient
-  // failures propagate after releasing their claim: the next source-control
-  // attempt finds this PR, updates it, and re-enters the deduplicated notifier.
+  // Durably admit the open event before returning so a very fast completion
+  // cannot overtake it in the parent conversation. Parent delivery then runs
+  // asynchronously without coupling this mutation to the parent turn lock.
   await notifyFastAgentParentOnPullRequestOpened({
     run: taskRun,
     ...(input.body.trim()

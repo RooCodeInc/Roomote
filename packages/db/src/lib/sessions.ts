@@ -8,6 +8,7 @@ import {
   sessions,
   sessionTasks,
   fastAgentConversations,
+  fastAgentMessages,
   taskRuns,
   tasks,
   type SessionStatus,
@@ -19,6 +20,8 @@ import { runInTransactionIfAvailable } from './transaction-utils';
 
 export type SessionStatusInput = {
   conversationResponding: boolean;
+  /** True when the linked Fast conversation awaits structured user input. */
+  conversationPendingInput?: boolean;
   tasks: Array<{
     state: TaskState;
     taskPhase: string | null;
@@ -28,6 +31,7 @@ export type SessionStatusInput = {
 
 export function deriveSessionStatus(input: SessionStatusInput): SessionStatus {
   if (
+    input.conversationPendingInput ||
     input.tasks.some(
       (task) =>
         task.state === 'active' && task.taskPhase === 'waiting_for_user_input',
@@ -55,6 +59,49 @@ export function deriveSessionStatus(input: SessionStatusInput): SessionStatus {
   }
 
   return 'ready';
+}
+
+/**
+ * True when the linked Fast conversation's most recent structured input
+ * request (`request_user_input`) has no matching response event yet. A newer
+ * request supersedes an older resolved one, so only the latest request is
+ * checked.
+ */
+export async function hasFastConversationPendingUserInput(
+  dbOrTx: DatabaseOrTransaction,
+  fastConversationId: string,
+): Promise<boolean> {
+  const [latestRequest] = await dbOrTx
+    .select({
+      requestId: sql<string>`(${fastAgentMessages.payload}->>'requestId')`,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, fastConversationId),
+        sql`${fastAgentMessages.eventType} = 'roomote_runtime.request_user_input'`,
+      ),
+    )
+    .orderBy(desc(fastAgentMessages.ts), desc(fastAgentMessages.createdAt))
+    .limit(1);
+
+  if (!latestRequest?.requestId) {
+    return false;
+  }
+
+  const [response] = await dbOrTx
+    .select({ exists: sql<number>`1` })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, fastConversationId),
+        sql`${fastAgentMessages.eventType} = 'roomote_runtime.request_user_input_response'`,
+        sql`(${fastAgentMessages.payload}->>'requestId') = ${latestRequest.requestId}`,
+      ),
+    )
+    .limit(1);
+
+  return !response;
 }
 
 export function isSessionConversationResponding(
@@ -126,10 +173,18 @@ async function refreshLockedSession(
       )
       .orderBy(tasks.id, desc(taskRuns.id));
 
+    const conversationPendingInput = lockedSession.fastConversationId
+      ? await hasFastConversationPendingUserInput(
+          tx,
+          lockedSession.fastConversationId,
+        )
+      : false;
+
     cachedStatus = deriveSessionStatus({
       conversationResponding: isSessionConversationResponding({
         respondingUntil,
       }),
+      conversationPendingInput,
       tasks: linkedTasks,
     });
   }
@@ -386,6 +441,30 @@ export async function ensureSessionForTask(
   return touchSessionActivity(tx, session.id, task.activityAt);
 }
 
+/**
+ * Binds a Fast conversation to a Session that has none yet, so a launch can
+ * land in the Session that produced the request instead of opening a new
+ * one. Returns null when the Session is missing or already has a
+ * conversation; the caller then keeps the conversation's own Session.
+ */
+export async function attachFastConversationToSession(
+  tx: DatabaseOrTransaction,
+  input: { sessionId: string; fastConversationId: string },
+): Promise<Session | null> {
+  const [updated] = await tx
+    .update(sessions)
+    .set({ fastConversationId: input.fastConversationId })
+    .where(
+      and(
+        eq(sessions.id, input.sessionId),
+        isNull(sessions.fastConversationId),
+      ),
+    )
+    .returning();
+
+  return updated ?? null;
+}
+
 export async function getSessionForTask(
   tx: DatabaseOrTransaction,
   taskId: string,
@@ -398,6 +477,34 @@ export async function getSessionForTask(
     .limit(1);
 
   return session?.session ?? null;
+}
+
+/**
+ * Returns the trusted human principals durably attached to a task.
+ *
+ * The immutable task initiator is authoritative for direct human launches.
+ * Automation-delegated tasks instead retain their run-as human through the
+ * canonical Session owner, without misclassifying the automation as a user.
+ */
+export async function getTaskHumanOwnerUserIds(
+  tx: DatabaseOrTransaction,
+  taskId: string,
+): Promise<string[]> {
+  const [task] = await tx
+    .select({ initiatorUserId: tasks.initiatorUserId })
+    .from(tasks)
+    .where(eq(tasks.id, taskId))
+    .limit(1);
+  const session = await getSessionForTask(tx, taskId);
+
+  return [
+    ...new Set(
+      [
+        task?.initiatorUserId,
+        session?.ownerKind === 'user' ? session.ownerUserId : null,
+      ].filter((userId): userId is string => Boolean(userId)),
+    ),
+  ];
 }
 
 export async function getSessionForFastConversation(

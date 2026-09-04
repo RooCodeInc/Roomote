@@ -1,43 +1,21 @@
 import {
-  buildGitHubExistingTaskFollowUpMessage,
-  buildGitHubRoutingContext,
-  enqueueTask,
-  getTaskUrl,
-  routeGitHubTask,
-  SnapshotResumeAlreadyExistsError,
-} from '@roomote/cloud-agents/server';
-import {
   findActiveGitHubPrReviewTask,
+  findRoomoteOpenedPullRequestTask,
   findReusableGitHubPrFollowUpOwner,
 } from '@roomote/db/server';
-import { getInstallationOctokit } from '@roomote/github';
 import {
-  acquireGithubPrReviewLifecycleLock,
-  ensureSnapshotResumeGitHubFollowUpFallback,
-  publishGithubPrReviewCheck,
+  getInstallationOctokit,
+  Schemas as GitHubSchemas,
+} from '@roomote/github';
+import {
+  startSourceControlFastSessionTurn,
+  type SourceControlFastDiscussion,
 } from '@roomote/sdk/server';
-import {
-  type TaskPayload,
-  RunStatus,
-  TaskPayloadKind,
-  EXPIRED_SNAPSHOT_RESUME_ERROR,
-  PRODUCT_NAME,
-  type SnapshotResumePromptFallbackTask,
-  isActivelyRunningTask,
-  isExitedRunStatus,
-  populateSnapshotResumeSlackMetadata,
-  isSnapshotResumable,
-  restoreSnapshotResumeVisiblePromptFields,
-} from '@roomote/types';
+import type { FastAgentActiveTask } from '@roomote/cloud-agents/server';
+import { PRODUCT_NAME } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
 import { toHostFromUrl } from '../utils';
-import { findLatestTaskRun, getTaskChannelBindings } from '../tasks/helpers';
-import {
-  getTrackedUserDisplayName,
-  sendMessageToTask,
-  steerMessageToTask,
-} from '../tasks/sendMessageToTask';
 
 import type {
   WebhookPullRequestCommentCreated,
@@ -50,8 +28,12 @@ import {
   fetchGitHubLinkedReferences,
   formatGitHubLinkedReferencesSection,
 } from './linked-issue-pr-context';
-import { getReviewTaskRelayPayload } from './reviewTaskRelayPayload';
 import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
+
+type PullRequestMentionEvent =
+  | WebhookPullRequestCommentCreated
+  | WebhookIssueCommentCreated
+  | WebhookPullRequestReviewSubmitted;
 
 type MentionResponseTarget = {
   repositoryFullName: string;
@@ -67,20 +49,21 @@ type ReviewCommentSnapshot = {
   userLogin: string;
 };
 
-type GitHubPrMentionReplyLink = { kind: 'task'; url: string };
-
-type GitHubPrMentionReplyOutcome =
-  | { kind: 'active_follow_up' }
-  | { kind: 'active_review' }
-  | { kind: 'dedicated_follow_up' }
-  | { kind: 'review_started'; count: number; partial: boolean };
-
-type GitHubPrMentionReplyLinkRequest = {
-  kind: 'task';
-  taskId: string;
-  utm: Parameters<typeof getTaskUrl>[0]['utm'];
-  warning: string;
+type GitHubRoutingHistoryContext = {
+  issueComments: Array<{ author: string; body: string }>;
+  reviewComments: Array<{ author: string; body: string; path?: string }>;
 };
+
+type PullRequestRoutingDetails = {
+  branchName: string;
+  prUrl: string;
+  headSha: string;
+};
+
+const GITHUB_ROUTING_HISTORY_PAGE_SIZE = 100;
+
+const FAST_UNAVAILABLE_COMMENT =
+  "I saw the mention, but I couldn't start a conversation right now. Please try again in a moment.";
 
 async function postMentionResponseComment({
   installationId,
@@ -129,11 +112,51 @@ async function postMentionResponseComment({
   }
 }
 
+/**
+ * Acknowledges the mention the way chat surfaces do, with an eyes reaction
+ * on the comment. Submitted reviews have no reaction API; the reply itself
+ * is the acknowledgement there.
+ */
+async function acknowledgeMentionBestEffort({
+  installationId,
+  eventPayload,
+}: {
+  installationId: number;
+  eventPayload: PullRequestMentionEvent;
+}): Promise<void> {
+  if (!('comment' in eventPayload)) {
+    return;
+  }
+  const [owner, repo] = eventPayload.repository.full_name.split('/');
+  if (!owner || !repo) {
+    return;
+  }
+  try {
+    const octokit = await getInstallationOctokit({ installationId });
+    if ('pull_request' in eventPayload) {
+      await octokit.rest.reactions.createForPullRequestReviewComment({
+        owner,
+        repo,
+        comment_id: eventPayload.comment.id,
+        content: 'eyes',
+      });
+      return;
+    }
+    await octokit.rest.reactions.createForIssueComment({
+      owner,
+      repo,
+      comment_id: eventPayload.comment.id,
+      content: 'eyes',
+    });
+  } catch (error) {
+    console.warn(
+      `[handlePrComment] failed to acknowledge mention on ${eventPayload.repository.full_name}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 function getMentionResponseTarget(
-  eventPayload:
-    | WebhookPullRequestCommentCreated
-    | WebhookIssueCommentCreated
-    | WebhookPullRequestReviewSubmitted,
+  eventPayload: PullRequestMentionEvent,
 ): MentionResponseTarget {
   if ('comment' in eventPayload && 'pull_request' in eventPayload) {
     return {
@@ -157,101 +180,6 @@ function getMentionResponseTarget(
 
 function buildReviewerGateMissComment(): string {
   return `I saw the mention, but I could not start work on this PR with the current ${PRODUCT_NAME} GitHub setup.`;
-}
-
-function tryBuildGitHubPrMentionReplyLink(
-  request: GitHubPrMentionReplyLinkRequest,
-): GitHubPrMentionReplyLink | null {
-  try {
-    return {
-      kind: 'task',
-      url: getTaskUrl({
-        taskId: request.taskId,
-        utm: request.utm,
-      }),
-    };
-  } catch (error) {
-    console.warn(
-      `${request.warning}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-
-    return null;
-  }
-}
-
-function formatGitHubPrMentionReply(
-  outcome: GitHubPrMentionReplyOutcome,
-  link: GitHubPrMentionReplyLink | null,
-): string {
-  const replyCopy = (() => {
-    switch (outcome.kind) {
-      case 'active_follow_up':
-        return {
-          intro:
-            "I'm on it. I routed this request into the existing PR task so follow-up work stays on one Roomote thread for this PR, and I'll keep updates here.",
-          taskLinkText: 'See task',
-          fallback:
-            'I could not generate the task link for the PR comment, but the follow-up was delivered.',
-        };
-      case 'active_review':
-        return {
-          intro: 'I found an active PR review already running for this PR.',
-          taskLinkText: 'See task',
-          fallback:
-            'I could not generate the task link for the PR comment, but the review is already in progress.',
-        };
-      case 'dedicated_follow_up':
-        return {
-          intro:
-            "I'm on it. I started a dedicated PR follow-up task for this request, and I'll keep updates here.",
-          taskLinkText: 'See task',
-          fallback:
-            'I could not generate the task link for the PR comment, but the follow-up task is already running.',
-        };
-      case 'review_started':
-        if (outcome.partial) {
-          return {
-            intro:
-              'I started PR review tasks for part of this request, but at least one reviewer could not be started right now.',
-            taskLinkText: 'See one task',
-            fallback:
-              'I could not generate the task link for the PR comment, but one or more review tasks are already running.',
-          };
-        }
-
-        return outcome.count === 1
-          ? {
-              intro: 'I started a PR review task for this request.',
-              taskLinkText: 'See task',
-              fallback:
-                'I could not generate the task link for the PR comment, but the review task is already running.',
-            }
-          : {
-              intro: 'I started PR review tasks for this request.',
-              taskLinkText: 'See one task',
-              fallback:
-                'I could not generate the task link for the PR comment, but the review tasks are already running.',
-            };
-    }
-  })();
-
-  if (!link) {
-    return `${replyCopy.intro} ${replyCopy.fallback}`;
-  }
-
-  return `${replyCopy.intro} [${replyCopy.taskLinkText}](${link.url})`;
-}
-
-function buildDedicatedTaskStartFailedComment(): string {
-  return 'I saw the mention, but I could not start the PR follow-up task right now. Please try again in a moment.';
-}
-
-function buildReviewTaskStartFailedComment(): string {
-  return 'I saw the mention, but I could not start the PR review task right now. Please try again in a moment.';
-}
-
-function buildFollowUpSafetyCheckFailedComment(): string {
-  return 'I saw the mention, but I could not safely start PR follow-up on this PR right now because I could not verify the active PR branch. Please try again in a moment.';
 }
 
 async function fetchReviewCommentSnapshot({
@@ -433,11 +361,18 @@ function buildReviewReplyTriggeringComment({
   commentBody: string;
   parentComment: ReviewCommentSnapshot;
 }): string {
+  const parentIsRoomote = GitHubSchemas.isRoomoteGitHubLogin(
+    parentComment.userLogin,
+  );
   const lines = [
-    `${commenter} mentioned Roomote in a reply to review comment #${parentComment.id}:`,
+    parentIsRoomote
+      ? `${commenter} replied to Roomote's review comment #${parentComment.id}:`
+      : `${commenter} mentioned Roomote in a reply to review comment #${parentComment.id}:`,
     formatQuotedText(commentBody),
     '',
-    `${parentComment.userLogin} wrote the following review comment that this reply is in response to:`,
+    parentIsRoomote
+      ? `Roomote (${parentComment.userLogin}) wrote the following review comment that this reply is in response to:`
+      : `${parentComment.userLogin} wrote the following review comment that this reply is in response to:`,
     formatQuotedText(parentComment.body),
   ];
 
@@ -460,6 +395,7 @@ async function buildTriggeringCommentContext({
   repositoryFullName,
   commenter,
   commentBody,
+  parentComment: knownParentComment,
 }: {
   eventPayload:
     | WebhookPullRequestCommentCreated
@@ -469,16 +405,20 @@ async function buildTriggeringCommentContext({
   repositoryFullName: string;
   commenter: string;
   commentBody: string;
+  /** The review thread parent when the mention gate already fetched it. */
+  parentComment?: ReviewCommentSnapshot | null;
 }): Promise<string> {
   if ('comment' in eventPayload && 'pull_request' in eventPayload) {
     const reviewComment = eventPayload.comment;
 
     if (reviewComment.in_reply_to_id) {
-      const parentComment = await fetchReviewCommentSnapshot({
-        installationId,
-        repositoryFullName,
-        commentId: reviewComment.in_reply_to_id,
-      });
+      const parentComment =
+        knownParentComment ??
+        (await fetchReviewCommentSnapshot({
+          installationId,
+          repositoryFullName,
+          commentId: reviewComment.in_reply_to_id,
+        }));
 
       if (parentComment) {
         return buildReviewReplyTriggeringComment({
@@ -493,106 +433,6 @@ async function buildTriggeringCommentContext({
   }
 
   return buildCompactTriggeringComment({ commenter, commentBody });
-}
-
-function buildActiveTaskFollowUpMessage({
-  repository,
-  prNumber,
-  prTitle,
-  prBody,
-  headRefName,
-  prAuthorLogin,
-  commentId,
-  commentBody,
-  triggeringComment,
-  reasoning,
-  issueComments,
-  reviewComments,
-  linkedReferencesSection,
-}: {
-  repository: string;
-  prNumber: number;
-  prTitle: string;
-  prBody?: string;
-  headRefName?: string;
-  prAuthorLogin?: string;
-  commentId?: number;
-  commentBody: string;
-  triggeringComment: string;
-  reasoning: string;
-  issueComments: Array<{ author: string; body: string }>;
-  reviewComments: Array<{ author: string; body: string; path?: string }>;
-  linkedReferencesSection?: string;
-}): string {
-  return buildGitHubExistingTaskFollowUpMessage({
-    routingReason: reasoning,
-    commentBody,
-    taskContext: {
-      repository,
-      pull_request_number: prNumber,
-      pull_request_details: buildCompactPullRequestDetails({
-        repository,
-        prNumber,
-        prTitle,
-        prBody,
-        headRefName,
-        prAuthorLogin,
-      }),
-      ...(commentId ? { triggering_comment_id: commentId } : {}),
-      triggering_comment: triggeringComment,
-      existing_review_comments:
-        formatCompactGitHubReviewComments(reviewComments),
-      issue_comments: formatCompactGitHubIssueComments(issueComments),
-      ...(linkedReferencesSection
-        ? { linked_issues_and_pull_requests: linkedReferencesSection }
-        : {}),
-    },
-  });
-}
-
-function buildRouterFailedComment(): string {
-  return 'I saw the mention, but I could not route it into follow-up work right now. Please try again in a moment.';
-}
-
-function buildInternalErrorComment(): string {
-  return 'I saw the mention, but I could not process it right now because the GitHub follow-up context was incomplete. Please try again in a moment.';
-}
-
-type PullRequestRoutingDetails = {
-  branchName: string;
-  prUrl: string;
-  headSha: string;
-};
-
-type GitHubRoutingHistoryContext = {
-  issueComments: Array<{ author: string; body: string }>;
-  reviewComments: Array<{ author: string; body: string; path?: string }>;
-};
-
-const EXISTING_TASK_WAIT_TIMEOUT_MS = 15_000;
-const EXISTING_TASK_WAIT_POLL_MS = 500;
-const GITHUB_ROUTING_HISTORY_PAGE_SIZE = 100;
-
-function asString(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
-
-function getSelectedRepositories(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const repositories = value.filter(
-    (repository): repository is string => typeof repository === 'string',
-  );
-
-  return repositories.length > 0 ? repositories : undefined;
-}
-
-function getSlackOriginMessageTs(
-  value: Record<string, unknown>,
-): string | undefined {
-  return asString(value.slackOriginMessageTs) ?? asString(value.ts);
 }
 
 async function listGitHubRoutingHistoryPages<T>(
@@ -696,418 +536,6 @@ async function getGitHubRoutingHistoryContext({
   }
 }
 
-async function waitForTaskToAcceptMessages({
-  taskId,
-  timeoutMs = EXISTING_TASK_WAIT_TIMEOUT_MS,
-}: {
-  taskId: string;
-  timeoutMs?: number;
-}) {
-  const deadline = Date.now() + timeoutMs;
-
-  while (Date.now() < deadline) {
-    const latestRun = await findLatestTaskRun(taskId, {
-      id: true,
-      status: true,
-      taskPhase: true,
-      sandboxServerUrl: true,
-    });
-
-    if (!latestRun || isExitedRunStatus(latestRun.status)) {
-      return null;
-    }
-
-    if (latestRun.sandboxServerUrl) {
-      return latestRun;
-    }
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, EXISTING_TASK_WAIT_POLL_MS),
-    );
-  }
-
-  return null;
-}
-
-function getDeferredResumePromptAccepted(result: unknown): boolean | null {
-  if (!result || typeof result !== 'object' || Array.isArray(result)) {
-    return null;
-  }
-
-  const accepted = (result as Record<string, unknown>)
-    .deferredResumePromptAccepted;
-
-  return typeof accepted === 'boolean' ? accepted : null;
-}
-
-async function waitForResumeRunToAcceptDeferredPrompt({
-  taskId,
-  resumeRunId,
-  timeoutMs = EXISTING_TASK_WAIT_TIMEOUT_MS,
-}: {
-  taskId: string;
-  resumeRunId: number;
-  timeoutMs?: number;
-}) {
-  const deadline = Date.now() + timeoutMs;
-  let latestRun:
-    | {
-        id: number;
-        status: RunStatus;
-        result: unknown;
-      }
-    | null
-    | undefined = null;
-
-  while (Date.now() < deadline) {
-    latestRun = await findLatestTaskRun(taskId, {
-      id: true,
-      status: true,
-      result: true,
-    });
-
-    if (!latestRun) {
-      return false;
-    }
-
-    if (latestRun.id === resumeRunId) {
-      const accepted = getDeferredResumePromptAccepted(latestRun.result);
-
-      if (accepted === true) {
-        return true;
-      }
-
-      if (accepted === false || isExitedRunStatus(latestRun.status)) {
-        return false;
-      }
-    }
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, EXISTING_TASK_WAIT_POLL_MS),
-    );
-  }
-
-  if (!latestRun || latestRun.id !== resumeRunId) {
-    return false;
-  }
-
-  const accepted = getDeferredResumePromptAccepted(latestRun.result);
-
-  if (accepted === true) {
-    return true;
-  }
-
-  if (accepted === false || isExitedRunStatus(latestRun.status)) {
-    return false;
-  }
-
-  return null;
-}
-
-async function resolveReusableTaskSenderUserId({
-  taskId,
-  preferredUserId,
-}: {
-  taskId: string;
-  preferredUserId?: string | null;
-}): Promise<string | null> {
-  if (preferredUserId) {
-    return preferredUserId;
-  }
-
-  const latestRun = await findLatestTaskRun(taskId, {
-    id: true,
-    actingUserId: true,
-  });
-
-  if (!latestRun) {
-    return null;
-  }
-
-  // No forged fallback: when the run has no acting human, the follow-up has
-  // no deliverable human and callers handle null.
-  return latestRun.actingUserId ?? null;
-}
-
-/**
- * Resolve a display name for the Slack reply quote attribution so the quote
- * names the actual commenter rather than the reusable task owner (which
- * `resolveReusableTaskSenderUserId` falls back to when the commenter has no
- * linked account). Uses the linked Roomote user's name when available, the
- * GitHub login as a fallback, and returns undefined when neither is known.
- */
-async function resolveCommenterDisplayName({
-  commenterUserId,
-  commenterGithubLogin,
-}: {
-  commenterUserId: string | null | undefined;
-  commenterGithubLogin: string | null | undefined;
-}): Promise<string | undefined> {
-  if (commenterUserId) {
-    try {
-      return await getTrackedUserDisplayName(commenterUserId);
-    } catch {
-      // Fall through to the GitHub login fallback below.
-    }
-  }
-
-  const login = commenterGithubLogin?.trim();
-  return login ? login : undefined;
-}
-
-async function deliverFollowUpToExistingTask({
-  taskId,
-  userId,
-  message,
-  quoteText = message,
-  status,
-  taskPhase,
-  commenterDisplayName,
-}: {
-  taskId: string;
-  userId?: string | null;
-  message: string;
-  quoteText?: string;
-  status: RunStatus;
-  taskPhase: string | null;
-  commenterDisplayName?: string;
-}) {
-  const senderUserId = await resolveReusableTaskSenderUserId({
-    taskId,
-    preferredUserId: userId,
-  });
-
-  if (!senderUserId) {
-    return {
-      success: false as const,
-      error: 'Reusable PR owner has no delivery user',
-      status: 409 as const,
-    };
-  }
-
-  const deliver = ({
-    status,
-    taskPhase,
-  }: {
-    status: RunStatus;
-    taskPhase: string | null;
-  }) =>
-    isActivelyRunningTask(status, taskPhase)
-      ? steerMessageToTask({
-          taskId,
-          userId: senderUserId,
-          message,
-          quoteText,
-          senderMode: 'github_pr_follow_up',
-          ...(commenterDisplayName
-            ? { workerQuoteUserName: commenterDisplayName }
-            : {}),
-        })
-      : sendMessageToTask({
-          taskId,
-          userId: senderUserId,
-          message,
-          quoteText,
-          senderMode: 'github_pr_follow_up',
-          ...(commenterDisplayName
-            ? { workerQuoteUserName: commenterDisplayName }
-            : {}),
-        });
-
-  const initialAttempt = await deliver({ status, taskPhase });
-
-  if (
-    initialAttempt.success ||
-    initialAttempt.status !== 409 ||
-    !initialAttempt.error.includes('no active sandbox')
-  ) {
-    return initialAttempt;
-  }
-
-  const readyRun = await waitForTaskToAcceptMessages({ taskId });
-
-  if (!readyRun) {
-    return initialAttempt;
-  }
-
-  return deliver({
-    status: readyRun.status,
-    taskPhase: readyRun.taskPhase,
-  });
-}
-
-export async function resumeExistingTaskAndDeliverFollowUp({
-  taskId,
-  userId,
-  sourceRunId,
-  message,
-  quoteText = message,
-  resumePromptFallbackTask,
-}: {
-  taskId: string;
-  userId?: string | null;
-  sourceRunId: number;
-  message: string;
-  quoteText?: string;
-  resumePromptFallbackTask: SnapshotResumePromptFallbackTask;
-}) {
-  const sourceRun = await findLatestTaskRun(taskId, {
-    id: true,
-    status: true,
-    taskPhase: true,
-    snapshotId: true,
-    snapshotCreatedAt: true,
-    payload: true,
-    port: true,
-    actingUserId: true,
-  });
-
-  if (!sourceRun) {
-    return { success: false as const, error: 'Task not found', status: 404 };
-  }
-
-  if (sourceRun.id !== sourceRunId) {
-    return {
-      success: false as const,
-      error: 'Reusable PR owner changed before follow-up delivery',
-      status: 409,
-    };
-  }
-
-  if (!sourceRun.snapshotId) {
-    return {
-      success: false as const,
-      error: 'Reusable PR owner has no snapshot to resume',
-      status: 409,
-    };
-  }
-
-  if (!isSnapshotResumable(sourceRun.snapshotCreatedAt)) {
-    return {
-      success: false as const,
-      error: EXPIRED_SNAPSHOT_RESUME_ERROR,
-      status: 409,
-    };
-  }
-
-  if (!isExitedRunStatus(sourceRun.status)) {
-    return deliverFollowUpToExistingTask({
-      taskId,
-      userId,
-      message,
-      quoteText,
-      status: sourceRun.status,
-      taskPhase: sourceRun.taskPhase,
-    });
-  }
-
-  if (!sourceRun.snapshotId) {
-    return {
-      success: false as const,
-      error: 'Reusable PR owner has no snapshot to resume',
-      status: 409,
-    };
-  }
-
-  // Prefer the linked commenter, then the run's acting user. No forged
-  // fallback: a run without an acting human and an unlinked commenter has no
-  // delivery user and is rejected below.
-  const senderUserId = userId ?? sourceRun.actingUserId;
-
-  if (!senderUserId) {
-    return {
-      success: false as const,
-      error: 'Reusable PR owner has no delivery user',
-      status: 409,
-    };
-  }
-
-  const sourcePayload = (sourceRun.payload ?? {}) as Record<string, unknown>;
-  const selectedRepositories = getSelectedRepositories(
-    sourcePayload.selectedRepositories,
-  );
-  const slackOriginMessageTs = getSlackOriginMessageTs(sourcePayload);
-  const channelBindings = await getTaskChannelBindings(taskId);
-
-  const resumePayload = {
-    repo: asString(sourcePayload.repo) ?? '',
-    environmentId: asString(sourcePayload.environmentId),
-    port: sourceRun.port ?? undefined,
-    sourceSnapshotId: sourceRun.snapshotId,
-    sourceRunId: sourceRun.id,
-    ...(selectedRepositories ? { selectedRepositories } : {}),
-    ...(slackOriginMessageTs ? { slackOriginMessageTs } : {}),
-    // Carry the follow-up on the resume run itself so the resumed worker can
-    // send it after the harness session is actually ready.
-    resumePrompt: message,
-    resumeQuoteText: quoteText,
-    resumePromptSource: 'github',
-    resumePromptFallbackTask,
-  } satisfies TaskPayload<typeof TaskPayloadKind.SnapshotResume>;
-  populateSnapshotResumeSlackMetadata(resumePayload, {
-    sourcePayload,
-    channel: channelBindings?.slackChannelId,
-    threadTs: channelBindings?.slackThreadTs,
-  });
-  restoreSnapshotResumeVisiblePromptFields(resumePayload, sourcePayload);
-
-  // Resumes never create tasks and never re-attribute; the resuming human
-  // becomes the new run's acting user.
-  let resumeLaunch: Awaited<ReturnType<typeof enqueueTask>>;
-  try {
-    resumeLaunch = await enqueueTask(
-      {
-        task: {
-          type: TaskPayloadKind.SnapshotResume,
-          sourceSnapshotId: sourceRun.snapshotId,
-          sourceRunId: sourceRun.id,
-          payload: resumePayload,
-        },
-        actingUserId: senderUserId,
-      },
-      {},
-    );
-  } catch (error) {
-    if (error instanceof SnapshotResumeAlreadyExistsError) {
-      // Continue through the normal fallback path so this distinct instruction
-      // gets its own linked follow-up task and response instead of being lost.
-      return {
-        success: false as const,
-        error: 'Reusable PR owner is already resuming',
-        status: 409,
-      };
-    }
-    throw error;
-  }
-
-  const accepted = await waitForResumeRunToAcceptDeferredPrompt({
-    taskId,
-    resumeRunId: resumeLaunch.id,
-  });
-
-  if (accepted === false) {
-    const fallbackTaskRun = await ensureSnapshotResumeGitHubFollowUpFallback({
-      resumeRunId: resumeLaunch.id,
-    });
-
-    return {
-      success: false as const,
-      error: 'Resumed PR owner did not accept the deferred follow-up prompt',
-      status: 409,
-      fallbackTaskRun,
-    };
-  }
-
-  return {
-    success: true as const,
-    result: {
-      accepted: true,
-      queuedToResumeRunId: resumeLaunch.id,
-      ...(accepted === null ? { pendingResumePromptAcceptance: true } : {}),
-    },
-  };
-}
-
 async function getPullRequestRoutingDetails({
   eventPayload,
   installationId,
@@ -1159,26 +587,179 @@ async function getPullRequestRoutingDetails({
   }
 }
 
+/**
+ * What the Session reads with a pull request mention: the pull request, the
+ * comment that mentioned Roomote (with the review thread it replies to), the
+ * discussion so far, and any linked issues or pull requests.
+ */
+function buildPullRequestMentionContext({
+  details,
+  triggeringComment,
+  history,
+  linkedReferencesSection,
+}: {
+  details: string;
+  triggeringComment: string;
+  history: GitHubRoutingHistoryContext;
+  linkedReferencesSection?: string;
+}): string {
+  return [
+    '<github_pull_request>',
+    details,
+    '</github_pull_request>',
+    '<triggering_comment>',
+    triggeringComment,
+    '</triggering_comment>',
+    ...(history.issueComments.length > 0
+      ? [
+          '<pull_request_discussion>',
+          formatCompactGitHubIssueComments(history.issueComments) ?? '',
+          '</pull_request_discussion>',
+        ]
+      : []),
+    ...(history.reviewComments.length > 0
+      ? [
+          '<pull_request_review_comments>',
+          formatCompactGitHubReviewComments(history.reviewComments) ?? '',
+          '</pull_request_review_comments>',
+        ]
+      : []),
+    ...(linkedReferencesSection ? [linkedReferencesSection] : []),
+    'This conversation is a GitHub pull request discussion. Your replies post as comments on the pull request, so keep them concise. Delegated tasks check out the head branch of this pull request.',
+  ].join('\n');
+}
+
+/**
+ * Tasks the Session may steer on this turn: a task that already owns this
+ * pull request, and an in-flight review of the current head.
+ */
+async function resolvePullRequestActiveTasks({
+  repositoryFullName,
+  prNumber,
+  branchName,
+  headSha,
+  host,
+}: {
+  repositoryFullName: string;
+  prNumber: number;
+  branchName: string;
+  headSha: string;
+  /** The discussion's resolved host, which scopes the lookup to this instance. */
+  host: string;
+}): Promise<FastAgentActiveTask[]> {
+  const [owner, review] = await Promise.all([
+    findReusableGitHubPrFollowUpOwner({
+      repoFullName: repositoryFullName,
+      prNumber,
+      branchName,
+      host,
+    }).catch(() => null),
+    headSha
+      ? findActiveGitHubPrReviewTask({
+          repoFullName: repositoryFullName,
+          prNumber,
+          headSha,
+          sourceControlProvider: 'github',
+          host,
+        }).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+  const tasks = new Map<string, FastAgentActiveTask>();
+  if (owner?.taskId) {
+    tasks.set(owner.taskId, { taskId: owner.taskId, status: owner.status });
+  }
+  if (review?.taskId) {
+    tasks.set(review.taskId, { taskId: review.taskId, status: review.status });
+  }
+  return [...tasks.values()];
+}
+
+/**
+ * A reply inside a review thread Roomote opened is addressed to Roomote the
+ * way GitHub trains people to reply to a reviewer, so it counts as a mention
+ * without the @-handle. Only pull requests Roomote did not open qualify: on a
+ * Roomote-opened pull request the review-feedback pipeline already batches
+ * these replies into the owning Session with its Resolve / Dismiss actions,
+ * and handling them here too would answer twice. Opening is recorded on the
+ * durable linkage row, so a finished task still owns its pull request, while
+ * a pull request a task merely mentioned stays human-opened.
+ */
+async function resolveImplicitReviewThreadMention({
+  eventPayload,
+  installationId,
+}: {
+  eventPayload: PullRequestMentionEvent;
+  installationId: number;
+}): Promise<{ parentComment: ReviewCommentSnapshot } | null> {
+  if (!('comment' in eventPayload) || !('pull_request' in eventPayload)) {
+    return null;
+  }
+  const { comment, pull_request: pullRequest, repository } = eventPayload;
+  const commenterLogin = comment.user?.login;
+  if (
+    !comment.in_reply_to_id ||
+    !commenterLogin ||
+    GitHubSchemas.isRoomoteGitHubLogin(commenterLogin)
+  ) {
+    return null;
+  }
+
+  const parentComment = await fetchReviewCommentSnapshot({
+    installationId,
+    repositoryFullName: repository.full_name,
+    commentId: comment.in_reply_to_id,
+  });
+  if (
+    !parentComment ||
+    !GitHubSchemas.isRoomoteGitHubLogin(parentComment.userLogin)
+  ) {
+    return null;
+  }
+
+  const linkedTask = await findRoomoteOpenedPullRequestTask({
+    repoFullName: repository.full_name,
+    prNumber: pullRequest.number,
+    host: toHostFromUrl(pullRequest.html_url ?? '') ?? 'github.com',
+  }).catch(() => null);
+  if (linkedTask) {
+    return null;
+  }
+
+  return { parentComment };
+}
+
+/**
+ * Every @mention on a pull request enters the pull request's Fast Session.
+ * The Session reads the discussion, replies as a comment, and delegates work
+ * to a task on the pull request's branch when the request needs one. A reply
+ * in a review thread Roomote opened enters the same way without an @mention.
+ */
 export async function handlePrComment(
-  eventPayload:
-    | WebhookPullRequestCommentCreated
-    | WebhookIssueCommentCreated
-    | WebhookPullRequestReviewSubmitted,
+  eventPayload: PullRequestMentionEvent,
 ): Promise<WebhookResponse> {
   const { installation, repository, sender, ...rest } = eventPayload;
   const isSubmittedReview = 'review' in rest;
   const mention = isSubmittedReview ? rest.review : rest.comment;
+  const githubInstallationId = installation?.id;
 
-  if (
-    !isMention({
-      body: mention.body ?? '',
-      user: mention.user ? { login: mention.user.login } : null,
-    })
-  ) {
-    return { status: 'ok', message: 'no_mention' };
+  const explicitMention = isMention({
+    body: mention.body ?? '',
+    user: mention.user ? { login: mention.user.login } : null,
+  });
+  let reviewThreadParent: ReviewCommentSnapshot | null = null;
+  if (!explicitMention) {
+    const implicitMention = githubInstallationId
+      ? await resolveImplicitReviewThreadMention({
+          eventPayload,
+          installationId: githubInstallationId,
+        })
+      : null;
+    if (!implicitMention) {
+      return { status: 'ok', message: 'no_mention' };
+    }
+    reviewThreadParent = implicitMention.parentComment;
   }
 
-  const githubInstallationId = installation?.id;
   const mentionResponseTarget = getMentionResponseTarget(eventPayload);
 
   if (!githubInstallationId) {
@@ -1186,25 +767,16 @@ export async function handlePrComment(
   }
 
   const pr = 'issue' in rest ? rest.issue : rest.pull_request;
-  const prAuthorLogin = pr.user?.login?.toLowerCase();
 
-  if (!prAuthorLogin) {
-    await postMentionResponseComment({
-      installationId: githubInstallationId,
-      target: mentionResponseTarget,
-      body: buildInternalErrorComment(),
-    });
-
-    return { status: 'ok', message: 'no_pr_author' };
-  }
-
+  // The commenter must be a linked Roomote user: the Session runs as them.
+  // The non-review workflow resolves the repository and the linked account
+  // without the Review Code automation gates, which do not apply to a
+  // conversation.
   const reviewerGate = await getGitHubAutomationTargets({
-    workflow: 'pr_review',
+    workflow: 'pr_conflict_resolve',
     installation,
     repository,
     sender,
-    author: prAuthorLogin,
-    ignoreRoomoteAuthorRequirement: true,
     requireLinkedSenderAccount: true,
   });
 
@@ -1227,506 +799,126 @@ export async function handlePrComment(
     };
   }
 
-  const reviewers = reviewerGate.targets;
-  const reviewer = reviewers[0];
+  const commenter = reviewerGate.targets[0];
+  const commenterUserId = commenter?.properties.userId;
 
-  if (!reviewer) {
+  if (!commenter) {
     await postMentionResponseComment({
       installationId: githubInstallationId,
       target: mentionResponseTarget,
-      body: buildInternalErrorComment(),
+      body: buildReviewerGateMissComment(),
     });
 
-    return { status: 'error', message: 'no_reviewer_context' };
+    return { status: 'ok', message: 'reviewer_gate_miss' };
   }
 
-  const routingDetails = await getPullRequestRoutingDetails({
-    eventPayload,
+  if (!commenterUserId) {
+    await postMentionResponseComment({
+      installationId: githubInstallationId,
+      target: mentionResponseTarget,
+      body: await buildSourceControlAccountLinkRequiredMessage('github'),
+    });
+
+    return { status: 'ok', message: 'account_link_required' };
+  }
+
+  await acknowledgeMentionBestEffort({
     installationId: githubInstallationId,
+    eventPayload,
+  });
+
+  const [details, history, linkedReferences, triggeringComment] =
+    await Promise.all([
+      getPullRequestRoutingDetails({
+        eventPayload,
+        installationId: githubInstallationId,
+        repositoryFullName: repository.full_name,
+        prNumber: pr.number,
+      }),
+      getGitHubRoutingHistoryContext({
+        installationId: githubInstallationId,
+        repositoryFullName: repository.full_name,
+        prNumber: pr.number,
+      }),
+      fetchGitHubLinkedReferences({
+        installationId: githubInstallationId,
+        repositoryFullName: repository.full_name,
+        issueOrPrNumber: pr.number,
+      }),
+      buildTriggeringCommentContext({
+        eventPayload,
+        installationId: githubInstallationId,
+        repositoryFullName: repository.full_name,
+        commenter: sender.login,
+        commentBody: mention.body ?? '',
+        parentComment: reviewThreadParent,
+      }),
+    ]);
+
+  const host =
+    commenter.repo.host ??
+    toHostFromUrl(
+      details.prUrl ||
+        `https://github.com/${repository.full_name}/pull/${pr.number}`,
+    ) ??
+    'github.com';
+  const discussion: SourceControlFastDiscussion = {
+    provider: 'github',
+    host,
+    repositoryFullName: repository.full_name,
+    kind: 'pull',
+    number: pr.number,
+    ...(mentionResponseTarget.reviewCommentId
+      ? { reviewCommentId: String(mentionResponseTarget.reviewCommentId) }
+      : {}),
+  };
+  const activeTasks = await resolvePullRequestActiveTasks({
     repositoryFullName: repository.full_name,
     prNumber: pr.number,
+    branchName: details.branchName,
+    headSha: details.headSha,
+    host,
   });
+  const currentMessageId = isSubmittedReview
+    ? `github:review:${rest.review.id}`
+    : `github:comment:${rest.comment.id}`;
 
-  const routingContext = buildGitHubRoutingContext({
-    taskDescription: mention.body ?? '',
-    repository: repository.full_name,
-    headRefName: routingDetails.branchName || undefined,
-    prAuthorLogin: pr.user?.login ?? undefined,
-    issueOrPrTitle: pr.title,
-    issueOrPrBody: pr.body ?? undefined,
-    commentBody: mention.body ?? '',
-  });
-
-  const routingDecision = await routeGitHubTask(routingContext);
-
-  if (routingDecision.status === 'fallback') {
-    await postMentionResponseComment({
-      installationId: githubInstallationId,
-      target: mentionResponseTarget,
-      body: buildRouterFailedComment(),
-    });
-
-    return {
-      status: 'error',
-      message: `router_failed:${routingDecision.reason}`,
-    };
-  }
-
-  const routingReason = routingDecision.result.reasoning;
-
-  if (routingDecision.result.followUpMode === 'review') {
-    const { branchName, prUrl, headSha } = routingDetails;
-
-    if (!branchName || !prUrl || !headSha) {
-      await postMentionResponseComment({
-        installationId: githubInstallationId,
-        target: mentionResponseTarget,
-        body: buildReviewTaskStartFailedComment(),
-      });
-
-      return {
-        status: 'error',
-        message: 'review_start_context_incomplete',
-      };
-    }
-
-    const activeReviewTask = await findActiveGitHubPrReviewTask({
-      repoFullName: repository.full_name,
-      prNumber: pr.number,
-      headSha,
-    });
-
-    if (activeReviewTask?.taskId) {
-      const taskCommentBody = formatGitHubPrMentionReply(
-        { kind: 'active_review' },
-        tryBuildGitHubPrMentionReplyLink({
-          kind: 'task',
-          taskId: activeReviewTask.taskId,
-          utm: {
-            source: 'github-comment',
-            campaign: 'github.pr.mention.review.active',
-          },
-          warning: `[handlePrComment] failed to build active PR review task link for ${repository.full_name}#${pr.number}`,
-        }),
-      );
-
-      await postMentionResponseComment({
-        installationId: githubInstallationId,
-        target: mentionResponseTarget,
-        body: taskCommentBody,
-      });
-
-      return { status: 'ok', message: 'active_pr_review_linked' };
-    }
-
-    const reviewPayloadBase = {
-      repo: repository.full_name,
-      prNumber: pr.number,
-      prTitle: pr.title,
-      prUrl,
-      headSha,
-      branchName,
-    };
-
-    const reviewLaunches: Array<Awaited<ReturnType<typeof enqueueTask>>> = [];
-    const failedReviewerIds: string[] = [];
-
-    for (const reviewer of reviewers) {
-      const relayPayload = await getReviewTaskRelayPayload({
+  const started = await startSourceControlFastSessionTurn({
+    discussion,
+    userId: commenterUserId,
+    senderDisplayName: sender.login,
+    question: mention.body ?? '',
+    agentContext: buildPullRequestMentionContext({
+      details: buildCompactPullRequestDetails({
         repository: repository.full_name,
         prNumber: pr.number,
-        branchName,
-        prBody: pr.body ?? null,
-        reviewerSettings: reviewer.settings,
-      });
-      const reviewPayload = {
-        ...reviewPayloadBase,
-        ...relayPayload,
-      } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>;
-
-      try {
-        if (!reviewer.properties.userId) {
-          throw new Error(
-            'PR mention review requires a linked commenter account.',
-          );
-        }
-
-        const releaseLifecycleLock = await acquireGithubPrReviewLifecycleLock(
-          repository.full_name,
-          pr.number,
-        );
-        if (!releaseLifecycleLock) {
-          throw new Error(
-            `Timed out serializing PR review launch for ${repository.full_name}#${pr.number}`,
-          );
-        }
-
-        try {
-          releaseLifecycleLock.signal.throwIfAborted();
-          const reviewLaunch = await enqueueTask({
-            task: {
-              type: TaskPayloadKind.GithubPrReview,
-              githubLogin: reviewer.properties.githubLogin,
-              githubUserId: reviewer.properties.githubUserId,
-              payload: reviewPayload,
-            },
-            // A human @roomote mention started this review.
-            initiator: { kind: 'user', userId: reviewer.properties.userId },
-            workflow: 'pr_review',
-            surface: 'github',
-            trigger: 'message',
-            prLinkage: {
-              provider: 'github',
-              host: reviewer.repo.host ?? toHostFromUrl(prUrl) ?? 'github.com',
-              repositoryId: reviewer.repo.id,
-              repository: repository.full_name,
-              prNumber: pr.number,
-              prUrl,
-              prTitle: pr.title,
-              prSha: headSha,
-            },
-          });
-          if (reviewer.settings?.publishGithubCheck) {
-            releaseLifecycleLock.signal.throwIfAborted();
-            await publishGithubPrReviewCheck({
-              installationId: githubInstallationId,
-              repository: repository.full_name,
-              prNumber: pr.number,
-              headSha,
-              taskId: reviewLaunch.taskId,
-              runId: reviewLaunch.id,
-              signal: releaseLifecycleLock.signal,
-            });
-          }
-          reviewLaunches.push(reviewLaunch);
-        } finally {
-          await releaseLifecycleLock();
-        }
-      } catch (error) {
-        failedReviewerIds.push(reviewer.id);
-        console.warn(
-          `[handlePrComment] failed to start PR review task for reviewer ${reviewer.id} on ${repository.full_name}#${pr.number}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-
-    if (reviewLaunches.length === 0) {
-      await postMentionResponseComment({
-        installationId: githubInstallationId,
-        body: buildReviewTaskStartFailedComment(),
-        target: mentionResponseTarget,
-      });
-
-      return {
-        status: 'error',
-        message: failedReviewerIds.length
-          ? `review_start_failed:failed_reviewers=${failedReviewerIds.join(',')}`
-          : 'review_start_failed:No PR review tasks were enqueued',
-      };
-    }
-
-    try {
-      const directReviewLaunches = reviewLaunches;
-      const firstDirectReviewLaunch = directReviewLaunches[0];
-      const taskCommentBody = formatGitHubPrMentionReply(
-        {
-          kind: 'review_started',
-          count: reviewLaunches.length,
-          partial: failedReviewerIds.length > 0,
-        },
-        firstDirectReviewLaunch
-          ? tryBuildGitHubPrMentionReplyLink({
-              kind: 'task',
-              taskId: firstDirectReviewLaunch.taskId,
-              utm: {
-                source: 'github-comment',
-                campaign: 'github.pr.mention.review',
-              },
-              warning: `[handlePrComment] failed to build PR review task link for ${repository.full_name}#${pr.number}`,
-            })
-          : null,
-      );
-
-      await postMentionResponseComment({
-        installationId: githubInstallationId,
-        target: mentionResponseTarget,
-        body: taskCommentBody,
-      });
-
-      const metadata = {
-        ...(directReviewLaunches.length > 0
-          ? {
-              ids: directReviewLaunches.map((launch) => launch.id),
-            }
-          : {}),
-      };
-
-      return {
-        status: 'ok',
-        ...(failedReviewerIds.length > 0
-          ? {
-              message: `review_start_partial:failed_reviewers=${failedReviewerIds.join(',')}`,
-            }
-          : {}),
-        metadata,
-      };
-    } catch (error) {
-      console.warn(
-        `[handlePrComment] failed to start PR review task for ${repository.full_name}#${pr.number}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-
-      await postMentionResponseComment({
-        installationId: githubInstallationId,
-        body: buildReviewTaskStartFailedComment(),
-        target: mentionResponseTarget,
-      });
-
-      return {
-        status: 'error',
-        message: `review_start_failed:${error instanceof Error ? error.message : String(error)}`,
-      };
-    }
-  }
-
-  const branchName = routingDetails.branchName;
-
-  const activePrOwner = await findReusableGitHubPrFollowUpOwner({
-    repoFullName: repository.full_name,
-    prNumber: pr.number,
-    branchName,
-  });
-
-  if (activePrOwner?.taskId) {
-    const [routingHistory, linkedReferences, triggeringComment] =
-      await Promise.all([
-        getGitHubRoutingHistoryContext({
-          installationId: githubInstallationId,
-          repositoryFullName: repository.full_name,
-          prNumber: pr.number,
-        }),
-        fetchGitHubLinkedReferences({
-          installationId: githubInstallationId,
-          repositoryFullName: repository.full_name,
-          issueOrPrNumber: pr.number,
-        }),
-        buildTriggeringCommentContext({
-          eventPayload,
-          installationId: githubInstallationId,
-          repositoryFullName: repository.full_name,
-          commenter: sender.login,
-          commentBody: mention.body ?? '',
-        }),
-      ]);
-    const followUpMessage = buildActiveTaskFollowUpMessage({
-      repository: repository.full_name,
-      prNumber: pr.number,
-      prTitle: pr.title,
-      prBody: pr.body ?? undefined,
-      headRefName: branchName || undefined,
-      prAuthorLogin: pr.user?.login ?? undefined,
-      commentId: !isSubmittedReview ? rest.comment.id : undefined,
-      commentBody: mention.body ?? '',
+        prTitle: pr.title,
+        prBody: pr.body ?? undefined,
+        headRefName: details.branchName || undefined,
+        prAuthorLogin: pr.user?.login ?? undefined,
+      }),
       triggeringComment,
-      reasoning: routingReason,
-      issueComments: routingHistory.issueComments,
-      reviewComments: routingHistory.reviewComments,
+      history,
       linkedReferencesSection:
         formatGitHubLinkedReferencesSection(linkedReferences),
-    });
-    const resumePromptFallbackTask = {
-      type: TaskPayloadKind.GithubPrReviewFollowUp,
-      userId: reviewer.properties.userId ?? undefined,
-      githubLogin: reviewer.properties.githubLogin ?? undefined,
-      githubUserId: reviewer.properties.githubUserId ?? undefined,
-      payload: {
-        repo: repository.full_name,
-        prNumber: pr.number,
-        prTitle: pr.title,
-        ...(!isSubmittedReview ? { commentId: rest.comment.id } : {}),
-        commentBody: mention.body ?? '',
-        followUpSource: 'github_mention',
-      },
-    } satisfies SnapshotResumePromptFallbackTask;
-    const commenterDisplayName = await resolveCommenterDisplayName({
-      commenterUserId: reviewer.properties.userId,
-      commenterGithubLogin: reviewer.properties.githubLogin,
-    });
-    const followUpResult =
-      activePrOwner.delivery === 'resume'
-        ? await resumeExistingTaskAndDeliverFollowUp({
-            taskId: activePrOwner.taskId,
-            userId: reviewer.properties.userId,
-            sourceRunId: activePrOwner.runId,
-            message: followUpMessage,
-            quoteText: mention.body ?? '',
-            resumePromptFallbackTask,
-          })
-        : await deliverFollowUpToExistingTask({
-            taskId: activePrOwner.taskId,
-            userId: reviewer.properties.userId,
-            message: followUpMessage,
-            quoteText: mention.body ?? '',
-            status: activePrOwner.status,
-            taskPhase: activePrOwner.taskPhase,
-            commenterDisplayName,
-          });
+    }),
+    currentMessageId,
+    activeTasks,
+  });
 
-    if (followUpResult.success) {
-      const taskCommentBody = formatGitHubPrMentionReply(
-        { kind: 'active_follow_up' },
-        tryBuildGitHubPrMentionReplyLink({
-          kind: 'task',
-          taskId: activePrOwner.taskId,
-          utm: {
-            source: 'github-comment',
-            campaign: 'github.pr.mention.active-owner',
-          },
-          warning: `[handlePrComment] failed to build active PR owner task link for ${repository.full_name}#${pr.number}`,
-        }),
-      );
-
-      await postMentionResponseComment({
-        installationId: githubInstallationId,
-        target: mentionResponseTarget,
-        body: taskCommentBody,
-      });
-
-      return { status: 'ok', message: 'active_pr_owner_routed' };
-    }
-
-    console.warn(
-      `[handlePrComment] failed to deliver routed PR mention to reusable task ${activePrOwner.taskId}: ${followUpResult.error}`,
-    );
-
-    const fallbackTaskRun =
-      'fallbackTaskRun' in followUpResult
-        ? followUpResult.fallbackTaskRun
-        : null;
-
-    if (fallbackTaskRun) {
-      const taskCommentBody = formatGitHubPrMentionReply(
-        { kind: 'dedicated_follow_up' },
-        fallbackTaskRun.taskId
-          ? tryBuildGitHubPrMentionReplyLink({
-              kind: 'task',
-              taskId: fallbackTaskRun.taskId,
-              utm: {
-                source: 'github-comment',
-                campaign: 'github.pr.mention',
-              },
-              warning: `[handlePrComment] failed to build fallback PR follow-up task link for ${repository.full_name}#${pr.number}`,
-            })
-          : null,
-      );
-
-      await postMentionResponseComment({
-        installationId: githubInstallationId,
-        target: mentionResponseTarget,
-        body: taskCommentBody,
-      });
-
-      return { status: 'ok', metadata: { ids: [fallbackTaskRun.id] } };
-    }
-  }
-
-  if (!branchName) {
+  if (started.status !== 'queued') {
     await postMentionResponseComment({
       installationId: githubInstallationId,
       target: mentionResponseTarget,
-      body: buildFollowUpSafetyCheckFailedComment(),
+      body: FAST_UNAVAILABLE_COMMENT,
     });
 
-    return {
-      status: 'error',
-      message: 'active_pr_owner_branch_unknown',
-    };
+    return { status: 'error', message: 'fast_unavailable' };
   }
 
-  const payload = {
-    repo: repository.full_name,
-    prNumber: pr.number,
-    prTitle: pr.title,
-    ...(!isSubmittedReview ? { commentId: rest.comment.id } : {}),
-    commentBody: mention.body ?? '',
-    followUpSource: 'github_mention',
-  } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReviewFollowUp>;
-
-  try {
-    if (!reviewer.properties.userId) {
-      throw new Error(
-        'PR mention follow-up requires a linked commenter account.',
-      );
-    }
-
-    const followUpLaunch = await enqueueTask({
-      task: {
-        type: TaskPayloadKind.GithubPrReviewFollowUp,
-        githubLogin: reviewer.properties.githubLogin,
-        githubUserId: reviewer.properties.githubUserId,
-        payload,
-      },
-      // A human @roomote mention started this follow-up.
-      initiator: { kind: 'user', userId: reviewer.properties.userId },
-      workflow: 'pr_review',
-      surface: 'github',
-      trigger: 'message',
-      prLinkage: {
-        provider: 'github',
-        host:
-          reviewer.repo.host ??
-          toHostFromUrl(
-            routingDetails.prUrl ||
-              `https://github.com/${repository.full_name}/pull/${pr.number}`,
-          ) ??
-          'github.com',
-        repositoryId: reviewer.repo.id,
-        repository: repository.full_name,
-        prNumber: pr.number,
-        prUrl:
-          routingDetails.prUrl ||
-          `https://github.com/${repository.full_name}/pull/${pr.number}`,
-        prTitle: pr.title,
-        ...(routingDetails.headSha ? { prSha: routingDetails.headSha } : {}),
-      },
-    });
-
-    const taskCommentBody = formatGitHubPrMentionReply(
-      { kind: 'dedicated_follow_up' },
-      tryBuildGitHubPrMentionReplyLink({
-        kind: 'task',
-        taskId: followUpLaunch.taskId,
-        utm: {
-          source: 'github-comment',
-          campaign: 'github.pr.mention',
-        },
-        warning: `[handlePrComment] failed to build dedicated PR follow-up task link for ${repository.full_name}#${pr.number}`,
-      }),
-    );
-
-    await postMentionResponseComment({
-      installationId: githubInstallationId,
-      target: mentionResponseTarget,
-      body: taskCommentBody,
-    });
-
-    return {
-      status: 'ok',
-      metadata: { ids: [followUpLaunch.id] },
-    };
-  } catch (error) {
-    console.warn(
-      `[handlePrComment] failed to start dedicated PR follow-up task for ${repository.full_name}#${pr.number}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-
-    await postMentionResponseComment({
-      installationId: githubInstallationId,
-      body: buildDedicatedTaskStartFailedComment(),
-      target: mentionResponseTarget,
-    });
-
-    return {
-      status: 'error',
-      message: `followup_start_failed:${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
+  return {
+    status: 'ok',
+    message: 'fast_session_queued',
+    metadata: { fastConversationId: started.fastConversationId },
+  };
 }

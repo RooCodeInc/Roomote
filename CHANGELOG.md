@@ -2,6 +2,147 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.2.3 (2026-09-03)
+
+Roomote 1.2.3 restores Fast Sessions for deployments that rely on the default task model.
+
+### Highlights
+
+- Start Fast Sessions with the default task model when no explicit model override is configured.
+
+### Patch changes
+
+- Use the task model catalog default for Fast sessions when no explicit orchestration or coding model override is configured.
+
+## 1.2.2 (2026-09-03)
+
+Roomote 1.2.2 strengthens deployment and setup reliability while making Slack-driven Fast conversations clearer and more consistent.
+
+### Highlights
+
+- Keep Brain, background jobs, and the controller available through service replacements and pending database migrations.
+- Complete setup when an orchestration model sends placeholder questions alongside the trusted starter-work prompt.
+- Resume the original Slack request through Fast after account linking instead of starting a separate task.
+- Read linked Slack names and emoji reaction receipts in web transcripts.
+
+### Patch changes
+
+- Fixed the Brain (gbrain) service crash-looping after a deploy when its job worker found the queue lock still held by the container being replaced. The worker now retries within the lock's TTL instead of taking the whole service down, so a fresh or redeployed Brain comes up on its own.
+- Render standard Slack and Microsoft Teams reaction receipts as emoji in Fast web transcripts without exposing the internal reaction tool activity, while leaving unknown workspace emoji names visible.
+- Render Slack user mentions as readable, linked names in web task and Fast Session transcripts while preserving the original message text for replies and follow-up tasks.
+- Fixed the setup session failing to offer starter-work choices when the orchestration model passes the trusted `setup_starter_tasks` preset together with placeholder questions. The preset now wins and model-supplied questions are discarded instead of rejecting the call, so onboarding no longer stalls at "choose your first work" on models that fill every optional tool parameter.
+- Resume a Slack user's original request through Fast after account linking instead of starting a separate legacy task, while preserving the original message and thread context.
+- Fixed the bullmq and controller services crashing during upgrades when they started before the database migration finished. On platforms that roll every service at once, a boot that reads a column the pending migration adds could exhaust the restart budget within seconds and stay down until someone redeployed it; both services now wait for the migration to land and then start normally.
+
+## 1.2.1 (2026-09-02)
+
+Roomote 1.2.1 restores Fast turns on OpenAI models and keeps Slack replies and usage alerts accurate.
+
+### Highlights
+
+- Run Fast turns on OpenAI models without immediate inference-provider errors.
+- Keep streamed Fast replies in Slack complete and deduplicated when finalization fails.
+
+### Patch changes
+
+- Restore Fast turns on OpenAI models by sending a valid schema for user-input requests instead of failing immediately with an inference-provider error.
+- Keep streamed Fast replies in Slack complete and deduplicated when finalizing the stream fails.
+- Show concise inference-provider usage alerts in Slack without repeating synthetic percentage details.
+
+## 1.2.0 (2026-09-02)
+
+Roomote 1.2 enables contextual Message Suggestions by default, streams Fast replies across web and Slack, guides first administrators in one resumable setup Session, and recommends Gemini 3.8 Flash.
+
+### Highlights
+
+- Get contextual Message Suggestions by default in task and Session composers.
+- See Fast replies stream into web Session transcripts and Slack threads while the model writes them.
+- Guide first administrators through setup in one persistent, resumable Session.
+- Recommend Gemini 3.8 Flash across Google Gemini, OpenRouter, Vercel AI Gateway, Requesty, and OpenCode Zen.
+
+### Minor changes
+
+- Let custom automations select a model-specific reasoning effort, including for delegated tasks launched from Fast, so admins can tune recurring work for cost and depth.
+- Let replay-safe Fast turns survive process interruptions and provider retry waits by resuming durably on a live process without duplicate acknowledgements or repeated side effects.
+- Add Gemini 3.8 Flash to Roomote's recommended model catalog and presets for Google Gemini, OpenRouter, Vercel AI Gateway, Requesty, and OpenCode Zen.
+- Guide first administrators through source control, starter work, sandbox configuration, and optional automation recommendations in one persistent setup Session with recoverable progress.
+- Let users reply to and manage live nested tasks directly inside Sessions, including attachments, commands, pending input, cancellation, and sleeping-task wakeup.
+- Let each launchable Fast automation suggestion select its own named environment, all-repositories, or Fast target across Slack, Discord, Microsoft Teams, and Telegram.
+- Let visual-proof runs use transparently disclosed simulated state when genuine setup is impractical, while clearly limiting the evidence to rendered appearance, layout, and interaction.
+- Enable contextual Message Suggestions by default for task and Session composers.
+- Let Roomote agents create and update Notion databases, data sources, properties, and views through the public API while leaving unsupported block reordering and hosted-MCP-only features unavailable.
+
+### Patch changes
+
+- Queue Fast automation runs durably before acknowledging them and report admitted work as queued, preventing long starts from timing out, duplicating launches, or appearing complete prematurely.
+- Apply matching Dependabot or Renovate reviewers and assignees to dependency-remediation pull requests, while allowing automation-started PR delivery to fall back safely when no human attribution candidate exists.
+- Keep task and Session views complete and readable by retaining linked and general subagent activity, restoring accumulated pull-request links without unnecessary wrapping, showing consequential outbound communication, and hiding internal discovery and duplicate reply-tool entries.
+- Show a clearer "Tab to accept" hint for composer suggestions only while the task or Session reply box is focused.
+- Make Review Code rely on current-commit CI results instead of rerunning repository validation suites, reducing duplicate validation time and compute.
+- Expand privacy-safe Fast diagnostics with setup timing, model-request counts, aggregate token usage, and context-size signals without logging prompt, reply, or tool content.
+- Make Fast conversations start and free up for follow-ups sooner by removing repeated tool setup and integration-discovery delays, overlapping Slack preparation, and ending inference after the reply is delivered.
+- Paginate Blaxel sandbox inventory requests within the provider's page-size limit.
+- Finalize hosted runs whose Modal sandbox is gone instead of repeatedly retrying maintenance for missing sandboxes.
+- Keep Fast and task prompts lean by discovering remote integration tools only when needed, while preserving permissions and showing the invoked integration action clearly in transcripts.
+- Show linked sender identities and readable display names in Fast and Fast-delegated Slack transcripts instead of anonymous avatars or raw Slack mention tokens.
+- Expose timestamped provisioning and command output for new Roomote Cloud sandbox runs through compute-log lookups, including stdout, stderr, and failure diagnostics.
+- Start self-hosted Memory from the published gbrain image matching the Roomote release by default while preserving custom image overrides.
+- Recover Sessions whose terminal subagent remains unsettled after a provider timeout instead of leaving the parent Session running indefinitely.
+- Stream Fast replies into web Session transcripts and Slack threads while the model writes them, then settle each stream into the finished reply with its usual content and links.
+
+## 1.1.0 (2026-09-02)
+
+Roomote 1.1 adds contextual message suggestions, clean-review handoff across source-control providers, Claude Fable 5.1, and stronger Fast and Session reliability.
+
+### Highlights
+
+- Get contextual next-message suggestions in task and Session composers, with simple keyboard controls and an optional admin setting.
+- Hand clean Roomote-created drafts to human reviewers automatically across supported source-control providers without approving or merging them.
+- Choose Claude Fable 5.1 from Roomote's curated model catalog across supported inference providers.
+- Keep Fast follow-ups, interruption recovery, Session activity, and pull-request lifecycle updates accurate through busy or interrupted work.
+
+### Minor changes
+
+- Add Claude Fable 5.1 to Roomote's curated recommended-model catalog across supported inference providers.
+- Let admins opt in to marking clean Roomote-created draft pull requests and merge requests ready for human review across GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket Cloud without approving or merging them.
+- Add optional helper-model-generated Message Suggestions to task and Session composers, with Tab acceptance, Escape dismissal, bounded conversation context, and an experimental admin setting.
+
+### Patch changes
+
+- Combine rapid same-user Fast follow-ups into one ordered update so every message reaches the active response together without losing attachments or durable history.
+- Keep Build this work in the artifact's existing Session with its environment, branch, model, plan, routing, and retry identity.
+- Repair stale setup-completion state when reseeding reused demo sandboxes so authenticated settings remain reachable without changing production onboarding.
+- Prevent Fast custom automations from posting duplicate Slack reports when bookkeeping fails after the original report was delivered.
+- Make Fast interruption recovery accurate and resilient by attributing causes, using honest restart copy, draining in-flight turns during API shutdown, renewing live-turn leases, and resuming the original unresolved request after a later nudge.
+- Require Fast to send a text acknowledgement or delivered task kickoff before starting tool-driven work so a reaction alone cannot leave users waiting through silent execution.
+- Route Linear issue discussion through the dedicated comment operation and surface the actual Linear tool error when a request fails.
+- Ensure Ping telemetry, version checks, and instance reports always carry a non-empty application version, including when a release version is unavailable.
+- Keep pull-request delivery and lifecycle reporting authoritative so successful remote creation does not appear failed when parent notification is delayed and stale child reports cannot contradict merged or closed events.
+- Keep Session task activity and navigation accurate by showing running follow-up turns, removing redundant Roomote self-links from delegated-task kickoffs, and returning to the originating nested task after an artifact preview.
+- Let Roomote MCP and other task-management callers inspect and continue valid user-facing Session links whether they contain the canonical Session ID or a retained Fast conversation identifier.
+- Preserve authored Slack invocation text for Fast prompts and render installed Roomote app mentions as readable `@Roomote` text instead of raw bot IDs.
+- Put inactive Roomote tasks to sleep after their pull request merges while preserving active or recently resumed work and keeping the parent Session state accurate.
+- Deliver inference usage threshold alerts for ChatGPT, GitHub Copilot, and xAI Grok subscriptions alongside the existing finite-quota providers.
+
+## 1.0.2 (2026-09-01)
+
+Roomote 1.0.2 makes Fast follow-ups reliable and steerable during active work, moves artifact builds into Sessions, and strengthens conversational and unattended automations.
+
+### Highlights
+
+- Send follow-ups during active Fast responses without losing messages, with same-person corrections steering current work between completed tool calls.
+- Create recurring automations from Fast conversations, and let unattended runs launch follow-on Sessions and coding tasks with trusted owner context.
+- Build Markdown plans inside Sessions while preserving the selected environment, branch, model, and plan context.
+
+### Patch changes
+
+- Let unattended automation runs use their trusted owner context to start follow-on Sessions and coding tasks and attribute resulting pull requests, while ownerless runs remain restricted.
+- Let deployment admins turn repeatable Fast work into recurring automations through conversation, with schedule confirmation, duplicate checks, and an optional test run after creation.
+- Keep human follow-ups sent during an active Fast response durable across web and supported chat providers, so accepted messages run in order under the correct participant instead of disappearing.
+- Let same-person follow-ups steer active Fast work between completed tool calls instead of waiting for the current response to finish, while preserving safe queued turns for other participants.
+- Reduce noise in Sessions list and board views by removing active spinners while keeping needs-input and blocked badges visible.
+- Start Markdown artifact builds inside a Session while preserving the selected environment, branch, model, and plan context, so retries recover the same delegated task instead of creating a standalone Task.
+
 ## 1.0.1 (2026-09-01)
 
 Roomote 1.0.1 improves Session access and task navigation, brings automated Slack and Discord entries into Fast, and hardens Fast recovery, model defaults, and pull-request review follow-through.

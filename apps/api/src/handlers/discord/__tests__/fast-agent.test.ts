@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   startTask: vi.fn(),
   recordProviderMessage: vi.fn(),
   admitHumanFollowUp: vi.fn(),
+  createConversationArtifact: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -36,6 +37,9 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
+  createFastAgentConversationArtifact: mocks.createConversationArtifact,
+  persistFastAgentInlineHumanTurn: vi.fn(async () => null),
+  wakeFastAgentParentEventNow: vi.fn(async () => undefined),
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
@@ -122,6 +126,56 @@ describe('processDiscordFastAgentMessage', () => {
       status: 'started',
       launchResult: { taskId: 'task-1' },
       taskUrl: 'https://roomote.example.com/task/task-1',
+    });
+  });
+
+  it('creates artifacts against the canonical Fast conversation', async () => {
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: {
+          createArtifact: (artifact: {
+            path: string;
+            content: string;
+            contentType: string;
+            artifactType: 'general' | 'plan';
+          }) => Promise<unknown>;
+        };
+      }) => {
+        await adapter.createArtifact({
+          path: 'notes/discord.md',
+          content: '# Discord',
+          contentType: 'text/markdown',
+          artifactType: 'general',
+        });
+        return 'Created.';
+      },
+    );
+
+    await processDiscordFastAgentMessage({
+      eventId: 'event-1',
+      question: 'Create a note',
+      sender: { id: 'discord-user-1', username: 'Matt' },
+      senderUserId: 'user-1',
+      provider: {} as never,
+      applicationId: 'app-1',
+      channel: {
+        channelId: 'dm-1',
+        channelType: 1,
+        isDirectMessage: true,
+        isThread: false,
+      } as never,
+      metadata: { communicationChannelId: 'dm-1' } as never,
+      conversationId: 'dm-1',
+    });
+
+    expect(mocks.createConversationArtifact).toHaveBeenCalledWith({
+      fastConversationId: 'fast-session-1',
+      path: 'notes/discord.md',
+      content: '# Discord',
+      contentType: 'text/markdown',
+      artifactType: 'general',
     });
   });
 
@@ -610,7 +664,7 @@ describe('processDiscordFastAgentMessage', () => {
     expect(mocks.resolveWorkspace).not.toHaveBeenCalled();
     expect(mocks.startTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        workspaceOverride: {
+        workspace: {
           repoForPayload: ALL_REPOSITORIES,
           workspaceDisplayName: 'all repos',
         },

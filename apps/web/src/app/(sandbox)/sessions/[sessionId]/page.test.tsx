@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { isValidElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 const {
@@ -15,9 +15,13 @@ const {
   getFastSessionTasksMock: vi.fn(),
   getSessionByIdCommandMock: vi.fn(),
   transcriptMock: vi.fn(
-    ({ footer }: { messages: unknown[]; footer?: ReactNode }) => (
-      <div data-testid="transcript">{footer}</div>
-    ),
+    ({
+      footer,
+    }: {
+      messages: unknown[];
+      footer?: ReactNode;
+      headerExtras?: ReactNode;
+    }) => <div data-testid="transcript">{footer}</div>,
   ),
   sessionTaskTimelineMock: vi.fn(() => (
     <div data-testid="session-task-timeline" />
@@ -51,8 +55,19 @@ vi.mock('../../use-sandbox-layout', () => ({
   }),
 }));
 vi.mock('@/components/layout', () => ({
-  WorkspaceHeader: ({ children }: { children: ReactNode }) => (
-    <header data-testid="workspace-header">{children}</header>
+  WorkspaceHeader: ({
+    children,
+    contentClassName,
+  }: {
+    children: ReactNode;
+    contentClassName?: string;
+  }) => (
+    <header
+      data-testid="workspace-header"
+      data-content-class-name={contentClassName}
+    >
+      {children}
+    </header>
   ),
   WorkspaceSurface: ({ children }: { children: ReactNode }) => (
     <main data-testid="workspace-surface">{children}</main>
@@ -66,8 +81,8 @@ vi.mock('./SessionTaskTimeline', () => ({
 }));
 vi.mock('./SessionWorkspace', () => ({
   SessionWorkspace: sessionWorkspaceMock,
-  SessionHeaderExtras: ({ status }: { status: string | null }) => (
-    <div data-testid="session-header-extras">{status}</div>
+  SessionHeaderPullRequests: () => (
+    <div data-testid="session-header-pull-requests" />
   ),
 }));
 vi.mock('./SessionReadTracker', () => ({
@@ -327,6 +342,12 @@ describe('Session detail page', () => {
     expect(transcriptMock.mock.calls[0]?.[0]).not.toHaveProperty(
       'timelineExtras',
     );
+    expect(transcriptMock.mock.calls[0]?.[0]).toHaveProperty('headerExtras');
+    const headerExtras = transcriptMock.mock.calls[0]?.[0].headerExtras;
+    expect(isValidElement(headerExtras)).toBe(true);
+    expect(isValidElement(headerExtras) ? headerExtras.key : null).toBe(
+      'session-pull-requests',
+    );
   });
 
   it('renders a task-only workspace for unified sessions without a Fast conversation', async () => {
@@ -337,7 +358,7 @@ describe('Session detail page', () => {
     });
     getSessionByIdCommandMock.mockResolvedValue({
       id: '6a1f8f1e-0000-4000-8000-000000000004',
-      title: 'Task-only session',
+      title: 'Task-only session with a title that wraps on narrow screens',
       ownerName: 'User',
       ownerEmail: 'user@example.com',
       ownerImageUrl: null,
@@ -366,8 +387,18 @@ describe('Session detail page', () => {
 
     expect(getFastSessionByIdMock).not.toHaveBeenCalled();
     expect(transcriptMock).not.toHaveBeenCalled();
-    expect(html).toContain('Task-only session');
+    expect(html).toContain(
+      'Task-only session with a title that wraps on narrow screens',
+    );
+    expect(html).toContain(
+      'data-content-class-name="flex-row flex-wrap items-center gap-2 pr-12 @[600px]:gap-3 @[600px]:pr-4"',
+    );
+    expect(html).toContain(
+      'class="min-w-0 max-w-full flex-[0_1_auto] cursor-default break-words text-sm font-medium @[600px]:truncate"',
+    );
+    expect(html).toContain('session-header-pull-requests');
     expect(html).toContain('session-task-timeline');
+    expect(html).not.toContain('completed');
     expect(sessionTaskTimelineMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: '6a1f8f1e-0000-4000-8000-000000000004',

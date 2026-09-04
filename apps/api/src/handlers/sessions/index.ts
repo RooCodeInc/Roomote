@@ -6,8 +6,10 @@ import {
   db,
   desc,
   deriveSessionStatus,
+  ensureSessionForFastConversation,
   eq,
   exists,
+  fastAgentConversations,
   getSessionForFastConversation,
   ilike,
   inArray,
@@ -34,7 +36,7 @@ import {
 } from '@roomote/types';
 
 import type { Variables } from '../../types';
-import type { McpAuth } from '../mcp/middleware';
+import { resolveMcpTaskOrSessionUserId, type McpAuth } from '../mcp/middleware';
 import { logHandlerError } from '../utils';
 import { getLatestTaskRunsByTaskIds } from '../tasks/helpers';
 import {
@@ -54,7 +56,31 @@ async function findAccessibleSession(sessionId: string) {
     .from(sessions)
     .where(and(eq(sessions.id, sessionId), eq(sessions.visibility, 'visible')))
     .limit(1);
-  return session ?? null;
+  if (session) return session;
+
+  // Session pages retain persisted Fast conversation UUIDs as alternate
+  // identifiers. Resolve those links here too, including conversations whose
+  // backfill has not created the canonical Session row yet.
+  const [alternate] = await db
+    .select({
+      conversationId: fastAgentConversations.id,
+      session: sessions,
+    })
+    .from(fastAgentConversations)
+    .leftJoin(
+      sessions,
+      eq(sessions.fastConversationId, fastAgentConversations.id),
+    )
+    .where(eq(fastAgentConversations.id, sessionId))
+    .limit(1);
+  if (!alternate) return null;
+  if (alternate.session) {
+    return alternate.session.visibility === 'visible'
+      ? alternate.session
+      : null;
+  }
+
+  return ensureSessionForFastConversation(db, alternate.conversationId);
 }
 
 async function sendSessionMessage(c: SessionContext): Promise<Response> {
@@ -171,7 +197,7 @@ function serializeSession(
 }
 
 async function startSession(c: SessionContext): Promise<Response> {
-  const userId = c.get('mcpAuth').userId;
+  const userId = await resolveMcpTaskOrSessionUserId(c.get('mcpAuth'));
   if (!userId) return c.json({ error: 'User context required' }, 403);
 
   let body: { message?: string };

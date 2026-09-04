@@ -9,10 +9,10 @@ import {
   CHAT_CHANNELS_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
   CHAT_REACTION_EMOJI_TOOL_NAME,
+  FAST_EXECUTION,
   FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
-  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   ROOMOTE_MCP_ID,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
@@ -23,7 +23,11 @@ import {
   truncateAcpOutputText,
   type ReasoningEffort,
   type RunStatus,
-  type TaskMessageContentBlock,
+  INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
+  matchIntegrationTools,
+  type IntegrationToolCandidate,
+  CALL_INTEGRATION_TOOL_TOOL,
+  FIND_INTEGRATION_TOOLS_TOOL,
 } from '@roomote/types';
 import {
   and,
@@ -35,6 +39,7 @@ import {
   getDeploymentTaskModelOptions,
   getSessionForFastConversation,
   getSessionForTask,
+  inArray,
   isBrainEnabled,
   isNull,
   sql,
@@ -57,11 +62,16 @@ import {
   type SlackThreadPromptMessage,
 } from '../../utils';
 import { resolveRoomoteReleaseVersion } from '../../release-version';
-import { getAvailableEnvironments, type RoutableEnvironment } from '../router';
+import {
+  getAvailableEnvironments,
+  type RoutableEnvironment,
+} from '../available-environments';
 import {
   FAST_AGENT_MODEL_ROLE,
   FAST_RESPONDING_LEASE_MS,
+  FAST_RESPONDING_LEASE_RENEW_MS,
 } from './fast-agent-constants';
+import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import {
   appendFastAgentVisibleMessages,
@@ -86,14 +96,35 @@ import {
   type NonTaskProviderRetryEvent,
   type NonTaskOpenCodeCompletedMessage,
   type NonTaskOpenCodeAssistantMessage,
+  type NonTaskOpenCodeAssistantText,
   type NonTaskOpenCodeNativeSteer,
+  type NonTaskOpenCodeTaskPart,
 } from '../non-task-provider-usage';
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
+import {
+  createFastAgentReplyStreamPublisher,
+  createFastAgentReplyTextTracker,
+} from './fast-agent-reply-stream';
+import { createFastAgentSurfaceReplyStreamer } from './fast-agent-surface-reply-stream';
 import { RemoteFastAgentSettingsSkillSource } from './fast-agent-settings-skill-source';
 import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill-invocation';
 import {
+  findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+  findFastAgentActiveInferenceRetryNotice,
+  markFastAgentDurableTurnDelivered,
+  markFastAgentInferenceRetryNoticeInterruption,
+  releaseFastAgentDurableTurnClaim,
+  renewFastAgentDurableTurnClaim,
+  revokeFastAgentDurableTurnReplay,
+  scheduleFastAgentDurableTurnRetry,
   reconcileFastAgentInferenceRetryNotices,
+  renewFastSessionRespondingLease,
+  type FastAgentInterruptionReason,
+  type FastAgentTurnAttemptReply,
+  type FastAgentTurnAttemptSummary,
+  type FastAgentUnresolvedRequest,
+  loadFastAgentTurnAttemptSummary,
 } from './fast-agent-conversation-repository';
 import {
   bindFastAgentNativeToolExecutor,
@@ -104,7 +135,10 @@ import {
   type FastAgentMcpToolCall,
   type FastAgentNativeToolCall,
 } from './fast-agent-native-tool-bridge';
-import { getFastAgentNativeAcpKind } from './fast-agent-tool-policy';
+import {
+  getFastAgentNativeAcpKind,
+  isFastAgentNativeIntegration,
+} from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
   listFastAgentIntegrations,
@@ -112,6 +146,7 @@ import {
 } from './fast-agent-integration-broker';
 import {
   cancelFastAgentTask,
+  launchFastAgentPrReview,
   sendFastAgentTaskMessage,
 } from './fast-agent-tasks';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
@@ -133,6 +168,7 @@ import {
   FAST_AGENT_REACTION_INPUT_TYPE,
   type FastAgentConversation,
   type FastAgentHumanInput,
+  type FastAgentInputPreset,
   isFastAgentCommunicationConversation,
   type FastAgentPlatformEventHandling,
   type FastAgentPlatformEventKind,
@@ -183,7 +219,8 @@ function selectFastRoomoteChannelTools(options: {
 export type FastAgentThreadMessage = SlackThreadPromptMessage;
 
 const chatReplyArgsSchema = z.object({
-  message: z.string().trim().min(1),
+  /** Omitted when the reply is the assistant text written before the call. */
+  message: z.string().trim().min(1).optional(),
   purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
   imageArtifactIds: z.array(z.string()).optional(),
   suggestions: z
@@ -191,6 +228,7 @@ const chatReplyArgsSchema = z.object({
       z.object({
         title: z.string().trim().min(1).max(140),
         brief: z.string().trim().min(1).max(2000),
+        environmentId: z.string().trim().min(1).optional(),
       }),
     )
     .max(10)
@@ -207,9 +245,27 @@ const showWidgetArgsSchema = z.object({
   height: z.number().optional(),
   textFallback: z.string().optional(),
 });
+const createArtifactArgsSchema = z.object({
+  path: z.string().trim().min(1).max(255),
+  content: z.string().min(1).max(131_072),
+  contentType: z.string().trim().min(1).max(200).optional(),
+  artifactType: z.enum(['general', 'plan']).optional().default('general'),
+});
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+// A reply tool call without a message reads the text the model wrote before
+// it. That text arrives on the OpenCode event stream, which may trail the
+// tool bridge request by a few milliseconds; bound how long to wait for it.
+const FAST_AGENT_REPLY_TEXT_SETTLE_TIMEOUT_MS = 750;
+const FAST_AGENT_REPLY_TEXT_SETTLE_POLL_MS = 25;
+const FAST_AGENT_EMPTY_REPLY_ERROR =
+  'Write the reply as assistant text before calling send_chat_reply, or pass it as "message".';
 const FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS = 50_000;
-const FAST_AGENT_HUMAN_STEER_POLL_INTERVAL_MS = 250;
+const FAST_AGENT_HUMAN_STEER_MAX_MESSAGES = 16;
+const FAST_AGENT_HUMAN_STEER_QUERY_LIMIT =
+  FAST_AGENT_HUMAN_STEER_MAX_MESSAGES + 1;
+const FAST_AGENT_HUMAN_STEER_MAX_TEXT_BYTES = 64 * 1024;
+const FAST_AGENT_HUMAN_STEER_MAX_FILES = 16;
+const FAST_AGENT_HUMAN_STEER_MAX_FILE_BYTES = 24 * 1024 * 1024;
 
 function buildFastAgentNativeSteerMessageId(
   rowId: string,
@@ -222,15 +278,18 @@ function buildFastAgentNativeSteerMessageId(
   return `msg_${sortable.toString(16).padStart(12, '0')}${suffix}`;
 }
 
-async function getNextPendingFastAgentHumanFollowUp(
+async function getPendingFastAgentHumanFollowUps(
   sessionId: string,
   excludedEventId?: string,
 ) {
-  return db.query.fastAgentParentEvents.findFirst({
+  return db.query.fastAgentParentEvents.findMany({
     where: and(
       eq(fastAgentParentEvents.conversationId, sessionId),
       isNull(fastAgentParentEvents.deliveredAt),
       isNull(fastAgentParentEvents.discardedAt),
+      // An inline-admitted row is a whole turn owned by a live process (or
+      // awaiting queue resumption), never a steer for the current turn.
+      isNull(fastAgentParentEvents.admission),
       sql`${fastAgentParentEvents.event} ->> 'type' = ${FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE}`,
       ...(excludedEventId
         ? [
@@ -242,16 +301,21 @@ async function getNextPendingFastAgentHumanFollowUp(
       asc(fastAgentParentEvents.createdAt),
       asc(fastAgentParentEvents.id),
     ],
+    limit: FAST_AGENT_HUMAN_STEER_QUERY_LIMIT,
   });
 }
 
-async function markFastAgentHumanFollowUpDelivered(id: string): Promise<void> {
+async function markFastAgentHumanFollowUpsDelivered(
+  ids: string[],
+): Promise<void> {
+  if (ids.length === 0) return;
+
   await db
     .update(fastAgentParentEvents)
     .set({ deliveredAt: new Date(), lastError: null, updatedAt: new Date() })
     .where(
       and(
-        eq(fastAgentParentEvents.id, id),
+        inArray(fastAgentParentEvents.id, ids),
         isNull(fastAgentParentEvents.deliveredAt),
         isNull(fastAgentParentEvents.discardedAt),
       ),
@@ -261,9 +325,13 @@ async function markFastAgentHumanFollowUpDelivered(id: string): Promise<void> {
 async function setFastSessionResponding(
   fastConversationId: string,
   responding: boolean,
+  /** Re-checked after the session lookup, immediately before the write, so
+   * an owner fenced off mid-lookup cannot extend a successor's lease. */
+  isOwnershipCurrent?: () => boolean,
 ): Promise<void> {
   const session = await getSessionForFastConversation(db, fastConversationId);
   if (!session) return;
+  if (isOwnershipCurrent && !isOwnershipCurrent()) return;
   await touchSessionActivity(db, session.id, Math.floor(Date.now() / 1000), {
     respondingUntil: responding
       ? new Date(Date.now() + FAST_RESPONDING_LEASE_MS)
@@ -294,22 +362,6 @@ function buildFastAgentTurnId({
     .digest('hex')
     .slice(0, 24);
   return `fallback:${digest}`;
-}
-
-function buildFastAgentUserContentBlocks(
-  text: string,
-  images: string[],
-): TaskMessageContentBlock[] {
-  const blocks: TaskMessageContentBlock[] = [{ type: 'text', text }];
-
-  for (const image of images) {
-    const match = /^data:(image\/[^;,]+);base64,(.+)$/i.exec(image.trim());
-    if (match?.[1] && match[2]) {
-      blocks.push({ type: 'image', mimeType: match[1], data: match[2] });
-    }
-  }
-
-  return blocks;
 }
 
 function serializeFastAgentToolOutput(result: unknown): {
@@ -356,6 +408,46 @@ const launchTaskArgsSchema = z.object({
   includeAttachments: z.boolean().optional().default(false),
   kickoffMessage: z.string().trim().min(1),
 });
+
+const reviewPullRequestArgsSchema = z.object({
+  repository: z.string().trim().min(1).optional(),
+  pullRequestNumber: z.number().int().positive().optional(),
+  kickoffMessage: z.string().trim().min(1),
+});
+
+/**
+ * The pull request a source-control Session is already discussing, so
+ * review_pull_request can omit its target there. The workspaceId encodes
+ * host/owner/name and the conversationId encodes pull/<number>.
+ */
+function getConversationPullRequestTarget(conversation: {
+  surface: string;
+  workspaceId: string;
+  conversationId: string;
+}): { repository: string; pullRequestNumber: number } | null {
+  const sourceControlSurfaces = new Set([
+    'github',
+    'gitlab',
+    'bitbucket',
+    'ado',
+    'gitea',
+  ]);
+  if (!sourceControlSurfaces.has(conversation.surface)) {
+    return null;
+  }
+  const match = /^pull\/(\d+)$/.exec(conversation.conversationId);
+  if (!match) {
+    return null;
+  }
+  const [, ...repositoryParts] = conversation.workspaceId.split('/');
+  if (repositoryParts.length < 2) {
+    return null;
+  }
+  return {
+    repository: repositoryParts.join('/'),
+    pullRequestNumber: Number(match[1]),
+  };
+}
 const taskMessageArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
   message: z.string().trim().min(1),
@@ -365,9 +457,89 @@ const taskIdArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
 });
 const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
+const findIntegrationToolsArgsSchema = z.object(
+  FIND_INTEGRATION_TOOLS_TOOL.inputSchema,
+);
+const callIntegrationToolArgsSchema = z.object(
+  CALL_INTEGRATION_TOOL_TOOL.inputSchema,
+);
+
+/**
+ * Resolve on-demand integration tools for `find_integration_tools` from the
+ * in-memory catalog; matching and ranking are shared with task sandboxes.
+ */
+function findFastAgentIntegrationTools(
+  integrations: FastAgentIntegration[],
+  args: z.infer<typeof findIntegrationToolsArgsSchema>,
+): {
+  tools: IntegrationToolCandidate[];
+  truncated: boolean;
+  unknownIntegration: boolean;
+} {
+  if (
+    args.integrationId &&
+    !integrations.some((integration) => integration.id === args.integrationId)
+  ) {
+    return { tools: [], truncated: false, unknownIntegration: true };
+  }
+  const candidates = integrations.flatMap((integration) =>
+    integration.tools.map((tool) => ({
+      integrationId: integration.id,
+      name: tool.name,
+      ...(tool.description ? { description: tool.description } : {}),
+      ...(tool.inputSchema !== undefined
+        ? { inputSchema: tool.inputSchema }
+        : {}),
+    })),
+  );
+  return {
+    ...matchIntegrationTools(candidates, args),
+    unknownIntegration: false,
+  };
+}
 const saveMemoryArgsSchema = z.object({
   memory: z.string().trim().min(1).max(FAST_AGENT_MEMORY_FACT_MAX_CHARS),
 });
+const requestUserInputQuestionSchema = z.object({
+  id: z.string().trim().min(1).max(80),
+  header: z.string().trim().min(1).max(60),
+  question: z.string().trim().min(1).max(500),
+  isOther: z.boolean().optional().default(false),
+  isSecret: z.boolean().optional().default(false),
+  options: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(140),
+        description: z.string().trim().min(1).max(500),
+      }),
+    )
+    .min(1)
+    .max(12)
+    .optional(),
+  multiple: z.boolean().optional(),
+});
+const fastAgentInputPresetSchema = z.enum(['setup_starter_tasks']);
+// Some models fill every optional tool parameter, so a trusted preset may
+// arrive alongside placeholder questions. The preset wins: its questions are
+// server-supplied and model-provided ones are discarded rather than rejected.
+const requestUserInputArgsSchema = z
+  .object({
+    questions: z.array(requestUserInputQuestionSchema).min(1).max(4).optional(),
+    preset: fastAgentInputPresetSchema.optional(),
+  })
+  .transform(
+    (
+      args,
+    ):
+      | { preset: FastAgentInputPreset }
+      | { questions: z.output<typeof requestUserInputQuestionSchema>[] }
+      | null =>
+      args.preset
+        ? { preset: args.preset }
+        : args.questions
+          ? { questions: args.questions }
+          : null,
+  );
 
 function normalizeThreadText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -418,6 +590,17 @@ const FAST_AGENT_SILENT_RECOVERY_WINDOW_MS = 30_000;
 // Progress-based budget resets are bounded so one turn cannot retry forever:
 // this caps total automatic retries across every reset within a single turn.
 export const FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN = 12;
+// Durable retry scheduling: a replay-safe turn parks instead of waiting out
+// provider backoff in process. Parks keep going for a wall-clock horizon
+// measured from the first failure (a real outage is meant to be ridden out,
+// not given up on), with a safety cap on handoffs since every park re-prompts
+// from scratch. The first short in-process retry stays in place: a one-off
+// blip is cheapest to absorb where it happened.
+export const FAST_AGENT_DURABLE_RETRY_HORIZON_MS = 15 * 60_000;
+export const FAST_AGENT_DURABLE_RETRY_MAX_PARKS = 30;
+const FAST_AGENT_DURABLE_RETRY_IMMEDIATE_PARK_WAIT_MS = 10_000;
+const FAST_AGENT_DURABLE_RETRY_PARK_BASE_DELAY_MS = 2_000;
+const FAST_AGENT_DURABLE_RETRY_PARK_MAX_DELAY_MS = 60_000;
 const FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS = 5 * 60_000;
 const FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO = 0.2;
 const FAST_AGENT_PROVIDER_RECOVERY_PROMPT =
@@ -438,6 +621,15 @@ type FastAgentInferenceRetryOptions = {
   canRetry?: (error: unknown, failure: FastAgentInferenceFailure) => boolean;
   prepareRetry?: () => Promise<void> | void;
   /**
+   * Offered the pending backoff after its notice is recorded and before the
+   * process would sleep it out. Returning true means the wait now belongs to
+   * durable scheduling and this execution must stop without an outcome; the
+   * loop then throws FastAgentDurableRetryScheduledError.
+   */
+  deferRetry?: (
+    notice: FastAgentInferenceRetryNotice & { inProcessAttempt: number },
+  ) => Promise<Date | null>;
+  /**
    * Consume forward progress made since the previous failure. Returning true
    * grants a fresh bounded retry budget, mirroring how standard-task provider
    * recovery resets after every completed turn. Callers must only return true
@@ -447,6 +639,49 @@ type FastAgentInferenceRetryOptions = {
   consumeRetryBudgetReset?: () => boolean;
   signal?: AbortSignal;
 };
+
+/**
+ * Abort reason for the OpenCode prompt once the turn has delivered its
+ * closeout. Any further model request would only produce post-closeout text
+ * that is never shown, while holding the conversation's turn lock.
+ */
+class FastAgentTurnClosedError extends Error {
+  constructor() {
+    super('The Fast turn delivered its closeout.');
+    this.name = 'FastAgentTurnClosedError';
+  }
+}
+
+/**
+ * Thrown out of a turn whose pending inference retry was parked durably: the
+ * queue re-runs the same turn at the scheduled time, so this execution ends
+ * with no user-visible outcome and no settlement of its own.
+ */
+export class FastAgentDurableRetryScheduledError extends Error {
+  constructor(public readonly retryAt: Date) {
+    super(
+      `Fast turn parked for a durable inference retry at ${retryAt.toISOString()}.`,
+    );
+    this.name = 'FastAgentDurableRetryScheduledError';
+  }
+}
+
+/**
+ * Find a park signal inside an error chain: an aborted OpenCode prompt may
+ * surface the abort reason wrapped as a prompt error's cause.
+ */
+export function findFastAgentDurableRetryScheduledError(
+  error: unknown,
+): FastAgentDurableRetryScheduledError | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < 6 && current; depth += 1) {
+    if (current instanceof FastAgentDurableRetryScheduledError) return current;
+    if (typeof current !== 'object') return null;
+    const record = current as { cause?: unknown; providerError?: unknown };
+    current = record.cause ?? record.providerError;
+  }
+  return null;
+}
 
 class FastAgentInferenceError extends Error {
   constructor(
@@ -585,6 +820,10 @@ async function runFastAgentInferenceWithRetries<T>(
       options.signal?.throwIfAborted();
       return await run();
     } catch (error) {
+      // A prompt aborted because the turn parked itself on OpenCode's own
+      // provider backoff is not a failure to classify or retry here.
+      const parked = findFastAgentDurableRetryScheduledError(error);
+      if (parked) throw parked;
       // Session loss is the session manager's bootstrap signal, not a
       // provider failure this loop should absorb.
       if (isNonTaskOpenCodeSessionNotFoundError(error)) {
@@ -630,6 +869,18 @@ async function runFastAgentInferenceWithRetries<T>(
         console.warn(
           `[Fast Agent] Failed to post inference retry notice: ${formatErrorForLog(noticeError)}`,
         );
+      }
+      // The notice is recorded first so a resumed run can find and keep
+      // editing it; only then may the wait leave this process.
+      const parkedUntil = await options.deferRetry?.({
+        failure,
+        attemptNumber,
+        maxAttempts: maxRetries,
+        delayMs,
+        inProcessAttempt: attemptNumber,
+      });
+      if (parkedUntil) {
+        throw new FastAgentDurableRetryScheduledError(parkedUntil);
       }
       await options.prepareRetry?.();
       await waitForFastAgentInferenceRetry(delayMs, options.signal);
@@ -722,12 +973,27 @@ function buildSupplementalThreadContext({
 function wrapFastAgentMessage(
   text: string,
   sender?: { displayName?: string; githubLogin?: string },
+  agentContext?: string,
 ): string {
-  return `<current_message>\n${escapeFastAgentEnvelopeJson({
+  // Surface context (a Linear issue, a pull request, auto-respond channel
+  // instructions) travels beside the message on every surface, the way the
+  // Slack envelope carries it.
+  const normalizedAgentContext = agentContext?.trim();
+  const contextBlock = normalizedAgentContext
+    ? `<current_message_context>\n${escapeFastAgentEnvelopeText(normalizedAgentContext)}\n</current_message_context>\n\n`
+    : '';
+  return `${contextBlock}<current_message>\n${escapeFastAgentEnvelopeJson({
     ...(sender?.displayName ? { sender_name: sender.displayName } : {}),
     ...(sender?.githubLogin ? { sender_github: sender.githubLogin } : {}),
     text,
   })}\n</current_message>`;
+}
+
+function escapeFastAgentEnvelopeText(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
 
 function escapeFastAgentEnvelopeJson(value: Record<string, string>): string {
@@ -735,6 +1001,164 @@ function escapeFastAgentEnvelopeJson(value: Record<string, string>): string {
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;');
+}
+
+const UNRESOLVED_REQUEST_TEXT_MAX_CHARS = 2_000;
+const FAST_AGENT_RESUMED_TURN_REASON =
+  'A service restart interrupted the previous attempt at this request before it finished.';
+const FAST_AGENT_RESUMED_RETRY_TURN_REASON =
+  'The previous attempt at this request failed with a temporary inference provider error and is being retried automatically.';
+const PREVIOUS_ATTEMPT_MAX_CHARS = 12_000;
+const PREVIOUS_ATTEMPT_REPLY_MAX_CHARS = 600;
+const PREVIOUS_ATTEMPT_ARGUMENTS_MAX_CHARS = 800;
+/**
+ * Stands in for the result of a call the process died on. It exists only in
+ * the resumed run's model input; nothing is written to the transcript or
+ * shown to the user.
+ */
+const LOST_TOOL_RESULT_TEXT =
+  'Tool result lost due to restart. The call may or may not have taken effect; check before repeating it.';
+
+type FastAgentRecordedCloseout =
+  | { kind: 'delivered'; text: string }
+  | { kind: 'lost'; purpose: 'closeout' | 'clarification'; text: string };
+
+/**
+ * What the transcript says about the closeout of an interrupted attempt.
+ * 'delivered' means the answer reached the surface: either a closing reply
+ * row is the last event, or a closing reply call completed. The second form
+ * matters because a closeout that replaces the visible retry notice, or
+ * finalizes a streamed reply, writes its reply row under an earlier
+ * sequence, so the call's result row is what ends the attempt. 'lost' means
+ * the attempt was cut off inside a closing reply call whose text is known
+ * but whose post was never recorded. Anything else (no closeout yet, or a
+ * failed one whose error the model can read) is left to the resumed model
+ * request.
+ */
+function findRecordedCloseout(
+  events: FastAgentTurnAttemptSummary['events'],
+): FastAgentRecordedCloseout | null {
+  const last = events.at(-1);
+  if (!last) return null;
+  if (last.kind === 'reply') {
+    return last.purpose === 'closeout' || last.purpose === 'clarification'
+      ? { kind: 'delivered', text: last.text }
+      : null;
+  }
+  if (
+    last.tool !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply ||
+    !last.arguments ||
+    typeof last.arguments !== 'object'
+  ) {
+    return null;
+  }
+  const { purpose, message } = last.arguments as {
+    purpose?: unknown;
+    message?: unknown;
+  };
+  if (purpose !== 'closeout' && purpose !== 'clarification') return null;
+  const text = typeof message === 'string' ? message.trim() : '';
+  if (last.status === 'completed') {
+    const lastReply = [...events]
+      .reverse()
+      .find(
+        (event): event is FastAgentTurnAttemptReply => event.kind === 'reply',
+      );
+    return { kind: 'delivered', text: text || lastReply?.text || '' };
+  }
+  if (last.status !== 'unknown') return null;
+  return text ? { kind: 'lost', purpose, text } : null;
+}
+
+function clipText(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/**
+ * Replay of the previous attempt, rendered in the same role-block form the
+ * model reads its history in, so it continues from the last entry instead
+ * of being told about it. Every field is bounded first: a reply can be long
+ * and a single argument (an artifact body, a task prompt) can run to many
+ * kilobytes, and the resume envelope must stay a summary, not a copy.
+ */
+function renderPreviousAttemptTranscript(
+  attempt: FastAgentTurnAttemptSummary,
+  { includeResults }: { includeResults: boolean },
+): string {
+  const blocks: string[] = [];
+  for (const event of attempt.events) {
+    if (event.kind === 'reply') {
+      blocks.push(
+        `[ASSISTANT]\n${escapeFastAgentEnvelopeText(clipText(event.text, PREVIOUS_ATTEMPT_REPLY_MAX_CHARS))}`,
+      );
+      continue;
+    }
+    const args = clipText(
+      JSON.stringify(event.arguments ?? null),
+      PREVIOUS_ATTEMPT_ARGUMENTS_MAX_CHARS,
+    );
+    blocks.push(
+      `[TOOL_CALL ${escapeFastAgentEnvelopeText(event.tool)}]\n${escapeFastAgentEnvelopeText(args)}`,
+    );
+    if (event.status === 'unknown') {
+      blocks.push(`[TOOL_RESULT lost]\n${LOST_TOOL_RESULT_TEXT}`);
+    } else {
+      const result = includeResults
+        ? (event.result ?? '(no output recorded)')
+        : '(output omitted)';
+      blocks.push(
+        `[TOOL_RESULT ${event.status}]\n${escapeFastAgentEnvelopeText(result)}`,
+      );
+    }
+  }
+  return blocks.join('\n\n');
+}
+
+/**
+ * The resumed-turn envelope. When the earlier attempt already did things, the
+ * envelope carries its transcript so the model picks up at the cut: replies
+ * were delivered, completed calls ran, and a lost result means the call may
+ * or may not have taken effect.
+ */
+function wrapFastAgentResumedTurn(
+  reason: string,
+  previousAttempt?: FastAgentTurnAttemptSummary | null,
+): string {
+  if (!previousAttempt || previousAttempt.events.length === 0) {
+    return `<resumed_turn>${reason}</resumed_turn>`;
+  }
+  let transcript = renderPreviousAttemptTranscript(previousAttempt, {
+    includeResults: true,
+  });
+  if (transcript.length > PREVIOUS_ATTEMPT_MAX_CHARS) {
+    // Results are the bulkiest field; drop them before anything else.
+    transcript = renderPreviousAttemptTranscript(previousAttempt, {
+      includeResults: false,
+    });
+  }
+  if (transcript.length > PREVIOUS_ATTEMPT_MAX_CHARS) {
+    // The hard cap holds no matter what the attempt contained.
+    transcript = `${transcript.slice(0, PREVIOUS_ATTEMPT_MAX_CHARS)}… [previous attempt truncated]`;
+  }
+  return [
+    `<resumed_turn>${reason}`,
+    'Your previous attempt at this request produced the transcript below, ending where it was cut off. It is already part of this conversation: the replies were delivered to the user and the completed tool calls ran. Continue from the last entry as if you had just received it. Do not send those replies again or repeat calls that completed. A call whose result is marked failed returned an error; read that error before deciding whether to retry, because a timeout or a lost response can mean the call actually took effect.',
+    `<previous_attempt_transcript>\n${transcript}\n</previous_attempt_transcript>`,
+    '</resumed_turn>',
+  ].join('\n');
+}
+
+function wrapFastAgentUnresolvedRequest(
+  request: FastAgentUnresolvedRequest,
+): string {
+  const text =
+    request.text.length > UNRESOLVED_REQUEST_TEXT_MAX_CHARS
+      ? `${request.text.slice(0, UNRESOLVED_REQUEST_TEXT_MAX_CHARS)}…`
+      : request.text;
+  return `<unresolved_request>\n${escapeFastAgentEnvelopeJson({
+    reason: request.reason,
+    text,
+  })}\n</unresolved_request>`;
 }
 
 function wrapFastAgentThreadContext(
@@ -768,6 +1192,10 @@ function buildFastAgentMessages({
   reactionInput,
   turnSource,
   slackRoomoteUserId,
+  unresolvedRequest,
+  resumedAfterInterruption = false,
+  resumedAfterInferenceRetry = false,
+  previousAttempt,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -783,6 +1211,11 @@ function buildFastAgentMessages({
   reactionInput: boolean;
   turnSource: FastAgentTurnSource;
   slackRoomoteUserId?: string;
+  unresolvedRequest?: FastAgentUnresolvedRequest | null;
+  resumedAfterInterruption?: boolean;
+  resumedAfterInferenceRetry?: boolean;
+  /** What an earlier attempt at this same turn already did, when resuming. */
+  previousAttempt?: FastAgentTurnAttemptSummary | null;
 }): {
   bootstrapMessages: ModelMessage[];
   turnMessages: ModelMessage[];
@@ -812,7 +1245,11 @@ function buildFastAgentMessages({
           })
         : normalizedQuestion
       : turnSource === 'human'
-        ? wrapFastAgentMessage(normalizedQuestion, currentMessageSender)
+        ? wrapFastAgentMessage(
+            normalizedQuestion,
+            currentMessageSender,
+            currentMessageAgentContext,
+          )
         : normalizedQuestion;
   const currentUserMessageText = [
     explicitSkillInvocationContext,
@@ -821,6 +1258,19 @@ function buildFastAgentMessages({
     .filter((entry): entry is string => Boolean(entry))
     .join('\n\n');
   const turnMessage = buildUserTextMessage(currentUserMessageText);
+  // The envelope travels with the turn delta (not only the bootstrap) so a
+  // warm session also learns that the previous request is still owed.
+  const unresolvedRequestText = unresolvedRequest
+    ? wrapFastAgentUnresolvedRequest(unresolvedRequest)
+    : undefined;
+  const resumedTurnText = resumedAfterInterruption
+    ? wrapFastAgentResumedTurn(FAST_AGENT_RESUMED_TURN_REASON, previousAttempt)
+    : resumedAfterInferenceRetry
+      ? wrapFastAgentResumedTurn(
+          FAST_AGENT_RESUMED_RETRY_TURN_REASON,
+          previousAttempt,
+        )
+      : undefined;
 
   if (compatibilityMessages.length > 0) {
     const supplementalThreadContext = buildSupplementalThreadContext({
@@ -833,6 +1283,10 @@ function buildFastAgentMessages({
       ...(supplementalThreadContext
         ? [buildUserTextMessage(supplementalThreadContext)]
         : []),
+      ...(unresolvedRequestText
+        ? [buildUserTextMessage(unresolvedRequestText)]
+        : []),
+      ...(resumedTurnText ? [buildUserTextMessage(resumedTurnText)] : []),
       turnMessage,
     ];
     return {
@@ -856,13 +1310,21 @@ function buildFastAgentMessages({
   const bootstrapText = [
     serializedThreadContext,
     replyingTo,
+    unresolvedRequestText,
+    resumedTurnText,
     currentUserMessageText,
   ]
     .filter((entry): entry is string => Boolean(entry))
     .join('\n\n');
   return {
     bootstrapMessages: [buildUserTextMessage(bootstrapText)],
-    turnMessages: [turnMessage],
+    turnMessages: [
+      ...(unresolvedRequestText
+        ? [buildUserTextMessage(unresolvedRequestText)]
+        : []),
+      ...(resumedTurnText ? [buildUserTextMessage(resumedTurnText)] : []),
+      turnMessage,
+    ],
     bootstrapThreadContextPresent: Boolean(serializedThreadContext),
     turnThreadContextPresent: false,
   };
@@ -951,6 +1413,11 @@ export async function answerFastAgentQuestion({
   platformEventTranscriptPayload,
   slackRoomoteUserId,
   currentDurableHumanFollowUpEventId,
+  setupSnapshot,
+  setupSession = false,
+  durableAdmission,
+  resumedAfterInterruption = false,
+  resumedAfterInferenceRetry = false,
 }: {
   question: string;
   images?: string[];
@@ -982,6 +1449,26 @@ export async function answerFastAgentQuestion({
   /** The durable row currently running as a fallback whole turn. Excluding it
    * keeps this turn's native steer poller from injecting its own prompt. */
   currentDurableHumanFollowUpEventId?: string;
+  /** Trusted setup snapshot injected into setup-session turns. */
+  setupSnapshot?: string;
+  /** True only for the active conversational setup session; enables
+   * setup-only native tools. */
+  setupSession?: boolean;
+  /**
+   * The inline-admitted parent-event row this turn is executing. While the
+   * turn stays replay-safe the row remains pending under this owner's claim,
+   * so an interruption hands it to the durable queue instead of the user.
+   */
+  durableAdmission?: {
+    eventId: string;
+    /** Automatic inference retries earlier executions already consumed. */
+    inferenceRetries?: number;
+  };
+  /** The durable queue is re-running this turn after an interruption. */
+  resumedAfterInterruption?: boolean;
+  /** The durable queue is re-running this turn at its scheduled retry time
+   * after a previous execution parked it on a temporary provider failure. */
+  resumedAfterInferenceRetry?: boolean;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
     currentMessageId,
@@ -1056,9 +1543,145 @@ export async function answerFastAgentQuestion({
   const degradedContextComponents = new Set<string>();
   let nativeSteer: NonTaskOpenCodeNativeSteer | undefined;
   let activeToolExecutions = 0;
-  let humanSteerPollTimer: ReturnType<typeof setInterval> | undefined;
+  let respondingLeaseRenewalTimer: ReturnType<typeof setInterval> | undefined;
+  // Renewals chain onto this promise so settlement can await the in-flight
+  // write before recording the terminal lease state; a fire-and-forget tick
+  // could otherwise commit after the settle write and leave an idle Session
+  // marked responding for another lease.
+  let respondingLeaseRenewal: Promise<void> = Promise.resolve();
+  // Durable admission: while true, the persisted turn row is still pending
+  // and an interruption hands the turn to the queue instead of the user.
+  // Flips off, durably, before the first action a replay could duplicate.
+  let durableTurnReplayable = Boolean(durableAdmission);
+  /**
+   * Withdraw the turn from replay before an action a re-run could duplicate.
+   * Resolves true only when this execution's revocation landed on its own
+   * still-pending row. A write that did not land, or a row that something
+   * else already settled (this execution is then a stale duplicate), both
+   * resolve false and the caller must not perform the action.
+   */
+  const revokeDurableTurnReplay = async (reason: string): Promise<boolean> => {
+    if (!durableAdmission || !durableTurnReplayable) return true;
+    try {
+      const revoked = await revokeFastAgentDurableTurnReplay(
+        durableAdmission.eventId,
+        reason,
+      );
+      if (!revoked) {
+        console.warn(
+          `[Fast Agent] Durable turn row ${durableAdmission.eventId} was no longer pending when replay revocation was attempted; refusing the action.`,
+        );
+        return false;
+      }
+      durableTurnReplayable = false;
+      return true;
+    } catch (error) {
+      console.warn(
+        `[Fast Agent] Failed to revoke durable turn replay: ${formatErrorForLog(error)}`,
+      );
+      return false;
+    }
+  };
+  const settleDurableTurn = async () => {
+    if (!durableAdmission) return;
+    durableTurnReplayable = false;
+    await markFastAgentDurableTurnDelivered(durableAdmission.eventId).catch(
+      (error) => {
+        console.warn(
+          `[Fast Agent] Failed to settle durable turn: ${formatErrorForLog(error)}`,
+        );
+      },
+    );
+  };
+  // Set once this execution has parked the turn for a scheduled retry: the
+  // row, its retry notice, and the responding lease now belong to the run
+  // the queue starts at the scheduled time, so nothing here may settle them.
+  let durableTurnDeferred = false;
+  // Automatic retries this turn has consumed across all of its executions,
+  // whether Roomote's loop or OpenCode's internal backoff scheduled them.
+  let durableRetriesConsumed = durableAdmission?.inferenceRetries ?? 0;
+  /**
+   * Move a pending inference retry out of this process. Only a turn that is
+   * still replay-safe can be re-run elsewhere; anything else keeps its
+   * backoff in process exactly as before. A schedule that does not land
+   * (row superseded or withdrawn, write failed) also falls back to the
+   * in-process wait, so durability here is best effort like admission.
+   */
+  const deferInferenceRetry = async (
+    notice: FastAgentInferenceRetryNotice & { inProcessAttempt: number },
+  ): Promise<Date | null> => {
+    if (
+      !durableAdmission ||
+      !durableTurnReplayable ||
+      !adapter.requestDurableRetry ||
+      Env.R_FAST_DURABLE_RETRY_DISABLED ||
+      notice.delayMs === undefined ||
+      signal?.aborted ||
+      isInstructionClosed()
+    ) {
+      return null;
+    }
+    // A one-off blip is cheapest to ride out where it happened: the first
+    // in-process retry stays in place unless its wait is already long.
+    // From the second attempt on, the wait leaves the process.
+    if (
+      notice.inProcessAttempt < 2 &&
+      notice.delayMs < FAST_AGENT_DURABLE_RETRY_IMMEDIATE_PARK_WAIT_MS
+    ) {
+      return null;
+    }
+    // Parks back off across handoffs (each one re-prompts from scratch) and
+    // never shorten a provider-issued wait. The episode as a whole is bounded
+    // by the horizon from its first failure plus the handoff cap; past that,
+    // the in-process retries and their honest terminal failure take over.
+    const now = Date.now();
+    const episodeStartedAt = inferenceRecoveryEpisodeStartedAt ?? now;
+    const parkDelayMs = Math.max(
+      notice.delayMs,
+      Math.min(
+        FAST_AGENT_DURABLE_RETRY_PARK_MAX_DELAY_MS,
+        FAST_AGENT_DURABLE_RETRY_PARK_BASE_DELAY_MS *
+          2 ** durableRetriesConsumed,
+      ),
+    );
+    if (
+      durableRetriesConsumed >= FAST_AGENT_DURABLE_RETRY_MAX_PARKS ||
+      now + parkDelayMs - episodeStartedAt > FAST_AGENT_DURABLE_RETRY_HORIZON_MS
+    ) {
+      return null;
+    }
+    const retryAt = new Date(now + parkDelayMs);
+    const inferenceRetries = durableRetriesConsumed + 1;
+    const scheduled = await scheduleFastAgentDurableTurnRetry(
+      durableAdmission.eventId,
+      {
+        retryAt,
+        inferenceRetries,
+        reason: `Inference retry ${inferenceRetries} scheduled (${notice.failure.reason}).`,
+      },
+    ).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to schedule a durable inference retry: ${formatErrorForLog(error)}`,
+      );
+      return false;
+    });
+    if (!scheduled) return null;
+    durableTurnReplayable = false;
+    durableTurnDeferred = true;
+    durableRetriesConsumed = inferenceRetries;
+    await adapter.requestDurableRetry(retryAt).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to queue the durable inference retry wakeup: ${formatErrorForLog(error)}`,
+      );
+    });
+    console.info(
+      `[Fast Agent] Parked the turn for a durable inference retry (row=${durableAdmission.eventId}, retryAt=${retryAt.toISOString()}, retries=${inferenceRetries}, reason=${notice.failure.reason}).`,
+    );
+    return retryAt;
+  };
   let activeHumanSteerPoll = Promise.resolve();
   const injectedHumanFollowUpIds = new Set<string>();
+  const deferredOversizedHumanFollowUpIds = new Set<string>();
   const humanFollowUpTurnSeqs = new Map<string, number>();
   const injectedHumanFollowUpMessages: ModelMessage[] = [];
   const injectedHumanFollowUpFiles: NonTaskPromptFile[] = [];
@@ -1067,8 +1690,6 @@ export async function answerFastAgentQuestion({
   const completedChatReplySignatures = new Set<string>();
   const completedTaskActions = new Set<string>();
   const stopHumanSteerPolling = () => {
-    if (humanSteerPollTimer) clearInterval(humanSteerPollTimer);
-    humanSteerPollTimer = undefined;
     nativeSteer = undefined;
   };
   signal?.addEventListener('abort', stopHumanSteerPolling, { once: true });
@@ -1077,6 +1698,96 @@ export async function answerFastAgentQuestion({
     eventId: `${turnId}:${slot}`,
     turnSeq: nextTurnSeq++,
   });
+  // The model's assistant text is the reply. Its not-yet-delivered text
+  // streams to the web transcript as assistant message chunks under a
+  // reserved event; the reply that delivers it (a reply tool call or the
+  // terminal closeout) persists under that same event, so the live text is
+  // replaced in place.
+  const replyTextTracker = createFastAgentReplyTextTracker();
+  const replyStream = createFastAgentReplyStreamPublisher({
+    getConversationId: () => canonicalConversationId,
+  });
+  let streamedReply:
+    | { eventId: string; turnSeq: number; sentText: string }
+    | undefined;
+  // A chat surface with a streaming API renders the same undelivered text
+  // as it is written; the reply that delivers it takes over that message.
+  // Platform events (automation reports, task settlements) post whole.
+  const surfaceReplyStream = createFastAgentSurfaceReplyStreamer({
+    ...(adapter.createReplyStream && !platformEvent
+      ? { createStream: adapter.createReplyStream }
+      : {}),
+  });
+  const onAssistantTextUpdated = (update: NonTaskOpenCodeAssistantText) => {
+    replyTextTracker.apply(update);
+    // Text after a closeout belongs to the trailing model request that the
+    // turn is already cutting off; never show it.
+    if (isInstructionClosed(getInstructionVersion(update.messageId))) return;
+    const text = replyTextTracker.unconsumedText();
+    if (!text.trim()) return;
+    surfaceReplyStream.update(text, replyTextTracker.hasIncompleteUnconsumed());
+    streamedReply ??= {
+      ...allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
+      sentText: '',
+    };
+    // Only appends stream. A rewrite of earlier text (rare: a completing
+    // part correcting drift) is left to the persisted row.
+    if (!text.startsWith(streamedReply.sentText)) return;
+    const delta = text.slice(streamedReply.sentText.length);
+    if (!delta) return;
+    streamedReply.sentText = text;
+    replyStream.publishChunk({
+      eventId: streamedReply.eventId,
+      sessionId: activeOpenCodeSessionId,
+      turnId: update.messageId,
+      ts: Date.now(),
+      text: delta,
+    });
+  };
+  /** Hands the streamed text's event to the reply that finalizes it. */
+  const takeStreamedReplyEvent = async () => {
+    const streamed = streamedReply;
+    streamedReply = undefined;
+    if (!streamed) return undefined;
+    await replyStream.flush();
+    return { eventId: streamed.eventId, turnSeq: streamed.turnSeq };
+  };
+  /** Forgets streamed text no reply will deliver; the transcript drops it
+   * when the turn settles. */
+  const dropStreamedReply = () => {
+    streamedReply = undefined;
+  };
+  const waitForSettledReplyText = async () => {
+    const deadline = Date.now() + FAST_AGENT_REPLY_TEXT_SETTLE_TIMEOUT_MS;
+    while (
+      !signal?.aborted &&
+      (!replyTextTracker.unconsumedText().trim() ||
+        replyTextTracker.hasIncompleteUnconsumed()) &&
+      Date.now() < deadline
+    ) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, FAST_AGENT_REPLY_TEXT_SETTLE_POLL_MS),
+      );
+    }
+  };
+  /**
+   * The closeout owed when the model ends its turn with undelivered text.
+   * The prompt result is the final assistant message's full text; strip
+   * what an earlier reply already delivered from that same message.
+   */
+  const resolveTerminalReplyText = (promptText: string) => {
+    if (!replyTextTracker.sawText()) return promptText;
+    const delivered = completedOpenCodeMessage?.id
+      ? replyTextTracker.consumedText(completedOpenCodeMessage.id)
+      : '';
+    const remainder = !delivered
+      ? promptText
+      : promptText.startsWith(delivered)
+        ? promptText.slice(delivered.length)
+        : replyTextTracker.unconsumedText();
+    replyTextTracker.consumeUnconsumed();
+    return remainder;
+  };
   const persistCanonicalMessage = async (
     message: Parameters<typeof upsertFastAgentMessage>[0]['message'],
     bestEffort = false,
@@ -1113,105 +1824,203 @@ export async function answerFastAgentQuestion({
     }
 
     for (;;) {
-      const row = await getNextPendingFastAgentHumanFollowUp(
+      const rows = await getPendingFastAgentHumanFollowUps(
         canonicalConversationId,
         currentDurableHumanFollowUpEventId,
       );
-      if (signal?.aborted || !row || !nativeSteer || activeToolExecutions > 0) {
+      if (
+        signal?.aborted ||
+        rows.length === 0 ||
+        !nativeSteer ||
+        activeToolExecutions > 0
+      ) {
         return;
       }
+      if (deferredOversizedHumanFollowUpIds.has(rows[0]!.id)) return;
 
-      const parsed = fastAgentHumanFollowUpEventSchema.safeParse(row.event);
-      if (!parsed.success || row.parent.sessionId !== canonicalConversationId) {
-        await db
-          .update(fastAgentParentEvents)
-          .set({
-            discardedAt: new Date(),
-            lastError: 'Queued Fast human follow-up was invalid.',
-            updatedAt: new Date(),
-          })
-          .where(eq(fastAgentParentEvents.id, row.id));
-        continue;
-      }
+      const alreadyInjectedIds: string[] = [];
+      const batch: Array<{
+        row: (typeof rows)[number];
+        followUp: z.infer<typeof fastAgentHumanFollowUpEventSchema>;
+        followUpTurnId: string;
+        turnMessages: ModelMessage[];
+        serializedPrompt: string;
+        files: NonTaskPromptFile[];
+      }> = [];
+      let batchTextBytes = 0;
+      let batchFileCount = 0;
+      let batchFileBytes = 0;
+      let blockedByDifferentUser = false;
 
-      if (injectedHumanFollowUpIds.has(row.id)) {
-        await markFastAgentHumanFollowUpDelivered(row.id);
-        continue;
-      }
+      for (const row of rows) {
+        const parsed = fastAgentHumanFollowUpEventSchema.safeParse(row.event);
+        if (
+          !parsed.success ||
+          row.parent.sessionId !== canonicalConversationId
+        ) {
+          await db
+            .update(fastAgentParentEvents)
+            .set({
+              discardedAt: new Date(),
+              lastError: 'Queued Fast human follow-up was invalid.',
+              updatedAt: new Date(),
+            })
+            .where(eq(fastAgentParentEvents.id, row.id));
+          continue;
+        }
 
-      const followUp = parsed.data;
-      if (followUp.userId !== userId) {
-        // The active turn's tools and integration clients are scoped to its
-        // initiating user. Leave another participant's message durable so the
-        // queue drainer starts a separately authorized turn after this one.
-        return;
-      }
-      const followUpTurnId = buildFastAgentTurnId({
-        currentMessageId: followUp.currentMessageId,
-        conversation,
-        question: followUp.question,
-      });
-      const { turnMessages: followUpTurnMessages } = buildFastAgentMessages({
-        question: followUp.question,
-        threadContext: [],
-        compatibilityMessages: [],
-        currentMessageTs: followUp.currentMessageId,
-        currentMessageSender: {
-          slackUserId: followUp.senderExternalId,
-          displayName: followUp.senderDisplayName,
-        },
-        surface: conversation.surface,
-        reactionInput: false,
-        turnSource: 'human',
-        slackRoomoteUserId,
-      });
-      const serializedFollowUpPrompt =
-        serializeFastAgentMessages(followUpTurnMessages);
-      if (signal?.aborted) return;
-      await persistCanonicalMessage({
-        eventId: `${followUpTurnId}:user`,
-        turnId: followUpTurnId,
-        turnSeq:
-          humanFollowUpTurnSeqs.get(row.id) ??
-          (() => {
-            const turnSeq = nextTurnSeq++;
-            humanFollowUpTurnSeqs.set(row.id, turnSeq);
-            return turnSeq;
-          })(),
-        ts: row.createdAt.getTime(),
-        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-        role: 'user',
-        contentBlocks: buildFastAgentUserContentBlocks(
-          normalizeThreadText(followUp.question),
-          followUp.images ?? [],
-        ),
-        metadata: {
-          visibleInTranscript: true,
+        if (injectedHumanFollowUpIds.has(row.id)) {
+          alreadyInjectedIds.push(row.id);
+          continue;
+        }
+
+        const followUp = parsed.data;
+        if (followUp.userId !== userId) {
+          // The active turn's tools and integration clients are scoped to its
+          // initiating user. Preserve global queue order: deliver the current
+          // actor's contiguous prefix, then leave this participant and every
+          // later message durable for separately authorized turns.
+          blockedByDifferentUser = true;
+          break;
+        }
+        if (followUp.sourceControlReplyTarget) {
+          // A mention routed in from a pull request needs its own turn: the
+          // answer must also post on that discussion and delegated work must
+          // target its branch, which only the whole-turn delivery wires up.
+          // Steering would inject the text into this turn's home adapter and
+          // retire the row without either. Leave it and everything after it
+          // durable, in order.
+          blockedByDifferentUser = true;
+          break;
+        }
+
+        const followUpTurnId = buildFastAgentTurnId({
+          currentMessageId: followUp.currentMessageId,
+          conversation,
+          question: followUp.question,
+        });
+        const { turnMessages } = buildFastAgentMessages({
+          question: followUp.question,
+          threadContext: [],
+          compatibilityMessages: [],
+          currentMessageTs: followUp.currentMessageId,
+          currentMessageSender: {
+            slackUserId: followUp.senderExternalId,
+            displayName: followUp.senderDisplayName,
+          },
+          surface: conversation.surface,
+          reactionInput: false,
           turnSource: 'human',
-          userId: followUp.userId,
-          ...(followUp.senderDisplayName
-            ? {
-                userName: followUp.senderDisplayName,
-                senderDisplayName: followUp.senderDisplayName,
-              }
-            : {}),
-          ...(followUp.senderExternalId
-            ? { senderExternalId: followUp.senderExternalId }
-            : {}),
-        },
-        payload: {},
-        source: conversation.surface,
-        nativeSessionId: activeOpenCodeSessionId,
-      });
+          slackRoomoteUserId,
+        });
+        const serializedPrompt = serializeFastAgentMessages(turnMessages);
+        const files = getFastAgentImageFiles(followUp.images ?? []);
+        const serializedPromptBytes = Buffer.byteLength(
+          serializedPrompt,
+          'utf8',
+        );
+        const filesBytes = files.reduce(
+          (total, file) =>
+            total +
+            Buffer.byteLength(file.url, 'utf8') +
+            Buffer.byteLength(file.mime, 'utf8') +
+            Buffer.byteLength(file.filename ?? '', 'utf8'),
+          0,
+        );
+        const separatorBytes = batch.length > 0 ? 2 : 0;
+        const exceedsBatchLimit =
+          batch.length >= FAST_AGENT_HUMAN_STEER_MAX_MESSAGES ||
+          batchTextBytes + separatorBytes + serializedPromptBytes >
+            FAST_AGENT_HUMAN_STEER_MAX_TEXT_BYTES ||
+          batchFileCount + files.length > FAST_AGENT_HUMAN_STEER_MAX_FILES ||
+          batchFileBytes + filesBytes > FAST_AGENT_HUMAN_STEER_MAX_FILE_BYTES;
+        if (exceedsBatchLimit) {
+          if (batch.length > 0) break;
+          // A single oversized follow-up cannot be split without changing its
+          // meaning or attachments. Leave it durable for the normal queued
+          // whole-turn fallback instead of hot-retrying promptAsync forever.
+          deferredOversizedHumanFollowUpIds.add(row.id);
+          console.info(
+            `[Fast Agent] Native steer deferred. conversationId="${canonicalConversationId}" reason="oversized_singleton"`,
+          );
+          return;
+        }
+
+        batchTextBytes += separatorBytes + serializedPromptBytes;
+        batchFileCount += files.length;
+        batchFileBytes += filesBytes;
+        batch.push({
+          row,
+          followUp,
+          followUpTurnId,
+          turnMessages,
+          serializedPrompt,
+          files,
+        });
+      }
+
+      await markFastAgentHumanFollowUpsDelivered(alreadyInjectedIds);
+      if (batch.length === 0) {
+        if (blockedByDifferentUser) return;
+        continue;
+      }
+
+      if (signal?.aborted) return;
+      for (const { row, followUp, followUpTurnId } of batch) {
+        await persistCanonicalMessage({
+          eventId: `${followUpTurnId}:user`,
+          turnId: followUpTurnId,
+          turnSeq:
+            humanFollowUpTurnSeqs.get(row.id) ??
+            (() => {
+              const turnSeq = nextTurnSeq++;
+              humanFollowUpTurnSeqs.set(row.id, turnSeq);
+              return turnSeq;
+            })(),
+          ts: row.createdAt.getTime(),
+          eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          role: 'user',
+          contentBlocks: buildFastAgentUserContentBlocks(
+            normalizeThreadText(followUp.question),
+            followUp.images ?? [],
+          ),
+          metadata: {
+            visibleInTranscript: true,
+            turnSource: 'human',
+            userId: followUp.userId,
+            ...(followUp.senderDisplayName
+              ? {
+                  userName: followUp.senderDisplayName,
+                  senderDisplayName: followUp.senderDisplayName,
+                }
+              : {}),
+            ...(followUp.senderExternalId
+              ? { senderExternalId: followUp.senderExternalId }
+              : {}),
+          },
+          payload: {},
+          source: conversation.surface,
+          nativeSessionId: activeOpenCodeSessionId,
+        });
+      }
       if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) return;
+      const batchMessages = batch.flatMap(({ turnMessages }) => turnMessages);
+      const batchFiles = batch.flatMap(({ files }) => files);
+      const batchPrompt = batch
+        .map(({ serializedPrompt }) => serializedPrompt)
+        .join('\n\n');
+      const firstRow = batch[0]!.row;
       const previousInstructionVersion = currentInstructionVersion;
       const steerInstructionVersion = previousInstructionVersion + 1;
       currentInstructionVersion = steerInstructionVersion;
       try {
         await nativeSteer({
-          messageId: buildFastAgentNativeSteerMessageId(row.id, row.createdAt),
-          text: serializedFollowUpPrompt,
-          files: getFastAgentImageFiles(followUp.images ?? []),
+          messageId: buildFastAgentNativeSteerMessageId(
+            firstRow.id,
+            firstRow.createdAt,
+          ),
+          text: batchPrompt,
+          files: batchFiles,
         });
       } catch (error) {
         if (currentInstructionVersion === steerInstructionVersion) {
@@ -1220,11 +2029,12 @@ export async function answerFastAgentQuestion({
         throw error;
       }
       if (signal?.aborted) return;
-      injectedHumanFollowUpIds.add(row.id);
-      injectedHumanFollowUpMessages.push(...followUpTurnMessages);
-      injectedHumanFollowUpFiles.push(
-        ...getFastAgentImageFiles(followUp.images ?? []),
+      console.info(
+        `[Fast Agent] Native steer accepted. conversationId="${canonicalConversationId}" followUpCount=${batch.length}`,
       );
+      for (const { row } of batch) injectedHumanFollowUpIds.add(row.id);
+      injectedHumanFollowUpMessages.push(...batchMessages);
+      injectedHumanFollowUpFiles.push(...batchFiles);
       // Native steering starts a new human instruction boundary inside the
       // same OpenCode run. Prior tool results remain in-session, while local
       // duplicate guards reset so the user may intentionally repeat an action.
@@ -1232,8 +2042,10 @@ export async function answerFastAgentQuestion({
       completedChatReactionSignatures.clear();
       completedChatReplySignatures.clear();
       completedTaskActions.clear();
-      turnVisibleMessages.push(...followUpTurnMessages);
-      await markFastAgentHumanFollowUpDelivered(row.id);
+      turnVisibleMessages.push(...batchMessages);
+      await markFastAgentHumanFollowUpsDelivered(
+        batch.map(({ row }) => row.id),
+      );
     }
   };
   const schedulePendingHumanSteerDrain = () => {
@@ -1244,6 +2056,7 @@ export async function answerFastAgentQuestion({
           `[Fast Agent] Failed to inject a native human steer: ${formatErrorForLog(error)}`,
         );
       });
+    return activeHumanSteerPoll;
   };
   const persistAssistantReply = async ({
     reply,
@@ -1252,6 +2065,8 @@ export async function answerFastAgentQuestion({
     nativeMessage,
     inferenceRetryNotice = false,
     visibleInTranscript = true,
+    interruptionReason,
+    ts,
   }: {
     reply: FastAgentReply;
     event: { eventId: string; turnSeq: number };
@@ -1259,6 +2074,9 @@ export async function answerFastAgentQuestion({
     nativeMessage?: NonTaskOpenCodeCompletedMessage | null;
     inferenceRetryNotice?: boolean;
     visibleInTranscript?: boolean;
+    interruptionReason?: FastAgentInterruptionReason;
+    /** Explicit event time; retry notices pin it to the episode start. */
+    ts?: number;
   }) =>
     persistCanonicalMessage(
       {
@@ -1267,7 +2085,7 @@ export async function answerFastAgentQuestion({
         // createdAtMs predates the turn's tool events and would sort the
         // reply above the tool activity that produced it, so fall straight
         // through to the persist-time clock when completion time is missing.
-        ts: nativeMessage?.completedAtMs ?? Date.now(),
+        ts: ts ?? nativeMessage?.completedAtMs ?? Date.now(),
         eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
         role: 'assistant',
         contentBlocks: [{ type: 'text', text: reply.message }],
@@ -1280,6 +2098,7 @@ export async function answerFastAgentQuestion({
                 inferenceRetryActive: reply.purpose === 'progress',
               }
             : {}),
+          ...(interruptionReason ? { interruptionReason } : {}),
           ...(platformMessageId ? { platformMessageId } : {}),
         },
         payload: {
@@ -1314,6 +2133,9 @@ export async function answerFastAgentQuestion({
     const ordinal = nextToolOrdinal++;
     const toolCallId = `${turnId}:tool:${ordinal}`;
     const isMcp = Boolean(mcpServerName && mcpToolName);
+    const visibleInTranscript =
+      title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply &&
+      title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction;
     const canonicalEvent = allocateCanonicalEvent(`tool:${ordinal}`);
     await persistCanonicalMessage(
       {
@@ -1323,7 +2145,7 @@ export async function answerFastAgentQuestion({
         eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
         role: 'tool',
         contentBlocks: [],
-        metadata: { visibleInTranscript: true },
+        metadata: { visibleInTranscript },
         payload: {
           toolCallId,
           title,
@@ -1354,6 +2176,7 @@ export async function answerFastAgentQuestion({
       mcpServerName,
       mcpToolName,
       kind,
+      visibleInTranscript,
       canonicalEvent,
     };
   };
@@ -1376,7 +2199,7 @@ export async function answerFastAgentQuestion({
         eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
         role: 'tool',
         contentBlocks: output ? [{ type: 'text', text: output }] : [],
-        metadata: { visibleInTranscript: true, truncated },
+        metadata: { visibleInTranscript: event.visibleInTranscript, truncated },
         payload: {
           toolCallId: event.toolCallId,
           title: event.title,
@@ -1401,11 +2224,103 @@ export async function answerFastAgentQuestion({
       true,
     );
   };
+  /**
+   * Post a closeout the service authors itself (terminal or error) under the
+   * same recorded intent a model-authored `send_chat_reply` gets: a call row
+   * before the post and a result row after it. A run that resumes this turn
+   * then reads the closeout from the transcript, delivered or cut off inside
+   * the post, exactly as it would a model-authored one (see
+   * findRecordedCloseout), so neither can be posted a second time after the
+   * user already saw it.
+   */
+  const postRecordedSystemCloseout = async (
+    message: string,
+    post: () => Promise<void>,
+  ) => {
+    const call = await beginCanonicalToolEvent({
+      title: FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
+      args: { purpose: 'closeout', message },
+    });
+    try {
+      await post();
+    } catch (error) {
+      await finishCanonicalToolEvent(call, {
+        success: false,
+        error: formatErrorForLog(error),
+      });
+      throw error;
+    }
+    await finishCanonicalToolEvent(call, { success: true, delivered: true });
+  };
+  const canonicalSubagentEvents = new Map<
+    string,
+    { eventId: string; turnSeq: number }
+  >();
+  const persistOpenCodeTaskPart = async (part: NonTaskOpenCodeTaskPart) => {
+    const eventKey = `${part.sessionId}:${part.messageId}:${part.toolCallId}`;
+    let canonicalEvent = canonicalSubagentEvents.get(eventKey);
+    if (!canonicalEvent) {
+      canonicalEvent = allocateCanonicalEvent(
+        `subagent:${part.messageId}:${part.partId}`,
+      );
+      canonicalSubagentEvents.set(eventKey, canonicalEvent);
+    }
+
+    const terminal = part.status !== 'in_progress';
+    const rawOutput = part.output ?? part.error ?? '';
+    const { text: output, truncation } = truncateAcpOutputText(
+      typeof rawOutput === 'string'
+        ? rawOutput
+        : stringifyFastAgentToolOutput(rawOutput),
+      FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS,
+    );
+    const truncated = truncation !== null;
+    const payload = {
+      sessionId: part.sessionId,
+      turnId: part.messageId,
+      toolCallId: part.toolCallId,
+      kind: 'subagent',
+      title: part.title,
+      status: part.status,
+      isExecute: false,
+      isRead: false,
+      isMcp: false,
+      mcpServerName: null,
+      mcpToolName: null,
+      command: null,
+      isSubagentSpawn: true,
+      senderThreadId: part.sessionId,
+      receiverThreadIds: [],
+      agentType: part.agentType ?? null,
+      rawInput: part.input,
+      ...(terminal ? { exitCode: null, output } : {}),
+    };
+
+    await persistCanonicalMessage({
+      ...canonicalEvent,
+      turnId,
+      ts: Date.now(),
+      eventType: terminal
+        ? ACP_ENVELOPE_EVENT_TYPES.ToolResult
+        : ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+      role: 'tool',
+      contentBlocks: terminal && output ? [{ type: 'text', text: output }] : [],
+      metadata: {
+        visibleInTranscript: true,
+        ...(terminal ? { truncated } : {}),
+      },
+      payload,
+      source: conversation.surface,
+      nativeSessionId: part.sessionId,
+      nativeMessageId: part.messageId,
+    });
+  };
 
   const replaceInferenceRetryReply = async (
     reply: FastAgentReply,
     bestEffort = false,
     onDelivered?: () => void,
+    interruptionReason?: FastAgentInterruptionReason,
   ): Promise<boolean> => {
     if (!inferenceRetryCanonicalEvent) {
       return false;
@@ -1413,6 +2328,12 @@ export async function answerFastAgentQuestion({
 
     const retryEvent = inferenceRetryCanonicalEvent;
     const retryMessageIndex = inferenceRetryMessageIndex;
+    // A progress notice keeps the episode's start time; a terminal
+    // replacement takes the clock like any other reply.
+    const noticeTs =
+      reply.purpose === 'progress'
+        ? inferenceRecoveryEpisodeStartedAt
+        : undefined;
     if (!inferenceRetryReply || !adapter.replaceReply) {
       if (
         retryMessageIndex !== undefined &&
@@ -1425,6 +2346,8 @@ export async function answerFastAgentQuestion({
         event: retryEvent,
         inferenceRetryNotice: true,
         visibleInTranscript: false,
+        interruptionReason,
+        ts: noticeTs,
       });
       return false;
     }
@@ -1439,6 +2362,8 @@ export async function answerFastAgentQuestion({
           reply,
           event: retryEvent,
           inferenceRetryNotice: true,
+          interruptionReason,
+          ts: noticeTs,
         });
         throw error;
       }
@@ -1456,6 +2381,8 @@ export async function answerFastAgentQuestion({
         event: retryEvent,
         inferenceRetryNotice: true,
         visibleInTranscript: false,
+        interruptionReason,
+        ts: noticeTs,
       });
       return false;
     }
@@ -1470,6 +2397,8 @@ export async function answerFastAgentQuestion({
         event: retryEvent,
         platformMessageId: inferenceRetryReply.messageId,
         inferenceRetryNotice: true,
+        interruptionReason,
+        ts: noticeTs,
       });
     }
     return true;
@@ -1516,13 +2445,17 @@ export async function answerFastAgentQuestion({
         return [];
       }),
       platformEvent
-        ? Promise.resolve({ displayName: null, githubLogin: null })
+        ? Promise.resolve({
+            displayName: null,
+            githubLogin: null,
+            isAdmin: false,
+          })
         : getFastAgentUserIdentity(userId).catch((error) => {
             degradedContextComponents.add('user_identity');
             console.warn(
               `[Fast Agent] User identity unavailable: ${formatErrorForLog(error)}`,
             );
-            return { displayName: null, githubLogin: null };
+            return { displayName: null, githubLogin: null, isAdmin: false };
           }),
     ]);
     const availableIntegrations = selectFastRoomoteChannelTools({
@@ -1531,30 +2464,134 @@ export async function answerFastAgentQuestion({
       currentMessageReactable,
     });
     canonicalConversationId = session.id;
-    humanSteerPollTimer = setInterval(
-      schedulePendingHumanSteerDrain,
-      FAST_AGENT_HUMAN_STEER_POLL_INTERVAL_MS,
-    );
-    humanSteerPollTimer.unref();
-    await reconcileFastAgentInferenceRetryNotices(session.id).catch((error) => {
-      console.warn(
-        `[Fast Agent] Failed to reconcile interrupted inference retry notices: ${formatErrorForLog(error)}`,
-      );
-    });
-    await setFastSessionResponding(session.id, true).catch((error) => {
+    // A resumed run continues the same turn. Load what the earlier attempt
+    // already did before anything is written: the model is told about it,
+    // and this run numbers its canonical events after the attempt's rows so
+    // it extends the transcript instead of overwriting them. Best effort:
+    // without it the model starts the turn over, the pre-resume behavior.
+    const previousAttempt =
+      resumedAfterInterruption || resumedAfterInferenceRetry
+        ? await loadFastAgentTurnAttemptSummary(session.id, turnId).catch(
+            (error) => {
+              console.warn(
+                `[Fast Agent] Failed to load the previous attempt for a resumed turn: ${formatErrorForLog(error)}`,
+              );
+              return null;
+            },
+          )
+        : null;
+    if (previousAttempt) {
+      nextAssistantOrdinal = previousAttempt.next.assistantOrdinal;
+      nextToolOrdinal = previousAttempt.next.toolOrdinal;
+      nextRetryNoticeOrdinal = previousAttempt.next.retryNoticeOrdinal;
+      nextTurnSeq = previousAttempt.next.turnSeq;
+    }
+    // A resumed execution of this same turn inherits the retry notice its
+    // predecessor left active, so the eventual answer edits that notice in
+    // place; only when no such notice exists (or this is a new turn) does a
+    // still-active notice mean an interrupted turn to reconcile.
+    const inheritedRetryNotice =
+      durableAdmission &&
+      (resumedAfterInterruption || resumedAfterInferenceRetry)
+        ? await findFastAgentActiveInferenceRetryNotice(
+            session.id,
+            turnId,
+          ).catch((error) => {
+            console.warn(
+              `[Fast Agent] Failed to look up the inherited inference retry notice: ${formatErrorForLog(error)}`,
+            );
+            return null;
+          })
+        : null;
+    if (inheritedRetryNotice) {
+      inferenceRetryAttempted = true;
+      inferenceRetryCanonicalEvent = {
+        eventId: inheritedRetryNotice.eventId,
+        turnSeq: nextTurnSeq++,
+      };
+      nextRetryNoticeOrdinal += 1;
+      inferenceRetryReply = inheritedRetryNotice.platformMessageId
+        ? { messageId: inheritedRetryNotice.platformMessageId }
+        : undefined;
+      inferenceRecoveryEpisodeStartedAt = inheritedRetryNotice.ts;
+      if (inheritedRetryNotice.platformMessageId) {
+        reportedInferenceNotices.add(inheritedRetryNotice.text);
+      }
+    } else {
+      await reconcileFastAgentInferenceRetryNotices(
+        session.id,
+        'next_turn_reconcile',
+      ).catch((error) => {
+        console.warn(
+          `[Fast Agent] Failed to reconcile interrupted inference retry notices: ${formatErrorForLog(error)}`,
+        );
+      });
+    }
+    await setFastSessionResponding(
+      session.id,
+      true,
+      () => !signal?.aborted,
+    ).catch((error) => {
       console.warn(
         `[sessions] Failed to mark Fast Session active: ${formatErrorForLog(error)}`,
       );
     });
+    // Assistant-message persists extend the lease as a side effect, but a
+    // turn can spend longer than the lease inside tool calls or a streaming
+    // stretch without persisting one, and the expired-lease reconciler would
+    // then stamp its live retry notice as interrupted. Renew on wall clock
+    // for as long as this owner is executing; the tick stops renewing the
+    // moment ownership is aborted so a fenced-off owner cannot extend a
+    // successor's lease.
+    respondingLeaseRenewalTimer = setInterval(() => {
+      if (signal?.aborted) return;
+      respondingLeaseRenewal = respondingLeaseRenewal.then(async () => {
+        // The abort check is only a cheap short-circuit; correctness comes
+        // from the renewal statement itself, which extends the lease only
+        // where it is still live, so a stale write cannot resurrect a lease
+        // a settlement or successor already cleared.
+        if (signal?.aborted) return;
+        await renewFastSessionRespondingLease(session.id).catch((error) => {
+          console.warn(
+            `[sessions] Failed to renew Fast Session responding lease: ${formatErrorForLog(error)}`,
+          );
+        });
+        if (durableAdmission && durableTurnReplayable) {
+          await renewFastAgentDurableTurnClaim(durableAdmission.eventId).catch(
+            (error) => {
+              console.warn(
+                `[Fast Agent] Failed to renew durable turn claim: ${formatErrorForLog(error)}`,
+              );
+            },
+          );
+        }
+      });
+    }, FAST_RESPONDING_LEASE_RENEW_MS);
+    respondingLeaseRenewalTimer.unref();
     durableOpenCodeSessionId = session.openCodeSessionId;
     activeOpenCodeSessionId = session.openCodeSessionId;
     diagnostics.setCanonicalConversationId(session.id);
-    const userEvent = allocateCanonicalEvent('user');
+    // Look up before this turn's own prompt is persisted, so "the latest
+    // turn" is the previous one. Only a substantive human turn can resume an
+    // owed request; platform events and reactions leave it for the next one.
+    const unresolvedRequest = substantiveHumanInput
+      ? await findFastAgentUnresolvedRequest(session.id).catch((error) => {
+          console.warn(
+            `[Fast Agent] Failed to look up an unresolved request: ${formatErrorForLog(error)}`,
+          );
+          return null;
+        })
+      : null;
+    // A resumed run re-persists the same prompt; it keeps the attempt's
+    // place and time so the transcript still reads in order.
+    const userEvent = previousAttempt?.prompt
+      ? { eventId: `${turnId}:user`, turnSeq: previousAttempt.prompt.turnSeq }
+      : allocateCanonicalEvent('user');
     const userMessageResult = await persistCanonicalMessage(
       {
         ...userEvent,
         turnId,
-        ts: Date.now(),
+        ts: previousAttempt?.prompt?.ts ?? Date.now(),
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
         role: 'user',
         contentBlocks: buildFastAgentUserContentBlocks(
@@ -1570,6 +2607,11 @@ export async function answerFastAgentQuestion({
             ? { inputKind: FAST_AGENT_REACTION_INPUT_TYPE }
             : {}),
           ...(platformEvent ? { platformEventKind } : {}),
+          // Lineage back to the interrupted request this turn is resuming,
+          // so the original still surfaces if this turn is interrupted too.
+          ...(unresolvedRequest
+            ? { resumesTurnId: unresolvedRequest.turnId }
+            : {}),
           userId,
           ...(senderDisplayName ? { userName: senderDisplayName } : {}),
           ...(senderDisplayName ? { senderDisplayName } : {}),
@@ -1627,6 +2669,10 @@ export async function answerFastAgentQuestion({
       reactionInput,
       turnSource,
       slackRoomoteUserId,
+      unresolvedRequest,
+      resumedAfterInterruption,
+      resumedAfterInferenceRetry,
+      previousAttempt,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
       Env.RELEASE_PRODUCT_VERSION,
@@ -1647,9 +2693,24 @@ export async function answerFastAgentQuestion({
       platformEventKind,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
+      isCurrentUserAdmin: currentUser.isAdmin,
+      implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
       releaseVersion,
+      ...(setupSnapshot ? { setupSnapshot } : {}),
+      setupSession,
+    });
+    diagnostics.recordPromptContext({
+      systemPromptChars: system.length,
+      environmentCount: availableEnvironments.length,
+      integrationCount: availableIntegrations.length,
+      integrationToolCount: availableIntegrations.reduce(
+        (count, integration) => count + integration.tools.length,
+        0,
+      ),
+      activeTaskCount: resolvedActiveTasks.length,
     });
     let visibleUpdatePosted = false;
+    let substantiveWorkAcknowledged = false;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
 
@@ -1675,17 +2736,23 @@ export async function answerFastAgentQuestion({
       mirrorImmediately = false,
       nativeMessage?: NonTaskOpenCodeCompletedMessage | null,
       instructionVersion = currentInstructionVersion,
+      /** The streamed partial this reply finalizes, if one was shown. */
+      streamedEvent?: { eventId: string; turnSeq: number },
     ) => {
       const replacedRetry = await replaceInferenceRetryReply(reply, true, () =>
         diagnostics.recordVisibleReply(),
       );
       if (!replacedRetry) {
-        const posted = await adapter.postReply(reply);
+        const posted =
+          (await surfaceReplyStream.deliver(reply)) ??
+          (await adapter.postReply(reply));
         diagnostics.recordVisibleReply();
         turnVisibleMessages.push(buildAssistantTextMessage(reply.message));
         await persistAssistantReply({
           reply,
-          event: allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
+          event:
+            streamedEvent ??
+            allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
           platformMessageId: posted?.messageId,
           nativeMessage,
         });
@@ -1695,6 +2762,10 @@ export async function answerFastAgentQuestion({
       inferenceRetryCanonicalEvent = undefined;
       lastVisibleMessage = reply.message;
       visibleUpdatePosted = true;
+      // Any text reply posted by the model (acknowledgement, first progress
+      // update, or task kickoff) is the textual communication the work-start
+      // gate requires. Reactions deliberately do not set this flag.
+      substantiveWorkAcknowledged = true;
       if (reply.purpose === 'closeout' || reply.purpose === 'clarification') {
         closedInstructionVersions.add(instructionVersion);
       }
@@ -1718,9 +2789,8 @@ export async function answerFastAgentQuestion({
         };
       }
       completedChatReactionSignatures.add(signature);
-      turnVisibleMessages.push(
-        buildAssistantTextMessage(`[Reacted with :${name}:]`),
-      );
+      const reactionText = `:${name}:`;
+      turnVisibleMessages.push(buildAssistantTextMessage(reactionText));
       await persistCanonicalMessage(
         {
           ...allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
@@ -1728,7 +2798,7 @@ export async function answerFastAgentQuestion({
           ts: Date.now(),
           eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
           role: 'assistant',
-          contentBlocks: [{ type: 'text', text: `[Reacted with :${name}:]` }],
+          contentBlocks: [{ type: 'text', text: reactionText }],
           metadata: { visibleInTranscript: true },
           payload: { reaction: name, purpose },
           source: conversation.surface,
@@ -1792,11 +2862,22 @@ export async function answerFastAgentQuestion({
       inferenceRetryCanonicalEvent ??= allocateCanonicalEvent(
         `retry-notice:${nextRetryNoticeOrdinal++}`,
       );
+      // The marker's timestamp is the recovery episode's start. A run the
+      // queue resumes inherits it, so the silent window keeps counting from
+      // the first failure instead of restarting on every handoff.
+      const now = Date.now();
+      inferenceRecoveryEpisodeStartedAt ??= now;
+      // The upsert replaces metadata, so a notice that is already visible
+      // (posted by this run or inherited from a parked predecessor) keeps
+      // its message id and visibility; otherwise a later run could not
+      // find the message to edit and would post a second notice.
       await persistAssistantReply({
         reply,
         event: inferenceRetryCanonicalEvent,
         inferenceRetryNotice: true,
-        visibleInTranscript: false,
+        visibleInTranscript: Boolean(inferenceRetryReply),
+        platformMessageId: inferenceRetryReply?.messageId,
+        ts: inferenceRecoveryEpisodeStartedAt,
       });
 
       if (platformEvent) return;
@@ -1805,8 +2886,6 @@ export async function answerFastAgentQuestion({
       // would absorb it invisibly. A notice is only worth interrupting the
       // user for when the pending wait pushes the continuous no-progress
       // stretch past the silent window.
-      const now = Date.now();
-      inferenceRecoveryEpisodeStartedAt ??= now;
       const projectedRecoveryMs =
         now - inferenceRecoveryEpisodeStartedAt + (notice.delayMs ?? 0);
       if (projectedRecoveryMs < FAST_AGENT_SILENT_RECOVERY_WINDOW_MS) {
@@ -1821,7 +2900,12 @@ export async function answerFastAgentQuestion({
       // Deliberately not the postReply closure: a system retry notice must
       // not satisfy the model's acknowledgement gate or close the turn.
       if (!(await replaceInferenceRetryReply(reply))) {
-        inferenceRetryReply = (await adapter.postReply(reply)) || undefined;
+        // A reply already streaming becomes the notice carrier rather than
+        // leaving a cut-off draft above it.
+        inferenceRetryReply =
+          (await surfaceReplyStream.deliver(reply)) ??
+          (await adapter.postReply(reply)) ??
+          undefined;
         inferenceRetryMessageIndex = turnVisibleMessages.length;
         turnVisibleMessages.push(buildAssistantTextMessage(message));
         await persistAssistantReply({
@@ -1829,6 +2913,7 @@ export async function answerFastAgentQuestion({
           event: inferenceRetryCanonicalEvent,
           platformMessageId: inferenceRetryReply?.messageId,
           inferenceRetryNotice: true,
+          ts: inferenceRecoveryEpisodeStartedAt,
         });
       }
       diagnostics.recordVisibleReply({ assistantResponse: false });
@@ -1875,14 +2960,31 @@ export async function answerFastAgentQuestion({
         return toolFailure(error);
       }
     };
-    const requireAcknowledgement = () =>
-      !platformEvent && !visibleUpdatePosted
-        ? {
+    // Single owner of the human-turn work-start gate, applied in-process to
+    // every native and MCP tool call before it runs. Only text communication
+    // (a reply, a first progress note, or a task kickoff) opens the gate; a
+    // reaction never does. The listed tools are the ones allowed to precede
+    // that communication.
+    const acknowledgementExemptToolIds = new Set<string>([
+      FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
+      FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
+      FAST_AGENT_NATIVE_TOOL_NAMES.launchTask,
+      FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+      // A catalog lookup reads nothing external; the call it prepares for is
+      // still gated on the acknowledgement.
+      FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools,
+      `${ROOMOTE_MCP_ID}_${CHAT_REACTION_EMOJI_TOOL_NAME}`,
+    ]);
+    const authorizeToolStart = (toolId: string) =>
+      platformEvent ||
+      substantiveWorkAcknowledged ||
+      acknowledgementExemptToolIds.has(toolId)
+        ? null
+        : {
             success: false as const,
             error:
               'Post an acknowledgement with send_chat_reply before this action.',
-          }
-        : null;
+          };
 
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
@@ -1898,6 +3000,12 @@ export async function answerFastAgentQuestion({
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
         turnProgressMarker += 1;
+        // The acknowledgement gate runs before replay revocation: a refused
+        // pre-ack call must leave the durable row recoverable.
+        const startDenial = authorizeToolStart(
+          `${call.integrationId}_${call.toolName}`,
+        );
+        if (startDenial) return startDenial;
 
         if (platformEventHandling === 'present_only') {
           return {
@@ -1975,16 +3083,9 @@ export async function answerFastAgentQuestion({
                     }
                   : chatScopedIntegrationArguments
             : chatScopedIntegrationArguments;
-        const managesCustomAutomations =
-          call.integrationId === ROOMOTE_MCP_ID &&
-          call.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
         const sendsChatReaction =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === CHAT_REACTION_EMOJI_TOOL_NAME;
-        if (!managesCustomAutomations && !sendsChatReaction) {
-          const ackError = requireAcknowledgement();
-          if (ackError) return ackError;
-        }
         const signature = buildIntegrationCallSignature({
           integrationId: call.integrationId,
           toolName: call.toolName,
@@ -2058,6 +3159,72 @@ export async function answerFastAgentQuestion({
       }
     };
 
+    // Natively mounted servers are excluded from both the lookup and the
+    // call path: their tools are already exposed by name, and the subagent
+    // tool filter denies some of them, which the shared call path must not
+    // bypass.
+    const onDemandIntegrations = availableIntegrations.filter(
+      (integration) => !isFastAgentNativeIntegration(integration.id),
+    );
+    const nativeIntegrationError = (integrationId: string) => ({
+      success: false as const,
+      error: `The "${integrationId}" server is mounted natively; call its tools directly by their ${integrationId}_ prefixed names.`,
+    });
+    const describeIntegrationTools = (
+      args: z.infer<typeof findIntegrationToolsArgsSchema>,
+    ) => {
+      if (
+        args.integrationId &&
+        isFastAgentNativeIntegration(args.integrationId)
+      ) {
+        return nativeIntegrationError(args.integrationId);
+      }
+      const found = findFastAgentIntegrationTools(onDemandIntegrations, args);
+      if (found.unknownIntegration) {
+        return {
+          success: false as const,
+          error: `No on-demand deployment MCP server with id "${args.integrationId}" is available in fast mode.`,
+        };
+      }
+      return {
+        success: true as const,
+        tools: found.tools,
+        ...(found.truncated
+          ? { guidance: INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE }
+          : {}),
+      };
+    };
+    // Subagents may look up and call on-demand deployment MCP tools; every
+    // other Fast tool stays with the parent. Calls run through the parent's
+    // MCP executor, so gating, duplicate detection, and auditing are shared.
+    const executeSubagentNativeTool = async (
+      call: FastAgentNativeToolCall,
+    ): Promise<unknown> => {
+      try {
+        if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools) {
+          return describeIntegrationTools(
+            findIntegrationToolsArgsSchema.parse(call.args),
+          );
+        }
+        if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool) {
+          const args = callIntegrationToolArgsSchema.parse(call.args);
+          if (isFastAgentNativeIntegration(args.integrationId)) {
+            return nativeIntegrationError(args.integrationId);
+          }
+          return await executeMcpTool({
+            integrationId: args.integrationId,
+            toolName: args.toolName,
+            args: args.args ?? {},
+          });
+        }
+      } catch (error) {
+        return toolFailure(error);
+      }
+      return {
+        success: false,
+        error: 'That tool is reserved for the Fast parent agent.',
+      };
+    };
     const executeNativeToolInner = async (
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
@@ -2071,6 +3238,11 @@ export async function answerFastAgentQuestion({
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
         turnProgressMarker += 1;
+        const startDenial = authorizeToolStart(call.name);
+        if (startDenial) return startDenial;
+        // No replay withdrawal here: every call is recorded before it runs and
+        // its result after, and a resumed run is handed that record, so an
+        // interrupted turn continues instead of failing closed.
 
         if (
           platformEventHandling === 'present_only' &&
@@ -2082,10 +3254,20 @@ export async function answerFastAgentQuestion({
               'This platform event may only be presented to the user with a closeout.',
           };
         }
-
         switch (call.name) {
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
             const args = chatReplyArgsSchema.parse(call.args);
+            if (args.message === undefined) await waitForSettledReplyText();
+            const message = (
+              args.message ?? replyTextTracker.unconsumedText()
+            ).trim();
+            if (!message) {
+              return { success: false, error: FAST_AGENT_EMPTY_REPLY_ERROR };
+            }
+            // A closeout does not withdraw the turn from replay. Its call row
+            // is on record before the post and its reply row right after, so
+            // a run that resumes this turn finishes it from that record (see
+            // findRecordedCloseout) instead of failing closed.
             if (
               args.suggestions?.length &&
               (args.purpose !== 'closeout' ||
@@ -2099,6 +3281,24 @@ export async function answerFastAgentQuestion({
                 success: false,
                 error:
                   'Launchable suggestions are available only on chat automation closeouts.',
+              };
+            }
+            const validSuggestionEnvironmentIds = new Set([
+              ALL_REPOSITORIES,
+              FAST_EXECUTION,
+              ...availableEnvironments.map((environment) => environment.id),
+            ]);
+            if (
+              args.suggestions?.some(
+                (suggestion) =>
+                  suggestion.environmentId &&
+                  !validSuggestionEnvironmentIds.has(suggestion.environmentId),
+              )
+            ) {
+              return {
+                success: false,
+                error:
+                  'A suggested task selected an environment that was not found.',
               };
             }
             if (
@@ -2129,10 +3329,14 @@ export async function answerFastAgentQuestion({
             }
             const signature = JSON.stringify([
               args.purpose,
-              args.message,
+              message,
               args.imageArtifactIds ?? [],
+              args.suggestions ?? [],
             ]);
             if (completedChatReplySignatures.has(signature)) {
+              replyTextTracker.consumeUnconsumed();
+              dropStreamedReply();
+              await surfaceReplyStream.abort();
               return {
                 success: true,
                 delivered: true,
@@ -2141,10 +3345,14 @@ export async function answerFastAgentQuestion({
               };
             }
             throwIfTurnCancelled();
+            // Whatever the model wrote before this call is delivered by it,
+            // whether the call restates that text or leaves it implicit.
+            replyTextTracker.consumeUnconsumed();
+            const streamedEvent = await takeStreamedReplyEvent();
             await postReply(
               {
                 purpose: args.purpose,
-                message: args.message,
+                message,
                 ...(args.imageArtifactIds?.length
                   ? { imageArtifactIds: args.imageArtifactIds }
                   : {}),
@@ -2155,6 +3363,7 @@ export async function answerFastAgentQuestion({
               false,
               undefined,
               instructionVersion,
+              streamedEvent,
             );
             completedChatReplySignatures.add(signature);
             return {
@@ -2171,6 +3380,54 @@ export async function answerFastAgentQuestion({
               args.purpose,
               instructionVersion,
             );
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact: {
+            if (!adapter.createArtifact) {
+              return {
+                success: false,
+                error: 'Artifact creation is unavailable for this Session.',
+              };
+            }
+            const args = createArtifactArgsSchema.parse(call.args);
+            const signature = createHash('sha256')
+              .update(`${args.path}\0${args.content}`)
+              .digest('hex');
+            if (completedTaskActions.has(`artifact:${signature}`)) {
+              return {
+                success: false,
+                error: 'The same artifact was already created in this turn.',
+              };
+            }
+            const extension = args.path.split('.').pop()?.toLowerCase();
+            const inferredContentType =
+              extension === 'md'
+                ? 'text/markdown'
+                : extension === 'html' || extension === 'htm'
+                  ? 'text/html'
+                  : extension === 'json'
+                    ? 'application/json'
+                    : extension === 'csv'
+                      ? 'text/csv'
+                      : extension === 'svg'
+                        ? 'image/svg+xml'
+                        : 'text/plain';
+            completedTaskActions.add(`artifact:${signature}`);
+            try {
+              const artifact = await adapter.createArtifact({
+                ...args,
+                contentType: args.contentType ?? inferredContentType,
+              });
+              if (conversation.surface === 'web') visibleUpdatePosted = true;
+              return {
+                success: true,
+                artifact,
+                guidance: 'Link the artifact viewUrl when it is useful.',
+              };
+            } catch (error) {
+              completedTaskActions.delete(`artifact:${signature}`);
+              return toolFailure(error);
+            }
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.showWidget: {
@@ -2238,6 +3495,11 @@ export async function answerFastAgentQuestion({
                 success: false,
                 error: `Model "${args.model}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
               };
+            }
+            try {
+              await adapter.assertTaskLaunch?.();
+            } catch (error) {
+              return toolFailure(error);
             }
             const signature = `launch_task:${JSON.stringify([
               args.prompt,
@@ -2313,6 +3575,16 @@ export async function answerFastAgentQuestion({
                 environmentId: args.environmentId ?? null,
                 model: args.model ?? null,
                 parentSessionId: session.id,
+                // Stable across a resumed run of this turn: a repeat of the
+                // same launch (the process died between launching and
+                // recording it) returns the existing task instead of a
+                // second one.
+                launchIdempotencyKey: `fast:${session.id}:${turnId}:${createHash(
+                  'sha256',
+                )
+                  .update(signature)
+                  .digest('hex')
+                  .slice(0, 32)}`,
                 postKickoff: deliverKickoff,
               });
             } catch (error) {
@@ -2329,11 +3601,89 @@ export async function answerFastAgentQuestion({
               currentTasks.set(result.taskId, { taskId: result.taskId });
               if (result.kickoffDelivered) {
                 visibleUpdatePosted = true;
+                substantiveWorkAcknowledged = true;
               }
               if (!kickoffDelivered && !result.kickoffDelivered) {
                 await deliverKickoff(result);
               }
             }
+            return result;
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest: {
+            const args = reviewPullRequestArgsSchema.parse(call.args);
+            const conversationTarget =
+              getConversationPullRequestTarget(conversation);
+            const repository =
+              args.repository ?? conversationTarget?.repository;
+            const pullRequestNumber =
+              args.pullRequestNumber ?? conversationTarget?.pullRequestNumber;
+            if (!repository || !pullRequestNumber) {
+              return {
+                success: false,
+                error:
+                  'Name the repository (owner/name) and pull request number to review.',
+              };
+            }
+            const signature = `review_pull_request:${repository}#${pullRequestNumber}`;
+            if (completedTaskActions.has(signature)) {
+              return {
+                success: false,
+                error:
+                  'A review of that pull request was already started in this turn.',
+              };
+            }
+            completedTaskActions.add(signature);
+            throwIfTurnCancelled();
+            let result: Awaited<ReturnType<typeof launchFastAgentPrReview>>;
+            try {
+              result = await launchFastAgentPrReview(
+                { userId, apiBaseUrl },
+                {
+                  repository,
+                  pullRequestNumber,
+                  fastConversationId: session.id,
+                },
+              );
+            } catch (error) {
+              completedTaskActions.delete(signature);
+              throw error;
+            }
+            if (!result.success) {
+              completedTaskActions.delete(signature);
+              return result;
+            }
+            // A reused already-active review keeps its original payload, so
+            // this Session will not hear its settle: skip the kickoff and let
+            // the reply set expectations instead of promising a callback. It
+            // also belongs to another launch (often an automation), so it is
+            // never registered as this turn's task — that would expose it to
+            // cancel_task and send_task_message here.
+            if (result.alreadyRunning) {
+              return {
+                ...result,
+                guidance:
+                  'A review of that pull request is already running; its results will post on the pull request itself, not back into this conversation. Tell the user that and link the pull request.',
+              };
+            }
+            if (result.taskId) {
+              currentTasks.set(result.taskId, { taskId: result.taskId });
+            }
+            const kickoffMessage = [
+              args.kickoffMessage,
+              result.taskUrl && !args.kickoffMessage.includes(result.taskUrl)
+                ? `[Open in Roomote](${result.taskUrl})`
+                : undefined,
+            ]
+              .filter((part): part is string => Boolean(part))
+              .join('\n\n');
+            throwIfTurnCancelled();
+            await postReply(
+              { purpose: 'progress', message: kickoffMessage, kickoff: true },
+              true,
+            );
+            visibleUpdatePosted = true;
+            substantiveWorkAcknowledged = true;
             return result;
           }
 
@@ -2371,8 +3721,6 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask: {
             const args = taskIdArgsSchema.parse(call.args);
-            const ackError = requireAcknowledgement();
-            if (ackError) return ackError;
             const target = selectActiveTaskId(args.taskId, currentTasks);
             if (!target.taskId) return { success: false, error: target.error };
             const targetTask = currentTasks.get(target.taskId);
@@ -2449,6 +3797,111 @@ export async function answerFastAgentQuestion({
             };
           }
 
+          case FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput: {
+            if (conversation.surface !== 'web') {
+              return {
+                success: false,
+                error: 'Structured input is available only in web Sessions.',
+              };
+            }
+            const args = requestUserInputArgsSchema.parse(call.args);
+            if (!args) {
+              return {
+                success: false,
+                error: 'Pass either questions to ask or a trusted preset name.',
+              };
+            }
+            const preset = 'preset' in args ? args.preset : undefined;
+            if (preset && (!setupSession || !adapter.resolveUserInputPreset)) {
+              return {
+                success: false,
+                error:
+                  'That trusted input preset is unavailable in this session.',
+              };
+            }
+            const questions =
+              'questions' in args
+                ? args.questions
+                : await adapter.resolveUserInputPreset!(
+                    args.preset as FastAgentInputPreset,
+                  );
+            for (const question of questions) {
+              if (question.options && question.isSecret) {
+                return {
+                  success: false,
+                  error:
+                    'Secret questions must use free-text answers, not options.',
+                };
+              }
+              if (question.multiple && !question.options) {
+                return {
+                  success: false,
+                  error:
+                    'Multi-select questions require options to choose from.',
+                };
+              }
+            }
+            const inputEvent = allocateCanonicalEvent(
+              `input_request:${nextTurnSeq++}`,
+            );
+            const requestId = `rui:${inputEvent.eventId}`;
+            throwIfTurnCancelled();
+            await persistCanonicalMessage(
+              {
+                ...inputEvent,
+                turnId,
+                ts: Date.now(),
+                eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+                role: 'assistant',
+                contentBlocks: [
+                  {
+                    type: 'text',
+                    text: questions
+                      .map((question) => question.question)
+                      .join('\n'),
+                  },
+                ],
+                metadata: { visibleInTranscript: true },
+                payload: {
+                  requestId,
+                  status: 'pending',
+                  ...(preset ? { preset } : {}),
+                  sessionId: session.id,
+                  turnId,
+                  callId: requestId,
+                  questions,
+                },
+                source: conversation.surface,
+                nativeSessionId: activeOpenCodeSessionId,
+              },
+              true,
+            );
+            await adapter.requestUserInput?.({
+              requestId,
+              ...(preset ? { preset } : {}),
+              questions,
+            });
+            visibleUpdatePosted = true;
+            closedInstructionVersions.add(instructionVersion);
+            return { success: true, requestId, closed: true };
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools: {
+            return describeIntegrationTools(
+              findIntegrationToolsArgsSchema.parse(call.args),
+            );
+          }
+          case FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool: {
+            const args = callIntegrationToolArgsSchema.parse(call.args);
+            if (isFastAgentNativeIntegration(args.integrationId)) {
+              return nativeIntegrationError(args.integrationId);
+            }
+            return executeMcpTool({
+              integrationId: args.integrationId,
+              toolName: args.toolName,
+              args: args.args ?? {},
+            });
+          }
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {
             ignoreEventArgsSchema.parse(call.args);
             if (platformEvent && platformEventVisibility === 'required') {
@@ -2480,6 +3933,12 @@ export async function answerFastAgentQuestion({
     ): Promise<unknown> => {
       activeToolExecutions += 1;
       try {
+        // The on-demand call is transport: the MCP executor it delegates to
+        // records the integration tool event, which is what the transcript
+        // should show, so no wrapper event is written for it.
+        if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool) {
+          return await executeNativeToolInner(call);
+        }
         const canonicalToolEvent = await beginCanonicalToolEvent({
           title: call.name,
           args: call.args,
@@ -2520,6 +3979,37 @@ export async function answerFastAgentQuestion({
       durableOpenCodeSessionId = openCodeSessionId;
       session.openCodeSessionId = openCodeSessionId;
     };
+    // A resumed run whose earlier attempt reached its closeout has nothing
+    // left to ask the model. Finish the turn from the record instead. A
+    // recorded closing reply was delivered: settle silently. A closing reply
+    // call the process died inside may or may not have reached the surface:
+    // post the same text once more and settle. The duplicate that can cause
+    // is bounded to the window between the surface accepting the post and
+    // the transcript recording it.
+    const recordedCloseout = previousAttempt
+      ? findRecordedCloseout(previousAttempt.events)
+      : null;
+    if (recordedCloseout) {
+      if (recordedCloseout.kind === 'delivered') {
+        console.info(
+          `[Fast Agent] Resumed turn ${turnId} already delivered its closeout; settling without a model request.`,
+        );
+        closedInstructionVersions.add(currentInstructionVersion);
+        lastVisibleMessage = recordedCloseout.text;
+        visibleUpdatePosted = true;
+      } else {
+        console.info(
+          `[Fast Agent] Resumed turn ${turnId} was cut off inside its closeout; posting it again.`,
+        );
+        await postReply({
+          purpose: recordedCloseout.purpose,
+          message: recordedCloseout.text,
+        });
+      }
+      await settleDurableTurn();
+      await mirrorPendingMessages();
+      return lastVisibleMessage;
+    }
     diagnostics.markInferenceQueued();
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
@@ -2557,6 +4047,7 @@ export async function answerFastAgentQuestion({
         const nativeRuntime = await getFastAgentNativeToolRuntime(
           session.id,
           availableIntegrations,
+          { surface: conversation.surface },
         );
         const unbindExecutors = new Set<() => void>();
         const boundSubagentSessionIDs = new Set<string>();
@@ -2638,9 +4129,12 @@ export async function answerFastAgentQuestion({
           const result = await runFastAgentInferenceWithRetries(
             async () => {
               const providerRetryAbortController = new AbortController();
-              const promptSignal = signal
-                ? AbortSignal.any([signal, providerRetryAbortController.signal])
-                : providerRetryAbortController.signal;
+              const closeoutAbortController = new AbortController();
+              const promptSignal = AbortSignal.any([
+                ...(signal ? [signal] : []),
+                providerRetryAbortController.signal,
+                closeoutAbortController.signal,
+              ]);
               let providerRetryTimeout:
                 | ReturnType<typeof setTimeout>
                 | undefined;
@@ -2689,6 +4183,34 @@ export async function answerFastAgentQuestion({
                           providerRetryTimeout.unref();
                         }
                         await reportProviderRetryEvent(event);
+                        // OpenCode is about to sleep out its own backoff
+                        // inside this process, which is the wait a restart
+                        // interrupts most often. A replay-safe turn parks
+                        // at that time instead and lets the queue re-prompt;
+                        // the abort below ends this prompt with the park as
+                        // its reason. The horizon and handoff cap bound the
+                        // parks, after which OpenCode's in-process retries
+                        // resume.
+                        if (event.nextRetryAtMs !== undefined) {
+                          const parkedUntil = await deferInferenceRetry({
+                            failure: classifyNonTaskInferenceError(
+                              new Error(event.message),
+                            ),
+                            attemptNumber: durableRetriesConsumed + 1,
+                            delayMs: Math.max(
+                              0,
+                              event.nextRetryAtMs - Date.now(),
+                            ),
+                            inProcessAttempt: event.attempt,
+                          });
+                          if (parkedUntil) {
+                            providerRetryAbortController.abort(
+                              new FastAgentDurableRetryScheduledError(
+                                parkedUntil,
+                              ),
+                            );
+                          }
+                        }
                       },
                       ...(imageFilesForAttempt.length
                         ? {
@@ -2716,6 +4238,7 @@ export async function answerFastAgentQuestion({
                         diagnostics.recordModelResolved(model);
                       },
                       onMessageCompleted: (message) => {
+                        diagnostics.recordAssistantMessageCompleted(message);
                         completedOpenCodeMessage = message;
                         completedOpenCodeInstructionVersion =
                           getInstructionVersion(message.id ?? undefined);
@@ -2725,20 +4248,46 @@ export async function answerFastAgentQuestion({
                         turnProgressMarker += 1;
                         noteInferenceRecoveryProgress();
                       },
-                      onAssistantMessageStarted: (
+                      onAssistantMessageStarted: async (
                         message: NonTaskOpenCodeAssistantMessage,
                       ) => {
+                        diagnostics.recordAssistantMessageStarted();
                         assistantInstructionVersions.set(
                           message.id,
                           currentInstructionVersion,
                         );
+                        if (!isInstructionClosed()) return;
+                        // A model request starting after the closeout is the
+                        // trailing request that only ever produces unseen
+                        // text. Let an in-flight steer drain land first: a
+                        // queued follow-up reopens the turn instead.
+                        await activeHumanSteerPoll.catch(() => undefined);
+                        if (
+                          !isInstructionClosed() ||
+                          activeToolExecutions > 0 ||
+                          closeoutAbortController.signal.aborted
+                        ) {
+                          return;
+                        }
+                        diagnostics.recordCloseoutAbort();
+                        closeoutAbortController.abort(
+                          new FastAgentTurnClosedError(),
+                        );
                       },
-                      onPromptStarted: () => {
+                      onAssistantMessageCompleted: (message) => {
+                        diagnostics.recordAssistantMessageCompleted(message);
+                        return schedulePendingHumanSteerDrain();
+                      },
+                      onPromptStarted: (setupTiming) => {
                         promptStarted = true;
                         diagnostics.markInferenceStarted();
+                        diagnostics.recordInferenceSetupTiming(setupTiming);
                       },
                       onNativeSteerReady: (steer) => {
                         nativeSteer = steer;
+                        // The prompt becoming active is the first native
+                        // pickup boundary. Messages admitted during setup are
+                        // already accumulated and can be submitted together.
                         schedulePendingHumanSteerDrain();
                       },
                       onNativeSteerClosed: () => {
@@ -2772,12 +4321,7 @@ export async function answerFastAgentQuestion({
                           bindFastAgentNativeToolExecutor(
                             subagentSessionID,
                             session.id,
-                            () =>
-                              Promise.resolve({
-                                success: false,
-                                error:
-                                  'That tool is reserved for the Fast parent agent.',
-                              }),
+                            executeSubagentNativeTool,
                             {
                               allowSkillAccess: false,
                               allowSpillRecovery: false,
@@ -2787,6 +4331,8 @@ export async function answerFastAgentQuestion({
                           ),
                         );
                       },
+                      onParentTaskPartUpdated: persistOpenCodeTaskPart,
+                      onAssistantTextUpdated,
                     },
                   );
                 const result = await resultPromise;
@@ -2811,6 +4357,29 @@ export async function answerFastAgentQuestion({
                 });
                 return result;
               } catch (error) {
+                if (closeoutAbortController.signal.aborted) {
+                  // The visible closeout already went out; the aborted
+                  // request was the trailing one. The turn is complete.
+                  captureFastAgentInferenceAttemptOutcome({
+                    userId,
+                    sessionId: session.id,
+                    turnId,
+                    surface: conversation.surface,
+                    sessionPath: attemptSessionPath,
+                    promptKind,
+                    attemptNumber: inferenceAttemptNumber,
+                    outcome: 'success',
+                    stage: 'model_generation',
+                    elapsedMs: Date.now() - attemptStartedAt,
+                    resolvedModel: resolvedInferenceModel,
+                    providerRetryEventCount,
+                  });
+                  return '';
+                }
+                // A parked turn ended this prompt on purpose; the outer
+                // handler records the outcome, not a failed attempt.
+                const parked = findFastAgentDurableRetryScheduledError(error);
+                if (parked) throw parked;
                 const failure = classifyNonTaskInferenceError(error);
                 const attemptStage = !resolvedInferenceModel
                   ? 'model_resolution'
@@ -2904,6 +4473,7 @@ export async function answerFastAgentQuestion({
                 // conversation lock forever if the provider stalls again.
                 promptTimeoutMs = FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS;
               },
+              deferRetry: deferInferenceRetry,
               signal,
             },
           );
@@ -2935,45 +4505,64 @@ export async function answerFastAgentQuestion({
       terminalInstructionVersion === currentInstructionVersion &&
       !isInstructionClosed(terminalInstructionVersion)
     ) {
-      const message = promptText.trim();
+      const message = resolveTerminalReplyText(promptText).trim();
+      // The terminal closeout stays inside replay: its intent is recorded
+      // before the post and its reply row right after, so a resumed run
+      // settles on that record instead of posting again.
       if (message) {
-        await postReply(
-          { purpose: 'closeout', message },
-          false,
-          completedOpenCodeMessage,
-          terminalInstructionVersion,
+        const streamedEvent = await takeStreamedReplyEvent();
+        await postRecordedSystemCloseout(message, () =>
+          postReply(
+            { purpose: 'closeout', message },
+            false,
+            completedOpenCodeMessage,
+            terminalInstructionVersion,
+            streamedEvent,
+          ),
         );
       } else if (!visibleUpdatePosted) {
         // A delivered update is already a complete visible response. Stay
         // silent rather than append a generic closeout that contradicts it.
-        await postReply(
-          {
-            purpose: 'closeout',
-            message:
-              'I could not complete that request within the available turn.',
-          },
-          false,
-          undefined,
-          terminalInstructionVersion,
+        const fallback =
+          'I could not complete that request within the available turn.';
+        await postRecordedSystemCloseout(fallback, () =>
+          postReply(
+            { purpose: 'closeout', message: fallback },
+            false,
+            undefined,
+            terminalInstructionVersion,
+          ),
         );
       } else if (platformEvent && platformEventVisibility === 'required') {
         // A visibility-required platform event promises a closeout even when
         // an intro ack or launch kickoff already posted a visible update
         // (e.g. the setup kickoff ending on an empty terminal response).
-        await postReply(
-          {
-            purpose: 'closeout',
-            message: 'I will post updates here as this progresses.',
-          },
-          false,
-          undefined,
-          terminalInstructionVersion,
+        const fallback = 'I will post updates here as this progresses.';
+        await postRecordedSystemCloseout(fallback, () =>
+          postReply(
+            { purpose: 'closeout', message: fallback },
+            false,
+            undefined,
+            terminalInstructionVersion,
+          ),
         );
       }
     }
+    await settleDurableTurn();
     await mirrorPendingMessages();
     return lastVisibleMessage;
   } catch (error) {
+    if (error instanceof FastAgentDurableRetryScheduledError) {
+      // The turn is parked, not failed: its notice stays active for the
+      // resumed run to edit, its row waits for the scheduled time, and no
+      // closeout is owed by this execution. The process-local OpenCode
+      // session is dropped because the resumed run rebuilds from history.
+      diagnostics.recordFailure('cancelled', error);
+      if (canonicalConversationId) {
+        fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
+      }
+      throw error;
+    }
     const terminalError =
       signal?.aborted && signal.reason instanceof Error ? signal.reason : error;
     const storageFull = isFastAgentStorageFullError(terminalError);
@@ -2997,40 +4586,87 @@ export async function answerFastAgentQuestion({
         terminalError instanceof FastAgentProcessShutdownError;
       const lockOwnershipLost =
         terminalError instanceof FastAgentTurnLockLostError;
+      const interruptionReason: FastAgentInterruptionReason =
+        shutdownInterrupted
+          ? 'api_shutdown'
+          : lockOwnershipLost
+            ? 'lock_lost'
+            : 'turn_aborted';
+      // Only ownership losses the turn did not choose (a restart, a lost
+      // conversation lock) are resumable; a deliberate cancellation is not.
+      const resumable =
+        durableTurnReplayable &&
+        Boolean(durableAdmission) &&
+        (shutdownInterrupted || lockOwnershipLost);
+      console.error(
+        `[Fast Agent] Turn interrupted (reason=${interruptionReason}, conversation=${canonicalConversationId ?? 'unknown'}, retryNoticeVisible=${Boolean(inferenceRetryReply)}, resumable=${resumable}, error=${formatErrorForLog(terminalError)})`,
+      );
       try {
         if (canonicalConversationId) {
           fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
         }
-        if (!lockOwnershipLost && inferenceRetryReply) {
+        if (resumable && durableAdmission) {
+          // Hand the turn back to the durable queue instead of the user: the
+          // claim release makes the row eligible at once, the wake hint asks
+          // the queue not to wait for its sweep, and no closeout is posted
+          // because the resumed run will deliver the real answer.
+          durableTurnReplayable = false;
+          await releaseFastAgentDurableTurnClaim(
+            durableAdmission.eventId,
+          ).catch((releaseError) => {
+            console.warn(
+              `[Fast Agent] Failed to release durable turn claim: ${formatErrorForLog(releaseError)}`,
+            );
+          });
+          await adapter.requestDurableResume?.().catch((wakeError) => {
+            console.warn(
+              `[Fast Agent] Failed to wake durable turn resume: ${formatErrorForLog(wakeError)}`,
+            );
+          });
+        }
+        // A terminal interruption closeout is only safe once the row can no
+        // longer be re-run; if that revocation did not land, post nothing
+        // and let recovery own the outcome.
+        const terminalCloseoutAllowed =
+          resumable || !durableAdmission
+            ? !resumable
+            : await revokeDurableTurnReplay(
+                `Turn interrupted without replay (${interruptionReason}).`,
+              );
+        if (!terminalCloseoutAllowed) {
+          // Resumable turns and unrevoked rows fall through to the rethrow
+          // below without a user-facing closeout.
+        } else if (!lockOwnershipLost && inferenceRetryReply) {
+          // A visible retry notice must not stay up claiming a retry that
+          // will never come: a deliberately cancelled turn, or the rare turn
+          // whose admission write failed and so has no row to resume from.
+          // Every admitted turn resumes instead and never reaches here.
           await replaceInferenceRetryReply(
             {
               purpose: 'closeout',
               message: INTERRUPTED_INFERENCE_RETRY_MESSAGE,
             },
             true,
+            undefined,
+            interruptionReason,
           );
-        } else if (shutdownInterrupted && !isInstructionClosed()) {
-          const reply = {
-            purpose: 'closeout' as const,
-            message: INTERRUPTED_INFERENCE_RETRY_MESSAGE,
-          };
-          try {
-            const posted = await adapter.postReply(reply);
-            diagnostics.recordVisibleReply();
-            const retryEvent = inferenceRetryCanonicalEvent;
-            await persistAssistantReply({
-              reply,
-              event:
-                retryEvent ??
-                allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
-              platformMessageId: posted?.messageId,
-              inferenceRetryNotice: Boolean(retryEvent),
-            });
-          } catch (postError) {
-            console.error(
-              `[Fast Agent] Failed to post shutdown closeout: ${formatErrorForLog(postError)}`,
+        } else if (
+          lockOwnershipLost &&
+          canonicalConversationId &&
+          inferenceRetryCanonicalEvent
+        ) {
+          // This owner is fenced off from terminal writes, but the fill-only
+          // cause stamp is safe: it no-ops once a successor reconciles the
+          // notice, and the reconciler folds it into its later closeout.
+          await markFastAgentInferenceRetryNoticeInterruption(
+            canonicalConversationId,
+            inferenceRetryCanonicalEvent.eventId,
+            'lock_lost',
+          ).catch((markError) => {
+            console.warn(
+              `[Fast Agent] Failed to record lock-lost interruption cause: ${formatErrorForLog(markError)}`,
             );
-          }
+          });
         }
       } finally {
         if (shutdownInterrupted) {
@@ -3055,15 +4691,23 @@ export async function answerFastAgentQuestion({
             inferenceRetryAttempted,
           )
         : 'I hit an error while handling that request. Please try again in a moment.';
+    // The error closeout is recorded like any other closeout: its intent
+    // before the post and its reply row right after, so a run that resumes
+    // this turn sees it and does not post a second one.
     if (!isInstructionClosed()) {
       try {
         const reply = { purpose: 'closeout' as const, message };
-        if (
-          !(await replaceInferenceRetryReply(reply, true, () =>
-            diagnostics.recordVisibleReply(),
-          ))
-        ) {
-          const posted = await adapter.postReply(reply);
+        await postRecordedSystemCloseout(message, async () => {
+          if (
+            await replaceInferenceRetryReply(reply, true, () =>
+              diagnostics.recordVisibleReply(),
+            )
+          ) {
+            return;
+          }
+          const posted =
+            (await surfaceReplyStream.deliver(reply)) ??
+            (await adapter.postReply(reply));
           diagnostics.recordVisibleReply();
           turnVisibleMessages.push(buildAssistantTextMessage(message));
           await persistAssistantReply({
@@ -3073,7 +4717,7 @@ export async function answerFastAgentQuestion({
             ),
             platformMessageId: posted?.messageId,
           });
-        }
+        });
         inferenceRetryReply = undefined;
         inferenceRetryMessageIndex = undefined;
         inferenceRetryCanonicalEvent = undefined;
@@ -3096,8 +4740,14 @@ export async function answerFastAgentQuestion({
         );
       }
     }
+    await settleDurableTurn();
     return lastVisibleMessage || message;
   } finally {
+    if (respondingLeaseRenewalTimer) clearInterval(respondingLeaseRenewalTimer);
+    respondingLeaseRenewalTimer = undefined;
+    // Wait out any renewal already in flight so the terminal lease write
+    // below cannot be overwritten by a stale extension.
+    await respondingLeaseRenewal;
     signal?.removeEventListener('abort', stopHumanSteerPolling);
     stopHumanSteerPolling();
     await activeHumanSteerPoll;
@@ -3109,7 +4759,9 @@ export async function answerFastAgentQuestion({
     // scheduled reconciler repairs the marker later when no successor appears.
     const lockOwnershipLost =
       signal?.aborted && signal.reason instanceof FastAgentTurnLockLostError;
-    if (canonicalConversationId && !lockOwnershipLost) {
+    // A parked turn is still responding from the user's point of view: the
+    // lease and the active retry notice carry over to the scheduled run.
+    if (canonicalConversationId && !lockOwnershipLost && !durableTurnDeferred) {
       await setFastSessionResponding(canonicalConversationId, false).catch(
         (error) => {
           console.warn(
@@ -3120,6 +4772,7 @@ export async function answerFastAgentQuestion({
       if (inferenceRetryAttempted) {
         await reconcileFastAgentInferenceRetryNotices(
           canonicalConversationId,
+          'turn_settled_reconcile',
         ).catch((error) => {
           console.warn(
             `[Fast Agent] Failed to reconcile settled inference retry notices: ${formatErrorForLog(error)}`,
@@ -3127,6 +4780,11 @@ export async function answerFastAgentQuestion({
         });
       }
     }
+    dropStreamedReply();
+    // A stream no reply finished (a cancelled or parked turn) is closed so
+    // Slack stops showing it as still writing; its text stays.
+    await surfaceReplyStream.abort();
+    await replyStream.dispose();
     await adapter.activity?.settle().catch((error) => {
       console.warn(
         `[Fast Agent] Failed to settle surface activity: ${formatErrorForLog(error)}`,

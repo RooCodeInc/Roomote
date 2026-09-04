@@ -18,7 +18,7 @@ describe('implement-changes validation scope guidance', () => {
       'the automated validation step may stop at the smallest relevant static checks',
     );
     expect(skillContent).toContain(
-      'follow the separate delegated visual-proof handoff defined earlier in this workflow',
+      'follow the separate visual-proof step defined earlier in this workflow',
     );
     expect(skillContent).toContain(
       'Do not add or expand automated tests whose main assertion is an exact Tailwind class',

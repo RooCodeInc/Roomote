@@ -36,11 +36,18 @@ export type FastAgentActiveTask = {
 export async function getOrCreateFastAgentSession({
   userId,
   conversation,
+  sessionId,
 }: {
   userId: string;
   conversation: FastAgentConversation;
+  /** Session to bind a newly created conversation to; see the repository. */
+  sessionId?: string;
 }): Promise<FastAgentSessionRecord> {
-  return fastAgentConversationRepository.getOrCreate({ userId, conversation });
+  return fastAgentConversationRepository.getOrCreate({
+    userId,
+    conversation,
+    ...(sessionId ? { sessionId } : {}),
+  });
 }
 
 export async function hasFastAgentSession(

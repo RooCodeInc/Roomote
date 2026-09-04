@@ -39,6 +39,9 @@ describe('Roomote MCP management contract', () => {
     expect(roomoteManagementFieldSchemas.sessionId.description).toContain(
       'when taskId is omitted',
     );
+    expect(roomoteManagementFieldSchemas.sessionId.description).toContain(
+      'responses return the canonical Session ID',
+    );
   });
 
   it('defaults communication to Sessions and lets taskId override naturally', () => {

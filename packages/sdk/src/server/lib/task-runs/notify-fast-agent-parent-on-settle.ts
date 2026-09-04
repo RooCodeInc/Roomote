@@ -1,6 +1,10 @@
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { canRetryFailedStart, getTaskUrl } from '@roomote/cloud-agents/server';
-import { RunStatus, getFastAgentParentFromPayload } from '@roomote/types';
+import {
+  RunStatus,
+  getFastAgentParentFromPayload,
+  isPrReviewRun,
+} from '@roomote/types';
 import {
   type TaskRun,
   and,
@@ -50,6 +54,15 @@ export async function notifyFastAgentParentOnSettle(
 ): Promise<void> {
   const parent = getFastAgentParentFromPayload(run.payload);
   if (!parent) {
+    return;
+  }
+
+  // A review child's outcome reaches the session through exactly one pipe,
+  // the PR feedback relay built from its summary comment. That holds for
+  // automatic reviews of a session-owned PR and for reviews the session
+  // requested itself, so a successful settle never announces here; only
+  // failures do, because a failed review never posts a summary.
+  if (isPrReviewRun(run) && status !== RunStatus.Failed) {
     return;
   }
 

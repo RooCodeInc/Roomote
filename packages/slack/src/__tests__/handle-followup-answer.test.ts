@@ -88,9 +88,9 @@ vi.mock('../find-active-slack-task-run', () => ({
   findActiveSlackTaskRun: findActiveSlackTaskRunMock,
 }));
 
-vi.mock('../block-kit', async () => {
+vi.mock('../account-link', async () => {
   const actual =
-    await vi.importActual<typeof import('../block-kit')>('../block-kit');
+    await vi.importActual<typeof import('../account-link')>('../account-link');
 
   return {
     ...actual,

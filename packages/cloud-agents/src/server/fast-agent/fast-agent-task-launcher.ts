@@ -3,13 +3,18 @@ import {
   buildFastAgentChildTaskMetadata,
   buildSlackThreadPermalink,
   TaskPayloadKind,
+  type ReasoningEffort,
   type StandardTask,
   type TaskInitiator,
   type TaskSurface,
   type TaskTrigger,
 } from '@roomote/types';
 
-import { enqueueTask } from '../task-run-queue';
+import {
+  enqueueTask,
+  type TaskChannelBindings,
+  type TaskPrLinkage,
+} from '../task-run-queue';
 import { getTaskUrl } from '../task-url';
 import type { LaunchFastAgentTask } from './fast-agent-conversation';
 
@@ -36,10 +41,17 @@ export function createFastAgentTaskLauncher(
     initiator?: TaskInitiator;
     trigger?: TaskTrigger;
     taskUrlCampaign: string;
+    /** Provider bindings recorded on the task, for example a Linear session. */
+    channels?: TaskChannelBindings;
+    /** Pull request the task works on, recorded with the task at launch. */
+    prLinkage?: TaskPrLinkage;
     buildTask: (input: {
       prompt: string;
       environmentId: string | null;
+      branch?: string;
+      launchIdempotencyKey?: string;
       model?: string | null;
+      reasoningEffort?: ReasoningEffort | null;
       parentSessionId: string;
     }) => StandardTask | Promise<StandardTask>;
   } & FastAgentTaskLaunchHooks,
@@ -48,25 +60,42 @@ export function createFastAgentTaskLauncher(
     prompt,
     images,
     environmentId,
+    branch,
+    launchIdempotencyKey,
     model,
+    reasoningEffort,
     parentSessionId,
     postKickoff,
   }) => {
     const builtTask = await params.buildTask({
       prompt,
       environmentId,
+      branch,
+      launchIdempotencyKey,
       model,
+      reasoningEffort,
       parentSessionId,
     });
+    const taskWithLaunchOverrides =
+      branch || launchIdempotencyKey
+        ? {
+            ...builtTask,
+            payload: {
+              ...builtTask.payload,
+              ...(branch ? { branch } : {}),
+              ...(launchIdempotencyKey ? { launchIdempotencyKey } : {}),
+            },
+          }
+        : builtTask;
     const task = images?.length
       ? {
-          ...builtTask,
+          ...taskWithLaunchOverrides,
           payload: {
-            ...builtTask.payload,
+            ...taskWithLaunchOverrides.payload,
             images,
           },
         }
-      : builtTask;
+      : taskWithLaunchOverrides;
     let taskUrl: string | undefined;
     let preparedTaskRun: { id: number; taskId: string } | undefined;
 
@@ -77,6 +106,8 @@ export function createFastAgentTaskLauncher(
         workflow: 'standard',
         surface: params.surface,
         trigger: params.trigger ?? 'message',
+        ...(params.channels ? { channels: params.channels } : {}),
+        ...(params.prLinkage ? { prLinkage: params.prLinkage } : {}),
       },
       {
         beforeEnqueue: async (taskRun) => {
@@ -137,6 +168,11 @@ export type FastAgentSlackTaskLauncherParams = {
   initiator?: TaskInitiator;
   /** Opt the child into the native Slack task card in the parent thread. */
   liveTaskStream?: boolean;
+  /**
+   * Repository the child runs against when the launch is pinned to a bare
+   * repository rather than an environment. Defaults to all repositories.
+   */
+  repoForPayload?: string;
 } & FastAgentTaskLaunchHooks;
 
 export function createFastAgentSlackTaskLauncher(
@@ -158,10 +194,16 @@ export function createFastAgentSlackTaskLauncher(
     afterKickoff: params.afterKickoff,
     onQueueFailure: params.onQueueFailure,
     rendersTaskLink: params.rendersTaskLink,
-    buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
+    buildTask: ({
+      prompt,
+      environmentId,
+      model,
+      reasoningEffort,
+      parentSessionId,
+    }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
-        repo: ALL_REPOSITORIES,
+        repo: params.repoForPayload ?? ALL_REPOSITORIES,
         description: prompt,
         communicationProvider: 'slack',
         communicationTeamId: params.teamId,
@@ -193,6 +235,7 @@ export function createFastAgentSlackTaskLauncher(
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
       },
     }),
   });
@@ -211,7 +254,15 @@ export function createFastAgentWebTaskLauncher(params: {
     surface: 'web',
     taskUrlCampaign: 'fast-delegation',
     rendersTaskLink: true,
-    buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
+    buildTask: ({
+      prompt,
+      environmentId,
+      branch,
+      launchIdempotencyKey,
+      model,
+      reasoningEffort,
+      parentSessionId,
+    }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
         repo: ALL_REPOSITORIES,
@@ -223,9 +274,12 @@ export function createFastAgentWebTaskLauncher(params: {
         ...(environmentId && environmentId !== ALL_REPOSITORIES
           ? { environmentId }
           : {}),
+        ...(branch ? { branch } : {}),
+        ...(launchIdempotencyKey ? { launchIdempotencyKey } : {}),
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
       },
     }),
   });

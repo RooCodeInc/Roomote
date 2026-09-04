@@ -19,12 +19,16 @@ export function TaskInputStack({
   onFileSearchOpen,
   onCommandSearchOpen,
   scrollToBottom,
+  promptPlaceholder,
+  autoFocus,
 }: {
   session: TaskSession;
   promptInputRef: { current: PromptInputHandle | null };
   onFileSearchOpen: (insertPosition?: number) => void;
   onCommandSearchOpen: (insertPosition?: number) => void;
   scrollToBottom: () => void;
+  promptPlaceholder?: string;
+  autoFocus?: boolean;
 }) {
   const { shouldHidePromptInput } = usePendingUserInputRequestState();
   const [visibleEnvVarRequestKey, setVisibleEnvVarRequestKey] = useState<
@@ -59,6 +63,8 @@ export function TaskInputStack({
             taskRun={session.taskRun}
             hasTransportError={session.hasTransportError}
             scrollToBottom={scrollToBottom}
+            placeholder={promptPlaceholder}
+            autoFocus={autoFocus}
           />
         </div>
       )}

@@ -125,9 +125,13 @@ function getInputSchemaField(
 function unwrapSchema(schema: z.ZodTypeAny): z.ZodTypeAny {
   let current = schema;
 
-  while (current instanceof z.ZodOptional || current instanceof z.ZodEffects) {
+  while (
+    current instanceof z.ZodOptional ||
+    current instanceof z.ZodNullable ||
+    current instanceof z.ZodEffects
+  ) {
     current =
-      current instanceof z.ZodOptional ? current.unwrap() : current.innerType();
+      current instanceof z.ZodEffects ? current.innerType() : current.unwrap();
   }
 
   return current;
@@ -1066,11 +1070,9 @@ describe('roomote MCP tool descriptions', () => {
       .definition as unknown as z.ZodType;
 
     // `definition` is optional (not required for the record_verification
-    // action), so unwrap the optional before asserting the inner string schema.
-    const definitionSchema =
-      definitionField instanceof z.ZodOptional
-        ? (definitionField.unwrap() as z.ZodType)
-        : definitionField;
+    // action) and optionals accept null on the wire, so unwrap those layers
+    // before asserting the inner string schema.
+    const definitionSchema = unwrapSchema(definitionField);
 
     expect(definitionSchema).toBeInstanceOf(z.ZodString);
     expect(definitionSchema).not.toBeInstanceOf(z.ZodUnion);
@@ -1253,6 +1255,56 @@ describe('roomote MCP tool descriptions', () => {
         },
       ],
     });
+  });
+
+  it('exposes and forwards pull request reviewer targets', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          success: true,
+          action: 'request_pull_request_reviewers',
+          provider: 'github',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          number: 12,
+          applied: true,
+          warnings: [],
+        }),
+      }),
+    );
+
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+      ROOMOTE_TASK_ID: 'task_123',
+    });
+    const sourceControlTool = getRegisteredTool(
+      registeredTools,
+      'manage_source_control',
+    );
+
+    await sourceControlTool.handler?.({
+      action: 'request_pull_request_reviewers',
+      repositoryFullName: 'RooCodeInc/Roomote',
+      prNumber: 12,
+      reviewers: ['alice'],
+      teamReviewers: ['platform'],
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/tasks/task_123/source_control',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'request_pull_request_reviewers',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          prNumber: 12,
+          reviewers: ['alice'],
+          teamReviewers: ['platform'],
+        }),
+      }),
+    );
   });
 
   it('forwards reviewId from manage_source_control tool params', async () => {

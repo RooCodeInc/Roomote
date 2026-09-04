@@ -28,7 +28,7 @@ vi.mock('@roomote/db/server', () => ({
   isNull: vi.fn(() => 'not-suspended-filter'),
 }));
 
-vi.mock('../../router/mcp-policy', () => ({
+vi.mock('../../mcp-policy', () => ({
   isRouterMcpServerEnabled: vi.fn(() => true),
 }));
 
@@ -456,6 +456,47 @@ describe('fast-agent integration broker', () => {
       }),
     ]);
     expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps serving a catalog left idle for a long time instead of blocking on rediscovery', async () => {
+    vi.useFakeTimers({ now: new Date('2026-08-19T00:00:00.000Z') });
+    mocks.configuredServers = {
+      notion: {
+        url: 'https://api.example.com/api/mcp/notion',
+        headers: {},
+      },
+    };
+
+    await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(1);
+
+    // Well past the refresh interval. Another user's cache miss runs the
+    // eviction pass that used to drop entries this old.
+    await vi.advanceTimersByTimeAsync(45 * 60_000);
+    await listFastAgentIntegrations({
+      userId: 'user-2',
+      apiBaseUrl: 'https://api.example.com',
+    });
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
+
+    mocks.listMcpTools.mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+    await expect(
+      listFastAgentIntegrations({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: 'notion',
+        tools: [expect.objectContaining({ name: 'search' })],
+      }),
+    ]);
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(3);
   });
 
   it('excludes tools disabled by the deployment', async () => {

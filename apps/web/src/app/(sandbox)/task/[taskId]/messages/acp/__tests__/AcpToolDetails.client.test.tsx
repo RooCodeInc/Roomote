@@ -437,18 +437,80 @@ describe('AcpToolDetails', () => {
     );
   });
 
-  it('hides expanded details for Roomote Slack lifecycle tools', () => {
+  it('shows the sent message for Roomote chat replies', () => {
+    const result = { success: true, delivered: true };
+    render(
+      <AcpToolDetails
+        msg={{
+          ...buildMessage({
+            kind: 'mcp',
+            title: 'send_chat_reply',
+            isMcp: true,
+            mcpServerName: 'roomote',
+            mcpToolName: 'send_chat_reply',
+            serverName: 'roomote',
+            toolName: 'send_chat_reply',
+            rawInput: {
+              arguments: {
+                message: 'Brief Slack update.',
+                purpose: 'closeout',
+              },
+            },
+            output: JSON.stringify(result),
+          } as Partial<AcpToolResultUiMessage['data']>),
+          text: JSON.stringify(result),
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Input')).toBeInTheDocument();
+    expect(codeBlockSpy.mock.calls.map(([props]) => props.code)).toEqual([
+      'message: Brief Slack update.',
+      ['success: true', 'delivered: true'].join('\n'),
+    ]);
+  });
+
+  it('shows the posted text and reaction name for channel tools', () => {
+    for (const [toolName, args, expected] of [
+      ['post_to_channel', { text: 'Deploy done.' }, 'text: Deploy done.'],
+      ['send_chat_reaction_emoji', { name: 'eyes' }, 'name: eyes'],
+    ] as const) {
+      codeBlockSpy.mockClear();
+      const { unmount } = render(
+        <AcpToolDetails
+          msg={{
+            ...buildMessage({
+              kind: 'mcp',
+              title: toolName,
+              isMcp: true,
+              mcpServerName: 'roomote',
+              mcpToolName: toolName,
+              serverName: 'roomote',
+              toolName,
+              rawInput: { arguments: args },
+              output: '{"success":true}',
+            } as Partial<AcpToolResultUiMessage['data']>),
+            text: '{"success":true}',
+          }}
+        />,
+      );
+      expect(codeBlockSpy.mock.calls[0]?.[0].code).toBe(expected);
+      unmount();
+    }
+  });
+
+  it('hides expanded details for effect-free Roomote lifecycle tools', () => {
     const { container } = render(
       <AcpToolDetails
         msg={buildMessage({
           kind: 'mcp',
-          title: 'send_chat_reply',
+          title: 'ignore_event',
           isMcp: true,
           mcpServerName: 'roomote',
-          mcpToolName: 'send_chat_reply',
+          mcpToolName: 'ignore_event',
           serverName: 'roomote',
-          toolName: 'send_chat_reply',
-          output: '{"success":true,"summary":"Brief Slack update."}',
+          toolName: 'ignore_event',
+          output: '{"success":true,"ignored":true}',
         })}
       />,
     );

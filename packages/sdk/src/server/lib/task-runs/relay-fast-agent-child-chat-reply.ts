@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { and, db, eq, taskRuns } from '@roomote/db/server';
-import { getFastAgentParentFromPayload } from '@roomote/types';
+import { getFastAgentParentFromPayload, isPrReviewRun } from '@roomote/types';
 
 import { enqueueFastAgentParentEvent } from '../fast-agent-parent-event-queue';
 
@@ -22,11 +22,17 @@ export async function relayFastAgentChildChatReply(input: {
 }): Promise<{ relayed: boolean }> {
   const run = await db.query.taskRuns.findFirst({
     where: and(eq(taskRuns.id, input.runId), eq(taskRuns.taskId, input.taskId)),
-    columns: { id: true, taskId: true, payload: true },
+    columns: { id: true, taskId: true, payload: true, payloadKind: true },
   });
   const parent = getFastAgentParentFromPayload(run?.payload);
 
   if (!run || !parent) {
+    return { relayed: false };
+  }
+
+  // A review child's outcome reaches the session through the PR feedback
+  // relay alone; its narration would double-announce the same result.
+  if (isPrReviewRun(run)) {
     return { relayed: false };
   }
 

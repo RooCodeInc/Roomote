@@ -37,7 +37,27 @@ export * from './llm-task-title';
 export * from './mcp-self-setup';
 export * from './mcp-tool-client';
 export * from './non-task-provider-usage';
-export * from './router';
+export {
+  getAvailableEnvironments,
+  type RoutableEnvironment,
+  type RoutingWorkspace,
+} from './available-environments';
+export {
+  evaluateChannelLaunchCriteria,
+  type ChannelLaunchGateActivityEntry,
+  type ChannelLaunchGateDecision,
+} from './channel-launch-gate';
+export {
+  selectDiscordForumTag,
+  type DiscordForumTagCandidate,
+  type DiscordForumTagSelection,
+} from './discord-forum-tag';
+export { resolveRequestedWorkKindDecision } from './requested-work-kind';
+export {
+  getRouterMcpServerPolicy,
+  getRouterMcpUpstreamConstraints,
+  type RouterMcpServerId,
+} from './mcp-policy';
 export * from './slack-question-channel-suggestions';
 export * from './suggested-tasks-prompt';
 export * from './task-suggestion-prompts';
