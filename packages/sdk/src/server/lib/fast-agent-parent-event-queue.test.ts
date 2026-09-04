@@ -531,7 +531,20 @@ describe('Fast parent event durable queue', () => {
       .mockResolvedValueOnce({ deliveredAt: new Date(), discardedAt: null })
       .mockResolvedValueOnce(undefined);
     mocks.acquireLock.mockResolvedValueOnce(mocks.releaseLock);
-    mocks.deliver.mockResolvedValueOnce('delivered');
+    let boundDuringDelivery:
+      | { durableRowId?: string; durableResume?: () => Promise<void> }
+      | undefined;
+    mocks.deliver.mockImplementationOnce(async () => {
+      const lock = mocks.releaseLock as typeof mocks.releaseLock & {
+        durableRowId?: string;
+        durableResume?: () => Promise<void>;
+      };
+      boundDuringDelivery = {
+        durableRowId: lock.durableRowId,
+        durableResume: lock.durableResume,
+      };
+      return 'delivered';
+    });
 
     await drainFastAgentParentEvents({
       conversationId: parent.sessionId,
@@ -546,6 +559,19 @@ describe('Fast parent event durable queue', () => {
       }),
       mocks.releaseLock,
     );
+    // While the resumed turn runs, its row is bound to the lock so a process
+    // shutdown that aborts it during setup can still release the claim and
+    // wake the queue; the binding does not outlive the delivery.
+    expect(boundDuringDelivery?.durableRowId).toBe('inline-1');
+    await boundDuringDelivery?.durableResume?.();
+    expect(mocks.queueAdd).toHaveBeenCalledWith(
+      'deliver',
+      { conversationId: parent.sessionId, eventKey: inlineRow.eventKey },
+      { jobId: inlineRow.eventKey },
+    );
+    expect(
+      (mocks.releaseLock as { durableRowId?: string }).durableRowId,
+    ).toBeUndefined();
     // The resumed run settled its own row; the drain must not overwrite
     // that settlement (a replay-withdrawn row would otherwise also read as
     // delivered, losing its recorded reason).
