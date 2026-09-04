@@ -121,7 +121,7 @@ export function SandboxShell({
         className={`md:hidden top-0 ${zIndex('NAV_HEADER')} w-full shrink-0 bg-card`}
       >
         {isSignedIn ? (
-          <NavbarHeader setupIncomplete={needsAdminSetup} />
+          <NavbarHeader />
         ) : (
           <div className="h-(--header-height) mx-auto px-3 flex items-center">
             <Link href="/" className="shrink-0">

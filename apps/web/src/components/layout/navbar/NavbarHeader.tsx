@@ -13,20 +13,11 @@ import { UserMenu } from '../UserMenu';
 
 import { NavbarDrawer } from './NavbarDrawer';
 
-type NavbarHeaderProps = Omit<
-  React.HTMLAttributes<HTMLDivElement>,
-  'children'
-> & {
-  setupIncomplete?: boolean;
-};
+type NavbarHeaderProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'children'>;
 
 const MOBILE_HEADER_LOGO_SRC = '/logos/r.svg';
 
-export const NavbarHeader = ({
-  className,
-  setupIncomplete = false,
-  ...props
-}: NavbarHeaderProps) => {
+export const NavbarHeader = ({ className, ...props }: NavbarHeaderProps) => {
   const { setOpen: openCommandPalette } = useCommandPalette();
   useAuthorizedUser();
 
@@ -38,28 +29,17 @@ export const NavbarHeader = ({
       )}
       {...props}
     >
-      <NavbarDrawer setupIncomplete={setupIncomplete} />
-      {setupIncomplete ? (
+      <NavbarDrawer />
+      <Link href="/" className="shrink-0">
         <Image
           src={MOBILE_HEADER_LOGO_SRC}
           alt="Roomote"
           width={28}
           height={28}
           priority
-          className="h-7 w-7 shrink-0 dark:invert"
+          className="h-7 w-7 cursor-pointer transition-all duration-300 hover:scale-105 hover:opacity-80 dark:invert"
         />
-      ) : (
-        <Link href="/" className="shrink-0">
-          <Image
-            src={MOBILE_HEADER_LOGO_SRC}
-            alt="Roomote"
-            width={28}
-            height={28}
-            priority
-            className="h-7 w-7 cursor-pointer transition-all duration-300 hover:scale-105 hover:opacity-80 dark:invert"
-          />
-        </Link>
-      )}
+      </Link>
       <div className="flex-1" />
       <div className="hidden md:flex items-center gap-2">
         <UserMenu />
