@@ -27,8 +27,10 @@ import {
   CardContent,
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
+  Eye,
   Input,
   Label,
   Play,
@@ -297,6 +299,8 @@ export function CustomAutomationsSection() {
   const taskModelsQuery = useLaunchTaskModels();
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [promptAutomation, setPromptAutomation] =
+    useState<CustomAutomationListItem | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<CustomAutomationFormState>(EMPTY_FORM);
   const [resolvedCron, setResolvedCron] = useState<string | null>(null);
@@ -946,6 +950,27 @@ export function CustomAutomationsSection() {
         {isCreating || editingId ? renderEditor() : null}
       </Dialog>
 
+      <Dialog
+        open={Boolean(promptAutomation)}
+        onOpenChange={(open) => {
+          if (!open) setPromptAutomation(null);
+        }}
+      >
+        {promptAutomation ? (
+          <DialogContent size="lg">
+            <DialogHeader>
+              <DialogTitle>{promptAutomation.name}</DialogTitle>
+              <DialogDescription>Configured prompt</DialogDescription>
+            </DialogHeader>
+            <div className="rounded-md border bg-muted/30 p-4">
+              <p className="whitespace-pre-wrap break-words text-sm">
+                {promptAutomation.prompt}
+              </p>
+            </div>
+          </DialogContent>
+        ) : null}
+      </Dialog>
+
       {listQuery.isPending ? (
         <Card variant="snug" data-testid="custom-automations-skeleton">
           <CardContent>
@@ -1083,6 +1108,18 @@ export function CustomAutomationsSection() {
                         automation={row}
                         disabled={busy}
                       />
+                      <BasicTooltip content="View prompt">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          disabled={busy}
+                          aria-label={`View prompt for ${row.name}`}
+                          onClick={() => setPromptAutomation(row)}
+                        >
+                          <Eye />
+                        </Button>
+                      </BasicTooltip>
                       <BasicTooltip content="Configure">
                         <Button
                           type="button"
