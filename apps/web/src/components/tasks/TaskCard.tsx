@@ -105,7 +105,14 @@ export const TaskCard = ({
           {showAgentAvatar && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="size-8 flex items-center justify-center rounded-full border border-border bg-muted ring-1 ring-background">
+                <div
+                  className={cn(
+                    'size-8 flex items-center justify-center overflow-clip rounded-full border border-border ring-1 ring-background',
+                    task.attributionKind === 'automation'
+                      ? 'bg-white'
+                      : 'bg-muted',
+                  )}
+                >
                   {task.attributionKind === 'automation' ? (
                     <TaskAutomationIcon
                       automationKey={task.initiatorAutomation}
