@@ -85,11 +85,13 @@ function gitLabMergeRequestReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
+  therapistModeEnabled,
 }: {
   taskSpec: GithubPullRequestReviewOpenTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
+  therapistModeEnabled?: boolean;
 }) {
   const prompt = buildGitLabMergeRequestReviewPrompt({
     taskSpec,
@@ -107,6 +109,7 @@ function gitLabMergeRequestReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
+    therapistModeEnabled,
   });
 }
 
@@ -161,11 +164,13 @@ function giteaPullRequestReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
+  therapistModeEnabled,
 }: {
   taskSpec: GithubPullRequestReviewOpenTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
+  therapistModeEnabled?: boolean;
 }) {
   const prompt = buildGiteaPullRequestReviewPrompt({
     taskSpec,
@@ -183,6 +188,7 @@ function giteaPullRequestReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
+    therapistModeEnabled,
   });
 }
 
@@ -237,11 +243,13 @@ function bitbucketPullRequestReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
+  therapistModeEnabled,
 }: {
   taskSpec: GithubPullRequestReviewOpenTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
+  therapistModeEnabled?: boolean;
 }) {
   const prompt = buildBitbucketPullRequestReviewPrompt({
     taskSpec,
@@ -259,6 +267,7 @@ function bitbucketPullRequestReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
+    therapistModeEnabled,
   });
 }
 
@@ -313,11 +322,13 @@ function adoPullRequestReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
+  therapistModeEnabled,
 }: {
   taskSpec: GithubPullRequestReviewOpenTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
+  therapistModeEnabled?: boolean;
 }) {
   const prompt = buildAdoPullRequestReviewPrompt({
     taskSpec,
@@ -335,6 +346,7 @@ function adoPullRequestReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
+    therapistModeEnabled,
   });
 }
 
@@ -364,6 +376,7 @@ export async function githubPrReview({
         taskRunUrl,
         additionalInstructions,
         attribution,
+        therapistModeEnabled,
       });
     case 'gitea':
       return giteaPullRequestReview({
@@ -371,6 +384,7 @@ export async function githubPrReview({
         taskRunUrl,
         additionalInstructions,
         attribution,
+        therapistModeEnabled,
       });
     case 'bitbucket':
       return bitbucketPullRequestReview({
@@ -378,6 +392,7 @@ export async function githubPrReview({
         taskRunUrl,
         additionalInstructions,
         attribution,
+        therapistModeEnabled,
       });
     case 'ado':
       return adoPullRequestReview({
@@ -385,6 +400,7 @@ export async function githubPrReview({
         taskRunUrl,
         additionalInstructions,
         attribution,
+        therapistModeEnabled,
       });
     case 'github':
       break;
