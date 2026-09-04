@@ -1,5 +1,4 @@
 import type { AutomationRuntime } from '@roomote/db/server';
-import { SlackPostDeliveryError } from '@roomote/slack';
 
 import {
   handleMergeAnnouncerPush,
@@ -356,6 +355,7 @@ describe('handleMergeAnnouncerPush', () => {
         (block: { type?: string }) => block.type === 'image',
       ),
     ).toBe(false);
+    expect(postMessage.mock.calls[0]?.[0]?.fallbackBlocks).toBeUndefined();
   });
 
   it('omits the selected image when anonymous MIME validation fails', async () => {
@@ -473,18 +473,13 @@ describe('handleMergeAnnouncerPush', () => {
     );
   });
 
-  it('retries a rejected Slack image announcement without the image', async () => {
+  it('delegates rejected Slack image degradation to the adapter', async () => {
     const { dependencies, postMessage } = createDependencies();
     const imageUrl = 'https://cdn.example.com/settings.png';
     dependencies.generateAnnouncement.mockResolvedValue({
       summary: 'Updates the saved settings experience.',
       imageUrl,
     });
-    postMessage
-      .mockRejectedValueOnce(
-        new SlackPostDeliveryError({ slackErrorCode: 'invalid_blocks' }),
-      )
-      .mockResolvedValueOnce(undefined);
 
     const result = await handleMergeAnnouncerPush(
       createPayload({
@@ -502,49 +497,20 @@ describe('handleMergeAnnouncerPush', () => {
     );
 
     expect(result.status).toBe('ok');
-    expect(postMessage).toHaveBeenCalledTimes(2);
+    expect(postMessage).toHaveBeenCalledOnce();
     const firstContainer = postMessage.mock.calls[0]?.[0]?.blocks?.[0];
-    const secondContainer = postMessage.mock.calls[1]?.[0]?.blocks?.[0];
+    const fallbackContainer =
+      postMessage.mock.calls[0]?.[0]?.fallbackBlocks?.[0];
     expect(
       firstContainer?.child_blocks?.some(
         (block: { type?: string }) => block.type === 'image',
       ),
     ).toBe(true);
     expect(
-      secondContainer?.child_blocks?.some(
+      fallbackContainer?.child_blocks?.some(
         (block: { type?: string }) => block.type === 'image',
       ),
     ).toBe(false);
-  });
-
-  it('does not retry an ambiguous Slack transport failure', async () => {
-    const { dependencies, postMessage } = createDependencies();
-    const imageUrl = 'https://cdn.example.com/settings.png';
-    dependencies.generateAnnouncement.mockResolvedValue({
-      summary: 'Updates the saved settings experience.',
-      imageUrl,
-    });
-    postMessage.mockRejectedValueOnce(
-      new SlackPostDeliveryError({ transportError: true }),
-    );
-
-    const result = await handleMergeAnnouncerPush(
-      createPayload({
-        pullRequest: {
-          number: 7,
-          url: 'https://github.com/acme/widgets/pull/7',
-          title: 'Update settings',
-          body: `![Settings screenshot](${imageUrl})`,
-          changedFileCount: 1,
-          additions: 10,
-          deletions: 2,
-        },
-      }),
-      dependencies,
-    );
-
-    expect(result).toMatchObject({ status: 'error' });
-    expect(postMessage).toHaveBeenCalledOnce();
   });
 
   it('omits the Slack image block when PR context has no image', async () => {

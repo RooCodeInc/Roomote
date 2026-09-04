@@ -12,10 +12,7 @@ import {
   type AutomationRuntime,
 } from '@roomote/db/server';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
-import {
-  buildAutomationResultBlocks,
-  SlackPostDeliveryError,
-} from '@roomote/slack';
+import { buildAutomationResultBlocks } from '@roomote/slack';
 import {
   MERGE_ANNOUNCER_SETTINGS_HASH,
   type SourceControlProvider,
@@ -486,6 +483,7 @@ async function postAnnouncement(params: {
   adapter: RuntimeCommunicationProviderAdapter;
   destination: ResolvedAutomationDestination;
   notification: ReturnType<typeof buildMergeAnnouncerNotification>;
+  fallbackNotification?: ReturnType<typeof buildMergeAnnouncerNotification>;
 }): Promise<void> {
   await params.adapter.postMessage({
     channelId: params.destination.channelId,
@@ -497,7 +495,12 @@ async function postAnnouncement(params: {
         ? params.notification.fallbackText
         : params.notification.markdownText,
     ...(params.destination.provider === 'slack'
-      ? { blocks: params.notification.slackBlocks }
+      ? {
+          blocks: params.notification.slackBlocks,
+          ...(params.fallbackNotification
+            ? { fallbackBlocks: params.fallbackNotification.slackBlocks }
+            : {}),
+        }
       : {
           textFormat: 'markdown' as const,
           buttons: params.notification.buttons,
@@ -600,33 +603,20 @@ export async function handleMergeAnnouncerPush(
       pusher,
       summary,
     };
-    try {
-      await postAnnouncement({
-        adapter,
-        destination,
-        notification: buildMergeAnnouncerNotification({
-          ...notificationParams,
-          representativeImage,
-        }),
-      });
-    } catch (error) {
-      if (
-        destination.provider !== 'slack' ||
-        !representativeImage ||
-        !(error instanceof SlackPostDeliveryError) ||
-        error.slackErrorCode !== 'invalid_blocks'
-      ) {
-        throw error;
-      }
-      console.warn(
-        `${LOG_PREFIX} Slack image delivery failed for ${repository.fullName}; retrying without the image: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      await postAnnouncement({
-        adapter,
-        destination,
-        notification: buildMergeAnnouncerNotification(notificationParams),
-      });
-    }
+    await postAnnouncement({
+      adapter,
+      destination,
+      notification: buildMergeAnnouncerNotification({
+        ...notificationParams,
+        representativeImage,
+      }),
+      ...(representativeImage
+        ? {
+            fallbackNotification:
+              buildMergeAnnouncerNotification(notificationParams),
+          }
+        : {}),
+    });
     await recordOutcomeSafely(dependencies, {
       key: 'merge_announcer',
       status: 'succeeded',
