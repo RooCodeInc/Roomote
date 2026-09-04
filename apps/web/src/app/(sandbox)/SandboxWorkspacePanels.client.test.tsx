@@ -74,6 +74,56 @@ describe('ResponsiveWorkspacePanels', () => {
     expect(getAllByRole('separator')).toHaveLength(3);
   });
 
+  it('marks only selected conversation panels for focus dimming', () => {
+    useMediaQueryMock.mockReturnValue(true);
+
+    const { getByText } = render(
+      <ResponsiveWorkspacePanels
+        isPanelOpen
+        main={<div>Main conversation</div>}
+        panel={<div>Task conversation</div>}
+        panelId="task"
+        dimUnfocusedPanelIds={['main', 'task']}
+        additionalPanels={[
+          { id: 'logs', content: <div>Logs</div> },
+          { id: 'artifacts', content: <div>Artifacts</div> },
+        ]}
+      />,
+    );
+
+    expect(
+      getByText('Main conversation').closest('[data-slot=resizable-panel]'),
+    ).toHaveAttribute('data-dim-when-unfocused', 'true');
+    expect(
+      getByText('Task conversation').closest('[data-slot=resizable-panel]'),
+    ).toHaveAttribute('data-dim-when-unfocused', 'true');
+    expect(
+      getByText('Logs').closest('[data-slot=resizable-panel]'),
+    ).not.toHaveAttribute('data-dim-when-unfocused');
+    expect(
+      getByText('Artifacts').closest('[data-slot=resizable-panel]'),
+    ).not.toHaveAttribute('data-dim-when-unfocused');
+  });
+
+  it('keeps Task utility panels outside focus dimming', () => {
+    useMediaQueryMock.mockReturnValue(true);
+
+    const { getByText } = render(
+      <ResponsiveWorkspacePanels
+        isPanelOpen
+        main={<div>Task transcript</div>}
+        panel={<div>Task utility panel</div>}
+      />,
+    );
+
+    expect(
+      getByText('Task transcript').closest('[data-slot=resizable-panel]'),
+    ).not.toHaveAttribute('data-dim-when-unfocused');
+    expect(
+      getByText('Task utility panel').closest('[data-slot=resizable-panel]'),
+    ).not.toHaveAttribute('data-dim-when-unfocused');
+  });
+
   it('resets the resizable layout when the visible panel set changes', () => {
     useMediaQueryMock.mockReturnValue(true);
 
