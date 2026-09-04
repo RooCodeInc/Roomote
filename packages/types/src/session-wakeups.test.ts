@@ -9,7 +9,6 @@ import {
   MANAGE_WAKEUPS_TOOL,
   fastAgentScheduledWakeupEventSchema,
   manageWakeupsInputSchema,
-  sessionWakeupScheduleInputSchema,
 } from './session-wakeups';
 
 describe('manage wakeups tool contract', () => {
@@ -25,51 +24,39 @@ describe('manage wakeups tool contract', () => {
       MANAGE_WAKEUPS_TOOL.name,
     );
     expect(getFastAgentNativeAcpKind('manage_wakeups')).toBe('task');
-    expect(MANAGE_WAKEUPS_TOOL.description).toContain('mode "once"');
+    expect(MANAGE_WAKEUPS_TOOL.description).toContain('"in 20m"');
     expect(MANAGE_WAKEUPS_TOOL.description).toContain('There is no pause.');
     expect(MANAGE_WAKEUPS_TOOL.description).toContain(
       'Never poll, sleep, or wait',
     );
+    expect(MANAGE_WAKEUPS_TOOL.inputSchema.schedule.description).toContain(
+      'cron 0 9 * * 1-5 America/New_York',
+    );
   });
 
-  it('rejects a schedule that mixes modes', () => {
+  it('takes the schedule as one string and nothing else schedule-shaped', () => {
+    expect(Object.keys(MANAGE_WAKEUPS_TOOL.inputSchema).sort()).toEqual([
+      'action',
+      'name',
+      'prompt',
+      'reportPolicy',
+      'schedule',
+      'wakeupId',
+    ]);
     expect(
-      sessionWakeupScheduleInputSchema.safeParse({
-        mode: 'once',
-        inMinutes: 4,
-        everyMinutes: 10,
+      manageWakeupsInputSchema.parse({
+        action: 'create',
+        name: 'Check the deploy',
+        prompt: 'Tell the user to check the deploy.',
+        schedule: '  in 2m ',
+      }).schedule,
+    ).toBe('in 2m');
+    expect(
+      manageWakeupsInputSchema.safeParse({
+        action: 'create',
+        schedule: { mode: 'once', inMinutes: 2 },
       }).success,
     ).toBe(false);
-    expect(
-      sessionWakeupScheduleInputSchema.safeParse({
-        mode: 'interval',
-        everyMinutes: 10,
-        at: '2026-09-04T15:00:00Z',
-      }).success,
-    ).toBe(false);
-  });
-
-  it('accepts each schedule mode on its own', () => {
-    expect(
-      sessionWakeupScheduleInputSchema.parse({ mode: 'once', inMinutes: 4 }),
-    ).toEqual({ mode: 'once', inMinutes: 4 });
-    expect(
-      sessionWakeupScheduleInputSchema.parse({
-        mode: 'interval',
-        everyMinutes: 15,
-      }),
-    ).toEqual({ mode: 'interval', everyMinutes: 15 });
-    expect(
-      sessionWakeupScheduleInputSchema.parse({
-        mode: 'cron',
-        expression: '0 9 * * 1-5',
-        timezone: 'America/New_York',
-      }),
-    ).toEqual({
-      mode: 'cron',
-      expression: '0 9 * * 1-5',
-      timezone: 'America/New_York',
-    });
   });
 
   it('validates the scheduled wakeup platform event', () => {

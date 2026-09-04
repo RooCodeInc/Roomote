@@ -28,12 +28,10 @@ import {
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
   REASONING_EFFORT_VALUES,
   MANAGE_WAKEUPS_TOOL_DESCRIPTION,
-  MAX_ACTIVE_SESSION_WAKEUPS,
-  SESSION_WAKEUP_MAX_INTERVAL_MINUTES,
-  SESSION_WAKEUP_MAX_ONCE_HORIZON_MINUTES,
-  SESSION_WAKEUP_MAX_RUNS_LIMIT,
   SESSION_WAKEUP_NAME_MAX_LENGTH,
   SESSION_WAKEUP_PROMPT_MAX_LENGTH,
+  SESSION_WAKEUP_SCHEDULE_GRAMMAR,
+  SESSION_WAKEUP_SCHEDULE_MAX_LENGTH,
   type FastAgentSurface,
   FAST_EXECUTION,
 } from '@roomote/types';
@@ -403,28 +401,11 @@ export default {
   description: ${JSON.stringify(MANAGE_WAKEUPS_TOOL_DESCRIPTION)},
   args: {
     action: z.enum(["create", "list", "get", "cancel"]).describe("create schedules a wakeup; list shows active wakeups in this conversation; get shows one; cancel stops one. Cancel is the only stop action."),
-    wakeupId: z.string().optional().describe("Required for get and cancel"),
+    wakeupId: z.string().optional().describe("Required for get and cancel. Omit otherwise."),
     name: z.string().min(3).max(${SESSION_WAKEUP_NAME_MAX_LENGTH}).optional().describe("[create] Short label, e.g. 'Check PR #85 for merge'"),
     prompt: z.string().min(10).max(${SESSION_WAKEUP_PROMPT_MAX_LENGTH}).optional().describe("[create] What to do when it fires. This conversation stays in context, so keep it short: what to check, what counts as done, what to tell the user."),
-    schedule: z.discriminatedUnion("mode", [
-      z.object({
-        mode: z.literal("once").describe("Fire one time. Use for every reminder or delayed follow-up."),
-        inMinutes: z.number().int().min(1).max(${SESSION_WAKEUP_MAX_ONCE_HORIZON_MINUTES}).optional().describe("Minutes from now. Preferred for relative requests. Provide exactly one of inMinutes or at."),
-        at: z.string().optional().describe("Absolute ISO 8601 date-time with UTC offset, e.g. 2026-09-04T15:00:00-04:00. Provide exactly one of inMinutes or at."),
-      }),
-      z.object({
-        mode: z.literal("interval").describe("Fire repeatedly on a fixed interval measured from each run."),
-        everyMinutes: z.number().int().min(1).max(${SESSION_WAKEUP_MAX_INTERVAL_MINUTES}).describe("Minutes between runs. Intervals under 5 minutes require maxRuns or until."),
-      }),
-      z.object({
-        mode: z.literal("cron").describe("Fire repeatedly on a calendar schedule."),
-        expression: z.string().describe("Five-field cron expression, e.g. '0 9 * * 1-5'"),
-        timezone: z.string().optional().describe("IANA timezone, e.g. 'America/New_York'. Defaults to the deployment timezone."),
-      }),
-    ]).optional().describe("[create] Exactly one schedule mode. Reminders must use mode 'once'; monitors use 'interval' or 'cron'."),
-    maxRuns: z.number().int().min(1).max(${SESSION_WAKEUP_MAX_RUNS_LIMIT}).optional().describe("[create] Stop after this many runs. Interval and cron only."),
-    until: z.string().optional().describe("[create] Stop after this ISO 8601 date-time. Interval and cron only."),
-    reportPolicy: z.enum(["always", "only_when_notable"]).optional().describe("[create] 'always' replies on every run (default for once); 'only_when_notable' stays silent unless there is news (default for interval and cron). At most ${MAX_ACTIVE_SESSION_WAKEUPS} wakeups may be active per conversation."),
+    schedule: z.string().max(${SESSION_WAKEUP_SCHEDULE_MAX_LENGTH}).optional().describe(${JSON.stringify(`[create] ${SESSION_WAKEUP_SCHEDULE_GRAMMAR}`)}),
+    reportPolicy: z.enum(["always", "only_when_notable"]).optional().describe("[create] 'always' replies on every run (default for one-shots); 'only_when_notable' stays silent unless there is news (default for repeating schedules). Omit to use the default."),
   },
   execute: (args, context) => invoke("manage_wakeups", args, context),
 }

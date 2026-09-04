@@ -1,9 +1,8 @@
 /**
  * Models routinely fill every optional tool argument, sending "", null, or a
- * literal "none" for the ones they do not mean to use, and a non-positive
- * number for an unused cap. Dropping those before validation keeps the
- * "exactly one of" rules and ISO date-time checks honest instead of failing
- * on placeholders and burning a retry.
+ * literal "none" for the ones they do not mean to use. Dropping those before
+ * validation keeps the contract honest instead of failing on placeholders
+ * and burning a retry.
  */
 export function normalizeManageWakeupsArgs(
   args: Record<string, unknown>,
@@ -12,22 +11,14 @@ export function normalizeManageWakeupsArgs(
 }
 
 const PLACEHOLDER_STRINGS = new Set(['null', 'none', 'undefined', 'n/a']);
-const NON_POSITIVE_NUMERIC_KEYS = new Set([
-  'maxRuns',
-  'inMinutes',
-  'everyMinutes',
-]);
 
-function stripEmpty(value: unknown, key?: string): unknown {
+function stripEmpty(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map((item) => stripEmpty(item));
+    return value.map(stripEmpty);
   }
   if (value && typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>)
-      .map(
-        ([nestedKey, nested]) =>
-          [nestedKey, stripEmpty(nested, nestedKey)] as const,
-      )
+      .map(([key, nested]) => [key, stripEmpty(nested)] as const)
       .filter(([, nested]) => nested !== undefined);
     return Object.fromEntries(entries);
   }
@@ -37,15 +28,6 @@ function stripEmpty(value: unknown, key?: string): unknown {
     if (trimmed === '' || PLACEHOLDER_STRINGS.has(trimmed.toLowerCase())) {
       return undefined;
     }
-    return value;
-  }
-  if (
-    typeof value === 'number' &&
-    key !== undefined &&
-    NON_POSITIVE_NUMERIC_KEYS.has(key) &&
-    !(value > 0)
-  ) {
-    return undefined;
   }
   return value;
 }

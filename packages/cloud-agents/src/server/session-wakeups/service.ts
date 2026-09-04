@@ -16,17 +16,15 @@ import {
   isSessionWakeupRecurring,
   type ManageWakeupsInput,
   type SessionWakeupReportPolicy,
-  type SessionWakeupScheduleInput,
   type SessionWakeupSummary,
 } from '@roomote/types';
 
 import { enqueueSessionWakeupFireBestEffort } from './queue';
+import { parseSessionWakeupSchedule } from './parse';
 import {
   SessionWakeupValidationError,
   describeSessionWakeupSchedule,
-  normalizeSessionWakeupSchedule,
   normalizeSessionWakeupTimeZone,
-  validateSessionWakeupCaps,
 } from './schedule';
 
 const DEFAULT_DEPLOYMENT_SETTINGS_ID = 'default';
@@ -40,9 +38,8 @@ export type SessionWakeupActor = {
 export type CreateSessionWakeupInput = {
   name: string;
   prompt: string;
-  schedule: SessionWakeupScheduleInput;
-  maxRuns?: number | null;
-  until?: string | null;
+  /** One schedule string, e.g. "in 20m", "every 10m x3", "cron 0 9 * * 1-5". */
+  schedule: string;
   reportPolicy?: SessionWakeupReportPolicy | null;
 };
 
@@ -112,19 +109,11 @@ export async function createSessionWakeup(
   if (!prompt) throw new SessionWakeupValidationError('prompt is required.');
 
   const timeZone = await resolveSessionWakeupTimeZone();
-  const { schedule, firstRunAt } = normalizeSessionWakeupSchedule(
+  const { schedule, firstRunAt, maxRuns, until } = parseSessionWakeupSchedule(
     input.schedule,
     { now, defaultTimeZone: timeZone },
   );
   const recurring = isSessionWakeupRecurring(schedule);
-  const maxRuns = recurring ? (input.maxRuns ?? null) : null;
-  const until = recurring && input.until ? new Date(input.until) : null;
-  if (until && Number.isNaN(until.getTime())) {
-    throw new SessionWakeupValidationError(
-      'until must be an ISO 8601 date-time.',
-    );
-  }
-  validateSessionWakeupCaps({ schedule, firstRunAt, maxRuns, until });
   const reportPolicy: SessionWakeupReportPolicy =
     input.reportPolicy ?? (recurring ? 'only_when_notable' : 'always');
 
@@ -242,8 +231,6 @@ export async function handleManageWakeupsToolCall(
           name: input.name,
           prompt: input.prompt,
           schedule: input.schedule,
-          maxRuns: input.maxRuns ?? null,
-          until: input.until ?? null,
           reportPolicy: input.reportPolicy ?? null,
         });
         return {

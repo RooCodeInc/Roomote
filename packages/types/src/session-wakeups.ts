@@ -6,21 +6,27 @@ import { z } from 'zod';
  * the same conversation and the agent handles it as a normal turn with the
  * full conversation still in context. A one-shot wakeup is a reminder; a
  * recurring wakeup is a monitor.
+ *
+ * The tool takes the schedule as one short string ("in 2m", "every 10m x3",
+ * "cron 0 9 * * 1-5 America/New_York") rather than a structured union.
+ * Models fill every optional structured field with placeholders, and each
+ * rejected placeholder costs a retry; a single required string has nothing to
+ * pad.
  */
 
 export const SESSION_WAKEUP_NAME_MAX_LENGTH = 80;
 export const SESSION_WAKEUP_NAME_MIN_LENGTH = 3;
 export const SESSION_WAKEUP_PROMPT_MAX_LENGTH = 4_000;
 export const SESSION_WAKEUP_PROMPT_MIN_LENGTH = 10;
-export const SESSION_WAKEUP_CRON_MAX_LENGTH = 120;
+export const SESSION_WAKEUP_SCHEDULE_MAX_LENGTH = 160;
 /** Active wakeups one conversation may hold at once. */
 export const MAX_ACTIVE_SESSION_WAKEUPS = 10;
 export const SESSION_WAKEUP_MIN_INTERVAL_MINUTES = 1;
 /** Seven days. */
 export const SESSION_WAKEUP_MAX_INTERVAL_MINUTES = 7 * 24 * 60;
 /**
- * Recurring wakeups tighter than this must carry `maxRuns` or `until`, so a
- * tight polling loop cannot run forever.
+ * Recurring wakeups tighter than this must carry a run count or an end time,
+ * so a tight polling loop cannot run forever.
  */
 export const SESSION_WAKEUP_UNCAPPED_MIN_INTERVAL_MINUTES = 5;
 /** Thirty days. A one-shot wakeup may not be scheduled further out. */
@@ -43,89 +49,6 @@ export const SESSION_WAKEUP_REPORT_POLICIES = [
 ] as const;
 export type SessionWakeupReportPolicy =
   (typeof SESSION_WAKEUP_REPORT_POLICIES)[number];
-
-const isoDateTimeSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .refine((value) => !Number.isNaN(Date.parse(value)), {
-    message: 'Must be an ISO 8601 date-time.',
-  });
-
-/**
- * The schedule as the agent supplies it. `once` accepts either a relative
- * delay or an absolute time; the relative form is preferred because it does
- * not require the model to do clock arithmetic.
- */
-export const sessionWakeupScheduleInputSchema = z.discriminatedUnion('mode', [
-  z
-    .object({
-      mode: z
-        .literal('once')
-        .describe(
-          'Fire one time. Use this for every reminder or delayed follow-up ("in 4 minutes", "at 3pm", "tomorrow morning").',
-        ),
-      inMinutes: z
-        .number()
-        .int()
-        .min(1)
-        .max(SESSION_WAKEUP_MAX_ONCE_HORIZON_MINUTES)
-        .optional()
-        .describe(
-          'Minutes from now. Preferred over "at" for relative requests. Provide exactly one of inMinutes or at.',
-        ),
-      at: isoDateTimeSchema
-        .optional()
-        .describe(
-          'Absolute ISO 8601 date-time with a UTC offset, for example 2026-09-04T15:00:00-04:00. Provide exactly one of inMinutes or at.',
-        ),
-    })
-    .strict(),
-  z
-    .object({
-      mode: z
-        .literal('interval')
-        .describe(
-          'Fire repeatedly on a fixed interval measured from each run.',
-        ),
-      everyMinutes: z
-        .number()
-        .int()
-        .min(SESSION_WAKEUP_MIN_INTERVAL_MINUTES)
-        .max(SESSION_WAKEUP_MAX_INTERVAL_MINUTES)
-        .describe(
-          `Minutes between runs (${SESSION_WAKEUP_MIN_INTERVAL_MINUTES}-${SESSION_WAKEUP_MAX_INTERVAL_MINUTES}). Intervals under ${SESSION_WAKEUP_UNCAPPED_MIN_INTERVAL_MINUTES} minutes require maxRuns or until.`,
-        ),
-    })
-    .strict(),
-  z
-    .object({
-      mode: z
-        .literal('cron')
-        .describe('Fire repeatedly on a calendar schedule.'),
-      expression: z
-        .string()
-        .trim()
-        .min(9)
-        .max(SESSION_WAKEUP_CRON_MAX_LENGTH)
-        .describe(
-          'Standard five-field cron expression (minute hour day-of-month month day-of-week), for example "0 9 * * 1-5" for 9am on weekdays.',
-        ),
-      timezone: z
-        .string()
-        .trim()
-        .min(1)
-        .optional()
-        .describe(
-          'IANA timezone for the cron expression, for example "America/New_York". Defaults to the deployment timezone.',
-        ),
-    })
-    .strict(),
-]);
-
-export type SessionWakeupScheduleInput = z.infer<
-  typeof sessionWakeupScheduleInputSchema
->;
 
 /** The normalized schedule persisted with a wakeup. */
 export const sessionWakeupScheduleSchema = z.discriminatedUnion('mode', [
@@ -150,6 +73,12 @@ export function isSessionWakeupRecurring(
   return schedule.mode !== 'once';
 }
 
+export const SESSION_WAKEUP_SCHEDULE_GRAMMAR = `One of:
+- "in <n>m|h|d" for a one-shot delay, e.g. "in 2m", "in 90m", "in 3h" (preferred for reminders and delayed follow-ups)
+- "at <ISO 8601 date-time with UTC offset>" for a one-shot at an absolute time, e.g. "at 2026-09-04T15:00:00-04:00"
+- "every <n>m|h|d" for a repeating interval, e.g. "every 10m", "every 6h"; add "x<count>" to stop after that many runs ("every 1m x3") or "until <ISO 8601>" to stop after a time ("every 10m until 2026-09-04T18:00:00Z")
+- "cron <five-field expression> [IANA timezone]" for a calendar schedule, e.g. "cron 0 9 * * 1-5 America/New_York" (timezone defaults to the deployment timezone)`;
+
 export const MANAGE_WAKEUPS_ACTIONS = [
   'create',
   'list',
@@ -169,7 +98,7 @@ export const manageWakeupsFieldSchemas = {
     .trim()
     .min(1)
     .optional()
-    .describe('Required for get and cancel.'),
+    .describe('Required for get and cancel. Omit otherwise.'),
   name: z
     .string()
     .trim()
@@ -188,30 +117,18 @@ export const manageWakeupsFieldSchemas = {
     .describe(
       '[create] What to do when the wakeup fires. This conversation will still be in context, so keep it short and concrete. Say what to check, what counts as done, and what to tell the user.',
     ),
-  schedule: sessionWakeupScheduleInputSchema
-    .optional()
-    .describe(
-      '[create] Exactly one schedule mode. Reminders must use mode "once"; monitors use "interval" or "cron".',
-    ),
-  maxRuns: z
-    .number()
-    .int()
+  schedule: z
+    .string()
+    .trim()
     .min(1)
-    .max(SESSION_WAKEUP_MAX_RUNS_LIMIT)
+    .max(SESSION_WAKEUP_SCHEDULE_MAX_LENGTH)
     .optional()
-    .describe(
-      '[create] Stop after this many runs. Only for interval or cron schedules.',
-    ),
-  until: isoDateTimeSchema
-    .optional()
-    .describe(
-      '[create] Stop after this ISO 8601 date-time. Only for interval or cron schedules.',
-    ),
+    .describe(`[create] ${SESSION_WAKEUP_SCHEDULE_GRAMMAR}`),
   reportPolicy: z
     .enum(SESSION_WAKEUP_REPORT_POLICIES)
     .optional()
     .describe(
-      '[create] "always" replies to the user on every run (default for once). "only_when_notable" stays silent unless there is news or the condition resolved (default for interval and cron).',
+      '[create] "always" replies to the user on every run (default for one-shots). "only_when_notable" stays silent unless there is news or the condition resolved (default for repeating schedules). Omit to use the default.',
     ),
 } satisfies z.ZodRawShape;
 
@@ -223,14 +140,13 @@ export const MANAGE_WAKEUPS_TOOL_NAME = 'manage_wakeups' as const;
 
 export const MANAGE_WAKEUPS_TOOL_DESCRIPTION = `Schedule this conversation to wake itself up later, once or on a cadence. When a wakeup fires, you receive a scheduled_wakeup platform event in this same conversation with the full history still in context, so the prompt can be brief and refer to things discussed here. Use it for reminders ("remind me in 20 minutes", "ping me at 3pm") and for monitors ("check every 10 minutes whether CI is green", "every weekday at 9am summarize open PRs").
 
-Choose the schedule deliberately:
-- One-shot reminders and delayed follow-ups must use schedule.mode "once". Prefer inMinutes for relative times; use at only for an explicit absolute time and include the UTC offset.
-- Repeating monitors use mode "interval" or mode "cron". Pick an interval that matches how fast the monitored thing actually changes, not how soon you want an answer. Intervals under ${SESSION_WAKEUP_UNCAPPED_MIN_INTERVAL_MINUTES} minutes need maxRuns or until.
+The schedule is one short string. Reminders and delayed follow-ups use "in <n>m" ("in 20m"); use "at <ISO date-time with offset>" only for an explicit absolute time. Repeating checks use "every <n>m" or "cron ...", optionally with "x<count>" or "until <ISO date-time>". Pick an interval that matches how fast the monitored thing actually changes, not how soon you want an answer; intervals under ${SESSION_WAKEUP_UNCAPPED_MIN_INTERVAL_MINUTES} minutes need "x<count>" or "until".
+
 - A monitor keeps running until the user cancels it or the condition definitively resolves. A run that finds nothing new is still useful. When a monitored condition resolves, tell the user and cancel the wakeup.
 - Results arrive automatically as a new turn in this conversation. Never poll, sleep, or wait for a wakeup inside a turn.
 - When the user says stop, cancel, remove, delete, or end a wakeup, use cancel. There is no pause.
 - Creating a wakeup that matches an active one (same prompt and schedule) returns the existing wakeup instead of a duplicate. At most ${MAX_ACTIVE_SESSION_WAKEUPS} wakeups may be active per conversation.
-- After creating a wakeup, confirm what will happen and when in one short sentence using the returned nextRunAt.`;
+- Only send the fields the action needs; omit the rest. After creating a wakeup, confirm what will happen and when in one short sentence using the returned nextRunAt.`;
 
 export const MANAGE_WAKEUPS_TOOL = {
   name: MANAGE_WAKEUPS_TOOL_NAME,

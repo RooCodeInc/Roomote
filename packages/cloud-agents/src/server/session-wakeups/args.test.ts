@@ -4,54 +4,50 @@ import { manageWakeupsInputSchema } from '@roomote/types';
 import { normalizeManageWakeupsArgs } from './args';
 
 describe('normalizeManageWakeupsArgs', () => {
-  it('drops empty-string and null placeholders at every depth', () => {
+  it('drops empty-string, null, and placeholder values', () => {
     expect(
       normalizeManageWakeupsArgs({
         action: 'create',
         wakeupId: '',
         name: 'Check the deploy',
         prompt: 'Tell the user to check the deploy.',
-        schedule: { mode: 'once', inMinutes: 2, at: '' },
-        until: null,
-        reportPolicy: '',
+        schedule: 'in 2m',
+        reportPolicy: null,
       }),
     ).toEqual({
       action: 'create',
       name: 'Check the deploy',
       prompt: 'Tell the user to check the deploy.',
-      schedule: { mode: 'once', inMinutes: 2 },
+      schedule: 'in 2m',
     });
+    expect(
+      normalizeManageWakeupsArgs({ action: 'list', wakeupId: 'none' }),
+    ).toEqual({ action: 'list' });
   });
 
-  it('makes a model-shaped once schedule pass the strict contract', () => {
+  it('makes a model-shaped create call pass the contract', () => {
     const parsed = manageWakeupsInputSchema.parse(
       normalizeManageWakeupsArgs({
         action: 'create',
         wakeupId: '',
         name: 'Check the deploy',
         prompt: 'Tell the user to check the deploy.',
-        schedule: { mode: 'once', inMinutes: 2, at: '' },
-        until: '',
+        schedule: 'in 2m',
+        reportPolicy: '',
       }),
     );
-    expect(parsed.schedule).toEqual({ mode: 'once', inMinutes: 2 });
+    expect(parsed.schedule).toBe('in 2m');
     expect(parsed.wakeupId).toBeUndefined();
-    expect(parsed.until).toBeUndefined();
+    expect(parsed.reportPolicy).toBeUndefined();
   });
 
-  it('drops placeholder strings and non-positive caps but keeps real values', () => {
+  it('keeps real values untouched', () => {
     expect(
       normalizeManageWakeupsArgs({
         action: 'cancel',
         wakeupId: 'abc',
-        maxRuns: 0,
-        until: 'none',
-        schedule: { mode: 'cron', expression: '0 9 * * *', timezone: 'UTC' },
+        reportPolicy: 'always',
       }),
-    ).toEqual({
-      action: 'cancel',
-      wakeupId: 'abc',
-      schedule: { mode: 'cron', expression: '0 9 * * *', timezone: 'UTC' },
-    });
+    ).toEqual({ action: 'cancel', wakeupId: 'abc', reportPolicy: 'always' });
   });
 });

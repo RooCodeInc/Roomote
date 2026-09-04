@@ -6,8 +6,13 @@ import {
   SESSION_WAKEUP_MIN_INTERVAL_MINUTES,
   SESSION_WAKEUP_UNCAPPED_MIN_INTERVAL_MINUTES,
   type SessionWakeupSchedule,
-  type SessionWakeupScheduleInput,
 } from '@roomote/types';
+
+/** The structured form the schedule-string parser produces before validation. */
+export type SessionWakeupScheduleInput =
+  | { mode: 'once'; inMinutes?: number; at?: string }
+  | { mode: 'interval'; everyMinutes: number }
+  | { mode: 'cron'; expression: string; timezone?: string };
 
 const MINUTE_MS = 60_000;
 
