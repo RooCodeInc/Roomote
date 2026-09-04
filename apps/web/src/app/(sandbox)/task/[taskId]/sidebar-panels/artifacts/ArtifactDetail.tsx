@@ -17,7 +17,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuLabel,
-  Loader2Icon,
   X,
 } from '@/components/system';
 
@@ -181,16 +180,13 @@ export function ArtifactDetail({
         }
       />
       <div className="min-h-0 flex-1 bg-zinc-800">
-        {isLoading ? (
-          <div className="flex h-full items-center justify-center">
-            <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
-          </div>
-        ) : !isFullscreenOpen ? (
+        {!isFullscreenOpen ? (
           <ArtifactViewerContent
             artifact={artifact}
             owner={{ taskId }}
             onVersionChange={setArtifactVersion}
             className="h-full border-0"
+            isLoading={isLoading}
           />
         ) : null}
       </div>

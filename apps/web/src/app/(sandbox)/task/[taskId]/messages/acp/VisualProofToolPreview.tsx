@@ -91,12 +91,12 @@ export function VisualProofToolPreview({ media }: VisualProofToolPreviewProps) {
         type="button"
         onClick={handleOpen}
         disabled={!location.path}
-        className="group block max-h-[100px] cursor-pointer overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default"
+        className="group block max-h-[200px] max-w-full cursor-pointer overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default"
         aria-label="Open visual proof"
       >
         <video
           src={media.src}
-          className="max-h-[100px] w-auto object-contain transition-opacity group-hover:opacity-90"
+          className="h-auto max-h-[200px] w-auto max-w-[min(100%,40rem)] object-contain transition-opacity group-hover:opacity-90"
           muted
           playsInline
           preload="metadata"
@@ -110,7 +110,7 @@ export function VisualProofToolPreview({ media }: VisualProofToolPreviewProps) {
       type="button"
       onClick={handleOpen}
       disabled={!location.path}
-      className="group block max-h-[100px] cursor-pointer overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default"
+      className="group block max-h-[200px] max-w-full cursor-pointer overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default"
       aria-label="Open visual proof"
     >
       {/* Not lazy: the button has no height until the image loads, and
@@ -120,7 +120,7 @@ export function VisualProofToolPreview({ media }: VisualProofToolPreviewProps) {
       <img
         src={media.src}
         alt="Visual proof"
-        className="max-h-[100px] w-auto object-contain transition-opacity group-hover:opacity-90"
+        className="h-auto max-h-[200px] w-auto max-w-[min(100%,40rem)] object-contain transition-opacity group-hover:opacity-90"
       />
     </button>
   );

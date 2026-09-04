@@ -29,6 +29,7 @@ import {
   Switch,
   Label,
   BasicTooltip,
+  Loader2Icon,
   MediaViewerImage,
 } from '@/components/system';
 import {
@@ -127,6 +128,8 @@ interface ArtifactViewerContentProps {
   onVersionChange?: (version: number) => void;
   className?: string;
   showToolbar?: boolean;
+  isLoading?: boolean;
+  emptyMessage?: string;
 }
 
 export function ArtifactViewerContent({
@@ -136,6 +139,8 @@ export function ArtifactViewerContent({
   onVersionChange,
   className,
   showToolbar = true,
+  isLoading = false,
+  emptyMessage = 'Select an artifact to inspect it here.',
 }: ArtifactViewerContentProps) {
   const artifactOwner = owner ?? { taskId: taskIdProp! };
   const taskId = 'taskId' in artifactOwner ? artifactOwner.taskId : undefined;
@@ -222,39 +227,34 @@ export function ArtifactViewerContent({
     }
   }, [artifact, latestVersion, onVersionChange]);
 
-  if (!artifact) {
-    return (
-      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-        Select an artifact to inspect it here.
-      </div>
-    );
-  }
-
-  const isHTML = isHtmlArtifact(artifact.contentType, artifact.path);
+  const isHTML = artifact
+    ? isHtmlArtifact(artifact.contentType, artifact.path)
+    : false;
   const isMarkdown =
     !isHTML &&
+    !!artifact &&
     (artifact.contentType.includes('markdown') ||
       artifact.path.endsWith('.md'));
-  const isImage = artifact.contentType.startsWith('image/');
-  const isVideo = artifact.contentType.startsWith('video/');
-  const isPDF = artifact.contentType === 'application/pdf';
+  const isImage = artifact?.contentType.startsWith('image/') ?? false;
+  const isVideo = artifact?.contentType.startsWith('video/') ?? false;
+  const isPDF = artifact?.contentType === 'application/pdf';
   const isText =
     !isHTML &&
     !isMarkdown &&
     !isImage &&
     !isVideo &&
     !isPDF &&
-    !!artifact.content;
-  const language = getLanguageFromPath(artifact.path);
+    !!artifact?.content;
+  const language = getLanguageFromPath(artifact?.path ?? '');
 
   const canRender =
     isText ||
-    (isHTML && artifact.content) ||
-    (isMarkdown && artifact.content) ||
-    ((isImage || isVideo || isPDF) && artifact.downloadUrl);
+    (isHTML && artifact?.content) ||
+    (isMarkdown && artifact?.content) ||
+    ((isImage || isVideo || isPDF) && artifact?.downloadUrl);
 
   const handleCopyToClipboard = async () => {
-    if (!artifact.content) return;
+    if (!artifact?.content) return;
 
     await navigator.clipboard.writeText(artifact.content);
     setIsCopied(true);
@@ -263,6 +263,8 @@ export function ArtifactViewerContent({
   };
 
   const handleCopyUrl = async () => {
+    if (!artifact) return;
+
     const url =
       'taskId' in artifactOwner
         ? getArtifactViewUrl(
@@ -284,7 +286,7 @@ export function ArtifactViewerContent({
   };
 
   const handleCopyRawUrl = async () => {
-    if (!artifact.rawUrl) return;
+    if (!artifact?.rawUrl) return;
     const url = `${window.location.origin}${artifact.rawUrl}`;
     await navigator.clipboard.writeText(url);
     setIsRawUrlCopied(true);
@@ -317,7 +319,7 @@ export function ArtifactViewerContent({
                 </BasicTooltip>
               )}
 
-              {canRender && (
+              {artifact?.downloadUrl ? (
                 <BasicTooltip content="Download">
                   <Button
                     asChild
@@ -327,6 +329,17 @@ export function ArtifactViewerContent({
                     <a href={artifact.downloadUrl} download>
                       <Download className="size-3.5" />
                     </a>
+                  </Button>
+                </BasicTooltip>
+              ) : (
+                <BasicTooltip content="Download">
+                  <Button
+                    variant="ghost"
+                    className="h-7 gap-1.5 px-2 text-sm font-medium hover:text-accent-foreground"
+                    disabled
+                    aria-label="Download"
+                  >
+                    <Download className="size-3.5" />
                   </Button>
                 </BasicTooltip>
               )}
@@ -352,6 +365,8 @@ export function ArtifactViewerContent({
                   variant="ghost"
                   className="h-7 gap-1.5 px-2 text-sm font-medium hover:text-accent-foreground"
                   onClick={handleCopyUrl}
+                  disabled={!artifact}
+                  aria-label="Copy URL"
                 >
                   {isUrlCopied ? (
                     <Check className="size-3.5" />
@@ -361,7 +376,7 @@ export function ArtifactViewerContent({
                 </Button>
               </BasicTooltip>
 
-              {artifact.rawUrl && (
+              {artifact?.rawUrl && (
                 <BasicTooltip content="Copy public image URL">
                   <Button
                     variant="ghost"
@@ -424,7 +439,18 @@ export function ArtifactViewerContent({
               : 'overflow-x-auto',
           )}
         >
-          {canRender ? (
+          {isLoading ? (
+            <div
+              className="flex h-full items-center justify-center"
+              aria-label="Loading artifact"
+            >
+              <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : !artifact ? (
+            <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+              {emptyMessage}
+            </div>
+          ) : canRender ? (
             <>
               {isMarkdown && !isRaw && artifact.content && (
                 <div className="max-w-3xl p-6 text-sm">

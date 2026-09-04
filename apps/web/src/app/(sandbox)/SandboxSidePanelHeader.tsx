@@ -14,6 +14,7 @@ interface SandboxSidePanelHeaderProps {
   actions?: ReactNode;
   titleAdornment?: ReactNode;
   onBack?: () => void;
+  backLabel?: string;
 }
 
 export function SandboxSidePanelHeader({
@@ -23,6 +24,7 @@ export function SandboxSidePanelHeader({
   actions,
   titleAdornment,
   onBack,
+  backLabel = 'Back to list',
 }: SandboxSidePanelHeaderProps) {
   const { isSidebarVisible } = useSandboxLayout();
   const isMdOrLarger = useMediaQuery('(min-width: 768px)', {
@@ -34,12 +36,12 @@ export function SandboxSidePanelHeader({
     <div className="flex min-w-0 items-center gap-2 border-b-2 border-card px-4 pt-3 pb-2.5">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
         {onBack ? (
-          <BasicTooltip content="Back to list">
+          <BasicTooltip content={backLabel}>
             <Button
               variant="ghost"
               size="icon"
               className="size-5 shrink-0 hover:scale-120 hover:text-accent-foreground"
-              aria-label="Back to list"
+              aria-label={backLabel}
               onClick={onBack}
             >
               <ArrowLeft className="size-3.5" />

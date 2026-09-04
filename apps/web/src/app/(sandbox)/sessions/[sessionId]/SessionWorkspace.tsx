@@ -46,7 +46,6 @@ import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 import {
   AppWindow,
   ArrowLeftFromLine,
-  ArrowLeft,
   Avatar,
   BasicTooltip,
   BrandIcon,
@@ -67,7 +66,6 @@ import {
   PopoverTrigger,
   Slack,
   VideoIcon,
-  X,
   Rows4,
 } from '@/components/system';
 import { SandboxSidePanelHeader } from '../../SandboxSidePanelHeader';
@@ -370,54 +368,29 @@ function SessionArtifactViewer({
     isPending,
     isError,
   } = useArtifactByPath(selection.owner, selection.path, selection.version);
+  const selectedArtifact =
+    artifact?.path === selection.path &&
+    (selection.version === undefined || artifact.version === selection.version)
+      ? artifact
+      : null;
 
   return (
     <>
-      <div className="flex min-w-0 shrink-0 items-center gap-2 border-b-2 border-card px-4 py-2">
-        <BasicTooltip content={backLabel}>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7 shrink-0"
-            aria-label={backLabel}
-            onClick={onBack}
-          >
-            <ArrowLeft />
-          </Button>
-        </BasicTooltip>
-        <h2 className="min-w-0 flex-1 truncate text-sm font-medium">
-          {humanizeFilename(selection.path)}
-        </h2>
-        <BasicTooltip content="Close">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={closeLabel}
-            onClick={onClose}
-          >
-            <X />
-          </Button>
-        </BasicTooltip>
-      </div>
+      <SandboxSidePanelHeader
+        title={humanizeFilename(selection.path)}
+        onBack={onBack}
+        backLabel={backLabel}
+        onClose={onClose}
+        closeLabel={closeLabel}
+      />
       <div className="min-h-0 flex-1 bg-zinc-800">
-        {isPending ? (
-          <div
-            className="flex h-full items-center justify-center"
-            aria-label="Loading artifact"
-          >
-            <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
-          </div>
-        ) : isError || !artifact ? (
-          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-            This artifact is unavailable.
-          </div>
-        ) : (
-          <ArtifactViewerContent
-            artifact={artifact}
-            owner={selection.owner}
-            className="h-full border-0"
-          />
-        )}
+        <ArtifactViewerContent
+          artifact={selectedArtifact}
+          owner={selection.owner}
+          className="h-full border-0"
+          isLoading={isPending}
+          emptyMessage={isError ? 'This artifact is unavailable.' : undefined}
+        />
       </div>
     </>
   );

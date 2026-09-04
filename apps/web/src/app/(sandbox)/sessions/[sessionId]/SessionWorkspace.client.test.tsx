@@ -147,9 +147,15 @@ vi.mock('@/hooks/useUser', () => ({
 vi.mock('@/components/tasks/ArtifactViewerContent', () => ({
   ArtifactViewerContent: ({
     artifact,
+    isLoading,
   }: {
     artifact: { path: string } | null;
-  }) => <div>Artifact preview: {artifact?.path}</div>,
+    isLoading?: boolean;
+  }) => (
+    <div data-loading={isLoading || undefined}>
+      Artifact preview: {artifact?.path}
+    </div>
+  ),
 }));
 
 vi.mock('./NestedTaskSidePanel', () => ({
@@ -1237,6 +1243,10 @@ describe('SessionWorkspace', () => {
     });
 
     expect(screen.getByRole('heading', { name: 'Decision' })).toBeVisible();
+    expect(
+      screen.getByRole('heading', { name: 'Decision' }).parentElement
+        ?.parentElement?.parentElement,
+    ).toHaveClass('px-4', 'pt-3', 'pb-2.5');
     expect(
       screen.queryByRole('button', { name: 'Open Decision from Session' }),
     ).toBeNull();

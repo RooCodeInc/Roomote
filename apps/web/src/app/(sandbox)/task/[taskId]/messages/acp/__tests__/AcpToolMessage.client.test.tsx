@@ -666,6 +666,12 @@ describe('AcpToolMessage', () => {
       'src',
       '/api/artifacts/art-1/raw?sig=fresh',
     );
+    expect(screen.getByRole('img', { name: 'Visual proof' })).toHaveClass(
+      'h-auto',
+      'max-h-[200px]',
+      'w-auto',
+      'max-w-[min(100%,40rem)]',
+    );
     // The subagent row keeps its collapsible prompt/details alongside the
     // always-visible preview.
     expect(toolHeaderSpy).toHaveBeenCalledWith(
