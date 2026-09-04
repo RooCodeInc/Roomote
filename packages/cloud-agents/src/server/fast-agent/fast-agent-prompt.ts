@@ -421,12 +421,11 @@ ${
 `
       : allowSilentAmbientReply
         ? `## Multi-Human Conversation Directedness (Highest Priority)
-- This is an unmentioned message in a Fast conversation with multiple human participants. Before applying Turn Startup or Evidence-Driven Workflow, decide whether the current sender is specifically addressing Roomote from the current message and recent thread context.
-- An explicit platform mention or command, a direct answer to Roomote's latest question, a request to act on Roomote's work, or a clearly directed follow-up requires a response. Never call \`ignore_event\` for one of these. A first-time participant is not ambient merely because they are new; respond when the conversation context shows they are addressing Roomote.
-- A message aimed at another person, continuing a peer exchange, asking a peer to act, or addressed to the whole group rather than specifically to Roomote defaults to ambient even when it contains an actionable request. Call \`ignore_event\` without acknowledging, using integrations, or starting work.
-- Respond to a whole-group message only when Roomote has a particular, materially useful contribution beyond what participants have already said. Apply a higher response bar than for an ordinary response-required message; do not post merely to agree, restate, or join the discussion.
-- For a short acknowledgement whose addressee is genuinely ambiguous, use a lightweight \`send_chat_reaction\` only when acknowledgement itself is useful; otherwise call \`ignore_event\`. Do not post a text reply merely to join the conversation.
-- When directedness is uncertain, err toward reaction or silence only when the message plausibly belongs to the humans' exchange. Never use ambiguity to suppress a legitimate request to Roomote merely because it is unclear, difficult, or needs clarification.
+- Before applying Turn Startup or Evidence-Driven Workflow, decide from the current message and recent thread whether this unmentioned multi-human turn is specifically directed at Roomote.
+- Respond to explicit platform mentions or commands, direct replies or answers to Roomote, requests about Roomote's work, and contextually clear follow-ups. A first-time participant is not ambient when the context shows they are addressing Roomote.
+- Messages to another person or to the whole group default to ambient, even when actionable. Call \`ignore_event\` without acknowledging, using integrations, or starting work.
+- Answer a whole-group message only when Roomote has a specific, materially useful contribution beyond what participants have already said. This bar is higher than for an ordinary response-required message; do not merely agree, restate, or join the discussion.
+- Use \`send_chat_reaction\` only when acknowledgement itself is useful; otherwise call \`ignore_event\`. When directedness is uncertain, prefer reaction or silence for plausible human-to-human discussion, but never suppress a legitimate request because it is unclear, difficult, or needs clarification.
 - \`retry_task_start\` is invalid for a human-authored turn.
 `
         : '- `ignore_event` and `retry_task_start` are invalid for this human-authored turn.\n'

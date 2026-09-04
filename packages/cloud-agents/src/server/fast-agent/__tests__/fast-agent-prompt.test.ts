@@ -602,28 +602,25 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(ambientPrompt).toContain(
-      'Before applying Turn Startup or Evidence-Driven Workflow, decide whether the current sender is specifically addressing Roomote',
+      'decide from the current message and recent thread whether this unmentioned multi-human turn is specifically directed at Roomote',
     );
     expect(ambientPrompt).toContain(
-      'addressed to the whole group rather than specifically to Roomote defaults to ambient',
+      "Respond to explicit platform mentions or commands, direct replies or answers to Roomote, requests about Roomote's work, and contextually clear follow-ups",
     );
     expect(ambientPrompt).toContain(
-      'Respond to a whole-group message only when Roomote has a particular, materially useful contribution beyond what participants have already said',
+      'Messages to another person or to the whole group default to ambient, even when actionable',
     );
     expect(ambientPrompt).toContain(
-      'Apply a higher response bar than for an ordinary response-required message',
+      'Answer a whole-group message only when Roomote has a specific, materially useful contribution beyond what participants have already said',
     );
     expect(ambientPrompt).toContain(
-      'use a lightweight `send_chat_reaction` only when acknowledgement itself is useful',
+      'This bar is higher than for an ordinary response-required message',
     );
     expect(ambientPrompt).toContain(
-      'A first-time participant is not ambient merely because they are new; respond when the conversation context shows they are addressing Roomote',
+      'Use `send_chat_reaction` only when acknowledgement itself is useful; otherwise call `ignore_event`',
     );
     expect(ambientPrompt).toContain(
-      "a direct answer to Roomote's latest question, a request to act on Roomote's work, or a clearly directed follow-up requires a response",
-    );
-    expect(ambientPrompt).toContain(
-      'Never call `ignore_event` for one of these',
+      'A first-time participant is not ambient when the context shows they are addressing Roomote',
     );
     expect(ambientPrompt).toContain(
       'An eligible ambient message or optional human reaction may use `ignore_event` under its narrow rule below',
