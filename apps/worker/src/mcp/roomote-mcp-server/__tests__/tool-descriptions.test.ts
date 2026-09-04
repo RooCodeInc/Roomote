@@ -125,9 +125,13 @@ function getInputSchemaField(
 function unwrapSchema(schema: z.ZodTypeAny): z.ZodTypeAny {
   let current = schema;
 
-  while (current instanceof z.ZodOptional || current instanceof z.ZodEffects) {
+  while (
+    current instanceof z.ZodOptional ||
+    current instanceof z.ZodNullable ||
+    current instanceof z.ZodEffects
+  ) {
     current =
-      current instanceof z.ZodOptional ? current.unwrap() : current.innerType();
+      current instanceof z.ZodEffects ? current.innerType() : current.unwrap();
   }
 
   return current;
@@ -1066,11 +1070,9 @@ describe('roomote MCP tool descriptions', () => {
       .definition as unknown as z.ZodType;
 
     // `definition` is optional (not required for the record_verification
-    // action), so unwrap the optional before asserting the inner string schema.
-    const definitionSchema =
-      definitionField instanceof z.ZodOptional
-        ? (definitionField.unwrap() as z.ZodType)
-        : definitionField;
+    // action) and optionals accept null on the wire, so unwrap those layers
+    // before asserting the inner string schema.
+    const definitionSchema = unwrapSchema(definitionField);
 
     expect(definitionSchema).toBeInstanceOf(z.ZodString);
     expect(definitionSchema).not.toBeInstanceOf(z.ZodUnion);

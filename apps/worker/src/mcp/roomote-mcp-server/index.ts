@@ -2,8 +2,8 @@
 
 import { pathToFileURL } from 'node:url';
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
@@ -104,7 +104,7 @@ export {
   automationWorkItemsResultHasSubmittedWorkItems,
 } from './automation-slack-summary-state.js';
 
-export const roomoteMcpServer = new McpServer({
+export const roomoteMcpServer = new NullableOptionalsMcpServer({
   name: 'roomote-mcp-server',
   version: '1.0.0',
 });
