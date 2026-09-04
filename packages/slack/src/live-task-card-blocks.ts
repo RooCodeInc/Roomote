@@ -37,8 +37,8 @@ export interface SlackLiveTaskCardContent {
  * no equivalent display selector on chat.postMessage or chat.update.
  *
  * The whole block is replaced on every chat.update, so the card shows exactly
- * the latest state. Keeping an ordinary message also lets Roomote relocate the
- * card and reopen it after an input-waiting run resumes.
+ * the latest state. Keeping an ordinary message also lets Roomote reopen the
+ * card after an input-waiting run resumes.
  *
  * Slack requires a new `block_id` for each message update, so every render
  * receives a fresh suffix while retaining the task id as a debugging prefix.
