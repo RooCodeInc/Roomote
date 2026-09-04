@@ -79,7 +79,7 @@ export function SessionCard({
       <div className="pointer-events-none relative z-10 mt-1 shrink-0">
         {session.ownerKind === 'automation' ? (
           <span
-            className="flex size-8 items-center justify-center rounded-full border border-border bg-muted"
+            className="flex size-8 items-center justify-center overflow-clip rounded-full border border-border bg-white"
             aria-label={actorName}
           >
             <TaskAutomationIcon

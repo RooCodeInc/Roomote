@@ -3,7 +3,7 @@ import type { LucideProps } from 'lucide-react';
 
 import {
   type LucideIcon,
-  Brain,
+  BookOpenText,
   BrandIcon,
   Bot,
   FileIcon,
@@ -37,7 +37,7 @@ export function toolIconForKey(key: ToolIconKey): LucideIcon {
   if (key === 'bot') return Bot;
   if (key === 'task') return Zap;
   if (key === 'message') return MessageSquareText;
-  if (key === 'memory') return Brain;
+  if (key === 'memory') return BookOpenText;
   if (key === 'artifact') return HardDriveUpload;
   if (key === 'widget') return GalleryVerticalEnd;
   if (key === 'roomote') return RoomoteR;

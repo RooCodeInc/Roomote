@@ -87,12 +87,16 @@ import {
   classifyNonTaskInferenceError,
   FAST_AGENT_SESSION_PERMISSIONS,
   FAST_AGENT_SESSION_TOOL_FILTER,
+  generateTrackedNonTaskText,
   generateTrackedNonTaskTextInOpenCodeSession,
   isNonTaskOpenCodePromptTimeoutError,
   isNonTaskOpenCodeSessionNotFoundError,
   isNonTaskOpenCodeSessionValidationError,
+  NonTaskInputModalityUnsupportedError,
   NonTaskOpenCodePromptTimeoutError,
   NON_TASK_INFERENCE_SURFACES,
+  resolveNonTaskInputModalityDelivery,
+  type NonTaskInputModalityDelivery,
   type NonTaskPromptFile,
   type NonTaskProviderRetryEvent,
   type NonTaskOpenCodeCompletedMessage,
@@ -461,6 +465,10 @@ const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
 const findIntegrationToolsArgsSchema = z.object(
   FIND_INTEGRATION_TOOLS_TOOL.inputSchema,
 );
+const inspectImagesArgsSchema = z.object({
+  question: z.string().min(1),
+  imageIds: z.array(z.string().min(1)).nullable().optional(),
+});
 const callIntegrationToolArgsSchema = z.object(
   CALL_INTEGRATION_TOOL_TOOL.inputSchema,
 );
@@ -603,6 +611,53 @@ const FAST_AGENT_DURABLE_RETRY_IMMEDIATE_PARK_WAIT_MS = 10_000;
 const FAST_AGENT_DURABLE_RETRY_PARK_BASE_DELAY_MS = 2_000;
 const FAST_AGENT_DURABLE_RETRY_PARK_MAX_DELAY_MS = 60_000;
 const FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS = 5 * 60_000;
+const FAST_AGENT_IMAGE_INSPECTION_TIMEOUT_MS = 2 * 60_000;
+const FAST_AGENT_IMAGE_INSPECTION_SYSTEM_PROMPT = [
+  'You are Roomote visual information extraction support for a chat assistant that cannot view images itself.',
+  'Inspect the attached image(s) and answer the question with concise factual observations the assistant can rely on as evidence: visible text, UI state, layout, colors, charts, diagrams, error messages, and any detail relevant to the question.',
+  'If the visual evidence is ambiguous, say what is uncertain and what would disambiguate it. Do not speculate beyond what is visible, do not address the end user directly, and do not make product decisions.',
+].join('\n');
+
+/**
+ * How the images attached to a Fast turn reach a model. Mirrors the task
+ * runtime: the turn model is never swapped for a vision model. When it can
+ * view images they ride along as prompt parts; otherwise a helper model
+ * inspects them on request through `inspect_images`, the way a hidden visual
+ * subagent reads images for a coding model that cannot.
+ */
+type FastAgentImageDelivery =
+  | NonTaskInputModalityDelivery
+  | { delivery: 'unsupported' };
+
+function formatFastAgentImageAttachmentList(
+  entries: Array<{ id: string; file: NonTaskPromptFile }>,
+): string {
+  return entries.map(({ id, file }) => `${id} (${file.mime})`).join(', ');
+}
+
+function buildFastAgentImageNotice(
+  entries: Array<{ id: string; file: NonTaskPromptFile }>,
+  delivery: FastAgentImageDelivery,
+): string {
+  const attachments = formatFastAgentImageAttachmentList(entries);
+  if (delivery.delivery === 'unsupported') {
+    return `[Image attachments: ${attachments}. No configured model accepts image input, so they cannot be viewed in this conversation. Tell the user plainly that the image could not be viewed and answer from the text only.]`;
+  }
+  return `[Image attachments: ${attachments}. The current model cannot view images, so they are not shown here. Call inspect_images with a targeted question (and these IDs when only some apply) so Roomote's image-capable model describes them before answering about their contents. Never claim to have seen them yourself.]`;
+}
+
+function buildFastAgentImageInspectionPrompt(
+  question: string,
+  entries: Array<{ id: string; file: NonTaskPromptFile }>,
+): string {
+  return [
+    `Attached image(s), in order: ${formatFastAgentImageAttachmentList(entries)}.`,
+    '',
+    'Question from the assistant:',
+    question,
+  ].join('\n');
+}
+
 const FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO = 0.2;
 const FAST_AGENT_PROVIDER_RECOVERY_PROMPT =
   buildInferenceProviderRecoveryPrompt({ protectCompletedSideEffects: true });
@@ -1505,6 +1560,21 @@ export async function answerFastAgentQuestion({
   let currentInstructionVersion = 0;
   const assistantInstructionVersions = new Map<string, number>();
   const closedInstructionVersions = new Set<number>();
+  // Set once a native steer injects a follow-up its surface did not mark as
+  // ambient. Ending silently after that drops a request, so it is never
+  // settled as an ignore.
+  let steeredDirectedFollowUp = false;
+  /**
+   * Mirrors the `ignore_event` tool's rule: the turn may end without any
+   * visible reply only when an explicit ignore would have been accepted for
+   * it, and no steered follow-up since then was directed at Roomote.
+   */
+  const silentCompletionAllowed = () =>
+    !(platformEvent && platformEventVisibility === 'required') &&
+    (Boolean(reactionInput) ||
+      Boolean(platformEvent) ||
+      allowSilentAmbientReply) &&
+    !steeredDirectedFollowUp;
   const getInstructionVersion = (messageId?: string) =>
     (messageId ? assistantInstructionVersions.get(messageId) : undefined) ??
     currentInstructionVersion;
@@ -1690,6 +1760,136 @@ export async function answerFastAgentQuestion({
   const humanFollowUpTurnSeqs = new Map<string, number>();
   const injectedHumanFollowUpMessages: ModelMessage[] = [];
   const injectedHumanFollowUpFiles: NonTaskPromptFile[] = [];
+  // Images the turn model cannot view are held here, under IDs stable for
+  // the turn, for `inspect_images` instead of riding along as prompt parts.
+  const turnImages = new Map<string, NonTaskPromptFile>();
+  let imageDeliveryPromise: Promise<FastAgentImageDelivery> | undefined;
+  let resolvedImageDelivery: FastAgentImageDelivery | undefined;
+  const resolveImageDelivery = (): Promise<FastAgentImageDelivery> => {
+    imageDeliveryPromise ??= resolveNonTaskInputModalityDelivery({
+      modality: 'image',
+      modelRole: FAST_AGENT_MODEL_ROLE,
+      ...(model ? { model } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+    })
+      .catch((error: unknown): FastAgentImageDelivery => {
+        if (error instanceof NonTaskInputModalityUnsupportedError) {
+          return { delivery: 'unsupported' };
+        }
+        // The lookup shares the inference server lease, so whatever failed
+        // here fails the prompt too, where the retry policy owns it. Attach
+        // the images directly so that prompt sees the input it always did.
+        console.warn(
+          `[Fast Agent] Could not resolve image delivery for conversation ${canonicalConversationId ?? 'unknown'}; attaching images directly. ${formatErrorForLog(error)}`,
+        );
+        return { delivery: 'direct', model: 'unresolved' };
+      })
+      .then((resolved) => {
+        resolvedImageDelivery = resolved;
+        diagnostics.recordImageDelivery(resolved);
+        return resolved;
+      });
+    return imageDeliveryPromise;
+  };
+  type HeldTurnImage = { id: string; file: NonTaskPromptFile };
+  const commitTurnImages = (held: HeldTurnImage[]) => {
+    for (const { id, file } of held) turnImages.set(id, file);
+  };
+  // Reserves IDs for `files` without holding them yet. The caller commits
+  // once the prompt that names those IDs is actually accepted, so a prompt
+  // abandoned in between leaves nothing behind for its next attempt to
+  // duplicate. Synchronous: nothing may run between reserving and building
+  // the prompt text.
+  const holdImagesForPrompt = (
+    files: NonTaskPromptFile[],
+    text: string,
+    delivery: FastAgentImageDelivery,
+  ): { files: NonTaskPromptFile[]; text: string; held: HeldTurnImage[] } => {
+    if (files.length === 0 || delivery.delivery === 'direct') {
+      return { files, text, held: [] };
+    }
+    const held = files.map((file, index) => ({
+      id: `image-${turnImages.size + index + 1}`,
+      file,
+    }));
+    return {
+      files: [],
+      text: `${text}\n\n${buildFastAgentImageNotice(held, delivery)}`,
+      held,
+    };
+  };
+  const prepareImagesForPrompt = async (
+    files: NonTaskPromptFile[],
+    text: string,
+  ): Promise<{ files: NonTaskPromptFile[]; text: string }> => {
+    if (files.length === 0) return { files, text };
+    const prepared = holdImagesForPrompt(
+      files,
+      text,
+      await resolveImageDelivery(),
+    );
+    commitTurnImages(prepared.held);
+    return prepared;
+  };
+  // Rebuilt prompts (bootstrap, clean retry) restate the whole turn, so they
+  // restate the notice for every held image too. Images are only held once
+  // the delivery has resolved to something other than direct.
+  const withTurnImageNotice = (text: string): string => {
+    if (turnImages.size === 0 || !resolvedImageDelivery) return text;
+    return `${text}\n\n${buildFastAgentImageNotice(
+      [...turnImages].map(([id, file]) => ({ id, file })),
+      resolvedImageDelivery,
+    )}`;
+  };
+  const inspectTurnImages = async (args: {
+    question: string;
+    imageIds?: string[] | null;
+  }): Promise<unknown> => {
+    if (turnImages.size === 0) {
+      return {
+        success: false,
+        error:
+          'No image attachments are held for this turn. Images the current model can view are delivered with the prompt itself.',
+      };
+    }
+    const requestedIds = args.imageIds?.length
+      ? args.imageIds
+      : [...turnImages.keys()];
+    const unknownIds = requestedIds.filter((id) => !turnImages.has(id));
+    if (unknownIds.length > 0) {
+      return {
+        success: false,
+        error: `Unknown image attachment ID(s): ${unknownIds.join(', ')}. Use the IDs listed in the turn's image notice.`,
+      };
+    }
+    const delivery = await resolveImageDelivery();
+    if (delivery.delivery !== 'helper') {
+      return {
+        success: false,
+        error:
+          'No configured model accepts image input, so the attachments cannot be inspected. Tell the user the image could not be viewed.',
+      };
+    }
+    const entries = requestedIds.map((id) => ({
+      id,
+      file: turnImages.get(id)!,
+    }));
+    const observations = await generateTrackedNonTaskText({
+      surface: NON_TASK_INFERENCE_SURFACES.fastAgentImageInspection,
+      userId,
+      fastConversationId: canonicalConversationId,
+      model: delivery.helperModel,
+      ...(delivery.helperReasoningEffort
+        ? { reasoningEffort: delivery.helperReasoningEffort }
+        : {}),
+      system: FAST_AGENT_IMAGE_INSPECTION_SYSTEM_PROMPT,
+      prompt: buildFastAgentImageInspectionPrompt(args.question, entries),
+      files: entries.map(({ file }) => file),
+      requiredInputModality: 'image',
+      timeoutMs: FAST_AGENT_IMAGE_INSPECTION_TIMEOUT_MS,
+    });
+    return { success: true, imageIds: requestedIds, observations };
+  };
   const integrationCallSignatures = new Set<string>();
   const completedChatReactionSignatures = new Set<string>();
   const completedChatReplySignatures = new Set<string>();
@@ -2010,10 +2210,21 @@ export async function answerFastAgentQuestion({
       }
       if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) return;
       const batchMessages = batch.flatMap(({ turnMessages }) => turnMessages);
-      const batchFiles = batch.flatMap(({ files }) => files);
-      const batchPrompt = batch
+      const batchSourceFiles = batch.flatMap(({ files }) => files);
+      const batchText = batch
         .map(({ serializedPrompt }) => serializedPrompt)
         .join('\n\n');
+      const batchImageDelivery =
+        batchSourceFiles.length > 0 ? await resolveImageDelivery() : undefined;
+      // The lookup above may have let a tool start or the turn end. Re-check
+      // before anything is reserved for this batch: it stays pending when
+      // abandoned here and must not have held images already.
+      if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) return;
+      const batchInput = batchImageDelivery
+        ? holdImagesForPrompt(batchSourceFiles, batchText, batchImageDelivery)
+        : { files: batchSourceFiles, text: batchText, held: [] };
+      const batchFiles = batchInput.files;
+      const batchPrompt = batchInput.text;
       const firstRow = batch[0]!.row;
       const previousInstructionVersion = currentInstructionVersion;
       const steerInstructionVersion = previousInstructionVersion + 1;
@@ -2033,11 +2244,21 @@ export async function answerFastAgentQuestion({
         }
         throw error;
       }
+      // Held images become addressable only once OpenCode has accepted the
+      // steer that names them. A rejected steer stays pending and reserves
+      // fresh IDs on its next attempt instead of stacking duplicates.
+      commitTurnImages(batchInput.held);
       if (signal?.aborted) return;
       console.info(
         `[Fast Agent] Native steer accepted. conversationId="${canonicalConversationId}" followUpCount=${batch.length}`,
       );
       for (const { row } of batch) injectedHumanFollowUpIds.add(row.id);
+      // Only a surface that classified the message as ambient may leave it
+      // unanswered; an unmarked follow-up (web, PR, older rows) counts as
+      // directed.
+      if (batch.some(({ followUp }) => followUp.directedAtRoomote !== false)) {
+        steeredDirectedFollowUp = true;
+      }
       injectedHumanFollowUpMessages.push(...batchMessages);
       injectedHumanFollowUpFiles.push(...batchFiles);
       // Native steering starts a new human instruction boundary inside the
@@ -2997,6 +3218,9 @@ export async function answerFastAgentQuestion({
       // A catalog lookup reads nothing external; the call it prepares for is
       // still gated on the acknowledgement.
       FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools,
+      // Reading an attachment the user just sent is part of understanding
+      // the request, not an action taken on their behalf.
+      FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages,
       `${ROOMOTE_MCP_ID}_${CHAT_REACTION_EMOJI_TOOL_NAME}`,
     ]);
     const authorizeToolStart = (toolId: string) =>
@@ -3920,6 +4144,9 @@ export async function answerFastAgentQuestion({
               findIntegrationToolsArgsSchema.parse(call.args),
             );
           }
+          case FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages: {
+            return inspectTurnImages(inspectImagesArgsSchema.parse(call.args));
+          }
           case FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool: {
             const args = callIntegrationToolArgsSchema.parse(call.args);
             if (isFastAgentNativeIntegration(args.integrationId)) {
@@ -3996,8 +4223,12 @@ export async function answerFastAgentQuestion({
       }
     };
 
-    const imageFiles = getFastAgentImageFiles(images);
-    const serializedTurnPrompt = serializeFastAgentMessages(turnMessages);
+    const turnPromptInput = await prepareImagesForPrompt(
+      getFastAgentImageFiles(images),
+      serializeFastAgentMessages(turnMessages),
+    );
+    const imageFiles = turnPromptInput.files;
+    const serializedTurnPrompt = turnPromptInput.text;
     let inferenceAttemptNumber = 0;
     const persistOpenCodeSession = async (openCodeSessionId: string) => {
       if (durableOpenCodeSessionId === openCodeSessionId) return;
@@ -4045,10 +4276,12 @@ export async function answerFastAgentQuestion({
       persistedSessionId: session.openCodeSessionId,
       prompt: serializedTurnPrompt,
       bootstrapPrompt: () =>
-        serializeFastAgentMessages([
-          ...bootstrapMessages,
-          ...injectedHumanFollowUpMessages,
-        ]),
+        withTurnImageNotice(
+          serializeFastAgentMessages([
+            ...bootstrapMessages,
+            ...injectedHumanFollowUpMessages,
+          ]),
+        ),
       onPathSelected: (path) => {
         diagnostics.recordSessionPath(path);
         console.info(`[Fast Agent] OpenCode session path=${path}.`);
@@ -4242,10 +4475,7 @@ export async function answerFastAgentQuestion({
                         }
                       },
                       ...(imageFilesForAttempt.length
-                        ? {
-                            files: imageFilesForAttempt,
-                            requiredInputModality: 'image' as const,
-                          }
+                        ? { files: imageFilesForAttempt }
                         : {}),
                     },
                     openCodeSession,
@@ -4486,10 +4716,12 @@ export async function answerFastAgentQuestion({
                   // Before tools run, rebuild from visible history rather than
                   // append the original turn to the failed session again.
                   openCodeSession.id = undefined;
-                  promptForAttempt = serializeFastAgentMessages([
-                    ...bootstrapMessages,
-                    ...injectedHumanFollowUpMessages,
-                  ]);
+                  promptForAttempt = withTurnImageNotice(
+                    serializeFastAgentMessages([
+                      ...bootstrapMessages,
+                      ...injectedHumanFollowUpMessages,
+                    ]),
+                  );
                   imageFilesForAttempt = [
                     ...imageFiles,
                     ...injectedHumanFollowUpFiles,
@@ -4550,18 +4782,31 @@ export async function answerFastAgentQuestion({
           ),
         );
       } else if (!visibleUpdatePosted) {
-        // A delivered update is already a complete visible response. Stay
-        // silent rather than append a generic closeout that contradicts it.
-        const fallback =
-          'I could not complete that request within the available turn.';
-        await postRecordedSystemCloseout(fallback, () =>
-          postReply(
-            { purpose: 'closeout', message: fallback },
-            false,
-            undefined,
-            terminalInstructionVersion,
-          ),
-        );
+        // The model ended the newest instruction with nothing to show: no
+        // reply tool, no undelivered text. Where an explicit ignore would
+        // have been accepted (an ambient message between people, an optional
+        // platform event, a reaction) settle exactly as an ignore does. The
+        // steered URL after an ignored aside is the typical case. Otherwise a
+        // request went unanswered, so say that plainly rather than narrate a
+        // budget that never existed.
+        if (silentCompletionAllowed()) {
+          closedInstructionVersions.add(terminalInstructionVersion);
+          diagnostics.recordSilentCompletion();
+          console.info(
+            `[Fast Agent] Silent completion settled as ignored. conversationId="${canonicalConversationId}" turnId="${turnId}" instructionVersion=${terminalInstructionVersion}`,
+          );
+        } else {
+          const fallback =
+            'I didn’t have a response to that. Could you rephrase it or add a bit more detail?';
+          await postRecordedSystemCloseout(fallback, () =>
+            postReply(
+              { purpose: 'closeout', message: fallback },
+              false,
+              undefined,
+              terminalInstructionVersion,
+            ),
+          );
+        }
       } else if (platformEvent && platformEventVisibility === 'required') {
         // A visibility-required platform event promises a closeout even when
         // an intro ack or launch kickoff already posted a visible update

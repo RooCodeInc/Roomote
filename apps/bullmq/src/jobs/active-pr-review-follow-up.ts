@@ -146,6 +146,7 @@ export const activePrReviewFollowUpJob = async (
       sandboxServerUrl: true,
       snapshotId: true,
       snapshotCreatedAt: true,
+      vendor: true,
       port: true,
       payload: true,
       actingUserId: true,
@@ -185,7 +186,10 @@ export const activePrReviewFollowUpJob = async (
     return;
   }
 
-  if (run.snapshotId && isSnapshotResumable(run.snapshotCreatedAt)) {
+  if (
+    run.snapshotId &&
+    isSnapshotResumable(run.snapshotCreatedAt, run.vendor)
+  ) {
     const sourcePayload = (run.payload ?? {}) as Record<string, unknown>;
     const selectedRepositories = Array.isArray(
       sourcePayload.selectedRepositories,

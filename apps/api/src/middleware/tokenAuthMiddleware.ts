@@ -63,8 +63,20 @@ export const tokenAuthMiddleware = () =>
       try {
         const jobContext = await validateRunToken(token);
         if (await deploymentAllowsTokenAuth()) {
-          c.set('authContext', jobContext);
-          isRunToken = true;
+          const user = jobContext.userId
+            ? await db.query.users.findFirst({
+                where: eq(users.id, jobContext.userId),
+                columns: { id: true, deletedAt: true },
+              })
+            : undefined;
+
+          // Deployment-principal run tokens are not tied to a user. A
+          // user-scoped run token, however, must stop authenticating as soon
+          // as that user is removed.
+          if (!jobContext.userId || (user && user.deletedAt == null)) {
+            c.set('authContext', jobContext);
+            isRunToken = true;
+          }
         }
       } catch {
         // Not a run token, try auth token below

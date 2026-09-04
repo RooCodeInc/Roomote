@@ -12,7 +12,7 @@ import {
   queuedCommunicationMessageSchema,
 } from './communication';
 import { fastAgentParentSchema, taskReportConsumerSchema } from './fast-agent';
-import { SANDBOX_SNAPSHOT_EXPIRY_MS } from './compute-providers/worker-runtime';
+import { getSnapshotExpiryMs } from './compute-providers/snapshot-retention';
 import { prActions } from './cloud-agents';
 import { ALL_REPOSITORIES } from './constants';
 import { sourceControlProviderSchema } from './source-control';
@@ -463,6 +463,7 @@ export const EXPIRED_SNAPSHOT_RESUME_ERROR =
 
 export function isSnapshotResumable(
   snapshotCreatedAt: Date | null | undefined,
+  provider: string | null | undefined,
   nowMs: number = Date.now(),
 ): boolean {
   if (
@@ -472,7 +473,8 @@ export function isSnapshotResumable(
     return false;
   }
 
-  return nowMs - snapshotCreatedAt.getTime() < SANDBOX_SNAPSHOT_EXPIRY_MS;
+  const expiryMs = getSnapshotExpiryMs(provider);
+  return expiryMs === null || nowMs - snapshotCreatedAt.getTime() < expiryMs;
 }
 
 const COMPLETE_TASK_ON_SNAPSHOT_PAYLOAD_FLAG = '__completeTaskOnSnapshot';

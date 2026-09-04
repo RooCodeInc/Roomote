@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   appendMemory: vi.fn(),
   isBrainEnabled: vi.fn(),
   generateText: vi.fn(),
+  generateHelperText: vi.fn(),
+  resolveImageDelivery: vi.fn(),
   classifyInferenceError: vi.fn(),
   invalidateSession: vi.fn(),
   runSession: vi.fn(),
@@ -73,6 +75,7 @@ const nativeToolNames = vi.hoisted(
       createArtifact: 'create_artifact',
       findIntegrationTools: 'find_integration_tools',
       ignoreEvent: 'ignore_event',
+      inspectImages: 'inspect_images',
       launchTask: 'launch_task',
       retryTaskStart: 'retry_task_start',
       saveMemory: 'save_memory',
@@ -154,14 +157,28 @@ vi.mock('@roomote/db/server', () => ({
   touchSessionActivity: mocks.touchSessionActivity,
 }));
 
+const NonTaskInputModalityUnsupportedError = vi.hoisted(
+  () =>
+    class NonTaskInputModalityUnsupportedError extends Error {
+      constructor(public readonly modality: string) {
+        super(`No configured model supports ${modality} input.`);
+        this.name = 'NonTaskInputModalityUnsupportedError';
+      }
+    },
+);
+
 vi.mock('../../non-task-provider-usage', () => ({
   FAST_AGENT_SESSION_PERMISSIONS: fastAgentSessionPermissions,
   FAST_AGENT_SESSION_TOOL_FILTER: fastAgentSessionToolFilter,
   NON_TASK_INFERENCE_SURFACES: {
+    fastAgentImageInspection: 'fast_agent_image_inspection',
     fastAgentQuestionAnswering: 'fast_agent',
   },
+  NonTaskInputModalityUnsupportedError,
   classifyNonTaskInferenceError: mocks.classifyInferenceError,
+  generateTrackedNonTaskText: mocks.generateHelperText,
   generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
+  resolveNonTaskInputModalityDelivery: mocks.resolveImageDelivery,
   NonTaskOpenCodePromptTimeoutError: class extends Error {
     constructor(timeoutMs: number) {
       super(`Timed out waiting for OpenCode output after ${timeoutMs}ms.`);
@@ -370,6 +387,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.refreshTitle.mockResolvedValue(null);
+    mocks.resolveImageDelivery.mockResolvedValue({
+      delivery: 'direct',
+      model: 'openrouter/openai/gpt-5.4',
+    });
     mocks.nativeExecutor = undefined;
     mocks.mcpExecutor = undefined;
     mocks.mcpCapabilityAvailable = false;
@@ -1250,6 +1271,190 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('holds follow-up images for inspect_images when the model cannot view them', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'helper',
+        model: 'openrouter/openai/gpt-5.4',
+        helperModel: 'openrouter/google/gemini-3.8-flash',
+      });
+      mocks.generateHelperText.mockResolvedValue('Two screenshots.');
+      const first = {
+        id: '11111111-1111-4111-8111-111111111111',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.3',
+          currentMessageId: '100.3',
+          userId: 'user-1',
+          question: 'First pending correction.',
+          images: ['data:image/png;base64,Zmlyc3Q='],
+        },
+      };
+      const second = {
+        id: '22222222-2222-4222-8222-222222222222',
+        createdAt: new Date('2026-08-31T12:00:01.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.4',
+          currentMessageId: '100.4',
+          userId: 'user-1',
+          question: 'Second pending correction.',
+          images: ['data:image/jpeg;base64,c2Vjb25k'],
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([first, second])
+        .mockResolvedValue([]);
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+
+      const steer = mocks.nativeSteer.mock.calls[0]?.[0];
+      expect(steer?.files).toEqual([]);
+      expect(steer?.text).toContain(
+        'Image attachments: image-1 (image/png), image-2 (image/jpeg)',
+      );
+      expect(steer?.text).toContain('inspect_images');
+
+      await expect(
+        invokeTool(nativeToolNames.inspectImages, {
+          question: 'What changed between them?',
+        }),
+      ).resolves.toEqual({
+        success: true,
+        imageIds: ['image-1', 'image-2'],
+        observations: 'Two screenshots.',
+      });
+      expect(mocks.generateHelperText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'openrouter/google/gemini-3.8-flash',
+          files: [
+            { mime: 'image/png', url: 'data:image/png;base64,Zmlyc3Q=' },
+            { mime: 'image/jpeg', url: 'data:image/jpeg;base64,c2Vjb25k' },
+          ],
+        }),
+      );
+
+      finishGeneration?.('Steered answer');
+      await expect(resultPromise).resolves.toBe('Steered answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not hold follow-up images twice when a rejected steer is retried', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'helper',
+        model: 'openrouter/openai/gpt-5.4',
+        helperModel: 'openrouter/google/gemini-3.8-flash',
+      });
+      mocks.generateHelperText.mockResolvedValue('One screenshot.');
+      const followUp = {
+        id: '11111111-1111-4111-8111-111111111111',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.3',
+          currentMessageId: '100.3',
+          userId: 'user-1',
+          question: 'Look at this.',
+          images: ['data:image/png;base64,Zmlyc3Q='],
+        },
+      };
+      let pendingRows = [followUp];
+      mocks.getPendingHumanFollowUp.mockImplementation(async () => pendingRows);
+      mocks.nativeSteer
+        .mockRejectedValueOnce(new Error('OpenCode is busy'))
+        .mockImplementationOnce(async () => {
+          pendingRows = [];
+        });
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      let completeAssistantBoundary: (() => Promise<void>) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          completeAssistantBoundary = async () => {
+            await options.onAssistantMessageCompleted?.({
+              id: 'assistant-after-rejected-steer',
+              sessionId: 'opencode-session-1',
+              createdAtMs: 100,
+              completedAtMs: 200,
+            });
+          };
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      // The rejected steer leaves the follow-up pending; the next boundary
+      // drains it again.
+      await completeAssistantBoundary?.();
+      await vi.waitFor(() =>
+        expect(mocks.nativeSteer).toHaveBeenCalledTimes(2),
+      );
+
+      for (const call of mocks.nativeSteer.mock.calls) {
+        expect(call[0]?.files).toEqual([]);
+        expect(call[0]?.text).toContain(
+          'Image attachments: image-1 (image/png)',
+        );
+        expect(call[0]?.text).not.toContain('image-2');
+      }
+      await expect(
+        invokeTool(nativeToolNames.inspectImages, {
+          question: 'Describe it.',
+        }),
+      ).resolves.toEqual({
+        success: true,
+        imageIds: ['image-1'],
+        observations: 'One screenshot.',
+      });
+      expect(mocks.generateHelperText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          files: [{ mime: 'image/png', url: 'data:image/png;base64,Zmlyc3Q=' }],
+        }),
+      );
+
+      finishGeneration?.('Steered answer');
+      await expect(resultPromise).resolves.toBe('Steered answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('leaves a same-user follow-up routed in from a pull request out of native steering', async () => {
     vi.useFakeTimers();
     try {
@@ -1638,6 +1843,183 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('settles an ambient turn silently when the model ends a steered aside with nothing to say', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([
+          {
+            id: '2b6d0e0a-5f0e-4d8b-9d0c-6a4a1a1b2c3d',
+            createdAt: new Date('2026-09-04T16:56:45.000Z'),
+            parent: { sessionId: 'conversation-1' },
+            event: {
+              type: 'human_follow_up',
+              eventId: '100.4',
+              currentMessageId: '100.4',
+              userId: 'user-1',
+              question: 'https://example.com/deploy/123',
+              directedAtRoomote: false,
+            },
+          },
+        ])
+        .mockResolvedValue([]);
+
+      let continueGeneration: (() => void) | undefined;
+      const generationPaused = new Promise<void>((resolve) => {
+        continueGeneration = resolve;
+      });
+      const adapter = callbacks();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-ignores-aside',
+            sessionId: 'opencode-session-1',
+            parentId: 'initial-user-message',
+            createdAtMs: 100,
+          });
+          // The opener is an aside between people; the model ignores it.
+          await invokeTool(
+            nativeToolNames.ignoreEvent,
+            {},
+            undefined,
+            'assistant-ignores-aside',
+          );
+          await generationPaused;
+          // The steered link opens a new instruction; the model says nothing.
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-after-steer',
+            sessionId: 'opencode-session-1',
+            parentId: 'steered-user-message',
+            createdAtMs: 200,
+          });
+          return '';
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        allowSilentAmbientReply: true,
+        adapter,
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      continueGeneration?.();
+      await expect(resultPromise).resolves.toBe('');
+
+      expect(adapter.postReply).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still closes out when a steered follow-up directed at Roomote goes unanswered', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([
+          {
+            id: '3c7e1f1b-6a1f-4e9c-8e1d-7b5b2b2c3d4e',
+            createdAt: new Date('2026-09-04T16:56:45.000Z'),
+            parent: { sessionId: 'conversation-1' },
+            event: {
+              type: 'human_follow_up',
+              eventId: '100.4',
+              currentMessageId: '100.4',
+              userId: 'user-1',
+              question: '<@UBOT> can you check the deploy?',
+              directedAtRoomote: true,
+            },
+          },
+        ])
+        .mockResolvedValue([]);
+
+      let continueGeneration: (() => void) | undefined;
+      const generationPaused = new Promise<void>((resolve) => {
+        continueGeneration = resolve;
+      });
+      const adapter = callbacks();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-ignores-aside',
+            sessionId: 'opencode-session-1',
+            parentId: 'initial-user-message',
+            createdAtMs: 100,
+          });
+          await invokeTool(
+            nativeToolNames.ignoreEvent,
+            {},
+            undefined,
+            'assistant-ignores-aside',
+          );
+          await generationPaused;
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-after-steer',
+            sessionId: 'opencode-session-1',
+            parentId: 'steered-user-message',
+            createdAtMs: 200,
+          });
+          return '';
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        allowSilentAmbientReply: true,
+        adapter,
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      continueGeneration?.();
+      await resultPromise;
+
+      expect(adapter.postReply).toHaveBeenCalledTimes(1);
+      expect(adapter.postReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          purpose: 'closeout',
+          message:
+            'I didn’t have a response to that. Could you rephrase it or add a bit more detail?',
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('tells the user plainly when a directed request ends with no response', async () => {
+    const adapter = callbacks();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        options.onAssistantMessageStarted?.({
+          id: 'assistant-silent',
+          sessionId: 'opencode-session-1',
+          parentId: 'initial-user-message',
+          createdAtMs: 100,
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(adapter.postReply).toHaveBeenCalledTimes(1);
+    expect(adapter.postReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'closeout',
+        message:
+          'I didn’t have a response to that. Could you rephrase it or add a bit more detail?',
+      }),
+    );
   });
 
   it('ignores plain terminal text from an assistant superseded by a native steer', async () => {
@@ -5135,13 +5517,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(answer).rejects.toBe(shutdown);
   });
 
-  it('passes image data URLs to the Fast model as image-capable file input', async () => {
+  it('passes image data URLs to the Fast model as file input when it can view images', async () => {
     await answerFastAgentQuestion({
       ...baseParams,
       images: ['data:image/png;base64,aGVsbG8=', 'not-an-image'],
       adapter: callbacks(),
     });
 
+    expect(mocks.resolveImageDelivery).toHaveBeenCalledWith({
+      modality: 'image',
+      modelRole: 'orchestration',
+    });
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.objectContaining({
         files: [
@@ -5150,11 +5536,162 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             url: 'data:image/png;base64,aGVsbG8=',
           },
         ],
-        requiredInputModality: 'image',
       }),
       expect.any(Object),
       expect.any(Object),
     );
+    expect(mocks.generateText.mock.calls[0]?.[0]).not.toHaveProperty(
+      'requiredInputModality',
+    );
+    expect(mocks.generateText.mock.calls[0]?.[0].prompt).not.toContain(
+      'inspect_images',
+    );
+  });
+
+  it('keeps the orchestration model and inspects images through a helper model when it cannot view them', async () => {
+    mocks.resolveImageDelivery.mockResolvedValue({
+      delivery: 'helper',
+      model: 'openrouter/openai/gpt-5.4',
+      helperModel: 'openrouter/google/gemini-3.8-flash',
+      helperReasoningEffort: 'low',
+    });
+    mocks.generateHelperText.mockResolvedValue(
+      'A settings page with a red error banner reading "Review check failed".',
+    );
+    let inspection: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        inspection = await invokeTool(nativeToolNames.inspectImages, {
+          question: 'What does the screenshot show?',
+          imageIds: null,
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The screenshot shows a failed review check.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      images: [
+        'data:image/png;base64,aGVsbG8=',
+        'data:image/jpeg;base64,d29ybGQ=',
+      ],
+      adapter: callbacks(),
+    });
+
+    const promptParams = mocks.generateText.mock.calls[0]?.[0];
+    expect(promptParams).not.toHaveProperty('files');
+    expect(promptParams.prompt).toContain(
+      'Image attachments: image-1 (image/png), image-2 (image/jpeg)',
+    );
+    expect(promptParams.prompt).toContain('inspect_images');
+    expect(inspection).toEqual({
+      success: true,
+      imageIds: ['image-1', 'image-2'],
+      observations:
+        'A settings page with a red error banner reading "Review check failed".',
+    });
+    expect(mocks.generateHelperText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surface: 'fast_agent_image_inspection',
+        userId: 'user-1',
+        fastConversationId: 'conversation-1',
+        model: 'openrouter/google/gemini-3.8-flash',
+        reasoningEffort: 'low',
+        requiredInputModality: 'image',
+        files: [
+          { mime: 'image/png', url: 'data:image/png;base64,aGVsbG8=' },
+          { mime: 'image/jpeg', url: 'data:image/jpeg;base64,d29ybGQ=' },
+        ],
+      }),
+    );
+    expect(mocks.generateHelperText.mock.calls[0]?.[0].prompt).toContain(
+      'What does the screenshot show?',
+    );
+  });
+
+  it('rejects unknown attachment IDs passed to inspect_images', async () => {
+    mocks.resolveImageDelivery.mockResolvedValue({
+      delivery: 'helper',
+      model: 'openrouter/openai/gpt-5.4',
+      helperModel: 'openrouter/google/gemini-3.8-flash',
+    });
+    let inspection: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        inspection = await invokeTool(nativeToolNames.inspectImages, {
+          question: 'Describe it.',
+          imageIds: ['image-9'],
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Done.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      images: ['data:image/png;base64,aGVsbG8='],
+      adapter: callbacks(),
+    });
+
+    expect(inspection).toEqual({
+      success: false,
+      error: expect.stringContaining('Unknown image attachment ID(s): image-9'),
+    });
+    expect(mocks.generateHelperText).not.toHaveBeenCalled();
+  });
+
+  it('tells the model no image-capable model exists instead of failing the turn', async () => {
+    mocks.resolveImageDelivery.mockRejectedValue(
+      new NonTaskInputModalityUnsupportedError('image'),
+    );
+    let inspection: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        inspection = await invokeTool(nativeToolNames.inspectImages, {
+          question: 'Describe it.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I could not view the image.',
+        });
+        return '';
+      },
+    );
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        images: ['data:image/png;base64,aGVsbG8='],
+        adapter: callbacks(),
+      }),
+    ).resolves.toBe('I could not view the image.');
+
+    const promptParams = mocks.generateText.mock.calls[0]?.[0];
+    expect(promptParams).not.toHaveProperty('files');
+    expect(promptParams.prompt).toContain(
+      'No configured model accepts image input',
+    );
+    expect(inspection).toEqual({
+      success: false,
+      error: expect.stringContaining('No configured model accepts image input'),
+    });
+    expect(mocks.generateHelperText).not.toHaveBeenCalled();
   });
 
   it('still answers when the canonical user prompt cannot persist', async () => {
