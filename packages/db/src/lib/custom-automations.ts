@@ -402,6 +402,7 @@ export async function tryClaimCustomAutomationLaunch(
     .where(
       and(
         eq(customAutomations.id, id),
+        eq(customAutomations.enabled, true),
         or(
           isNull(customAutomations.launchClaimedAt),
           lt(customAutomations.launchClaimedAt, staleBefore),
