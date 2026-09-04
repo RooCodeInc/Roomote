@@ -1498,6 +1498,49 @@ describe('canonical PR review notification ownership', () => {
     ]);
   });
 
+  it('suppresses a superseded ordinary automatic dispatch after its lease expires', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/superseded-auto-dispatch-${task.id}`;
+    const eventKey = `superseded-auto-dispatch-${task.id}`;
+    await associate(task.id, repository, 31);
+    await persistPrReviewEvent(
+      eventInput({ repository, prNumber: 31, eventKey }),
+    );
+    const claim = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    if (!claim || claim.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+    });
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'prepared',
+      status: 'auto_dispatch_pending',
+      values: { actionClaimedAt: CLAIM_AT },
+    });
+    await db
+      .update(prReviewEvents)
+      .set({ superseded: true })
+      .where(eq(prReviewEvents.eventKey, eventKey));
+
+    await expect(
+      claimForRepository(
+        repository,
+        new Date(CLAIM_AT.getTime() + 11 * 60 * 1000),
+      ),
+    ).resolves.toEqual([]);
+    await expect(deliveryStatusOf(claim.deliveryId)).resolves.toBe(
+      'suppressed',
+    );
+  });
+
   it('holds the old-head retirement fence through automatic dispatch', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({ initiatorUserId: user.id });
