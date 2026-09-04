@@ -10,7 +10,7 @@ import {
   taskRuns,
   tasks,
 } from '@roomote/db/server';
-import type { RunStatus } from '@roomote/types';
+import type { FastAgentConversationOwner, RunStatus } from '@roomote/types';
 import type { FastAgentConversation } from './fast-agent-conversation';
 import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
 import type {
@@ -20,6 +20,8 @@ import type {
 
 type FastAgentSessionRecord = {
   id: string;
+  userId: string | null;
+  owner: FastAgentConversationOwner;
   title: string | null;
   conversation: FastAgentConversation;
   compatibilityMessages: ModelMessage[];
@@ -34,12 +36,14 @@ export type FastAgentActiveTask = {
 };
 
 export async function getOrCreateFastAgentSession({
+  owner,
   userId,
   conversation,
   sessionId,
   initialTitle,
 }: {
-  userId: string;
+  owner?: FastAgentConversationOwner;
+  userId?: string;
   conversation: FastAgentConversation;
   /** Session to bind a newly created conversation to; see the repository. */
   sessionId?: string;
@@ -47,7 +51,8 @@ export async function getOrCreateFastAgentSession({
   initialTitle?: string;
 }): Promise<FastAgentSessionRecord> {
   return fastAgentConversationRepository.getOrCreate({
-    userId,
+    ...(owner ? { owner } : {}),
+    ...(userId ? { userId } : {}),
     conversation,
     ...(sessionId ? { sessionId } : {}),
     ...(initialTitle ? { initialTitle } : {}),

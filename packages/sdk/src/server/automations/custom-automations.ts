@@ -26,7 +26,6 @@ import {
   isCommunicationAutomationTarget,
   resolveEvalHarnessSelection,
   TaskPayloadKind,
-  buildFastAgentSessionAttachment,
   type AutomationTarget,
   type CommunicationProvider,
   type FastAgentConversation,
@@ -759,13 +758,10 @@ async function launchCustomAutomationRow(
       return result;
     }
 
-    if (!automation.createdByUserId) {
-      throw new Error('Automation run-as user is not configured.');
-    }
     const eventId = `${automation.id}:${eventClaimedAt.toISOString()}`;
     const conversation = buildAutomationConversation(automation, eventId);
     const parentSession = await getOrCreateFastAgentSession({
-      userId: automation.createdByUserId,
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
       conversation,
       initialTitle: automation.name,
     });
@@ -776,10 +772,7 @@ async function launchCustomAutomationRow(
         ...(modelOverride?.harness ? { harness: modelOverride.harness } : {}),
         payload: {
           repo: automation.allRepositories ? ALL_REPOSITORIES : '',
-          ...buildFastAgentSessionAttachment({
-            sessionId: parentSession.id,
-            conversation,
-          }),
+          fastAgentSessionId: parentSession.id,
           ...(automation.environmentId
             ? { environmentId: automation.environmentId }
             : {}),

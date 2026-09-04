@@ -829,7 +829,7 @@ describe('customAutomationsJob', () => {
       conversationId: `${automation.id}:${claimAt.toISOString()}`,
     };
     expect(fastMocks.getSession).toHaveBeenCalledWith({
-      userId: 'user-1',
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
       conversation,
       initialTitle: automation.name,
     });
@@ -845,10 +845,6 @@ describe('customAutomationsJob', () => {
             channel: 'C123',
             slackChannel: 'C123',
             fastAgentSessionId: '33333333-3333-4333-8333-333333333333',
-            fastAgentParent: {
-              sessionId: '33333333-3333-4333-8333-333333333333',
-              conversation,
-            },
           }),
         }),
         initiator: {
@@ -873,6 +869,7 @@ describe('customAutomationsJob', () => {
     expect(enqueued.task.payload).not.toHaveProperty(
       'communicationContextInherited',
     );
+    expect(enqueued.task.payload).not.toHaveProperty('fastAgentParent');
     expect(fastMocks.enqueueParentEvent).not.toHaveBeenCalled();
     expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
       db,
@@ -1165,18 +1162,32 @@ describe('customAutomationsJob', () => {
     expect(buildDestinationTaskPayloadFields).not.toHaveBeenCalled();
   });
 
-  it('fails when a sandbox automation has no run-as user', async () => {
+  it('launches an ownerless sandbox automation into an automation-owned Session', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       { ...automation, createdByUserId: null } as never,
     ]);
 
     const result = await customAutomationsJob();
 
-    expect(result.errors).toEqual([
-      'Flaky tests: Automation run-as user is not configured.',
-    ]);
-    expect(fastMocks.getSession).not.toHaveBeenCalled();
-    expect(enqueueTask).not.toHaveBeenCalled();
+    expect(result.launchedTaskId).toBe('task_abc');
+    expect(fastMocks.getSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        owner: { kind: 'automation', automationKey: 'custom_automation' },
+      }),
+    );
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initiator: expect.objectContaining({
+          kind: 'automation',
+          key: 'custom_automation',
+        }),
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            fastAgentSessionId: '33333333-3333-4333-8333-333333333333',
+          }),
+        }),
+      }),
+    );
   });
 
   it("falls back to the enabling admin's DM when no report channel is configured", async () => {

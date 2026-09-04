@@ -292,6 +292,7 @@ const FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT = 1000;
 const fastSessionSelection = {
   id: fastAgentConversations.id,
   userId: fastAgentConversations.userId,
+  ownerAutomation: fastAgentConversations.ownerAutomation,
   ownerName: users.name,
   ownerEmail: users.email,
   ownerImageUrl: users.imageUrl,
@@ -329,6 +330,7 @@ export async function findAccessibleFastSession(
     .select({
       id: fastAgentConversations.id,
       userId: fastAgentConversations.userId,
+      ownerAutomation: fastAgentConversations.ownerAutomation,
       title: fastAgentConversations.title,
       surface: fastAgentConversations.surface,
       workspaceId: fastAgentConversations.workspaceId,
@@ -638,7 +640,7 @@ export async function getFastSessionById(
   const [session] = await db
     .select(fastSessionSelection)
     .from(fastAgentConversations)
-    .innerJoin(users, eq(fastAgentConversations.userId, users.id))
+    .leftJoin(users, eq(fastAgentConversations.userId, users.id))
     .where(
       and(eq(fastAgentConversations.id, sessionId), fastSessionScope(auth)),
     )
