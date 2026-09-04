@@ -240,6 +240,7 @@ const chatReplyArgsSchema = z.object({
     .max(10)
     .optional(),
 });
+
 const chatReactionArgsSchema = z.object({
   name: z.string().trim().min(1),
   purpose: z.enum(['ack', 'closeout']),

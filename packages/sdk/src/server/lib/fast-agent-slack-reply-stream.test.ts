@@ -49,6 +49,12 @@ function build(slack: ReturnType<typeof slackMock>, quote: string | null) {
     sessionId: 'session-1',
     footerContext: {} as never,
     getQuote: () => pendingQuote,
+    resolveImages: async () => [
+      {
+        url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+        altText: 'result.png',
+      },
+    ],
     onDelivered: () => {
       pendingQuote = null;
       onDelivered();
@@ -118,6 +124,35 @@ describe('createSlackFastReplyStream', () => {
     ).resolves.toBeUndefined();
     await stream.abort();
     expect(slack.stopMessageStream).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves structured image artifact IDs when finalizing a streamed reply', async () => {
+    const slack = slackMock();
+    const { stream } = build(slack, null);
+
+    await stream.append('Preparing the result');
+    await stream.finish({
+      purpose: 'closeout',
+      message: 'Here is the requested result.',
+      imageArtifactIds: ['artifact-1'],
+    });
+
+    expect(mocks.updateWithFooter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bodyBlocks: [
+          {
+            type: 'markdown',
+            text: 'Here is the requested result.',
+          },
+          {
+            type: 'image',
+            image_url:
+              'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+            alt_text: 'result.png',
+          },
+        ],
+      }),
+    );
   });
 
   it('yields nothing when the stream never opened so the caller posts normally', async () => {
