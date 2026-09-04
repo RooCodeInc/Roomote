@@ -37,7 +37,7 @@ Roomote 1.3 brings every supported entry point into continuous Sessions, expands
 - Accept unused optional MCP tool fields, respond to explicit GitHub mentions even in repositories excluded from unsolicited automation, and revalidate time-sensitive operational facts before acting.
 - Improve task and Session readability with correctly clipped avatars, accurate demo-task start times, visible cost labels, restored environment badges, smoother artifact transitions, less intrusive initial activity, and a todo list that no longer crowds the prompt input.
 - Keep Modal- and Roomote-backed task snapshots resumable beyond the previous seven-day application limit when the provider still retains them.
-- Keep parent task model, reasoning, and provider overrides out of nested Roomote environments and preview shell files while preserving explicit nested inference configuration.
+- Prevent parent task model, reasoning, and provider overrides from leaking into environment services or preview shell files while preserving explicit inference configuration.
 - Start the first Fast conversation after a deployment without waiting several minutes for OpenCode to install its runtime plugin.
 - Protect Roomote-reserved deployment variables from generic environment-variable updates and deletion.
 - Preserve reviewer feedback across new commits, retire controls for outdated revisions, restart Roomote reviews from GitHub's Re-run action, and clear failed review checks after findings are resolved.
