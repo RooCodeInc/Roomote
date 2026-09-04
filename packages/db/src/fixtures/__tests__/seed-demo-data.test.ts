@@ -268,4 +268,63 @@ describe('seedDemoData', () => {
     });
     expect(seededTaskRuns).toHaveLength(demoSeedTasks.length);
   });
+
+  it('backfills missing lifecycle timestamps without overwriting existing values', async () => {
+    await seedDemoData();
+
+    const completedTask = demoSeedTasks.find(
+      ({ taskRunStatus }) => taskRunStatus === RunStatus.Completed,
+    );
+    const runningTask = demoSeedTasks.find(
+      ({ taskRunStatus }) => taskRunStatus === RunStatus.Running,
+    );
+    expect(completedTask).toBeDefined();
+    expect(runningTask).toBeDefined();
+
+    const preservedStartedAt = new Date('2025-01-02T03:04:05.000Z');
+    const otherCompletedTask = demoSeedTasks.find(
+      ({ id, taskRunStatus }) =>
+        id !== completedTask!.id && taskRunStatus === RunStatus.Completed,
+    );
+    expect(otherCompletedTask).toBeDefined();
+
+    await db
+      .update(taskRuns)
+      .set({ startedAt: null, completedAt: null })
+      .where(eq(taskRuns.taskId, completedTask!.id));
+    await db
+      .update(taskRuns)
+      .set({ startedAt: null, completedAt: null })
+      .where(eq(taskRuns.taskId, runningTask!.id));
+    await db
+      .update(taskRuns)
+      .set({ startedAt: preservedStartedAt })
+      .where(eq(taskRuns.taskId, otherCompletedTask!.id));
+
+    const summary = await seedDemoData();
+    const runsByTaskId = new Map(
+      (
+        await db.query.taskRuns.findMany({
+          where: inArray(taskRuns.taskId, demoTaskIds),
+        })
+      ).map((run) => [run.taskId, run]),
+    );
+
+    expect(runsByTaskId.get(completedTask!.id)?.startedAt).toBeInstanceOf(Date);
+    expect(runsByTaskId.get(completedTask!.id)?.completedAt).toBeInstanceOf(
+      Date,
+    );
+    expect(runsByTaskId.get(runningTask!.id)?.startedAt).toBeInstanceOf(Date);
+    expect(runsByTaskId.get(runningTask!.id)?.completedAt).toBeNull();
+    expect(runsByTaskId.get(otherCompletedTask!.id)?.startedAt).toEqual(
+      preservedStartedAt,
+    );
+    expect(summary.created).toEqual(
+      expect.arrayContaining([
+        `task run for ${completedTask!.id}`,
+        `task run for ${runningTask!.id}`,
+      ]),
+    );
+    expect(summary.skipped).toContain(`task run for ${otherCompletedTask!.id}`);
+  });
 });
