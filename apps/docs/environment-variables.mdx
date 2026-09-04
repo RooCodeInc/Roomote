@@ -309,8 +309,8 @@ as per-task auth tokens or workspace paths.
 | `R_GITHUB_CLIENT_SECRET`       | GitHub       | GitHub OAuth client secret.                                                                 |
 | `R_GITHUB_WEBHOOK_SECRET`      | GitHub       | GitHub webhook secret.                                                                      |
 | `GITHUB_MCP_SERVER_URL`        | Optional     | GitHub MCP server URL override.                                                             |
-| `GITHUB_AUTOMATED_SKIP_REPOS`  | Optional     | Repository skip list for automated GitHub processing.                                       |
-| `GITHUB_AUTOMATED_SKIP_OWNERS` | Optional     | Owner skip list for automated GitHub processing.                                            |
+| `GITHUB_AUTOMATED_SKIP_REPOS`  | Optional     | Repository skip list for unsolicited GitHub automations (reviews, triage, conflict checks). Mentions still get a response. |
+| `GITHUB_AUTOMATED_SKIP_OWNERS` | Optional     | Owner skip list for unsolicited GitHub automations. Mentions still get a response.          |
 | `GITLAB_BASE_URL`              | Optional     | GitLab base URL for self-managed GitLab.                                                    |
 | `GITLAB_CLIENT_ID`             | GitLab       | GitLab OAuth application ID.                                                                |
 | `GITLAB_CLIENT_SECRET`         | GitLab       | GitLab OAuth application secret.                                                            |
