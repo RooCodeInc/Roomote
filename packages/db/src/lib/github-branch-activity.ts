@@ -1,4 +1,14 @@
-import { and, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 
 import {
   type TaskPayload,
@@ -255,6 +265,7 @@ export async function findReusableGitHubPrFollowUpOwner({
   branchName,
   sourceControlProvider = 'github',
   host,
+  repositoryId,
   fastAgentConversation,
 }: {
   repoFullName: string;
@@ -262,6 +273,13 @@ export async function findReusableGitHubPrFollowUpOwner({
   branchName: string;
   sourceControlProvider?: SourceControlProvider;
   host?: string | null;
+  /**
+   * When set, the linkage-row match requires this exact repositories-row FK.
+   * Unlike the host predicate (which tolerates legacy null-host rows), this
+   * pins the lookup to one connected repository, so a same-named repository
+   * on another self-managed instance can never match.
+   */
+  repositoryId?: string | null;
   fastAgentConversation?: Pick<
     FastAgentConversation,
     'surface' | 'workspaceId' | 'conversationId'
@@ -292,6 +310,9 @@ export async function findReusableGitHubPrFollowUpOwner({
         ...(host
           ? [or(eq(taskPullRequests.host, host), isNull(taskPullRequests.host))]
           : []),
+        ...(repositoryId
+          ? [eq(taskPullRequests.repositoryId, repositoryId)]
+          : []),
       ),
     )
     .orderBy(desc(taskRuns.createdAt), desc(taskRuns.id));
@@ -309,6 +330,13 @@ export async function findReusableGitHubPrFollowUpOwner({
   // would match payloads that stamped an empty `branch`/`headRef` and hand
   // ownership to an unrelated task.
   if (!branchName) {
+    return null;
+  }
+
+  // The payload-branch fallback cannot be pinned to a repositories row, so a
+  // caller that demands the exact-repository match gets no fallback: an
+  // unstamped legacy payload on another instance must never satisfy it.
+  if (repositoryId) {
     return null;
   }
 
@@ -446,11 +474,17 @@ export async function findActiveGitHubPrReviewTask({
   prNumber,
   headSha,
   sourceControlProvider,
+  host,
 }: {
   repoFullName: string;
   prNumber: number;
   headSha: string;
   sourceControlProvider?: SourceControlProvider;
+  /**
+   * When given, only review rows on this host (or legacy rows with no host)
+   * match, so a same-named PR on another self-hosted instance never does.
+   */
+  host?: string | null;
 }): Promise<ActiveGitHubBranchWork | null> {
   const reviewRows = await db
     .select(ACTIVE_WORK_COLUMNS)
@@ -467,12 +501,77 @@ export async function findActiveGitHubPrReviewTask({
         ...(sourceControlProvider
           ? [eq(taskPullRequests.sourceControlProvider, sourceControlProvider)]
           : []),
+        ...(host
+          ? [or(eq(taskPullRequests.host, host), isNull(taskPullRequests.host))]
+          : []),
       ),
     )
     .orderBy(desc(taskRuns.createdAt))
     .limit(10);
 
   return pickActiveWork(reviewRows, 'task_pull_request');
+}
+
+export type RoomoteOpenedPullRequestTask = {
+  runId: number;
+  taskId: string;
+  type: TaskPayloadKind;
+  status: RunStatus;
+};
+
+/**
+ * The newest Roomote task that opened the pull request, whether or not a run
+ * is still active or resumable. Only linkage rows stamped `createdByRoomote`
+ * count: a pull request merely mentioned in a task transcript is also linked
+ * to that task, but Roomote did not open it. Review-pipeline and
+ * conflict-resolver tasks never open pull requests and are excluded.
+ *
+ * Use this, not the active-run lookups above, when deciding whether a pull
+ * request is Roomote-opened: those return null once the task finishes
+ * without a snapshot, while the linkage is durable.
+ */
+export async function findRoomoteOpenedPullRequestTask({
+  repoFullName,
+  prNumber,
+  sourceControlProvider = 'github',
+  host,
+}: {
+  repoFullName: string;
+  prNumber: number;
+  sourceControlProvider?: SourceControlProvider;
+  /** When given, only rows on this host (or legacy rows with no host) match. */
+  host?: string | null;
+}): Promise<RoomoteOpenedPullRequestTask | null> {
+  const [row] = await db
+    .select(ACTIVE_WORK_COLUMNS)
+    .from(taskRuns)
+    .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, taskRuns.taskId))
+    .where(
+      and(
+        eq(taskPullRequests.createdByRoomote, true),
+        notInArray(taskRuns.payloadKind, [
+          ...ACTIVE_PR_REVIEW_TYPES,
+          TaskPayloadKind.GithubPrConflictResolve,
+        ]),
+        eq(taskPullRequests.sourceControlProvider, sourceControlProvider),
+        eq(taskPullRequests.repository, repoFullName),
+        eq(taskPullRequests.prNumber, prNumber),
+        ...(host
+          ? [or(eq(taskPullRequests.host, host), isNull(taskPullRequests.host))]
+          : []),
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
+
+  return row
+    ? {
+        runId: row.runId,
+        taskId: row.taskId,
+        type: row.type,
+        status: row.status,
+      }
+    : null;
 }
 
 async function fetchRunReuseMetadata(

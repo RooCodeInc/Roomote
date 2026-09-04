@@ -1,3 +1,5 @@
+import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
+
 const mocks = vi.hoisted(() => ({
   findRun: vi.fn(),
   stopTaskRun: vi.fn(),
@@ -13,6 +15,12 @@ const mocks = vi.hoisted(() => ({
   releaseWorkItem: vi.fn(),
   handlePrReviewAction: vi.fn(),
   processFastAgentMessage: vi.fn(),
+  launchPinned: vi.fn(),
+  getSessionForTask: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  launchPinnedFastSessionTask: mocks.launchPinned,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -32,14 +40,11 @@ vi.mock('@roomote/db/server', () => ({
   db: { query: { taskRuns: { findFirst: mocks.findRun } } },
   finalizeWorkItemLaunched: mocks.finalizeWorkItem,
   releaseWorkItemClaim: mocks.releaseWorkItem,
+  getSessionForTask: mocks.getSessionForTask,
 }));
 
 vi.mock('../../tasks/task-stop.js', () => ({ stopTaskRun: mocks.stopTaskRun }));
 vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
-vi.mock('../routing-confirmation.js', () => ({
-  parseDiscordRouteCallbackData: () => null,
-  handleDiscordRoutingCallback: vi.fn(),
-}));
 vi.mock('@roomote/sdk/server', () => ({
   findDiscordMappedUserId: mocks.findMappedUser,
 }));
@@ -68,7 +73,16 @@ vi.mock('../fast-agent.js', () => ({
 vi.mock('../task-launch.js', () => ({
   resolveDiscordChannelContext: mocks.resolveChannel,
   resolveDiscordWorkspace: mocks.resolveWorkspace,
-  discordMetadataForChannel: vi.fn(),
+  discordMetadataForChannel: vi.fn(
+    (input: { channel: { channelId: string; parentChannelId?: string } }) => ({
+      communicationProvider: 'discord',
+      communicationChannelId:
+        input.channel.parentChannelId ?? input.channel.channelId,
+      ...(input.channel.parentChannelId
+        ? { communicationThreadId: input.channel.channelId }
+        : {}),
+    }),
+  ),
 }));
 vi.mock('../../tasks/orphaned-work-item-run.js', () => ({
   cancelOrphanedWorkItemRunBestEffort: vi.fn(),
@@ -94,6 +108,33 @@ describe('Discord component callbacks', () => {
     mocks.findSuggestionByMessage.mockResolvedValue('suggestion-1');
     mocks.processFastAgentMessage.mockResolvedValue({ accepted: true });
     mocks.releaseWorkItem.mockResolvedValue(true);
+    // The pinned-launch primitive runs the surface launcher inside a Session.
+    mocks.launchPinned.mockImplementation(
+      async (input: {
+        launchId: string;
+        conversation: unknown;
+        launch: (context: {
+          parent: { sessionId: string; conversation: unknown };
+          launchIdempotencyKey: string;
+          postKickoff: () => Promise<void>;
+        }) => Promise<
+          { success: true; taskId: string } | { success: false; error: string }
+        >;
+      }) => {
+        const result = await input.launch({
+          parent: { sessionId: 'fast-1', conversation: input.conversation },
+          launchIdempotencyKey: `pinned-launch:${input.launchId}`,
+          postKickoff: async () => {},
+        });
+        if (!result.success) throw new Error(result.error);
+        return {
+          sessionId: 'session-1',
+          fastConversationId: 'fast-1',
+          taskId: result.taskId,
+          runId: 42,
+        };
+      },
+    );
     mocks.resolveWorkspace.mockResolvedValue({
       environmentId: 'env-1',
       repoForPayload: 'acme/app',
@@ -230,6 +271,7 @@ describe('Discord component callbacks', () => {
 
   it('starts a coding task for a pinned suggestion', async () => {
     const claimedAt = new Date('2026-08-28T00:00:00.000Z');
+    mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
     mocks.claimSuggestionByMessage.mockResolvedValue({
       outcome: 'claimed',
       suggestion: {
@@ -240,6 +282,7 @@ describe('Discord component callbacks', () => {
         targetRepositoryFullName: null,
         targetEnvironmentId: null,
         usesRouterLaunch: false,
+        sourceTaskId: 'scan-task-1',
         launchClaimedAt: claimedAt,
       },
     });
@@ -278,12 +321,201 @@ describe('Discord component callbacks', () => {
     });
 
     expect(mocks.startNewTask).toHaveBeenCalled();
+    expect(mocks.getSessionForTask).toHaveBeenCalledWith(
+      expect.anything(),
+      'scan-task-1',
+    );
+    expect(mocks.launchPinned).toHaveBeenCalledWith(
+      expect.objectContaining({ originSessionId: 'session-origin' }),
+    );
     expect(mocks.processFastAgentMessage).not.toHaveBeenCalled();
     expect(mocks.finalizeWorkItem).toHaveBeenCalledWith(expect.anything(), {
       id: 'suggestion-1',
       taskId: 'task-1',
       claimedAt,
     });
+  });
+
+  it('fails loudly instead of routing elsewhere when a legacy pinned environment no longer resolves', async () => {
+    const claimedAt = new Date('2026-08-28T00:00:00.000Z');
+    mocks.claimSuggestionByMessage.mockResolvedValue({
+      outcome: 'claimed',
+      suggestion: {
+        id: 'suggestion-1',
+        title: 'Fix tests',
+        brief: 'Repair the flaky suite.',
+        investigationContext: null,
+        targetRepositoryFullName: 'acme/app',
+        targetEnvironmentId: 'env-1',
+        usesRouterLaunch: false,
+        launchClaimedAt: claimedAt,
+      },
+    });
+    mocks.resolveChannel.mockResolvedValue({
+      channelId: 'channel-1',
+      channelName: 'general',
+      channelType: 0,
+      guildId: 'guild-1',
+      isDirectMessage: false,
+      isThread: false,
+    });
+    mocks.resolveWorkspace.mockResolvedValue(null);
+    const postMessage = vi.fn();
+
+    await handleDiscordSuggestionReaction({
+      provider: { postMessage } as never,
+      applicationId: 'app-1',
+      channel: {
+        channelId: 'thread-1',
+        channelName: 'Suggested tasks',
+        channelType: 11,
+        guildId: 'guild-1',
+        parentChannelId: 'channel-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+      channelId: 'thread-1',
+      messageId: 'suggestion-message-1',
+      eventId: 'reaction-1',
+      sender: { id: 'discord-user-1', username: 'matt' },
+    });
+
+    expect(mocks.resolveWorkspace).toHaveBeenCalledWith({
+      type: 'environment',
+      id: 'env-1',
+      name: 'env-1',
+    });
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.finalizeWorkItem).not.toHaveBeenCalled();
+    expect(mocks.releaseWorkItem).toHaveBeenCalledWith(expect.anything(), {
+      id: 'suggestion-1',
+      claimedAt,
+    });
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('Could not start'),
+      }),
+    );
+  });
+
+  it.each([
+    {
+      label: 'concrete environment',
+      launchTarget: 'env-1',
+      targetEnvironmentId: 'env-1',
+      targetRepositoryFullName: null,
+      expectedWorkspace: expect.objectContaining({ environmentId: 'env-1' }),
+    },
+    {
+      label: 'all repositories',
+      launchTarget: ALL_REPOSITORIES,
+      targetEnvironmentId: null,
+      targetRepositoryFullName: ALL_REPOSITORIES,
+      expectedWorkspace: expect.objectContaining({
+        repoForPayload: ALL_REPOSITORIES,
+      }),
+    },
+  ])('honors an explicit $label coding target', async (target) => {
+    mocks.claimSuggestionByMessage.mockResolvedValue({
+      outcome: 'claimed',
+      suggestion: {
+        id: 'suggestion-1',
+        title: 'Fix tests',
+        brief: 'Repair the flaky suite.',
+        investigationContext: null,
+        launchTarget: target.launchTarget,
+        targetRepositoryFullName: target.targetRepositoryFullName,
+        targetEnvironmentId: target.targetEnvironmentId,
+        usesRouterLaunch: false,
+        launchClaimedAt: new Date('2026-08-28T00:00:00.000Z'),
+      },
+    });
+    mocks.resolveChannel.mockResolvedValue({
+      channelId: 'channel-1',
+      channelName: 'general',
+      channelType: 0,
+      guildId: 'guild-1',
+      isDirectMessage: false,
+      isThread: false,
+    });
+    mocks.startNewTask.mockResolvedValue({
+      status: 'started',
+      launchResult: { id: 42, taskId: 'task-1' },
+    });
+    mocks.finalizeWorkItem.mockResolvedValue(true);
+
+    await handleDiscordSuggestionReaction({
+      provider: { postMessage: vi.fn() } as never,
+      applicationId: 'app-1',
+      channel: {
+        channelId: 'thread-1',
+        channelName: 'Suggested tasks',
+        channelType: 11,
+        guildId: 'guild-1',
+        parentChannelId: 'channel-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+      channelId: 'thread-1',
+      messageId: 'suggestion-message-1',
+      eventId: 'reaction-1',
+      sender: { id: 'discord-user-1', username: 'matt' },
+    });
+
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace: target.expectedWorkspace,
+        fastAgentParent: expect.objectContaining({ sessionId: 'fast-1' }),
+      }),
+    );
+    expect(mocks.processFastAgentMessage).not.toHaveBeenCalled();
+  });
+
+  it('honors an explicit Fast target', async () => {
+    mocks.claimSuggestionByMessage.mockResolvedValue({
+      outcome: 'claimed',
+      suggestion: {
+        id: 'suggestion-1',
+        title: 'Fix tests',
+        brief: 'Repair the flaky suite.',
+        investigationContext: null,
+        launchTarget: FAST_EXECUTION,
+        targetRepositoryFullName: FAST_EXECUTION,
+        targetEnvironmentId: null,
+        usesRouterLaunch: false,
+        launchClaimedAt: new Date('2026-08-28T00:00:00.000Z'),
+      },
+    });
+    mocks.resolveChannel.mockResolvedValue({
+      channelId: 'channel-1',
+      channelName: 'general',
+      channelType: 0,
+      guildId: 'guild-1',
+      isDirectMessage: false,
+      isThread: false,
+    });
+    mocks.finalizeWorkItem.mockResolvedValue(true);
+
+    await handleDiscordSuggestionReaction({
+      provider: { postMessage: vi.fn() } as never,
+      applicationId: 'app-1',
+      channel: {
+        channelId: 'thread-1',
+        channelName: 'Suggested tasks',
+        channelType: 11,
+        guildId: 'guild-1',
+        parentChannelId: 'channel-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+      channelId: 'thread-1',
+      messageId: 'suggestion-message-1',
+      eventId: 'reaction-1',
+      sender: { id: 'discord-user-1', username: 'matt' },
+    });
+
+    expect(mocks.processFastAgentMessage).toHaveBeenCalled();
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('releases the suggestion when the Fast session is busy', async () => {
@@ -634,7 +866,7 @@ describe('Discord component callbacks', () => {
     expect(mocks.startNewTask).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: dmChannel,
-        workspaceOverride: expect.objectContaining({ environmentId: 'env-1' }),
+        workspace: expect.objectContaining({ environmentId: 'env-1' }),
       }),
     );
     expect(mocks.resolveWorkspace).toHaveBeenCalledWith({
@@ -651,6 +883,58 @@ describe('Discord component callbacks', () => {
     );
     expect(postMessage).toHaveBeenCalledWith(
       expect.not.objectContaining({ threadId: expect.anything() }),
+    );
+  });
+
+  it('keeps a bare-repository suggestion on its saved repository', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+    mocks.claimSuggestion.mockResolvedValue({
+      id: 'suggestion-1',
+      title: 'Fix the flaky login test',
+      brief: null,
+      targetRepositoryFullName: 'acme/app',
+      targetEnvironmentId: null,
+      investigationContext: null,
+      launchClaimedAt: new Date(),
+    });
+    mocks.startNewTask.mockResolvedValue({
+      status: 'started',
+      launchResult: { id: 42, taskId: 'task-9' },
+      taskUrl: 'https://app.example.com/task/task-9',
+    });
+    mocks.finalizeWorkItem.mockResolvedValue({ id: 'suggestion-1' });
+
+    const result = await handleDiscordComponentInteraction({
+      provider: { postMessage } as never,
+      applicationId: 'app-1',
+      interaction: {
+        id: 'interaction-3',
+        application_id: 'app-1',
+        type: 3,
+        token: 'token-3',
+        channel_id: 'dm-1',
+        user: { id: 'discord-user-1', username: 'matt' },
+        data: { custom_id: 'idea:suggestion-1', component_type: 2 },
+      },
+      interactionDeferred: true,
+      channel: {
+        channelId: 'dm-1',
+        channelName: 'DM',
+        channelType: 1,
+        isDirectMessage: true,
+        isThread: false,
+      },
+    });
+
+    expect(result).toBe('handled');
+    expect(mocks.resolveWorkspace).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace: {
+          repoForPayload: 'acme/app',
+          workspaceDisplayName: 'acme/app',
+        },
+      }),
     );
   });
 

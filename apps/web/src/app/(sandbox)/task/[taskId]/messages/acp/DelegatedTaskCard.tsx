@@ -40,18 +40,18 @@ export function DelegatedTaskCard({
   return (
     <button
       type="button"
-      className="group my-2 flex w-full cursor-pointer items-center gap-3 rounded-xl bg-card px-4 py-3 text-left transition-colors hover:bg-accent/50"
+      className="group my-2 flex w-full cursor-pointer items-center gap-3 rounded-xl bg-card px-4 py-3 text-left hover:bg-card/50"
       onClick={() => onOpen(taskId)}
       aria-label={`View coding task: ${title}`}
     >
       <span className="min-w-0 flex-1">
-        <span className="block text-xs text-muted-foreground">
+        <span className="block text-xs text-muted-foreground group-hover:text-accent-foreground">
           Started coding task
         </span>
         {isPending ? (
           <Skeleton className="mt-1 h-4 w-2/3" />
         ) : (
-          <span className="ph-no-capture block truncate text-sm font-medium">
+          <span className="ph-no-capture block truncate text-sm font-medium group-hover:text-accent-foreground">
             {title}
           </span>
         )}

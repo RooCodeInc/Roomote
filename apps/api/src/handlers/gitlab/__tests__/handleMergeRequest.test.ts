@@ -7,6 +7,7 @@ const {
   mockScheduleNotifyPullRequestTerminalStatus,
   mockScheduleSourceControlPullRequestFactSync,
   mockFindActiveGitHubPrReviewTask,
+  mockGetPrOriginFastAgentParent,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockGetGitLabAutomationTargets: vi.fn(),
@@ -16,10 +17,12 @@ const {
   mockScheduleNotifyPullRequestTerminalStatus: vi.fn(),
   mockScheduleSourceControlPullRequestFactSync: vi.fn(),
   mockFindActiveGitHubPrReviewTask: vi.fn(),
+  mockGetPrOriginFastAgentParent: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
+  getPrOriginFastAgentParent: mockGetPrOriginFastAgentParent,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -104,6 +107,8 @@ describe('handleGitLabMergeRequest', () => {
     mockRepositoriesFindFirst.mockReset();
     mockScheduleNotifyPullRequestTerminalStatus.mockReset();
     mockFindActiveGitHubPrReviewTask.mockReset();
+    mockGetPrOriginFastAgentParent.mockReset();
+    mockGetPrOriginFastAgentParent.mockResolvedValue(null);
 
     mockRepositoriesFindFirst.mockResolvedValue({
       id: 'repo-row-1',
@@ -267,6 +272,41 @@ describe('handleGitLabMergeRequest', () => {
         }),
       }),
       expect.any(Object),
+    );
+  });
+
+  it('attaches the review to the Fast session whose task opened the MR', async () => {
+    const fastParent = {
+      sessionId: '22222222-2222-4222-8222-222222222222',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: '100.001',
+        replyTarget: { channelId: 'C123', threadId: '100.001' },
+      },
+    };
+    mockGetPrOriginFastAgentParent.mockResolvedValue(fastParent);
+
+    await handleGitLabMergeRequest(makePayload('open'));
+
+    expect(mockGetPrOriginFastAgentParent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repository: 'acme/backend',
+        prNumber: 42,
+        branchName: 'feature/test',
+        sourceControlProvider: 'gitlab',
+      }),
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            fastAgentParent: fastParent,
+            fastAgentSessionId: fastParent.sessionId,
+          }),
+        }),
+      }),
+      expect.anything(),
     );
   });
 

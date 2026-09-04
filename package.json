@@ -1,6 +1,6 @@
 {
   "name": "roomote",
-  "version": "1.0.2",
+  "version": "1.2.4",
   "license": "FCL-1.0-ALv2",
   "packageManager": "pnpm@10.29.3",
   "engines": {
@@ -37,11 +37,6 @@
     "dev": "pnpm --silent --filter @roomote/dev dev",
     "doctor": "pnpm --filter @roomote/dev run doctor",
     "storybook": "pnpm --filter @roomote/web storybook",
-    "evals": "pnpm eval:router && pnpm eval:router:followup",
-    "eval:router": "pnpm --filter @roomote/cloud-agents eval:router",
-    "eval:router:followup": "pnpm --filter @roomote/cloud-agents eval:router:followup",
-    "eval:router:view": "pnpm --filter @roomote/cloud-agents eval:router:view",
-    "eval:router:share": "pnpm --filter @roomote/cloud-agents eval:router:share",
     "changeset": "changeset",
     "version": "node scripts/release/apply-version.mjs",
     "test:release-scripts": "node --test scripts/release/__tests__/*.test.mjs"
@@ -142,15 +137,19 @@
       "yaml-language-server>yaml": "2.8.3",
       "@opentelemetry/propagator-jaeger": "2.9.0",
       "@hono/node-server": "2.0.10",
+      "@humanfs/node": "0.16.8",
+      "@xmldom/xmldom": "0.8.15",
       "body-parser": "2.3.0",
+      "browserslist": "4.28.7",
       "brace-expansion@<1.1.18": "1.1.18",
       "brace-expansion@>=2.0.0 <2.1.4": "2.1.4",
       "brace-expansion@>=3.0.0 <5.0.9": "5.0.9",
-      "fast-uri": "3.1.5",
+      "fast-uri": "3.1.6",
       "ip-address": "10.3.1",
       "immutable": "5.1.8",
       "postcss": "8.5.23",
-      "sharp": "0.35.0"
+      "sharp": "0.35.0",
+      "toml": "4.2.0"
     },
     "patchedDependencies": {
       "vite-plugin-storybook-nextjs@3.1.10": "patches/vite-plugin-storybook-nextjs@3.1.10.patch"

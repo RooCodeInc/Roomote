@@ -140,6 +140,60 @@ describe('SideNavItem', () => {
     ).not.toHaveAttribute('data-next-link');
   });
 
+  it('renders disabled destinations as focusable non-navigable buttons', () => {
+    const onClick = vi.fn();
+    render(
+      <SideNavItem
+        icon={TestIcon}
+        href="/analytics"
+        tooltip="Analytics"
+        description="View analytics"
+        onClick={onClick}
+        focusableWhenDisabled
+        disabled
+      />,
+    );
+
+    expect(screen.queryByRole('link', { name: 'Analytics' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Analytics' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Analytics' }),
+    ).not.toBeDisabled();
+    expect(screen.getByTestId('tooltip-content')).toHaveTextContent(
+      'View analytics',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Analytics' }));
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('preserves native disabled behavior by default', () => {
+    render(
+      <SideNavItem icon={TestIcon} href="/tasks" tooltip="Tasks" disabled />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Tasks' })).toBeDisabled();
+  });
+
+  it('keeps the setup explanation available when a disabled item is expanded', () => {
+    render(
+      <SideNavItem
+        icon={TestIcon}
+        href="/analytics"
+        tooltip="Available when setup is completed."
+        expanded
+        focusableWhenDisabled
+        disabled
+      />,
+    );
+
+    expect(screen.getByTestId('tooltip-content')).toHaveTextContent(
+      'Available when setup is completed.',
+    );
+  });
+
   it('renders action items with the same structure and fires clicks', () => {
     const onClick = vi.fn();
 

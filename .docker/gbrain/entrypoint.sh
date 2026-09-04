@@ -357,11 +357,49 @@ if [ -n "$CONFIGURED_DIMENSIONS" ] && [ "$CONFIGURED_DIMENSIONS" != "$EMBEDDING_
   echo "[gbrain-entrypoint] WARNING:   gbrain migrate embeddings --to <provider:model> --yes"
 fi
 
+# The supervisor holds a queue-scoped lock row in Postgres with a 5-minute
+# TTL. On a rolling deploy the container being replaced can still hold it
+# (or have died without releasing it), and this gbrain exits with code 2
+# (LOCK_HELD) the moment it sees that. Treating that exit as fatal took the
+# server down too and crash-looped three fresh Brains past Railway's restart
+# budget before the TTL had even lapsed (2026-09-02). Retry within the TTL
+# plus a margin instead; anything else the supervisor exits with stays fatal.
+SUPERVISOR_LOCK_HELD_EXIT=2
+SUPERVISOR_LOCK_RETRY_SECONDS="${GBRAIN_SUPERVISOR_LOCK_RETRY_SECONDS:-30}"
+SUPERVISOR_LOCK_RETRY_LIMIT="${GBRAIN_SUPERVISOR_LOCK_RETRY_LIMIT:-14}"
+run_job_worker() {
+  attempt=0
+  while :; do
+    rm -f "$DATA_DIR/gbrain-worker-supervisor.pid"
+    gbrain jobs supervisor \
+      --concurrency "${GBRAIN_WORKER_CONCURRENCY:-1}" \
+      --pid-file "$DATA_DIR/gbrain-worker-supervisor.pid" &
+    supervisor_pid=$!
+    # Shutdown must end the wrapper too, whether it is waiting on a live
+    # supervisor or sleeping between retries; otherwise the loop outlives the
+    # entrypoint's stop and starts another supervisor mid-shutdown. Waiting
+    # for the forwarded signal to land lets the supervisor release its lock
+    # row, which is what spares the next container this whole retry.
+    trap 'kill -TERM "$supervisor_pid" 2>/dev/null; wait "$supervisor_pid" 2>/dev/null; exit 0' TERM INT
+    if wait "$supervisor_pid"; then
+      status=0
+    else
+      status=$?
+    fi
+    if [ "$status" -ne "$SUPERVISOR_LOCK_HELD_EXIT" ] \
+      || [ "$attempt" -ge "$SUPERVISOR_LOCK_RETRY_LIMIT" ]; then
+      return "$status"
+    fi
+    attempt=$((attempt + 1))
+    echo "[gbrain-entrypoint] job worker found the queue lock held; retrying in ${SUPERVISOR_LOCK_RETRY_SECONDS}s ($attempt/$SUPERVISOR_LOCK_RETRY_LIMIT)"
+    # Backgrounded so the trap fires during the pause rather than after it.
+    sleep "$SUPERVISOR_LOCK_RETRY_SECONDS" &
+    wait $! || true
+  done
+}
+
 echo "[gbrain-entrypoint] starting durable job worker"
-rm -f "$DATA_DIR/gbrain-worker-supervisor.pid"
-gbrain jobs supervisor \
-  --concurrency "${GBRAIN_WORKER_CONCURRENCY:-1}" \
-  --pid-file "$DATA_DIR/gbrain-worker-supervisor.pid" &
+run_job_worker &
 WORKER_PID=$!
 
 echo "[gbrain-entrypoint] starting gbrain serve on :$PORT (full surface)"

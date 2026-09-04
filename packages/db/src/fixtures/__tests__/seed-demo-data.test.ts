@@ -1,11 +1,17 @@
 import { and, eq, inArray } from 'drizzle-orm';
 
+import { createEmptySetupNewState } from '@roomote/types';
+
 import {
   taskRuns,
   deploymentSettings,
   environments,
+  fastAgentConversations,
+  fastAgentMessages,
   githubInstallations,
   repositories,
+  sessionParticipants,
+  sessions,
   taskPullRequests,
   tasks,
   users,
@@ -13,6 +19,7 @@ import {
 import { db } from '../../db';
 import {
   demoSeedEnvironmentName,
+  demoSeedFastSession,
   demoSeedRepositories,
   demoSeedPullRequests,
   demoSeedTasks,
@@ -32,6 +39,12 @@ function withoutSettings(labels: string[]) {
 }
 
 async function cleanup() {
+  await db
+    .delete(sessions)
+    .where(eq(sessions.fastConversationId, demoSeedFastSession.conversationId));
+  await db
+    .delete(fastAgentConversations)
+    .where(eq(fastAgentConversations.id, demoSeedFastSession.conversationId));
   await db
     .delete(taskPullRequests)
     .where(inArray(taskPullRequests.taskId, demoTaskIds));
@@ -82,8 +95,10 @@ describe('seedDemoData', () => {
 
     expect(withoutSettings(summary.skipped)).toEqual([]);
     expect(withoutSettings(summary.created)).toHaveLength(
-      // user + installation + environment + repositories + tasks + task runs + PRs
-      3 +
+      // user + Fast conversation/messages/Session/participant + installation +
+      // environment + repositories + tasks + task runs + PRs
+      6 +
+        demoSeedFastSession.messages.length +
         demoSeedRepositories.length +
         demoSeedTasks.length * 2 +
         demoSeedPullRequests.length,
@@ -99,6 +114,62 @@ describe('seedDemoData', () => {
     });
     expect(user).toBeDefined();
     expect(user?.onboardingCompletedAt).not.toBeNull();
+
+    const fastConversation = await db.query.fastAgentConversations.findFirst({
+      where: eq(fastAgentConversations.id, demoSeedFastSession.conversationId),
+    });
+    expect(fastConversation).toMatchObject({
+      userId: demoSeedUserId,
+      surface: 'slack',
+      workspaceId: demoSeedFastSession.workspaceId,
+      conversationId: demoSeedFastSession.providerConversationId,
+      currentReplyChannelId: demoSeedFastSession.channelId,
+      currentReplyThreadId: demoSeedFastSession.threadId,
+      title: demoSeedFastSession.title,
+    });
+
+    const fastMessages = await db.query.fastAgentMessages.findMany({
+      where: eq(
+        fastAgentMessages.conversationId,
+        demoSeedFastSession.conversationId,
+      ),
+      orderBy: (message, { asc }) => [asc(message.turnSeq)],
+    });
+    expect(fastMessages).toHaveLength(demoSeedFastSession.messages.length);
+    expect(fastMessages.map(({ role }) => role)).toEqual(['user', 'assistant']);
+    expect(fastMessages.map(({ contentBlocks }) => contentBlocks)).toEqual(
+      demoSeedFastSession.messages.map(({ text }) => [{ type: 'text', text }]),
+    );
+    expect(fastMessages[0]?.metadata).toMatchObject({
+      visibleInTranscript: true,
+      userId: demoSeedUserId,
+    });
+
+    const fastSession = await db.query.sessions.findFirst({
+      where: eq(
+        sessions.fastConversationId,
+        demoSeedFastSession.conversationId,
+      ),
+    });
+    expect(fastSession).toMatchObject({
+      id: demoSeedFastSession.sessionId,
+      title: demoSeedFastSession.title,
+      ownerKind: 'user',
+      ownerUserId: demoSeedUserId,
+      sourceSurface: 'slack',
+      sourceTrigger: 'message',
+      fastConversationId: demoSeedFastSession.conversationId,
+      cachedStatus: 'ready',
+    });
+
+    const participant = await db.query.sessionParticipants.findFirst({
+      where: eq(sessionParticipants.id, demoSeedFastSession.participantId),
+    });
+    expect(participant).toMatchObject({
+      sessionId: demoSeedFastSession.sessionId,
+      userId: demoSeedUserId,
+      role: 'owner',
+    });
 
     const installation = await db.query.githubInstallations.findFirst({
       where: eq(githubInstallations.installedByUserId, demoSeedUserId),
@@ -158,27 +229,115 @@ describe('seedDemoData', () => {
     }
   });
 
+  it('repairs incomplete setup without changing other deployment settings', async () => {
+    const settingsBefore = await db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+    });
+    const staleSetupNewState = {
+      ...createEmptySetupNewState(),
+      computeProvider: 'modal' as const,
+      sourceControlProvider: 'github' as const,
+    };
+    const staleMetadata = { preserveDuringDemoSeed: true };
+
+    if (settingsBefore) {
+      await db
+        .update(deploymentSettings)
+        .set({
+          metadata: staleMetadata,
+          setupCompletedAt: null,
+          setupNewState: staleSetupNewState,
+        })
+        .where(eq(deploymentSettings.id, 'default'));
+    } else {
+      await db.insert(deploymentSettings).values({
+        id: 'default',
+        metadata: staleMetadata,
+        setupCompletedAt: null,
+        setupNewState: staleSetupNewState,
+      });
+    }
+
+    const staleSettings = await db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+    });
+
+    try {
+      const summary = await seedDemoData();
+      const settingsAfter = await db.query.deploymentSettings.findFirst({
+        where: eq(deploymentSettings.id, 'default'),
+      });
+
+      expect(summary.created).toContain('deployment settings default');
+      expect(settingsAfter).toEqual({
+        ...staleSettings,
+        setupCompletedAt: expect.any(Date),
+      });
+    } finally {
+      if (settingsBefore) {
+        await db
+          .update(deploymentSettings)
+          .set({
+            metadata: settingsBefore.metadata,
+            setupCompletedAt: settingsBefore.setupCompletedAt,
+            setupNewState: settingsBefore.setupNewState,
+            updatedAt: settingsBefore.updatedAt,
+          })
+          .where(eq(deploymentSettings.id, 'default'));
+      } else {
+        await db
+          .delete(deploymentSettings)
+          .where(eq(deploymentSettings.id, 'default'));
+      }
+    }
+  });
+
   it('is idempotent and leaves existing rows untouched on re-run', async () => {
     await seedDemoData();
 
+    const settingsBefore = await db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+    });
     const userBefore = await db.query.users.findFirst({
       where: eq(users.id, demoSeedUserId),
     });
+    const fastConversationBefore =
+      await db.query.fastAgentConversations.findFirst({
+        where: eq(
+          fastAgentConversations.id,
+          demoSeedFastSession.conversationId,
+        ),
+      });
 
     const summary = await seedDemoData();
 
     expect(summary.created).toEqual([]);
     expect(withoutSettings(summary.skipped)).toHaveLength(
-      3 +
+      6 +
+        demoSeedFastSession.messages.length +
         demoSeedRepositories.length +
         demoSeedTasks.length * 2 +
         demoSeedPullRequests.length,
     );
 
+    const settingsAfter = await db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+    });
     const userAfter = await db.query.users.findFirst({
       where: eq(users.id, demoSeedUserId),
     });
+    const fastConversationAfter =
+      await db.query.fastAgentConversations.findFirst({
+        where: eq(
+          fastAgentConversations.id,
+          demoSeedFastSession.conversationId,
+        ),
+      });
+    expect(settingsAfter).toEqual(settingsBefore);
     expect(userAfter?.updatedAt).toEqual(userBefore?.updatedAt);
+    expect(fastConversationAfter?.updatedAt).toEqual(
+      fastConversationBefore?.updatedAt,
+    );
 
     const seededTasks = await db.query.tasks.findMany({
       where: inArray(tasks.id, demoTaskIds),

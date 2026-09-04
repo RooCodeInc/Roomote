@@ -10,10 +10,19 @@ import {
   trackedMessages,
   workItems,
 } from '@roomote/db/server';
-import { MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  FAST_EXECUTION,
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+} from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
+import type { FastAgentStartResult } from '../fast-agent-entry.js';
 import { launchClaimedSuggestedTask } from '../tasks/suggestion-launch.js';
+import {
+  resolveSuggestedTaskLaunchTarget,
+  type SuggestedTaskLaunchTarget,
+} from '../tasks/suggestion-launch-target.js';
 import { claimCurrentThreadSuggestionByMessage } from '../tasks/current-thread-suggestion-reaction.js';
 import { stripTeamsMessageIdSuffix } from './find-active-teams-run.js';
 
@@ -69,6 +78,9 @@ export type ClaimedTeamsSuggestion = {
   targetRepositoryFullName: string | null;
   targetEnvironmentId?: string | null;
   usesRouterLaunch?: boolean;
+  launchTarget?: string;
+  /** The scan or onboarding task that produced the suggestion. */
+  sourceTaskId?: string | null;
   launchClaimedAt: Date;
 };
 
@@ -196,6 +208,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       investigationContext: claimed.investigationContext,
       targetRepositoryFullName: claimed.targetRepositoryFullName,
       targetEnvironmentId: claimed.targetEnvironmentId,
+      sourceTaskId: claimed.sourceTaskId,
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };
@@ -228,7 +241,9 @@ function buildTeamsSuggestionTaskPromptText(
     suggestion.title,
     '',
     suggestion.brief ?? '',
-    ...(suggestion.targetRepositoryFullName
+    ...(suggestion.targetRepositoryFullName &&
+    suggestion.targetRepositoryFullName !== ALL_REPOSITORIES &&
+    suggestion.targetRepositoryFullName !== FAST_EXECUTION
       ? ['', `Target repository: ${suggestion.targetRepositoryFullName}`]
       : []),
     ...(suggestion.targetEnvironmentId
@@ -240,14 +255,17 @@ function buildTeamsSuggestionTaskPromptText(
   ].join('\n');
 }
 
-/** Minimal structural view of startNewTeamsTask's launch outcomes. */
-type TeamsSuggestionLaunchOutcome =
-  | { status: 'started'; launchResult: { id: number; taskId: string } }
-  | { status: 'replied_inline' };
+/** Minimal structural view of a pinned suggestion launch outcome. */
+type TeamsSuggestionLaunchOutcome = {
+  status: 'started';
+  launchResult: { id: number; taskId: string };
+};
 
 type LaunchClaimedTeamsSuggestionResult =
-  | { result: 'started'; runId: number }
+  | { result: 'started'; runId: number | null }
   | { result: 'replied_inline' }
+  /** The launch was refused with a reason that was posted to the user. */
+  | { result: 'rejected' }
   /**
    * The fenced finalize lost to a reclaim after the task was enqueued: the
    * orphaned run was best-effort canceled and the user got a corrective
@@ -268,37 +286,70 @@ type LaunchClaimedTeamsSuggestionResult =
  */
 export async function launchClaimedTeamsSuggestion(params: {
   suggestion: ClaimedTeamsSuggestion;
-  /** Launches the task from the suggestion prompt (startNewTeamsTask). */
-  launchTask: (promptText: string) => Promise<TeamsSuggestionLaunchOutcome>;
+  /** Launches the task from the suggestion prompt inside the owning Session. */
+  launchTask: (
+    promptText: string,
+    target: SuggestedTaskLaunchTarget,
+  ) => Promise<TeamsSuggestionLaunchOutcome>;
+  /**
+   * Starts a Fast turn from the suggestion prompt. Must resolve on admission
+   * (not turn completion) so the claim is finalized promptly, and return an
+   * abort handle so a lost finalize can cancel the orphaned turn.
+   */
+  launchFast?: (promptText: string) => Promise<FastAgentStartResult>;
   /** Posts a best-effort visible reply into the conversation. */
   postMessage: (text: string) => Promise<void>;
 }): Promise<LaunchClaimedTeamsSuggestionResult> {
   const { suggestion } = params;
+  const target = resolveSuggestedTaskLaunchTarget(suggestion);
+  // Cards without a pinned workspace let Fast decide; pinned cards delegate
+  // through the owning Session without a model turn.
+  const usesFastTurn = target.kind === 'fast' || target.kind === 'router';
   const launchResult = await launchClaimedSuggestedTask({
     suggestion,
     policy: {
-      fastEligible: false,
-      userDefaultEnabled: false,
-      fastAvailable: false,
+      fastEligible: usesFastTurn,
+      userDefaultEnabled: usesFastTurn,
+      fastAvailable: Boolean(params.launchFast),
+      requiredMode: usesFastTurn ? ('fast' as const) : ('coding' as const),
     },
-    launch: async () => {
-      const launch = await params.launchTask(
-        buildTeamsSuggestionTaskPromptText(suggestion),
-      );
-      return launch.status === 'started'
-        ? {
-            accepted: true,
-            runId: launch.launchResult.id,
-            taskId: launch.launchResult.taskId,
-          }
-        : { accepted: false };
+    launch: async (mode) => {
+      const promptText = buildTeamsSuggestionTaskPromptText(suggestion);
+      if (mode === 'fast') {
+        const fastStart = (await params.launchFast?.(promptText)) ?? {
+          accepted: false as const,
+          reason: 'Fast mode is unavailable.',
+        };
+        return fastStart.accepted
+          ? {
+              accepted: true,
+              runId: null,
+              taskId: null,
+              abort: fastStart.abort,
+            }
+          : fastStart;
+      }
+      const launch = await params.launchTask(promptText, target);
+      return {
+        accepted: true,
+        runId: launch.launchResult.id,
+        taskId: launch.launchResult.taskId,
+      };
     },
   });
 
   if (launchResult.status === 'started') {
-    return { result: 'started', runId: launchResult.runId! };
+    return { result: 'started', runId: launchResult.runId };
   }
   if (launchResult.status === 'rejected') {
+    // A reasoned rejection (a refused Fast turn) posted nothing itself;
+    // reasonless rejections already replied inline from task routing.
+    if (launchResult.reason) {
+      await params.postMessage(
+        `Could not start "${suggestion.title}" — ${launchResult.reason}`,
+      );
+      return { result: 'rejected' };
+    }
     return { result: 'replied_inline' };
   }
   if (

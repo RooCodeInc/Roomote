@@ -2,10 +2,13 @@ import type { ArtifactWithContent } from '@/types';
 import type { UserAuthSuccess } from '@/types';
 import {
   getArtifactByPath as getArtifactByPathServer,
+  getArtifactBySessionPath,
   generateDownloadUrl,
+  generateOwnedDownloadUrl,
   signArtifactId,
   currentEpochSeconds,
 } from '@/lib/server';
+import { findAccessibleSession } from '@/lib/server/sessions';
 
 const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024; // 1MB
 
@@ -55,27 +58,57 @@ async function readTextWithByteLimit(
 
 export async function getArtifactByPathCommand(
   auth: UserAuthSuccess,
-  input: { taskId: string; path: string; version?: number },
+  input: {
+    taskId?: string;
+    sessionId?: string;
+    path: string;
+    version?: number;
+  },
 ): Promise<ArtifactWithContent | null> {
-  const { taskId, path, version } = input;
+  const { taskId, sessionId, path, version } = input;
+  if (
+    sessionId &&
+    !(await findAccessibleSession(
+      { userId: auth.userId, isAdmin: auth.isAdmin },
+      sessionId,
+    ))
+  ) {
+    return null;
+  }
 
-  const artifact = await getArtifactByPathServer({
-    taskId,
-    path,
-    version,
-    auth: { userId: auth.userId, isAdmin: auth.isAdmin },
-  });
+  const artifact = taskId
+    ? await getArtifactByPathServer({
+        taskId,
+        path,
+        version,
+        auth: { userId: auth.userId, isAdmin: auth.isAdmin },
+      })
+    : sessionId
+      ? await getArtifactBySessionPath({
+          sessionId,
+          path,
+          version,
+          auth: { userId: auth.userId, isAdmin: auth.isAdmin },
+        })
+      : null;
 
   if (!artifact || !artifact.uploaded) {
     return null;
   }
 
-  const downloadUrl = await generateDownloadUrl(
-    artifact.taskId,
-    artifact.id,
-    artifact.path,
-    artifact.version,
-  );
+  const downloadUrl = artifact.taskId
+    ? await generateDownloadUrl(
+        artifact.taskId,
+        artifact.id,
+        artifact.path,
+        artifact.version,
+      )
+    : await generateOwnedDownloadUrl(
+        { sessionId: artifact.sessionId! },
+        artifact.id,
+        artifact.path,
+        artifact.version,
+      );
 
   let content: string | undefined;
 
@@ -132,6 +165,7 @@ export async function getArtifactByPathCommand(
   return {
     id: artifact.id,
     taskId: artifact.taskId,
+    sessionId: artifact.sessionId,
     path: artifact.path,
     version: artifact.version,
     artifactType: artifact.artifactType,

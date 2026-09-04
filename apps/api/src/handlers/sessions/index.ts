@@ -6,8 +6,10 @@ import {
   db,
   desc,
   deriveSessionStatus,
+  ensureSessionForFastConversation,
   eq,
   exists,
+  fastAgentConversations,
   getSessionForFastConversation,
   ilike,
   inArray,
@@ -54,7 +56,31 @@ async function findAccessibleSession(sessionId: string) {
     .from(sessions)
     .where(and(eq(sessions.id, sessionId), eq(sessions.visibility, 'visible')))
     .limit(1);
-  return session ?? null;
+  if (session) return session;
+
+  // Session pages retain persisted Fast conversation UUIDs as alternate
+  // identifiers. Resolve those links here too, including conversations whose
+  // backfill has not created the canonical Session row yet.
+  const [alternate] = await db
+    .select({
+      conversationId: fastAgentConversations.id,
+      session: sessions,
+    })
+    .from(fastAgentConversations)
+    .leftJoin(
+      sessions,
+      eq(sessions.fastConversationId, fastAgentConversations.id),
+    )
+    .where(eq(fastAgentConversations.id, sessionId))
+    .limit(1);
+  if (!alternate) return null;
+  if (alternate.session) {
+    return alternate.session.visibility === 'visible'
+      ? alternate.session
+      : null;
+  }
+
+  return ensureSessionForFastConversation(db, alternate.conversationId);
 }
 
 async function sendSessionMessage(c: SessionContext): Promise<Response> {

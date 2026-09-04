@@ -22,7 +22,7 @@ import {
   listMcpTools,
   type McpToolDefinition,
 } from '../mcp-tool-client';
-import { isRouterMcpServerEnabled } from '../router/mcp-policy';
+import { isRouterMcpServerEnabled } from '../mcp-policy';
 import { resolveApiBaseUrl } from '../shared-utils';
 import {
   getFastAgentConversationStorageWorkspaceId,
@@ -62,6 +62,7 @@ type IntegrationAuditContext = BrokerContext & {
 
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS = 30_000;
+const FAST_AGENT_INTEGRATION_TOOL_CACHE_MAX_ENTRIES = 1_000;
 const FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS = 10_000;
 const FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS = 60_000;
 
@@ -71,6 +72,63 @@ type IntegrationToolCacheEntry = {
 };
 
 const integrationToolCache = new Map<string, IntegrationToolCacheEntry>();
+
+const FAST_ROOMOTE_MANAGE_TASKS_LAUNCH_FIELDS = new Set([
+  'prompt',
+  'environmentId',
+  'branch',
+  'notifyOnSettle',
+]);
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/**
+ * Fast has a native launch gate that owns Session attachment, kickoff ordering,
+ * attachments, and settlement. Keep the direct task API available to other MCP
+ * consumers without exposing its incompatible launch action to Fast models.
+ */
+function shapeFastIntegrationTool(
+  integrationId: string,
+  tool: McpToolDefinition,
+): McpToolDefinition | null {
+  if (integrationId !== ROOMOTE_MCP_ID || tool.name !== 'manage_tasks') {
+    return tool;
+  }
+
+  const inputSchema = asObject(tool.inputSchema);
+  const properties = asObject(inputSchema?.properties);
+  const action = asObject(properties?.action);
+  const actions = Array.isArray(action?.enum) ? action.enum : null;
+  if (!inputSchema || !properties || !action || !actions) {
+    // A schema we cannot narrow must not retain the unsafe launch path.
+    return null;
+  }
+
+  return {
+    ...tool,
+    description:
+      'Manage Roomote Sessions and inspect or control existing tasks. Use launch_task to start coding work from a Fast Session.',
+    inputSchema: {
+      ...inputSchema,
+      properties: {
+        ...Object.fromEntries(
+          Object.entries(properties).filter(
+            ([name]) => !FAST_ROOMOTE_MANAGE_TASKS_LAUNCH_FIELDS.has(name),
+          ),
+        ),
+        action: {
+          ...action,
+          enum: actions.filter((candidate) => candidate !== 'launch'),
+          description: 'The Session or existing-task action to perform.',
+        },
+      },
+    },
+  };
+}
 
 async function withFastIntegrationTimeout<T>(
   operation: (signal: AbortSignal) => Promise<T>,
@@ -108,6 +166,9 @@ async function listCachedIntegrationTools(options: {
   const { cacheKey, ...clientOptions } = options;
   const cached = integrationToolCache.get(cacheKey);
   if (cached) {
+    // Re-insert so eviction below is least-recently-used rather than oldest.
+    integrationToolCache.delete(cacheKey);
+    integrationToolCache.set(cacheKey, cached);
     if (cached.expiresAt <= Date.now()) {
       // Keep serving the last known-good catalog while refreshing. Fast turns
       // must never wait behind a deployment MCP server that stopped answering
@@ -144,7 +205,7 @@ async function listCachedIntegrationTools(options: {
     FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS,
     'Fast integration tool discovery',
   );
-  pruneExpiredIntegrationToolCacheEntries();
+  pruneIntegrationToolCacheEntries();
   integrationToolCache.set(cacheKey, {
     expiresAt: Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS,
     tools,
@@ -162,13 +223,16 @@ async function listCachedIntegrationTools(options: {
 
 // The cache is keyed per user, so on deployments with many Fast users
 // abandoned entries would otherwise accumulate for the process lifetime.
-// Entries still inside the stale-while-refresh window are kept.
-function pruneExpiredIntegrationToolCacheEntries(): void {
-  const cutoff = Date.now() - FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS;
-  for (const [key, entry] of integrationToolCache) {
-    if (entry.expiresAt <= cutoff) {
-      integrationToolCache.delete(key);
-    }
+// Eviction is by count rather than age: a stale catalog is still served
+// instantly while it refreshes in the background, so keeping it around means
+// the first message after an idle stretch never blocks on tool discovery.
+function pruneIntegrationToolCacheEntries(): void {
+  while (
+    integrationToolCache.size >= FAST_AGENT_INTEGRATION_TOOL_CACHE_MAX_ENTRIES
+  ) {
+    const oldestKey = integrationToolCache.keys().next().value;
+    if (oldestKey === undefined) return;
+    integrationToolCache.delete(oldestKey);
   }
 }
 
@@ -337,7 +401,12 @@ export async function listFastAgentIntegrations(
           url: integration.endpoint!.url,
           headers: integration.endpoint!.headers,
         })
-      ).filter((tool) => !integration.disabledTools.has(tool.name)),
+      )
+        .filter((tool) => !integration.disabledTools.has(tool.name))
+        .flatMap((tool) => {
+          const shaped = shapeFastIntegrationTool(integration.id, tool);
+          return shaped ? [shaped] : [];
+        }),
     })),
   );
 
@@ -396,6 +465,15 @@ export async function callFastAgentIntegration(
   }
   if (!integration.tools.some((tool) => tool.name === request.toolName)) {
     throw new Error('That integration tool is not available to fast mode.');
+  }
+  if (
+    request.integrationId === ROOMOTE_MCP_ID &&
+    request.toolName === 'manage_tasks' &&
+    request.args.action === 'launch'
+  ) {
+    throw new Error(
+      'Fast Sessions must use launch_task so the child stays attached and reports settlement to its parent Session.',
+    );
   }
 
   // Fail closed: an integration tool never executes unless its durable audit

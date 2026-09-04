@@ -42,6 +42,26 @@ and account balance are authoritative.
 4. run a small task and confirm the request appears in OpenRouter activity
 5. check that Roomote shows a remaining key limit when the key has one
 
+## Roomote previews inside environment tasks
+
+When an environment task starts another Roomote deployment for development or
+smoke tests, create a separate spend-capped OpenRouter key and set it as
+`SANDBOX_OPENROUTER_API_KEY` under **Settings > Environments > Deployment
+Environment Variables**. You can alternatively set it on the parent controller.
+Do not store it in an environment definition.
+
+The environment worker maps the value to `OPENROUTER_API_KEY` while preparing
+the workspace. The nested deployment therefore uses Roomote's native OpenRouter
+provider without requiring the parent's normal `OPENROUTER_API_KEY`. Configure
+the nested deployment's models normally in its own Settings. The parent task's
+model mapping, presets, trial provider, and role overrides are not copied into
+the nested deployment.
+
+The mapped key is available to setup commands and services in that environment
+workspace, so use a capped key appropriate for sandbox access. The launcher
+source variable is not exposed there. Deployment environment variable changes
+apply to new tasks, so start a new task after saving or rotating the key.
+
 ## Common issues
 
 - **The key has no usable balance.** Add credits or raise its spending limit.

@@ -348,7 +348,10 @@ describe('dequeueTaskRun', () => {
     });
     expect(mockFetchResolvedRuntimeEnvVars).toHaveBeenCalledWith(
       { ORG_ENV: '1' },
-      { sourceControlProvider: ['gitlab', 'github'] },
+      {
+        sourceControlProvider: ['gitlab', 'github'],
+        includeSandboxOpenRouterApiKey: false,
+      },
     );
     expect(result?.task).toMatchObject({
       id: 'task-101',
@@ -495,6 +498,11 @@ describe('dequeueTaskRun', () => {
     await dequeueTaskRun({ orgId: 'org-1' } as never, {
       runId: taskRun.id,
     });
+
+    expect(mockFetchResolvedRuntimeEnvVars).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ includeSandboxOpenRouterApiKey: true }),
+    );
 
     expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
       expect.anything(),

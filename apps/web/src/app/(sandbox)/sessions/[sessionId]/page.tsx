@@ -20,14 +20,22 @@ import {
 import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { WorkspaceHeader } from '@/components/layout';
 
+import { findDeploymentSetupSessionId } from '@/trpc/commands/setup/setup-session';
 import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionTaskTimeline } from './SessionTaskTimeline';
 import {
-  SessionHeaderExtras,
+  SessionHeaderPullRequests,
   SessionWorkspace,
   type SessionInfo,
 } from './SessionWorkspace';
 import { SessionReadTracker } from './SessionReadTracker';
+import { SetupAutomationRecommendationsCard } from './setup/SetupAutomationRecommendationsCard';
+import { SetupSandboxCard } from './setup/SetupSandboxCard';
+import { SetupSessionSourceControlCard } from './setup/SetupSourceControlCard';
+import {
+  SESSION_HEADER_CONTENT_CLASS_NAME,
+  SESSION_HEADER_TITLE_CLASS_NAME,
+} from './session-header-layout';
 
 const getSessionPageData = cache(async (sessionId: string) => {
   const authorizedUser = await authorize();
@@ -122,37 +130,68 @@ export default async function SessionDetailPage({
       createdAt: unifiedSession.createdAt,
       status: unifiedSession.status,
       tasks: unifiedSession.tasks,
+      artifacts: unifiedSession.artifacts,
     };
+    // The setup session keeps its inline automation-recommendations card on
+    // its normal route after activation: recommendations are optional and
+    // must not interrupt activation, so they surface here once ready.
+    const isSetupSession =
+      authorizedUser.isAdmin &&
+      unifiedSession.id === (await findDeploymentSetupSessionId());
+    const setupTimelineExtras = isSetupSession ? (
+      <div className="space-y-3">
+        <SetupSessionSourceControlCard sessionId={unifiedSession.id} />
+        <SetupSandboxCard />
+        <SetupAutomationRecommendationsCard sessionId={unifiedSession.id} />
+      </div>
+    ) : null;
     return (
       <SessionWorkspace session={sessionInfo}>
         <SessionReadTracker sessionId={unifiedSession.id} />
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
           {session ? (
-            <FastSessionTranscript
-              sessionId={session.id}
-              initialMessages={session.messages}
-              hasOlderMessages={session.hasOlderMessages}
-              canReply
-              initialTitle={unifiedSession.title}
-              fallbackTitle={unifiedSession.title}
-              sessionModel={session.model}
-              sessionReasoningEffort={session.reasoningEffort}
-              defaultModelId={defaultModelId}
-              defaultReasoningEffort={defaultReasoningEffort}
-              headerExtras={
-                <SessionHeaderExtras status={unifiedSession.status} />
-              }
-            />
+            <div className="flex min-h-0 flex-1">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <FastSessionTranscript
+                  sessionId={session.id}
+                  initialMessages={session.messages}
+                  hasOlderMessages={session.hasOlderMessages}
+                  canReply
+                  initialTitle={unifiedSession.title}
+                  fallbackTitle={unifiedSession.title}
+                  sessionModel={session.model}
+                  sessionReasoningEffort={session.reasoningEffort}
+                  defaultModelId={defaultModelId}
+                  defaultReasoningEffort={defaultReasoningEffort}
+                  {...(unifiedSession.ownerUserId
+                    ? {
+                        owner: {
+                          userId: unifiedSession.ownerUserId,
+                          name: unifiedSession.ownerName,
+                          email: unifiedSession.ownerEmail,
+                          imageUrl: unifiedSession.ownerImageUrl,
+                        },
+                      }
+                    : {})}
+                  headerExtras={
+                    <SessionHeaderPullRequests key="session-pull-requests" />
+                  }
+                  {...(isSetupSession
+                    ? { timelineExtras: setupTimelineExtras }
+                    : {})}
+                />
+              </div>
+            </div>
           ) : (
             <>
               <WorkspaceHeader
                 className="py-4"
-                contentClassName="items-stretch gap-2 pr-12 @[600px]:items-center @[600px]:gap-3 @[600px]:pr-4"
+                contentClassName={SESSION_HEADER_CONTENT_CLASS_NAME}
               >
-                <h1 className="min-w-0 flex-1 break-words text-sm font-medium @[600px]:truncate">
+                <h1 className={SESSION_HEADER_TITLE_CLASS_NAME}>
                   {unifiedSession.title}
                 </h1>
-                <SessionHeaderExtras status={unifiedSession.status} />
+                <SessionHeaderPullRequests />
               </WorkspaceHeader>
               <SessionTaskTimeline
                 sessionId={unifiedSession.id}
@@ -191,6 +230,7 @@ export default async function SessionDetailPage({
     createdAt: session.createdAt,
     status: null,
     tasks: [],
+    artifacts: [],
     taskSource: 'fast',
     taskCards: fastTasks,
   };
@@ -215,6 +255,16 @@ export default async function SessionDetailPage({
           sessionReasoningEffort={session.reasoningEffort}
           defaultModelId={defaultModelId}
           defaultReasoningEffort={defaultReasoningEffort}
+          {...(session.userId
+            ? {
+                owner: {
+                  userId: session.userId,
+                  name: session.ownerName,
+                  email: session.ownerEmail,
+                  imageUrl: session.ownerImageUrl,
+                },
+              }
+            : {})}
         />
       </div>
     </SessionWorkspace>

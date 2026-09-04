@@ -169,8 +169,10 @@ become canonical memory.
 <Note>
   Self-hosted Compose deployments start Memory from the `brain` profile, so
   add `brain` to `COMPOSE_PROFILES` in your environment file to bring the
-  container up, then enable Memory in Settings. Everything after that is the
-  same.
+  container up, then enable Memory in Settings. Production installs pull
+  `ghcr.io/roocodeinc/roomote-gbrain` with the same `v*` release tag as Roomote;
+  a complete custom image reference can be pinned with `GBRAIN_IMAGE`.
+  Everything after that is the same.
 </Note>
 
 ## Seeing what it knows

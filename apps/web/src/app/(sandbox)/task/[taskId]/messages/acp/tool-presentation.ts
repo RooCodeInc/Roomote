@@ -87,6 +87,7 @@ const READ_TOOL_NAMES = new Set([
 ]);
 const TASK_TOOL_NAMES = new Set([
   'launch_task',
+  'review_pull_request',
   'retry_task_start',
   'cancel_task',
   'send_task_message',
@@ -287,6 +288,11 @@ function resolveReceiptLanguage(
       verb: byPhase('Starting', 'Started', 'Failed to Start'),
       object: 'Coding Task',
     };
+  if (toolName === 'review_pull_request')
+    return {
+      verb: byPhase('Starting', 'Started', 'Failed to Start'),
+      object: 'Code Review',
+    };
   if (toolName === 'cancel_task')
     return {
       verb: byPhase('Cancelling', 'Cancelled', 'Failed to Cancel'),
@@ -302,10 +308,30 @@ function resolveReceiptLanguage(
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),
       object: 'Task Message',
     };
+  if (toolName === 'send_chat_reply')
+    return {
+      verb: byPhase('Sending', 'Sent', 'Failed to Send'),
+      object: 'Chat Reply',
+    };
+  if (toolName === 'post_to_channel')
+    return {
+      verb: byPhase('Posting', 'Posted', 'Failed to Post'),
+      object: 'Channel Message',
+    };
+  if (toolName === 'send_chat_reaction_emoji')
+    return {
+      verb: byPhase('Adding', 'Added', 'Failed to Add'),
+      object: 'Chat Reaction',
+    };
   if (toolName === 'save_memory')
     return {
       verb: byPhase('Saving', 'Saved', 'Failed to Save'),
       object: 'Memory',
+    };
+  if (toolName === 'find_integration_tools')
+    return {
+      verb: byPhase('Searching', 'Searched', 'Failed to Search'),
+      object: 'Integration Tools',
     };
   return null;
 }
