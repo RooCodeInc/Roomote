@@ -74,6 +74,11 @@ export async function handleSendMessage(
         message:
           result.result.reason ||
           'Linked review handoff was skipped for this task.',
+        sent: {
+          direction: 'Codex → Roomote',
+          target: { kind: 'task', id: params.taskId },
+          text: params.message,
+        },
       });
     }
 
@@ -81,11 +86,21 @@ export async function handleSendMessage(
       return successResult({
         message: `Task ${result.result.taskId ?? params.taskId} is resuming from snapshot.`,
         ...result.result,
+        sent: {
+          direction: 'Codex → Roomote',
+          target: { kind: 'task', id: params.taskId },
+          text: params.message,
+        },
       });
     }
 
     return successResult({
       message: `Message sent to task ${params.taskId}.`,
+      sent: {
+        direction: 'Codex → Roomote',
+        target: { kind: 'task', id: params.taskId },
+        text: params.message,
+      },
     });
   } catch (error) {
     return catchError(error);

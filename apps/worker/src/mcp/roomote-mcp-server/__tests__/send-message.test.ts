@@ -35,6 +35,11 @@ describe('handleSendMessage', () => {
     const parsed = JSON.parse(text);
     expect(parsed.success).toBe(true);
     expect(parsed.message).toContain('task-1');
+    expect(parsed.sent).toEqual({
+      direction: 'Codex → Roomote',
+      target: { kind: 'task', id: 'task-1' },
+      text: 'Please continue',
+    });
     expect(tasksApiClient.steerMessageToTask).toHaveBeenCalledWith(
       config,
       'task-1',
@@ -65,6 +70,11 @@ describe('handleSendMessage', () => {
       resumed: true,
       runId: 77,
       taskId: 'task-1',
+      sent: {
+        direction: 'Codex → Roomote',
+        target: { kind: 'task', id: 'task-1' },
+        text: 'Please continue',
+      },
     });
     expect(tasksApiClient.steerMessageToTask).toHaveBeenCalledWith(
       config,

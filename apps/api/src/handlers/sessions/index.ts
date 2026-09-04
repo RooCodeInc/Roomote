@@ -30,6 +30,7 @@ import {
   type RoomoteSearchSessionsResponse,
   type RoomoteSessionChildTask,
   type RoomoteSessionMessagesResponse,
+  type RoomoteSessionRelayState,
   type RoomoteSessionSummary,
   type RoomoteStartSessionResponse,
   type TaskPhase,
@@ -43,6 +44,7 @@ import {
   getFastSessionMessagesForUser,
   sendMessageToFastSessionForUser,
 } from '../tasks/fastSessionCommunication';
+import { getSessionRelayUpdates } from '../tasks/getRelayUpdates';
 
 type SessionContext = Context<{
   Variables: Variables & { mcpAuth: McpAuth };
@@ -109,7 +111,16 @@ async function sendSessionMessage(c: SessionContext): Promise<Response> {
       userId,
       message,
     });
-    if (result.success) return c.json(result);
+    if (result.success) {
+      return c.json({
+        ...result,
+        sent: {
+          direction: 'Codex → Roomote',
+          target: { kind: 'session', id: session.id },
+          text: message,
+        },
+      });
+    }
     const { status, ...errorBody } = result;
     return c.json(errorBody, { status });
   } catch (error) {
@@ -400,9 +411,52 @@ async function getSessionMessages(c: SessionContext): Promise<Response> {
   }
 }
 
+async function getSessionUpdates(c: SessionContext): Promise<Response> {
+  const userId = c.get('mcpAuth').userId;
+  if (!userId) return c.json({ error: 'User context required' }, 403);
+  const sessionId = c.req.param('sessionId');
+  if (!sessionId) return c.json({ error: 'sessionId is required' }, 400);
+
+  try {
+    const session = await findAccessibleSession(sessionId);
+    if (!session) return c.json({ error: 'Session not found' }, 404);
+    const childTasks = await getChildTasks([session.id]);
+    const serialized = serializeSession(
+      session,
+      childTasks.get(session.id) ?? [],
+    );
+    const state = {
+      kind: 'session' as const,
+      status: serialized.status,
+      tasks: serialized.tasks.map((task) => ({
+        taskId: task.taskId,
+        state: task.state,
+        taskRunStatus: task.latestRun?.status ?? null,
+        taskPhase: task.latestRun?.taskPhase ?? null,
+        goalStatus: task.goalStatus,
+      })),
+    } satisfies RoomoteSessionRelayState;
+    const result = await getSessionRelayUpdates({
+      sessionId: session.id,
+      fastConversationId: session.fastConversationId,
+      userId,
+      cursor: c.req.query('cursor'),
+      limit: c.req.query('limit'),
+      state,
+    });
+    if (!result) return c.json({ error: 'Session not found' }, 404);
+    if ('error' in result) return c.json(result, 400);
+    return c.json(result);
+  } catch (error) {
+    logHandlerError('getSessionUpdates', error);
+    return c.json({ error: 'Failed to get session updates' }, 500);
+  }
+}
+
 export const sessionsRouter = new Hono<{ Variables: Variables }>();
 sessionsRouter.get('/', searchSessions);
 sessionsRouter.post('/', startSession);
 sessionsRouter.get('/:sessionId/summary', getSessionSummary);
 sessionsRouter.get('/:sessionId/messages', getSessionMessages);
+sessionsRouter.get('/:sessionId/updates', getSessionUpdates);
 sessionsRouter.post('/:sessionId/send_message', sendSessionMessage);

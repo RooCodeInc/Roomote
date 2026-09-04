@@ -145,7 +145,14 @@ export async function sendMessage(
   }
 
   if (result.success) {
-    return c.json(result);
+    return c.json({
+      ...result,
+      sent: {
+        direction: 'Codex → Roomote',
+        target: { kind: 'task', id: taskId },
+        text: body.message,
+      },
+    });
   }
 
   const { status, ...errorBody } = result;
