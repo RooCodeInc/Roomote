@@ -35,41 +35,11 @@ import {
   resolveUserMcpServerConfigs,
 } from '@roomote/sdk/server';
 
-import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
 import {
   postSlackThreadMarkdownMessage,
   guardReplyStreamBySourceMessage,
 } from '../helpers/thread-posting.js';
 import { processSlackAttachments } from '../helpers/attachments.js';
-
-export function stripLeadingFastCommandMention(text: string): string {
-  return text.replace(LEADING_FAST_COMMAND_MENTION_PATTERN, '').trimStart();
-}
-
-export function isFastCommandInvocation(text: string): boolean {
-  const mentionStrippedText = stripLeadingFastCommandMention(text);
-  return /^!fast(?:\s|$)/i.test(mentionStrippedText);
-}
-
-export function extractFastQuestion(
-  mentionStrippedText: string,
-  continuation = false,
-): string | null {
-  if (continuation) {
-    const trimmedQuestion = mentionStrippedText.trim();
-    return trimmedQuestion.length > 0 ? trimmedQuestion : null;
-  }
-
-  const match = mentionStrippedText.match(/^!fast\s*(.*)$/is);
-  if (!match) {
-    return null;
-  }
-
-  const [, question = ''] = match;
-  const trimmedQuestion = question.trim();
-
-  return trimmedQuestion.length > 0 ? trimmedQuestion : null;
-}
 
 /**
  * Registers a no-op rejection handler so a promise started ahead of its await
@@ -87,7 +57,6 @@ export async function processFastAgentMessage(params: {
   userId: string;
   teamId: string;
   apiBaseUrl?: string;
-  continuation?: boolean;
   activeTasks?: FastAgentActiveTask[];
   resolveActiveTasks?: () => Promise<FastAgentActiveTask[]>;
   launchTask: LaunchFastAgentTask;
@@ -104,7 +73,6 @@ export async function processFastAgentMessage(params: {
     userId,
     teamId,
     apiBaseUrl,
-    continuation = false,
     activeTasks = [],
     resolveActiveTasks,
     launchTask,
@@ -128,11 +96,7 @@ export async function processFastAgentMessage(params: {
     maxWaitMs: 0,
   });
 
-  const authoredText = event.authoredText ?? event.text;
-  const questionText = continuation
-    ? authoredText
-    : stripLeadingFastCommandMention(authoredText);
-  const baseQuestion = extractFastQuestion(questionText, continuation) ?? '';
+  const baseQuestion = (event.authoredText ?? event.text).trim();
 
   // Every Slack round trip from the control plane costs a few hundred
   // milliseconds, and the thread history, processing reaction, attachments,

@@ -45,7 +45,7 @@
         "type": "app_mention",
         "channel": "C123ABC456",
         "user": "UGRACE",
-        "text": "<@UROOMOTE> !fast what file handles Slack mentions?",
+        "text": "<@UROOMOTE> what file handles Slack mentions?",
         "ts": "1710000000.000100",
         "channel_type": "channel"
       }

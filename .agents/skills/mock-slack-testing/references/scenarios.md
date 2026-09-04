@@ -4,7 +4,7 @@ Use this file to choose the closest scenario before creating a custom one.
 
 ## `app-mention-fast`
 
-- Use for: fresh `@roomote !fast ...` mentions handled inline without a cloud job.
+- Use for: fresh `@roomote ...` mentions handled inline without a cloud job.
 - Minimum setup:
   - one channel
   - one human user
