@@ -153,12 +153,7 @@ describe('Fast native OpenCode tool bridge', () => {
       'Supported current-turn attachments are forwarded only when includeAttachments is true',
     );
     expect(launchTaskSource).toContain('defaults to false');
-    expect(launchTaskSource).toContain(
-      'Brief user-facing description of the work now underway',
-    );
-    expect(launchTaskSource).toContain(
-      'do not mention delegation, launching, or queue state',
-    );
+    expect(launchTaskSource).not.toContain('kickoffMessage');
     expect(launchTaskSource).not.toContain(
       'explanation of what is being delegated',
     );

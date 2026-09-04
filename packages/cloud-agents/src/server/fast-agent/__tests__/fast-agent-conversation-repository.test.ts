@@ -1397,7 +1397,11 @@ describe('Fast conversation repository', () => {
       eventType: 'roomote_runtime.assistant_message',
       role: 'assistant',
       contentBlocks: [{ type: 'text', text: 'Starting on it.' }],
-      metadata: { visibleInTranscript: true, purpose: 'progress' },
+      metadata: {
+        visibleInTranscript: true,
+        purpose: 'progress',
+        inferenceRetryNotice: true,
+      },
       payload: { purpose: 'progress' },
       source: 'slack',
     });
@@ -1483,7 +1487,12 @@ describe('Fast conversation repository', () => {
     ).resolves.toEqual({
       // Transcript order: the reply, then each call with its outcome.
       events: [
-        { kind: 'reply', text: 'Starting on it.', purpose: 'progress' },
+        {
+          kind: 'reply',
+          text: 'Starting on it.',
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+        },
         {
           kind: 'action',
           tool: 'launch_task',
