@@ -1791,22 +1791,45 @@ export async function answerFastAgentQuestion({
       });
     return imageDeliveryPromise;
   };
+  type HeldTurnImage = { id: string; file: NonTaskPromptFile };
+  const commitTurnImages = (held: HeldTurnImage[]) => {
+    for (const { id, file } of held) turnImages.set(id, file);
+  };
+  // Reserves IDs for `files` without holding them yet. The caller commits
+  // once the prompt that names those IDs is actually accepted, so a prompt
+  // abandoned in between leaves nothing behind for its next attempt to
+  // duplicate. Synchronous: nothing may run between reserving and building
+  // the prompt text.
+  const holdImagesForPrompt = (
+    files: NonTaskPromptFile[],
+    text: string,
+    delivery: FastAgentImageDelivery,
+  ): { files: NonTaskPromptFile[]; text: string; held: HeldTurnImage[] } => {
+    if (files.length === 0 || delivery.delivery === 'direct') {
+      return { files, text, held: [] };
+    }
+    const held = files.map((file, index) => ({
+      id: `image-${turnImages.size + index + 1}`,
+      file,
+    }));
+    return {
+      files: [],
+      text: `${text}\n\n${buildFastAgentImageNotice(held, delivery)}`,
+      held,
+    };
+  };
   const prepareImagesForPrompt = async (
     files: NonTaskPromptFile[],
     text: string,
   ): Promise<{ files: NonTaskPromptFile[]; text: string }> => {
     if (files.length === 0) return { files, text };
-    const delivery = await resolveImageDelivery();
-    if (delivery.delivery === 'direct') return { files, text };
-    const entries = files.map((file) => {
-      const id = `image-${turnImages.size + 1}`;
-      turnImages.set(id, file);
-      return { id, file };
-    });
-    return {
-      files: [],
-      text: `${text}\n\n${buildFastAgentImageNotice(entries, delivery)}`,
-    };
+    const prepared = holdImagesForPrompt(
+      files,
+      text,
+      await resolveImageDelivery(),
+    );
+    commitTurnImages(prepared.held);
+    return prepared;
   };
   // Rebuilt prompts (bootstrap, clean retry) restate the whole turn, so they
   // restate the notice for every held image too. Images are only held once
@@ -2187,11 +2210,19 @@ export async function answerFastAgentQuestion({
       }
       if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) return;
       const batchMessages = batch.flatMap(({ turnMessages }) => turnMessages);
-      const batchInput = await prepareImagesForPrompt(
-        batch.flatMap(({ files }) => files),
-        batch.map(({ serializedPrompt }) => serializedPrompt).join('\n\n'),
-      );
+      const batchSourceFiles = batch.flatMap(({ files }) => files);
+      const batchText = batch
+        .map(({ serializedPrompt }) => serializedPrompt)
+        .join('\n\n');
+      const batchImageDelivery =
+        batchSourceFiles.length > 0 ? await resolveImageDelivery() : undefined;
+      // The lookup above may have let a tool start or the turn end. Re-check
+      // before anything is reserved for this batch: it stays pending when
+      // abandoned here and must not have held images already.
       if (signal?.aborted || !nativeSteer || activeToolExecutions > 0) return;
+      const batchInput = batchImageDelivery
+        ? holdImagesForPrompt(batchSourceFiles, batchText, batchImageDelivery)
+        : { files: batchSourceFiles, text: batchText, held: [] };
       const batchFiles = batchInput.files;
       const batchPrompt = batchInput.text;
       const firstRow = batch[0]!.row;
@@ -2213,6 +2244,10 @@ export async function answerFastAgentQuestion({
         }
         throw error;
       }
+      // Held images become addressable only once OpenCode has accepted the
+      // steer that names them. A rejected steer stays pending and reserves
+      // fresh IDs on its next attempt instead of stacking duplicates.
+      commitTurnImages(batchInput.held);
       if (signal?.aborted) return;
       console.info(
         `[Fast Agent] Native steer accepted. conversationId="${canonicalConversationId}" followUpCount=${batch.length}`,

@@ -1271,6 +1271,190 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('holds follow-up images for inspect_images when the model cannot view them', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'helper',
+        model: 'openrouter/openai/gpt-5.4',
+        helperModel: 'openrouter/google/gemini-3.8-flash',
+      });
+      mocks.generateHelperText.mockResolvedValue('Two screenshots.');
+      const first = {
+        id: '11111111-1111-4111-8111-111111111111',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.3',
+          currentMessageId: '100.3',
+          userId: 'user-1',
+          question: 'First pending correction.',
+          images: ['data:image/png;base64,Zmlyc3Q='],
+        },
+      };
+      const second = {
+        id: '22222222-2222-4222-8222-222222222222',
+        createdAt: new Date('2026-08-31T12:00:01.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.4',
+          currentMessageId: '100.4',
+          userId: 'user-1',
+          question: 'Second pending correction.',
+          images: ['data:image/jpeg;base64,c2Vjb25k'],
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([first, second])
+        .mockResolvedValue([]);
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+
+      const steer = mocks.nativeSteer.mock.calls[0]?.[0];
+      expect(steer?.files).toEqual([]);
+      expect(steer?.text).toContain(
+        'Image attachments: image-1 (image/png), image-2 (image/jpeg)',
+      );
+      expect(steer?.text).toContain('inspect_images');
+
+      await expect(
+        invokeTool(nativeToolNames.inspectImages, {
+          question: 'What changed between them?',
+        }),
+      ).resolves.toEqual({
+        success: true,
+        imageIds: ['image-1', 'image-2'],
+        observations: 'Two screenshots.',
+      });
+      expect(mocks.generateHelperText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'openrouter/google/gemini-3.8-flash',
+          files: [
+            { mime: 'image/png', url: 'data:image/png;base64,Zmlyc3Q=' },
+            { mime: 'image/jpeg', url: 'data:image/jpeg;base64,c2Vjb25k' },
+          ],
+        }),
+      );
+
+      finishGeneration?.('Steered answer');
+      await expect(resultPromise).resolves.toBe('Steered answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not hold follow-up images twice when a rejected steer is retried', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'helper',
+        model: 'openrouter/openai/gpt-5.4',
+        helperModel: 'openrouter/google/gemini-3.8-flash',
+      });
+      mocks.generateHelperText.mockResolvedValue('One screenshot.');
+      const followUp = {
+        id: '11111111-1111-4111-8111-111111111111',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.3',
+          currentMessageId: '100.3',
+          userId: 'user-1',
+          question: 'Look at this.',
+          images: ['data:image/png;base64,Zmlyc3Q='],
+        },
+      };
+      let pendingRows = [followUp];
+      mocks.getPendingHumanFollowUp.mockImplementation(async () => pendingRows);
+      mocks.nativeSteer
+        .mockRejectedValueOnce(new Error('OpenCode is busy'))
+        .mockImplementationOnce(async () => {
+          pendingRows = [];
+        });
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      let completeAssistantBoundary: (() => Promise<void>) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          completeAssistantBoundary = async () => {
+            await options.onAssistantMessageCompleted?.({
+              id: 'assistant-after-rejected-steer',
+              sessionId: 'opencode-session-1',
+              createdAtMs: 100,
+              completedAtMs: 200,
+            });
+          };
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      // The rejected steer leaves the follow-up pending; the next boundary
+      // drains it again.
+      await completeAssistantBoundary?.();
+      await vi.waitFor(() =>
+        expect(mocks.nativeSteer).toHaveBeenCalledTimes(2),
+      );
+
+      for (const call of mocks.nativeSteer.mock.calls) {
+        expect(call[0]?.files).toEqual([]);
+        expect(call[0]?.text).toContain(
+          'Image attachments: image-1 (image/png)',
+        );
+        expect(call[0]?.text).not.toContain('image-2');
+      }
+      await expect(
+        invokeTool(nativeToolNames.inspectImages, {
+          question: 'Describe it.',
+        }),
+      ).resolves.toEqual({
+        success: true,
+        imageIds: ['image-1'],
+        observations: 'One screenshot.',
+      });
+      expect(mocks.generateHelperText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          files: [{ mime: 'image/png', url: 'data:image/png;base64,Zmlyc3Q=' }],
+        }),
+      );
+
+      finishGeneration?.('Steered answer');
+      await expect(resultPromise).resolves.toBe('Steered answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('leaves a same-user follow-up routed in from a pull request out of native steering', async () => {
     vi.useFakeTimers();
     try {
