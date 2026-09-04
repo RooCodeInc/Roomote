@@ -6162,6 +6162,98 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
     });
 
+    it('preserves a delivered acknowledgement when the turn resumes before launch', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        events: [
+          {
+            kind: 'reply',
+            text: 'I’m starting on the checkout fix.',
+            purpose: 'ack',
+          },
+        ],
+        next: {
+          assistantOrdinal: 1,
+          toolOrdinal: 1,
+          retryNoticeOrdinal: 0,
+          turnSeq: 3,
+        },
+        prompt: { ts: 1_000, turnSeq: 0 },
+      });
+      const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
+        await postKickoff({ taskId: 'task-1', taskLinkRendered: true });
+        return { success: true, taskId: 'task-1' };
+      });
+      const adapter = callbacks({ launchTask });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await expect(
+            invokeTool(nativeToolNames.launchTask, {
+              prompt: 'Fix checkout.',
+            }),
+          ).resolves.toMatchObject({ success: true, taskId: 'task-1' });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        resumedAfterInterruption: true,
+      });
+
+      expect(launchTask).toHaveBeenCalledOnce();
+      expect(adapter.postReply).not.toHaveBeenCalled();
+    });
+
+    it('does not restore acknowledgement state from a system retry notice', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        events: [
+          {
+            kind: 'reply',
+            text: 'The inference provider is taking longer than expected.',
+            purpose: 'progress',
+            inferenceRetryNotice: true,
+          },
+        ],
+        next: {
+          assistantOrdinal: 0,
+          toolOrdinal: 0,
+          retryNoticeOrdinal: 1,
+          turnSeq: 2,
+        },
+        prompt: { ts: 1_000, turnSeq: 0 },
+      });
+      let launchResult: unknown;
+      const adapter = callbacks();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          launchResult = await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix checkout.',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'I could not start the work.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        resumedAfterInterruption: true,
+      });
+
+      expect(launchResult).toEqual({
+        success: false,
+        error:
+          'Post an acknowledgement with send_chat_reply before this action.',
+      });
+      expect(adapter.launchTask).not.toHaveBeenCalled();
+    });
+
     it('records an emoji-only terminal reaction as Slack emoji markup', async () => {
       let reactionResult: unknown;
       const adapter = callbacks();

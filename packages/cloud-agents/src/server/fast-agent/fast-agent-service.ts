@@ -2942,8 +2942,16 @@ export async function answerFastAgentQuestion({
       ),
       activeTaskCount: resolvedActiveTasks.length,
     });
-    let visibleUpdatePosted = false;
-    let substantiveWorkAcknowledged = false;
+    const resumedWithDeliveredAcknowledgement = Boolean(
+      previousAttempt?.events.some(
+        (event) =>
+          event.kind === 'reply' &&
+          !event.inferenceRetryNotice &&
+          (event.purpose === 'ack' || event.purpose === 'progress'),
+      ),
+    );
+    let visibleUpdatePosted = resumedWithDeliveredAcknowledgement;
+    let substantiveWorkAcknowledged = resumedWithDeliveredAcknowledgement;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
 
