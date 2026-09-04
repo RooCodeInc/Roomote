@@ -1,7 +1,7 @@
 'use client';
 
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
@@ -87,16 +87,14 @@ export function SetupSignedInFlow() {
     setupStatus.data != null
       ? getSetupRedirectPath(setupStatus.data)
       : null;
-  const observedIncompleteSetupRef = useRef(false);
-
-  useEffect(() => {
-    if (
-      setupStatus.data?.setupCompletedAt == null &&
-      setupStatus.data != null
-    ) {
-      observedIncompleteSetupRef.current = true;
-    }
-  }, [setupStatus.data]);
+  // Setup is complete once the setup Session records it. This page only
+  // bootstraps inference for a fresh deployment, so a completed deployment
+  // (for example an admin reopening the Cloud "open your deployment" link)
+  // has nothing left to show here.
+  const setupAlreadyCompleted =
+    shouldEvaluateSetupRedirect &&
+    !setupStatus.isError &&
+    setupStatus.data?.setupCompletedAt != null;
 
   useEffect(() => {
     if (authStatus === 'signed-in' && !isAdmin) {
@@ -112,12 +110,20 @@ export function SetupSignedInFlow() {
         router.replace(setupRedirectPath);
         return;
       }
-      if (setupRedirectPath === null && !observedIncompleteSetupRef.current) {
+      // Leave the hand-off to the setup Session alone when it is in flight;
+      // otherwise a completed deployment goes Home.
+      if (
+        setupRedirectPath === null &&
+        !createSession.isPending &&
+        !createSession.data
+      ) {
         router.replace('/');
       }
     }
     if (isError) router.replace('/');
   }, [
+    createSession.data,
+    createSession.isPending,
     authStatus,
     isAdmin,
     isError,
@@ -162,6 +168,14 @@ export function SetupSignedInFlow() {
     );
   }
   if (isLoading || !status) return <LoadingSetupFlow />;
+  // Hold the spinner instead of flashing the inference prompts while the
+  // completion check is in flight or the redirect Home is pending.
+  if (
+    shouldEvaluateSetupRedirect &&
+    (setupStatus.isLoading || setupAlreadyCompleted)
+  ) {
+    return <LoadingSetupFlow />;
+  }
 
   if (conversationalSetupReady) {
     if (createSession.isError) {
