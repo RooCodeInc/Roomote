@@ -1409,6 +1409,7 @@ export async function answerFastAgentQuestion({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  defaultImageArtifactIds = [],
   allowSilentAmbientReply = false,
   platformEventTranscriptPayload,
   slackRoomoteUserId,
@@ -1442,6 +1443,9 @@ export async function answerFastAgentQuestion({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  /** Child-selected images to carry through when the parent model omits the
+   * optional attachment argument while composing the child update. */
+  defaultImageArtifactIds?: string[];
   /** True only for an unmentioned turn in a multi-human Fast conversation. */
   allowSilentAmbientReply?: boolean;
   platformEventTranscriptPayload?: Record<string, unknown>;
@@ -3327,10 +3331,15 @@ export async function answerFastAgentQuestion({
                   'Platform events may post only a closeout or clarification.',
               };
             }
+            const requestedImageArtifactIds = args.imageArtifactIds ?? [];
+            const imageArtifactIds =
+              requestedImageArtifactIds.length > 0
+                ? requestedImageArtifactIds
+                : defaultImageArtifactIds;
             const signature = JSON.stringify([
               args.purpose,
               message,
-              args.imageArtifactIds ?? [],
+              imageArtifactIds,
               args.suggestions ?? [],
             ]);
             if (completedChatReplySignatures.has(signature)) {
@@ -3353,9 +3362,7 @@ export async function answerFastAgentQuestion({
               {
                 purpose: args.purpose,
                 message,
-                ...(args.imageArtifactIds?.length
-                  ? { imageArtifactIds: args.imageArtifactIds }
-                  : {}),
+                ...(imageArtifactIds.length ? { imageArtifactIds } : {}),
                 ...(args.suggestions?.length
                   ? { suggestions: args.suggestions }
                   : {}),
