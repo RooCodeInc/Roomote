@@ -1443,58 +1443,6 @@ export class SlackNotifier {
     }
   }
 
-  /** Fetch the exact repostable fields of one canonical thread message. */
-  public async getRawMessage({
-    channel,
-    messageTs,
-    threadTs,
-  }: {
-    channel: string;
-    messageTs: string;
-    threadTs: string;
-  }): Promise<Pick<SlackMessage, 'text' | 'blocks' | 'attachments'> | null> {
-    try {
-      const response = await slackFetch(
-        `${buildSlackApiUrl('conversations.replies')}?channel=${encodeURIComponent(channel)}&ts=${encodeURIComponent(threadTs)}&oldest=${encodeURIComponent(messageTs)}&latest=${encodeURIComponent(messageTs)}&inclusive=true`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${this.token}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        },
-      );
-      if (!response.ok) return null;
-
-      const result = (await response.json()) as {
-        ok: boolean;
-        messages?: Array<{
-          ts?: string;
-          text?: unknown;
-          blocks?: unknown;
-          attachments?: unknown;
-        }>;
-      };
-      const message = result.ok
-        ? result.messages?.find((entry) => entry.ts === messageTs)
-        : undefined;
-      if (!message) return null;
-
-      return {
-        ...(typeof message.text === 'string' ? { text: message.text } : {}),
-        ...(Array.isArray(message.blocks) ? { blocks: message.blocks } : {}),
-        ...(Array.isArray(message.attachments)
-          ? { attachments: message.attachments }
-          : {}),
-      };
-    } catch (error) {
-      console.error(
-        `[getRawMessage] Failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return null;
-    }
-  }
-
   /**
    * Fetches message metadata for a single message timestamp in a channel.
    * Uses conversations.history with include_all_metadata to retrieve hidden

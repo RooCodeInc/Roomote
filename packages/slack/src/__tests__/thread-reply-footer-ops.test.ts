@@ -7,7 +7,6 @@ const {
   mockBuildFooterText,
   mockRedisSet,
   mockRedisEval,
-  mockRelocate,
 } = vi.hoisted(() => ({
   mockGetFooterTs: vi.fn(),
   mockSetFooterTs: vi.fn(),
@@ -15,7 +14,6 @@ const {
   mockBuildFooterText: vi.fn(),
   mockRedisSet: vi.fn(),
   mockRedisEval: vi.fn(),
-  mockRelocate: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -29,14 +27,6 @@ vi.mock('@roomote/redis', () => ({
   }),
 }));
 
-vi.mock('../relocate-active-task-cards', () => ({
-  relocateSlackThreadActiveTaskCards: mockRelocate,
-}));
-vi.mock('../thread-reply-stream', () => ({
-  beginSlackThreadReplyStream: vi.fn(),
-  endSlackThreadReplyStream: vi.fn(),
-}));
-
 vi.mock('../slack-messages', () => ({
   getSlackThreadReplyFooterMessageTs: mockGetFooterTs,
   setSlackThreadReplyFooterMessageTs: mockSetFooterTs,
@@ -48,10 +38,10 @@ vi.mock('../thread-footer', () => ({
 }));
 
 import {
-  finalizeSlackThreadReplyStreamWithFooterText,
   isSlackThreadReplyFooterBlock,
   postSlackThreadMessageWithStickyFooter,
   removeSlackThreadReplyFooter,
+  updateSlackThreadMessageWithFooterText,
 } from '../thread-reply-footer-ops';
 
 describe('thread-reply-footer-ops', () => {
@@ -59,7 +49,6 @@ describe('thread-reply-footer-ops', () => {
     vi.clearAllMocks();
     mockRedisSet.mockResolvedValue('OK');
     mockRedisEval.mockResolvedValue(1);
-    mockRelocate.mockResolvedValue(undefined);
     mockGetFooterTs.mockResolvedValue('111.000');
     mockSetFooterTs.mockResolvedValue(undefined);
     mockResolveFooterContext.mockResolvedValue({
@@ -113,8 +102,6 @@ describe('thread-reply-footer-ops', () => {
         },
       ]),
       updateMessage: vi.fn().mockResolvedValue(true),
-      getRawMessage: vi.fn(),
-      deleteMessage: vi.fn().mockResolvedValue(true),
     };
 
     const ts = await postSlackThreadMessageWithStickyFooter({
@@ -177,75 +164,7 @@ describe('thread-reply-footer-ops', () => {
     );
   });
 
-  it('relocates canonical cards before posting the footer carrier', async () => {
-    const slack = {
-      postMessage: vi.fn().mockResolvedValue('222.000'),
-      getMessageBlocks: vi.fn().mockResolvedValue([
-        { type: 'markdown', text: 'old body' },
-        {
-          type: 'context',
-          block_id: 'roomote_thread_reply_footer',
-          elements: [{ type: 'mrkdwn', text: 'old footer' }],
-        },
-      ]),
-      updateMessage: vi.fn().mockResolvedValue(true),
-      getRawMessage: vi.fn(),
-      deleteMessage: vi.fn().mockResolvedValue(true),
-    };
-
-    await postSlackThreadMessageWithStickyFooter({
-      slack,
-      channel: 'C1',
-      threadTs: '100.000',
-      taskId: 'task-1',
-      text: 'new reply',
-    });
-
-    expect(mockRelocate).toHaveBeenCalledWith(
-      expect.objectContaining({ channel: 'C1', threadTs: '100.000' }),
-    );
-    expect(mockRelocate.mock.invocationCallOrder[0]).toBeLessThan(
-      slack.postMessage.mock.invocationCallOrder[0]!,
-    );
-    const postedBlocks = slack.postMessage.mock.calls[0]?.[0]?.blocks;
-    expect(postedBlocks).toHaveLength(2);
-    expect(postedBlocks[1]).toMatchObject({
-      block_id: 'roomote_thread_reply_footer',
-    });
-    expect(slack.updateMessage).toHaveBeenCalledWith({
-      channel: 'C1',
-      ts: '111.000',
-      message: { blocks: [{ type: 'markdown', text: 'old body' }] },
-    });
-  });
-
-  it('posts the primary reply when card relocation state is unavailable', async () => {
-    mockRelocate.mockRejectedValueOnce(new Error('redis unavailable'));
-    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const slack = {
-      postMessage: vi.fn().mockResolvedValue('222.000'),
-      getMessageBlocks: vi.fn().mockResolvedValue([]),
-      updateMessage: vi.fn().mockResolvedValue(true),
-      getRawMessage: vi.fn(),
-      deleteMessage: vi.fn().mockResolvedValue(true),
-    };
-
-    await expect(
-      postSlackThreadMessageWithStickyFooter({
-        slack,
-        channel: 'C1',
-        threadTs: '100.000',
-        taskId: 'task-1',
-        text: 'new reply',
-      }),
-    ).resolves.toBe('222.000');
-    expect(slack.postMessage).toHaveBeenCalledOnce();
-    expect(warning).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to relocate active task cards'),
-    );
-  });
-
-  it('finalizes all streamed reply content before relocating cards and posting the footer', async () => {
+  it('rewrites an existing message into the footer carrier and strips the previous one', async () => {
     const slack = {
       getMessageBlocks: vi.fn().mockResolvedValue([
         { type: 'section', text: { type: 'mrkdwn', text: 'old body' } },
@@ -256,13 +175,10 @@ describe('thread-reply-footer-ops', () => {
         },
       ]),
       updateMessage: vi.fn().mockResolvedValue(true),
-      getRawMessage: vi.fn(),
-      postMessage: vi.fn().mockResolvedValue('footer-new'),
-      deleteMessage: vi.fn().mockResolvedValue(true),
     };
 
     await expect(
-      finalizeSlackThreadReplyStreamWithFooterText({
+      updateSlackThreadMessageWithFooterText({
         slack,
         channel: 'C1',
         threadTs: '100.000',
@@ -270,7 +186,6 @@ describe('thread-reply-footer-ops', () => {
         text: 'final reply',
         bodyBlocks: [{ type: 'markdown', text: 'final reply' }],
         footerText: 'footer',
-        streamToken: 'stream-token',
       }),
     ).resolves.toBe(true);
 
@@ -279,32 +194,24 @@ describe('thread-reply-footer-ops', () => {
       ts: '333.000',
       message: {
         text: 'final reply',
-        blocks: [{ type: 'markdown', text: 'final reply' }],
+        blocks: [
+          { type: 'markdown', text: 'final reply' },
+          expect.objectContaining({
+            type: 'context',
+            block_id: 'roomote_thread_reply_footer',
+          }),
+        ],
       },
-    });
-    expect(slack.updateMessage.mock.invocationCallOrder[0]).toBeLessThan(
-      mockRelocate.mock.invocationCallOrder[0]!,
-    );
-    expect(mockRelocate.mock.invocationCallOrder[0]).toBeLessThan(
-      slack.postMessage.mock.invocationCallOrder[0]!,
-    );
-    expect(slack.postMessage).toHaveBeenCalledWith({
-      channel: 'C1',
-      thread_ts: '100.000',
-      text: 'footer',
-      blocks: [
-        expect.objectContaining({ block_id: 'roomote_thread_reply_footer' }),
-      ],
     });
     // The prior carrier loses its footer and the pointer moves.
     expect(slack.updateMessage).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ ts: '111.000' }),
     );
-    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', 'footer-new');
+    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', '333.000');
   });
 
-  it('deletes a new footer carrier when its pointer cannot be saved', async () => {
+  it('takes the footer back off a rewritten message when the pointer cannot be saved', async () => {
     mockGetFooterTs.mockResolvedValue(null);
     mockSetFooterTs.mockRejectedValue(new Error('redis down'));
     const slack = {
@@ -317,14 +224,11 @@ describe('thread-reply-footer-ops', () => {
         },
       ]),
       updateMessage: vi.fn().mockResolvedValue(true),
-      getRawMessage: vi.fn(),
-      postMessage: vi.fn().mockResolvedValue('footer-new'),
-      deleteMessage: vi.fn().mockResolvedValue(true),
     };
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await expect(
-      finalizeSlackThreadReplyStreamWithFooterText({
+      updateSlackThreadMessageWithFooterText({
         slack,
         channel: 'C1',
         threadTs: '100.000',
@@ -332,14 +236,15 @@ describe('thread-reply-footer-ops', () => {
         text: 'final reply',
         bodyBlocks: [{ type: 'markdown', text: 'final reply' }],
         footerText: 'footer',
-        streamToken: 'stream-token',
       }),
     ).resolves.toBe(true);
 
-    expect(slack.deleteMessage).toHaveBeenCalledWith({
-      channel: 'C1',
-      ts: 'footer-new',
-    });
+    expect(slack.updateMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ts: '333.000',
+        message: { blocks: [{ type: 'markdown', text: 'final reply' }] },
+      }),
+    );
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining('Failed to persist latest footer message ts'),
     );

@@ -1,20 +1,11 @@
 const mocks = vi.hoisted(() => ({
-  beginStream: vi.fn(),
-  endStream: vi.fn(),
-  finalizeStream: vi.fn(),
+  updateWithFooter: vi.fn(),
   recordMessage: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', () => ({
-  beginSlackThreadReplyStream: mocks.beginStream,
-  endSlackThreadReplyStream: mocks.endStream,
-  finalizeSlackThreadReplyStreamWithFooterText: mocks.finalizeStream,
   ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID: 'quote',
-  withSlackThreadReplyFooterLock: async ({
-    fn,
-  }: {
-    fn: () => Promise<unknown>;
-  }) => fn(),
+  updateSlackThreadMessageWithFooterText: mocks.updateWithFooter,
 }));
 vi.mock('@roomote/communication', () => ({
   buildFastSessionReplyFooterText: () => 'footer',
@@ -42,8 +33,6 @@ function slackMock() {
     deleteMessage: vi.fn(async () => true),
     updateMessage: vi.fn(async () => true),
     getMessageBlocks: vi.fn(async () => []),
-    getRawMessage: vi.fn(async () => null),
-    postMessage: vi.fn(async () => undefined),
   };
 }
 
@@ -71,9 +60,7 @@ function build(slack: ReturnType<typeof slackMock>, quote: string | null) {
 describe('createSlackFastReplyStream', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.beginStream.mockResolvedValue('stream-token');
-    mocks.endStream.mockResolvedValue(undefined);
-    mocks.finalizeStream.mockResolvedValue(true);
+    mocks.updateWithFooter.mockResolvedValue(true);
     mocks.recordMessage.mockResolvedValue(undefined);
   });
 
@@ -90,9 +77,6 @@ describe('createSlackFastReplyStream', () => {
       recipientUserId: 'U1',
       markdownText: 'Looking',
     });
-    expect(mocks.beginStream.mock.invocationCallOrder[0]).toBeLessThan(
-      slack.startMessageStream.mock.invocationCallOrder[0]!,
-    );
     expect(slack.appendMessageStream).toHaveBeenCalledWith({
       channel: 'C1',
       ts: '200.1',
@@ -106,13 +90,7 @@ describe('createSlackFastReplyStream', () => {
       channel: 'C1',
       ts: '200.1',
     });
-    expect(slack.appendMessageStream.mock.invocationCallOrder[0]).toBeLessThan(
-      slack.stopMessageStream.mock.invocationCallOrder[0]!,
-    );
-    expect(slack.stopMessageStream.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.finalizeStream.mock.invocationCallOrder[0]!,
-    );
-    expect(mocks.finalizeStream).toHaveBeenCalledWith(
+    expect(mocks.updateWithFooter).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'C1',
         threadTs: '100.1',
@@ -127,7 +105,6 @@ describe('createSlackFastReplyStream', () => {
           { type: 'markdown', text: 'Looking at the logs.' },
         ],
         footerText: 'footer',
-        streamToken: 'stream-token',
       }),
     );
     expect(mocks.recordMessage).toHaveBeenCalledWith(
@@ -155,7 +132,7 @@ describe('createSlackFastReplyStream', () => {
     await expect(
       stream.finish({ purpose: 'closeout', message: 'Done.' }),
     ).resolves.toBeUndefined();
-    expect(mocks.finalizeStream).not.toHaveBeenCalled();
+    expect(mocks.updateWithFooter).not.toHaveBeenCalled();
     expect(onDelivered).not.toHaveBeenCalled();
   });
 
@@ -172,14 +149,14 @@ describe('createSlackFastReplyStream', () => {
     await expect(
       stream.finish({ purpose: 'closeout', message: 'One two three.' }),
     ).resolves.toEqual({ messageId: '200.1' });
-    expect(mocks.finalizeStream).toHaveBeenCalledWith(
+    expect(mocks.updateWithFooter).toHaveBeenCalledWith(
       expect.objectContaining({ text: 'One two three.' }),
     );
   });
 
   it('removes the partial stream before falling back to a normal post', async () => {
     const slack = slackMock();
-    mocks.finalizeStream.mockResolvedValue(false);
+    mocks.updateWithFooter.mockResolvedValue(false);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { stream, onDelivered, getPendingQuote } = build(slack, '> Matt: hi');
 
@@ -200,60 +177,9 @@ describe('createSlackFastReplyStream', () => {
     );
   });
 
-  it('does not finalize when Slack cannot stop the stream and falls back after cleanup', async () => {
-    const slack = slackMock();
-    slack.stopMessageStream.mockResolvedValue(false);
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const { stream, onDelivered } = build(slack, null);
-
-    await stream.append('Looking');
-    await expect(
-      stream.finish({ purpose: 'closeout', message: 'Looking.' }),
-    ).resolves.toBeUndefined();
-
-    expect(mocks.finalizeStream).not.toHaveBeenCalled();
-    expect(slack.deleteMessage).toHaveBeenCalledWith({
-      channel: 'C1',
-      ts: '200.1',
-    });
-    expect(mocks.endStream).toHaveBeenCalledWith({
-      channel: 'C1',
-      threadTs: '100.1',
-      token: 'stream-token',
-    });
-    expect(mocks.recordMessage).not.toHaveBeenCalled();
-    expect(onDelivered).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('did not stop streamed reply'),
-    );
-  });
-
-  it('retains the barrier when Slack cannot stop or delete the partial stream', async () => {
-    const slack = slackMock();
-    slack.stopMessageStream.mockResolvedValue(false);
-    slack.deleteMessage.mockResolvedValue(false);
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { stream, onDelivered } = build(slack, null);
-
-    await stream.append('Looking');
-    await expect(
-      stream.finish({ purpose: 'closeout', message: 'Looking.' }),
-    ).resolves.toEqual({ messageId: '200.1' });
-
-    expect(mocks.finalizeStream).not.toHaveBeenCalled();
-    expect(mocks.endStream).not.toHaveBeenCalled();
-    expect(mocks.recordMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ messageId: '200.1' }),
-    );
-    expect(onDelivered).toHaveBeenCalledOnce();
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining('retaining the relocation barrier'),
-    );
-  });
-
   it('keeps the partial stream as the delivery when it cannot be removed', async () => {
     const slack = slackMock();
-    mocks.finalizeStream.mockResolvedValue(false);
+    mocks.updateWithFooter.mockResolvedValue(false);
     slack.deleteMessage.mockResolvedValue(false);
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { stream, onDelivered } = build(slack, null);
@@ -273,7 +199,7 @@ describe('createSlackFastReplyStream', () => {
 
   it('removes the partial stream when the final rewrite throws', async () => {
     const slack = slackMock();
-    mocks.finalizeStream.mockRejectedValue(new Error('lock timed out'));
+    mocks.updateWithFooter.mockRejectedValue(new Error('lock timed out'));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { stream } = build(slack, null);
 
@@ -299,22 +225,6 @@ describe('createSlackFastReplyStream', () => {
       channel: 'C1',
       ts: '200.1',
     });
-    expect(mocks.finalizeStream).not.toHaveBeenCalled();
-    expect(mocks.endStream).toHaveBeenCalledWith({
-      channel: 'C1',
-      threadTs: '100.1',
-      token: 'stream-token',
-    });
-  });
-
-  it('retains the barrier when abort cannot confirm the stream stopped', async () => {
-    const slack = slackMock();
-    slack.stopMessageStream.mockResolvedValue(false);
-    const { stream } = build(slack, null);
-
-    await stream.append('Half');
-    await stream.abort();
-
-    expect(mocks.endStream).not.toHaveBeenCalled();
+    expect(mocks.updateWithFooter).not.toHaveBeenCalled();
   });
 });

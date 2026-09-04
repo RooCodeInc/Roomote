@@ -7,11 +7,8 @@ import {
   type FastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
-  beginSlackThreadReplyStream,
-  endSlackThreadReplyStream,
-  finalizeSlackThreadReplyStreamWithFooterText,
   ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
-  withSlackThreadReplyFooterLock,
+  updateSlackThreadMessageWithFooterText,
   type SlackNotifier,
 } from '@roomote/slack';
 
@@ -19,8 +16,8 @@ import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provi
 
 /**
  * Streams a Fast reply into a Slack thread with Slack's message streaming
- * API, then rewrites the finished message and places active task cards and
- * the sticky footer below all completed reply content.
+ * API, then rewrites the finished message into the same body the reply
+ * would have been posted with (quote, markdown block, sticky footer).
  * Streaming outside a DM needs the recipient; callers without a Slack user
  * for the sender do not offer a stream.
  */
@@ -33,8 +30,6 @@ export function createSlackFastReplyStream(params: {
     | 'deleteMessage'
     | 'updateMessage'
     | 'getMessageBlocks'
-    | 'getRawMessage'
-    | 'postMessage'
   >;
   conversation: FastAgentConversation;
   channelId: string;
@@ -50,7 +45,6 @@ export function createSlackFastReplyStream(params: {
   let messageTs: string | null = null;
   let opened = false;
   let failed = false;
-  let streamToken: string | null = null;
 
   return {
     append: async (text) => {
@@ -58,32 +52,12 @@ export function createSlackFastReplyStream(params: {
       if (!messageTs) {
         if (opened) return;
         opened = true;
-        messageTs = await withSlackThreadReplyFooterLock({
+        messageTs = await params.slack.startMessageStream({
           channel: params.channelId,
           threadTs: params.threadTs,
-          fn: async () => {
-            streamToken = await beginSlackThreadReplyStream({
-              channel: params.channelId,
-              threadTs: params.threadTs,
-            });
-            if (!streamToken) return null;
-            const ts = await params.slack.startMessageStream({
-              channel: params.channelId,
-              threadTs: params.threadTs,
-              recipientTeamId: params.recipientTeamId,
-              recipientUserId: params.recipientUserId,
-              markdownText: text,
-            });
-            if (!ts) {
-              await endSlackThreadReplyStream({
-                channel: params.channelId,
-                threadTs: params.threadTs,
-                token: streamToken,
-              });
-              streamToken = null;
-            }
-            return ts;
-          },
+          recipientTeamId: params.recipientTeamId,
+          recipientUserId: params.recipientUserId,
+          markdownText: text,
         });
         if (!messageTs) failed = true;
         return;
@@ -99,44 +73,13 @@ export function createSlackFastReplyStream(params: {
     },
     finish: async (reply) => {
       const ts = messageTs;
-      const token = streamToken;
-      if (!ts || !token) return undefined;
+      if (!ts) return undefined;
       messageTs = null;
-      streamToken = null;
-      const stopped = await params.slack.stopMessageStream({
-        channel: params.channelId,
-        ts,
-      });
-      if (!stopped) {
-        const deleted = await params.slack
-          .deleteMessage({ channel: params.channelId, ts })
-          .catch(() => false);
-        if (deleted) {
-          await endSlackThreadReplyStream({
-            channel: params.channelId,
-            threadTs: params.threadTs,
-            token,
-          });
-          console.warn(
-            `[Fast Agent] Slack did not stop streamed reply ${ts}; removed it so the reply can post normally.`,
-          );
-          return undefined;
-        }
-        console.error(
-          `[Fast Agent] Slack did not stop streamed reply ${ts}, and it could not be removed; retaining the relocation barrier and keeping the partial stream as the delivery.`,
-        );
-        await recordFastAgentConversationMessageBestEffort({
-          sessionId: params.sessionId,
-          conversation: params.conversation,
-          messageId: ts,
-        });
-        params.onDelivered?.();
-        return { messageId: ts };
-      }
+      await params.slack.stopMessageStream({ channel: params.channelId, ts });
       const quote = params.getQuote?.() ?? null;
       let updated = false;
       try {
-        updated = await finalizeSlackThreadReplyStreamWithFooterText({
+        updated = await updateSlackThreadMessageWithFooterText({
           slack: params.slack,
           channel: params.channelId,
           threadTs: params.threadTs,
@@ -159,7 +102,6 @@ export function createSlackFastReplyStream(params: {
             sessionId: params.sessionId,
             ...params.footerContext,
           }),
-          streamToken: token,
         });
       } catch (error) {
         console.warn(
@@ -191,20 +133,8 @@ export function createSlackFastReplyStream(params: {
     abort: async () => {
       const ts = messageTs;
       if (!ts) return;
-      const token = streamToken;
       messageTs = null;
-      streamToken = null;
-      const stopped = await params.slack.stopMessageStream({
-        channel: params.channelId,
-        ts,
-      });
-      if (stopped && token) {
-        await endSlackThreadReplyStream({
-          channel: params.channelId,
-          threadTs: params.threadTs,
-          token,
-        });
-      }
+      await params.slack.stopMessageStream({ channel: params.channelId, ts });
     },
   };
 }
