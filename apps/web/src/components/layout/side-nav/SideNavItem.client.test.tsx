@@ -140,21 +140,47 @@ describe('SideNavItem', () => {
     ).not.toHaveAttribute('data-next-link');
   });
 
-  it('renders disabled destinations as non-navigable buttons', () => {
+  it('renders disabled destinations as focusable non-navigable buttons', () => {
+    const onClick = vi.fn();
     render(
       <SideNavItem
         icon={TestIcon}
         href="/analytics"
         tooltip="Analytics"
         description="View analytics"
+        onClick={onClick}
         disabled
       />,
     );
 
     expect(screen.queryByRole('link', { name: 'Analytics' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Analytics' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Analytics' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Analytics' }),
+    ).not.toBeDisabled();
     expect(screen.getByTestId('tooltip-content')).toHaveTextContent(
       'View analytics',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Analytics' }));
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('keeps the setup explanation available when a disabled item is expanded', () => {
+    render(
+      <SideNavItem
+        icon={TestIcon}
+        href="/analytics"
+        tooltip="Available when setup is completed."
+        expanded
+        disabled
+      />,
+    );
+
+    expect(screen.getByTestId('tooltip-content')).toHaveTextContent(
+      'Available when setup is completed.',
     );
   });
 

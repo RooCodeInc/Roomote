@@ -6,6 +6,7 @@ import {
   type ComponentPropsWithoutRef,
   type ReactElement,
   type ReactNode,
+  type MouseEventHandler,
   isValidElement,
 } from 'react';
 import type { LucideIcon } from '@/components/system';
@@ -63,6 +64,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
       disabled = false,
       className,
       type,
+      onClick,
       'aria-label': ariaLabel,
       ...props
     },
@@ -72,6 +74,13 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
       label ?? (typeof tooltip === 'string' ? tooltip : undefined);
     const isLeftSide = side === 'left';
     const isCurrentItem = active ?? isActive ?? false;
+    const handleClick: MouseEventHandler<HTMLButtonElement> | undefined =
+      disabled
+        ? (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        : onClick;
 
     const itemClasses = cn(
       'relative cursor-pointer flex items-center transition-all text-sm',
@@ -134,6 +143,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
         asChild
         disabled={disabled}
         className={itemClasses}
+        onClick={handleClick}
         aria-label={ariaLabel ?? (!isLeftSide ? resolvedLabel : undefined)}
         {...props}
       >
@@ -146,6 +156,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
         asChild
         disabled={disabled}
         className={itemClasses}
+        onClick={handleClick}
         aria-label={ariaLabel ?? (!isLeftSide ? resolvedLabel : undefined)}
         {...props}
       >
@@ -172,8 +183,9 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
         ref={ref}
         type={type ?? 'button'}
         variant="ghost"
-        disabled={disabled}
+        aria-disabled={disabled || undefined}
         className={itemClasses}
+        onClick={handleClick}
         aria-label={ariaLabel ?? (!isLeftSide ? resolvedLabel : undefined)}
         {...props}
       >
@@ -181,7 +193,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
       </Button>
     );
 
-    if (expanded || !tooltip) {
+    if ((expanded && !disabled) || !tooltip) {
       return control;
     }
 

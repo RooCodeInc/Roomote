@@ -7,6 +7,7 @@ import type {
 
 const {
   createInstallationMutateMock,
+  createInstallationOptionsRef,
   syncRepositoriesMutateMock,
   syncRepositoriesOptionsRef,
   ensureQueryDataMock,
@@ -19,6 +20,12 @@ const {
   mutationVariablesRef,
 } = vi.hoisted(() => ({
   createInstallationMutateMock: vi.fn(),
+  createInstallationOptionsRef: {
+    current: null as {
+      onSuccess?: (result: { success: boolean; error?: string }) => void;
+      onError?: () => void;
+    } | null,
+  },
   syncRepositoriesMutateMock: vi.fn(),
   syncRepositoriesOptionsRef: {
     current: null as {
@@ -111,10 +118,15 @@ vi.mock('@/trpc/client', () => ({
 }));
 
 vi.mock('@/hooks/github/useCreateGitHubInstallation', () => ({
-  useCreateGitHubInstallation: () => ({
-    mutate: createInstallationMutateMock,
-    isPending: false,
-  }),
+  useCreateGitHubInstallation: (
+    options: typeof createInstallationOptionsRef.current,
+  ) => {
+    createInstallationOptionsRef.current = options;
+    return {
+      mutate: createInstallationMutateMock,
+      isPending: false,
+    };
+  },
 }));
 
 vi.mock('@/hooks/github', () => ({
@@ -232,6 +244,7 @@ describe('SourceControlConnection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     syncRepositoriesOptionsRef.current = null;
+    createInstallationOptionsRef.current = null;
     pendingInstallationsDataRef.current = undefined;
     adoLinkedAccountDataRef.current = { configured: true, account: null };
     mutationVariablesRef.current = [];
@@ -270,6 +283,28 @@ describe('SourceControlConnection', () => {
     expect(createInstallationMutateMock).toHaveBeenCalledWith(
       '/setup?step=source-control-connect',
     );
+  });
+
+  it('allows GitHub linking to be retried after a failed attempt', () => {
+    render(
+      <SourceControlConnection
+        sourceControlSetup={buildSourceControlSetup('github')}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    const connectButton = screen.getByRole('button', {
+      name: /Connect to GitHub/i,
+    });
+    fireEvent.click(connectButton);
+    createInstallationOptionsRef.current?.onSuccess?.({
+      success: false,
+      error: 'GitHub linking failed.',
+    });
+    fireEvent.click(connectButton);
+
+    expect(toastErrorMock).toHaveBeenCalledWith('GitHub linking failed.');
+    expect(createInstallationMutateMock).toHaveBeenCalledTimes(2);
   });
 
   it('shows the pending-request UI instead of the connect CTA when a GitHub install request is pending', async () => {
