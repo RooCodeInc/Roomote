@@ -782,6 +782,40 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('persists child-selected image IDs on a text-only terminal closeout', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        return 'The visual comparison is attached.';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      defaultImageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'The visual comparison is attached.',
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+    const assistantMessage = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) => message.eventType === 'roomote_runtime.assistant_message',
+      );
+    expect(assistantMessage?.payload).toMatchObject({
+      purpose: 'closeout',
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+  });
+
   it('reports local storage exhaustion instead of a generic Fast error', async () => {
     const storageError = Object.assign(
       new Error('ENOSPC: no space left on device, write'),

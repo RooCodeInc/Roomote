@@ -2752,17 +2752,25 @@ export async function answerFastAgentQuestion({
       /** The streamed partial this reply finalizes, if one was shown. */
       streamedEvent?: { eventId: string; turnSeq: number },
     ) => {
-      const replacedRetry = await replaceInferenceRetryReply(reply, true, () =>
-        diagnostics.recordVisibleReply(),
+      const replyWithImages =
+        !reply.imageArtifactIds?.length && defaultImageArtifactIds.length
+          ? { ...reply, imageArtifactIds: defaultImageArtifactIds }
+          : reply;
+      const replacedRetry = await replaceInferenceRetryReply(
+        replyWithImages,
+        true,
+        () => diagnostics.recordVisibleReply(),
       );
       if (!replacedRetry) {
         const posted =
-          (await surfaceReplyStream.deliver(reply)) ??
-          (await adapter.postReply(reply));
+          (await surfaceReplyStream.deliver(replyWithImages)) ??
+          (await adapter.postReply(replyWithImages));
         diagnostics.recordVisibleReply();
-        turnVisibleMessages.push(buildAssistantTextMessage(reply.message));
+        turnVisibleMessages.push(
+          buildAssistantTextMessage(replyWithImages.message),
+        );
         await persistAssistantReply({
-          reply,
+          reply: replyWithImages,
           event:
             streamedEvent ??
             allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
@@ -2773,13 +2781,16 @@ export async function answerFastAgentQuestion({
       inferenceRetryReply = undefined;
       inferenceRetryMessageIndex = undefined;
       inferenceRetryCanonicalEvent = undefined;
-      lastVisibleMessage = reply.message;
+      lastVisibleMessage = replyWithImages.message;
       visibleUpdatePosted = true;
       // Any text reply posted by the model (acknowledgement, first progress
       // update, or task kickoff) is the textual communication the work-start
       // gate requires. Reactions deliberately do not set this flag.
       substantiveWorkAcknowledged = true;
-      if (reply.purpose === 'closeout' || reply.purpose === 'clarification') {
+      if (
+        replyWithImages.purpose === 'closeout' ||
+        replyWithImages.purpose === 'clarification'
+      ) {
         closedInstructionVersions.add(instructionVersion);
       }
       if (mirrorImmediately) {
@@ -3341,14 +3352,14 @@ export async function answerFastAgentQuestion({
               };
             }
             const requestedImageArtifactIds = args.imageArtifactIds ?? [];
-            const imageArtifactIds =
+            const signatureImageArtifactIds =
               requestedImageArtifactIds.length > 0
                 ? requestedImageArtifactIds
                 : defaultImageArtifactIds;
             const signature = JSON.stringify([
               args.purpose,
               message,
-              imageArtifactIds,
+              signatureImageArtifactIds,
               args.suggestions ?? [],
             ]);
             if (completedChatReplySignatures.has(signature)) {
@@ -3371,7 +3382,9 @@ export async function answerFastAgentQuestion({
               {
                 purpose: args.purpose,
                 message,
-                ...(imageArtifactIds.length ? { imageArtifactIds } : {}),
+                ...(requestedImageArtifactIds.length
+                  ? { imageArtifactIds: requestedImageArtifactIds }
+                  : {}),
                 ...(args.suggestions?.length
                   ? { suggestions: args.suggestions }
                   : {}),
