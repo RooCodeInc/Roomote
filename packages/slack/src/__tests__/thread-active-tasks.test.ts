@@ -3,63 +3,70 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   eval: vi.fn(),
   get: vi.fn(),
-  zrange: vi.fn(),
+  hgetall: vi.fn(),
 }));
 
-vi.mock('@roomote/redis', () => ({ getRedis: () => mocks }));
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => mocks,
+}));
+
 vi.mock('node:crypto', () => ({
   default: { randomUUID: () => 'route-version' },
 }));
 
 import {
-  getSlackThreadActiveTaskIds,
-  registerSlackThreadActiveTask,
+  getSlackThreadActiveTasks,
   removeSlackThreadActiveTaskByTaskId,
+  setSlackThreadActiveTask,
 } from '../thread-active-tasks';
 
 describe('thread-active-tasks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
+    mocks.eval.mockResolvedValue(1);
     mocks.get.mockResolvedValue(null);
-    mocks.zrange.mockResolvedValue([]);
+    mocks.hgetall.mockResolvedValue({});
   });
 
-  it('registers a canonical card in a stable sequenced zset', async () => {
-    const route = {
+  it('persists one active task per Slack thread', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-03T12:00:00Z'));
+
+    await setSlackThreadActiveTask({
       teamId: 'T1',
       channel: 'C1',
       threadTs: '100.000',
-      version: 'route-version',
-    };
-    mocks.eval.mockResolvedValue(JSON.stringify(route));
-
-    await expect(
-      registerSlackThreadActiveTask({ ...route, taskId: 'task-1' }),
-    ).resolves.toEqual(route);
+      task: {
+        taskId: 'task-1',
+        title: 'Ship the change',
+        taskUrl: 'https://app.example.com/task/task-1',
+      },
+    });
 
     expect(mocks.eval).toHaveBeenCalledWith(
-      expect.stringContaining("redis.call('zadd'"),
-      3,
-      'slack:thread_active_task_cards:C1:100.000',
+      expect.stringContaining("redis.call('hset'"),
+      2,
+      'slack:thread_active_tasks:C1:100.000',
       'slack:thread_active_task:task-1',
-      'slack:thread_active_task_sequence:C1:100.000',
       'task-1',
-      'C1',
-      '100.000',
-      JSON.stringify(route),
+      JSON.stringify({
+        taskId: 'task-1',
+        title: 'Ship the change',
+        taskUrl: 'https://app.example.com/task/task-1',
+        updatedAt: Date.now(),
+      }),
+      JSON.stringify({
+        teamId: 'T1',
+        channel: 'C1',
+        threadTs: '100.000',
+        version: 'route-version',
+      }),
       (30 * 24 * 60 * 60).toString(),
     );
   });
 
-  it('returns task ids in their stable Redis score order', async () => {
-    mocks.zrange.mockResolvedValue(['task-1', 'task-2', 'task-3']);
-
-    await expect(
-      getSlackThreadActiveTaskIds({ channel: 'C1', threadTs: '100.000' }),
-    ).resolves.toEqual(['task-1', 'task-2', 'task-3']);
-  });
-
-  it('removes a terminal task through its versioned task route', async () => {
+  it('removes a terminal task through its task-scoped thread pointer', async () => {
     const route = {
       teamId: 'T1',
       channel: 'C1',
@@ -72,11 +79,12 @@ describe('thread-active-tasks', () => {
     await expect(
       removeSlackThreadActiveTaskByTaskId('task-1'),
     ).resolves.toEqual(route);
+
     expect(mocks.eval).toHaveBeenCalledWith(
-      expect.stringContaining("redis.call('zrem'"),
+      expect.stringContaining("redis.call('hdel'"),
       2,
       'slack:thread_active_task:task-1',
-      'slack:thread_active_task_cards:C1:100.000',
+      'slack:thread_active_tasks:C1:100.000',
       JSON.stringify(route),
       'task-1',
     );
@@ -96,5 +104,33 @@ describe('thread-active-tasks', () => {
     await expect(
       removeSlackThreadActiveTaskByTaskId('task-1'),
     ).resolves.toBeNull();
+  });
+
+  it('ignores malformed persisted summaries', async () => {
+    mocks.hgetall.mockResolvedValue({
+      valid: JSON.stringify({
+        taskId: 'task-1',
+        title: 'Valid task',
+        updatedAt: 1,
+      }),
+      badJson: '{',
+      badRecord: JSON.stringify({
+        taskId: 'task-2',
+        updatedAt: 2,
+      }),
+    });
+
+    await expect(
+      getSlackThreadActiveTasks({
+        channel: 'C1',
+        threadTs: '100.000',
+      }),
+    ).resolves.toEqual([
+      {
+        taskId: 'task-1',
+        title: 'Valid task',
+        updatedAt: 1,
+      },
+    ]);
   });
 });

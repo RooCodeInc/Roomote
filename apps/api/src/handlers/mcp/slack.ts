@@ -35,7 +35,6 @@ import {
   getNextSlackReplyQuoteSuppression,
   getActiveSlackRunReplyTarget,
   getSlackThreadReplyFooterMessageTs,
-  relocateSlackThreadActiveTaskCards,
   removeSlackThreadReplyFooter,
   resolveSlackThreadFooterContext,
   resolveSlackThreadLinkedPrs,
@@ -1390,22 +1389,6 @@ slackMcp.post('/thread_reply', async (c) => {
               footerText,
             }),
           );
-        }
-
-        if (includeFooter) {
-          try {
-            await relocateSlackThreadActiveTaskCards({
-              slack: resolvedSlack,
-              channel: slackReplyTarget.channel,
-              threadTs: existingThreadTs,
-            });
-          } catch (error) {
-            console.warn(
-              `[slackMcp#thread_reply] Failed to relocate active task cards before posting the reply: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            );
-          }
         }
 
         const replyPostResult = await resolvedSlack.postMessageDetailed({

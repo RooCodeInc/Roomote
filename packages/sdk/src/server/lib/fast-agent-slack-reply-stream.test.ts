@@ -1,18 +1,11 @@
 const mocks = vi.hoisted(() => ({
   updateWithFooter: vi.fn(),
   recordMessage: vi.fn(),
-  relocateCards: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', () => ({
   ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID: 'quote',
-  relocateSlackThreadActiveTaskCards: mocks.relocateCards,
   updateSlackThreadMessageWithFooterText: mocks.updateWithFooter,
-  withSlackThreadReplyFooterLock: async ({
-    fn,
-  }: {
-    fn: () => Promise<unknown>;
-  }) => fn(),
 }));
 vi.mock('@roomote/communication', () => ({
   buildFastSessionReplyFooterText: () => 'footer',
@@ -40,8 +33,6 @@ function slackMock() {
     deleteMessage: vi.fn(async () => true),
     updateMessage: vi.fn(async () => true),
     getMessageBlocks: vi.fn(async () => []),
-    getRawMessage: vi.fn(async () => null),
-    postMessage: vi.fn(async () => undefined),
   };
 }
 
@@ -71,7 +62,6 @@ describe('createSlackFastReplyStream', () => {
     vi.clearAllMocks();
     mocks.updateWithFooter.mockResolvedValue(true);
     mocks.recordMessage.mockResolvedValue(undefined);
-    mocks.relocateCards.mockResolvedValue(undefined);
   });
 
   it('starts on the first append, appends after, and finishes into the canonical reply body', async () => {
@@ -87,9 +77,6 @@ describe('createSlackFastReplyStream', () => {
       recipientUserId: 'U1',
       markdownText: 'Looking',
     });
-    expect(mocks.relocateCards.mock.invocationCallOrder[0]).toBeLessThan(
-      slack.startMessageStream.mock.invocationCallOrder[0]!,
-    );
     expect(slack.appendMessageStream).toHaveBeenCalledWith({
       channel: 'C1',
       ts: '200.1',
