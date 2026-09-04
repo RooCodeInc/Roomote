@@ -29,6 +29,7 @@ import {
 import {
   admitFastAgentHumanFollowUp,
   createFastAgentConversationArtifact,
+  handOffFastAgentInterruptedTurn,
   persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
@@ -374,7 +375,13 @@ export async function processDiscordFastAgentMessage(
                   retryAt,
                 ),
             }
-          : {}),
+          : {
+              requestLateDurableAdmission: () =>
+                handOffFastAgentInterruptedTurn({
+                  parent: { sessionId: session.id, conversation },
+                  event: humanFollowUpEvent,
+                }),
+            }),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId: input.senderUserId,

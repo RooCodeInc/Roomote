@@ -19,6 +19,7 @@ import {
   buildFastAgentArtifactCreator,
   buildFastAgentSurfaceReplyDelivery,
   createFastAgentSessionArtifact,
+  handOffFastAgentInterruptedTurn,
   persistFastAgentInlineHumanTurn,
   resolveUserMcpServerConfigs,
   wakeFastAgentParentEventAt,
@@ -260,9 +261,11 @@ async function runWebFastAgentTurn({
     // events ride the same row with their framing recorded; the ones that
     // need adapter extensions or a setup snapshot cannot be rebuilt by the
     // queue and stay process-bound.
-    const durableTurn =
+    const durableAdmissionRequest:
+      | Parameters<typeof persistFastAgentInlineHumanTurn>[0]
+      | null =
       durableSessionId && !adapterExtensions && !setupSnapshot
-        ? await persistFastAgentInlineHumanTurn({
+        ? {
             parent: { sessionId: durableSessionId, conversation },
             event: {
               type: 'human_follow_up',
@@ -283,13 +286,18 @@ async function runWebFastAgentTurn({
                 : {}),
               ...(setupSession ? { setupSession: true } : {}),
             },
-          }).catch((error) => {
+          }
+        : null;
+    const durableTurn = durableAdmissionRequest
+      ? await persistFastAgentInlineHumanTurn(durableAdmissionRequest).catch(
+          (error) => {
             console.error(
               `[Fast Web] Failed to persist turn admission: ${formatErrorForLog(error)}`,
             );
             return null;
-          })
-        : null;
+          },
+        )
+      : null;
     if (durableTurn && durableSessionId) {
       release.durableRowId = durableTurn.id;
       release.durableResume = () =>
@@ -347,7 +355,12 @@ async function runWebFastAgentTurn({
                   retryAt,
                 ),
             }
-          : {}),
+          : durableAdmissionRequest
+            ? {
+                requestLateDurableAdmission: () =>
+                  handOffFastAgentInterruptedTurn(durableAdmissionRequest),
+              }
+            : {}),
         ...delivery.adapter,
         ...adapterExtensions,
       },

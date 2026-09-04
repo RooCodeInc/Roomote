@@ -223,6 +223,7 @@ export {
 } from './lib/fast-agent-parent-event-queue';
 export {
   admitFastAgentHumanFollowUp,
+  handOffFastAgentInterruptedTurn,
   persistFastAgentInlineHumanTurn,
   type FastAgentDurableTurn,
   type FastAgentHumanFollowUpAdmission,

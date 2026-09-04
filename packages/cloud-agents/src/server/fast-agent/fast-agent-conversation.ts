@@ -209,6 +209,14 @@ export type FastAgentTurnAdapter = {
    */
   requestDurableResume?: () => Promise<void>;
   /**
+   * Called when a shutdown interrupts a turn that has no durable row (its
+   * admission write failed before it ran). Persists the row now and hands
+   * it to the queue so the turn resumes on the next process instead of
+   * asking the user to send it again. Resolves true when the hand-off
+   * landed; false means nothing will re-run the turn.
+   */
+  requestLateDurableAdmission?: () => Promise<boolean>;
+  /**
    * Called when a turn has parked itself for a durable inference
    * retry; schedules the queue wakeup for `retryAt` so the retry does not
    * wait for a recovery sweep. Best effort. Without this hook the turn keeps

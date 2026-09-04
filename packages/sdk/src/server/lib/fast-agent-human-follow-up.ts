@@ -1,6 +1,7 @@
 import {
   acquireFastAgentTurnLock,
   FAST_AGENT_DURABLE_TURN_CLAIM_MS,
+  releaseFastAgentDurableTurnClaim,
   type FastAgentTurnLockHandle,
 } from '@roomote/cloud-agents/server';
 import {
@@ -19,6 +20,7 @@ import type {
 import {
   buildFastAgentParentEventKey,
   enqueueFastAgentParentEvent,
+  wakeFastAgentParentEventNow,
 } from './fast-agent-parent-event-queue';
 
 export type FastAgentDurableTurn = {
@@ -120,6 +122,36 @@ export async function persistFastAgentInlineHumanTurn(params: {
 
     return { id: row.id, eventKey, ...(resumed ? { resumed: true } : {}) };
   });
+}
+
+/**
+ * Late durable admission for a turn a shutdown interrupted after its
+ * admission write had failed. The turn already ran under this process with
+ * its prompt and actions recorded by turn id, so persisting the row now and
+ * handing it straight to the queue lets the next process resume it exactly
+ * as it would a turn admitted up front. Returns false when no row could be
+ * persisted (or the same message already settled), in which case nothing
+ * will re-run the turn.
+ */
+export async function handOffFastAgentInterruptedTurn(params: {
+  parent: FastAgentParent;
+  event: FastAgentHumanFollowUpEvent;
+}): Promise<boolean> {
+  const durable = await persistFastAgentInlineHumanTurn(params);
+  if (!durable) return false;
+  // The row is persisted under this process's claim; this process is going
+  // away, so release it at once and ask the queue not to wait for a sweep.
+  await releaseFastAgentDurableTurnClaim(durable.id);
+  await wakeFastAgentParentEventNow({
+    conversationId: params.parent.sessionId,
+    eventKey: durable.eventKey,
+  }).catch((error) => {
+    // The recovery sweep recreates the wakeup within its interval.
+    console.warn(
+      `[Fast Agent] Late-admitted turn ${durable.id} persisted, but its wakeup failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+  return true;
 }
 
 /**

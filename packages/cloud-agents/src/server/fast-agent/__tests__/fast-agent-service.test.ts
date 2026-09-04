@@ -4941,12 +4941,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }) as typeof setTimeout);
   }
 
-  it('tells the user to resend when API shutdown cuts off a turn that has no row to resume from', async () => {
-    // No durable row (the admission write failed): nothing will re-run this
-    // turn, so the honest outcome is a recorded restart closeout.
+  it('admits a turn late and hands it to the queue when API shutdown cuts it off without a row', async () => {
+    // The admission write failed before the turn ran. Rather than asking the
+    // user to resend, the turn is persisted now and handed to the queue,
+    // which resumes it on the next process; nothing is posted.
     const controller = new AbortController();
     const shutdown = new FastAgentProcessShutdownError('SIGTERM');
     const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
+    const requestLateDurableAdmission = vi.fn().mockResolvedValue(true);
     const timeout = abortOnFirstTimer(controller, shutdown);
     mocks.generateText.mockRejectedValue(new Error('TypeError: fetch failed'));
 
@@ -4954,10 +4956,50 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await expect(
         answerFastAgentQuestion({
           ...baseParams,
-          adapter: callbacks({ postReply }),
+          adapter: callbacks({ postReply, requestLateDurableAdmission }),
           signal: controller.signal,
         }),
       ).rejects.toBe(shutdown);
+
+      expect(requestLateDurableAdmission).toHaveBeenCalledOnce();
+      expect(postReply).not.toHaveBeenCalled();
+      const persisted = mocks.upsertMessage.mock.calls.map(
+        ([input]) => input.message,
+      );
+      expect(
+        persisted.some(
+          (message) =>
+            (message.metadata as { purpose?: string } | undefined)?.purpose ===
+            'closeout',
+        ),
+      ).toBe(false);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('tells the user to resend only when a turn has no row and cannot be admitted late', async () => {
+    // Nothing will re-run this turn, so the honest outcome is a recorded
+    // restart closeout.
+    const controller = new AbortController();
+    const shutdown = new FastAgentProcessShutdownError('SIGTERM');
+    const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
+    const requestLateDurableAdmission = vi
+      .fn()
+      .mockRejectedValue(new Error('db offline'));
+    const timeout = abortOnFirstTimer(controller, shutdown);
+    mocks.generateText.mockRejectedValue(new Error('TypeError: fetch failed'));
+
+    try {
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ postReply, requestLateDurableAdmission }),
+          signal: controller.signal,
+        }),
+      ).rejects.toBe(shutdown);
+
+      expect(requestLateDurableAdmission).toHaveBeenCalledOnce();
 
       expect(mocks.generateText).toHaveBeenCalledOnce();
       expect(postReply).toHaveBeenCalledWith({
