@@ -26,6 +26,7 @@ import {
   isCommunicationAutomationTarget,
   resolveEvalHarnessSelection,
   TaskPayloadKind,
+  buildFastAgentSessionAttachment,
   type AutomationTarget,
   type CommunicationProvider,
   type FastAgentConversation,
@@ -260,6 +261,17 @@ function isFastDeliveryTarget(target: AutomationTarget): boolean {
   return isCommunicationAutomationTarget(target);
 }
 
+function buildAutomationConversation(
+  automation: CustomAutomation,
+  eventId: string,
+): FastAgentConversation {
+  return {
+    surface: 'automation',
+    workspaceId: automation.id,
+    conversationId: eventId,
+  };
+}
+
 async function buildFastAutomationConversation(params: {
   automation: CustomAutomation;
   eventId: string;
@@ -271,13 +283,7 @@ async function buildFastAutomationConversation(params: {
 }> {
   const { automation, destination, eventId, target } = params;
   if (!destination) {
-    return {
-      conversation: {
-        surface: 'automation',
-        workspaceId: automation.id,
-        conversationId: eventId,
-      },
-    };
+    return { conversation: buildAutomationConversation(automation, eventId) };
   }
 
   if (destination.provider === 'slack') {
@@ -753,12 +759,27 @@ async function launchCustomAutomationRow(
       return result;
     }
 
+    if (!automation.createdByUserId) {
+      throw new Error('Automation run-as user is not configured.');
+    }
+    const eventId = `${automation.id}:${eventClaimedAt.toISOString()}`;
+    const conversation = buildAutomationConversation(automation, eventId);
+    const parentSession = await getOrCreateFastAgentSession({
+      userId: automation.createdByUserId,
+      conversation,
+      initialTitle: automation.name,
+    });
+
     const launchResult = await enqueueTask({
       task: {
         type: TaskPayloadKind.StandardTask,
         ...(modelOverride?.harness ? { harness: modelOverride.harness } : {}),
         payload: {
           repo: automation.allRepositories ? ALL_REPOSITORIES : '',
+          ...buildFastAgentSessionAttachment({
+            sessionId: parentSession.id,
+            conversation,
+          }),
           ...(automation.environmentId
             ? { environmentId: automation.environmentId }
             : {}),

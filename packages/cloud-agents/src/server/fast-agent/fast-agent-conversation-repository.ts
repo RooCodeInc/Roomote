@@ -765,6 +765,8 @@ export interface FastAgentConversationRepository {
      * Session.
      */
     sessionId?: string;
+    /** Title to seed only when this call creates the conversation. */
+    initialTitle?: string;
   }): Promise<FastAgentConversationGetOrCreateResult>;
   findById(input: {
     id: string;
@@ -904,7 +906,7 @@ async function loadConversationRecord(
 
 export const fastAgentConversationRepository: FastAgentConversationRepository =
   {
-    async getOrCreate({ userId, conversation, sessionId }) {
+    async getOrCreate({ userId, conversation, sessionId, initialTitle }) {
       return db.transaction(async (tx) => {
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${buildIdentityKey(conversation)}, 0))`,
@@ -947,6 +949,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             .insert(fastAgentConversations)
             .values({
               userId,
+              title: initialTitle?.trim() || null,
               surface: conversation.surface,
               workspaceId: conversation.workspaceId,
               conversationId: conversation.conversationId,

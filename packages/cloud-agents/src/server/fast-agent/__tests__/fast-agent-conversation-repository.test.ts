@@ -66,6 +66,7 @@ describe('Fast conversation repository', () => {
     const session = await fastAgentConversationRepository.getOrCreate({
       userId: user.id,
       conversation,
+      initialTitle: 'Weekly product update',
     });
     const stored = await fastAgentConversationRepository.findById({
       id: session.id,
@@ -78,10 +79,20 @@ describe('Fast conversation repository', () => {
       .select({
         channelId: fastAgentConversations.currentReplyChannelId,
         surface: fastAgentConversations.surface,
+        title: fastAgentConversations.title,
       })
       .from(fastAgentConversations)
       .where(eq(fastAgentConversations.id, session.id));
-    expect(row).toEqual({ channelId: null, surface: 'automation' });
+    expect(row).toEqual({
+      channelId: null,
+      surface: 'automation',
+      title: 'Weekly product update',
+    });
+    const [unifiedSession] = await db
+      .select({ title: sessions.title })
+      .from(sessions)
+      .where(eq(sessions.fastConversationId, session.id));
+    expect(unifiedSession?.title).toBe('Weekly product update');
   });
 
   it.each(['teams', 'telegram'] as const)(

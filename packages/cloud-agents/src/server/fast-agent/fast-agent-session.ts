@@ -37,16 +37,20 @@ export async function getOrCreateFastAgentSession({
   userId,
   conversation,
   sessionId,
+  initialTitle,
 }: {
   userId: string;
   conversation: FastAgentConversation;
   /** Session to bind a newly created conversation to; see the repository. */
   sessionId?: string;
+  /** Title to seed only when this call creates the conversation. */
+  initialTitle?: string;
 }): Promise<FastAgentSessionRecord> {
   return fastAgentConversationRepository.getOrCreate({
     userId,
     conversation,
     ...(sessionId ? { sessionId } : {}),
+    ...(initialTitle ? { initialTitle } : {}),
   });
 }
 
