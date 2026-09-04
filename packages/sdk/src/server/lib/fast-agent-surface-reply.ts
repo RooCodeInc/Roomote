@@ -11,13 +11,7 @@ import {
   type FastAgentReactionExternalInput,
   type FastAgentTurnAdapter,
 } from '@roomote/cloud-agents/server';
-import {
-  and,
-  db,
-  ensureSessionForFastConversation,
-  eq,
-  slackInstallations,
-} from '@roomote/db/server';
+import { and, db, eq, slackInstallations } from '@roomote/db/server';
 import {
   isFastAgentSourceControlConversation,
   type FastAgentHumanFollowUpEvent,
@@ -72,7 +66,7 @@ import {
   buildSourceControlFastDelivery,
   buildSourceControlReplyQuote,
 } from './source-control-fast-delivery';
-import { createFastAgentSessionArtifact } from './artifacts/create-session-artifact';
+import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
 const DISCORD_QUOTE_MAX_LENGTH = 280;
@@ -218,6 +212,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     return null;
   }
   const conversation = session.conversation;
+  const createArtifact = buildFastAgentArtifactCreator(session.id);
 
   if (conversation.surface === 'web' || conversation.surface === 'automation') {
     // No side channel to post into: the canonical transcript the service
@@ -226,6 +221,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     return {
       conversation,
       adapter: {
+        createArtifact,
         launchTask: createFastAgentWebTaskLauncher({
           userId: params.userId,
           conversation,
@@ -272,6 +268,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     return {
       conversation,
       adapter: {
+        createArtifact,
         ...(senderSubject
           ? {
               createReplyStream: () =>
@@ -374,6 +371,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         });
 
     const adapter: FastAgentTurnAdapter = {
+      createArtifact,
       launchTask: createFastAgentDiscordTaskLauncher({
         provider,
         userId: params.userId,
@@ -460,6 +458,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     return {
       conversation,
       adapter: {
+        createArtifact,
         launchTask: createFastAgentCommunicationTaskLauncher({
           userId: params.userId,
           conversation,
@@ -508,6 +507,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     return {
       conversation,
       adapter: {
+        createArtifact,
         launchTask: createFastAgentLinearTaskLauncher({
           userId: params.userId,
           conversation,
@@ -533,15 +533,18 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     }
     return {
       conversation,
-      adapter: buildSourceControlFastAdapter({
-        conversation,
-        delivery,
-        userId: params.userId,
-        sessionId: session.id,
-        quote: params.externalInput
-          ? null
-          : buildSourceControlReplyQuote({ text: params.question }),
-      }),
+      adapter: {
+        createArtifact,
+        ...buildSourceControlFastAdapter({
+          conversation,
+          delivery,
+          userId: params.userId,
+          sessionId: session.id,
+          quote: params.externalInput
+            ? null
+            : buildSourceControlReplyQuote({ text: params.question }),
+        }),
+      },
     };
   }
 
@@ -555,6 +558,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     return {
       conversation,
       adapter: {
+        createArtifact,
         launchTask: createFastAgentCommunicationTaskLauncher({
           userId: params.userId,
           conversation,
@@ -766,16 +770,7 @@ async function runFastAgentSurfaceReply(
                 ),
             }
           : {}),
-        createArtifact: async (artifact) => {
-          const unifiedSession = await ensureSessionForFastConversation(
-            db,
-            params.sessionId,
-          );
-          return createFastAgentSessionArtifact({
-            sessionId: unifiedSession.id,
-            ...artifact,
-          });
-        },
+        createArtifact: buildFastAgentArtifactCreator(params.sessionId),
         ...delivery.adapter,
       },
     }).catch((error: unknown) => {

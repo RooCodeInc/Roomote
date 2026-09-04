@@ -49,6 +49,7 @@ const mocks = vi.hoisted(() => ({
   postSourceControlComment: vi.fn(),
   updateSourceControlComment: vi.fn(),
   linearEmitResponse: vi.fn(),
+  createConversationArtifact: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -164,6 +165,10 @@ vi.mock('./task-runs/pr-review-action', () => ({
     mocks.attachPendingPrReviewActionMessage,
   retirePrReviewActionMessagesBestEffort:
     mocks.retirePrReviewActionMessagesBestEffort,
+}));
+
+vi.mock('./artifacts/create-session-artifact', () => ({
+  createFastAgentConversationArtifact: mocks.createConversationArtifact,
 }));
 
 vi.mock('./artifacts/raw-url', () => ({
@@ -517,6 +522,45 @@ describe('deliverFastAgentParentEvent', () => {
       }),
     );
     expect(mocks.answerQuestion.mock.calls[1]?.[0]).not.toHaveProperty('input');
+  });
+
+  it('lets a queued web turn create artifacts in its Session', async () => {
+    const webParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: 'user-1',
+        conversationId: 'session-1',
+      },
+    };
+    mocks.createConversationArtifact.mockResolvedValue({ id: 'artifact-1' });
+    mocks.answerQuestion.mockImplementation(async ({ adapter }) =>
+      adapter.createArtifact({
+        path: 'notes/decision.md',
+        content: '# Decision',
+        contentType: 'text/markdown',
+        artifactType: 'general',
+      }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: webParent,
+      event: {
+        type: 'human_follow_up',
+        eventId: 'web-message-1',
+        currentMessageId: 'web-message-1',
+        userId: 'user-1',
+        question: 'Write up the decision',
+      },
+    });
+
+    expect(mocks.createConversationArtifact).toHaveBeenCalledWith({
+      fastConversationId: parent.sessionId,
+      path: 'notes/decision.md',
+      content: '# Decision',
+      contentType: 'text/markdown',
+      artifactType: 'general',
+    });
   });
 
   it('passes a canonical review offer into the web transcript payload', async () => {

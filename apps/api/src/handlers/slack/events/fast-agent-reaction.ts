@@ -13,6 +13,7 @@ import {
   resolveFastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
+  buildFastAgentArtifactCreator,
   findFastAgentSessionForProviderMessage,
   persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
@@ -159,6 +160,7 @@ async function processFastAgentReaction(params: {
                 ),
             }
           : {}),
+        createArtifact: buildFastAgentArtifactCreator(session.id),
         activity: createFastAgentSlackSessionActivity({
           slack: context.slack,
           workspaceId: context.teamId,
