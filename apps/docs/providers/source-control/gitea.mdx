@@ -82,8 +82,8 @@ as GitHub and GitLab. After syncing repositories, associate the Gitea repository
 with the intended environment and enable Review Code automation for that target.
 
 Open or reopened PR events enqueue initial review tasks. PR sync events enqueue
-delta reviews. `@roomote` comments on Gitea pull requests route into the
-existing PR owner task when possible, or enqueue a new review task.
+delta reviews. `@roomote` comments on Gitea pull requests and issues continue
+the Roomote Session for that discussion, or start one when it does not exist.
 
 ## CI Failure Triage
 

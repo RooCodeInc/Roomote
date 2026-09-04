@@ -21,7 +21,6 @@ import {
   findActiveGitHubBranchWork,
   findReusableGitHubPrFollowUpOwner,
   findReusableGitHubIssueTaskOwner,
-  findRoomoteOpenedPullRequestTask,
   hasRecentGitHubBranchCommit,
 } from '../github-branch-activity';
 
@@ -1951,113 +1950,5 @@ describe('hasRecentGitHubBranchCommit', () => {
         now,
       }),
     ).toBe(false);
-  });
-});
-
-describe('findRoomoteOpenedPullRequestTask', () => {
-  it('returns the task that opened the pull request even after its run finished', async () => {
-    const { user } = await createActor();
-    const run = await createPrLinkedTaskRun({
-      repoFullName: 'acme/api',
-      prNumber: 42,
-      userId: user.id,
-      payloadKind: TaskPayloadKind.StandardTask,
-      status: RunStatus.Completed,
-      createdByRoomote: true,
-    });
-
-    await expect(
-      findRoomoteOpenedPullRequestTask({
-        repoFullName: 'acme/api',
-        prNumber: 42,
-        host: 'github.com',
-      }),
-    ).resolves.toEqual({
-      runId: run.id,
-      taskId: run.taskId,
-      type: TaskPayloadKind.StandardTask,
-      status: RunStatus.Completed,
-    });
-  });
-
-  it('ignores a pull request a task merely mentioned', async () => {
-    const { user } = await createActor();
-    await createPrLinkedTaskRun({
-      repoFullName: 'acme/api',
-      prNumber: 43,
-      userId: user.id,
-      payloadKind: TaskPayloadKind.StandardTask,
-      status: RunStatus.Completed,
-      createdByRoomote: false,
-    });
-
-    await expect(
-      findRoomoteOpenedPullRequestTask({
-        repoFullName: 'acme/api',
-        prNumber: 43,
-      }),
-    ).resolves.toBeNull();
-  });
-
-  it('ignores review-pipeline and conflict-resolver linkage', async () => {
-    const { user } = await createActor();
-    for (const payloadKind of [
-      TaskPayloadKind.GithubPrReview,
-      TaskPayloadKind.GithubPrReviewSync,
-      TaskPayloadKind.GithubPrConflictResolve,
-    ]) {
-      await createPrLinkedTaskRun({
-        repoFullName: 'acme/api',
-        prNumber: 44,
-        userId: user.id,
-        payloadKind,
-        status: RunStatus.Running,
-        createdByRoomote: true,
-      });
-    }
-
-    await expect(
-      findRoomoteOpenedPullRequestTask({
-        repoFullName: 'acme/api',
-        prNumber: 44,
-      }),
-    ).resolves.toBeNull();
-  });
-
-  it('host-scopes the lookup, tolerating legacy null-host rows', async () => {
-    const { user } = await createActor();
-    await createPrLinkedTaskRun({
-      repoFullName: 'acme/api',
-      prNumber: 45,
-      userId: user.id,
-      payloadKind: TaskPayloadKind.StandardTask,
-      status: RunStatus.Completed,
-      host: 'github.example.com',
-      createdByRoomote: true,
-    });
-    const legacy = await createPrLinkedTaskRun({
-      repoFullName: 'acme/api',
-      prNumber: 46,
-      userId: user.id,
-      payloadKind: TaskPayloadKind.StandardTask,
-      status: RunStatus.Completed,
-      host: null,
-      createdByRoomote: true,
-    });
-
-    await expect(
-      findRoomoteOpenedPullRequestTask({
-        repoFullName: 'acme/api',
-        prNumber: 45,
-        host: 'github.com',
-      }),
-    ).resolves.toBeNull();
-    await expect(
-      findRoomoteOpenedPullRequestTask({
-        repoFullName: 'acme/api',
-        prNumber: 46,
-        host: 'github.com',
-      }),
-    ).resolves.toEqual(expect.objectContaining({ taskId: legacy.taskId }));
   });
 });

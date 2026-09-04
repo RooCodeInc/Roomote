@@ -397,7 +397,7 @@ export async function resolveRuntimeGitHubAppCredentials(
 
   const envCredentials = resolveGitHubAppCredentials();
 
-  if (envCredentials.appId.trim() && envCredentials.privateKey.trim()) {
+  if (envCredentials.appId?.trim() && envCredentials.privateKey?.trim()) {
     return envCredentials;
   }
 

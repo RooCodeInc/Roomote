@@ -127,7 +127,7 @@ function BoardTaskCard({ task }: { task: Task }) {
           {isAutomation ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="flex size-6 items-center justify-center rounded-full border border-border bg-muted ring-2 ring-card">
+                <span className="flex size-6 items-center justify-center overflow-clip rounded-full border border-border bg-white ring-2 ring-card">
                   <TaskAutomationIcon
                     automationKey={task.initiatorAutomation}
                     className="size-5"

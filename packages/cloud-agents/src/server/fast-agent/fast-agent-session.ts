@@ -82,6 +82,7 @@ export async function getActiveFastAgentTasks(
         snapshotId: taskRuns.snapshotId,
         snapshotCreatedAt: taskRuns.snapshotCreatedAt,
         snapshotFailedAt: taskRuns.snapshotFailedAt,
+        vendor: taskRuns.vendor,
       })
       .from(taskRuns)
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
@@ -109,6 +110,7 @@ export async function getActiveFastAgentTasks(
         snapshotId: latestRunPerTask.snapshotId,
         snapshotCreatedAt: latestRunPerTask.snapshotCreatedAt,
         snapshotFailedAt: latestRunPerTask.snapshotFailedAt,
+        vendor: latestRunPerTask.vendor,
       }),
     )
     .orderBy(desc(latestRunPerTask.createdAt));
@@ -159,7 +161,7 @@ export async function setFastAgentOpenCodeSession({
   openCodeSessionId,
 }: {
   sessionId: string;
-  openCodeSessionId: string;
+  openCodeSessionId: string | null;
 }): Promise<void> {
   await fastAgentConversationRepository.setOpenCodeSession({
     conversationId: sessionId,

@@ -12,7 +12,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { useMediaQuery, useResizeObserver } from 'usehooks-ts';
 import {
@@ -27,10 +26,7 @@ import {
   getUserDisplayName,
   humanizeFilename,
 } from '@/lib';
-import {
-  parseSessionArtifactSearchParams,
-  type SessionArtifactSelection,
-} from '@/lib/artifact-view-urls';
+import { type SessionArtifactSelection } from '@/lib/artifact-view-urls';
 import { getSessionPullRequests } from '@/lib/session-pull-requests';
 import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInferenceCostBreakdown';
 import { PullRequestBadge } from '@/components/sandbox';
@@ -99,6 +95,11 @@ import {
   PreviewSidePanel,
   type PreviewEntry,
 } from '../../task/[taskId]/sidebar-panels/PreviewSidePanel';
+import {
+  getSessionPanelMinSizes,
+  getSessionTaskPanelCapacity,
+  useSessionWorkspacePanels,
+} from './use-session-workspace-panels';
 
 const ArtifactViewerContent = dynamic(
   () =>
@@ -748,31 +749,6 @@ function SessionInfoPanel({
   );
 }
 
-type UtilityWorkspacePanel =
-  | { kind: 'info' }
-  | { kind: 'tasks' }
-  | { kind: 'artifacts' }
-  | { kind: 'previews' };
-
-type TaskPanelState = { taskId: string };
-type TaskArtifactSelection = { path: string; version?: number };
-
-const SESSION_MAIN_MIN_WIDTH = 400;
-const SESSION_TASK_PANEL_MIN_WIDTH = 400;
-
-export function getSessionTaskPanelCapacity(
-  workspaceWidth: number,
-  isMdOrLarger: boolean,
-) {
-  if (!isMdOrLarger || workspaceWidth <= 0) return 1;
-  return Math.max(
-    1,
-    Math.floor(
-      (workspaceWidth - SESSION_MAIN_MIN_WIDTH) / SESSION_TASK_PANEL_MIN_WIDTH,
-    ),
-  );
-}
-
 export function SessionWorkspace({
   session,
   children,
@@ -781,25 +757,6 @@ export function SessionWorkspace({
   children: ReactNode;
 }) {
   const trpc = useTRPC();
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const selectedTaskId = searchParams.get('task');
-  // A `?artifact=<path>&v=<version>` link (the create_artifact result and the
-  // viewer's copy-link URL) opens the Session-owned artifact in the Artifacts
-  // panel unless a URL-selected task already owns the side panel.
-  const requestedArtifact = selectedTaskId
-    ? null
-    : parseSessionArtifactSearchParams(searchParams);
-  const [utilityPanel, setUtilityPanel] =
-    useState<UtilityWorkspacePanel | null>(() =>
-      requestedArtifact ? { kind: 'artifacts' } : null,
-    );
-  const [utilityArtifact, setUtilityArtifact] =
-    useState<SessionArtifactViewerSelection | null>(null);
-  const [taskPanels, setTaskPanels] = useState<TaskPanelState[]>([]);
-  const [taskArtifacts, setTaskArtifacts] = useState<
-    Record<string, TaskArtifactSelection>
-  >({});
   const workspacePanelsRef = useRef<HTMLDivElement>(null!);
   const { width: workspaceWidth = 0 } = useResizeObserver<HTMLDivElement>({
     ref: workspacePanelsRef,
@@ -845,10 +802,6 @@ export function SessionWorkspace({
   );
   const singleRunningTaskId =
     runningTaskCount === 1 ? runningTasks[0]?.taskId : null;
-  const selectedTask = taskCards.find((task) => task.taskId === selectedTaskId);
-  const [promptFocusTaskId, setPromptFocusTaskId] = useState<string | null>(
-    selectedTaskId,
-  );
   const isMdOrLarger = useMediaQuery('(min-width: 768px)', {
     initializeWithValue: false,
   });
@@ -856,252 +809,40 @@ export function SessionWorkspace({
     workspaceWidth,
     isMdOrLarger,
   );
-  const orderedTaskPanels = [
-    ...(selectedTask ? [{ taskId: selectedTask.taskId }] : []),
-    ...taskPanels.filter(({ taskId }) => taskId !== selectedTask?.taskId),
-  ];
-  const visibleTaskPanels = utilityPanel
-    ? []
-    : orderedTaskPanels.slice(0, taskPanelCapacity);
-  const panelOpen = utilityPanel !== null || visibleTaskPanels.length > 0;
-  const knownTaskIdsRef = useRef<string[] | null>(null);
-  const widePanelsSeededRef = useRef(false);
-
-  useEffect(() => {
-    if (!isMdOrLarger || workspaceWidth <= 0) return;
-
-    const taskIds = taskCards.map((task) => task.taskId);
-    const previousTaskIds = knownTaskIdsRef.current;
-    knownTaskIdsRef.current = taskIds;
-
-    if (!widePanelsSeededRef.current && taskPanelCapacity >= 2) {
-      widePanelsSeededRef.current = true;
-      const initialTaskIds = taskIds.filter(
-        (taskId) => taskId !== selectedTask?.taskId,
-      );
-      setTaskPanels((previous) => [
-        ...previous,
-        ...initialTaskIds
-          .filter(
-            (taskId) => !previous.some((panel) => panel.taskId === taskId),
-          )
-          .map((taskId) => ({ taskId })),
-      ]);
-      setPromptFocusTaskId(selectedTask?.taskId ?? initialTaskIds[0] ?? null);
-      return;
-    }
-
-    if (!previousTaskIds) return;
-    const previousTaskIdSet = new Set(previousTaskIds);
-    const newTaskIds = taskIds.filter(
-      (taskId) => !previousTaskIdSet.has(taskId),
-    );
-    if (newTaskIds.length === 0) return;
-
-    const shouldFocusNewTask =
-      utilityPanel === null || utilityPanel.kind === 'tasks';
-    if (shouldFocusNewTask) {
-      setUtilityPanel(null);
-      setPromptFocusTaskId(newTaskIds[0] ?? null);
-    }
-    setTaskPanels((previous) => {
-      const next = [...previous];
-      const selectedOffset = selectedTask ? 1 : 0;
-      let insertionIndex = Math.max(0, taskPanelCapacity - selectedOffset - 1);
-      for (const taskId of newTaskIds) {
-        if (
-          taskId === selectedTask?.taskId ||
-          next.some((panel) => panel.taskId === taskId)
-        ) {
-          continue;
-        }
-        next.splice(Math.min(next.length, insertionIndex), 0, {
-          taskId,
-        });
-        insertionIndex += 1;
-      }
-      return next;
-    });
-  }, [
-    isMdOrLarger,
-    selectedTask,
-    taskCards,
-    taskPanelCapacity,
+  const taskIds = useMemo(
+    () => taskCards.map((task) => task.taskId),
+    [taskCards],
+  );
+  const {
     utilityPanel,
+    taskArtifacts,
+    promptFocusTaskId,
+    requestedArtifact,
+    visibleTaskPanelIds,
+    panelOpen,
+    openTaskPanel,
+    openTasksPanel,
+    openTasksSideBySide,
+    showMain,
+    openArtifactViewer,
+    togglePanel,
+    closeUtilityPanel,
+    closeSessionArtifact,
+    backToSessionArtifacts,
+    clearRequestedArtifact,
+    closeTaskPanel,
+    selectPanelTask,
+    openTaskArtifact,
+    backToTask,
+    clearPromptFocus,
+  } = useSessionWorkspacePanels({
+    sessionId: session.id,
+    taskIds,
+    singleRunningTaskId: singleRunningTaskId ?? null,
+    taskPanelCapacity,
+    isMdOrLarger,
     workspaceWidth,
-  ]);
-
-  const replaceSearchParams = useCallback(
-    (update: (params: URLSearchParams) => void) => {
-      const params = new URLSearchParams(searchParams);
-      update(params);
-      const query = params.toString();
-      if (query === searchParams.toString()) return;
-      router.replace(`/sessions/${session.id}${query ? `?${query}` : ''}`);
-    },
-    [router, searchParams, session.id],
-  );
-  // Leaving the deep-linked artifact drops it from the URL so a refresh does
-  // not reopen it.
-  const clearRequestedArtifact = useCallback(
-    () =>
-      replaceSearchParams((params) => {
-        params.delete('artifact');
-        params.delete('v');
-      }),
-    [replaceSearchParams],
-  );
-  const selectTask = useCallback(
-    (taskId: string | null) =>
-      replaceSearchParams((params) => {
-        if (taskId) params.set('task', taskId);
-        else params.delete('task');
-        // Any side-panel change moves away from the deep-linked artifact.
-        params.delete('artifact');
-        params.delete('v');
-      }),
-    [replaceSearchParams],
-  );
-
-  const openTaskPanel = useCallback(
-    (taskId: string) => {
-      setUtilityPanel(null);
-      setPromptFocusTaskId(taskId);
-      setTaskArtifacts((previous) => {
-        if (!previous[taskId]) return previous;
-        const next = { ...previous };
-        delete next[taskId];
-        return next;
-      });
-      if (taskId === selectedTask?.taskId) return;
-      if (selectedTask && taskPanelCapacity === 1) {
-        selectTask(taskId);
-        return;
-      }
-
-      setTaskPanels((previous) => {
-        const withoutTask = previous.filter((panel) => panel.taskId !== taskId);
-        const selectedOffset = selectedTask ? 1 : 0;
-        const rightmostVisibleIndex = Math.max(
-          0,
-          taskPanelCapacity - selectedOffset - 1,
-        );
-        withoutTask.splice(
-          Math.min(withoutTask.length, rightmostVisibleIndex),
-          0,
-          { taskId },
-        );
-        return withoutTask;
-      });
-    },
-    [selectedTask, selectTask, taskPanelCapacity],
-  );
-  const openTasksPanel = useCallback(() => {
-    if (singleRunningTaskId) {
-      setUtilityPanel(null);
-      selectTask(singleRunningTaskId);
-      return;
-    }
-
-    setUtilityPanel({ kind: 'tasks' });
-  }, [selectTask, singleRunningTaskId]);
-  const openTasksSideBySide = useCallback(() => {
-    setUtilityPanel(null);
-    setTaskArtifacts({});
-    setPromptFocusTaskId(selectedTask?.taskId ?? taskCards[0]?.taskId ?? null);
-    setTaskPanels(
-      taskCards
-        .filter(({ taskId }) => taskId !== selectedTask?.taskId)
-        .map(({ taskId }) => ({ taskId })),
-    );
-  }, [selectedTask?.taskId, taskCards]);
-  const showMain = () => {
-    setUtilityPanel(null);
-    setUtilityArtifact(null);
-    setTaskPanels([]);
-    setTaskArtifacts({});
-    selectTask(null);
-  };
-  // Artifact links in the transcript open the viewer in the side panel instead
-  // of navigating; backing out lands on the Artifacts gallery.
-  const openArtifactViewer = useCallback(
-    (selection: SessionArtifactViewerSelection) => {
-      setUtilityPanel({ kind: 'artifacts' });
-      setUtilityArtifact(selection);
-      selectTask(null);
-    },
-    [selectTask],
-  );
-  const togglePanel = (kind: 'info' | 'tasks' | 'artifacts' | 'previews') => {
-    setUtilityArtifact(null);
-    setUtilityPanel((previous) => (previous?.kind === kind ? null : { kind }));
-  };
-  const closeTaskPanel = (taskId: string) => {
-    if (taskId === selectedTask?.taskId) {
-      selectTask(null);
-    } else {
-      setTaskPanels((previous) =>
-        previous.filter((panel) => panel.taskId !== taskId),
-      );
-    }
-    setTaskArtifacts((previous) => {
-      const next = { ...previous };
-      delete next[taskId];
-      return next;
-    });
-  };
-
-  const selectPanelTask = (currentTaskId: string, nextTaskId: string) => {
-    if (currentTaskId === nextTaskId) return;
-
-    setTaskArtifacts((previous) => {
-      const next = { ...previous };
-      delete next[currentTaskId];
-      delete next[nextTaskId];
-      return next;
-    });
-    if (currentTaskId === selectedTask?.taskId) {
-      setTaskPanels((previous) => {
-        const nextIndex = previous.findIndex(
-          (panel) => panel.taskId === nextTaskId,
-        );
-        if (nextIndex < 0) return previous;
-        return previous.map((panel, index) =>
-          index === nextIndex ? { taskId: currentTaskId } : panel,
-        );
-      });
-      selectTask(nextTaskId);
-      return;
-    }
-
-    if (nextTaskId === selectedTask?.taskId) {
-      setTaskPanels((previous) =>
-        previous.map((panel) =>
-          panel.taskId === currentTaskId
-            ? { taskId: selectedTask.taskId }
-            : panel,
-        ),
-      );
-      selectTask(currentTaskId);
-      return;
-    }
-
-    setTaskPanels((previous) => {
-      const currentIndex = previous.findIndex(
-        (panel) => panel.taskId === currentTaskId,
-      );
-      const nextIndex = previous.findIndex(
-        (panel) => panel.taskId === nextTaskId,
-      );
-      if (currentIndex < 0) return previous;
-
-      const next = [...previous];
-      next[currentIndex] = { taskId: nextTaskId };
-      if (nextIndex >= 0) next[nextIndex] = { taskId: currentTaskId };
-      return next;
-    });
-  };
-
+  });
   const renderTaskPanel = (taskId: string) => {
     const artifact = taskArtifacts[taskId];
     return artifact ? (
@@ -1113,13 +854,7 @@ export function SessionWorkspace({
           selection={{ owner: { taskId }, ...artifact }}
           backLabel="Back to task"
           closeLabel="Close artifact"
-          onBack={() =>
-            setTaskArtifacts((previous) => {
-              const next = { ...previous };
-              delete next[taskId];
-              return next;
-            })
-          }
+          onBack={() => backToTask(taskId)}
           onClose={() => closeTaskPanel(taskId)}
         />
       </FramedSurface>
@@ -1131,10 +866,7 @@ export function SessionWorkspace({
         onSelectTask={(nextTaskId) => selectPanelTask(taskId, nextTaskId)}
         onClose={() => closeTaskPanel(taskId)}
         onOpenArtifact={(path, version) =>
-          setTaskArtifacts((previous) => ({
-            ...previous,
-            [taskId]: { path, version },
-          }))
+          openTaskArtifact(taskId, path, version)
         }
       />
     );
@@ -1146,23 +878,19 @@ export function SessionWorkspace({
         tasks={taskCards}
         onOpenTask={openTaskPanel}
         onOpenSideBySide={openTasksSideBySide}
-        onClose={() => setUtilityPanel(null)}
+        onClose={closeUtilityPanel}
       />
-    ) : utilityPanel?.kind === 'artifacts' && utilityArtifact ? (
+    ) : utilityPanel?.kind === 'artifacts' && utilityPanel.artifact ? (
       <FramedSurface
         frameClassName="p-0"
         surfaceClassName="relative flex flex-col overflow-hidden"
       >
         <SessionArtifactViewer
-          selection={utilityArtifact}
+          selection={utilityPanel.artifact}
           backLabel="Back to artifacts"
           closeLabel="Close artifact"
-          onBack={() => setUtilityArtifact(null)}
-          onClose={() => {
-            setUtilityArtifact(null);
-            setUtilityPanel(null);
-            clearRequestedArtifact();
-          }}
+          onBack={backToSessionArtifacts}
+          onClose={closeSessionArtifact}
         />
       </FramedSurface>
     ) : utilityPanel?.kind === 'artifacts' ? (
@@ -1172,25 +900,16 @@ export function SessionWorkspace({
         sessionArtifacts={session.artifacts ?? []}
         initialSelection={requestedArtifact}
         onDeselect={clearRequestedArtifact}
-        onClose={() => {
-          setUtilityPanel(null);
-          clearRequestedArtifact();
-        }}
+        onClose={closeSessionArtifact}
       />
     ) : utilityPanel?.kind === 'previews' ? (
-      <SessionPreviewsPanel
-        tasks={taskCards}
-        onClose={() => setUtilityPanel(null)}
-      />
+      <SessionPreviewsPanel tasks={taskCards} onClose={closeUtilityPanel} />
     ) : (
-      <SessionInfoPanel
-        session={session}
-        onClose={() => setUtilityPanel(null)}
-      />
+      <SessionInfoPanel session={session} onClose={closeUtilityPanel} />
     );
   const renderedPanels = utilityPanel
     ? [{ id: `utility:${utilityPanel.kind}`, content: utilityPanelContent }]
-    : visibleTaskPanels.map(({ taskId }) => ({
+    : visibleTaskPanelIds.map((taskId) => ({
         id: `task:${taskId}`,
         content: renderTaskPanel(taskId),
       }));
@@ -1210,9 +929,7 @@ export function SessionWorkspace({
       promptInput.focus();
       if (document.activeElement !== promptInput) return false;
 
-      setPromptFocusTaskId((current) =>
-        current === promptFocusTaskId ? null : current,
-      );
+      clearPromptFocus(promptFocusTaskId);
       return true;
     };
 
@@ -1227,14 +944,9 @@ export function SessionWorkspace({
     });
 
     return () => observer.disconnect();
-  }, [promptFocusTaskId]);
+  }, [clearPromptFocus, promptFocusTaskId]);
   const primaryPanel = renderedPanels[0];
-  const panelMinSize = workspaceWidth
-    ? Math.min(40, (SESSION_TASK_PANEL_MIN_WIDTH / workspaceWidth) * 100)
-    : undefined;
-  const mainMinSize = workspaceWidth
-    ? Math.min(60, (SESSION_MAIN_MIN_WIDTH / workspaceWidth) * 100)
-    : undefined;
+  const { panelMinSize, mainMinSize } = getSessionPanelMinSizes(workspaceWidth);
   const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
   useResponsiveSandboxSidebar(session.id);
   const handlePromptFocusNavigation = useCallback(
@@ -1343,9 +1055,9 @@ export function SessionWorkspace({
               isPanelOpen={panelOpen}
               dimUnfocusedPanelIds={[
                 'main',
-                ...visibleTaskPanels
-                  .filter(({ taskId }) => !taskArtifacts[taskId])
-                  .map(({ taskId }) => `task:${taskId}`),
+                ...visibleTaskPanelIds
+                  .filter((taskId) => !taskArtifacts[taskId])
+                  .map((taskId) => `task:${taskId}`),
               ]}
               mainMinSize={mainMinSize}
               panelMinSize={panelMinSize}

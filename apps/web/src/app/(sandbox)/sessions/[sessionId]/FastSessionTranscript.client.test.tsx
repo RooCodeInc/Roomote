@@ -1236,7 +1236,7 @@ describe('FastSessionTranscript', () => {
     );
 
     expect(screen.getByText('Starting')).toBeInTheDocument();
-    expect(screen.getByText('Coding Task')).toBeInTheDocument();
+    expect(screen.getByText('coding task')).toBeInTheDocument();
     expect(screen.getByText('Running')).toBeInTheDocument();
     expect(FakeEventSource.instances).toHaveLength(1);
     expect(FakeEventSource.instances[0]!.url).toBe(
@@ -1434,7 +1434,7 @@ describe('FastSessionTranscript', () => {
     );
 
     expect(
-      screen.getByRole('button', { name: /Started Coding Task Completed/ }),
+      screen.getByRole('button', { name: /Started coding task Completed/ }),
     ).toBeInTheDocument();
     expect(screen.getByText('I started the checkout fix.')).toBeInTheDocument();
     expect(
