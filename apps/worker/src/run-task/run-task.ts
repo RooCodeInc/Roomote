@@ -18,7 +18,7 @@ import {
   getSlackThreadTsFromTaskPayload,
   getTaskReportConsumerFromPayload,
   isCommunicationProvider,
-  NESTED_COMPUTE_ENV_VAR_NAME,
+  NESTED_DEPLOYMENT_ENV_VAR_NAME,
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   SANDBOX_SERVER_PORT,
   SANDBOX_TIMEOUT_MS,
@@ -722,7 +722,7 @@ export const runTask = async ({
       Object.entries(envVars).filter(
         ([name]) =>
           name !== SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME &&
-          name !== NESTED_COMPUTE_ENV_VAR_NAME,
+          name !== NESTED_DEPLOYMENT_ENV_VAR_NAME,
       ),
     );
     const unsanitizedEnv = workerEnv

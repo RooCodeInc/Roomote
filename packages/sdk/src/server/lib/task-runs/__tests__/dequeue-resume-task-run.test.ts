@@ -259,7 +259,7 @@ describe('dequeueResumeTaskRun', () => {
       {
         sourceControlProvider: ['gitlab', 'github'],
         includeSandboxOpenRouterApiKey: true,
-        nestedComputeEnvironmentId: 'env-1',
+        nestedDeploymentEnvironmentId: 'env-1',
       },
     );
     expect(result?.harnessInstructions).toBe('preserved instructions');

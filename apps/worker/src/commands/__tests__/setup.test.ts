@@ -469,7 +469,7 @@ describe('setup mode behavior', () => {
       MODAL_TOKEN_SECRET: 'as-secret',
     });
     mockGetRuntimeEnv.mockReturnValueOnce({
-      R_NESTED_COMPUTE_ENV: nestedComputeEnv,
+      R_NESTED_DEPLOYMENT_ENV: nestedComputeEnv,
       R_MODEL: 'roomote/openai/outer-model',
     });
 
@@ -479,7 +479,7 @@ describe('setup mode behavior', () => {
         ...environmentWorkspaceOptions,
         userEnvVars: {
           FOO: 'bar',
-          R_NESTED_COMPUTE_ENV: nestedComputeEnv,
+          R_NESTED_DEPLOYMENT_ENV: nestedComputeEnv,
         },
       },
       logger,
@@ -521,7 +521,7 @@ describe('setup mode behavior', () => {
       MODAL_TOKEN_SECRET: 'as-secret',
     });
     mockGetRuntimeEnv.mockReturnValueOnce({
-      R_NESTED_COMPUTE_ENV: nestedComputeEnv,
+      R_NESTED_DEPLOYMENT_ENV: nestedComputeEnv,
     });
 
     await setup({

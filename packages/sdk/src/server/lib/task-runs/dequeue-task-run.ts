@@ -571,7 +571,8 @@ export const dequeueTaskRun = async (
             includeSandboxOpenRouterApiKey: Boolean(
               txResult.taskRun.payload.environmentId,
             ),
-            nestedComputeEnvironmentId: txResult.taskRun.payload.environmentId,
+            nestedDeploymentEnvironmentId:
+              txResult.taskRun.payload.environmentId,
           }),
       });
     } catch (error) {

@@ -49,7 +49,7 @@ export * from './llm-usage';
 export * from './bedrock-opencode-provider';
 export * from './inference-gateway';
 export * from './sandbox-preview-inference';
-export * from './nested-compute';
+export * from './nested-deployment-env';
 export * from './inference-provider-retry';
 export * from './model-provider-config';
 export * from './openai-compatible-providers';

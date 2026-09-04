@@ -6,7 +6,7 @@ import {
   buildPreviewProxyUrl,
   CODE_SERVER_NAMED_PORT,
   getSourceControlTokenEnvVars,
-  NESTED_COMPUTE_ENV_VAR_NAME,
+  NESTED_DEPLOYMENT_ENV_VAR_NAME,
   portNameToSlug,
   PRODUCT_NAME,
   TASK_MODEL_ROLE_DESCRIPTORS,
@@ -44,7 +44,7 @@ export const INHERITED_MODEL_RUNTIME_ENV_VAR_NAMES: ReadonlySet<string> =
     'ROOMOTE_MODEL_ENV_KEYS',
     // Launcher-only source name; setup expands it into the nested app's env,
     // so the raw value is left out of the shell files.
-    NESTED_COMPUTE_ENV_VAR_NAME,
+    NESTED_DEPLOYMENT_ENV_VAR_NAME,
   ]);
 
 export function buildEnvironmentShellEnvVars(

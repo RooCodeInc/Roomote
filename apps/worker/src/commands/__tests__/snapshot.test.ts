@@ -122,7 +122,7 @@ describe('snapshot', () => {
     mockFetchSnapshotEnv.mockResolvedValue({
       envVars: {
         PREVIEW_PROXY_BASE_URL: 'https://preview.roomote.run',
-        R_NESTED_COMPUTE_ENV: nestedComputeEnv,
+        R_NESTED_DEPLOYMENT_ENV: nestedComputeEnv,
       },
       gitHubToken: 'gh-token',
       taskId: 'task-42',
@@ -134,7 +134,7 @@ describe('snapshot', () => {
     // buildEnvironmentShellEnvVars tests); setup expands the raw value into
     // the nested environment env.
     expect(mockInjectEnvVars).toHaveBeenCalledWith(
-      expect.objectContaining({ R_NESTED_COMPUTE_ENV: nestedComputeEnv }),
+      expect.objectContaining({ R_NESTED_DEPLOYMENT_ENV: nestedComputeEnv }),
       undefined,
       expect.objectContaining({ omitInheritedModelRuntimeEnvFromShell: true }),
     );
@@ -142,7 +142,7 @@ describe('snapshot', () => {
       expect.objectContaining({
         workspace: expect.objectContaining({
           envVars: expect.objectContaining({
-            R_NESTED_COMPUTE_ENV: nestedComputeEnv,
+            R_NESTED_DEPLOYMENT_ENV: nestedComputeEnv,
           }),
         }),
       }),

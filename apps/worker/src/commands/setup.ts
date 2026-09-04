@@ -13,14 +13,14 @@
 import {
   DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
-  NESTED_COMPUTE_ENV_VAR_NAME,
+  NESTED_DEPLOYMENT_ENV_VAR_NAME,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   TASK_MODEL_COSTS_ENV_VAR_NAME,
   TaskPayloadKind,
   parseModelProviderEnvKeys,
-  parseNestedComputeEnv,
+  parseNestedDeploymentEnv,
 } from '@roomote/types';
 
 import { ExecutionError } from '../command-executor';
@@ -134,8 +134,8 @@ function buildEnvironmentWorkspaceEnvVars(
   const sandboxOpenRouterApiKey =
     envVars[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME] ??
     launcherSandboxOpenRouterApiKey;
-  const nestedComputeEnv =
-    parseNestedComputeEnv(envVars[NESTED_COMPUTE_ENV_VAR_NAME]) ??
+  const nestedDeploymentEnv =
+    parseNestedDeploymentEnv(envVars[NESTED_DEPLOYMENT_ENV_VAR_NAME]) ??
     launcherNestedComputeEnv;
   const configuredProviderEnvVarNames = new Set(
     parseModelProviderEnvKeys(envVars.R_MODEL_ENV_KEYS),
@@ -146,7 +146,7 @@ function buildEnvironmentWorkspaceEnvVars(
     if (
       value !== undefined &&
       name !== SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME &&
-      name !== NESTED_COMPUTE_ENV_VAR_NAME &&
+      name !== NESTED_DEPLOYMENT_ENV_VAR_NAME &&
       !name.startsWith('R_INFERENCE_GATEWAY_') &&
       !INHERITED_MODEL_RUNTIME_ENV_VAR_NAMES.has(name) &&
       !INHERITED_MODEL_PROVIDER_ENV_VAR_NAMES.has(name) &&
@@ -163,8 +163,8 @@ function buildEnvironmentWorkspaceEnvVars(
   // `inherit_compute` environments: expand the launcher's compute forwarding
   // blob into the real provider names so a nested Roomote controller can
   // spawn sandboxes with the outer deployment's provider.
-  if (nestedComputeEnv) {
-    Object.assign(nestedEnvironmentEnvVars, nestedComputeEnv);
+  if (nestedDeploymentEnv) {
+    Object.assign(nestedEnvironmentEnvVars, nestedDeploymentEnv);
   }
 
   return nestedEnvironmentEnvVars;
@@ -203,15 +203,15 @@ export async function setup({
   // Launcher-only source names never stay in the worker runtime env: the
   // sandbox OpenRouter key maps to OPENROUTER_API_KEY and the nested compute
   // blob expands into provider names, both for the nested app only.
-  const nestedComputeEnv = parseNestedComputeEnv(
-    runtimeEnv[NESTED_COMPUTE_ENV_VAR_NAME],
+  const nestedDeploymentEnv = parseNestedDeploymentEnv(
+    runtimeEnv[NESTED_DEPLOYMENT_ENV_VAR_NAME],
   );
   if (
     SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME in runtimeEnv ||
-    NESTED_COMPUTE_ENV_VAR_NAME in runtimeEnv
+    NESTED_DEPLOYMENT_ENV_VAR_NAME in runtimeEnv
   ) {
     delete runtimeEnv[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
-    delete runtimeEnv[NESTED_COMPUTE_ENV_VAR_NAME];
+    delete runtimeEnv[NESTED_DEPLOYMENT_ENV_VAR_NAME];
     workerEnv.setRuntimeEnv(runtimeEnv);
   }
 
@@ -228,7 +228,7 @@ export async function setup({
       ? buildEnvironmentWorkspaceEnvVars(
           inheritedWorkspaceEnvVars,
           sandboxOpenRouterApiKey ?? workerEnv.sandboxOpenRouterApiKey,
-          nestedComputeEnv,
+          nestedDeploymentEnv,
         )
       : inheritedWorkspaceEnvVars,
     userEnvVars:
@@ -236,7 +236,7 @@ export async function setup({
         ? buildEnvironmentWorkspaceEnvVars(
             workspaceOpts.userEnvVars,
             undefined,
-            nestedComputeEnv,
+            nestedDeploymentEnv,
           )
         : workspaceOpts.userEnvVars,
   };

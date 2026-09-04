@@ -196,18 +196,26 @@ describe('configToYaml', () => {
     expect(yaml).toContain('oidc:');
   });
 
-  it('preserves inherit_compute when serializing environment config', () => {
+  it('preserves the inherit flags when serializing environment config', () => {
     const config: EnvironmentConfig = {
       name: 'Nested Roomote',
       repositories: [{ repository: 'Roomote/example-app' }],
       inherit_compute: true,
+      inherit_source_control: true,
     };
 
     const parsed = YAML.parse(configToYaml(config));
 
     expect(parsed.inherit_compute).toBe(true);
-    expect(
-      YAML.parse(configToYaml({ ...config, inherit_compute: undefined })),
-    ).not.toHaveProperty('inherit_compute');
+    expect(parsed.inherit_source_control).toBe(true);
+    const cleared = YAML.parse(
+      configToYaml({
+        ...config,
+        inherit_compute: undefined,
+        inherit_source_control: undefined,
+      }),
+    );
+    expect(cleared).not.toHaveProperty('inherit_compute');
+    expect(cleared).not.toHaveProperty('inherit_source_control');
   });
 });

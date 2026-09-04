@@ -150,7 +150,7 @@ describe('injectEnvVars', () => {
     expect(
       buildEnvironmentShellEnvVars({
         FOO: 'bar',
-        R_NESTED_COMPUTE_ENV: '{"DEFAULT_COMPUTE_PROVIDER":"modal"}',
+        R_NESTED_DEPLOYMENT_ENV: '{"DEFAULT_COMPUTE_PROVIDER":"modal"}',
         DEFAULT_COMPUTE_PROVIDER: 'modal',
       }),
     ).toEqual({ FOO: 'bar', DEFAULT_COMPUTE_PROVIDER: 'modal' });

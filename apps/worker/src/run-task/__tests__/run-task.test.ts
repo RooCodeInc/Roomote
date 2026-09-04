@@ -4116,7 +4116,7 @@ describe('runTask', () => {
       } as never,
       envVars: {
         SANDBOX_OPENROUTER_API_KEY: 'dequeued-sandbox-key',
-        R_NESTED_COMPUTE_ENV: '{"DEFAULT_COMPUTE_PROVIDER":"modal"}',
+        R_NESTED_DEPLOYMENT_ENV: '{"DEFAULT_COMPUTE_PROVIDER":"modal"}',
       },
       workspacePath: '/tmp/workspace',
       prompt: '',
@@ -4186,7 +4186,7 @@ describe('runTask', () => {
     ).not.toHaveProperty('SANDBOX_OPENROUTER_API_KEY');
     expect(
       createHarnessMock.mock.calls.at(-1)?.[0]?.runtimeEnv,
-    ).not.toHaveProperty('R_NESTED_COMPUTE_ENV');
+    ).not.toHaveProperty('R_NESTED_DEPLOYMENT_ENV');
   });
 
   it('isolates the task runtime HOME while keeping packaged skill sourcing on the worker HOME', async () => {

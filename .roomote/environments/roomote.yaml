@@ -24,6 +24,9 @@ initialUrl: http://127.0.0.1:3000/auth/dev-login
 # controller can spawn its own task sandboxes (see "Nested compute" in the
 # environment definition docs).
 inherit_compute: true
+# Also forward the configured source-control providers (GitHub App fields) so
+# the nested instance can clone repositories and mint its own repo tokens.
+inherit_source_control: true
 ports:
   - name: web
     port: 3000

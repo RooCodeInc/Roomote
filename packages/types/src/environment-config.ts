@@ -747,6 +747,14 @@ export const environmentConfigSchema = z
      */
     inherit_compute: z.boolean().optional(),
     /**
+     * Forward the deployment's configured source-control providers (for
+     * example the GitHub App fields) into this environment so a nested Roomote
+     * instance can reach its repositories and mint its own repo tokens. Same
+     * trust caveat as `inherit_compute`: every task in the environment can
+     * read the forwarded values.
+     */
+    inherit_source_control: z.boolean().optional(),
+    /**
      * Named preview ports for human-facing application URLs.
      * Each port gets an authenticated shareable URL in
      * `ROOMOTE_<NAME>_PREVIEW_URL`. `ROOMOTE_<NAME>_HOST` points to that same
