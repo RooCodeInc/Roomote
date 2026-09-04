@@ -1,4 +1,10 @@
-import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,7 +24,8 @@ export const OPENCODE_PLUGIN_SEED_DIR_ENV = 'ROOMOTE_OPENCODE_PLUGIN_SEED_DIR';
 /** Image bake path shared with the worker image's sandbox seed. */
 const DEFAULT_OPENCODE_PLUGIN_SEED_DIR = '/opt/roomote/opencode-plugin-seed';
 
-const SEED_ENTRIES = ['package.json', 'package-lock.json', 'node_modules'];
+/** Copied verbatim; package.json is merged instead (see below). */
+const SEED_COPY_ENTRIES = ['package-lock.json', 'node_modules'];
 
 type OpenCodePluginSeedResult = 'already-complete' | 'copied' | 'no-seed';
 
@@ -145,12 +152,38 @@ export function seedOpenCodePluginDependencies(
   }
 
   mkdirSync(configDir, { recursive: true });
-  for (const entry of SEED_ENTRIES) {
+  // Merge rather than replace package.json: the shared Fast tools directory
+  // already carries `type: "module"` for its ESM tool files (as OpenCode's
+  // own Arborist install would have preserved), so only the dependency
+  // declarations come from the seed.
+  const existingPackageJson = readJson(join(configDir, 'package.json'));
+  const seedPackageJson = readJson(join(sourceDir, 'package.json'));
+  for (const entry of SEED_COPY_ENTRIES) {
     cpSync(join(sourceDir, entry), join(configDir, entry), {
       recursive: true,
       force: true,
     });
   }
+  const mergedPackageJson = {
+    ...(isRecord(existingPackageJson)
+      ? existingPackageJson
+      : isRecord(seedPackageJson)
+        ? seedPackageJson
+        : {}),
+    dependencies: {
+      ...(isRecord(existingPackageJson) &&
+      isRecord(existingPackageJson.dependencies)
+        ? existingPackageJson.dependencies
+        : {}),
+      ...(isRecord(seedPackageJson) && isRecord(seedPackageJson.dependencies)
+        ? seedPackageJson.dependencies
+        : {}),
+    },
+  };
+  writeFileSync(
+    join(configDir, 'package.json'),
+    `${JSON.stringify(mergedPackageJson, null, 2)}\n`,
+  );
   if (!isOpenCodePluginSeedComplete(configDir)) {
     throw new Error(
       `Copied the OpenCode plugin seed from ${sourceDir} into ${configDir}, but the result is still incomplete.`,

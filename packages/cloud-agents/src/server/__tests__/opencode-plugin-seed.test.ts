@@ -98,10 +98,24 @@ describe('OpenCode plugin seed', () => {
         [OPENCODE_PLUGIN_SEED_DIR_ENV]: seedDir,
       }),
     ).toBe('copied');
+    // The ESM tool files depend on `type: "module"` surviving the seed; only
+    // the dependency declarations come from the baked package.json.
+    expect(
+      JSON.parse(readFileSync(path.join(configDir, 'package.json'), 'utf8')),
+    ).toEqual({
+      private: true,
+      type: 'module',
+      dependencies: { '@opencode-ai/plugin': '1.18.10' },
+    });
     expect(
       readFileSync(path.join(configDir, 'tools', 'send_chat_reply.js'), 'utf8'),
     ).toBe('tool');
     expect(isOpenCodePluginSeedComplete(configDir)).toBe(true);
+    expect(
+      seedOpenCodePluginDependencies(configDir, {
+        [OPENCODE_PLUGIN_SEED_DIR_ENV]: seedDir,
+      }),
+    ).toBe('already-complete');
   });
 
   it('leaves the directory alone when no usable seed is baked', () => {
