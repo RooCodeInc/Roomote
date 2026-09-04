@@ -848,11 +848,29 @@ export function FastSessionTranscript({
       return;
     }
 
-    // Replies that predate the conversation stay silent.
-    lastSpokenTsRef.current = Date.now();
+    // Replies that predate the conversation stay silent. The cutoff comes
+    // from the transcript's own (server-assigned) timestamps rather than the
+    // browser clock, which may run ahead of the server.
+    lastSpokenTsRef.current = messages.reduce(
+      (latest, message) => Math.max(latest, message.ts),
+      0,
+    );
     pendingUtterancesRef.current = [];
     void liveVoice.start();
-  }, [liveVoice]);
+  }, [liveVoice, messages]);
+
+  // A structured input request replaces the composer (and with it the voice
+  // controls), so end the conversation rather than leaving the microphone
+  // open with no way to stop it.
+  const liveVoiceConnecting = liveVoice.status === 'connecting';
+  const stopLiveVoiceRef = useRef(liveVoice.stop);
+  stopLiveVoiceRef.current = liveVoice.stop;
+
+  useEffect(() => {
+    if (pendingInputRequest && (liveVoiceActive || liveVoiceConnecting)) {
+      stopLiveVoiceRef.current();
+    }
+  }, [pendingInputRequest, liveVoiceActive, liveVoiceConnecting]);
 
   return (
     <MessageUiOptionsProvider
