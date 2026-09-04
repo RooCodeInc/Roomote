@@ -7,6 +7,7 @@ import {
   eq,
   inArray,
   isNull,
+  sql,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
@@ -388,6 +389,10 @@ export async function clearComputeConfigCommand(
   }
 
   await db.transaction(async (tx) => {
+    // Keep setup completion's final readiness check atomic with credential removal.
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('setup-complete'))`,
+    );
     await tx
       .delete(environmentVariables)
       .where(

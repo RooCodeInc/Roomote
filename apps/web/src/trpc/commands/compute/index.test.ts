@@ -56,6 +56,9 @@ vi.mock('@roomote/db/server', () => ({
     values,
   })),
   isNull: vi.fn((field: unknown) => ({ op: 'isNull', field })),
+  sql: vi.fn((strings: TemplateStringsArray) => ({
+    sql: strings.join('?'),
+  })),
   resolveSavedWorkerImage: mockResolveSavedWorkerImage,
   purgeSavedDeploymentWorkerImage: vi.fn(async () => undefined),
 }));
@@ -543,6 +546,7 @@ describe('compute commands', () => {
     });
 
     it('deletes credential and provider-specific infrastructure env vars, not the shared worker image', async () => {
+      const txExecute = vi.fn(async () => undefined);
       const txWhere = vi.fn(async () => undefined);
       const txDelete = vi.fn(() => ({ where: txWhere }));
       const {
@@ -552,11 +556,17 @@ describe('compute commands', () => {
       } = await import('@roomote/db/server');
 
       mockDbTransaction.mockImplementation(async (callback) => {
-        return callback({ delete: txDelete } as never);
+        return callback({ execute: txExecute, delete: txDelete } as never);
       });
 
       await clearComputeConfigCommand(buildMockAuth(), { provider: 'modal' });
 
+      expect(txExecute).toHaveBeenCalledWith({
+        sql: "SELECT pg_advisory_xact_lock(hashtext('setup-complete'))",
+      });
+      expect(txExecute.mock.invocationCallOrder[0]).toBeLessThan(
+        txDelete.mock.invocationCallOrder[0]!,
+      );
       expect(txDelete).toHaveBeenCalled();
       expect(txInArray).toHaveBeenCalledWith('env.name', [
         'MODAL_TOKEN_ID',
@@ -597,12 +607,13 @@ describe('compute commands', () => {
     });
 
     it('deletes Docker standby retention settings', async () => {
+      const txExecute = vi.fn(async () => undefined);
       const txWhere = vi.fn(async () => undefined);
       const txDelete = vi.fn(() => ({ where: txWhere }));
       const { inArray: txInArray } = await import('@roomote/db/server');
 
       mockDbTransaction.mockImplementation(async (callback) => {
-        return callback({ delete: txDelete } as never);
+        return callback({ execute: txExecute, delete: txDelete } as never);
       });
 
       await clearComputeConfigCommand(buildMockAuth(), { provider: 'docker' });
