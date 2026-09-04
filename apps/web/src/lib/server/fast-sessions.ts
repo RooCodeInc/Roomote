@@ -28,6 +28,7 @@ import {
 import type { FastAgentMessage } from '@roomote/db';
 
 import type { UserAuthSuccess } from '@/types';
+import { currentEpochSeconds, signArtifactId } from './artifact-signature';
 import { COMPOSER_SUGGESTION_HISTORY_LIMIT } from './composer-suggestion-history';
 import {
   buildSessionTaskPreviews,
@@ -106,6 +107,98 @@ const fastSessionMessageSelection = {
 };
 
 const fastSessionMessageUserJoin = sql`${users.id}::text = ${fastAgentMessages.metadata} ->> 'userId'`;
+
+/** Signed raw URLs are bucketed so a polling transcript stays byte-stable. */
+const REPLY_IMAGE_SIGNATURE_WINDOW_SECONDS = 60 * 60;
+
+function readReplyImageArtifactIds(payload: unknown): string[] {
+  const ids = (payload as { imageArtifactIds?: unknown } | null)
+    ?.imageArtifactIds;
+  return Array.isArray(ids)
+    ? ids.filter((id): id is string => typeof id === 'string' && id !== '')
+    : [];
+}
+
+/**
+ * Fast replies reference the images they attach by artifact id (chat
+ * surfaces post the files themselves). The web transcript renders
+ * `payload.images` URLs, so resolve the ids here to signed raw URLs. Only
+ * uploaded image artifacts from this Session's own tasks (or the Session
+ * itself) qualify; anything else is dropped rather than signed.
+ */
+async function attachFastSessionReplyImages<
+  T extends Pick<FastSessionMessage, 'payload'>,
+>(sessionId: string, messages: T[]): Promise<T[]> {
+  const requestedIds = new Set(
+    messages.flatMap((message) => readReplyImageArtifactIds(message.payload)),
+  );
+  if (requestedIds.size === 0) {
+    return messages;
+  }
+
+  const [conversation] = await db
+    .select({
+      legacyConversationIds: fastAgentConversations.legacyConversationIds,
+    })
+    .from(fastAgentConversations)
+    .where(eq(fastAgentConversations.id, sessionId))
+    .limit(1);
+  const lookupIds = [sessionId, ...(conversation?.legacyConversationIds ?? [])];
+
+  const allowed = await db
+    .select({ id: taskArtifacts.id })
+    .from(taskArtifacts)
+    .where(
+      and(
+        inArray(taskArtifacts.id, [...requestedIds]),
+        eq(taskArtifacts.uploaded, true),
+        sql`${taskArtifacts.contentType} like 'image/%'`,
+        or(
+          inArray(
+            taskArtifacts.taskId,
+            db
+              .select({ taskId: taskRuns.taskId })
+              .from(taskRuns)
+              .where(inArray(taskRuns.fastAgentSessionId, lookupIds)),
+          ),
+          inArray(
+            taskArtifacts.sessionId,
+            db
+              .select({ id: sessions.id })
+              .from(sessions)
+              .where(inArray(sessions.fastConversationId, lookupIds)),
+          ),
+        ),
+      ),
+    );
+  const allowedIds = new Set(allowed.map((row) => row.id));
+  if (allowedIds.size === 0) {
+    return messages;
+  }
+
+  const signatureTimestamp =
+    Math.floor(currentEpochSeconds() / REPLY_IMAGE_SIGNATURE_WINDOW_SECONDS) *
+    REPLY_IMAGE_SIGNATURE_WINDOW_SECONDS;
+
+  return messages.map((message) => {
+    const images = readReplyImageArtifactIds(message.payload)
+      .filter((id) => allowedIds.has(id))
+      .map(
+        (id) =>
+          `/api/artifacts/${id}/raw?sig=${signArtifactId(id, signatureTimestamp)}&ts=${signatureTimestamp}`,
+      );
+    if (images.length === 0) {
+      return message;
+    }
+    return {
+      ...message,
+      payload: {
+        ...((message.payload as Record<string, unknown> | null) ?? {}),
+        images,
+      },
+    };
+  });
+}
 
 export function buildFastSessionPrReviewDestinationKey(session: {
   surface: string;
@@ -439,10 +532,13 @@ export async function getFastSessionMessagesSince(
     );
 
   let cursor = sinceMs;
-  const messages = rows.map(({ updatedAtMs, ...row }) => {
-    cursor = Math.max(cursor, Number(updatedAtMs));
-    return sanitizeFastSessionMessageRow(row);
-  });
+  const messages = await attachFastSessionReplyImages(
+    sessionId,
+    rows.map(({ updatedAtMs, ...row }) => {
+      cursor = Math.max(cursor, Number(updatedAtMs));
+      return sanitizeFastSessionMessageRow(row);
+    }),
+  );
 
   return { messages, cursor };
 }
@@ -556,9 +652,12 @@ export async function getFastSessionById(
   // Sanitize at the read boundary, matching the task transcript path: the DB
   // stores full payloads, but oversized tool output is truncated before it is
   // serialized into the RSC payload.
-  const messages = windowed
-    .reverse()
-    .map((row): FastSessionMessage => sanitizeFastSessionMessageRow(row));
+  const messages = await attachFastSessionReplyImages(
+    session.id,
+    windowed
+      .reverse()
+      .map((row): FastSessionMessage => sanitizeFastSessionMessageRow(row)),
+  );
 
   // Fast usage events carry the OpenCode session id; a conversation can span
   // several (cold rebuilds), so sum across every session id the transcript
