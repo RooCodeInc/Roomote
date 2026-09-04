@@ -2,8 +2,8 @@
 
 import { pathToFileURL } from 'node:url';
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
@@ -104,7 +104,7 @@ export {
   automationWorkItemsResultHasSubmittedWorkItems,
 } from './automation-slack-summary-state.js';
 
-export const roomoteMcpServer = new McpServer({
+export const roomoteMcpServer = new NullableOptionalsMcpServer({
   name: 'roomote-mcp-server',
   version: '1.0.0',
 });
@@ -457,6 +457,14 @@ function shouldRegisterSlackThreadReplyTool(): boolean {
 
 function isFastAgentChild(): boolean {
   return process.env.ROOMOTE_FAST_AGENT_CHILD === 'true';
+}
+
+/** Review children report through the PR feedback relay, not chat replies. */
+function fastAgentChildRelaysChatReplies(): boolean {
+  return (
+    isFastAgentChild() &&
+    process.env.ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY !== 'false'
+  );
 }
 
 function hasSlackChatContext(): boolean {
@@ -1430,7 +1438,7 @@ if (!isFastAgentChild()) {
   );
 }
 
-if (shouldRegisterSlackThreadReplyTool() || isFastAgentChild()) {
+if (shouldRegisterSlackThreadReplyTool() || fastAgentChildRelaysChatReplies()) {
   const chatReplySurfaceLabel = getChatReplySurfaceLabel();
   const relaysThroughFastParent = isFastAgentChild();
   const supportsChatReplySuggestions =

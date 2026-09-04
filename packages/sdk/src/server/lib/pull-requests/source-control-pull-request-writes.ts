@@ -78,9 +78,10 @@ export const sourceControlPullRequestWriteInputSchema = z.object({
    * GitHub review thread GraphQL node ids, GitLab discussion ids, ADO
    * String(thread.id), Gitea String(review.id).
    *
-   * For update_pull_request_comment on GitHub: omit (or leave blank) for
-   * top-level issue comments; pass the review thread id only for
-   * review-thread comments.
+   * For update_pull_request_comment on GitHub it is only a hint: top-level
+   * issue comments and review-thread comments live on different endpoints,
+   * and the writer tries the other endpoint when the hinted one does not
+   * know the comment id.
    */
   threadId: optionalTrimmedNonEmptyStringSchema,
   /**
@@ -325,7 +326,11 @@ export async function writeSourceControlPullRequestForTaskRun({
   let result: SourceControlPullRequestWriteResult;
   switch (provider) {
     case 'github':
-      result = await writeGitHubPullRequest({ input, repository, provider });
+      try {
+        result = await writeGitHubPullRequest({ input, repository, provider });
+      } catch (error) {
+        throw toGitHubWriteError(input, error);
+      }
       break;
     case 'gitlab':
       result = await writeGitLabMergeRequest({
@@ -631,6 +636,81 @@ function getHttpErrorStatus(error: unknown): number | undefined {
   return undefined;
 }
 
+/**
+ * Octokit request failures carry the provider status but are not
+ * SourceControlWriteErrors, so without this they surface to the agent as a
+ * generic 500 that hides what GitHub actually said. Keep the real status and
+ * name the action so the agent can correct the call instead of retrying it.
+ */
+function toGitHubWriteError(
+  input: SourceControlPullRequestWriteInput,
+  error: unknown,
+): unknown {
+  if (error instanceof SourceControlWriteError) {
+    return error;
+  }
+  const status = getHttpErrorStatus(error);
+  if (status === undefined || status < 400) {
+    return error;
+  }
+  const detail = error instanceof Error ? error.message : String(error);
+  return new SourceControlWriteError(
+    status,
+    `GitHub rejected ${input.action} for pull request #${input.prNumber} in ${input.repositoryFullName}: ${detail}`,
+  );
+}
+
+/**
+ * GitHub keeps top-level issue comments and review-thread comments on
+ * different endpoints, but their ids share one id space and the writer can
+ * tell them apart itself. The caller's threadId only picks which endpoint to
+ * try first; a 404 there means the id belongs to the other kind, so the edit
+ * is retried on the other endpoint. A stale, filler, or missing threadId
+ * therefore never fails an edit of a comment that exists.
+ */
+async function updateGitHubPullRequestComment({
+  octokit,
+  owner,
+  repo,
+  input,
+}: {
+  octokit: ReturnType<typeof getOctokit>;
+  owner: string;
+  repo: string;
+  input: SourceControlPullRequestWriteInput;
+}): Promise<{ url: string | null; threadId: string | null }> {
+  const commentId = requireCommentId(input);
+  const body = requireBody(input);
+  const request = { owner, repo, comment_id: Number(commentId), body };
+  const asIssueComment = {
+    threadId: null,
+    run: () => octokit.rest.issues.updateComment(request),
+  };
+  const asReviewComment = {
+    threadId: input.threadId ?? null,
+    run: () => octokit.rest.pulls.updateReviewComment(request),
+  };
+  const attempts = input.threadId
+    ? [asReviewComment, asIssueComment]
+    : [asIssueComment, asReviewComment];
+
+  for (const attempt of attempts) {
+    try {
+      const { data } = await attempt.run();
+      return { url: data.html_url ?? null, threadId: attempt.threadId };
+    } catch (error) {
+      if (getHttpErrorStatus(error) !== 404) {
+        throw error;
+      }
+    }
+  }
+
+  throw new SourceControlWriteError(
+    404,
+    `GitHub has no comment ${commentId} to update on pull request #${input.prNumber} in ${input.repositoryFullName} (checked both top-level and review-thread comments). Re-read list_pull_request_comments and retry with a comment id it returns.`,
+  );
+}
+
 function multiLineRangeWarnings(
   provider: SourceControlProvider,
   input: SourceControlPullRequestWriteInput,
@@ -822,30 +902,20 @@ async function writeGitHubPullRequest({
     }
     case 'update_pull_request_comment': {
       const commentId = requireCommentId(input);
-      const body = requireBody(input);
-      // A provided threadId marks the comment as a review-thread comment,
-      // which lives on the pulls API; plain issue comments live on issues.
-      const { data } = input.threadId
-        ? await octokit.rest.pulls.updateReviewComment({
-            owner,
-            repo,
-            comment_id: Number(commentId),
-            body,
-          })
-        : await octokit.rest.issues.updateComment({
-            owner,
-            repo,
-            comment_id: Number(commentId),
-            body,
-          });
+      const { url, threadId } = await updateGitHubPullRequestComment({
+        octokit,
+        owner,
+        repo,
+        input,
+      });
 
       return buildWriteResult({
         input,
         provider,
         repository,
-        threadId: input.threadId ?? null,
+        threadId,
         commentId,
-        url: data.html_url ?? null,
+        url,
       });
     }
     case 'resolve_pull_request_thread': {

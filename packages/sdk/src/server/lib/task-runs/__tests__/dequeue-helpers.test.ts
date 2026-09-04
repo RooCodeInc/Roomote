@@ -968,6 +968,7 @@ describe('redactControlPlaneEnvVars', () => {
       OPENAI_API_KEY: 'sk-test',
       ANTHROPIC_API_KEY: 'sk-ant',
       OPENROUTER_API_KEY: 'sk-or',
+      SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
       MY_APP_CONFIG: 'value',
       GITLAB_TOKEN: 'glpat-scoped',
     });
@@ -980,6 +981,33 @@ describe('redactControlPlaneEnvVars', () => {
 });
 
 describe('fetchResolvedRuntimeEnvVars', () => {
+  it('withholds the sandbox OpenRouter key from ordinary tasks', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+
+    const envVars = await fetchResolvedRuntimeEnvVars({
+      SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+      MY_APP_CONFIG: 'value',
+    });
+
+    expect(envVars).not.toHaveProperty('SANDBOX_OPENROUTER_API_KEY');
+    expect(envVars.MY_APP_CONFIG).toBe('value');
+  });
+
+  it('admits the sandbox OpenRouter key only for environment-linked workers', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+
+    const envVars = await fetchResolvedRuntimeEnvVars(
+      {
+        SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+        MY_APP_CONFIG: 'value',
+      },
+      { includeSandboxOpenRouterApiKey: true },
+    );
+
+    expect(envVars.SANDBOX_OPENROUTER_API_KEY).toBe('sandbox-openrouter-key');
+    expect(envVars.MY_APP_CONFIG).toBe('value');
+  });
+
   it('mirrors resolved model env to legacy ROOMOTE_* aliases for pre-rename snapshot workers', async () => {
     mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'anthropic/claude-test',

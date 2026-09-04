@@ -188,7 +188,7 @@ export function ArtifactDetail({
         ) : !isFullscreenOpen ? (
           <ArtifactViewerContent
             artifact={artifact}
-            taskId={taskId}
+            owner={{ taskId }}
             onVersionChange={setArtifactVersion}
             className="h-full border-0"
           />
@@ -207,7 +207,7 @@ export function ArtifactDetail({
             </Button>
             <ArtifactViewerContent
               artifact={artifact}
-              taskId={taskId}
+              owner={{ taskId }}
               onVersionChange={setArtifactVersion}
               className="h-full border-0"
               showToolbar={false}

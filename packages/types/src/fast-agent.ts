@@ -157,6 +157,65 @@ export type FastAgentParent = z.infer<typeof fastAgentParentSchema>;
 
 export const FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE = 'human_follow_up' as const;
 
+/**
+ * A pull request or issue discussion a queued human turn should also answer
+ * in, when the message was posted there but the Session lives on another
+ * surface (the Slack thread or web Session whose task opened the pull
+ * request). Mirrors the sdk's SourceControlFastDiscussion.
+ */
+export const fastAgentSourceControlReplyTargetSchema = z.object({
+  provider: z.enum(fastAgentSourceControlSurfaces),
+  host: z.string().min(1),
+  repositoryFullName: z.string().min(1),
+  kind: z.enum(['pull', 'issues']),
+  number: z.number().int().positive(),
+  reviewCommentId: z.string().min(1).optional(),
+  replyCommentId: z.string().min(1).optional(),
+  /** Public page of the discussion, for attribution on the home surface. */
+  url: z.string().min(1).optional(),
+});
+
+export type FastAgentSourceControlReplyTarget = z.infer<
+  typeof fastAgentSourceControlReplyTargetSchema
+>;
+
+/** An emoji reaction a chat surface delivered as Fast human input. */
+export const fastAgentReactionExternalInputSchema = z.object({
+  type: z.literal('reaction_added'),
+  provider: z.enum(['slack', 'discord', 'teams', 'telegram']),
+  reactions: z.array(
+    z.object({ name: z.string().min(1), id: z.string().optional() }),
+  ),
+  reactor: z.object({
+    externalUserId: z.string().min(1),
+    displayName: z.string().optional(),
+  }),
+  message: z.object({
+    workspaceId: z.string().min(1),
+    channelId: z.string().min(1),
+    messageId: z.string().min(1),
+    threadId: z.string().optional(),
+    text: z.string().optional(),
+  }),
+  eventId: z.string().min(1),
+});
+
+export type FastAgentReactionExternalInput = z.infer<
+  typeof fastAgentReactionExternalInputSchema
+>;
+
+export const fastAgentPlatformEventKindSchema = z.enum([
+  'delegated_task',
+  'automation',
+  'setup',
+  'input_response',
+]);
+
+export const fastAgentPlatformEventVisibilitySchema = z.enum([
+  'optional',
+  'required',
+]);
+
 export const fastAgentHumanFollowUpEventSchema = z.object({
   type: z.literal(FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE),
   eventId: z.string().min(1),
@@ -166,6 +225,47 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
   images: z.array(z.string()).optional(),
   senderDisplayName: z.string().min(1).optional(),
   senderExternalId: z.string().min(1).optional(),
+  /**
+   * Surface context the model reads with the message (the pull request a
+   * mention is on, for example). Persisted so a queued or resumed turn keeps
+   * the context the inline turn would have had.
+   */
+  agentContext: z.string().min(1).optional(),
+  /** Tasks the Session may steer on this turn beyond the ones it delegated. */
+  activeTasks: z
+    .array(
+      z.object({
+        taskId: z.string().min(1),
+        title: z.string().optional(),
+        status: z.string().optional(),
+      }),
+    )
+    .optional(),
+  /**
+   * Set when the message came from a source-control discussion that another
+   * Session owns through a task: the answer posts there as well as on the
+   * Session's home surface.
+   */
+  sourceControlReplyTarget: fastAgentSourceControlReplyTargetSchema.optional(),
+  /**
+   * Set when the human input was an emoji reaction rather than a message, so
+   * a run that resumes the turn keeps reaction semantics.
+   */
+  input: z
+    .object({
+      type: z.literal('reaction'),
+      externalInput: fastAgentReactionExternalInputSchema,
+    })
+    .optional(),
+  /**
+   * Set for platform events admitted through the human turn path (web setup
+   * kickoffs and input responses), so a run that resumes the turn keeps
+   * their framing instead of treating the event text as a human message.
+   */
+  turnSource: z.literal('platform_event').optional(),
+  platformEventKind: fastAgentPlatformEventKindSchema.optional(),
+  platformEventVisibility: fastAgentPlatformEventVisibilitySchema.optional(),
+  setupSession: z.boolean().optional(),
 });
 
 export type FastAgentHumanFollowUpEvent = z.infer<
@@ -190,6 +290,23 @@ export function buildFastAgentChildTaskMetadata(parent: FastAgentParent): {
   return {
     communicationContextInherited: true,
     reportConsumer: 'orchestrator',
+    fastAgentSessionId: parent.sessionId,
+    fastAgentParent: parent,
+  };
+}
+
+/**
+ * Session linkage without orchestrator report ownership: the task shows up in
+ * the parent Fast session (session_tasks + the fast task list) and can emit
+ * parent events, but keeps its own workflow's report and communication
+ * behavior. Used for review-pipeline tasks attached to the session whose
+ * delegated work opened the reviewed PR.
+ */
+export function buildFastAgentSessionAttachment(parent: FastAgentParent): {
+  fastAgentSessionId: string;
+  fastAgentParent: FastAgentParent;
+} {
+  return {
     fastAgentSessionId: parent.sessionId,
     fastAgentParent: parent,
   };

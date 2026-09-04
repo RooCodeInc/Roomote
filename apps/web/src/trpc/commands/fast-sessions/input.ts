@@ -87,17 +87,6 @@ function requireFastSessionContent(
 export const startFastSessionInputSchema = z
   .object({
     ...fastSessionMessageInputShape,
-    artifactBuild: z
-      .object({
-        launchId: z.string().uuid(),
-        environmentId: z.string().uuid(),
-        branch: z.string().trim().min(1).optional(),
-        taskModel: z.string().trim().min(1),
-        sourceArtifactId: z.string().uuid(),
-        sourceArtifactPath: z.string().min(1),
-        sourceArtifactVersion: z.number().int(),
-      })
-      .optional(),
     pinnedLaunch: pinnedFastSessionLaunchSchema.optional(),
   })
   .superRefine(requireFastSessionContent);

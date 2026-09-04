@@ -7,9 +7,16 @@ import {
 } from './live-task-card-blocks';
 import {
   buildSlackLiveTaskTitle,
+  clearSlackLiveTaskPendingCleanup,
   getSlackLiveTaskStreamData,
+  stopSlackLiveTaskRelocation,
 } from './live-task-stream';
 import { SlackNotifier } from './slack-notifier';
+import {
+  removeSlackThreadActiveTaskByTaskId,
+  type SlackThreadActiveTaskRoute,
+} from './thread-active-tasks';
+import { withSlackThreadReplyFooterLock } from './thread-reply-footer-ops';
 
 export type SlackLiveTaskCardRenderStatus =
   | 'in_progress'
@@ -47,39 +54,119 @@ export async function renderSlackLiveTaskCard(input: {
   /** The task's generated title, rendered in place of the prompt-derived one. */
   taskTitle?: string | null;
 }): Promise<SlackLiveTaskCardRenderResult> {
-  const data = await getSlackLiveTaskStreamData(input.taskId);
-  if (!data) {
-    return { card: false, updated: false };
+  const terminal = input.status !== 'in_progress';
+  let removedRoute: SlackThreadActiveTaskRoute | null = null;
+  let data = await getSlackLiveTaskStreamData(input.taskId);
+  if (terminal && !data) {
+    try {
+      removedRoute = await removeSlackThreadActiveTaskByTaskId(input.taskId);
+    } catch (error) {
+      console.warn(
+        `[renderSlackLiveTaskCard] Failed to remove active task ${input.taskId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
+  const taskTitle = input.taskTitle?.trim();
+  const route = data ?? removedRoute;
+  if (!route) return { card: false, updated: false };
   const installation = await db.query.slackInstallations.findFirst({
     where: and(
       eq(slackInstallations.isActive, true),
-      eq(slackInstallations.teamId, data.teamId),
+      eq(slackInstallations.teamId, route.teamId),
     ),
     columns: { botAccessToken: true },
   });
   if (!installation?.botAccessToken) {
+    if (terminal && data) {
+      await withSlackThreadReplyFooterLock({
+        channel: data.channel,
+        threadTs: data.threadTs,
+        fn: async () => {
+          await removeSlackThreadActiveTaskByTaskId(input.taskId);
+        },
+      });
+    }
     return { card: false, updated: false };
   }
 
-  const taskTitle = input.taskTitle?.trim();
-  const updated = await new SlackNotifier(
-    installation.botAccessToken,
-  ).updateMessage({
-    channel: data.channel,
-    ts: data.messageTs,
-    message: buildSlackLiveTaskCardBlocks({
-      taskUpdateId: data.taskUpdateId,
-      title: taskTitle ? buildSlackLiveTaskTitle(taskTitle) : data.title,
-      status: input.status,
-      ...(input.details ? { details: input.details } : {}),
-      ...(input.output ? { output: input.output } : {}),
-      ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
-    }),
-  });
+  const slack = new SlackNotifier(installation.botAccessToken);
+  if (!data) {
+    return { card: false, updated: false };
+  }
 
-  return { card: true, updated };
+  return withSlackThreadReplyFooterLock({
+    channel: data.channel,
+    threadTs: data.threadTs,
+    fn: async () => {
+      // Relocation swaps messageTs under this same lock. Re-read it only after
+      // acquiring the lock so a live render cannot target the deleted copy.
+      data = await getSlackLiveTaskStreamData(input.taskId);
+      if (!data) {
+        if (terminal) {
+          await removeSlackThreadActiveTaskByTaskId(input.taskId);
+        }
+        return { card: false, updated: false };
+      }
+
+      if (terminal) {
+        await stopSlackLiveTaskRelocation({
+          taskId: input.taskId,
+          currentMessageTs: data.messageTs,
+        });
+      }
+      let updated = false;
+      try {
+        updated = await slack.updateMessage({
+          channel: data.channel,
+          ts: data.messageTs,
+          message: buildSlackLiveTaskCardBlocks({
+            taskUpdateId: data.taskUpdateId,
+            title: taskTitle ? buildSlackLiveTaskTitle(taskTitle) : data.title,
+            status: input.status,
+            ...(input.details ? { details: input.details } : {}),
+            ...(input.output ? { output: input.output } : {}),
+            ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
+          }),
+        });
+      } finally {
+        if (terminal) {
+          let pendingCleanupComplete = !data.pendingOldMessageTs;
+          if (data.pendingOldMessageTs) {
+            const oldMessageTs = data.pendingOldMessageTs;
+            pendingCleanupComplete = await slack.deleteMessage({
+              channel: data.channel,
+              ts: oldMessageTs,
+            });
+            if (pendingCleanupComplete) {
+              try {
+                await clearSlackLiveTaskPendingCleanup({
+                  taskId: input.taskId,
+                  currentMessageTs: data.messageTs,
+                  oldMessageTs,
+                });
+              } catch (error) {
+                console.warn(
+                  `[renderSlackLiveTaskCard] Failed to clear deleted predecessor ${oldMessageTs} for task ${input.taskId}: ${error instanceof Error ? error.message : String(error)}`,
+                );
+              }
+            }
+          }
+          try {
+            if (pendingCleanupComplete) {
+              await removeSlackThreadActiveTaskByTaskId(input.taskId);
+            }
+          } catch (error) {
+            console.warn(
+              `[renderSlackLiveTaskCard] Failed to remove active task ${input.taskId}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+      }
+
+      return { card: true, updated };
+    },
+  });
 }
 
 /**

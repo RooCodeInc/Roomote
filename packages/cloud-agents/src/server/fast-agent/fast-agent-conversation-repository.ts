@@ -65,9 +65,6 @@ export type FastAgentMessageUpsertResult = {
 export const INTERRUPTED_INFERENCE_RETRY_MESSAGE =
   'The inference retry was interrupted before it completed. Please send the request again.';
 
-export const RESTARTED_ACTIVE_TURN_MESSAGE =
-  'Roomote restarted while working on this request. Please send it again.';
-
 /**
  * Why an accepted Fast turn ended without a real answer. Stamped into the
  * terminal message's metadata by every writer so occurrence counts can be
@@ -210,6 +207,212 @@ export async function markFastAgentInferenceRetryNoticeInterruption(
     )
     .returning({ id: fastAgentMessages.id });
   return stamped.length > 0;
+}
+
+/** One action the interrupted attempt of a turn took, as the transcript recorded it. */
+export type FastAgentTurnAttemptAction = {
+  kind: 'action';
+  tool: string;
+  arguments: unknown;
+  /** 'unknown' when the call was recorded but the process died before its result. */
+  status: 'completed' | 'failed' | 'unknown';
+  result?: string;
+};
+
+export type FastAgentTurnAttemptReplyPurpose =
+  | 'ack'
+  | 'progress'
+  | 'closeout'
+  | 'clarification';
+
+export type FastAgentTurnAttemptReply = {
+  kind: 'reply';
+  /** A visible assistant reply the attempt already posted. */
+  text: string;
+  /** Recorded for replies the turn posted itself; absent on older rows. */
+  purpose?: FastAgentTurnAttemptReplyPurpose;
+};
+
+function isFastAgentTurnAttemptReplyPurpose(
+  value: unknown,
+): value is FastAgentTurnAttemptReplyPurpose {
+  return (
+    value === 'ack' ||
+    value === 'progress' ||
+    value === 'closeout' ||
+    value === 'clarification'
+  );
+}
+
+export type FastAgentTurnAttemptEvent =
+  | FastAgentTurnAttemptReply
+  | FastAgentTurnAttemptAction;
+
+export type FastAgentTurnAttemptSummary = {
+  /** Everything the attempt did, in transcript order, up to where it was cut. */
+  events: FastAgentTurnAttemptEvent[];
+  /**
+   * Where the resumed run must continue numbering its canonical events so
+   * its rows extend the transcript instead of overwriting the attempt's.
+   */
+  next: {
+    assistantOrdinal: number;
+    toolOrdinal: number;
+    retryNoticeOrdinal: number;
+    turnSeq: number;
+  };
+  /** The attempt's prompt row, so the resumed run keeps its place and time. */
+  prompt: { ts: number; turnSeq: number } | null;
+};
+
+const TURN_ATTEMPT_RESULT_MAX_CHARS = 1_200;
+
+/**
+ * What an earlier attempt at this turn already did, for the run that resumes
+ * it. Every tool call is recorded before it executes and its result after,
+ * so a resumed run can be told exactly what happened instead of starting the
+ * turn over and repeating actions. A call with no result is reported as
+ * unknown: the process died between starting it and recording the outcome.
+ */
+export async function loadFastAgentTurnAttemptSummary(
+  conversationId: string,
+  turnId: string,
+): Promise<FastAgentTurnAttemptSummary> {
+  const rows = await db
+    .select({
+      eventId: fastAgentMessages.eventId,
+      turnSeq: fastAgentMessages.turnSeq,
+      ts: fastAgentMessages.ts,
+      eventType: fastAgentMessages.eventType,
+      role: fastAgentMessages.role,
+      contentBlocks: fastAgentMessages.contentBlocks,
+      metadata: fastAgentMessages.metadata,
+      payload: fastAgentMessages.payload,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        eq(fastAgentMessages.turnId, turnId),
+      ),
+    )
+    .orderBy(fastAgentMessages.turnSeq, fastAgentMessages.ts);
+
+  const text = (blocks: unknown) =>
+    Array.isArray(blocks)
+      ? blocks
+          .flatMap((block) =>
+            block &&
+            typeof block === 'object' &&
+            (block as { type?: unknown }).type === 'text'
+              ? [String((block as { text?: unknown }).text ?? '')]
+              : [],
+          )
+          .join('')
+      : '';
+
+  const events: FastAgentTurnAttemptEvent[] = [];
+  // A call and its result share one canonical event, so normally only one row
+  // per call survives; when both are present the later row wins in place.
+  const actionIndexByCallId = new Map<string, number>();
+  const next = {
+    assistantOrdinal: 0,
+    toolOrdinal: 0,
+    retryNoticeOrdinal: 0,
+    turnSeq: 0,
+  };
+  let prompt: FastAgentTurnAttemptSummary['prompt'] = null;
+  const ordinalOf = (slot: string, eventId: string) => {
+    const match = new RegExp(`:${slot}:(\\d+)$`, 'u').exec(eventId);
+    return match ? Number(match[1]) + 1 : 0;
+  };
+  for (const row of rows) {
+    if (
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+      row.eventId === `${turnId}:user`
+    ) {
+      prompt = { ts: Number(row.ts), turnSeq: row.turnSeq };
+    }
+    next.turnSeq = Math.max(next.turnSeq, row.turnSeq + 1);
+    next.assistantOrdinal = Math.max(
+      next.assistantOrdinal,
+      ordinalOf('assistant', row.eventId),
+    );
+    next.toolOrdinal = Math.max(
+      next.toolOrdinal,
+      ordinalOf('tool', row.eventId),
+    );
+    next.retryNoticeOrdinal = Math.max(
+      next.retryNoticeOrdinal,
+      ordinalOf('retry-notice', row.eventId),
+    );
+    const payload = (row.payload ?? {}) as Record<string, unknown>;
+    const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+    if (
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall ||
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult
+    ) {
+      // A call and its result share one canonical event, so the result row
+      // replaces the call row once it lands and carries the arguments with
+      // it. A call row that is still present therefore has no result: the
+      // process died between starting the call and recording its outcome.
+      const toolCallId = String(payload.toolCallId ?? '');
+      if (!toolCallId) continue;
+      // Native and MCP calls wrap their input as `rawInput.arguments`;
+      // subagent task calls persist the input object directly.
+      const rawInput = payload.rawInput as
+        | { arguments?: unknown }
+        | Record<string, unknown>
+        | undefined;
+      const action: FastAgentTurnAttemptAction = {
+        kind: 'action',
+        tool: String(payload.toolName ?? payload.title ?? 'tool'),
+        arguments:
+          rawInput && typeof rawInput === 'object'
+            ? 'arguments' in rawInput
+              ? rawInput.arguments
+              : rawInput
+            : null,
+        status:
+          row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall
+            ? 'unknown'
+            : payload.status === 'failed'
+              ? 'failed'
+              : 'completed',
+      };
+      if (action.status !== 'unknown') {
+        const output = text(row.contentBlocks);
+        if (output) {
+          action.result =
+            output.length > TURN_ATTEMPT_RESULT_MAX_CHARS
+              ? `${output.slice(0, TURN_ATTEMPT_RESULT_MAX_CHARS)}…`
+              : output;
+        }
+      }
+      const index = actionIndexByCallId.get(toolCallId);
+      if (index === undefined) {
+        actionIndexByCallId.set(toolCallId, events.length);
+        events.push(action);
+      } else {
+        events[index] = action;
+      }
+    } else if (
+      row.role === 'assistant' &&
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+      metadata.visibleInTranscript !== false &&
+      metadata.interruptionReason === undefined
+    ) {
+      const reply = text(row.contentBlocks).trim();
+      if (!reply) continue;
+      const purpose = payload.purpose ?? metadata.purpose;
+      events.push({
+        kind: 'reply',
+        text: reply,
+        ...(isFastAgentTurnAttemptReplyPurpose(purpose) ? { purpose } : {}),
+      });
+    }
+  }
+  return { events, next, prompt };
 }
 
 export type FastAgentUnresolvedRequest = {

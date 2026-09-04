@@ -1,7 +1,9 @@
+import { TaskPayloadKind } from '@roomote/types';
 import {
   buildMcpTaskEnv,
   getCommunicationReplyContext,
   getSlackReplyContext,
+  getFastAgentChildRuntimeEnv,
   isFastAgentChildTaskRun,
 } from '../mcp-task-env';
 
@@ -361,6 +363,44 @@ describe('buildMcpTaskEnv', () => {
       ROOMOTE_COMMUNICATION_THREAD_ID: 'thread-1',
       ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE:
         '/home/worker/.config/opencode/roomote-slack-reply-satisfaction.json',
+    });
+  });
+});
+
+describe('getFastAgentChildRuntimeEnv', () => {
+  const fastAgentParent = {
+    sessionId: '11111111-1111-4111-8111-111111111111',
+    conversation: {
+      surface: 'web' as const,
+      workspaceId: 'ws',
+      conversationId: '11111111-1111-4111-8111-111111111111',
+    },
+  };
+
+  it('returns nothing for runs without a Fast parent', () => {
+    expect(
+      getFastAgentChildRuntimeEnv({ payload: {}, payloadKind: 'standard' }),
+    ).toEqual({});
+  });
+
+  it('marks a coding child and keeps its chat relay', () => {
+    expect(
+      getFastAgentChildRuntimeEnv({
+        payload: { fastAgentParent },
+        payloadKind: TaskPayloadKind.StandardTask,
+      }),
+    ).toEqual({ ROOMOTE_FAST_AGENT_CHILD: 'true' });
+  });
+
+  it('disables the chat relay for review children so the PR feedback relay is the only signal', () => {
+    expect(
+      getFastAgentChildRuntimeEnv({
+        payload: { fastAgentParent, fastParentRequestedReview: true },
+        payloadKind: TaskPayloadKind.GithubPrReview,
+      }),
+    ).toEqual({
+      ROOMOTE_FAST_AGENT_CHILD: 'true',
+      ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY: 'false',
     });
   });
 });

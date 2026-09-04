@@ -5,12 +5,16 @@ import {
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
 import { and, db, eq, repositories } from '@roomote/db/server';
-import { buildFastSessionReplyFooterText } from '@roomote/communication';
+import {
+  buildFastSessionReplyFooterText,
+  resolveFastSessionLivePreviewUrl,
+} from '@roomote/communication';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
   linkedWorkItemProviderSchema,
   TaskPayloadKind,
+  type FastAgentConversation,
   type FastAgentSourceControlConversation,
   type FastAgentSourceControlSurface,
 } from '@roomote/types';
@@ -108,6 +112,12 @@ export type SourceControlFastLaunchTarget = {
 export function createFastAgentSourceControlTaskLauncher(params: {
   userId: string;
   conversation: FastAgentSourceControlConversation;
+  /**
+   * The Session's home conversation when it differs from the discussion (a
+   * Slack Session answering a mention on the pull request its task opened).
+   * The child attaches to that home so its lifecycle events reach the Session.
+   */
+  parentConversation?: FastAgentConversation;
   resolveTarget: () => Promise<SourceControlFastLaunchTarget>;
 }): LaunchFastAgentTask {
   const discussion = parseSourceControlFastConversation(params.conversation);
@@ -185,7 +195,7 @@ export function createFastAgentSourceControlTaskLauncher(params: {
           ...(linkedIssue ? { linkedWorkItems: [linkedIssue] } : {}),
           ...buildFastAgentChildTaskMetadata({
             sessionId: parentSessionId,
-            conversation: params.conversation,
+            conversation: params.parentConversation ?? params.conversation,
           }),
           ...(environmentId && environmentId !== ALL_REPOSITORIES
             ? { environmentId }
@@ -199,6 +209,26 @@ export function createFastAgentSourceControlTaskLauncher(params: {
     });
     return launch(input);
   };
+}
+
+/**
+ * The comment a turn answers, quoted exactly the way GitHub's own
+ * "Quote reply" does: every line of the original prefixed with "> ",
+ * nothing added.
+ */
+export function buildSourceControlReplyQuote(params: {
+  text: string;
+}): string | null {
+  if (!params.text.trim()) {
+    return null;
+  }
+  // Quote the text verbatim: indentation and blank lines are meaningful
+  // Markdown (code blocks, paragraph breaks) and GitHub preserves them.
+  return params.text
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => (line.length > 0 ? `> ${line}` : '>'))
+    .join('\n');
 }
 
 export type SourceControlPostedComment = {
@@ -409,14 +439,33 @@ async function findProviderRepository(discussion: SourceControlFastDiscussion) {
 function pullRequestPageUrl(discussion: SourceControlFastDiscussion): string {
   const base = `https://${discussion.host}/${discussion.repositoryFullName}`;
   switch (discussion.provider) {
+    case 'github':
+      return `${base}/${discussion.kind === 'pull' ? 'pull' : 'issues'}/${discussion.number}`;
     case 'gitlab':
       return `${base}/-/${discussion.kind === 'pull' ? 'merge_requests' : 'issues'}/${discussion.number}`;
     case 'bitbucket':
       return `${base}/pull-requests/${discussion.number}`;
+    case 'ado': {
+      // Azure DevOps names repositories organization/project/repository; a
+      // pull request lives under the repository's _git area and a work item
+      // under the project.
+      const [organization, project, repository, ...extra] =
+        discussion.repositoryFullName.split('/');
+      if (!organization || !project || !repository || extra.length > 0) {
+        return `${base}/${discussion.kind === 'pull' ? 'pullrequest' : '_workitems/edit'}/${discussion.number}`;
+      }
+      const projectBase = `https://${discussion.host}/${organization}/${project}`;
+      return discussion.kind === 'pull'
+        ? `${projectBase}/_git/${repository}/pullrequest/${discussion.number}`
+        : `${projectBase}/_workitems/edit/${discussion.number}`;
+    }
     default:
       return `${base}/${discussion.kind === 'pull' ? 'pulls' : 'issues'}/${discussion.number}`;
   }
 }
+
+/** Public page of a discussion, derived from its identity when the provider's own URL is not at hand. */
+export const buildSourceControlDiscussionUrl = pullRequestPageUrl;
 
 async function buildGitLabFastDelivery(
   discussion: SourceControlFastDiscussion,
@@ -815,6 +864,13 @@ export function buildSourceControlFastAdapter(params: {
   delivery: SourceControlFastDelivery;
   userId: string;
   sessionId: string;
+  /** Blockquote of the message this turn answers; opens the turn's comment. */
+  /**
+   * The Session's home conversation when the discussion is not its own (see
+   * createFastAgentSourceControlTaskLauncher). Delegated children attach there.
+   */
+  parentConversation?: FastAgentConversation;
+  quote?: string | null;
   onReplyPosted?: () => void;
 }): {
   launchTask: LaunchFastAgentTask;
@@ -831,6 +887,9 @@ export function buildSourceControlFastAdapter(params: {
     launchTask: createFastAgentSourceControlTaskLauncher({
       userId: params.userId,
       conversation: params.conversation,
+      ...(params.parentConversation
+        ? { parentConversation: params.parentConversation }
+        : {}),
       resolveTarget: params.delivery.resolveTarget,
     }),
     postReply: async ({ message }) => {
@@ -842,6 +901,10 @@ export function buildSourceControlFastAdapter(params: {
       const footer = buildFastSessionReplyFooterText({
         provider: discussion.provider,
         sessionId: params.sessionId,
+        // The preview link is a nicety; its lookup never blocks the comment.
+        livePreviewUrl: await resolveFastSessionLivePreviewUrl(
+          params.sessionId,
+        ).catch(() => null),
       });
       // One comment per turn: the first reply opens it, later replies append
       // by editing it in place, so a turn never stacks comments on the
@@ -852,10 +915,10 @@ export function buildSourceControlFastAdapter(params: {
         params.onReplyPosted?.();
         return { messageId: turnComment.messageId };
       }
-      turnBody = message;
+      turnBody = params.quote ? `${params.quote}\n\n${message}` : message;
       const posted = await params.delivery.postComment({
         discussion,
-        body: `${message}\n\n${footer}`,
+        body: `${turnBody}\n\n${footer}`,
       });
       turnComment = posted;
       params.onReplyPosted?.();
@@ -870,6 +933,9 @@ export function buildSourceControlFastAdapter(params: {
             const footer = buildFastSessionReplyFooterText({
               provider: discussion.provider,
               sessionId: params.sessionId,
+              livePreviewUrl: await resolveFastSessionLivePreviewUrl(
+                params.sessionId,
+              ).catch(() => null),
             });
             await params.delivery.updateCommentById!({
               discussion,

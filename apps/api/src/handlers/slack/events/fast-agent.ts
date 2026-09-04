@@ -24,6 +24,7 @@ import {
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   admitFastAgentHumanFollowUp,
+  createFastAgentConversationArtifact,
   persistFastAgentInlineHumanTurn,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
@@ -319,6 +320,9 @@ export async function processFastAgentMessage(params: {
       currentMessageId: event.ts,
       signal: activeTurnLock.signal,
       ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
+      // A redelivered event whose earlier inline attempt never settled
+      // resumes that attempt instead of repeating its recorded actions.
+      ...(durableTurn?.resumed ? { resumedAfterInterruption: true } : {}),
       senderExternalId: event.user,
       senderDisplayName:
         currentMessage?.user === event.user
@@ -332,6 +336,11 @@ export async function processFastAgentMessage(params: {
         !directedAtRoomote,
       ...(roomoteSlackUserId ? { slackRoomoteUserId: roomoteSlackUserId } : {}),
       adapter: {
+        createArtifact: (artifact) =>
+          createFastAgentConversationArtifact({
+            fastConversationId: session.id,
+            ...artifact,
+          }),
         ...(durableTurn
           ? {
               requestDurableResume: () =>

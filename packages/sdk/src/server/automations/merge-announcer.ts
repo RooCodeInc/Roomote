@@ -416,12 +416,15 @@ function buildMergeAnnouncerNotification(params: {
 }) {
   const commitCount = params.event.commitCount ?? params.event.commits.length;
   const commitLabel = `${commitCount} ${commitCount === 1 ? 'commit' : 'commits'}`;
+  const repositoryLabel = params.event.pullRequest
+    ? `${params.repository.fullName}#${params.event.pullRequest.number}`
+    : params.repository.fullName;
   const summary = normalizeSummary(params.summary);
   const slackSummary = escapeSlackMrkdwnText(summary);
   const configureUrl = buildManagerSlackSettingsUrl(
     MERGE_ANNOUNCER_SETTINGS_HASH,
   );
-  const markdownNarrative = `**${params.pusher}** pushed ${commitLabel} to **${params.branch}** in **${params.repository.fullName}**.`;
+  const markdownNarrative = `**${params.pusher}** pushed ${commitLabel} to **${params.branch}** in **${repositoryLabel}**.`;
   const changesUrl =
     params.event.pullRequest?.url ??
     params.event.compareUrl ??
@@ -439,7 +442,7 @@ function buildMergeAnnouncerNotification(params: {
 
   return {
     fallbackText: escapeSlackMrkdwnText(
-      `${params.pusher} pushed ${commitLabel} to ${params.branch} in ${params.repository.fullName}. ${summary}`,
+      `${params.pusher} pushed ${commitLabel} to ${params.branch} in ${repositoryLabel}. ${summary}`,
     ),
     slackBlocks: buildAutomationResultBlocks({
       title: 'Merge Announcer',
@@ -447,7 +450,7 @@ function buildMergeAnnouncerNotification(params: {
       configureUrl,
       subtitle: {
         type: 'plain_text',
-        text: `${params.repository.fullName} · ${params.branch} · ${params.pusher}`,
+        text: `${repositoryLabel} · ${params.branch} · ${params.pusher}`,
       },
       contentBlocks: [
         {

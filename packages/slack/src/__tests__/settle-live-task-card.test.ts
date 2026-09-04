@@ -2,6 +2,10 @@ const mocks = vi.hoisted(() => ({
   getSlackLiveTaskStreamData: vi.fn(),
   findInstallation: vi.fn(),
   updateMessage: vi.fn(),
+  deleteMessage: vi.fn(),
+  clearPendingCleanup: vi.fn(),
+  stopRelocation: vi.fn(),
+  removeSlackThreadActiveTaskByTaskId: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -18,13 +22,29 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('../live-task-stream', () => ({
   buildSlackLiveTaskTitle: (title: string) => title,
   getSlackLiveTaskStreamData: mocks.getSlackLiveTaskStreamData,
+  clearSlackLiveTaskPendingCleanup: mocks.clearPendingCleanup,
+  stopSlackLiveTaskRelocation: mocks.stopRelocation,
 }));
 
 vi.mock('../slack-notifier', () => ({
   SlackNotifier: class {
     constructor(public token: string) {}
     updateMessage = mocks.updateMessage;
+    deleteMessage = mocks.deleteMessage;
   },
+}));
+
+vi.mock('../thread-active-tasks', () => ({
+  removeSlackThreadActiveTaskByTaskId:
+    mocks.removeSlackThreadActiveTaskByTaskId,
+}));
+
+vi.mock('../thread-reply-footer-ops', () => ({
+  withSlackThreadReplyFooterLock: async ({
+    fn,
+  }: {
+    fn: () => Promise<unknown>;
+  }) => fn(),
 }));
 
 import { RunStatus } from '@roomote/types';
@@ -51,6 +71,15 @@ describe('settleSlackLiveTaskCardForRun', () => {
     mocks.getSlackLiveTaskStreamData.mockResolvedValue(cardData);
     mocks.findInstallation.mockResolvedValue({ botAccessToken: 'xoxb-test' });
     mocks.updateMessage.mockResolvedValue(true);
+    mocks.deleteMessage.mockResolvedValue(true);
+    mocks.clearPendingCleanup.mockResolvedValue(true);
+    mocks.stopRelocation.mockResolvedValue(true);
+    mocks.removeSlackThreadActiveTaskByTaskId.mockResolvedValue({
+      teamId: 'T123',
+      channel: 'C123',
+      threadTs: '100.001',
+      version: 'route-version',
+    });
   });
 
   it('marks a canceled task card as an error with the owning team token', async () => {
@@ -90,6 +119,9 @@ describe('settleSlackLiveTaskCardForRun', () => {
         ],
       }),
     });
+    expect(mocks.removeSlackThreadActiveTaskByTaskId).toHaveBeenCalledWith(
+      'task-1',
+    );
   });
 
   it('reports whether a card exists and whether Slack accepted the render', async () => {
@@ -112,6 +144,32 @@ describe('settleSlackLiveTaskCardForRun', () => {
     ).resolves.toEqual({ card: false, updated: false });
   });
 
+  it('re-reads the canonical timestamp inside the footer lock', async () => {
+    mocks.getSlackLiveTaskStreamData
+      .mockResolvedValueOnce(cardData)
+      .mockResolvedValueOnce({ ...cardData, messageTs: 'relocated-ts' });
+
+    await renderSlackLiveTaskCard({
+      taskId: 'task-1',
+      status: 'in_progress',
+      details: 'Working.',
+    });
+
+    expect(mocks.updateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ ts: 'relocated-ts' }),
+    );
+  });
+
+  it('does not touch the movement registry during an in-progress update', async () => {
+    await renderSlackLiveTaskCard({
+      taskId: 'task-1',
+      status: 'in_progress',
+      taskTitle: 'Generated title',
+    });
+
+    expect(mocks.removeSlackThreadActiveTaskByTaskId).not.toHaveBeenCalled();
+  });
+
   it('does nothing for runs without a card', async () => {
     await settleSlackLiveTaskCardForRun({
       taskId: 'task-1',
@@ -128,6 +186,20 @@ describe('settleSlackLiveTaskCardForRun', () => {
     expect(mocks.updateMessage).not.toHaveBeenCalled();
   });
 
+  it('removes and refreshes a terminal task after its live-card record expires', async () => {
+    mocks.getSlackLiveTaskStreamData.mockResolvedValue(null);
+
+    await expect(
+      renderSlackLiveTaskCard({ taskId: 'task-1', status: 'complete' }),
+    ).resolves.toEqual({ card: false, updated: false });
+
+    expect(mocks.removeSlackThreadActiveTaskByTaskId).toHaveBeenCalledWith(
+      'task-1',
+    );
+    expect(mocks.findInstallation).toHaveBeenCalledOnce();
+    expect(mocks.updateMessage).not.toHaveBeenCalled();
+  });
+
   it('never throws', async () => {
     mocks.getSlackLiveTaskStreamData.mockRejectedValue(new Error('redis'));
 
@@ -138,5 +210,96 @@ describe('settleSlackLiveTaskCardForRun', () => {
         status: RunStatus.Failed,
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it('keeps canonical card updates working when registry cleanup fails', async () => {
+    mocks.removeSlackThreadActiveTaskByTaskId.mockRejectedValueOnce(
+      new Error('redis unavailable'),
+    );
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(
+      renderSlackLiveTaskCard({ taskId: 'task-1', status: 'complete' }),
+    ).resolves.toEqual({ card: true, updated: true });
+
+    expect(mocks.updateMessage).toHaveBeenCalledOnce();
+    expect(warning).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to remove active task'),
+    );
+  });
+
+  it('removes a terminal card from movement even when the final Slack update throws', async () => {
+    mocks.updateMessage.mockRejectedValueOnce(new Error('Slack unavailable'));
+
+    await expect(
+      renderSlackLiveTaskCard({ taskId: 'task-1', status: 'complete' }),
+    ).rejects.toThrow('Slack unavailable');
+
+    expect(mocks.removeSlackThreadActiveTaskByTaskId).toHaveBeenCalledWith(
+      'task-1',
+    );
+  });
+
+  it('deletes and clears a pending old card before terminal deregistration', async () => {
+    mocks.getSlackLiveTaskStreamData.mockResolvedValue({
+      ...cardData,
+      pendingOldMessageTs: 'stale-card-ts',
+    });
+
+    await renderSlackLiveTaskCard({ taskId: 'task-1', status: 'complete' });
+
+    expect(mocks.stopRelocation).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      currentMessageTs: 'card-ts',
+    });
+    expect(mocks.deleteMessage).toHaveBeenCalledWith({
+      channel: 'C123',
+      ts: 'stale-card-ts',
+    });
+    expect(mocks.clearPendingCleanup).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      currentMessageTs: 'card-ts',
+      oldMessageTs: 'stale-card-ts',
+    });
+    expect(mocks.removeSlackThreadActiveTaskByTaskId).toHaveBeenCalledWith(
+      'task-1',
+    );
+  });
+
+  it('keeps a terminal card registered when pending duplicate deletion fails', async () => {
+    mocks.getSlackLiveTaskStreamData.mockResolvedValue({
+      ...cardData,
+      pendingOldMessageTs: 'stale-card-ts',
+    });
+    mocks.deleteMessage.mockResolvedValue(false);
+
+    await renderSlackLiveTaskCard({ taskId: 'task-1', status: 'complete' });
+
+    expect(mocks.clearPendingCleanup).not.toHaveBeenCalled();
+    expect(mocks.removeSlackThreadActiveTaskByTaskId).not.toHaveBeenCalled();
+  });
+
+  it('deregisters after Slack deletion even when clearing Redis state fails', async () => {
+    mocks.getSlackLiveTaskStreamData.mockResolvedValue({
+      ...cardData,
+      pendingOldMessageTs: 'stale-card-ts',
+    });
+    mocks.clearPendingCleanup.mockRejectedValue(new Error('redis unavailable'));
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(
+      renderSlackLiveTaskCard({ taskId: 'task-1', status: 'complete' }),
+    ).resolves.toEqual({ card: true, updated: true });
+
+    expect(mocks.deleteMessage).toHaveBeenCalledWith({
+      channel: 'C123',
+      ts: 'stale-card-ts',
+    });
+    expect(mocks.removeSlackThreadActiveTaskByTaskId).toHaveBeenCalledWith(
+      'task-1',
+    );
+    expect(warning).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to clear deleted predecessor'),
+    );
   });
 });

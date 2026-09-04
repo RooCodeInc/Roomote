@@ -62,7 +62,7 @@ export async function deleteTasksCommand(
       try {
         s3Result = await deleteArtifactsBatch(
           artifactsToDelete.map((artifact) => ({
-            taskId: artifact.taskId,
+            taskId: artifact.taskId!,
             artifactId: artifact.id,
             path: artifact.path,
             version: artifact.version,

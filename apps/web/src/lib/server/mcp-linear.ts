@@ -12,6 +12,7 @@ import {
   getMcpOauthReplay,
   getValidAccessToken,
   getLinearDeploymentMetadata,
+  getLinearUserMetadata,
   LINEAR_ORG_CONNECTION_ROLE,
   LINEAR_USER_CONNECTION_ROLE,
   startLinearFastSessionTurn,
@@ -53,6 +54,33 @@ function replayMatchesLinearIdentity(
   );
 }
 
+function connectionMatchesLinearIdentity(
+  connection: NonNullable<McpConnectionRecord>,
+  identity: {
+    linearOrganizationId: string;
+    appUserId?: string;
+    linearUserId?: string;
+  },
+) {
+  if (connection.connectionRole === LINEAR_ORG_CONNECTION_ROLE) {
+    const metadata = getLinearDeploymentMetadata(connection.authConfig);
+    return (
+      metadata?.linearOrganizationId === identity.linearOrganizationId &&
+      metadata.appUserId === identity.appUserId
+    );
+  }
+
+  if (connection.connectionRole === LINEAR_USER_CONNECTION_ROLE) {
+    const metadata = getLinearUserMetadata(connection.authConfig);
+    return (
+      metadata?.linearOrganizationId === identity.linearOrganizationId &&
+      metadata.linearUserId === identity.linearUserId
+    );
+  }
+
+  return false;
+}
+
 async function storeLinearConnection(input: {
   connection: NonNullable<McpConnectionRecord>;
   tokens: OAuthTokens;
@@ -70,6 +98,10 @@ async function storeLinearConnection(input: {
     typeof input.connection.authConfig === 'object'
       ? (input.connection.authConfig as Record<string, unknown>)
       : {};
+  const preserveExistingRefreshToken =
+    input.tokens.refresh_token === undefined &&
+    Boolean(input.connection.refreshToken) &&
+    connectionMatchesLinearIdentity(input.connection, input);
 
   await db
     .update(mcpConnections)
@@ -83,7 +115,9 @@ async function storeLinearConnection(input: {
         ...(input.linearUserId ? { linearUserId: input.linearUserId } : {}),
       } as NonNullable<McpConnectionRecord>['authConfig'],
       accessToken: input.tokens.access_token,
-      refreshToken: input.tokens.refresh_token || null,
+      ...(preserveExistingRefreshToken
+        ? {}
+        : { refreshToken: input.tokens.refresh_token || null }),
       tokenExpiresAt,
       scopes: input.tokens.scope
         ? input.tokens.scope.split(/[\s,]+/).filter(Boolean)

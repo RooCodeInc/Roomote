@@ -10,12 +10,22 @@
  * needs to exist before this can run.
  */
 
-import { TaskPayloadKind } from '@roomote/types';
+import {
+  DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+  TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
+  TASK_MODEL_COSTS_ENV_VAR_NAME,
+  TaskPayloadKind,
+  parseModelProviderEnvKeys,
+} from '@roomote/types';
 
 import { ExecutionError } from '../command-executor';
 import type { WorkerEnv } from '../env';
 import { resolveWorkerCodingHarness } from '../lib/resolve-worker-coding-harness';
 import type { StartupLogger } from '../logging';
+import { INHERITED_MODEL_RUNTIME_ENV_VAR_NAMES } from './utils/env-vars';
 
 import {
   type EnvironmentSetupWarning,
@@ -60,6 +70,7 @@ interface SetupOptions {
   mode: SetupMode;
   logger: StartupLogger;
   workerEnv: WorkerEnv;
+  sandboxOpenRouterApiKey?: string;
   recordPhase?: PhaseRecorder;
   backgroundEnvironmentSetup?: boolean;
 }
@@ -105,6 +116,46 @@ function buildBackgroundEnvironmentSetupWarning(): string {
   return 'Environment setup is still running in the background. Docker projects may still be building or waiting for health checks, and repository setup commands may still be installing dependencies or preparing services.';
 }
 
+const INHERITED_MODEL_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
+  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
+  TASK_MODEL_COSTS_ENV_VAR_NAME,
+  ...DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
+  ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+]);
+
+function buildEnvironmentWorkspaceEnvVars(
+  envVars: Record<string, string | undefined>,
+  launcherSandboxOpenRouterApiKey?: string,
+): Record<string, string> {
+  const sandboxOpenRouterApiKey =
+    envVars[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME] ??
+    launcherSandboxOpenRouterApiKey;
+  const configuredProviderEnvVarNames = new Set(
+    parseModelProviderEnvKeys(envVars.R_MODEL_ENV_KEYS),
+  );
+  const nestedEnvironmentEnvVars: Record<string, string> = {};
+
+  for (const [name, value] of Object.entries(envVars)) {
+    if (
+      value !== undefined &&
+      name !== SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME &&
+      !name.startsWith('R_INFERENCE_GATEWAY_') &&
+      !INHERITED_MODEL_RUNTIME_ENV_VAR_NAMES.has(name) &&
+      !INHERITED_MODEL_PROVIDER_ENV_VAR_NAMES.has(name) &&
+      !configuredProviderEnvVarNames.has(name)
+    ) {
+      nestedEnvironmentEnvVars[name] = value;
+    }
+  }
+
+  if (sandboxOpenRouterApiKey) {
+    nestedEnvironmentEnvVars.OPENROUTER_API_KEY = sandboxOpenRouterApiKey;
+  }
+
+  return nestedEnvironmentEnvVars;
+}
+
 /**
  * Runs the complete worker setup.
  * This is idempotent and safe to call multiple times.
@@ -114,6 +165,7 @@ export async function setup({
   mode,
   logger,
   workerEnv,
+  sandboxOpenRouterApiKey,
   recordPhase,
   backgroundEnvironmentSetup = false,
 }: SetupOptions): Promise<SetupResult> {
@@ -133,18 +185,31 @@ export async function setup({
   // Worker config values (auth keys, API URLs) are NOT re-read.
   workerEnv.refreshSystemEnv(process.env);
 
+  const runtimeEnv = workerEnv.getRuntimeEnv();
+  if (SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME in runtimeEnv) {
+    delete runtimeEnv[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
+    workerEnv.setRuntimeEnv(runtimeEnv);
+  }
+
+  const inheritedWorkspaceEnvVars = {
+    ...workerEnv.buildUserFacingEnv(),
+    ...workspaceOpts.envVars,
+  };
+  const isEnvironmentWorkspace = workspaceOpts.workspace.type === 'environment';
   const workspaceOptions = {
     ...workspaceOpts,
     cleanupLegacyPaths:
       workspaceOpts.taskRunType === TaskPayloadKind.SnapshotEnvironment,
-    envVars: {
-      ...workerEnv.buildUserFacingEnv(),
-      ...workspaceOpts.envVars,
-      ...(workspaceOpts.workspace.type === 'environment' &&
-        workerEnv.sandboxOpenRouterApiKey && {
-          OPENROUTER_API_KEY: workerEnv.sandboxOpenRouterApiKey,
-        }),
-    },
+    envVars: isEnvironmentWorkspace
+      ? buildEnvironmentWorkspaceEnvVars(
+          inheritedWorkspaceEnvVars,
+          sandboxOpenRouterApiKey ?? workerEnv.sandboxOpenRouterApiKey,
+        )
+      : inheritedWorkspaceEnvVars,
+    userEnvVars:
+      isEnvironmentWorkspace && workspaceOpts.userEnvVars
+        ? buildEnvironmentWorkspaceEnvVars(workspaceOpts.userEnvVars)
+        : workspaceOpts.userEnvVars,
   };
   let result: PrepareWorkspaceResult | undefined;
   let backgroundEnvironmentSetupPromise:
@@ -182,13 +247,22 @@ export async function setup({
 
   if (workspaceOptions) {
     const runtimeEnv = workerEnv.getRuntimeEnv();
+    const explicitEnvironmentEnvVarNames = new Set(
+      workspaceOptions.workspace.type === 'environment'
+        ? Object.keys(workspaceOptions.workspace.environmentConfig.env ?? {})
+        : [],
+    );
     const workspaceEnv = Object.fromEntries(
       Object.entries(workspaceOptions.envVars).filter(([key, value]) => {
         if (value === undefined) {
           return false;
         }
 
-        return !(key in runtimeEnv) || runtimeEnv[key] !== value;
+        return (
+          explicitEnvironmentEnvVarNames.has(key) ||
+          !(key in runtimeEnv) ||
+          runtimeEnv[key] !== value
+        );
       }),
     );
 

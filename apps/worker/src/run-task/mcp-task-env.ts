@@ -6,6 +6,7 @@ import {
   getFastAgentParentFromPayload,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
+  isPrReviewRun,
 } from '@roomote/types';
 
 interface SlackReplyContext {
@@ -35,6 +36,27 @@ export function isFastAgentChildTaskRun(taskRun: {
   payload: unknown;
 }): boolean {
   return getFastAgentParentFromPayload(taskRun.payload) !== null;
+}
+
+/**
+ * Runtime env that tells the Roomote MCP server how this run talks to its
+ * Fast parent. A review child gets no chat relay: its outcome reaches the
+ * session through the PR feedback relay alone, so `send_chat_reply` would
+ * only produce narration the parent then double-announces.
+ */
+export function getFastAgentChildRuntimeEnv(taskRun: {
+  payload: unknown;
+  payloadKind?: string | null;
+}): Record<string, string> {
+  if (!isFastAgentChildTaskRun(taskRun)) {
+    return {};
+  }
+  return {
+    ROOMOTE_FAST_AGENT_CHILD: 'true',
+    ...(isPrReviewRun(taskRun)
+      ? { ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY: 'false' }
+      : {}),
+  };
 }
 
 function hasInheritedCommunicationContext(payload: unknown): boolean {

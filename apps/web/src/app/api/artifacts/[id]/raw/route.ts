@@ -6,7 +6,7 @@ import {
 
 import {
   getUploadedArtifactById,
-  getArtifactObject,
+  getOwnedArtifactObject,
   verifyArtifactSignature,
 } from '@/lib/server';
 
@@ -79,8 +79,10 @@ export async function GET(
   // Fetch the object from S3
   let s3Response;
   try {
-    s3Response = await getArtifactObject(
-      artifact.taskId,
+    s3Response = await getOwnedArtifactObject(
+      artifact.taskId
+        ? { taskId: artifact.taskId }
+        : { sessionId: artifact.sessionId! },
       artifact.id,
       artifact.path,
       artifact.version,

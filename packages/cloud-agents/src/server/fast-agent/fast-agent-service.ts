@@ -13,7 +13,6 @@ import {
   FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
-  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   ROOMOTE_MCP_ID,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
@@ -121,9 +120,11 @@ import {
   scheduleFastAgentDurableTurnRetry,
   reconcileFastAgentInferenceRetryNotices,
   renewFastSessionRespondingLease,
-  RESTARTED_ACTIVE_TURN_MESSAGE,
   type FastAgentInterruptionReason,
+  type FastAgentTurnAttemptReply,
+  type FastAgentTurnAttemptSummary,
   type FastAgentUnresolvedRequest,
+  loadFastAgentTurnAttemptSummary,
 } from './fast-agent-conversation-repository';
 import {
   bindFastAgentNativeToolExecutor,
@@ -145,6 +146,7 @@ import {
 } from './fast-agent-integration-broker';
 import {
   cancelFastAgentTask,
+  launchFastAgentPrReview,
   sendFastAgentTaskMessage,
 } from './fast-agent-tasks';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
@@ -236,6 +238,12 @@ const showWidgetArgsSchema = z.object({
   css: z.string().optional(),
   height: z.number().optional(),
   textFallback: z.string().optional(),
+});
+const createArtifactArgsSchema = z.object({
+  path: z.string().trim().min(1).max(255),
+  content: z.string().min(1).max(131_072),
+  contentType: z.string().trim().min(1).max(200).optional(),
+  artifactType: z.enum(['general', 'plan']).optional().default('general'),
 });
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 // A reply tool call without a message reads the text the model wrote before
@@ -394,6 +402,46 @@ const launchTaskArgsSchema = z.object({
   includeAttachments: z.boolean().optional().default(false),
   kickoffMessage: z.string().trim().min(1),
 });
+
+const reviewPullRequestArgsSchema = z.object({
+  repository: z.string().trim().min(1).optional(),
+  pullRequestNumber: z.number().int().positive().optional(),
+  kickoffMessage: z.string().trim().min(1),
+});
+
+/**
+ * The pull request a source-control Session is already discussing, so
+ * review_pull_request can omit its target there. The workspaceId encodes
+ * host/owner/name and the conversationId encodes pull/<number>.
+ */
+function getConversationPullRequestTarget(conversation: {
+  surface: string;
+  workspaceId: string;
+  conversationId: string;
+}): { repository: string; pullRequestNumber: number } | null {
+  const sourceControlSurfaces = new Set([
+    'github',
+    'gitlab',
+    'bitbucket',
+    'ado',
+    'gitea',
+  ]);
+  if (!sourceControlSurfaces.has(conversation.surface)) {
+    return null;
+  }
+  const match = /^pull\/(\d+)$/.exec(conversation.conversationId);
+  if (!match) {
+    return null;
+  }
+  const [, ...repositoryParts] = conversation.workspaceId.split('/');
+  if (repositoryParts.length < 2) {
+    return null;
+  }
+  return {
+    repository: repositoryParts.join('/'),
+    pullRequestNumber: Number(match[1]),
+  };
+}
 const taskMessageArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
   message: z.string().trim().min(1),
@@ -522,73 +570,6 @@ function buildIntegrationCallSignature({
     toolName,
     canonicalizeIntegrationCallValue(args),
   ]);
-}
-
-const REPLAY_SAFE_ROOMOTE_TASK_ACTIONS = new Set([
-  'search',
-  'get_summary',
-  'get_messages',
-  'search_tasks',
-  'get_compute_logs',
-  'list_environments',
-]);
-
-const REPLAY_SAFE_ROOMOTE_AUTOMATION_ACTIONS = new Set([
-  'list',
-  'list_models',
-  'resolve_schedule',
-]);
-
-/**
- * Whether re-running the turn from scratch after this call could duplicate
- * an external effect. Reads and presentation-only calls are safe; anything
- * that launches, messages, cancels, mutates, or reaches an integration whose
- * semantics are unknown is not.
- */
-function isReplaySafeFastAgentMcpCall(call: FastAgentMcpToolCall): boolean {
-  if (call.integrationId !== ROOMOTE_MCP_ID) return false;
-  if (
-    call.toolName === 'get_about_me' ||
-    call.toolName === CHAT_CHANNELS_TOOL.name ||
-    call.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name ||
-    call.toolName === CHAT_MESSAGE_CONTEXT_TOOL.name
-  ) {
-    return true;
-  }
-  if (call.toolName === 'manage_tasks') {
-    return (
-      typeof call.args.action === 'string' &&
-      REPLAY_SAFE_ROOMOTE_TASK_ACTIONS.has(call.args.action)
-    );
-  }
-  if (call.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name) {
-    return (
-      typeof call.args.action === 'string' &&
-      REPLAY_SAFE_ROOMOTE_AUTOMATION_ACTIONS.has(call.args.action)
-    );
-  }
-  return false;
-}
-
-function isReplaySafeFastAgentNativeTool(
-  call: FastAgentNativeToolCall,
-): boolean {
-  switch (call.name) {
-    // An acknowledgement or progress note may repeat on resume (the resumed
-    // turn is told not to re-acknowledge); a closeout ends the turn, so a
-    // replay after it would answer twice.
-    case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply:
-      return call.args.purpose !== 'closeout';
-    case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction:
-    case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent:
-    case FAST_AGENT_NATIVE_TOOL_NAMES.listSkills:
-    case FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill:
-    case FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep:
-    case FAST_AGENT_NATIVE_TOOL_NAMES.spillRead:
-      return true;
-    default:
-      return false;
-  }
 }
 
 export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
@@ -1017,10 +998,149 @@ function escapeFastAgentEnvelopeJson(value: Record<string, string>): string {
 }
 
 const UNRESOLVED_REQUEST_TEXT_MAX_CHARS = 2_000;
-const FAST_AGENT_RESUMED_TURN_MARKER =
-  '<resumed_turn>A service restart interrupted the previous attempt at this request before it finished.</resumed_turn>';
-const FAST_AGENT_RESUMED_RETRY_TURN_MARKER =
-  '<resumed_turn>The previous attempt at this request failed with a temporary inference provider error and is being retried automatically.</resumed_turn>';
+const FAST_AGENT_RESUMED_TURN_REASON =
+  'A service restart interrupted the previous attempt at this request before it finished.';
+const FAST_AGENT_RESUMED_RETRY_TURN_REASON =
+  'The previous attempt at this request failed with a temporary inference provider error and is being retried automatically.';
+const PREVIOUS_ATTEMPT_MAX_CHARS = 12_000;
+const PREVIOUS_ATTEMPT_REPLY_MAX_CHARS = 600;
+const PREVIOUS_ATTEMPT_ARGUMENTS_MAX_CHARS = 800;
+/**
+ * Stands in for the result of a call the process died on. It exists only in
+ * the resumed run's model input; nothing is written to the transcript or
+ * shown to the user.
+ */
+const LOST_TOOL_RESULT_TEXT =
+  'Tool result lost due to restart. The call may or may not have taken effect; check before repeating it.';
+
+type FastAgentRecordedCloseout =
+  | { kind: 'delivered'; text: string }
+  | { kind: 'lost'; purpose: 'closeout' | 'clarification'; text: string };
+
+/**
+ * What the transcript says about the closeout of an interrupted attempt.
+ * 'delivered' means the answer reached the surface: either a closing reply
+ * row is the last event, or a closing reply call completed. The second form
+ * matters because a closeout that replaces the visible retry notice, or
+ * finalizes a streamed reply, writes its reply row under an earlier
+ * sequence, so the call's result row is what ends the attempt. 'lost' means
+ * the attempt was cut off inside a closing reply call whose text is known
+ * but whose post was never recorded. Anything else (no closeout yet, or a
+ * failed one whose error the model can read) is left to the resumed model
+ * request.
+ */
+function findRecordedCloseout(
+  events: FastAgentTurnAttemptSummary['events'],
+): FastAgentRecordedCloseout | null {
+  const last = events.at(-1);
+  if (!last) return null;
+  if (last.kind === 'reply') {
+    return last.purpose === 'closeout' || last.purpose === 'clarification'
+      ? { kind: 'delivered', text: last.text }
+      : null;
+  }
+  if (
+    last.tool !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply ||
+    !last.arguments ||
+    typeof last.arguments !== 'object'
+  ) {
+    return null;
+  }
+  const { purpose, message } = last.arguments as {
+    purpose?: unknown;
+    message?: unknown;
+  };
+  if (purpose !== 'closeout' && purpose !== 'clarification') return null;
+  const text = typeof message === 'string' ? message.trim() : '';
+  if (last.status === 'completed') {
+    const lastReply = [...events]
+      .reverse()
+      .find(
+        (event): event is FastAgentTurnAttemptReply => event.kind === 'reply',
+      );
+    return { kind: 'delivered', text: text || lastReply?.text || '' };
+  }
+  if (last.status !== 'unknown') return null;
+  return text ? { kind: 'lost', purpose, text } : null;
+}
+
+function clipText(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/**
+ * Replay of the previous attempt, rendered in the same role-block form the
+ * model reads its history in, so it continues from the last entry instead
+ * of being told about it. Every field is bounded first: a reply can be long
+ * and a single argument (an artifact body, a task prompt) can run to many
+ * kilobytes, and the resume envelope must stay a summary, not a copy.
+ */
+function renderPreviousAttemptTranscript(
+  attempt: FastAgentTurnAttemptSummary,
+  { includeResults }: { includeResults: boolean },
+): string {
+  const blocks: string[] = [];
+  for (const event of attempt.events) {
+    if (event.kind === 'reply') {
+      blocks.push(
+        `[ASSISTANT]\n${escapeFastAgentEnvelopeText(clipText(event.text, PREVIOUS_ATTEMPT_REPLY_MAX_CHARS))}`,
+      );
+      continue;
+    }
+    const args = clipText(
+      JSON.stringify(event.arguments ?? null),
+      PREVIOUS_ATTEMPT_ARGUMENTS_MAX_CHARS,
+    );
+    blocks.push(
+      `[TOOL_CALL ${escapeFastAgentEnvelopeText(event.tool)}]\n${escapeFastAgentEnvelopeText(args)}`,
+    );
+    if (event.status === 'unknown') {
+      blocks.push(`[TOOL_RESULT lost]\n${LOST_TOOL_RESULT_TEXT}`);
+    } else {
+      const result = includeResults
+        ? (event.result ?? '(no output recorded)')
+        : '(output omitted)';
+      blocks.push(
+        `[TOOL_RESULT ${event.status}]\n${escapeFastAgentEnvelopeText(result)}`,
+      );
+    }
+  }
+  return blocks.join('\n\n');
+}
+
+/**
+ * The resumed-turn envelope. When the earlier attempt already did things, the
+ * envelope carries its transcript so the model picks up at the cut: replies
+ * were delivered, completed calls ran, and a lost result means the call may
+ * or may not have taken effect.
+ */
+function wrapFastAgentResumedTurn(
+  reason: string,
+  previousAttempt?: FastAgentTurnAttemptSummary | null,
+): string {
+  if (!previousAttempt || previousAttempt.events.length === 0) {
+    return `<resumed_turn>${reason}</resumed_turn>`;
+  }
+  let transcript = renderPreviousAttemptTranscript(previousAttempt, {
+    includeResults: true,
+  });
+  if (transcript.length > PREVIOUS_ATTEMPT_MAX_CHARS) {
+    // Results are the bulkiest field; drop them before anything else.
+    transcript = renderPreviousAttemptTranscript(previousAttempt, {
+      includeResults: false,
+    });
+  }
+  if (transcript.length > PREVIOUS_ATTEMPT_MAX_CHARS) {
+    // The hard cap holds no matter what the attempt contained.
+    transcript = `${transcript.slice(0, PREVIOUS_ATTEMPT_MAX_CHARS)}… [previous attempt truncated]`;
+  }
+  return [
+    `<resumed_turn>${reason}`,
+    'Your previous attempt at this request produced the transcript below, ending where it was cut off. It is already part of this conversation: the replies were delivered to the user and the completed tool calls ran. Continue from the last entry as if you had just received it. Do not send those replies again or repeat calls that completed. A call whose result is marked failed returned an error; read that error before deciding whether to retry, because a timeout or a lost response can mean the call actually took effect.',
+    `<previous_attempt_transcript>\n${transcript}\n</previous_attempt_transcript>`,
+    '</resumed_turn>',
+  ].join('\n');
+}
 
 function wrapFastAgentUnresolvedRequest(
   request: FastAgentUnresolvedRequest,
@@ -1069,6 +1189,7 @@ function buildFastAgentMessages({
   unresolvedRequest,
   resumedAfterInterruption = false,
   resumedAfterInferenceRetry = false,
+  previousAttempt,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -1087,6 +1208,8 @@ function buildFastAgentMessages({
   unresolvedRequest?: FastAgentUnresolvedRequest | null;
   resumedAfterInterruption?: boolean;
   resumedAfterInferenceRetry?: boolean;
+  /** What an earlier attempt at this same turn already did, when resuming. */
+  previousAttempt?: FastAgentTurnAttemptSummary | null;
 }): {
   bootstrapMessages: ModelMessage[];
   turnMessages: ModelMessage[];
@@ -1135,9 +1258,12 @@ function buildFastAgentMessages({
     ? wrapFastAgentUnresolvedRequest(unresolvedRequest)
     : undefined;
   const resumedTurnText = resumedAfterInterruption
-    ? FAST_AGENT_RESUMED_TURN_MARKER
+    ? wrapFastAgentResumedTurn(FAST_AGENT_RESUMED_TURN_REASON, previousAttempt)
     : resumedAfterInferenceRetry
-      ? FAST_AGENT_RESUMED_RETRY_TURN_MARKER
+      ? wrapFastAgentResumedTurn(
+          FAST_AGENT_RESUMED_RETRY_TURN_REASON,
+          previousAttempt,
+        )
       : undefined;
 
   if (compatibilityMessages.length > 0) {
@@ -1450,34 +1576,8 @@ export async function answerFastAgentQuestion({
       return false;
     }
   };
-  const DURABLE_REVOKE_FAILED_TOOL_ERROR =
-    'Roomote could not durably record this action before running it. Try the action again.';
-  // Set when a terminal closeout was skipped because its revocation did not
-  // land: the user has no answer yet, so settlement must hand the turn to
-  // the queue instead of marking it delivered.
-  let terminalRevocationFailed = false;
   const settleDurableTurn = async () => {
     if (!durableAdmission) return;
-    if (terminalRevocationFailed) {
-      durableTurnReplayable = false;
-      const released = await releaseFastAgentDurableTurnClaim(
-        durableAdmission.eventId,
-      ).catch((error) => {
-        console.warn(
-          `[Fast Agent] Failed to release durable turn claim after a skipped closeout: ${formatErrorForLog(error)}`,
-        );
-        return false;
-      });
-      await adapter.requestDurableResume?.().catch((error) => {
-        console.warn(
-          `[Fast Agent] Failed to wake durable turn resume after a skipped closeout: ${formatErrorForLog(error)}`,
-        );
-      });
-      console.info(
-        `[Fast Agent] Durable turn handed to the queue after a skipped closeout (row=${durableAdmission.eventId}, released=${released}).`,
-      );
-      return;
-    }
     durableTurnReplayable = false;
     await markFastAgentDurableTurnDelivered(durableAdmission.eventId).catch(
       (error) => {
@@ -1774,6 +1874,16 @@ export async function answerFastAgentQuestion({
           // initiating user. Preserve global queue order: deliver the current
           // actor's contiguous prefix, then leave this participant and every
           // later message durable for separately authorized turns.
+          blockedByDifferentUser = true;
+          break;
+        }
+        if (followUp.sourceControlReplyTarget) {
+          // A mention routed in from a pull request needs its own turn: the
+          // answer must also post on that discussion and delegated work must
+          // target its branch, which only the whole-turn delivery wires up.
+          // Steering would inject the text into this turn's home adapter and
+          // retire the row without either. Leave it and everything after it
+          // durable, in order.
           blockedByDifferentUser = true;
           break;
         }
@@ -2108,6 +2218,34 @@ export async function answerFastAgentQuestion({
       true,
     );
   };
+  /**
+   * Post a closeout the service authors itself (terminal or error) under the
+   * same recorded intent a model-authored `send_chat_reply` gets: a call row
+   * before the post and a result row after it. A run that resumes this turn
+   * then reads the closeout from the transcript, delivered or cut off inside
+   * the post, exactly as it would a model-authored one (see
+   * findRecordedCloseout), so neither can be posted a second time after the
+   * user already saw it.
+   */
+  const postRecordedSystemCloseout = async (
+    message: string,
+    post: () => Promise<void>,
+  ) => {
+    const call = await beginCanonicalToolEvent({
+      title: FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
+      args: { purpose: 'closeout', message },
+    });
+    try {
+      await post();
+    } catch (error) {
+      await finishCanonicalToolEvent(call, {
+        success: false,
+        error: formatErrorForLog(error),
+      });
+      throw error;
+    }
+    await finishCanonicalToolEvent(call, { success: true, delivered: true });
+  };
   const canonicalSubagentEvents = new Map<
     string,
     { eventId: string; turnSeq: number }
@@ -2320,6 +2458,28 @@ export async function answerFastAgentQuestion({
       currentMessageReactable,
     });
     canonicalConversationId = session.id;
+    // A resumed run continues the same turn. Load what the earlier attempt
+    // already did before anything is written: the model is told about it,
+    // and this run numbers its canonical events after the attempt's rows so
+    // it extends the transcript instead of overwriting them. Best effort:
+    // without it the model starts the turn over, the pre-resume behavior.
+    const previousAttempt =
+      resumedAfterInterruption || resumedAfterInferenceRetry
+        ? await loadFastAgentTurnAttemptSummary(session.id, turnId).catch(
+            (error) => {
+              console.warn(
+                `[Fast Agent] Failed to load the previous attempt for a resumed turn: ${formatErrorForLog(error)}`,
+              );
+              return null;
+            },
+          )
+        : null;
+    if (previousAttempt) {
+      nextAssistantOrdinal = previousAttempt.next.assistantOrdinal;
+      nextToolOrdinal = previousAttempt.next.toolOrdinal;
+      nextRetryNoticeOrdinal = previousAttempt.next.retryNoticeOrdinal;
+      nextTurnSeq = previousAttempt.next.turnSeq;
+    }
     // A resumed execution of this same turn inherits the retry notice its
     // predecessor left active, so the eventual answer edits that notice in
     // place; only when no such notice exists (or this is a new turn) does a
@@ -2416,12 +2576,16 @@ export async function answerFastAgentQuestion({
           return null;
         })
       : null;
-    const userEvent = allocateCanonicalEvent('user');
+    // A resumed run re-persists the same prompt; it keeps the attempt's
+    // place and time so the transcript still reads in order.
+    const userEvent = previousAttempt?.prompt
+      ? { eventId: `${turnId}:user`, turnSeq: previousAttempt.prompt.turnSeq }
+      : allocateCanonicalEvent('user');
     const userMessageResult = await persistCanonicalMessage(
       {
         ...userEvent,
         turnId,
-        ts: Date.now(),
+        ts: previousAttempt?.prompt?.ts ?? Date.now(),
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
         role: 'user',
         contentBlocks: buildFastAgentUserContentBlocks(
@@ -2502,6 +2666,7 @@ export async function answerFastAgentQuestion({
       unresolvedRequest,
       resumedAfterInterruption,
       resumedAfterInferenceRetry,
+      previousAttempt,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
       Env.RELEASE_PRODUCT_VERSION,
@@ -2835,14 +3000,6 @@ export async function answerFastAgentQuestion({
           `${call.integrationId}_${call.toolName}`,
         );
         if (startDenial) return startDenial;
-        if (
-          !isReplaySafeFastAgentMcpCall(call) &&
-          !(await revokeDurableTurnReplay(
-            `MCP call ${call.integrationId}/${call.toolName} is not replay-safe.`,
-          ))
-        ) {
-          return { success: false, error: DURABLE_REVOKE_FAILED_TOOL_ERROR };
-        }
 
         if (platformEventHandling === 'present_only') {
           return {
@@ -3075,18 +3232,11 @@ export async function answerFastAgentQuestion({
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
         turnProgressMarker += 1;
-        // The acknowledgement gate runs before replay revocation: a refused
-        // pre-ack call must leave the durable row recoverable.
         const startDenial = authorizeToolStart(call.name);
         if (startDenial) return startDenial;
-        if (
-          !isReplaySafeFastAgentNativeTool(call) &&
-          !(await revokeDurableTurnReplay(
-            `Native tool ${call.name} is not replay-safe.`,
-          ))
-        ) {
-          return { success: false, error: DURABLE_REVOKE_FAILED_TOOL_ERROR };
-        }
+        // No replay withdrawal here: every call is recorded before it runs and
+        // its result after, and a resumed run is handed that record, so an
+        // interrupted turn continues instead of failing closed.
 
         if (
           platformEventHandling === 'present_only' &&
@@ -3108,6 +3258,10 @@ export async function answerFastAgentQuestion({
             if (!message) {
               return { success: false, error: FAST_AGENT_EMPTY_REPLY_ERROR };
             }
+            // A closeout does not withdraw the turn from replay. Its call row
+            // is on record before the post and its reply row right after, so
+            // a run that resumes this turn finishes it from that record (see
+            // findRecordedCloseout) instead of failing closed.
             if (
               args.suggestions?.length &&
               (args.purpose !== 'closeout' ||
@@ -3220,6 +3374,54 @@ export async function answerFastAgentQuestion({
               args.purpose,
               instructionVersion,
             );
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact: {
+            if (!adapter.createArtifact) {
+              return {
+                success: false,
+                error: 'Artifact creation is unavailable for this Session.',
+              };
+            }
+            const args = createArtifactArgsSchema.parse(call.args);
+            const signature = createHash('sha256')
+              .update(`${args.path}\0${args.content}`)
+              .digest('hex');
+            if (completedTaskActions.has(`artifact:${signature}`)) {
+              return {
+                success: false,
+                error: 'The same artifact was already created in this turn.',
+              };
+            }
+            const extension = args.path.split('.').pop()?.toLowerCase();
+            const inferredContentType =
+              extension === 'md'
+                ? 'text/markdown'
+                : extension === 'html' || extension === 'htm'
+                  ? 'text/html'
+                  : extension === 'json'
+                    ? 'application/json'
+                    : extension === 'csv'
+                      ? 'text/csv'
+                      : extension === 'svg'
+                        ? 'image/svg+xml'
+                        : 'text/plain';
+            completedTaskActions.add(`artifact:${signature}`);
+            try {
+              const artifact = await adapter.createArtifact({
+                ...args,
+                contentType: args.contentType ?? inferredContentType,
+              });
+              if (conversation.surface === 'web') visibleUpdatePosted = true;
+              return {
+                success: true,
+                artifact,
+                guidance: 'Link the artifact viewUrl when it is useful.',
+              };
+            } catch (error) {
+              completedTaskActions.delete(`artifact:${signature}`);
+              return toolFailure(error);
+            }
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.showWidget: {
@@ -3367,6 +3569,16 @@ export async function answerFastAgentQuestion({
                 environmentId: args.environmentId ?? null,
                 model: args.model ?? null,
                 parentSessionId: session.id,
+                // Stable across a resumed run of this turn: a repeat of the
+                // same launch (the process died between launching and
+                // recording it) returns the existing task instead of a
+                // second one.
+                launchIdempotencyKey: `fast:${session.id}:${turnId}:${createHash(
+                  'sha256',
+                )
+                  .update(signature)
+                  .digest('hex')
+                  .slice(0, 32)}`,
                 postKickoff: deliverKickoff,
               });
             } catch (error) {
@@ -3389,6 +3601,83 @@ export async function answerFastAgentQuestion({
                 await deliverKickoff(result);
               }
             }
+            return result;
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest: {
+            const args = reviewPullRequestArgsSchema.parse(call.args);
+            const conversationTarget =
+              getConversationPullRequestTarget(conversation);
+            const repository =
+              args.repository ?? conversationTarget?.repository;
+            const pullRequestNumber =
+              args.pullRequestNumber ?? conversationTarget?.pullRequestNumber;
+            if (!repository || !pullRequestNumber) {
+              return {
+                success: false,
+                error:
+                  'Name the repository (owner/name) and pull request number to review.',
+              };
+            }
+            const signature = `review_pull_request:${repository}#${pullRequestNumber}`;
+            if (completedTaskActions.has(signature)) {
+              return {
+                success: false,
+                error:
+                  'A review of that pull request was already started in this turn.',
+              };
+            }
+            completedTaskActions.add(signature);
+            throwIfTurnCancelled();
+            let result: Awaited<ReturnType<typeof launchFastAgentPrReview>>;
+            try {
+              result = await launchFastAgentPrReview(
+                { userId, apiBaseUrl },
+                {
+                  repository,
+                  pullRequestNumber,
+                  fastConversationId: session.id,
+                },
+              );
+            } catch (error) {
+              completedTaskActions.delete(signature);
+              throw error;
+            }
+            if (!result.success) {
+              completedTaskActions.delete(signature);
+              return result;
+            }
+            // A reused already-active review keeps its original payload, so
+            // this Session will not hear its settle: skip the kickoff and let
+            // the reply set expectations instead of promising a callback. It
+            // also belongs to another launch (often an automation), so it is
+            // never registered as this turn's task — that would expose it to
+            // cancel_task and send_task_message here.
+            if (result.alreadyRunning) {
+              return {
+                ...result,
+                guidance:
+                  'A review of that pull request is already running; its results will post on the pull request itself, not back into this conversation. Tell the user that and link the pull request.',
+              };
+            }
+            if (result.taskId) {
+              currentTasks.set(result.taskId, { taskId: result.taskId });
+            }
+            const kickoffMessage = [
+              args.kickoffMessage,
+              result.taskUrl && !args.kickoffMessage.includes(result.taskUrl)
+                ? `[Open in Roomote](${result.taskUrl})`
+                : undefined,
+            ]
+              .filter((part): part is string => Boolean(part))
+              .join('\n\n');
+            throwIfTurnCancelled();
+            await postReply(
+              { purpose: 'progress', message: kickoffMessage, kickoff: true },
+              true,
+            );
+            visibleUpdatePosted = true;
+            substantiveWorkAcknowledged = true;
             return result;
           }
 
@@ -3684,6 +3973,37 @@ export async function answerFastAgentQuestion({
       durableOpenCodeSessionId = openCodeSessionId;
       session.openCodeSessionId = openCodeSessionId;
     };
+    // A resumed run whose earlier attempt reached its closeout has nothing
+    // left to ask the model. Finish the turn from the record instead. A
+    // recorded closing reply was delivered: settle silently. A closing reply
+    // call the process died inside may or may not have reached the surface:
+    // post the same text once more and settle. The duplicate that can cause
+    // is bounded to the window between the surface accepting the post and
+    // the transcript recording it.
+    const recordedCloseout = previousAttempt
+      ? findRecordedCloseout(previousAttempt.events)
+      : null;
+    if (recordedCloseout) {
+      if (recordedCloseout.kind === 'delivered') {
+        console.info(
+          `[Fast Agent] Resumed turn ${turnId} already delivered its closeout; settling without a model request.`,
+        );
+        closedInstructionVersions.add(currentInstructionVersion);
+        lastVisibleMessage = recordedCloseout.text;
+        visibleUpdatePosted = true;
+      } else {
+        console.info(
+          `[Fast Agent] Resumed turn ${turnId} was cut off inside its closeout; posting it again.`,
+        );
+        await postReply({
+          purpose: recordedCloseout.purpose,
+          message: recordedCloseout.text,
+        });
+      }
+      await settleDurableTurn();
+      await mirrorPendingMessages();
+      return lastVisibleMessage;
+    }
     diagnostics.markInferenceQueued();
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
@@ -4180,49 +4500,45 @@ export async function answerFastAgentQuestion({
       !isInstructionClosed(terminalInstructionVersion)
     ) {
       const message = resolveTerminalReplyText(promptText).trim();
-      // A terminal closeout is itself a side effect a replay would repeat:
-      // withdraw the turn from recovery before posting it.
-      const terminalReplayRevoked =
-        await revokeDurableTurnReplay('Terminal closeout.');
-      if (!terminalReplayRevoked) {
-        terminalRevocationFailed = true;
-        console.warn(
-          '[Fast Agent] Skipping the terminal closeout because the turn could not be withdrawn from replay.',
-        );
-      } else if (message) {
+      // The terminal closeout stays inside replay: its intent is recorded
+      // before the post and its reply row right after, so a resumed run
+      // settles on that record instead of posting again.
+      if (message) {
         const streamedEvent = await takeStreamedReplyEvent();
-        await postReply(
-          { purpose: 'closeout', message },
-          false,
-          completedOpenCodeMessage,
-          terminalInstructionVersion,
-          streamedEvent,
+        await postRecordedSystemCloseout(message, () =>
+          postReply(
+            { purpose: 'closeout', message },
+            false,
+            completedOpenCodeMessage,
+            terminalInstructionVersion,
+            streamedEvent,
+          ),
         );
       } else if (!visibleUpdatePosted) {
         // A delivered update is already a complete visible response. Stay
         // silent rather than append a generic closeout that contradicts it.
-        await postReply(
-          {
-            purpose: 'closeout',
-            message:
-              'I could not complete that request within the available turn.',
-          },
-          false,
-          undefined,
-          terminalInstructionVersion,
+        const fallback =
+          'I could not complete that request within the available turn.';
+        await postRecordedSystemCloseout(fallback, () =>
+          postReply(
+            { purpose: 'closeout', message: fallback },
+            false,
+            undefined,
+            terminalInstructionVersion,
+          ),
         );
       } else if (platformEvent && platformEventVisibility === 'required') {
         // A visibility-required platform event promises a closeout even when
         // an intro ack or launch kickoff already posted a visible update
         // (e.g. the setup kickoff ending on an empty terminal response).
-        await postReply(
-          {
-            purpose: 'closeout',
-            message: 'I will post updates here as this progresses.',
-          },
-          false,
-          undefined,
-          terminalInstructionVersion,
+        const fallback = 'I will post updates here as this progresses.';
+        await postRecordedSystemCloseout(fallback, () =>
+          postReply(
+            { purpose: 'closeout', message: fallback },
+            false,
+            undefined,
+            terminalInstructionVersion,
+          ),
         );
       }
     }
@@ -4307,44 +4623,19 @@ export async function answerFastAgentQuestion({
           // Resumable turns and unrevoked rows fall through to the rethrow
           // below without a user-facing closeout.
         } else if (!lockOwnershipLost && inferenceRetryReply) {
+          // A visible retry notice must not stay up claiming a retry that
+          // will never come: a deliberately cancelled turn, or the rare turn
+          // whose admission write failed and so has no row to resume from.
+          // Every admitted turn resumes instead and never reaches here.
           await replaceInferenceRetryReply(
             {
               purpose: 'closeout',
-              // A shutdown is a restart the user can see through honestly;
-              // other aborts keep the generic retry-interruption wording.
-              message: shutdownInterrupted
-                ? RESTARTED_ACTIVE_TURN_MESSAGE
-                : INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+              message: INTERRUPTED_INFERENCE_RETRY_MESSAGE,
             },
             true,
             undefined,
             interruptionReason,
           );
-        } else if (shutdownInterrupted && !isInstructionClosed()) {
-          const reply = {
-            purpose: 'closeout' as const,
-            message: RESTARTED_ACTIVE_TURN_MESSAGE,
-          };
-          try {
-            const posted =
-              (await surfaceReplyStream.deliver(reply)) ??
-              (await adapter.postReply(reply));
-            diagnostics.recordVisibleReply();
-            const retryEvent = inferenceRetryCanonicalEvent;
-            await persistAssistantReply({
-              reply,
-              event:
-                retryEvent ??
-                allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
-              platformMessageId: posted?.messageId,
-              inferenceRetryNotice: Boolean(retryEvent),
-              interruptionReason,
-            });
-          } catch (postError) {
-            console.error(
-              `[Fast Agent] Failed to post shutdown closeout: ${formatErrorForLog(postError)}`,
-            );
-          }
         } else if (
           lockOwnershipLost &&
           canonicalConversationId &&
@@ -4385,24 +4676,20 @@ export async function answerFastAgentQuestion({
             inferenceRetryAttempted,
           )
         : 'I hit an error while handling that request. Please try again in a moment.';
-    // The error closeout is terminal too; a replay must not post it twice.
-    const errorReplayRevoked =
-      !isInstructionClosed() &&
-      (await revokeDurableTurnReplay('Error closeout.'));
-    if (!isInstructionClosed() && !errorReplayRevoked) {
-      terminalRevocationFailed = true;
-      console.warn(
-        '[Fast Agent] Skipping the error closeout because the turn could not be withdrawn from replay.',
-      );
-    }
-    if (errorReplayRevoked) {
+    // The error closeout is recorded like any other closeout: its intent
+    // before the post and its reply row right after, so a run that resumes
+    // this turn sees it and does not post a second one.
+    if (!isInstructionClosed()) {
       try {
         const reply = { purpose: 'closeout' as const, message };
-        if (
-          !(await replaceInferenceRetryReply(reply, true, () =>
-            diagnostics.recordVisibleReply(),
-          ))
-        ) {
+        await postRecordedSystemCloseout(message, async () => {
+          if (
+            await replaceInferenceRetryReply(reply, true, () =>
+              diagnostics.recordVisibleReply(),
+            )
+          ) {
+            return;
+          }
           const posted =
             (await surfaceReplyStream.deliver(reply)) ??
             (await adapter.postReply(reply));
@@ -4415,7 +4702,7 @@ export async function answerFastAgentQuestion({
             ),
             platformMessageId: posted?.messageId,
           });
-        }
+        });
         inferenceRetryReply = undefined;
         inferenceRetryMessageIndex = undefined;
         inferenceRetryCanonicalEvent = undefined;

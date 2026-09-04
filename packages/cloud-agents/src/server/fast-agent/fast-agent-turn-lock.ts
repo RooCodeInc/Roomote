@@ -19,9 +19,14 @@ export class FastAgentTurnLockLostError extends Error {
   }
 }
 
+/**
+ * Abort reason for a Fast turn whose process is shutting down. Raised by
+ * every process that executes turns (the API for the turns it admits, the
+ * bullmq service for the turns the queue resumes).
+ */
 export class FastAgentProcessShutdownError extends Error {
-  constructor(signal: NodeJS.Signals) {
-    super(`Fast turn interrupted by API shutdown (${signal}).`);
+  constructor(public readonly signal: NodeJS.Signals) {
+    super(`Fast turn interrupted by process shutdown (${signal}).`);
     this.name = 'FastAgentProcessShutdownError';
   }
 }

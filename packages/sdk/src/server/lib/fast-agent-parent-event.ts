@@ -9,6 +9,7 @@ import {
   fastAgentConversationRepository,
   resolveApiBaseUrl,
   type FastAgentTurnLockHandle,
+  type FastAgentReplyHandle,
   type FastAgentTurnAdapter,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
@@ -52,6 +53,7 @@ import {
   exitedRunStatuses,
   type FastAgentConversation,
   type FastAgentHumanFollowUpEvent,
+  type FastAgentSourceControlReplyTarget,
   type FastAgentParent,
   type PullRequestStatus,
   type ReasoningEffort,
@@ -70,7 +72,10 @@ import {
 } from './linear-fast-session';
 import {
   buildSourceControlFastAdapter,
+  buildSourceControlFastConversation,
   buildSourceControlFastDelivery,
+  buildSourceControlReplyQuote,
+  type SourceControlFastDiscussion,
 } from './source-control-fast-delivery';
 import { buildCustomAutomationSlackMessage } from './manager-slack';
 import {
@@ -85,6 +90,7 @@ import {
   buildSignedArtifactRawUrl,
   currentEpochSeconds,
 } from './artifacts/raw-url';
+import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
@@ -1619,12 +1625,238 @@ async function createSourceControlFastAgentParentTurn(params: {
       delivery,
       userId: actorUserId,
       sessionId: session.id,
+      // Mentions reach this turn through the durable queue, so the quote of
+      // the answered comment has to come from the queued event itself.
+      quote:
+        params.event.type === 'human_follow_up'
+          ? buildSourceControlReplyQuote({ text: params.event.question })
+          : null,
       onReplyPosted: params.onReplyPosted,
     }),
   };
 }
 
+/**
+ * Attribution line for the home surface when a human turn arrived on a
+ * source-control discussion: who wrote it and where, quoted the way a web
+ * reply is quoted into a Slack thread.
+ */
+function buildSourceControlOriginAttribution(
+  event: FastAgentHumanFollowUpEvent,
+  target: FastAgentSourceControlReplyTarget,
+): string {
+  const label = `${target.repositoryFullName}#${target.number}`;
+  const where = target.url ? `[${label}](${target.url})` : label;
+  const who = event.senderDisplayName?.trim() || 'Someone';
+  const quoted = event.question
+    .trim()
+    .split('\n')
+    .map((line) => `> ${line}`)
+    .join('\n');
+  return `> **${who}** on ${where}:\n${quoted}`;
+}
+
+/**
+ * A human turn that arrived on a source-control discussion this Session owns
+ * through a task (a mention on the pull request a Slack Session's task opened)
+ * answers in both places: the Session's home surface as usual, and the
+ * discussion the message came from. Delegated work targets the discussion's
+ * branch while staying attached to this Session.
+ */
+async function withSourceControlReplyTarget(
+  turn: FastAgentParentTurn,
+  params: {
+    parent: FastAgentParent;
+    event: FastAgentHumanFollowUpEvent;
+    onReplyPosted: () => void;
+  },
+): Promise<FastAgentParentTurn> {
+  const target = params.event.sourceControlReplyTarget;
+  if (!target) {
+    return turn;
+  }
+  const discussion: SourceControlFastDiscussion = {
+    provider: target.provider,
+    host: target.host,
+    repositoryFullName: target.repositoryFullName,
+    kind: target.kind,
+    number: target.number,
+    ...(target.reviewCommentId
+      ? { reviewCommentId: target.reviewCommentId }
+      : {}),
+    ...(target.replyCommentId ? { replyCommentId: target.replyCommentId } : {}),
+  };
+  const conversation = buildSourceControlFastConversation(discussion);
+  // The Session's own discussion: the home adapter already posts there.
+  if (
+    isFastAgentSourceControlConversation(turn.conversation) &&
+    turn.conversation.workspaceId === conversation.workspaceId &&
+    turn.conversation.conversationId === conversation.conversationId
+  ) {
+    return turn;
+  }
+  const delivery = await buildSourceControlFastDelivery(conversation);
+  if (!delivery) {
+    console.warn(
+      `[Fast Agent] The repository for ${target.repositoryFullName} is not connected; answering only on the Session's home surface.`,
+    );
+    return turn;
+  }
+  const discussionAdapter = buildSourceControlFastAdapter({
+    conversation,
+    delivery,
+    userId: turn.userId,
+    sessionId: params.parent.sessionId,
+    parentConversation: turn.conversation,
+    quote: buildSourceControlReplyQuote({ text: params.event.question }),
+    onReplyPosted: params.onReplyPosted,
+  });
+  const attribution = buildSourceControlOriginAttribution(params.event, target);
+  let attributionPending = true;
+  const discussionLabel = `${target.repositoryFullName}#${target.number}`;
+  const postOnDiscussion = async (
+    message: string,
+  ): Promise<FastAgentReplyHandle | null> => {
+    try {
+      return await discussionAdapter.postReply({ message });
+    } catch (error) {
+      console.warn(
+        `[Fast Agent] Failed to post the Session's reply on ${discussionLabel}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  };
+  const replaceOnDiscussion = async (
+    handle: FastAgentReplyHandle | null,
+    message: string,
+  ): Promise<FastAgentReplyHandle | null> => {
+    if (handle && discussionAdapter.replaceReply) {
+      try {
+        return await discussionAdapter.replaceReply(handle, { message });
+      } catch (error) {
+        console.warn(
+          `[Fast Agent] Failed to replace the Session's reply on ${discussionLabel}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return handle;
+      }
+    }
+    return postOnDiscussion(message);
+  };
+  // Web and automation homes keep only the transcript, so there is nothing
+  // on the home surface to replace; the discussion still needs the update.
+  const homeHoldsNoMessages =
+    turn.conversation.surface === 'web' ||
+    turn.conversation.surface === 'automation';
+
+  return {
+    ...turn,
+    adapter: {
+      ...turn.adapter,
+      launchTask: discussionAdapter.launchTask,
+      postReply: async (reply) => {
+        const homeReply =
+          attributionPending && !homeHoldsNoMessages
+            ? { ...reply, message: `${attribution}\n\n${reply.message}` }
+            : reply;
+        attributionPending = false;
+        const [homeHandle, discussionHandle] = await Promise.all([
+          turn.adapter.postReply(homeReply),
+          postOnDiscussion(reply.message),
+        ]);
+        return encodeRoutedReplyHandle({
+          home: homeHandle ?? null,
+          discussion: discussionHandle,
+        });
+      },
+      // Replacement is offered whenever either side can honor it. A home that
+      // holds messages but cannot edit them (Linear) still receives the
+      // replacement as a fresh reply, the same outcome it has without a
+      // routed target, while the discussion comment is edited in place.
+      ...(turn.adapter.replaceReply ||
+      discussionAdapter.replaceReply ||
+      homeHoldsNoMessages
+        ? {
+            replaceReply: async (handle, reply) => {
+              const parts = decodeRoutedReplyHandle(handle);
+              const [homeHandle, discussionHandle] = await Promise.all([
+                parts.home && turn.adapter.replaceReply
+                  ? turn.adapter.replaceReply(parts.home, reply)
+                  : homeHoldsNoMessages
+                    ? Promise.resolve(undefined)
+                    : turn.adapter.postReply(reply),
+                replaceOnDiscussion(parts.discussion, reply.message),
+              ]);
+              return encodeRoutedReplyHandle({
+                home: homeHandle ?? parts.home,
+                discussion: discussionHandle,
+              });
+            },
+          }
+        : {}),
+    },
+  };
+}
+
+/**
+ * Separates the home and discussion message ids inside one reply handle. The
+ * service persists only `messageId` for a retry notice and hands that string
+ * back on a resumed turn, so both sides have to travel in it for the
+ * replacement to reach the pull request after a process change. The marker
+ * cannot occur in a Slack ts, a Discord snowflake, or a provider comment id.
+ */
+const ROUTED_REPLY_HANDLE_MARKER = '|scm:';
+
+function encodeRoutedReplyHandle({
+  home,
+  discussion,
+}: {
+  home: FastAgentReplyHandle | null;
+  discussion: FastAgentReplyHandle | null;
+}): FastAgentReplyHandle | undefined {
+  if (home && discussion) {
+    return {
+      messageId: `${home.messageId}${ROUTED_REPLY_HANDLE_MARKER}${discussion.messageId}`,
+    };
+  }
+  if (discussion) {
+    return {
+      messageId: `${ROUTED_REPLY_HANDLE_MARKER}${discussion.messageId}`,
+    };
+  }
+  return home ?? undefined;
+}
+
+function decodeRoutedReplyHandle(handle: FastAgentReplyHandle): {
+  home: FastAgentReplyHandle | null;
+  discussion: FastAgentReplyHandle | null;
+} {
+  const markerIndex = handle.messageId.indexOf(ROUTED_REPLY_HANDLE_MARKER);
+  if (markerIndex < 0) {
+    return { home: handle, discussion: null };
+  }
+  const homeMessageId = handle.messageId.slice(0, markerIndex);
+  const discussionMessageId = handle.messageId.slice(
+    markerIndex + ROUTED_REPLY_HANDLE_MARKER.length,
+  );
+  return {
+    home: homeMessageId ? { messageId: homeMessageId } : null,
+    discussion: discussionMessageId ? { messageId: discussionMessageId } : null,
+  };
+}
+
 async function createFastAgentParentTurn(params: {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  actorUserId?: string;
+  onReplyPosted: () => void;
+}): Promise<FastAgentParentTurn> {
+  const turn = await createFastAgentHomeParentTurn(params);
+  return params.event.type === 'human_follow_up'
+    ? withSourceControlReplyTarget(turn, { ...params, event: params.event })
+    : turn;
+}
+
+async function createFastAgentHomeParentTurn(params: {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
   actorUserId?: string;
@@ -1793,7 +2025,26 @@ export async function deliverFastAgentParentEventWithLock(
       ...(humanFollowUp?.senderExternalId
         ? { senderExternalId: humanFollowUp.senderExternalId }
         : {}),
-      turnSource: humanFollowUp ? 'human' : 'platform_event',
+      ...(humanFollowUp?.agentContext
+        ? { currentMessageAgentContext: humanFollowUp.agentContext }
+        : {}),
+      ...(humanFollowUp?.activeTasks?.length
+        ? {
+            activeTasks: humanFollowUp.activeTasks.map((task) => ({
+              taskId: task.taskId,
+              ...(task.title ? { title: task.title } : {}),
+              ...(task.status ? { status: task.status as RunStatus } : {}),
+            })),
+          }
+        : {}),
+      // A durable human row can carry a reaction or a platform event that
+      // was admitted through the human path; a resumed run keeps that
+      // framing rather than reading the event text as a typed message.
+      turnSource:
+        humanFollowUp?.turnSource ??
+        (humanFollowUp ? 'human' : 'platform_event'),
+      ...(humanFollowUp?.input ? { input: humanFollowUp.input } : {}),
+      ...(humanFollowUp?.setupSession ? { setupSession: true } : {}),
       ...(humanFollowUp
         ? { currentDurableHumanFollowUpEventId: humanFollowUp.eventId }
         : {}),
@@ -1812,15 +2063,17 @@ export async function deliverFastAgentParentEventWithLock(
           ? 'present_only'
           : 'default',
       platformEventVisibility:
-        params.event.type === 'pull_request_feedback' ||
+        humanFollowUp?.platformEventVisibility ??
+        (params.event.type === 'pull_request_feedback' ||
         params.event.type === 'pull_request_conflict_detected' ||
         params.event.type === 'automation_triggered'
           ? 'required'
-          : 'optional',
+          : 'optional'),
       platformEventKind:
-        params.event.type === 'automation_triggered'
+        humanFollowUp?.platformEventKind ??
+        (params.event.type === 'automation_triggered'
           ? 'automation'
-          : 'delegated_task',
+          : 'delegated_task'),
       ...(params.event.type === 'pull_request_feedback' &&
       params.event.reviewActionDeliveryId &&
       params.event.suggestedActionQuestion
@@ -1835,6 +2088,7 @@ export async function deliverFastAgentParentEventWithLock(
           }
         : {}),
       adapter: {
+        createArtifact: buildFastAgentArtifactCreator(params.parent.sessionId),
         ...parentTurn.adapter,
         launchTask,
         resolveMcpServerConfigs: () =>

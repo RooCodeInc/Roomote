@@ -130,6 +130,7 @@ export default async function SessionDetailPage({
       createdAt: unifiedSession.createdAt,
       status: unifiedSession.status,
       tasks: unifiedSession.tasks,
+      artifacts: unifiedSession.artifacts,
     };
     // The setup session keeps its inline automation-recommendations card on
     // its normal route after activation: recommendations are optional and
@@ -229,6 +230,7 @@ export default async function SessionDetailPage({
     createdAt: session.createdAt,
     status: null,
     tasks: [],
+    artifacts: [],
     taskSource: 'fast',
     taskCards: fastTasks,
   };

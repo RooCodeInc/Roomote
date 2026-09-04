@@ -133,7 +133,10 @@ reads the discussion, answers as a comment when no workspace is needed, and
 otherwise starts a task on the pull request's source branch (or the project's
 mapped repository for a work item) and reports back in the same discussion.
 Pull request replies stay in the comment thread the mention came from. The
-commenter must have a linked Azure DevOps account.
+commenter must have a linked Azure DevOps account. Ask for a review in the
+mention (for example `@roomote review this`) and Roomote runs the Review Code
+automation's structured review on the current head, posts the findings on the
+pull request, and reports back in the same discussion.
 
 ## Current limits
 

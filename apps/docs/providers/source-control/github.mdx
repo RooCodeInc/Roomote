@@ -228,6 +228,22 @@ answers as a comment when no workspace is needed, and otherwise starts a task
 on the pull request's branch (or the issue's repository) and reports back in
 the same discussion. Mention it again to redirect it, ask a follow-up, or
 steer a running task. Replies to a review comment stay in that review thread.
+Ask for a review in the mention (for example `@roomote review this`) and
+Roomote runs the Review Code automation's structured review on the current
+head, posts the findings on the pull request, and reports back in the same
+discussion.
+
+Replying inside a review thread that Roomote opened counts as talking to
+Roomote, so no `@mention` is needed there; Roomote answers in that thread. On
+a pull request that a Roomote task opened, those replies are instead collected
+as review feedback for the owning Session, described below.
+
+A pull request that a Roomote task opened already belongs to the Session that
+started the work, for example the Slack thread where the task was requested.
+Mentions on that pull request join that Session instead of opening a second
+one: Roomote answers on the pull request and in the Session's home surface,
+and any work it delegates runs on the pull request's branch from the same
+Session.
 
 When a Roomote task opens a pull request, actionable review feedback returns to
 the owning Session and appears in both Fast and standard web task transcripts.

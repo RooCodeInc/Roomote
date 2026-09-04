@@ -38,6 +38,7 @@ import {
 
 import type { Variables } from '../../types';
 import { resolveMcpTaskOrSessionUserId, type McpAuth } from '../mcp/middleware';
+import { handlePrReviewLaunch } from './launchPrReview';
 import { getMembershipRole } from './membership';
 import { logHandlerError } from '../utils';
 
@@ -240,6 +241,12 @@ export async function launchTask(
 
     if (requiresAdmin && membershipRole !== 'org:admin') {
       return c.json({ error: 'Unauthorized' }, 403);
+    }
+
+    // The review pipeline has its own target resolution (a PR, not a prompt
+    // and workspace), so it branches before the standard launch machinery.
+    if (requestedType === 'pr-review') {
+      return await handlePrReviewLaunch(c, { userId: auth.userId }, body);
     }
 
     const repositoryValidationError = shouldValidateRepositorySelection

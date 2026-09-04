@@ -30,7 +30,6 @@ vi.mock('@roomote/sdk/server', () => ({
 
 import {
   findAccessibleSession,
-  getArtifactBuildParentSession,
   getLatestExternalSessionEvent,
   getSessionById,
   getSessionForTask,
@@ -47,82 +46,6 @@ describe('unified Session queries', () => {
     syncFastSlackTitle.mockResolvedValue(undefined);
   });
 
-  it('resolves an artifact through its owning task to the canonical Session', async () => {
-    const owner = await userFactory.create();
-    const [conversation] = await db
-      .insert(fastAgentConversations)
-      .values({
-        userId: owner.id,
-        surface: 'web',
-        workspaceId: owner.id,
-        conversationId: crypto.randomUUID(),
-      })
-      .returning();
-    const session = await sessionFactory.create({
-      ownerKind: 'user',
-      ownerUserId: owner.id,
-      fastConversationId: conversation!.id,
-    });
-    const task = await taskFactory.create({ initiatorUserId: owner.id });
-    await db.insert(sessionTasks).values({
-      sessionId: session.id,
-      taskId: task.id,
-      origin: 'fast_delegation',
-    });
-    const [artifact] = await db
-      .insert(taskArtifacts)
-      .values({
-        taskId: task.id,
-        path: 'plans/build.md',
-        version: 3,
-        contentType: 'text/markdown',
-        size: 100,
-        uploaded: true,
-      })
-      .returning();
-
-    await expect(
-      getArtifactBuildParentSession(
-        { userId: owner.id, isAdmin: false },
-        artifact!.id,
-      ),
-    ).resolves.toEqual({
-      sourceTaskId: task.id,
-      sourceArtifactPath: 'plans/build.md',
-      sourceArtifactVersion: 3,
-      sessionId: session.id,
-      fastConversationId: conversation!.id,
-    });
-  });
-
-  it('keeps artifact ownership when its task has no Session parent', async () => {
-    const owner = await userFactory.create();
-    const task = await taskFactory.create({ initiatorUserId: owner.id });
-    const [artifact] = await db
-      .insert(taskArtifacts)
-      .values({
-        taskId: task.id,
-        path: 'plans/orphan.md',
-        version: 1,
-        contentType: 'text/markdown',
-        size: 100,
-        uploaded: true,
-      })
-      .returning();
-
-    await expect(
-      getArtifactBuildParentSession(
-        { userId: owner.id, isAdmin: false },
-        artifact!.id,
-      ),
-    ).resolves.toEqual({
-      sourceTaskId: task.id,
-      sourceArtifactPath: 'plans/orphan.md',
-      sourceArtifactVersion: 1,
-      sessionId: null,
-      fastConversationId: null,
-    });
-  });
   it('opens detail reads to everyone but scopes the list like tasks', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
@@ -915,6 +838,156 @@ describe('unified Session queries', () => {
     expect(taskEvent).not.toHaveProperty('task.pullRequests');
   });
 
+  it('paginates late timeline events with equal timestamps regardless of id order', async () => {
+    const owner = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      fastConversationId: conversation!.id,
+    });
+    const auth = { userId: owner.id, isAdmin: false };
+
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: 'same-time-z',
+      turnId: 'turn-1',
+      turnSeq: 0,
+      ts: 100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'First' }],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+    });
+
+    const first = await getSessionTimeline(auth, session.id);
+    expect(first?.events.map((event) => event.id)).toEqual([
+      'fast:same-time-z',
+    ]);
+    expect(first?.cursor).toEqual({
+      at: 100,
+      seenIdsAtTimestamp: ['fast:same-time-z'],
+    });
+
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: 'same-time-a',
+      turnId: 'turn-1',
+      turnSeq: 1,
+      ts: 100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Second' }],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+    });
+
+    const second = await getSessionTimeline(auth, session.id, first!.cursor);
+    expect(second?.events.map((event) => event.id)).toEqual([
+      'fast:same-time-a',
+    ]);
+    expect(second?.cursor).toEqual({
+      at: 100,
+      seenIdsAtTimestamp: ['fast:same-time-a', 'fast:same-time-z'],
+    });
+
+    await expect(
+      getSessionTimeline(auth, session.id, second!.cursor),
+    ).resolves.toEqual({ events: [], cursor: second!.cursor });
+
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: 'next-time',
+      turnId: 'turn-1',
+      turnSeq: 2,
+      ts: 101,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Later' }],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+    });
+
+    const third = await getSessionTimeline(auth, session.id, second!.cursor);
+    expect(third?.events.map((event) => event.id)).toEqual(['fast:next-time']);
+    expect(third?.cursor).toEqual({
+      at: 101,
+      seenIdsAtTimestamp: ['fast:next-time'],
+    });
+  });
+
+  it('preserves timestamp-only pagination for deployed clients', async () => {
+    const owner = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      fastConversationId: conversation!.id,
+    });
+
+    await db.insert(fastAgentMessages).values([
+      {
+        conversationId: conversation!.id,
+        eventId: 'at-cursor',
+        turnId: 'turn-1',
+        turnSeq: 0,
+        ts: 100,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'At cursor' }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+      },
+      {
+        conversationId: conversation!.id,
+        eventId: 'after-cursor',
+        turnId: 'turn-1',
+        turnSeq: 1,
+        ts: 101,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'After cursor' }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+      },
+    ]);
+
+    const timeline = await getSessionTimeline(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+      100,
+    );
+
+    expect(timeline?.events.map((event) => event.id)).toEqual([
+      'fast:after-cursor',
+    ]);
+    expect(timeline?.cursor).toBe(101);
+
+    const next = await getSessionTimeline(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+      timeline!.cursor as number,
+    );
+    expect(next).toEqual({ events: [], cursor: 101 });
+  });
+
   it('hydrates uploaded artifacts for every associated task without collapsing shared paths', async () => {
     const owner = await userFactory.create();
     const session = await sessionFactory.create({
@@ -995,6 +1068,43 @@ describe('unified Session queries', () => {
         }),
       ]),
     );
+  });
+
+  it('returns uploaded Session-owned artifacts without creating a task', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Fast artifact session',
+    });
+    await db.insert(taskArtifacts).values([
+      {
+        sessionId: session.id,
+        path: 'notes/result.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 100,
+        uploaded: true,
+      },
+      {
+        sessionId: session.id,
+        path: 'notes/pending.md',
+        version: 1,
+        contentType: 'text/markdown',
+        size: 100,
+        uploaded: false,
+      },
+    ]);
+
+    const detail = await getSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(detail?.tasks).toEqual([]);
+    expect(detail?.artifacts).toEqual([
+      expect.objectContaining({ path: 'notes/result.md', version: 1 }),
+    ]);
   });
 
   it('collates live preview URLs from awake linked task runs', async () => {

@@ -4,6 +4,7 @@ import { Env } from '@roomote/env';
 import { getRedis } from '@roomote/redis';
 
 import type { SlackNotifier } from './slack-notifier';
+import { relocateSlackThreadActiveTaskCards } from './relocate-active-task-cards';
 import {
   getSlackThreadReplyFooterMessageTs,
   setSlackThreadReplyFooterMessageTs,
@@ -12,11 +13,12 @@ import {
   buildSlackThreadFooterText,
   resolveSlackThreadFooterContext,
 } from './thread-footer';
+import { registerSlackThreadActiveTask } from './thread-active-tasks';
 
 export const SLACK_THREAD_REPLY_FOOTER_BLOCK_ID = 'roomote_thread_reply_footer';
 
 const SLACK_THREAD_REPLY_FOOTER_LOCK_PREFIX = 'slack:thread_reply_footer_lock:';
-const THREAD_REPLY_FOOTER_LOCK_TTL_SECONDS = 30;
+const THREAD_REPLY_FOOTER_LOCK_TTL_SECONDS = 120;
 const THREAD_REPLY_FOOTER_LOCK_MAX_ATTEMPTS = 8;
 const THREAD_REPLY_FOOTER_LOCK_RETRY_MS = 100;
 const RELEASE_LOCK_SCRIPT =
@@ -71,6 +73,48 @@ export function isSlackThreadReplyFooterBlock(block: unknown): boolean {
       isSlackThreadReplyFooterText(contextElement.text)
     );
   });
+}
+
+function removeSlackThreadStickyBlocks(blocks: unknown[]): unknown[] {
+  return blocks.filter(
+    (block) =>
+      !isSlackThreadReplyFooterBlock(block) &&
+      !(
+        block &&
+        typeof block === 'object' &&
+        typeof (block as { block_id?: unknown }).block_id === 'string' &&
+        (block as { block_id: string }).block_id.startsWith(
+          'roomote_thread_active_task_',
+        )
+      ),
+  );
+}
+
+function getSlackThreadReplyFooterFallbackText(block: unknown): string {
+  if (!block || typeof block !== 'object') return '';
+  const record = block as { text?: unknown; elements?: unknown };
+  if (typeof record.text === 'string') return record.text;
+  if (!Array.isArray(record.elements)) return '';
+  const first = record.elements[0];
+  return first &&
+    typeof first === 'object' &&
+    typeof (first as { text?: unknown }).text === 'string'
+    ? (first as { text: string }).text
+    : '';
+}
+
+async function relocateActiveCardsBestEffort(params: {
+  slack: Pick<SlackNotifier, 'getRawMessage' | 'postMessage' | 'deleteMessage'>;
+  channel: string;
+  threadTs: string;
+}): Promise<void> {
+  try {
+    await relocateSlackThreadActiveTaskCards(params);
+  } catch (error) {
+    console.warn(
+      `[slackThreadFooter] Failed to relocate active task cards in thread ${params.threadTs}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 export function buildSlackThreadReplyFooterBlock(params: {
@@ -147,9 +191,7 @@ export async function removeSlackThreadReplyFooter(params: {
     return;
   }
 
-  const updatedBlocks = blocks.filter(
-    (block) => !isSlackThreadReplyFooterBlock(block),
-  );
+  const updatedBlocks = removeSlackThreadStickyBlocks(blocks);
 
   if (updatedBlocks.length === blocks.length) {
     return;
@@ -184,7 +226,11 @@ function buildOutOfBandTaskUrl(taskId: string, utmCampaign: string): string {
 export async function postSlackThreadMessageWithFooterText(params: {
   slack: Pick<
     SlackNotifier,
-    'postMessage' | 'getMessageBlocks' | 'updateMessage'
+    | 'postMessage'
+    | 'getMessageBlocks'
+    | 'getRawMessage'
+    | 'updateMessage'
+    | 'deleteMessage'
   >;
   channel: string;
   threadTs: string;
@@ -207,6 +253,11 @@ export async function postSlackThreadMessageWithFooterText(params: {
         params.channel,
         params.threadTs,
       );
+      await relocateActiveCardsBestEffort({
+        slack: params.slack,
+        channel: params.channel,
+        threadTs: params.threadTs,
+      });
 
       const nextMessageTs = await params.slack.postMessage({
         channel: params.channel,
@@ -373,6 +424,71 @@ export async function updateSlackThreadMessageWithFooterText(params: {
   });
 }
 
+/** Register a card and, when needed, place the exact existing footer below it. */
+export async function registerSlackThreadActiveTaskAndMoveFooter(params: {
+  slack: Pick<
+    SlackNotifier,
+    | 'getMessageBlocks'
+    | 'getRawMessage'
+    | 'postMessage'
+    | 'updateMessage'
+    | 'deleteMessage'
+  >;
+  teamId: string;
+  channel: string;
+  threadTs: string;
+  taskId: string;
+}): Promise<void> {
+  await withSlackThreadReplyFooterLock({
+    channel: params.channel,
+    threadTs: params.threadTs,
+    fn: async () => {
+      await registerSlackThreadActiveTask(params);
+      const previousFooterMessageTs = await getSlackThreadReplyFooterMessageTs(
+        params.channel,
+        params.threadTs,
+      );
+      await relocateActiveCardsBestEffort(params);
+      if (!previousFooterMessageTs) return;
+
+      const blocks = await params.slack.getMessageBlocks({
+        channel: params.channel,
+        threadTs: params.threadTs,
+        messageTs: previousFooterMessageTs,
+      });
+      const footerBlock = blocks?.find(isSlackThreadReplyFooterBlock);
+      if (!footerBlock) return;
+      const nextFooterMessageTs = await params.slack.postMessage({
+        channel: params.channel,
+        thread_ts: params.threadTs,
+        text: getSlackThreadReplyFooterFallbackText(footerBlock),
+        blocks: [footerBlock],
+      });
+      if (!nextFooterMessageTs) return;
+
+      try {
+        await setSlackThreadReplyFooterMessageTs(
+          params.channel,
+          params.threadTs,
+          nextFooterMessageTs,
+        );
+      } catch (error) {
+        await params.slack.deleteMessage({
+          channel: params.channel,
+          ts: nextFooterMessageTs,
+        });
+        throw error;
+      }
+      await removeSlackThreadReplyFooter({
+        slack: params.slack,
+        channel: params.channel,
+        threadTs: params.threadTs,
+        messageTs: previousFooterMessageTs,
+      });
+    },
+  });
+}
+
 /**
  * Posts a Slack thread reply that becomes the sticky "Working on..." footer
  * message for the thread: attaches the current footer, then removes it from
@@ -384,7 +500,11 @@ export async function updateSlackThreadMessageWithFooterText(params: {
 export async function postSlackThreadMessageWithStickyFooter(params: {
   slack: Pick<
     SlackNotifier,
-    'postMessage' | 'getMessageBlocks' | 'updateMessage'
+    | 'postMessage'
+    | 'getMessageBlocks'
+    | 'getRawMessage'
+    | 'updateMessage'
+    | 'deleteMessage'
   >;
   channel: string;
   threadTs: string;
