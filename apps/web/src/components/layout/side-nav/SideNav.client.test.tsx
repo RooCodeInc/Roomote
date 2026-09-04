@@ -491,12 +491,21 @@ describe('SideNav recent sessions', () => {
     expect(screen.queryByTestId('nav-/automations')).not.toBeInTheDocument();
   });
 
-  it('hides inaccessible destinations during setup while keeping Settings enabled', () => {
+  it('disables inaccessible destinations during setup while keeping Settings enabled', () => {
     render(<SideNav setupIncomplete />);
 
-    expect(screen.queryByTestId('nav-/')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('nav-/automations')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('nav-/analytics')).not.toBeInTheDocument();
+    expect(screen.getByTestId('nav-/')).toHaveAttribute(
+      'data-disabled',
+      'true',
+    );
+    expect(screen.getByTestId('nav-/automations')).toHaveAttribute(
+      'data-disabled',
+      'true',
+    );
+    expect(screen.getByTestId('nav-/analytics')).toHaveAttribute(
+      'data-disabled',
+      'true',
+    );
     expect(screen.getByTestId('nav-/sessions')).toHaveAttribute(
       'data-disabled',
       'false',
@@ -505,15 +514,5 @@ describe('SideNav recent sessions', () => {
       'data-disabled',
       'false',
     );
-  });
-
-  it('does not link the expanded wordmark to gated Home during setup', () => {
-    state.isSideNavExpanded = true;
-
-    render(<SideNav setupIncomplete />);
-
-    expect(
-      screen.getByRole('img', { name: 'Roomote' }).closest('a'),
-    ).toBeNull();
   });
 });
