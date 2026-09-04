@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
   getData: vi.fn(),
   casMessageTs: vi.fn(),
   clearPendingCleanup: vi.fn(),
-  isReplyStreamActive: vi.fn(),
 }));
 
 vi.mock('../thread-active-tasks', () => ({
@@ -17,9 +16,6 @@ vi.mock('../live-task-stream', () => ({
   getSlackLiveTaskStreamData: mocks.getData,
   compareAndSwapSlackLiveTaskMessageTs: mocks.casMessageTs,
   clearSlackLiveTaskPendingCleanup: mocks.clearPendingCleanup,
-}));
-vi.mock('../thread-reply-stream', () => ({
-  isSlackThreadReplyStreamActive: mocks.isReplyStreamActive,
 }));
 
 import { relocateSlackThreadActiveTaskCards } from '../relocate-active-task-cards';
@@ -92,40 +88,6 @@ describe('relocateSlackThreadActiveTaskCards', () => {
     mocks.casMessageTs.mockResolvedValue(true);
     mocks.clearPendingCleanup.mockResolvedValue(true);
     mocks.removeTask.mockResolvedValue({});
-    mocks.isReplyStreamActive.mockResolvedValue(false);
-  });
-
-  it('does not relocate a canonical card while any reply stream is active', async () => {
-    mocks.isReplyStreamActive.mockResolvedValue(true);
-    const slack = slackMock();
-
-    await relocateSlackThreadActiveTaskCards({
-      slack: slack as never,
-      channel: 'C1',
-      threadTs: 'root-ts',
-    });
-
-    expect(mocks.getTaskIds).not.toHaveBeenCalled();
-    expect(slack.getRawMessage).not.toHaveBeenCalled();
-    expect(slack.postMessage).not.toHaveBeenCalled();
-  });
-
-  it('relocates after all chunks complete even while finalization owns the marker', async () => {
-    mocks.isReplyStreamActive.mockResolvedValue(true);
-    const slack = slackMock();
-
-    await relocateSlackThreadActiveTaskCards({
-      slack: slack as never,
-      channel: 'C1',
-      threadTs: 'root-ts',
-      replyStreamComplete: true,
-    });
-
-    expect(slack.postMessage).toHaveBeenCalledWith({
-      channel: 'C1',
-      thread_ts: 'root-ts',
-      ...rawMessage,
-    });
   });
 
   it('reposts the exact canonical payload, hands off the pointer, then deletes the old card', async () => {
