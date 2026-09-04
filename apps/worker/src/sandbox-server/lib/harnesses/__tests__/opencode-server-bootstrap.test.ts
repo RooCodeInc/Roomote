@@ -15,6 +15,7 @@ describe('opencode-server bootstrap', () => {
   // apps/worker/src/run-task/slack-posting-tools.ts).
   const slackPostingToolExclusions = {
     roomote_send_chat_reply: false,
+    roomote_report_to_parent_session: false,
     roomote_send_chat_reaction_emoji: false,
     roomote_post_to_channel: false,
     roomote_reply_to_slack_thread: false,

@@ -175,10 +175,10 @@ describe('Capture visual proof skill', () => {
       "every retained keyframe's local path, `artifactId`, `viewUrl`, and `rawUrl`",
     );
     expect(skillContent).toContain(
-      'When uploaded proof artifacts are present, carry forward a short `Sharing note`',
+      'When proof artifacts exist, note that uploads are not shared automatically',
     );
     expect(skillContent).toContain(
-      'when `send_chat_reply` with `imageArtifactIds` is available and the proof may be relevant to the user in the originating thread',
+      'Include screenshot IDs via `report_to_parent_session` when available',
     );
     expect(skillContent).toContain(
       'Choose `Blocker type` from: `proof capture timed out`, `proof runtime unavailable`, `browser surface unavailable`, `browser surface broken`, `claim not visually provable`, `state not reachable on current browser surface`, `fixture missing on current browser surface`, `external side effect risk`, or `upload failed`.',

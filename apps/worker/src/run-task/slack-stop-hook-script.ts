@@ -19,23 +19,37 @@ function getChatSurfaceLabel() {
 }
 
 const SURFACE_LABEL = getChatSurfaceLabel();
+const REPORTS_TO_PARENT_SESSION =
+  process.env.ROOMOTE_FAST_AGENT_CHILD === 'true';
+const LIFECYCLE_TOOL_NAME = REPORTS_TO_PARENT_SESSION
+  ? 'report_to_parent_session'
+  : 'send_chat_reply';
 const REMINDER = [
-  'Before finalizing, post a terminal ' +
-    SURFACE_LABEL +
-    '-visible reply for the current turn:',
-  'use send_chat_reply with purpose "closeout" for the answer, result, blocker, or handoff.',
+  REPORTS_TO_PARENT_SESSION
+    ? 'Before finalizing, send a terminal report to the parent Session:'
+    : 'Before finalizing, post a terminal ' +
+      SURFACE_LABEL +
+      '-visible reply for the current turn:',
+  'use ' +
+    LIFECYCLE_TOOL_NAME +
+    ' with purpose "closeout" for the answer, result, blocker, or handoff.',
   'Use request_user_input only when you genuinely require structured input from the user.',
   'If the current turn was interrupted mid-action or its work is unfinished,',
   'finish that work first and then post the closeout.',
   'Do not start unrelated new work before the closeout.',
 ].join(' ');
 const AUTOMATION_CLOSEOUT_REMINDER = [
-  'This automation-started task has not posted its ' +
-    SURFACE_LABEL +
-    ' closeout yet.',
-  'Before finalizing, post one self-contained ' +
-    SURFACE_LABEL +
-    ' message with send_chat_reply purpose "closeout" that explains',
+  REPORTS_TO_PARENT_SESSION
+    ? 'This automation-started task has not reported its closeout to the parent Session yet.'
+    : 'This automation-started task has not posted its ' +
+      SURFACE_LABEL +
+      ' closeout yet.',
+  REPORTS_TO_PARENT_SESSION
+    ? 'Before finalizing, send one self-contained report to the parent Session with'
+    : 'Before finalizing, post one self-contained ' +
+      SURFACE_LABEL +
+      ' message with',
+  LIFECYCLE_TOOL_NAME + ' purpose "closeout" that explains',
   'what the automation asked you to investigate and the concrete outcome (PR link, no-op or deferred reason, or blocker).',
   'Do not start new work first.',
 ].join(' ');
@@ -247,9 +261,13 @@ function isTerminalReplyPurpose(replyPurpose) {
   );
 }
 
+function isLifecycleTextTool(tool) {
+  return tool === 'send_chat_reply' || tool === 'report_to_parent_session';
+}
+
 function getLegacyTerminalSatisfaction(state, currentTurnMessageTs) {
   const tool = trimString(state && state.tool);
-  if (tool !== 'send_chat_reply') {
+  if (!isLifecycleTextTool(tool)) {
     return null;
   }
 
@@ -278,7 +296,7 @@ function getCurrentTurnTerminalSatisfaction(state) {
   const currentTurnMessageTs = trimString(state && state.currentTurnMessageTs);
   if (!currentTurnMessageTs) {
     const tool = trimString(state && state.tool);
-    if (tool !== 'send_chat_reply') {
+    if (!isLifecycleTextTool(tool)) {
       return null;
     }
 
@@ -364,7 +382,7 @@ function getTerminalCurrentTurnFailureReason(state) {
     return 'current_turn_nonterminal_reaction';
   }
 
-  if (!tool || tool !== 'send_chat_reply') {
+  if (!tool || !isLifecycleTextTool(tool)) {
     return null;
   }
 

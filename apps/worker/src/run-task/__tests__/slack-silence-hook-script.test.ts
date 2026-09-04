@@ -37,6 +37,7 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
         ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: undefined,
         ROOMOTE_COMMUNICATION_PROVIDER: undefined,
         ROOMOTE_SLACK_CHANNEL: undefined,
+        ROOMOTE_FAST_AGENT_CHILD: undefined,
         ...options.env,
       },
     });
@@ -109,6 +110,7 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
   it.each([
     'mcp__roomote__send_chat_reply',
     'roomote_send_chat_reply',
+    'mcp__roomote__report_to_parent_session',
     'mcp__roomote__send_chat_reaction_emoji',
     'roomote_reply_to_slack_thread',
   ])('denies %s from non-parent subagent threads', (toolName) => {

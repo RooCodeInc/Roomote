@@ -5,18 +5,18 @@ import { getFastAgentParentFromPayload, isPrReviewRun } from '@roomote/types';
 
 import { enqueueFastAgentParentEvent } from '../fast-agent-parent-event-queue';
 
-type FastAgentChildChatReplyPurpose =
+type ParentSessionReportPurpose =
   | 'ack'
   | 'progress'
   | 'closeout'
   | 'clarification';
 
-/** Route a Fast child's lifecycle message through its conversational parent. */
-export async function relayFastAgentChildChatReply(input: {
+/** Route a coding task report through its conversational parent Session. */
+export async function reportToParentSession(input: {
   runId: number;
   taskId: string;
   deliverySignature: string;
-  purpose: FastAgentChildChatReplyPurpose;
+  purpose: ParentSessionReportPurpose;
   message: string;
   imageArtifactIds?: string[];
 }): Promise<{ relayed: boolean }> {
