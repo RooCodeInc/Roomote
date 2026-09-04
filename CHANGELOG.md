@@ -47,6 +47,7 @@ Roomote 1.3 brings every supported entry point into continuous Sessions, expands
 - Keep Slack task progress visible and stable as threads grow, show live activity separately from final output, and explain when buttons on retired task messages can no longer be used. Thanks to @mrubens and @daniel-lxs for contributing this improvement.
 - Render Slack links, channel references, and bare URLs correctly in web Session transcripts. Thanks to @mrubens for contributing this improvement.
 - Keep source-control conversations accurate by quoting the triggering comment, editing one reply throughout a Fast turn, linking forwarded Slack notifications to the exact GitHub comment, and resolving comment-edit endpoints safely. Thanks to @mrubens for contributing this improvement.
+- Revoke a removed user's existing run-token access to task artifacts while preserving deployment-owned task access.
 
 ## 1.2.4 (2026-09-04)
 
