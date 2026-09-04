@@ -2,6 +2,19 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.2.4 (2026-09-04)
+
+Roomote 1.2.4 completes setup from infrastructure readiness and makes unavailable product areas clear without interrupting the active setup Session.
+
+### Highlights
+
+- Finish setup without choosing optional starter work once infrastructure and repository prerequisites are ready.
+- See which product areas become available after setup, with unavailable destinations disabled and explained.
+
+### Patch changes
+
+- Complete setup as soon as infrastructure and repository prerequisites are ready, while keeping setup-gated destinations visible but disabled with an explanation until setup finishes.
+
 ## 1.2.3 (2026-09-03)
 
 Roomote 1.2.3 restores Fast Sessions for deployments that rely on the default task model.
