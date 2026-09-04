@@ -2447,8 +2447,8 @@ describe('deliverFastAgentParentEvent', () => {
       conversationId: 'pull/42',
       replyTarget: { channelId: 'pull/42', threadId: '800' },
     });
-    // The pull request gets the answer under the quoted mention, in the
-    // review thread the mention came from.
+    // The pull request gets the answer in the review thread the mention
+    // came from; the reply sits under the mention, so it is not quoted.
     expect(mocks.postSourceControlComment).toHaveBeenCalledOnce();
     const comment = mocks.postSourceControlComment.mock.calls[0]?.[0] as {
       discussion: { number: number; reviewCommentId?: string };
@@ -2457,7 +2457,7 @@ describe('deliverFastAgentParentEvent', () => {
     expect(comment.discussion).toEqual(
       expect.objectContaining({ number: 42, reviewCommentId: '800' }),
     );
-    expect(comment.body).toContain('> Can you also update the changelog?');
+    expect(comment.body).not.toContain('> Can you also update the changelog?');
     expect(comment.body).toContain('Done: the changelog now mentions the fix.');
     // The Slack thread gets the same answer with attribution to the mention.
     const slackPosts = JSON.stringify(mocks.postMessage.mock.calls);
