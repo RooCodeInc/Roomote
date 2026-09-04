@@ -103,6 +103,13 @@ function isLivePartialBlock(block: AcpRenderBlock): boolean {
   return isToolMessage(block.msg) && block.msg.data.status === 'in_progress';
 }
 
+function countToolCalls(blocks: AcpRenderBlock[]): number {
+  return blocks.reduce((count, block) => {
+    if (block.kind === 'tool_group') return count + block.items.length;
+    return count + (isToolMessage(block.msg) ? 1 : 0);
+  }, 0);
+}
+
 export function isActivityCollapsibleBlock(
   block: AcpRenderBlock,
   artifacts?: readonly TaskArtifact[] | null,
@@ -208,7 +215,11 @@ export function buildAcpActivityRenderBlocks(
     const activityBlocks = blocks.slice(activityStart, activityEnd);
     const next = blocks[activityEnd];
 
-    if (activityBlocks.length > 0 && next && isActivityBoundaryBlock(next)) {
+    if (
+      countToolCalls(activityBlocks) > 1 &&
+      next &&
+      isActivityBoundaryBlock(next)
+    ) {
       const firstActivity = activityBlocks[0]!;
 
       groupedBlocks.push({

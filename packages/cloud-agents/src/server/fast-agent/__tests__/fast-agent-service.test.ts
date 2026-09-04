@@ -745,6 +745,77 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('persists child-selected image IDs when the parent omits the optional attachment argument', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Here is the screenshot.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      defaultImageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'Here is the screenshot.',
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+    const assistantMessage = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) => message.eventType === 'roomote_runtime.assistant_message',
+      );
+    expect(assistantMessage?.payload).toMatchObject({
+      purpose: 'closeout',
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+  });
+
+  it('persists child-selected image IDs on a text-only terminal closeout', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        return 'The visual comparison is attached.';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      defaultImageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'The visual comparison is attached.',
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+    const assistantMessage = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) => message.eventType === 'roomote_runtime.assistant_message',
+      );
+    expect(assistantMessage?.payload).toMatchObject({
+      purpose: 'closeout',
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+  });
+
   it('reports local storage exhaustion instead of a generic Fast error', async () => {
     const storageError = Object.assign(
       new Error('ENOSPC: no space left on device, write'),
@@ -1567,6 +1638,183 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('settles an ambient turn silently when the model ends a steered aside with nothing to say', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([
+          {
+            id: '2b6d0e0a-5f0e-4d8b-9d0c-6a4a1a1b2c3d',
+            createdAt: new Date('2026-09-04T16:56:45.000Z'),
+            parent: { sessionId: 'conversation-1' },
+            event: {
+              type: 'human_follow_up',
+              eventId: '100.4',
+              currentMessageId: '100.4',
+              userId: 'user-1',
+              question: 'https://example.com/deploy/123',
+              directedAtRoomote: false,
+            },
+          },
+        ])
+        .mockResolvedValue([]);
+
+      let continueGeneration: (() => void) | undefined;
+      const generationPaused = new Promise<void>((resolve) => {
+        continueGeneration = resolve;
+      });
+      const adapter = callbacks();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-ignores-aside',
+            sessionId: 'opencode-session-1',
+            parentId: 'initial-user-message',
+            createdAtMs: 100,
+          });
+          // The opener is an aside between people; the model ignores it.
+          await invokeTool(
+            nativeToolNames.ignoreEvent,
+            {},
+            undefined,
+            'assistant-ignores-aside',
+          );
+          await generationPaused;
+          // The steered link opens a new instruction; the model says nothing.
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-after-steer',
+            sessionId: 'opencode-session-1',
+            parentId: 'steered-user-message',
+            createdAtMs: 200,
+          });
+          return '';
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        allowSilentAmbientReply: true,
+        adapter,
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      continueGeneration?.();
+      await expect(resultPromise).resolves.toBe('');
+
+      expect(adapter.postReply).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still closes out when a steered follow-up directed at Roomote goes unanswered', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([
+          {
+            id: '3c7e1f1b-6a1f-4e9c-8e1d-7b5b2b2c3d4e',
+            createdAt: new Date('2026-09-04T16:56:45.000Z'),
+            parent: { sessionId: 'conversation-1' },
+            event: {
+              type: 'human_follow_up',
+              eventId: '100.4',
+              currentMessageId: '100.4',
+              userId: 'user-1',
+              question: '<@UBOT> can you check the deploy?',
+              directedAtRoomote: true,
+            },
+          },
+        ])
+        .mockResolvedValue([]);
+
+      let continueGeneration: (() => void) | undefined;
+      const generationPaused = new Promise<void>((resolve) => {
+        continueGeneration = resolve;
+      });
+      const adapter = callbacks();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-ignores-aside',
+            sessionId: 'opencode-session-1',
+            parentId: 'initial-user-message',
+            createdAtMs: 100,
+          });
+          await invokeTool(
+            nativeToolNames.ignoreEvent,
+            {},
+            undefined,
+            'assistant-ignores-aside',
+          );
+          await generationPaused;
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-after-steer',
+            sessionId: 'opencode-session-1',
+            parentId: 'steered-user-message',
+            createdAtMs: 200,
+          });
+          return '';
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        allowSilentAmbientReply: true,
+        adapter,
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      continueGeneration?.();
+      await resultPromise;
+
+      expect(adapter.postReply).toHaveBeenCalledTimes(1);
+      expect(adapter.postReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          purpose: 'closeout',
+          message:
+            'I didn’t have a response to that. Could you rephrase it or add a bit more detail?',
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('tells the user plainly when a directed request ends with no response', async () => {
+    const adapter = callbacks();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        options.onAssistantMessageStarted?.({
+          id: 'assistant-silent',
+          sessionId: 'opencode-session-1',
+          parentId: 'initial-user-message',
+          createdAtMs: 100,
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(adapter.postReply).toHaveBeenCalledTimes(1);
+    expect(adapter.postReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'closeout',
+        message:
+          'I didn’t have a response to that. Could you rephrase it or add a bit more detail?',
+      }),
+    );
   });
 
   it('ignores plain terminal text from an assistant superseded by a native steer', async () => {

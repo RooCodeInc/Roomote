@@ -50,6 +50,7 @@ import { handlePrComment } from '../handlePrComment';
 import type {
   WebhookIssueCommentCreated,
   WebhookPullRequestCommentCreated,
+  WebhookPullRequestReviewSubmitted,
 } from '../types';
 
 const repository = {
@@ -79,6 +80,7 @@ function makeIssueCommentPayload(): WebhookIssueCommentCreated {
     comment: {
       id: 777,
       body: '@roomote please take a look',
+      html_url: 'https://github.com/acme/api/pull/42#issuecomment-777',
       user: { login: 'alice' },
     },
   } as WebhookIssueCommentCreated;
@@ -102,9 +104,33 @@ function makeReviewCommentPayload(): WebhookPullRequestCommentCreated {
       id: 900,
       in_reply_to_id: 800,
       body: '@roomote can you address this?',
+      html_url: 'https://github.com/acme/api/pull/42#discussion_r900',
       user: { login: 'alice' },
     },
   } as unknown as WebhookPullRequestCommentCreated;
+}
+
+function makeReviewPayload(): WebhookPullRequestReviewSubmitted {
+  return {
+    action: 'submitted',
+    installation: { id: 123 },
+    repository,
+    sender,
+    pull_request: {
+      number: 42,
+      title: 'Ship it',
+      body: 'Please review',
+      html_url: 'https://github.com/acme/api/pull/42',
+      user: { login: 'bob' },
+      head: { ref: 'feature/ship', sha: 'abc123' },
+    },
+    review: {
+      id: 901,
+      body: '@roomote can you follow up?',
+      html_url: 'https://github.com/acme/api/pull/42#pullrequestreview-901',
+      user: { login: 'alice' },
+    },
+  } as unknown as WebhookPullRequestReviewSubmitted;
 }
 
 describe('handlePrComment', () => {
@@ -205,6 +231,7 @@ describe('handlePrComment', () => {
       },
       userId: 'user-1',
       senderDisplayName: 'alice',
+      sourceUrl: 'https://github.com/acme/api/pull/42#issuecomment-777',
       question: '@roomote please take a look',
       agentContext: expect.stringContaining('Earlier note.'),
       currentMessageId: 'github:comment:777',
@@ -230,8 +257,20 @@ describe('handlePrComment', () => {
           number: 42,
           reviewCommentId: '800',
         }),
+        sourceUrl: 'https://github.com/acme/api/pull/42#discussion_r900',
         currentMessageId: 'github:comment:900',
         agentContext: expect.stringContaining('This loop never terminates.'),
+      }),
+    );
+  });
+
+  it('forwards a submitted review permalink to the Session', async () => {
+    await handlePrComment(makeReviewPayload());
+
+    expect(mocks.startSourceControlFastSessionTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceUrl: 'https://github.com/acme/api/pull/42#pullrequestreview-901',
+        currentMessageId: 'github:review:901',
       }),
     );
   });

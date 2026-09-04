@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   findCustomAutomation: vi.fn(),
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
+  findTaskRuns: vi.fn(),
+  getConversationLookupIds: vi.fn(),
   findTaskPullRequests: vi.fn(),
   postMessage: vi.fn(),
   updateMessage: vi.fn(),
@@ -85,6 +87,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   fastAgentConversationRepository: {
     findById: mocks.findSession,
     getOrCreate: mocks.bindConversation,
+    getLookupIds: mocks.getConversationLookupIds,
   },
   createFastAgentTaskLauncher:
     ({
@@ -125,7 +128,10 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: vi.fn().mockResolvedValue(null),
         findMany: mocks.findTaskPullRequests,
       },
-      taskRuns: { findFirst: mocks.findTaskRun },
+      taskRuns: {
+        findFirst: mocks.findTaskRun,
+        findMany: mocks.findTaskRuns,
+      },
     },
   },
   and: vi.fn((...args: unknown[]) => args),
@@ -138,7 +144,10 @@ vi.mock('@roomote/db/server', () => ({
   },
   taskArtifacts: { id: 'task_artifacts.id' },
   taskPullRequests: { taskId: 'task_pull_requests.task_id' },
-  taskRuns: { id: 'task_runs.id' },
+  taskRuns: {
+    id: 'task_runs.id',
+    fastAgentSessionId: 'task_runs.fast_agent_session_id',
+  },
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -305,6 +314,8 @@ describe('deliverFastAgentParentEvent', () => {
       },
     ]);
     mocks.findTaskRun.mockResolvedValue({ status: 'running' });
+    mocks.findTaskRuns.mockResolvedValue([{ id: 42, taskId: 'task-1' }]);
+    mocks.getConversationLookupIds.mockResolvedValue([parent.sessionId]);
     mocks.findTaskPullRequests.mockResolvedValue([]);
     mocks.postMessage.mockResolvedValue('101.001');
     mocks.updateMessage.mockResolvedValue(true);
@@ -444,6 +455,90 @@ describe('deliverFastAgentParentEvent', () => {
     await answerInput.adapter.resolveMcpServerConfigs();
     expect(mocks.resolveUserMcpServerConfigs).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-2' }),
+    );
+  });
+
+  it('posts a recovered child image on a later Slack human turn', async () => {
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'human_follow_up',
+        eventId: '100.004',
+        currentMessageId: '100.004',
+        userId: 'user-2',
+        question: 'Show me the screenshot.',
+      },
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        thread_ts: '100.001',
+        blocks: expect.arrayContaining([
+          {
+            type: 'image',
+            image_url:
+              'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+            alt_text: 'result.png',
+          },
+        ]),
+      }),
+    );
+    expect(mocks.getConversationLookupIds).toHaveBeenCalledWith(
+      parent.sessionId,
+    );
+  });
+
+  it('rejects a recovered image from a task outside the Fast Session', async () => {
+    mocks.findTaskRuns.mockResolvedValueOnce([]);
+
+    await expect(
+      deliverFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.005',
+          currentMessageId: '100.005',
+          userId: 'user-2',
+          question: 'Show me the screenshot.',
+        },
+      }),
+    ).rejects.toThrow('Invalid Fast parent image artifact: artifact-1');
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('posts a recovered child image on a later Discord human turn', async () => {
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'guild-1',
+          conversationId: 'thread-1',
+          replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+        },
+      },
+      event: {
+        type: 'human_follow_up',
+        eventId: 'discord-message-2',
+        currentMessageId: 'discord-message-2',
+        userId: 'user-2',
+        question: 'Show me the screenshot.',
+      },
+    });
+
+    expect(mocks.discordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+        images: [
+          {
+            url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+            altText: 'result.png',
+            contentType: 'image/png',
+          },
+        ],
+      }),
     );
   });
 
@@ -699,6 +794,29 @@ describe('deliverFastAgentParentEvent', () => {
       conversation: parent.conversation,
       messageId: '101.001',
     });
+  });
+
+  it('carries child-selected image IDs into the Fast parent turn by default', async () => {
+    mocks.answerQuestion.mockResolvedValueOnce('Shared the proof.');
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'child_message',
+        taskId: 'task-1',
+        runId: 42,
+        messageId: '33333333-3333-4333-8333-333333333333',
+        purpose: 'closeout',
+        message: 'The visual comparison is ready.',
+        imageArtifactIds: ['artifact-1'],
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultImageArtifactIds: ['artifact-1'],
+      }),
+    );
   });
 
   it('captures an automation platform turn without a chat provider', async () => {
@@ -2308,7 +2426,7 @@ describe('deliverFastAgentParentEvent', () => {
             kind: 'pull',
             number: 42,
             reviewCommentId: '800',
-            url: 'https://github.com/acme/api/pull/42',
+            url: 'https://github.com/acme/api/pull/42#discussion_r900',
           },
         },
       },
@@ -2344,7 +2462,7 @@ describe('deliverFastAgentParentEvent', () => {
     // The Slack thread gets the same answer with attribution to the mention.
     const slackPosts = JSON.stringify(mocks.postMessage.mock.calls);
     expect(slackPosts).toContain(
-      '**alice** on [acme/api#42](https://github.com/acme/api/pull/42):',
+      '**alice** on [acme/api#42](https://github.com/acme/api/pull/42#discussion_r900):',
     );
     expect(slackPosts).toContain('Done: the changelog now mentions the fix.');
   });

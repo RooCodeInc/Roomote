@@ -82,6 +82,7 @@ describe('startSourceControlFastSessionTurn', () => {
 
     const result = await startSourceControlFastSessionTurn({
       ...baseInput,
+      sourceUrl: 'https://github.com/acme/api/pull/42#discussion_r900',
       activeTasks: [{ taskId: 'task-owner', status: RunStatus.Running }],
     });
 
@@ -101,7 +102,7 @@ describe('startSourceControlFastSessionTurn', () => {
         question: 'Can you also update the changelog?',
         senderDisplayName: 'alice',
         agentContext: expect.stringContaining(
-          'alice posted this message on GitHub pull request acme/api#42 (https://github.com/acme/api/pull/42), which a task in this Session opened.',
+          'alice posted this message on GitHub pull request acme/api#42 (https://github.com/acme/api/pull/42#discussion_r900), which a task in this Session opened.',
         ),
         activeTasks: [{ taskId: 'task-owner', status: RunStatus.Running }],
         sourceControlReplyTarget: {
@@ -111,7 +112,7 @@ describe('startSourceControlFastSessionTurn', () => {
           kind: 'pull',
           number: 42,
           reviewCommentId: '800',
-          url: 'https://github.com/acme/api/pull/42',
+          url: 'https://github.com/acme/api/pull/42#discussion_r900',
         },
       },
       forceQueue: true,
@@ -120,6 +121,30 @@ describe('startSourceControlFastSessionTurn', () => {
     expect(event.agentContext).toContain('<pull_request>#42</pull_request>');
     expect(mocks.getOrCreateFastAgentSession).not.toHaveBeenCalled();
     expect(mocks.queueFastAgentSurfaceReply).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the discussion URL when the source has no permalink', async () => {
+    mocks.getSessionForTask.mockResolvedValue({
+      id: 'unified-a',
+      fastConversationId: 'session-a',
+    });
+    mocks.findById.mockResolvedValue({
+      id: 'session-a',
+      conversation: slackConversation,
+    });
+
+    await startSourceControlFastSessionTurn({
+      ...baseInput,
+      activeTasks: [{ taskId: 'task-owner', status: RunStatus.Running }],
+    });
+
+    const event = mocks.admitFastAgentHumanFollowUp.mock.calls[0]?.[0].event;
+    expect(event.agentContext).toContain(
+      'alice posted this message on GitHub pull request acme/api#42 (https://github.com/acme/api/pull/42), which a task in this Session opened.',
+    );
+    expect(event.sourceControlReplyTarget.url).toBe(
+      'https://github.com/acme/api/pull/42',
+    );
   });
 
   it('stays in the discussion Session when its own task owns the pull request', async () => {

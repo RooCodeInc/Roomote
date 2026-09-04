@@ -190,7 +190,7 @@ const visualProofArtifact: TaskArtifact = {
 };
 
 describe('buildAcpActivityRenderBlocks', () => {
-  it('collapses one eligible activity block between text messages', () => {
+  it('keeps activity with no tool calls directly in the transcript', () => {
     const entries = buildAcpActivityRenderBlocks([
       textBlock('text-1', 1_000),
       messageBlock('reasoning-1', 2_000, 'reasoning'),
@@ -199,14 +199,34 @@ describe('buildAcpActivityRenderBlocks', () => {
 
     expect(entries.map((entry) => entry.kind)).toEqual([
       'message',
+      'message',
+      'message',
+    ]);
+  });
+
+  it('keeps a single tool call direct and collapses two tool calls', () => {
+    const single = buildAcpActivityRenderBlocks([
+      textBlock('text-1', 1_000),
+      toolResultBlock({ id: 'tool-1', ts: 2_000 }),
+      textBlock('text-2', 3_000),
+    ]);
+    const multiple = buildAcpActivityRenderBlocks([
+      textBlock('text-1', 1_000),
+      toolResultBlock({ id: 'tool-1', ts: 2_000 }),
+      toolResultBlock({ id: 'tool-2', ts: 3_000, toolName: 'search' }),
+      textBlock('text-2', 4_000),
+    ]);
+
+    expect(single.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+    ]);
+    expect(multiple.map((entry) => entry.kind)).toEqual([
+      'message',
       'activity_group',
       'message',
     ]);
-    expect(entries[1]).toMatchObject({
-      kind: 'activity_group',
-      ts: 2_000,
-      endTs: 19_000,
-    });
   });
 
   it('keeps live partial reasoning and tools outside collapsed activity groups', () => {
@@ -303,7 +323,10 @@ describe('buildAcpActivityRenderBlocks', () => {
       toolGroupBlock({
         id: 'group-1',
         ts: 4_000,
-        items: [buildToolResult({ id: 'tool-1', ts: 4_000 })],
+        items: [
+          buildToolResult({ id: 'tool-1', ts: 4_000 }),
+          buildToolResult({ id: 'tool-2', ts: 5_000 }),
+        ],
       }),
       textBlock('text-2', 10_000),
     ]);
@@ -374,16 +397,15 @@ describe('buildAcpActivityRenderBlocks', () => {
 
     expect(entries.map((entry) => entry.kind)).toEqual([
       'message',
-      'activity_group',
+      'message',
       'message',
       'activity_group',
       'message',
     ]);
 
     expect(entries[1]).toMatchObject({
-      kind: 'activity_group',
-      ts: 2_000,
-      endTs: 3_000,
+      kind: 'message',
+      msg: { id: 'reasoning-1' },
     });
 
     expect(entries[3]).toMatchObject({
@@ -542,7 +564,7 @@ describe('buildAcpActivityRenderBlocks', () => {
     ]);
   });
 
-  it('collapses leading eligible activity before the first text message', () => {
+  it('keeps leading activity with fewer than two tool calls direct', () => {
     const entries = buildAcpActivityRenderBlocks([
       messageBlock('leading', 1_000, 'reasoning'),
       textBlock('text-1', 2_000),
@@ -550,16 +572,10 @@ describe('buildAcpActivityRenderBlocks', () => {
     ]);
 
     expect(entries.map((entry) => entry.kind)).toEqual([
-      'activity_group',
+      'message',
       'message',
       'message',
     ]);
-
-    expect(entries[0]).toMatchObject({
-      kind: 'activity_group',
-      ts: 1_000,
-      endTs: 2_000,
-    });
   });
 
   it('keeps leading todo section markers visible and starts a new activity boundary after them', () => {
@@ -571,23 +587,11 @@ describe('buildAcpActivityRenderBlocks', () => {
     ]);
 
     expect(entries.map((entry) => entry.kind)).toEqual([
-      'activity_group',
       'message',
-      'activity_group',
+      'message',
+      'message',
       'message',
     ]);
-
-    expect(entries[0]).toMatchObject({
-      kind: 'activity_group',
-      ts: 1_000,
-      endTs: 1_500,
-    });
-
-    expect(entries[2]).toMatchObject({
-      kind: 'activity_group',
-      ts: 1_700,
-      endTs: 2_000,
-    });
   });
 
   it('collapses leading activity when an external session prompt provides the left text boundary', () => {
@@ -599,15 +603,7 @@ describe('buildAcpActivityRenderBlocks', () => {
       { hasLeadingTextBoundary: true },
     );
 
-    expect(entries.map((entry) => entry.kind)).toEqual([
-      'activity_group',
-      'message',
-    ]);
-    expect(entries[0]).toMatchObject({
-      kind: 'activity_group',
-      ts: 2_000,
-      endTs: 10_000,
-    });
+    expect(entries.map((entry) => entry.kind)).toEqual(['message', 'message']);
   });
 
   it('bypasses grouping in narration mode', () => {

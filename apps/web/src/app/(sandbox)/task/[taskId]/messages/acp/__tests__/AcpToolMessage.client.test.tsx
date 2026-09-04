@@ -9,6 +9,7 @@ import type { ReactNode } from 'react';
 
 import {
   AlertCircle,
+  BookOpenText,
   Bot,
   FileIcon,
   Search,
@@ -405,13 +406,13 @@ describe('AcpToolMessage', () => {
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'Sent',
-        object: 'Chat Reply',
+        object: 'chat reply',
         collapsible: true,
       }),
     );
   });
 
-  it('renders effect-free Roomote lifecycle tools as compact title-only rows', () => {
+  it('renders effect-free Roomote lifecycle tools without provider attribution', () => {
     render(
       <AcpToolMessage
         msg={buildResultMessage('mcp', {
@@ -430,14 +431,14 @@ describe('AcpToolMessage', () => {
       expect.objectContaining({
         action: 'Used',
         object: 'Ignore Event',
-        suffix: 'Roomote',
+        suffix: undefined,
         collapsible: false,
       }),
     );
     expect(toolDetailsSpy).not.toHaveBeenCalled();
   });
 
-  it('renders the gbrain MCP server as Memory', () => {
+  it('renders Memory tools with natural wording and the Open Book icon', () => {
     render(
       <AcpToolMessage
         msg={buildResultMessage('mcp', {
@@ -453,9 +454,10 @@ describe('AcpToolMessage', () => {
 
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: 'Used',
-        object: 'Query',
-        suffix: 'Memory',
+        action: 'Searched',
+        object: 'my memory',
+        suffix: undefined,
+        icon: BookOpenText,
       }),
     );
   });

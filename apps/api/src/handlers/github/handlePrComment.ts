@@ -887,6 +887,7 @@ export async function handlePrComment(
     discussion,
     userId: commenterUserId,
     senderDisplayName: sender.login,
+    sourceUrl: mention.html_url,
     question: mention.body ?? '',
     agentContext: buildPullRequestMentionContext({
       details: buildCompactPullRequestDetails({

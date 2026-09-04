@@ -195,6 +195,15 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('Existing active tasks do not block');
     expect(prompt).toContain('send_chat_reply');
+    expect(prompt).toContain(
+      "use that task's known ID with `manage_tasks` `get_summary` to recover its stable image artifact IDs and viewer links",
+    );
+    expect(prompt).toContain(
+      'Never say an image or screenshot is attached, shown, included, above, or below unless the same reply actually supplies its stable ID in "imageArtifactIds"',
+    );
+    expect(prompt).toContain(
+      'provide an accessible artifact viewer link when available and accurately say that the image could not be attached',
+    );
     expect(prompt).toContain('send_chat_reaction');
     expect(prompt).toContain(
       'Use `send_chat_reaction` only for an optional reaction or an emoji-only terminal answer',
