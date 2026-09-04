@@ -157,7 +157,13 @@ async function attachFastSessionReplyImages<
   const lookupIds = [sessionId, ...(conversation?.legacyConversationIds ?? [])];
 
   const allowed = await db
-    .select({ id: taskArtifacts.id })
+    .select({
+      id: taskArtifacts.id,
+      taskId: taskArtifacts.taskId,
+      sessionId: taskArtifacts.sessionId,
+      path: taskArtifacts.path,
+      version: taskArtifacts.version,
+    })
     .from(taskArtifacts)
     .where(
       and(
@@ -182,8 +188,8 @@ async function attachFastSessionReplyImages<
         ),
       ),
     );
-  const allowedIds = new Set(allowed.map((row) => row.id));
-  if (allowedIds.size === 0) {
+  const allowedById = new Map(allowed.map((row) => [row.id, row]));
+  if (allowedById.size === 0) {
     return messages;
   }
 
@@ -192,20 +198,37 @@ async function attachFastSessionReplyImages<
     REPLY_IMAGE_SIGNATURE_WINDOW_SECONDS;
 
   return messages.map((message) => {
-    const images = readReplyImageArtifactIds(message.payload)
-      .filter((id) => allowedIds.has(id))
-      .map(
-        (id) =>
-          `/api/artifacts/${id}/raw?sig=${signArtifactId(id, signatureTimestamp)}&ts=${signatureTimestamp}`,
-      );
-    if (images.length === 0) {
+    // `imageArtifacts` carries the owner/path/version alongside each URL so
+    // the transcript can open the image in the artifact viewer.
+    const imageArtifacts = readReplyImageArtifactIds(message.payload).flatMap(
+      (id) => {
+        const artifact = allowedById.get(id);
+        if (!artifact) return [];
+        const owner = artifact.taskId
+          ? { taskId: artifact.taskId }
+          : artifact.sessionId
+            ? { sessionId: artifact.sessionId }
+            : null;
+        if (!owner) return [];
+        return [
+          {
+            url: `/api/artifacts/${id}/raw?sig=${signArtifactId(id, signatureTimestamp)}&ts=${signatureTimestamp}`,
+            owner,
+            path: artifact.path,
+            version: artifact.version,
+          },
+        ];
+      },
+    );
+    if (imageArtifacts.length === 0) {
       return message;
     }
     return {
       ...message,
       payload: {
         ...((message.payload as Record<string, unknown> | null) ?? {}),
-        images,
+        images: imageArtifacts.map((artifact) => artifact.url),
+        imageArtifacts,
       },
     };
   });
