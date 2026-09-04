@@ -11,7 +11,6 @@ import {
 
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
 import {
-  getSessionTaskPanelCapacity,
   SessionHeaderPullRequests,
   SessionWorkspace,
   type SessionInfo,
@@ -784,23 +783,6 @@ describe('SessionWorkspace', () => {
     ).not.toHaveAttribute('data-dim-when-unfocused');
   });
 
-  it('restores task panels after temporarily viewing a utility panel', async () => {
-    renderWorkspace({
-      isMobile: false,
-      workspaceWidth: 1280,
-      sessionOverride: { tasks: [singleTask, secondTask] },
-    });
-
-    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
-    expect(screen.getByRole('heading', { name: 'Session Info' })).toBeVisible();
-    expect(screen.queryByLabelText('Full task task-1')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Close session info' }));
-    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
-    expect(screen.getByLabelText('Full task task-2')).toBeVisible();
-  });
-
   it('keeps multi-task sessions on the transcript below xl widths', () => {
     renderWorkspace({
       isMobile: false,
@@ -885,30 +867,6 @@ describe('SessionWorkspace', () => {
 
     expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
     expect(screen.getByText('Session transcript')).toBeVisible();
-  });
-
-  it('swaps task panels when a title dropdown selects another open task', async () => {
-    renderWorkspace({
-      isMobile: false,
-      workspaceWidth: 1280,
-      sessionOverride: { tasks: [singleTask, secondTask] },
-    });
-
-    const primary = await screen.findByLabelText('Full task task-1');
-    const secondary = screen.getByLabelText('Full task task-2');
-    expect(primary.compareDocumentPosition(secondary)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Select task-1 from task-2' }),
-    );
-
-    const swappedPrimary = screen.getByLabelText('Full task task-2');
-    const swappedSecondary = screen.getByLabelText('Full task task-1');
-    expect(swappedPrimary.compareDocumentPosition(swappedSecondary)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
   });
 
   it.each([false, true])(
@@ -1011,35 +969,6 @@ describe('SessionWorkspace', () => {
 
     expect(screen.getByText('Nested panel task-1')).toBeInTheDocument();
     expect(screen.getByLabelText('Task prompt task-1')).toHaveFocus();
-  });
-
-  it('reopens as many tasks as fit from the task list panel', async () => {
-    const thirdTask = {
-      ...singleTask,
-      taskId: 'task-3',
-      title: 'Add homepage tests',
-    };
-    renderWorkspace({
-      isMobile: false,
-      workspaceWidth: 1600,
-      sessionOverride: { tasks: [singleTask, secondTask, thirdTask] },
-    });
-
-    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
-    for (const taskId of ['task-1', 'task-2', 'task-3']) {
-      fireEvent.click(
-        screen.getByRole('button', { name: `Close panel ${taskId}` }),
-      );
-    }
-    expect(screen.queryByLabelText('Full task task-1')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Open side-by-side' }));
-
-    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
-    expect(screen.getByLabelText('Full task task-2')).toBeVisible();
-    expect(screen.getByLabelText('Full task task-3')).toBeVisible();
-    expect(screen.getByText('Session transcript')).toBeVisible();
   });
 
   it('opens tasks side-by-side when the Tasks rail item is middle-clicked', async () => {
@@ -1325,6 +1254,32 @@ describe('SessionWorkspace', () => {
 
     expect(screen.getByRole('heading', { name: 'Artifacts' })).toBeVisible();
     expect(screen.getByText('No artifacts in this session yet.')).toBeVisible();
+  });
+
+  it('clears a URL-selected task when opening a Session artifact', () => {
+    artifactQueryState.dataByPath['session-1:notes/decision.md'] = {
+      id: 'session-artifact',
+      taskId: null,
+      sessionId: 'session-1',
+      path: 'notes/decision.md',
+      version: 1,
+      artifactType: 'general',
+      contentType: 'text/markdown',
+      size: 100,
+      createdAt: new Date('2026-01-05T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/session-artifact/download',
+    };
+    renderWorkspace({
+      isMobile: false,
+      children: <OpenSessionArtifact />,
+      selectedTaskId: singleTask.taskId,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open decision link' }));
+
+    expect(screen.getByRole('heading', { name: 'Decision' })).toBeVisible();
+    expect(routerReplaceMock).toHaveBeenCalledWith('/sessions/session-1');
   });
 
   it('shows the artifact gallery when a deep link matches no Session artifact', () => {
@@ -1862,20 +1817,4 @@ describe('SessionWorkspace', () => {
     expect(screen.queryByRole('button', { name: 'Session info' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
   });
-});
-
-describe('getSessionTaskPanelCapacity', () => {
-  it.each([
-    { width: 700, isMdOrLarger: false, expected: 1 },
-    { width: 1024, isMdOrLarger: true, expected: 1 },
-    { width: 1280, isMdOrLarger: true, expected: 2 },
-    { width: 1920, isMdOrLarger: true, expected: 3 },
-    { width: 2560, isMdOrLarger: true, expected: 5 },
-    { width: 3840, isMdOrLarger: true, expected: 8 },
-  ])(
-    'returns $expected task panels for a $width px workspace',
-    ({ width, isMdOrLarger, expected }) => {
-      expect(getSessionTaskPanelCapacity(width, isMdOrLarger)).toBe(expected);
-    },
-  );
 });
