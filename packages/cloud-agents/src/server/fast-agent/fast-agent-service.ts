@@ -58,7 +58,10 @@ import { z } from 'zod';
 import packageJson from '../../../../../package.json';
 
 import { appendAttachmentTextsToPromptText } from '../../file-attachments';
-import { handleManageWakeupsToolCall } from '../session-wakeups';
+import {
+  handleManageWakeupsToolCall,
+  normalizeManageWakeupsArgs,
+} from '../session-wakeups';
 import {
   buildSlackThreadPromptBlocks,
   wrapSlackMessage,
@@ -4208,7 +4211,9 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups: {
-            const args = manageWakeupsInputSchema.parse(call.args);
+            const args = manageWakeupsInputSchema.parse(
+              normalizeManageWakeupsArgs(call.args),
+            );
 
             throwIfTurnCancelled();
 

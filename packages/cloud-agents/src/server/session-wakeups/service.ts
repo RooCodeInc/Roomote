@@ -116,8 +116,9 @@ export async function createSessionWakeup(
     input.schedule,
     { now, defaultTimeZone: timeZone },
   );
-  const maxRuns = input.maxRuns ?? null;
-  const until = input.until ? new Date(input.until) : null;
+  const recurring = isSessionWakeupRecurring(schedule);
+  const maxRuns = recurring ? (input.maxRuns ?? null) : null;
+  const until = recurring && input.until ? new Date(input.until) : null;
   if (until && Number.isNaN(until.getTime())) {
     throw new SessionWakeupValidationError(
       'until must be an ISO 8601 date-time.',
@@ -125,8 +126,7 @@ export async function createSessionWakeup(
   }
   validateSessionWakeupCaps({ schedule, firstRunAt, maxRuns, until });
   const reportPolicy: SessionWakeupReportPolicy =
-    input.reportPolicy ??
-    (isSessionWakeupRecurring(schedule) ? 'only_when_notable' : 'always');
+    input.reportPolicy ?? (recurring ? 'only_when_notable' : 'always');
 
   // Reuse an equivalent active wakeup instead of stacking duplicates; a model
   // that retries a create call must not double-schedule.

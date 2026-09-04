@@ -1,3 +1,4 @@
+export { normalizeManageWakeupsArgs } from './args';
 export {
   SESSION_WAKEUP_FIRE_JOB_NAME,
   SESSION_WAKEUP_QUEUE_NAME,

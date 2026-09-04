@@ -74,11 +74,13 @@ export function normalizeSessionWakeupSchedule(
   const { now } = options;
   switch (input.mode) {
     case 'once': {
+      // Models often send a computed `at` alongside `inMinutes`; the relative
+      // form is authoritative because it cannot be off by a clock skew.
       const hasDelay = input.inMinutes !== undefined;
       const hasAt = input.at !== undefined;
-      if (hasDelay === hasAt) {
+      if (!hasDelay && !hasAt) {
         throw new SessionWakeupValidationError(
-          'A once schedule needs exactly one of inMinutes or at.',
+          'A once schedule needs inMinutes or at.',
         );
       }
       const at = hasDelay
@@ -198,14 +200,9 @@ export function validateSessionWakeupCaps(params: {
   until: Date | null;
 }): void {
   const { schedule } = params;
-  if (schedule.mode === 'once') {
-    if (params.maxRuns !== null || params.until !== null) {
-      throw new SessionWakeupValidationError(
-        'maxRuns and until only apply to interval and cron schedules.',
-      );
-    }
-    return;
-  }
+  // A once schedule is inherently a single run; a stray maxRuns or until from
+  // the model is ignored rather than rejected.
+  if (schedule.mode === 'once') return;
   if (params.until && params.until.getTime() <= params.firstRunAt.getTime()) {
     throw new SessionWakeupValidationError(
       `until must be later than the first occurrence at ${params.firstRunAt.toISOString()}.`,

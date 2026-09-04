@@ -33,13 +33,16 @@ describe('normalizeSessionWakeupSchedule', () => {
     expect(result.firstRunAt.toISOString()).toBe('2026-09-04T19:00:00.000Z');
   });
 
-  it('rejects a once schedule with both or neither time fields', () => {
-    expect(() =>
+  it('prefers inMinutes when a computed at is sent alongside it', () => {
+    expect(
       normalizeSessionWakeupSchedule(
         { mode: 'once', inMinutes: 5, at: '2026-09-04T18:00:00Z' },
         options,
-      ),
-    ).toThrow(SessionWakeupValidationError);
+      ).firstRunAt.toISOString(),
+    ).toBe('2026-09-04T17:05:00.000Z');
+  });
+
+  it('rejects a once schedule with neither time field', () => {
     expect(() =>
       normalizeSessionWakeupSchedule({ mode: 'once' }, options),
     ).toThrow(SessionWakeupValidationError);
@@ -158,7 +161,7 @@ describe('resolveSessionWakeupNextRun', () => {
 });
 
 describe('validateSessionWakeupCaps', () => {
-  it('rejects caps on a once schedule', () => {
+  it('ignores stray caps on a once schedule', () => {
     expect(() =>
       validateSessionWakeupCaps({
         schedule: { mode: 'once', at: now.toISOString() },
@@ -166,7 +169,7 @@ describe('validateSessionWakeupCaps', () => {
         maxRuns: 2,
         until: null,
       }),
-    ).toThrow(/only apply/);
+    ).not.toThrow();
   });
 
   it('requires a cap on tight intervals', () => {

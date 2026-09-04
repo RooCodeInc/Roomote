@@ -39,7 +39,8 @@ function getSessionWakeupQueue(): Queue<SessionWakeupFireJob> {
 }
 
 export function buildSessionWakeupFireJobId(job: SessionWakeupFireJob): string {
-  return `${job.wakeupId}:${job.runAt}`;
+  // BullMQ rejects custom job ids containing ":".
+  return `${job.wakeupId}-${job.runAt}`;
 }
 
 /**
