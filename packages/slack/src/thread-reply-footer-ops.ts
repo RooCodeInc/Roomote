@@ -168,10 +168,7 @@ export async function withSlackThreadReplyFooterLock<T>(params: {
 }
 
 export async function removeSlackThreadReplyFooter(params: {
-  slack: Pick<
-    SlackNotifier,
-    'getMessageBlocks' | 'updateMessage' | 'deleteMessage'
-  >;
+  slack: Pick<SlackNotifier, 'getMessageBlocks' | 'updateMessage'>;
   channel: string;
   threadTs: string;
   messageTs: string;
@@ -189,19 +186,6 @@ export async function removeSlackThreadReplyFooter(params: {
   const updatedBlocks = removeSlackThreadStickyBlocks(blocks);
 
   if (updatedBlocks.length === blocks.length) {
-    return;
-  }
-
-  if (updatedBlocks.length === 0) {
-    const deleted = await params.slack.deleteMessage({
-      channel: params.channel,
-      ts: params.messageTs,
-    });
-    if (!deleted) {
-      console.error(
-        `[slackThreadFooter] Failed to delete empty prior Slack message ${params.messageTs}`,
-      );
-    }
     return;
   }
 

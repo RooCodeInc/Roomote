@@ -245,49 +245,6 @@ describe('thread-reply-footer-ops', () => {
     );
   });
 
-  it('deletes a prior footer-only carrier when a later real reply arrives', async () => {
-    const footerBlock = {
-      type: 'context',
-      block_id: 'roomote_thread_reply_footer',
-      elements: [{ type: 'mrkdwn', text: '_Exact footer._' }],
-    };
-    const slack = {
-      postMessage: vi.fn().mockResolvedValue('222.000'),
-      getMessageBlocks: vi.fn().mockResolvedValue([footerBlock]),
-      updateMessage: vi.fn(),
-      getRawMessage: vi.fn(),
-      deleteMessage: vi.fn().mockResolvedValue(true),
-    };
-
-    await postSlackThreadMessageWithStickyFooter({
-      slack,
-      channel: 'C1',
-      threadTs: '100.000',
-      taskId: 'task-1',
-      text: 'real reply',
-    });
-
-    expect(slack.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: 'real reply',
-        blocks: [
-          {
-            type: 'section',
-            text: { type: 'mrkdwn', text: 'real reply' },
-          },
-          expect.objectContaining({
-            block_id: 'roomote_thread_reply_footer',
-          }),
-        ],
-      }),
-    );
-    expect(slack.deleteMessage).toHaveBeenCalledWith({
-      channel: 'C1',
-      ts: '111.000',
-    });
-    expect(slack.updateMessage).not.toHaveBeenCalled();
-  });
-
   it('finalizes all streamed reply content before relocating cards and posting the footer', async () => {
     const slack = {
       getMessageBlocks: vi.fn().mockResolvedValue([
@@ -396,7 +353,6 @@ describe('thread-reply-footer-ops', () => {
           { type: 'section', text: { type: 'mrkdwn', text: 'body' } },
         ]),
       updateMessage: vi.fn(),
-      deleteMessage: vi.fn(),
     };
 
     await removeSlackThreadReplyFooter({
