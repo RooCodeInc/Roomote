@@ -2,7 +2,6 @@ const mocks = vi.hoisted(() => ({
   getGitHubAutomationTargets: vi.fn(),
   getInstallationOctokit: vi.fn(),
   findActiveGitHubPrReviewTask: vi.fn(),
-  findRoomoteOpenedPullRequestTask: vi.fn(),
   findReusableGitHubPrFollowUpOwner: vi.fn(),
   startSourceControlFastSessionTurn: vi.fn(),
   fetchGitHubLinkedReferences: vi.fn(),
@@ -10,7 +9,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@roomote/db/server', () => ({
   findActiveGitHubPrReviewTask: mocks.findActiveGitHubPrReviewTask,
-  findRoomoteOpenedPullRequestTask: mocks.findRoomoteOpenedPullRequestTask,
   findReusableGitHubPrFollowUpOwner: mocks.findReusableGitHubPrFollowUpOwner,
 }));
 
@@ -192,7 +190,6 @@ describe('handlePrComment', () => {
     });
     mocks.findActiveGitHubPrReviewTask.mockResolvedValue(null);
     mocks.findReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
-    mocks.findRoomoteOpenedPullRequestTask.mockResolvedValue(null);
     mocks.fetchGitHubLinkedReferences.mockResolvedValue([]);
     mocks.startSourceControlFastSessionTurn.mockResolvedValue({
       status: 'queued',
@@ -367,116 +364,16 @@ describe('handlePrComment', () => {
     expect(mocks.startSourceControlFastSessionTurn).not.toHaveBeenCalled();
   });
 
-  describe('replies in a review thread Roomote opened', () => {
-    function makeRoomoteThreadReplyPayload(): WebhookPullRequestCommentCreated {
-      const payload = makeReviewCommentPayload();
-      payload.comment.body = 'Can you make this loop bounded instead?';
-      return payload;
-    }
+  it('ignores replies in a review thread Roomote opened when they carry no @mention', async () => {
+    const payload = makeReviewCommentPayload();
+    payload.comment.body = 'Fixed in 5756284.';
 
-    beforeEach(() => {
-      request.mockImplementation(async (route: string) => {
-        if (route.startsWith('GET /repos/{owner}/{repo}/pulls/comments/')) {
-          return {
-            data: {
-              id: 800,
-              body: 'This loop never terminates.',
-              path: 'src/retry.ts',
-              diff_hunk: '@@ -1 +1 @@\n-old\n+new',
-              user: { login: 'roomote[bot]' },
-            },
-          };
-        }
-        return { data: {} };
-      });
-    });
+    const result = await handlePrComment(payload);
 
-    it('enters the Session without an @mention when no task owns the pull request', async () => {
-      const result = await handlePrComment(makeRoomoteThreadReplyPayload());
-
-      expect(result).toEqual(
-        expect.objectContaining({
-          status: 'ok',
-          message: 'fast_session_queued',
-        }),
-      );
-      expect(mocks.findRoomoteOpenedPullRequestTask).toHaveBeenCalledWith({
-        repoFullName: 'acme/api',
-        prNumber: 42,
-        host: 'github.com',
-      });
-      // The gate's fetch is reused for the context; the parent is not
-      // fetched a second time.
-      expect(
-        request.mock.calls.filter(([route]) =>
-          String(route).startsWith('GET /repos/{owner}/{repo}/pulls/comments/'),
-        ),
-      ).toHaveLength(1);
-      expect(createForPullRequestReviewComment).toHaveBeenCalledWith(
-        expect.objectContaining({ comment_id: 900, content: 'eyes' }),
-      );
-      expect(mocks.startSourceControlFastSessionTurn).toHaveBeenCalledWith(
-        expect.objectContaining({
-          discussion: expect.objectContaining({
-            kind: 'pull',
-            number: 42,
-            reviewCommentId: '800',
-          }),
-          question: 'Can you make this loop bounded instead?',
-          agentContext: expect.stringContaining(
-            "alice replied to Roomote's review comment #800",
-          ),
-        }),
-      );
-    });
-
-    it('leaves replies on a Roomote-opened pull request to the review-feedback pipeline, even after its task finished', async () => {
-      // The opening task is done and has no resumable snapshot, so the
-      // active-owner lookup finds nothing; the durable PR linkage still does.
-      mocks.findReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
-      mocks.findRoomoteOpenedPullRequestTask.mockResolvedValue({
-        taskId: 'task-owner',
-        runId: 5,
-        type: 'standard_task',
-        status: 'completed',
-      });
-
-      const result = await handlePrComment(makeRoomoteThreadReplyPayload());
-
-      expect(result).toEqual({ status: 'ok', message: 'no_mention' });
-      expect(mocks.startSourceControlFastSessionTurn).not.toHaveBeenCalled();
-      expect(createForPullRequestReviewComment).not.toHaveBeenCalled();
-    });
-
-    it('ignores replies to review comments written by people', async () => {
-      request.mockImplementation(async (route: string) => {
-        if (route.startsWith('GET /repos/{owner}/{repo}/pulls/comments/')) {
-          return {
-            data: {
-              id: 800,
-              body: 'This loop never terminates.',
-              user: { login: 'carol' },
-            },
-          };
-        }
-        return { data: {} };
-      });
-
-      const result = await handlePrComment(makeRoomoteThreadReplyPayload());
-
-      expect(result).toEqual({ status: 'ok', message: 'no_mention' });
-      expect(mocks.startSourceControlFastSessionTurn).not.toHaveBeenCalled();
-    });
-
-    it('ignores top-level review comments without a mention', async () => {
-      const payload = makeRoomoteThreadReplyPayload();
-      delete (payload.comment as { in_reply_to_id?: number }).in_reply_to_id;
-
-      const result = await handlePrComment(payload);
-
-      expect(result).toEqual({ status: 'ok', message: 'no_mention' });
-      expect(request).not.toHaveBeenCalled();
-      expect(mocks.startSourceControlFastSessionTurn).not.toHaveBeenCalled();
-    });
+    expect(result).toEqual({ status: 'ok', message: 'no_mention' });
+    // Nothing is fetched or acknowledged: the thread is left to the humans.
+    expect(request).not.toHaveBeenCalled();
+    expect(createForPullRequestReviewComment).not.toHaveBeenCalled();
+    expect(mocks.startSourceControlFastSessionTurn).not.toHaveBeenCalled();
   });
 });
