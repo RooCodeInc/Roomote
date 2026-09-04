@@ -288,6 +288,9 @@ describe('roomote MCP tool descriptions', () => {
     expect(manageTasksTool.config.description).toContain(
       'When the user provides an existing Roomote task URL, extract its task ID and pass taskId to get_summary or get_messages before resorting to browser navigation.',
     );
+    expect(manageTasksTool.config.description).toContain(
+      'uploaded image artifact IDs and viewer links',
+    );
   });
 
   it('documents the task run log debugging action on manage_tasks', async () => {
@@ -1035,7 +1038,12 @@ describe('roomote MCP tool descriptions', () => {
     );
     expect(
       getInputSchemaField(chatReplyTool, 'imageArtifactIds').description,
-    ).toBe('Optional already-uploaded artifact IDs for images to attach.');
+    ).toContain(
+      'must not claim an image or screenshot is attached, shown, or included',
+    );
+    expect(
+      getInputSchemaField(chatReplyTool, 'imageArtifactIds').description,
+    ).toContain('provide an accessible artifact viewer link');
   });
 
   it('documents the standalone video description tool', () => {

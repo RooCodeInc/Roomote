@@ -295,29 +295,23 @@ type FastAgentEventImage = {
 async function buildSelectedImages(params: {
   artifactIds: string[];
   event: FastAgentParentEvent;
+  sessionId: string;
 }): Promise<FastAgentEventImage[]> {
   const artifactIds = [...new Set(params.artifactIds)];
-  if (
-    artifactIds.length === 0 ||
-    (params.event.type !== 'artifact_published' &&
-      params.event.type !== 'child_message') ||
-    (params.event.type === 'child_message' &&
-      !params.event.imageArtifactIds?.length)
-  ) {
+  if (artifactIds.length === 0) {
     return [];
   }
 
-  const allowedIds = new Set(
+  const eventIds = new Set(
     params.event.type === 'artifact_published'
       ? [params.event.artifact.id]
       : params.event.type === 'child_message'
         ? (params.event.imageArtifactIds ?? [])
         : [],
   );
-  if (artifactIds.some((id) => !allowedIds.has(id))) {
-    throw new Error('Fast parent selected an artifact outside this event.');
+  if (params.event.type !== 'human_follow_up' && eventIds.size === 0) {
+    return [];
   }
-
   const artifacts = await db.query.taskArtifacts.findMany({
     where: inArray(taskArtifacts.id, artifactIds),
     columns: {
@@ -330,16 +324,45 @@ async function buildSelectedImages(params: {
     },
   });
   const byId = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
+  const sessionRunTaskById = new Map<number, string>();
+  if (params.event.type === 'human_follow_up') {
+    const runIds = artifacts.flatMap((artifact) =>
+      artifact.runId === null ? [] : [artifact.runId],
+    );
+    if (runIds.length > 0) {
+      const lookupIds = await fastAgentConversationRepository.getLookupIds(
+        params.sessionId,
+      );
+      const sessionRuns = await db.query.taskRuns.findMany({
+        where: and(
+          inArray(taskRuns.id, runIds),
+          inArray(taskRuns.fastAgentSessionId, lookupIds),
+        ),
+        columns: { id: true, taskId: true },
+      });
+      for (const run of sessionRuns) {
+        sessionRunTaskById.set(run.id, run.taskId);
+      }
+    }
+  }
   const ts = currentEpochSeconds();
 
   return artifactIds.map((id) => {
     const artifact = byId.get(id);
+    const belongsToCurrentEvent =
+      artifact &&
+      eventIds.has(id) &&
+      'taskId' in params.event &&
+      artifact.taskId === params.event.taskId &&
+      artifact.runId === params.event.runId;
+    const belongsToSessionTask =
+      params.event.type === 'human_follow_up' &&
+      artifact?.runId != null &&
+      artifact?.taskId === sessionRunTaskById.get(artifact.runId);
     if (
       !artifact ||
       !artifact.uploaded ||
-      !('taskId' in params.event) ||
-      artifact.taskId !== params.event.taskId ||
-      artifact.runId !== params.event.runId ||
+      (!belongsToCurrentEvent && !belongsToSessionTask) ||
       !artifact.contentType.startsWith('image/')
     ) {
       throw new Error(`Invalid Fast parent image artifact: ${id}`);
@@ -686,6 +709,7 @@ async function createSlackFastAgentParentTurn(
         const images = await buildSelectedImages({
           artifactIds: imageArtifactIds,
           event: params.event,
+          sessionId: params.parent.sessionId,
         });
         const action =
           params.event.type === 'pull_request_feedback' &&
@@ -1132,6 +1156,7 @@ async function createDiscordFastAgentParentTurn(
       const images = await buildSelectedImages({
         artifactIds: imageArtifactIds,
         event: params.event,
+        sessionId: params.parent.sessionId,
       });
       const action =
         params.event.type === 'pull_request_feedback' &&
@@ -1364,6 +1389,7 @@ async function createTeamsFastAgentParentTurn(
         const images = await buildSelectedImages({
           artifactIds: imageArtifactIds,
           event: params.event,
+          sessionId: params.parent.sessionId,
         });
         const reportMessage =
           params.event.type === 'automation_triggered' && !kickoff
@@ -1496,6 +1522,7 @@ async function createTelegramFastAgentParentTurn(
         const images = await buildSelectedImages({
           artifactIds: imageArtifactIds,
           event: params.event,
+          sessionId: params.parent.sessionId,
         });
         const reportMessage =
           params.event.type === 'automation_triggered' && !kickoff
@@ -2089,6 +2116,10 @@ export async function deliverFastAgentParentEventWithLock(
         (params.event.type === 'automation_triggered'
           ? 'automation'
           : 'delegated_task'),
+      ...(params.event.type === 'child_message' &&
+      params.event.imageArtifactIds?.length
+        ? { defaultImageArtifactIds: params.event.imageArtifactIds }
+        : {}),
       ...(params.event.type === 'pull_request_feedback' &&
       params.event.reviewActionDeliveryId &&
       params.event.suggestedActionQuestion

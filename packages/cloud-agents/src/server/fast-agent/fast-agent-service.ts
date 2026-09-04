@@ -1410,6 +1410,7 @@ export async function answerFastAgentQuestion({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  defaultImageArtifactIds = [],
   allowSilentAmbientReply = false,
   platformEventTranscriptPayload,
   slackRoomoteUserId,
@@ -1443,6 +1444,9 @@ export async function answerFastAgentQuestion({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  /** Child-selected images to carry through when the parent model omits the
+   * optional attachment argument while composing the child update. */
+  defaultImageArtifactIds?: string[];
   /** True only for an unmentioned turn in a multi-human Fast conversation. */
   allowSilentAmbientReply?: boolean;
   platformEventTranscriptPayload?: Record<string, unknown>;
@@ -2748,17 +2752,25 @@ export async function answerFastAgentQuestion({
       /** The streamed partial this reply finalizes, if one was shown. */
       streamedEvent?: { eventId: string; turnSeq: number },
     ) => {
-      const replacedRetry = await replaceInferenceRetryReply(reply, true, () =>
-        diagnostics.recordVisibleReply(),
+      const replyWithImages =
+        !reply.imageArtifactIds?.length && defaultImageArtifactIds.length
+          ? { ...reply, imageArtifactIds: defaultImageArtifactIds }
+          : reply;
+      const replacedRetry = await replaceInferenceRetryReply(
+        replyWithImages,
+        true,
+        () => diagnostics.recordVisibleReply(),
       );
       if (!replacedRetry) {
         const posted =
-          (await surfaceReplyStream.deliver(reply)) ??
-          (await adapter.postReply(reply));
+          (await surfaceReplyStream.deliver(replyWithImages)) ??
+          (await adapter.postReply(replyWithImages));
         diagnostics.recordVisibleReply();
-        turnVisibleMessages.push(buildAssistantTextMessage(reply.message));
+        turnVisibleMessages.push(
+          buildAssistantTextMessage(replyWithImages.message),
+        );
         await persistAssistantReply({
-          reply,
+          reply: replyWithImages,
           event:
             streamedEvent ??
             allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
@@ -2769,13 +2781,16 @@ export async function answerFastAgentQuestion({
       inferenceRetryReply = undefined;
       inferenceRetryMessageIndex = undefined;
       inferenceRetryCanonicalEvent = undefined;
-      lastVisibleMessage = reply.message;
+      lastVisibleMessage = replyWithImages.message;
       visibleUpdatePosted = true;
       // Any text reply posted by the model (acknowledgement, first progress
       // update, or task kickoff) is the textual communication the work-start
       // gate requires. Reactions deliberately do not set this flag.
       substantiveWorkAcknowledged = true;
-      if (reply.purpose === 'closeout' || reply.purpose === 'clarification') {
+      if (
+        replyWithImages.purpose === 'closeout' ||
+        replyWithImages.purpose === 'clarification'
+      ) {
         closedInstructionVersions.add(instructionVersion);
       }
       if (mirrorImmediately) {
@@ -3336,10 +3351,15 @@ export async function answerFastAgentQuestion({
                   'Platform events may post only a closeout or clarification.',
               };
             }
+            const requestedImageArtifactIds = args.imageArtifactIds ?? [];
+            const signatureImageArtifactIds =
+              requestedImageArtifactIds.length > 0
+                ? requestedImageArtifactIds
+                : defaultImageArtifactIds;
             const signature = JSON.stringify([
               args.purpose,
               message,
-              args.imageArtifactIds ?? [],
+              signatureImageArtifactIds,
               args.suggestions ?? [],
             ]);
             if (completedChatReplySignatures.has(signature)) {
@@ -3362,8 +3382,8 @@ export async function answerFastAgentQuestion({
               {
                 purpose: args.purpose,
                 message,
-                ...(args.imageArtifactIds?.length
-                  ? { imageArtifactIds: args.imageArtifactIds }
+                ...(requestedImageArtifactIds.length
+                  ? { imageArtifactIds: requestedImageArtifactIds }
                   : {}),
                 ...(args.suggestions?.length
                   ? { suggestions: args.suggestions }
