@@ -50,6 +50,15 @@ Look for concrete vulnerabilities and secure-by-default gaps: injection risks, m
 Inspect the test suites and recent CI behavior in the most impactful repository in this workspace for tests that fail intermittently. Timing assumptions, shared state, unawaited async work, and test-order dependence are common causes. Reproduce the flakiest ones, fix the root causes so the tests are deterministic, and open a pull request. List any flaky tests you found but did not fix, with what you learned about each.`,
   },
   {
+    id: 'address-todos',
+    title: 'Address TODOs',
+    description:
+      'Turn suitable TODOs into finished work without changing markers that should remain.',
+    prompt: `Find and address TODOs.
+
+Search the most impactful repository in this workspace for TODO markers. Review each one in context and assess whether it is still relevant, actionable, and appropriate to address now; do not blindly change every marker. Implement the suitable TODOs, remove markers made obsolete by the work, and validate the changes with the repository's own build and test tooling before opening a pull request. List any TODOs you deliberately left in place, with a short reason for each.`,
+  },
+  {
     id: 'update-dependencies',
     title: 'Update dependencies',
     description:
