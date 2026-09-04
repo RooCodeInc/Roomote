@@ -121,7 +121,7 @@ describe('TaskInputStack', () => {
       'data-auto-focus',
       'true',
     );
-    expect(screen.getByTestId('todo-list')).toBeInTheDocument();
+    expect(screen.queryByTestId('todo-list')).not.toBeInTheDocument();
     expect(screen.getByTestId('active-subtasks')).toBeInTheDocument();
     expect(screen.getByTestId('pending-user-input')).toBeInTheDocument();
     expect(screen.getByTestId('pending-env-var')).toBeInTheDocument();
@@ -144,7 +144,7 @@ describe('TaskInputStack', () => {
     );
 
     expect(screen.getByTestId('pending-user-input')).toBeInTheDocument();
-    expect(screen.getByTestId('todo-list')).toBeInTheDocument();
+    expect(screen.queryByTestId('todo-list')).not.toBeInTheDocument();
     expect(screen.getByTestId('queued-messages')).toBeInTheDocument();
     expect(screen.getByTestId('prompt-input').parentElement).toHaveClass(
       'hidden',
