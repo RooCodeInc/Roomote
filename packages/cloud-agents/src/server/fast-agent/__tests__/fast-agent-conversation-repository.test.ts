@@ -15,6 +15,7 @@ import {
   fastAgentConversationRepository,
   findFastAgentActiveInferenceRetryNotice,
   findFastAgentUnresolvedRequest,
+  loadFastAgentTurnAttemptSummary,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   scheduleFastAgentDurableTurnRetry,
   markFastAgentDurableTurnDelivered,
@@ -65,6 +66,7 @@ describe('Fast conversation repository', () => {
     const session = await fastAgentConversationRepository.getOrCreate({
       userId: user.id,
       conversation,
+      initialTitle: 'Weekly product update',
     });
     const stored = await fastAgentConversationRepository.findById({
       id: session.id,
@@ -77,10 +79,66 @@ describe('Fast conversation repository', () => {
       .select({
         channelId: fastAgentConversations.currentReplyChannelId,
         surface: fastAgentConversations.surface,
+        title: fastAgentConversations.title,
       })
       .from(fastAgentConversations)
       .where(eq(fastAgentConversations.id, session.id));
-    expect(row).toEqual({ channelId: null, surface: 'automation' });
+    expect(row).toEqual({
+      channelId: null,
+      surface: 'automation',
+      title: 'Weekly product update',
+    });
+    const [unifiedSession] = await db
+      .select({ title: sessions.title })
+      .from(sessions)
+      .where(eq(sessions.fastConversationId, session.id));
+    expect(unifiedSession?.title).toBe('Weekly product update');
+  });
+
+  it('creates an automation-owned Session without a run-as user', async () => {
+    const conversation = {
+      surface: 'automation' as const,
+      workspaceId: 'ownerless-automation-repository-test',
+      conversationId: crypto.randomUUID(),
+    };
+
+    const created = await fastAgentConversationRepository.getOrCreate({
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      conversation,
+      initialTitle: 'Ownerless weekly update',
+    });
+    const reused = await fastAgentConversationRepository.getOrCreate({
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      conversation,
+      initialTitle: 'Changed title must not replace the original',
+    });
+
+    expect(created).toMatchObject({
+      userId: null,
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+    });
+    expect(reused).toMatchObject({ id: created.id, created: false });
+    const [unifiedSession] = await db
+      .select({
+        id: sessions.id,
+        ownerKind: sessions.ownerKind,
+        ownerUserId: sessions.ownerUserId,
+        ownerAutomation: sessions.ownerAutomation,
+        title: sessions.title,
+      })
+      .from(sessions)
+      .where(eq(sessions.fastConversationId, created.id));
+    expect(unifiedSession).toMatchObject({
+      ownerKind: 'automation',
+      ownerUserId: null,
+      ownerAutomation: 'custom_automation',
+      title: 'Ownerless weekly update',
+    });
+
+    await db.delete(sessions).where(eq(sessions.id, unifiedSession!.id));
+    await db
+      .delete(fastAgentConversations)
+      .where(eq(fastAgentConversations.id, created.id));
   });
 
   it.each(['teams', 'telegram'] as const)(
@@ -111,6 +169,122 @@ describe('Fast conversation repository', () => {
     },
   );
 
+  it('binds a new conversation to the Session it was created for', async () => {
+    const user = await createUser();
+    const [origin] = await db
+      .insert(sessions)
+      .values({
+        title: 'Weekly scan',
+        ownerKind: 'user',
+        ownerUserId: user.id,
+        sourceSurface: 'web',
+        sourceTrigger: 'manual',
+        visibility: 'visible',
+        activityAt: Math.floor(Date.now() / 1000),
+        cachedStatus: 'ready',
+      })
+      .returning({ id: sessions.id });
+    const conversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-origin-test',
+      conversationId: `thread-origin-${origin!.id}`,
+      replyTarget: {
+        channelId: 'channel-origin-test',
+        threadId: `thread-origin-${origin!.id}`,
+      },
+    };
+
+    const created = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+      sessionId: origin!.id,
+    });
+    const [bound] = await db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(eq(sessions.fastConversationId, created.id));
+    expect(bound?.id).toBe(origin!.id);
+
+    // A second Session cannot claim a conversation that already exists.
+    const [other] = await db
+      .insert(sessions)
+      .values({
+        title: 'Another scan',
+        ownerKind: 'user',
+        ownerUserId: user.id,
+        sourceSurface: 'web',
+        sourceTrigger: 'manual',
+        visibility: 'visible',
+        activityAt: Math.floor(Date.now() / 1000),
+        cachedStatus: 'ready',
+      })
+      .returning({ id: sessions.id });
+    const reused = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+      sessionId: other!.id,
+    });
+    expect(reused.id).toBe(created.id);
+    const [otherRow] = await db
+      .select({ fastConversationId: sessions.fastConversationId })
+      .from(sessions)
+      .where(eq(sessions.id, other!.id));
+    expect(otherRow?.fastConversationId).toBeNull();
+    await db
+      .delete(sessions)
+      .where(inArray(sessions.id, [origin!.id, other!.id]));
+  });
+
+  it('converges concurrent launches into one Session on the conversation that bound first', async () => {
+    const user = await createUser();
+    const [origin] = await db
+      .insert(sessions)
+      .values({
+        title: 'Weekly scan',
+        ownerKind: 'user',
+        ownerUserId: user.id,
+        sourceSurface: 'web',
+        sourceTrigger: 'manual',
+        visibility: 'visible',
+        activityAt: Math.floor(Date.now() / 1000),
+        cachedStatus: 'ready',
+      })
+      .returning({ id: sessions.id });
+    const identity = (index: number) => ({
+      surface: 'slack' as const,
+      workspaceId: 'team-origin-race-test',
+      conversationId: `thread-origin-race-${origin!.id}-${index}`,
+      replyTarget: {
+        channelId: 'channel-origin-race-test',
+        threadId: `thread-origin-race-${origin!.id}-${index}`,
+      },
+    });
+
+    const results = await Promise.all(
+      Array.from({ length: 6 }, (_, index) =>
+        fastAgentConversationRepository.getOrCreate({
+          userId: user.id,
+          conversation: identity(index),
+          sessionId: origin!.id,
+        }),
+      ),
+    );
+
+    expect(new Set(results.map(({ id }) => id)).size).toBe(1);
+    expect(results.filter(({ created }) => created)).toHaveLength(1);
+    const [bound] = await db
+      .select({ fastConversationId: sessions.fastConversationId })
+      .from(sessions)
+      .where(eq(sessions.id, origin!.id));
+    expect(bound?.fastConversationId).toBe(results[0]!.id);
+    const rows = await db
+      .select({ id: fastAgentConversations.id })
+      .from(fastAgentConversations)
+      .where(eq(fastAgentConversations.workspaceId, 'team-origin-race-test'));
+    expect(rows).toHaveLength(1);
+    await db.delete(sessions).where(eq(sessions.id, origin!.id));
+  });
+
   it('converges concurrent creation on one provider-neutral row', async () => {
     const user = await createUser();
     const sessions = await Promise.all(
@@ -139,6 +313,66 @@ describe('Fast conversation repository', () => {
       );
 
     expect(rows).toEqual([{ id: sessions[0]!.id }]);
+  });
+
+  it('lets another participant take a turn in a user-owned conversation', async () => {
+    const owner = await createUser();
+    const participant = await createUser();
+    const conversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-participant-test',
+      conversationId: `thread-participant-${owner.id}`,
+      replyTarget: {
+        channelId: 'channel-participant-test',
+        threadId: `thread-participant-${owner.id}`,
+      },
+    };
+    const created = await fastAgentConversationRepository.getOrCreate({
+      userId: owner.id,
+      conversation,
+    });
+    expect(created.created).toBe(true);
+
+    // A coworker replying in the bound thread is a participant, not a new
+    // owner: the turn reuses the conversation and ownership is unchanged.
+    const reused = await fastAgentConversationRepository.getOrCreate({
+      userId: participant.id,
+      conversation,
+    });
+    expect(reused).toMatchObject({ id: created.id, created: false });
+    expect(reused.owner).toEqual({ kind: 'user', userId: owner.id });
+    expect(reused.userId).toBe(owner.id);
+  });
+
+  it('rejects an explicit owner that does not match the conversation', async () => {
+    const owner = await createUser();
+    const other = await createUser();
+    const conversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-owner-mismatch-test',
+      conversationId: `thread-owner-mismatch-${owner.id}`,
+      replyTarget: {
+        channelId: 'channel-owner-mismatch-test',
+        threadId: `thread-owner-mismatch-${owner.id}`,
+      },
+    };
+    await fastAgentConversationRepository.getOrCreate({
+      owner: { kind: 'user', userId: owner.id },
+      conversation,
+    });
+
+    await expect(
+      fastAgentConversationRepository.getOrCreate({
+        owner: { kind: 'user', userId: other.id },
+        conversation,
+      }),
+    ).rejects.toThrow('Fast conversation owner does not match the caller.');
+    await expect(
+      fastAgentConversationRepository.getOrCreate({
+        owner: { kind: 'automation', automationKey: 'custom_automation' },
+        conversation,
+      }),
+    ).rejects.toThrow('Fast conversation owner does not match the caller.');
   });
 
   it('returns the persisted Fast conversation title', async () => {
@@ -1105,6 +1339,202 @@ describe('Fast conversation repository', () => {
     await expect(
       findFastAgentUnresolvedRequest(session.id),
     ).resolves.toBeNull();
+  });
+
+  it('summarizes what an interrupted attempt already did for the run that resumes it', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const write = (
+      message: Parameters<
+        typeof fastAgentConversationRepository.upsertMessage
+      >[0]['message'],
+    ) =>
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message,
+      });
+    const tool = (
+      ordinal: number,
+      eventType: 'roomote_runtime.tool_call' | 'roomote_runtime.tool_result',
+      payload: Record<string, unknown>,
+      text?: string,
+    ) =>
+      // Production shape: the call and its result share one canonical event,
+      // so the result overwrites the call row when it lands.
+      write({
+        eventId: `turn-a:tool:${ordinal}`,
+        turnId: 'turn-a',
+        turnSeq: ordinal * 2,
+        ts: 1_000 + ordinal * 10,
+        eventType,
+        role: 'tool',
+        contentBlocks: text ? [{ type: 'text', text }] : [],
+        metadata: { visibleInTranscript: true },
+        payload: { toolCallId: `turn-a:tool:${ordinal}`, ...payload },
+        source: 'slack',
+      });
+
+    await write({
+      eventId: 'turn-a:user',
+      turnId: 'turn-a',
+      turnSeq: 0,
+      ts: 990,
+      eventType: 'roomote_runtime.user_prompt',
+      role: 'user',
+      contentBlocks: [{ type: 'text', text: 'Count the root files.' }],
+      metadata: { visibleInTranscript: true, turnSource: 'human' },
+      payload: {},
+      source: 'slack',
+    });
+    await write({
+      eventId: 'turn-a:assistant:0',
+      turnId: 'turn-a',
+      turnSeq: 1,
+      ts: 1_000,
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Starting on it.' }],
+      metadata: { visibleInTranscript: true, purpose: 'progress' },
+      payload: { purpose: 'progress' },
+      source: 'slack',
+    });
+    // A completed launch, a failed message, and a call the process died on
+    // (its call row was never replaced by a result).
+    await tool(1, 'roomote_runtime.tool_call', {
+      toolName: 'launch_task',
+      rawInput: { arguments: { prompt: 'Fix the bug' } },
+    });
+    await tool(
+      1,
+      'roomote_runtime.tool_result',
+      {
+        toolName: 'launch_task',
+        status: 'completed',
+        rawInput: { arguments: { prompt: 'Fix the bug' } },
+      },
+      '{"success":true,"taskId":"task-1"}',
+    );
+    await tool(2, 'roomote_runtime.tool_call', {
+      toolName: 'send_task_message',
+      rawInput: { arguments: { taskId: 'task-1', message: 'hi' } },
+    });
+    await tool(
+      2,
+      'roomote_runtime.tool_result',
+      {
+        toolName: 'send_task_message',
+        status: 'failed',
+        rawInput: { arguments: { taskId: 'task-1', message: 'hi' } },
+      },
+      '{"success":false,"error":"Task is not accepting messages."}',
+    );
+    await tool(3, 'roomote_runtime.tool_call', {
+      toolName: 'save_memory',
+      rawInput: { arguments: { content: 'Prefers bullets.' } },
+    });
+    // A subagent task call persists its input directly, without the
+    // `arguments` wrapper the native tools use.
+    await tool(
+      4,
+      'roomote_runtime.tool_result',
+      {
+        toolName: 'task',
+        status: 'failed',
+        rawInput: { prompt: 'Audit the queue', subagent_type: 'explore' },
+      },
+      'Subagent exited early.',
+    );
+    // Rows from another turn and hidden or terminal assistant rows are not
+    // part of the attempt.
+    await write({
+      eventId: 'turn-b:assistant:0',
+      turnId: 'turn-b',
+      turnSeq: 1,
+      ts: 2_000,
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Other turn.' }],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+      source: 'slack',
+    });
+    await write({
+      eventId: 'turn-a:interruption',
+      turnId: 'turn-a',
+      turnSeq: 9,
+      ts: 1_900,
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Roomote restarted…' }],
+      metadata: {
+        visibleInTranscript: true,
+        purpose: 'closeout',
+        interruptionReason: 'api_shutdown',
+      },
+      payload: { purpose: 'closeout' },
+      source: 'slack',
+    });
+
+    await expect(
+      loadFastAgentTurnAttemptSummary(session.id, 'turn-a'),
+    ).resolves.toEqual({
+      // Transcript order: the reply, then each call with its outcome.
+      events: [
+        { kind: 'reply', text: 'Starting on it.', purpose: 'progress' },
+        {
+          kind: 'action',
+          tool: 'launch_task',
+          arguments: { prompt: 'Fix the bug' },
+          status: 'completed',
+          result: '{"success":true,"taskId":"task-1"}',
+        },
+        {
+          kind: 'action',
+          tool: 'send_task_message',
+          arguments: { taskId: 'task-1', message: 'hi' },
+          status: 'failed',
+          result: '{"success":false,"error":"Task is not accepting messages."}',
+        },
+        {
+          kind: 'action',
+          tool: 'save_memory',
+          arguments: { content: 'Prefers bullets.' },
+          status: 'unknown',
+        },
+        {
+          kind: 'action',
+          tool: 'task',
+          arguments: { prompt: 'Audit the queue', subagent_type: 'explore' },
+          status: 'failed',
+          result: 'Subagent exited early.',
+        },
+      ],
+      // The resumed run numbers its rows after the attempt's, so nothing
+      // is overwritten: assistant:0 exists, tools 1..4 exist, turnSeq 9 is
+      // the highest row.
+      next: {
+        assistantOrdinal: 1,
+        toolOrdinal: 5,
+        retryNoticeOrdinal: 0,
+        turnSeq: 10,
+      },
+      prompt: { ts: 990, turnSeq: 0 },
+    });
+    await expect(
+      loadFastAgentTurnAttemptSummary(session.id, 'turn-none'),
+    ).resolves.toEqual({
+      events: [],
+      next: {
+        assistantOrdinal: 0,
+        toolOrdinal: 0,
+        retryNoticeOrdinal: 0,
+        turnSeq: 0,
+      },
+      prompt: null,
+    });
   });
 
   it('walks a durable turn row through claim, release, revoke, and delivery', async () => {

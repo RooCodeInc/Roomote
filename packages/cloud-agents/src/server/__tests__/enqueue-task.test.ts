@@ -22,6 +22,7 @@ import {
   TaskPayloadKind,
   TASK_KICKOFF_MESSAGE_SOURCE,
   ACP_ENVELOPE_EVENT_TYPES,
+  getFastAgentParentFromPayload,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
 } from '@roomote/types';
 import {
@@ -945,6 +946,55 @@ describe('enqueueTask Session linkage', () => {
     await expect(
       db.select().from(sessionTasks).where(eq(sessionTasks.taskId, run.taskId)),
     ).resolves.toEqual([]);
+  });
+
+  it('attaches an ownerless automation task to a Fast Session without a human actor', async () => {
+    const fastAgentSessionId = crypto.randomUUID();
+    await db.insert(fastAgentConversations).values({
+      id: fastAgentSessionId,
+      userId: null,
+      ownerAutomation: 'custom_automation',
+      surface: 'automation',
+      workspaceId: crypto.randomUUID(),
+      conversationId: crypto.randomUUID(),
+    });
+    const task = standardTaskInput({
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: 'Prepare the weekly product update',
+        fastAgentSessionId,
+      },
+    });
+
+    const run = await launchFresh({
+      task,
+      initiator: { kind: 'automation', key: 'custom_automation' },
+      workflow: 'standard',
+      surface: 'system',
+      trigger: 'schedule',
+    });
+
+    expect(run.actingUserId).toBeNull();
+    expect(getFastAgentParentFromPayload(run.payload)).toBeNull();
+    await expect(
+      db
+        .select({
+          fastConversationId: sessions.fastConversationId,
+          ownerKind: sessions.ownerKind,
+          ownerAutomation: sessions.ownerAutomation,
+          origin: sessionTasks.origin,
+        })
+        .from(sessionTasks)
+        .innerJoin(sessions, eq(sessionTasks.sessionId, sessions.id))
+        .where(eq(sessionTasks.taskId, run.taskId)),
+    ).resolves.toEqual([
+      {
+        fastConversationId: fastAgentSessionId,
+        ownerKind: 'automation',
+        ownerAutomation: 'custom_automation',
+        origin: 'fast_delegation',
+      },
+    ]);
   });
 
   it('reuses one Session task for concurrent launch idempotency retries', async () => {

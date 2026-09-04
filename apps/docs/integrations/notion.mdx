@@ -59,18 +59,25 @@ user-information capability retracts the whole directory the same way.
 
 Roomote agents can read and update page content as enhanced Markdown, move
 regular pages beneath another page or into a data source, and create blocks at
-the start or end of existing content or after a specific child block. These
+the start or end of existing content or after a specific child block. Agents
+can also create a database, its initial data source, and its first table view
+beneath an approved page or as a private workspace page. After creation, agents
+can update database metadata and placement, add, rename, reconfigure, or delete
+data source properties, and create, configure, or delete database views. These
 operations use Notion's public API rather than Notion's hosted MCP tools, so
 their schemas and limitations follow the public API.
 
+The database update API can replace an icon or cover, but its current schema
+does not accept `null` to remove either one. Data source icons can be cleared.
+
 Notion's public API cannot move or reorder an existing block. Positional block
-insertion applies only to newly created blocks. Moving a database or preserving
-a block's ID while recreating it in another position is also unsupported.
+insertion applies only to newly created blocks. Preserving a block's ID while
+recreating it in another position is also unsupported.
 
 Roomote's deployment-wide integration is not a proxy for Notion's hosted MCP.
-Hosted-only features such as connected-source search, attachment helpers,
-database and view creation, page duplication, folders, meeting-note queries,
-and workspace team or user lookup are not currently exposed as agent tools.
+Hosted-only features such as connected-source search, attachment helpers, page
+duplication, folders, meeting-note queries, and workspace team or user lookup
+are not currently exposed as agent tools.
 (Memory's identity linking reads the workspace user directory directly
 through the public API, as described above.) Roomote instead provides the
 direct public-API operations that work with a restricted internal
@@ -89,7 +96,9 @@ Disable update, insert, or comment capabilities there when the connection
 should be read-only. Roomote exposes its Notion tools, but Notion rejects any
 operation the integration's capabilities do not permit.
 
-Inserting blocks requires **Insert content**. Moving pages and updating page
-Markdown require **Update content**, including edit access to the destination
-parent for page moves. Changing these capabilities on an existing internal
-integration takes effect without reconnecting Roomote.
+Creating databases and inserting blocks require **Insert content**. Creating a
+view requires both **Insert content** and **Update content**. Updating database
+metadata, data source schemas, views, page locations, or page Markdown requires
+**Update content**, including access to destination parents. Notion does not
+allow deleting the last remaining view in a database. Changing capabilities on
+an existing internal integration takes effect without reconnecting Roomote.

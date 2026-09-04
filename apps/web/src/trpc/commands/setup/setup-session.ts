@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { type FastAgentTurnAdapter } from '@roomote/cloud-agents/server';
+import { buildFastAgentArtifactCreator } from '@roomote/sdk/server';
 import {
   and,
   db,
@@ -13,20 +14,17 @@ import {
   sessions,
   sql,
   taskRuns,
-  users,
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   AUTOMATION_RECOMMENDATION_CATALOG,
   createSetupNewSetupSession,
-  isSetupStarterTaskId,
   normalizeSetupNewState,
   normalizeSetupNewSetupSession,
   RunStatus,
   type AcpRequestUserInputAnswers,
   type AcpRequestUserInputPayload,
   type AutomationRecommendationBatch,
-  type SetupStarterTaskId,
 } from '@roomote/types';
 import { captureEvent } from '@roomote/telemetry/server';
 
@@ -34,7 +32,7 @@ import type { UserAuthSuccess } from '@/types';
 import { SETUP_STARTER_TASKS } from '@/lib/setup-starter-tasks';
 import { recordSetupFunnelMilestones } from '@/lib/server/setup-funnel-telemetry';
 import { assertAdmin } from './shared';
-import { completeSetupCommand } from './index';
+import { completeConversationalSetupIfReady } from './setup-session-completion';
 import { getSetupNewStatusCommand } from '../setup-new';
 import {
   buildSetupReceiptMessage,
@@ -319,8 +317,8 @@ async function buildSetupSessionAdapterExtensions(
           isSecret: false,
           multiple: true,
           options: SETUP_STARTER_TASKS.map((task) => ({
-            label: task.id,
-            description: `${task.title}: ${task.description}`,
+            label: task.title,
+            description: task.description,
           })),
         },
       ];
@@ -379,6 +377,9 @@ async function buildSetupPlatformEventTurn(
         conversationId: conversation.conversationId,
       },
       adapter: {
+        createArtifact: buildFastAgentArtifactCreator(
+          conversation.fastConversationId,
+        ),
         launchTask: (
           await import('@roomote/cloud-agents/server')
         ).createFastAgentWebTaskLauncher({
@@ -417,14 +418,17 @@ async function buildSetupPlatformEventTurn(
  */
 export async function reconcileSetupPlatformEvents(
   auth: UserAuthSuccess,
-): Promise<void> {
+): Promise<boolean> {
   assertAdmin(auth);
   const status = await getSetupNewStatusCommand(auth);
   const state = normalizeSetupNewState(status.setupNewState);
   const setupSession = normalizeSetupNewSetupSession(state.setupSession);
-  if (!setupSession) return;
+  if (!setupSession) return status.setupCompletedAt != null;
   const conversation = await findSetupSessionConversation(auth);
-  if (!conversation) return;
+  if (!conversation) return status.setupCompletedAt != null;
+  const setupCompleted =
+    status.setupCompletedAt != null ||
+    (await completeConversationalSetupIfReady(auth, status));
   const hasSuccessfulStarterLaunch = setupSession.starterTaskSelection
     ? await hasSuccessfulSetupSessionTaskLaunch(
         auth,
@@ -624,6 +628,7 @@ export async function reconcileSetupPlatformEvents(
     });
     if (turn) scheduleWebFastAgentTurn(turn);
   }
+  return setupCompleted;
 }
 
 export async function notifySetupSourceControlSynchronized(
@@ -684,11 +689,13 @@ export async function getSetupSessionStatusCommand(auth: UserAuthSuccess) {
   const setupSession = normalizeSetupNewSetupSession(
     status.setupNewState.setupSession,
   );
-  if (setupSession) await reconcileSetupPlatformEvents(auth);
+  const completed = setupSession
+    ? await reconcileSetupPlatformEvents(auth)
+    : status.setupCompletedAt != null;
   return {
     ready: Boolean(await findSetupSessionConversation(auth)),
     sessionId: setupSession?.sessionId ?? null,
-    completed: status.setupCompletedAt != null,
+    completed,
     rail: deriveSetupRailMilestones(status),
   };
 }
@@ -797,7 +804,7 @@ async function persistSetupPresetResponse(input: {
     payload: AcpRequestUserInputPayload;
   };
   answers: AcpRequestUserInputAnswers;
-}): Promise<{ completedSetup: boolean }> {
+}): Promise<void> {
   assertAdmin(input.auth);
   const preset = input.request.payload.preset;
   if (preset !== 'setup_starter_tasks') {
@@ -805,7 +812,6 @@ async function persistSetupPresetResponse(input: {
   }
   await assertSetupStarterWorkReady(input.auth);
 
-  let completedSetup = false;
   await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${SETUP_SESSION_ADVISORY_LOCK}))`,
@@ -850,11 +856,15 @@ async function persistSetupPresetResponse(input: {
 
     const taskIds = [
       ...new Set(
-        input.answers['setup-starter-tasks']?.answers.filter(
-          isSetupStarterTaskId,
-        ) ?? [],
+        input.answers['setup-starter-tasks']?.answers.flatMap((answer) => {
+          const task = SETUP_STARTER_TASKS.find(
+            (candidate) =>
+              candidate.title === answer || candidate.id === answer,
+          );
+          return task ? [task.id] : [];
+        }) ?? [],
       ),
-    ] as SetupStarterTaskId[];
+    ];
     if (taskIds.length === 0) {
       throw new Error('Select at least one starter task.');
     }
@@ -870,18 +880,11 @@ async function persistSetupPresetResponse(input: {
         },
       },
     };
-    await tx
-      .update(users)
-      .set({ onboardingCompletedAt: selectedAt })
-      .where(eq(users.id, input.auth.userId));
-    completedSetup = true;
-
     const now = new Date();
     await tx
       .update(deploymentSettings)
       .set({
         setupNewState: nextState,
-        ...(completedSetup ? { setupCompletedAt: now } : {}),
         updatedAt: now,
       })
       .where(eq(deploymentSettings.id, 'default'));
@@ -940,11 +943,6 @@ async function persistSetupPresetResponse(input: {
         target: [fastAgentMessages.conversationId, fastAgentMessages.eventId],
       });
   });
-
-  if (completedSetup) {
-    queueMicrotask(() => void completeSetupCommand(input.auth));
-  }
-  return { completedSetup };
 }
 
 export async function submitSetupSessionUserInputCommand(

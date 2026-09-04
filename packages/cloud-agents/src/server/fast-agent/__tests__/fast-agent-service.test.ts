@@ -1,5 +1,6 @@
 const mocks = vi.hoisted(() => ({
   appendVisibleMessages: vi.fn(),
+  publishReplyStream: vi.fn(),
   getActiveTasks: vi.fn(),
   getSession: vi.fn(),
   getNativeRuntime: vi.fn(),
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
   getUserIdentity: vi.fn(),
+  getTherapistMode: vi.fn(),
   refreshTitle: vi.fn(),
   bindExecutor: vi.fn(),
   bindMcpExecutor: vi.fn(),
@@ -37,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   revokeDurableReplay: vi.fn(),
   scheduleDurableRetry: vi.fn(),
   findActiveRetryNotice: vi.fn(),
+  loadTurnAttempt: vi.fn(),
   getUnifiedSession: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
@@ -67,6 +70,7 @@ const nativeToolNames = vi.hoisted(
     ({
       callIntegrationTool: 'call_integration_tool',
       cancelTask: 'cancel_task',
+      createArtifact: 'create_artifact',
       findIntegrationTools: 'find_integration_tools',
       ignoreEvent: 'ignore_event',
       launchTask: 'launch_task',
@@ -100,8 +104,6 @@ vi.mock('../fast-agent-session', () => ({
 vi.mock('../fast-agent-conversation-repository', () => ({
   INTERRUPTED_INFERENCE_RETRY_MESSAGE:
     'The inference retry was interrupted before it completed. Please send the request again.',
-  RESTARTED_ACTIVE_TURN_MESSAGE:
-    'Roomote restarted while working on this request. Please send it again.',
   reconcileFastAgentInferenceRetryNotices: mocks.reconcileRetryNotices,
   markFastAgentInferenceRetryNoticeInterruption:
     mocks.markRetryNoticeInterruption,
@@ -113,9 +115,10 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   revokeFastAgentDurableTurnReplay: mocks.revokeDurableReplay,
   scheduleFastAgentDurableTurnRetry: mocks.scheduleDurableRetry,
   findFastAgentActiveInferenceRetryNotice: mocks.findActiveRetryNotice,
+  loadFastAgentTurnAttemptSummary: mocks.loadTurnAttempt,
 }));
 
-vi.mock('../../router', () => ({
+vi.mock('../../available-environments', () => ({
   getAvailableEnvironments: mocks.getEnvironments,
 }));
 
@@ -217,8 +220,37 @@ vi.mock('../fast-agent-user-identity', () => ({
   getFastAgentUserIdentity: mocks.getUserIdentity,
 }));
 
+vi.mock('../../therapist-mode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../therapist-mode')>();
+  return {
+    ...actual,
+    getTherapistModeEnabledForUser: mocks.getTherapistMode,
+  };
+});
+
 vi.mock('../fast-agent-title', () => ({
   refreshFastAgentSessionTitle: mocks.refreshTitle,
+}));
+
+vi.mock('../fast-agent-surface-reply-stream', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../fast-agent-surface-reply-stream')>();
+  return {
+    ...actual,
+    // Tests drive the stream synchronously; no start delay or pacing.
+    createFastAgentSurfaceReplyStreamer: (
+      options: Parameters<typeof actual.createFastAgentSurfaceReplyStreamer>[0],
+    ) =>
+      actual.createFastAgentSurfaceReplyStreamer({
+        ...options,
+        startDelayMs: 0,
+        intervalMs: 0,
+      }),
+  };
+});
+
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => ({ publish: mocks.publishReplyStream }),
 }));
 
 vi.mock('../fast-agent-turn-lock', () => ({
@@ -413,6 +445,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.revokeDurableReplay.mockResolvedValue(true);
     mocks.scheduleDurableRetry.mockResolvedValue(true);
     mocks.findActiveRetryNotice.mockResolvedValue(null);
+    mocks.loadTurnAttempt.mockResolvedValue({
+      events: [],
+      next: {
+        assistantOrdinal: 0,
+        toolOrdinal: 0,
+        retryNoticeOrdinal: 0,
+        turnSeq: 0,
+      },
+      prompt: null,
+    });
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
@@ -437,6 +479,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       githubLogin: 'mrubens',
       isAdmin: true,
     });
+    mocks.getTherapistMode.mockResolvedValue(false);
     mocks.classifyInferenceError.mockImplementation((error: unknown) => {
       const detail = error instanceof Error ? error.message.toLowerCase() : '';
 
@@ -494,6 +537,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         });
         return '';
       },
+    );
+  });
+
+  it('applies the current user therapist mode preference to the system prompt', async () => {
+    mocks.getTherapistMode.mockResolvedValueOnce(true);
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.getTherapistMode).toHaveBeenCalledWith('user-1');
+    expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
+      '<therapist_mode>',
     );
   });
 
@@ -691,24 +745,185 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('rejects request_user_input calls that mix questions with a trusted preset', async () => {
+  it('persists child-selected image IDs when the parent omits the optional attachment argument', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Here is the screenshot.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      defaultImageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'Here is the screenshot.',
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+    const assistantMessage = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) => message.eventType === 'roomote_runtime.assistant_message',
+      );
+    expect(assistantMessage?.payload).toMatchObject({
+      purpose: 'closeout',
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+  });
+
+  it('persists child-selected image IDs on a text-only terminal closeout', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        return 'The visual comparison is attached.';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      defaultImageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'The visual comparison is attached.',
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+    const assistantMessage = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) => message.eventType === 'roomote_runtime.assistant_message',
+      );
+    expect(assistantMessage?.payload).toMatchObject({
+      purpose: 'closeout',
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+  });
+
+  it('reports local storage exhaustion instead of a generic Fast error', async () => {
+    const storageError = Object.assign(
+      new Error('ENOSPC: no space left on device, write'),
+      { code: 'ENOSPC' },
+    );
+    mocks.getNativeRuntime.mockRejectedValueOnce(storageError);
+    const adapter = callbacks();
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      await expect(
+        answerFastAgentQuestion({ ...baseParams, adapter }),
+      ).resolves.toContain("Fast's local working");
+
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: expect.stringContaining("Fast's local working"),
+      });
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining('reason="local_storage_'),
+      );
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining('filesystemPath=/tmp'),
+      );
+      expect(mocks.generateText).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('lets a trusted preset win when the model also passes placeholder questions', async () => {
+    const presetQuestions = [
+      {
+        id: 'setup-starter-tasks',
+        header: 'First work',
+        question: 'What should Roomote work on first?',
+        isOther: false,
+        isSecret: false,
+        multiple: true,
+        options: [
+          {
+            label: 'fix-flaky-tests',
+            description: 'Find and fix flaky tests.',
+          },
+        ],
+      },
+    ];
     let toolResult: unknown;
     const requestUserInput = vi.fn();
-    const resolveUserInputPreset = vi.fn();
+    const resolveUserInputPreset = vi.fn(async () => presetQuestions);
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
         options.onPromptStarted?.();
+        // Some models fill every optional parameter; the placeholder
+        // questions must be discarded, never rendered or used to reject.
         toolResult = await invokeTool(nativeToolNames.requestUserInput, {
           preset: 'setup_starter_tasks',
           questions: [
             {
-              id: 'starter-work',
-              header: 'First work',
-              question: 'What should I work on first?',
+              id: 'placeholder',
+              header: 'placeholder',
+              question: 'placeholder',
+              options: [{ label: 'placeholder', description: 'placeholder' }],
             },
           ],
         });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'setup-session-1',
+      },
+      turnSource: 'platform_event',
+      platformEventKind: 'setup',
+      platformEventVisibility: 'required',
+      setupSession: true,
+      adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+    });
+
+    expect(toolResult).toEqual({
+      success: true,
+      requestId: expect.any(String),
+      closed: true,
+    });
+    expect(resolveUserInputPreset).toHaveBeenCalledWith('setup_starter_tasks');
+    expect(requestUserInput).toHaveBeenCalledWith({
+      requestId: expect.any(String),
+      preset: 'setup_starter_tasks',
+      questions: presetQuestions,
+    });
+  });
+
+  it('rejects request_user_input calls with neither questions nor a preset', async () => {
+    let toolResult: unknown;
+    const requestUserInput = vi.fn();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        toolResult = await invokeTool(nativeToolNames.requestUserInput, {});
         return 'Please choose your first task.';
       },
     );
@@ -720,13 +935,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         workspaceId: 'deployment-1',
         conversationId: 'setup-session-1',
       },
+      turnSource: 'platform_event',
+      platformEventKind: 'setup',
+      platformEventVisibility: 'required',
       setupSession: true,
-      adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+      adapter: callbacks({ requestUserInput }),
     });
 
-    expect(toolResult).toMatchObject({ success: false });
+    expect(toolResult).toEqual({
+      success: false,
+      error: 'Pass either questions to ask or a trusted preset name.',
+    });
     expect(requestUserInput).not.toHaveBeenCalled();
-    expect(resolveUserInputPreset).not.toHaveBeenCalled();
   });
 
   it('lets a required setup platform event end with trusted structured input', async () => {
@@ -1025,6 +1245,100 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       finishGeneration?.('Combined steered answer');
       await expect(resultPromise).resolves.toBe('Combined steered answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaves a same-user follow-up routed in from a pull request out of native steering', async () => {
+    vi.useFakeTimers();
+    try {
+      const steerable = {
+        id: '66666666-6666-4666-8666-666666666666',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.8',
+          currentMessageId: '100.8',
+          userId: 'user-1',
+          question: 'Steer this one.',
+        },
+      };
+      const routedFromPullRequest = {
+        id: '77777777-7777-4777-8777-777777777777',
+        createdAt: new Date('2026-08-31T12:00:01.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: 'github:comment:900',
+          currentMessageId: 'github:comment:900',
+          userId: 'user-1',
+          question: 'Also update the changelog on the PR.',
+          sourceControlReplyTarget: {
+            provider: 'github',
+            host: 'github.com',
+            repositoryFullName: 'acme/api',
+            kind: 'pull',
+            number: 42,
+          },
+        },
+      };
+      const afterRouted = {
+        id: '88888888-8888-4888-8888-888888888888',
+        createdAt: new Date('2026-08-31T12:00:02.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.9',
+          currentMessageId: '100.9',
+          userId: 'user-1',
+          question: 'Do not jump ahead of the pull request mention.',
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([steerable, routedFromPullRequest, afterRouted])
+        .mockResolvedValue([routedFromPullRequest, afterRouted]);
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+
+      // Only the plain follow-up is injected; the routed mention and every
+      // later row stay durable for the whole-turn delivery that answers on
+      // the pull request too.
+      const steer = mocks.nativeSteer.mock.calls[0]?.[0];
+      expect(steer?.text).toContain('Steer this one.');
+      expect(steer?.text).not.toContain('Also update the changelog on the PR.');
+      expect(steer?.text).not.toContain(
+        'Do not jump ahead of the pull request mention.',
+      );
+      expect(mocks.inArray).toHaveBeenCalledWith('id', [steerable.id]);
+      expect(mocks.upsertMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({
+            eventId: 'github:comment:900:user',
+          }),
+        }),
+      );
+
+      finishGeneration?.('Steered answer');
+      await expect(resultPromise).resolves.toBe('Steered answer');
     } finally {
       vi.useRealTimers();
     }
@@ -2540,6 +2854,50 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('creates a durable Session artifact with inferred content type', async () => {
+    const createArtifact = vi.fn().mockResolvedValue({
+      id: 'artifact-1',
+      path: 'notes/decision.md',
+      version: 1,
+      artifactType: 'general',
+      contentType: 'text/markdown',
+      size: 8,
+      viewUrl: 'https://roomote.example/sessions/session-1',
+    });
+    const adapter = callbacks({ createArtifact });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Creating that document.',
+        });
+        const result = await invokeTool(nativeToolNames.createArtifact, {
+          path: 'notes/decision.md',
+          content: '# Decision',
+        });
+        expect(result).toMatchObject({
+          success: true,
+          artifact: { id: 'artifact-1', contentType: 'text/markdown' },
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The document is ready.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(createArtifact).toHaveBeenCalledWith({
+      path: 'notes/decision.md',
+      content: '# Decision',
+      contentType: 'text/markdown',
+      artifactType: 'general',
+    });
+  });
+
   it('posts the Fast widget preview with its Discord session link', async () => {
     const adapter = callbacks();
     mocks.generateText.mockImplementation(
@@ -3443,7 +3801,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   describe('durable admission', () => {
     const durableAdmission = { eventId: 'durable-row-1' };
 
-    it('keeps replay open through an acknowledgement and closes it before the closeout', async () => {
+    it('keeps replay open through the acknowledgement and the closeout', async () => {
       const order: string[] = [];
       mocks.revokeDurableReplay.mockImplementation(async (_id, reason) => {
         order.push(`revoke:${reason}`);
@@ -3457,7 +3815,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             message: 'Looking into it.',
           });
           order.push('acked');
-          expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
             message: 'Done.',
@@ -3473,30 +3830,24 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         durableAdmission,
       });
 
-      expect(order).toEqual([
-        'acked',
-        'revoke:Native tool send_chat_reply is not replay-safe.',
-        'closed',
-      ]);
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
-        'durable-row-1',
-        expect.any(String),
-      );
+      // Nothing withdraws the turn from replay any more: a run that resumes
+      // it after the closeout settles on the recorded reply instead.
+      expect(order).toEqual(['acked', 'closed']);
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 
-    it('revokes replay before a task launch runs', async () => {
+    it('keeps replay open through a task launch and gives the launch a stable key', async () => {
       const order: string[] = [];
       mocks.revokeDurableReplay.mockImplementation(async () => {
         order.push('revoke');
         return true;
       });
-      const adapter = callbacks({
-        launchTask: vi.fn<LaunchFastAgentTask>(async () => {
-          order.push('launch');
-          return { success: true, taskId: 'task-1' };
-        }),
+      const launchTask = vi.fn<LaunchFastAgentTask>(async () => {
+        order.push('launch');
+        return { success: true, taskId: 'task-1' };
       });
+      const adapter = callbacks({ launchTask });
       mocks.generateText.mockImplementationOnce(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
@@ -3519,94 +3870,47 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         durableAdmission,
       });
 
-      expect(order.slice(0, 2)).toEqual(['revoke', 'launch']);
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledTimes(1);
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
-        'durable-row-1',
-        'Native tool launch_task is not replay-safe.',
+      // Neither the launch nor the closeout ends replay: the turn stays
+      // resumable and a resumed run is told what happened.
+      expect(order).toEqual(['launch']);
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+      // The key is stable for this turn and launch, so a repeat after a kill
+      // between launching and recording returns the same task.
+      expect(launchTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          launchIdempotencyKey: expect.stringMatching(
+            /^fast:[^:]+:[^:]+:[0-9a-f]{32}$/u,
+          ),
+        }),
       );
     });
 
-    it('refuses a non-replayable action when the revocation does not land', async () => {
-      mocks.revokeDurableReplay.mockRejectedValueOnce(new Error('db down'));
-      const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
-        success: true,
-        taskId: 'task-1',
-      }));
-      let launchResult: unknown;
-      mocks.generateText.mockImplementationOnce(
-        async (_params, _session, options) => {
-          await options.onSessionReady('opencode-session-1');
-          launchResult = await invokeTool(nativeToolNames.launchTask, {
-            prompt: 'Fix the bug',
-            environmentId: 'env-1',
-            kickoffMessage: 'Starting.',
-          });
-          await invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'closeout',
-            message: 'Could not launch.',
-          });
-          return '';
-        },
-      );
-
-      await answerFastAgentQuestion({
-        ...baseParams,
-        adapter: callbacks({ launchTask }),
-        durableAdmission,
-      });
-
-      expect(launchTask).not.toHaveBeenCalled();
-      expect(launchResult).toMatchObject({
-        success: false,
-        error: expect.stringContaining('could not durably record'),
-      });
-      // The later closeout retried the revocation successfully.
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledTimes(2);
-    });
-
-    it('refuses a non-replayable action when the row was already settled elsewhere', async () => {
-      mocks.revokeDurableReplay.mockResolvedValue(false);
-      const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
-        success: true,
-        taskId: 'task-1',
-      }));
-      let launchResult: unknown;
-      mocks.generateText.mockImplementationOnce(
-        async (_params, _session, options) => {
-          await options.onSessionReady('opencode-session-1');
-          launchResult = await invokeTool(nativeToolNames.launchTask, {
-            prompt: 'Fix the bug',
-            environmentId: 'env-1',
-            kickoffMessage: 'Starting.',
-          });
-          return 'Stopping.';
-        },
-      );
-
-      await answerFastAgentQuestion({
-        ...baseParams,
-        adapter: callbacks({ launchTask }),
-        durableAdmission,
-      });
-
-      expect(launchTask).not.toHaveBeenCalled();
-      expect(launchResult).toMatchObject({
-        success: false,
-        error: expect.stringContaining('could not durably record'),
-      });
-    });
-
-    it('withdraws a plain-text turn from replay before its terminal closeout', async () => {
+    // Records the order of a system-posted closeout's intent row, its
+    // surface post, and its result row.
+    const recordCloseoutOrder = (postReply: ReturnType<typeof vi.fn>) => {
       const order: string[] = [];
-      mocks.revokeDurableReplay.mockImplementation(async () => {
-        order.push('revoke');
-        return true;
-      });
-      const postReply = vi.fn(async () => {
+      postReply.mockImplementation(async () => {
         order.push('post');
         return { messageId: 'reply-1' };
       });
+      mocks.upsertMessage.mockImplementation(async ({ message }) => {
+        const payload = message.payload as {
+          title?: string;
+          rawInput?: { arguments?: { purpose?: string; message?: string } };
+        };
+        if (payload.title === nativeToolNames.sendChatReply) {
+          order.push(
+            `${message.eventType === 'roomote_runtime.tool_call' ? 'call' : 'result'}:${payload.rawInput?.arguments?.message}`,
+          );
+        }
+        return { initialHumanTurn: false };
+      });
+      return order;
+    };
+
+    it('records the terminal closeout as a call before posting it and a result after', async () => {
+      const postReply = vi.fn();
+      const order = recordCloseoutOrder(postReply);
       mocks.generateText.mockResolvedValueOnce('All done.');
 
       await answerFastAgentQuestion({
@@ -3615,49 +3919,159 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         durableAdmission,
       });
 
-      expect(order).toEqual(['revoke', 'post']);
+      // Same recorded intent as a model-authored closeout, so a resumed run
+      // finds it in the transcript whether or not the post completed.
+      expect(order).toEqual(['call:All done.', 'post', 'result:All done.']);
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('records the error closeout as a call before posting it and a result after', async () => {
+      const postReply = vi.fn();
+      const order = recordCloseoutOrder(postReply);
+      mocks.generateText.mockRejectedValueOnce(new Error('provider exploded'));
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+      });
+
+      expect(order).toHaveLength(3);
+      expect(order[0]).toMatch(/^call:/u);
+      expect(order[1]).toBe('post');
+      expect(order[2]).toMatch(/^result:/u);
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    const attemptCounters = {
+      next: {
+        assistantOrdinal: 2,
+        toolOrdinal: 2,
+        retryNoticeOrdinal: 0,
+        turnSeq: 6,
+      },
+      prompt: { ts: 1_000, turnSeq: 0 },
+    };
+
+    it('settles a resumed turn whose earlier attempt already delivered its closeout without asking the model', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        ...attemptCounters,
+        events: [
+          { kind: 'reply', text: 'Looking into it.', purpose: 'ack' },
+          { kind: 'reply', text: 'All done.', purpose: 'closeout' },
+        ],
+      });
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+
+      const result = await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      // The answer already reached the surface; the resumed run only closes
+      // the books.
+      expect(result).toBe('All done.');
+      expect(mocks.generateText).not.toHaveBeenCalled();
+      expect(postReply).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('settles a resumed turn whose closeout replaced the retry notice, leaving the completed call as the last event', async () => {
+      // The replaced notice keeps its earlier sequence, so the closeout's
+      // reply row sits before the call that delivered it; the completed
+      // call is the proof of delivery.
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        ...attemptCounters,
+        events: [
+          { kind: 'reply', text: 'All done.', purpose: 'closeout' },
+          {
+            kind: 'action',
+            tool: nativeToolNames.sendChatReply,
+            arguments: { purpose: 'closeout', message: 'All done.' },
+            status: 'completed',
+            result: '{"success":true,"delivered":true}',
+          },
+        ],
+      });
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+
+      const result = await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      expect(result).toBe('All done.');
+      expect(mocks.generateText).not.toHaveBeenCalled();
+      expect(postReply).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('posts the closeout again when the earlier attempt died inside the call before recording it', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        ...attemptCounters,
+        events: [
+          { kind: 'reply', text: 'Looking into it.', purpose: 'ack' },
+          {
+            kind: 'action',
+            tool: nativeToolNames.sendChatReply,
+            arguments: { purpose: 'closeout', message: 'All done.' },
+            status: 'unknown',
+          },
+        ],
+      });
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-2' });
+
+      const result = await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      // The text is on record but its post is not, so it goes out once more
+      // without a model request; a duplicate is possible only if the first
+      // post landed in the instant before the process died.
+      expect(result).toBe('All done.');
+      expect(mocks.generateText).not.toHaveBeenCalled();
+      expect(postReply).toHaveBeenCalledOnce();
       expect(postReply).toHaveBeenCalledWith(
         expect.objectContaining({ purpose: 'closeout', message: 'All done.' }),
       );
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 
-    it('hands the turn to the queue when the terminal closeout cannot be withdrawn from replay', async () => {
-      mocks.revokeDurableReplay.mockResolvedValue(false);
-      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
-      const requestDurableResume = vi.fn().mockResolvedValue(undefined);
-      mocks.generateText.mockResolvedValueOnce('All done.');
+    it('lets the model finish a resumed turn whose lost closeout carried no explicit text', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        ...attemptCounters,
+        events: [
+          {
+            kind: 'action',
+            tool: nativeToolNames.sendChatReply,
+            arguments: { purpose: 'closeout' },
+            status: 'unknown',
+          },
+        ],
+      });
+      mocks.generateText.mockResolvedValueOnce('Finished.');
 
       await answerFastAgentQuestion({
         ...baseParams,
-        adapter: callbacks({ postReply, requestDurableResume }),
+        adapter: callbacks(),
         durableAdmission,
+        resumedAfterInterruption: true,
       });
 
-      // No closeout, and the row stays recoverable so the resumed run
-      // delivers the answer instead of the user getting nothing.
-      expect(postReply).not.toHaveBeenCalled();
-      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
-      expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
-      expect(requestDurableResume).toHaveBeenCalledOnce();
-    });
-
-    it('hands the turn to the queue when the error closeout cannot be withdrawn from replay', async () => {
-      mocks.revokeDurableReplay.mockResolvedValue(false);
-      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
-      const requestDurableResume = vi.fn().mockResolvedValue(undefined);
-      mocks.generateText.mockRejectedValueOnce(new Error('provider exploded'));
-
-      await answerFastAgentQuestion({
-        ...baseParams,
-        adapter: callbacks({ postReply, requestDurableResume }),
-        durableAdmission,
-      });
-
-      expect(postReply).not.toHaveBeenCalled();
-      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
-      expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
-      expect(requestDurableResume).toHaveBeenCalledOnce();
+      // Nothing to re-post verbatim: the model resumes with the transcript
+      // and the lost-result placeholder, as for any other cut-off call.
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      const call = mocks.generateText.mock.calls[0]?.[0];
+      expect(call.prompt).toContain('lost due to restart');
     });
 
     it('posts no interruption closeout when a cancelled turn cannot be withdrawn from replay', async () => {
@@ -3739,9 +4153,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           'Post an acknowledgement with send_chat_reply before this action.',
       });
       expect(results[1]).toMatchObject({ success: true });
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
+      // The memory write itself no longer ends replay; only the closeout does.
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalledWith(
         'durable-row-1',
-        'Native tool save_memory is not replay-safe.',
+        expect.stringContaining('save_memory'),
       );
     });
 
@@ -3784,7 +4199,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
     });
 
-    it('posts the restart closeout when the interrupted turn already acted', async () => {
+    it('hands an acted turn back to the queue on shutdown without a closeout', async () => {
       const controller = new AbortController();
       const shutdown = new FastAgentProcessShutdownError('SIGTERM');
       const requestDurableResume = vi.fn().mockResolvedValue(undefined);
@@ -3805,19 +4220,26 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await expect(
         answerFastAgentQuestion({
           ...baseParams,
-          adapter: callbacks({ postReply, requestDurableResume }),
+          adapter: callbacks({
+            postReply,
+            requestDurableResume,
+            launchTask: vi.fn<LaunchFastAgentTask>(async () => ({
+              success: true,
+              taskId: 'task-1',
+            })),
+          }),
           signal: controller.signal,
           durableAdmission,
         }),
       ).rejects.toBe(shutdown);
 
-      expect(postReply).toHaveBeenCalledWith({
-        purpose: 'closeout',
-        message:
-          'Roomote restarted while working on this request. Please send it again.',
-      });
-      expect(mocks.releaseDurableClaim).not.toHaveBeenCalled();
-      expect(requestDurableResume).not.toHaveBeenCalled();
+      // The launch is on record, so the turn is resumable: the claim goes
+      // back to the queue, the queue is woken, and the user sees no closeout.
+      expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
+      expect(requestDurableResume).toHaveBeenCalledOnce();
+      expect(postReply).not.toHaveBeenCalledWith(
+        expect.objectContaining({ purpose: 'closeout' }),
+      );
     });
 
     it('does not resume a deliberately cancelled turn', async () => {
@@ -3889,6 +4311,208 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         call.prompt.indexOf('What does this service do?'),
       );
       expect(call.system).toContain('`<resumed_turn>` marker');
+    });
+
+    it('tells a resumed run what the earlier attempt already did', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        events: [
+          { kind: 'reply', text: 'Starting on it.' },
+          {
+            kind: 'action',
+            tool: 'launch_task',
+            arguments: { prompt: 'Fix the bug' },
+            status: 'completed',
+            result: '{"success":true,"taskId":"task-1"}',
+          },
+          {
+            kind: 'action',
+            tool: 'send_task_message',
+            arguments: { taskId: 'task-1', message: 'Focus on the root.' },
+            status: 'failed',
+            result:
+              '{"success":false,"error":"Task is not accepting messages yet."}',
+          },
+          {
+            kind: 'action',
+            tool: 'save_memory',
+            arguments: { content: 'Prefers bullets.' },
+            status: 'unknown',
+          },
+        ],
+        next: {
+          assistantOrdinal: 2,
+          toolOrdinal: 3,
+          retryNoticeOrdinal: 0,
+          turnSeq: 7,
+        },
+        prompt: { ts: 1_700_000_000_000, turnSeq: 0 },
+      });
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-2' });
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Done: 12 files.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      // This run's rows are numbered after the attempt's, so the earlier
+      // attempt's transcript survives the resume.
+      const written = mocks.upsertMessage.mock.calls.map(
+        ([input]) => input.message,
+      );
+      expect(
+        written.some((message) => message.eventId.endsWith(':assistant:2')),
+      ).toBe(true);
+      expect(
+        written.some((message) => /:assistant:[01]$/u.test(message.eventId)),
+      ).toBe(false);
+      expect(
+        written.some((message) => message.eventId.endsWith(':tool:3')),
+      ).toBe(true);
+      // The prompt keeps the attempt's place and time; everything new lands
+      // after the attempt's rows.
+      const prompt = written.find((message) =>
+        message.eventId.endsWith(':user'),
+      );
+      expect(prompt).toMatchObject({ ts: 1_700_000_000_000, turnSeq: 0 });
+      expect(
+        Math.min(
+          ...written
+            .filter((message) => !message.eventId.endsWith(':user'))
+            .map((message) => message.turnSeq),
+        ),
+      ).toBeGreaterThanOrEqual(7);
+
+      expect(mocks.loadTurnAttempt).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+      );
+      const call = mocks.generateText.mock.calls[0]?.[0];
+      // The attempt is replayed as a transcript, in order, with the call the
+      // process died on given a synthetic lost result that only the model
+      // ever sees.
+      const block = call.prompt.slice(
+        call.prompt.indexOf('<previous_attempt_transcript>'),
+        call.prompt.indexOf('</previous_attempt_transcript>'),
+      );
+      expect(block).toContain('[ASSISTANT]\nStarting on it.');
+      expect(block).toContain('[TOOL_CALL launch_task]');
+      expect(block).toContain('[TOOL_RESULT completed]');
+      expect(block).toContain('task-1');
+      expect(block).toContain('[TOOL_CALL save_memory]');
+      expect(block).toContain(
+        '[TOOL_RESULT lost]\nTool result lost due to restart.',
+      );
+      expect(block.indexOf('[ASSISTANT]')).toBeLessThan(
+        block.indexOf('[TOOL_CALL launch_task]'),
+      );
+      expect(block.indexOf('[TOOL_CALL launch_task]')).toBeLessThan(
+        block.indexOf('[TOOL_CALL save_memory]'),
+      );
+      expect(call.prompt).toContain('Continue from the last entry');
+      // A failed call is replayed with its error so the model can judge a
+      // retry; "failed" is not asserted to mean "had no effect", since a lost
+      // response to a write is recorded the same way.
+      expect(block).toContain('[TOOL_RESULT failed]');
+      expect(block).toContain('Task is not accepting messages yet.');
+      expect(call.prompt).toContain(
+        'read that error before deciding whether to retry',
+      );
+      // The envelope, the transcript block, and the lost-result placeholder
+      // are model input only: no persisted row ever contains them.
+      const persistedTexts = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .flatMap((message) =>
+          (message.contentBlocks ?? []).map(
+            (block: { text?: string }) => block.text ?? '',
+          ),
+        )
+        .join('\n');
+      expect(persistedTexts).not.toContain('lost due to restart');
+      expect(persistedTexts).not.toContain('<previous_attempt_transcript>');
+      expect(persistedTexts).not.toContain('<resumed_turn>');
+      // Nor does the durable history that seeds future cold starts.
+      const historyTexts = JSON.stringify(
+        mocks.appendVisibleMessages.mock.calls.map(([input]) => input.messages),
+      );
+      expect(historyTexts).not.toContain('lost due to restart');
+      expect(historyTexts).not.toContain('previous_attempt_transcript');
+      expect(historyTexts).not.toContain('resumed_turn');
+      expect(call.prompt.indexOf('<previous_attempt_transcript>')).toBeLessThan(
+        call.prompt.indexOf('What does this service do?'),
+      );
+    });
+
+    it('keeps the previous-attempt block bounded however large the attempt was', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        events: [
+          { kind: 'reply', text: 'x'.repeat(50_000) },
+          {
+            kind: 'action',
+            tool: 'create_artifact',
+            arguments: { content: 'y'.repeat(130_000) },
+            status: 'completed',
+            result: 'z'.repeat(5_000),
+          },
+        ],
+        next: {
+          assistantOrdinal: 1,
+          toolOrdinal: 1,
+          retryNoticeOrdinal: 0,
+          turnSeq: 3,
+        },
+        prompt: null,
+      });
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      const call = mocks.generateText.mock.calls[0]?.[0];
+      const start = call.prompt.indexOf('<previous_attempt_transcript>');
+      const end = call.prompt.indexOf('</previous_attempt_transcript>');
+      expect(start).toBeGreaterThan(-1);
+      // Replies and arguments are clipped individually, so the block stays
+      // far under the cap even for a 130 KiB artifact body.
+      expect(end - start).toBeLessThan(12_000 + 200);
+      expect(call.prompt.slice(start, end)).toContain('create_artifact');
+      expect(call.prompt.slice(start, end)).toContain('…');
+    });
+
+    it('adds no attempt block when nothing happened before the interruption', async () => {
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+      const resumed = mocks.generateText.mock.calls[0]?.[0];
+      expect(resumed.prompt).toContain('<resumed_turn>');
+      expect(resumed.prompt).not.toContain('<previous_attempt_transcript>');
+
+      mocks.generateText.mockClear();
+      mocks.loadTurnAttempt.mockClear();
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        durableAdmission,
+      });
+      // A fresh turn has no earlier attempt to load.
+      expect(mocks.loadTurnAttempt).not.toHaveBeenCalled();
     });
 
     it('renews the durable claim alongside the responding lease', async () => {
@@ -4177,7 +4801,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 
-    it('keeps the retry in process once the turn is no longer replay-safe', async () => {
+    it('rides out the first retry in place after a task launch', async () => {
       vi.useFakeTimers();
       try {
         mocks.generateText
@@ -4423,11 +5047,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('posts a terminal closeout when API shutdown interrupts silent retry backoff', async () => {
+  it('posts nothing when API shutdown cuts off an unadmitted turn during silent retry backoff', async () => {
+    // No durable row (the admission write failed) and no visible retry
+    // notice to correct: there is no restart notice any more, so the turn
+    // ends without a user-facing message.
     const controller = new AbortController();
     const shutdown = new FastAgentProcessShutdownError('SIGTERM');
-    const expectedCloseout =
-      'Roomote restarted while working on this request. Please send it again.';
     const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
     const originalSetTimeout = globalThis.setTimeout;
     let shouldAbort = true;
@@ -4454,35 +5079,22 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ).rejects.toBe(shutdown);
 
       expect(mocks.generateText).toHaveBeenCalledOnce();
-      expect(postReply).toHaveBeenCalledOnce();
-      expect(postReply).toHaveBeenCalledWith({
-        purpose: 'closeout',
-        message: expectedCloseout,
-      });
-      const retryWrites = mocks.upsertMessage.mock.calls
-        .map(([input]) => input.message)
-        .filter((message) => message.eventId === '100.2:retry-notice:0');
-      expect(retryWrites.at(-1)).toMatchObject({
-        contentBlocks: [
-          {
-            type: 'text',
-            text: expectedCloseout,
-          },
-        ],
-        metadata: {
-          visibleInTranscript: true,
-          purpose: 'closeout',
-          platformMessageId: 'closeout-1',
-          inferenceRetryNotice: true,
-          inferenceRetryActive: false,
-          interruptionReason: 'api_shutdown',
-        },
-      });
+      expect(postReply).not.toHaveBeenCalled();
+      const persisted = mocks.upsertMessage.mock.calls.map(
+        ([input]) => input.message,
+      );
       expect(
-        mocks.upsertMessage.mock.calls
-          .map(([input]) => input.message.eventId)
-          .filter((eventId) => eventId.startsWith('100.2:assistant:')),
+        persisted.filter((message) =>
+          message.eventId.startsWith('100.2:assistant:'),
+        ),
       ).toHaveLength(0);
+      expect(
+        persisted.some(
+          (message) =>
+            (message.metadata as { purpose?: string } | undefined)?.purpose ===
+            'closeout',
+        ),
+      ).toBe(false);
     } finally {
       timeout.mockRestore();
     }
@@ -4950,14 +5562,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(results[2]).toMatchObject({ success: true });
     });
 
-    it('allows an emoji-only terminal reaction without a text acknowledgement', async () => {
+    it('records an emoji-only terminal reaction as Slack emoji markup', async () => {
       let reactionResult: unknown;
       const adapter = callbacks();
       mocks.generateText.mockImplementation(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
           reactionResult = await invokeTool(nativeToolNames.sendChatReaction, {
-            name: 'white_check_mark',
+            name: '+1',
             purpose: 'closeout',
           });
           return '';
@@ -4968,6 +5580,41 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       expect(reactionResult).toMatchObject({ success: true, closed: true });
       expect(adapter.postReply).not.toHaveBeenCalled();
+      const reactionToolWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter(
+          (message) => message.payload?.toolName === 'send_chat_reaction',
+        );
+      expect(
+        reactionToolWrites.map((message) => ({
+          eventType: message.eventType,
+          visibleInTranscript: message.metadata?.visibleInTranscript,
+        })),
+      ).toEqual([
+        {
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+          visibleInTranscript: false,
+        },
+        {
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+          visibleInTranscript: false,
+        },
+      ]);
+      expect(mocks.upsertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({
+            contentBlocks: [{ type: 'text', text: ':+1:' }],
+            metadata: { visibleInTranscript: true },
+            payload: { reaction: '+1', purpose: 'closeout' },
+          }),
+        }),
+      );
+      expect(mocks.appendVisibleMessages).toHaveBeenCalledWith({
+        sessionId: 'conversation-1',
+        messages: expect.arrayContaining([
+          { role: 'assistant', content: [{ type: 'text', text: ':+1:' }] },
+        ]),
+      });
     });
 
     it('does not gate platform-event turns', async () => {
@@ -7660,5 +8307,339 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ).rejects.toThrow('OpenCode unavailable');
     expect(activity.start).toHaveBeenCalledOnce();
     expect(activity.settle).toHaveBeenCalledOnce();
+  });
+
+  describe('answerFastAgentQuestion streamed reply text', () => {
+    beforeEach(() => {
+      mocks.publishReplyStream.mockResolvedValue(1);
+    });
+
+    /** Published chunks as `id=text`, concatenated per reply in order. */
+    const streamedReplies = () => {
+      const byId = new Map<string, string>();
+      for (const [channel, payload] of mocks.publishReplyStream.mock.calls as [
+        string,
+        string,
+      ][]) {
+        expect(channel).toBe('fast-agent:reply-stream:conversation-1');
+        const event = JSON.parse(payload) as {
+          id: string;
+          eventType: string;
+          role: string;
+          metadata: Record<string, unknown>;
+          text: string;
+        };
+        expect(event.eventType).toBe(
+          ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk,
+        );
+        expect(event.role).toBe('assistant');
+        expect(event.metadata).toMatchObject({
+          sessionId: 'opencode-session-1',
+          turnId: 'assistant-message-1',
+        });
+        byId.set(event.id, (byId.get(event.id) ?? '') + event.text);
+      }
+      return [...byId.entries()];
+    };
+    const persistedAssistantRows = () =>
+      mocks.upsertMessage.mock.calls
+        .map(([{ message }]) => message)
+        .filter((message) => message.role === 'assistant');
+
+    it('delivers the text written before a reply call and finalizes the streamed chunks', async () => {
+      const postReply = vi.fn().mockResolvedValue(undefined);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'Looking at',
+            delta: 'Looking at',
+            completed: false,
+          });
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'Looking at the deploy history now.',
+            completed: true,
+          });
+          const result = await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'progress',
+          });
+          expect(result).toMatchObject({ success: true, delivered: true });
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-2',
+            text: 'Done.',
+            completed: true,
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+          });
+          return 'Looking at the deploy history now.Done.';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+      });
+
+      expect(postReply).toHaveBeenCalledTimes(2);
+      expect(postReply).toHaveBeenNthCalledWith(1, {
+        purpose: 'progress',
+        message: 'Looking at the deploy history now.',
+      });
+      expect(postReply).toHaveBeenNthCalledWith(2, {
+        purpose: 'closeout',
+        message: 'Done.',
+      });
+
+      const streamed = streamedReplies();
+      expect(streamed.map(([, text]) => text)).toEqual([
+        'Looking at the deploy history now.',
+        'Done.',
+      ]);
+
+      const rows = persistedAssistantRows();
+      expect(rows.map((row) => row.contentBlocks)).toEqual([
+        [{ type: 'text', text: 'Looking at the deploy history now.' }],
+        [{ type: 'text', text: 'Done.' }],
+      ]);
+      // Each persisted row lands under the event its chunks streamed as.
+      expect(rows.map((row) => row.eventId)).toEqual(
+        streamed.map(([eventId]) => eventId),
+      );
+    });
+
+    it('rejects a reply call with nothing written and no message', async () => {
+      let result: unknown;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          result = await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Done.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(result).toEqual({
+        success: false,
+        error: expect.stringContaining('Write the reply as assistant text'),
+      });
+    });
+
+    it('posts only the undelivered remainder as the terminal closeout', async () => {
+      const postReply = vi.fn().mockResolvedValue(undefined);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'On it.',
+            completed: true,
+          });
+          await invokeTool(nativeToolNames.sendChatReply, { purpose: 'ack' });
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-2',
+            text: 'The answer is 42.',
+            completed: true,
+          });
+          await options.onMessageCompleted?.({
+            id: 'assistant-message-1',
+            sessionId: 'opencode-session-1',
+            createdAtMs: 100,
+            completedAtMs: 200,
+          });
+          return 'On it.The answer is 42.';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+      });
+
+      expect(postReply).toHaveBeenCalledTimes(2);
+      expect(postReply).toHaveBeenNthCalledWith(1, {
+        purpose: 'ack',
+        message: 'On it.',
+      });
+      expect(postReply).toHaveBeenNthCalledWith(2, {
+        purpose: 'closeout',
+        message: 'The answer is 42.',
+      });
+      const streamed = streamedReplies();
+      expect(streamed.map(([, text]) => text)).toEqual([
+        'On it.',
+        'The answer is 42.',
+      ]);
+      expect(persistedAssistantRows().at(-1)?.eventId).toBe(
+        streamed.at(-1)?.[0],
+      );
+    });
+
+    it('keeps a restated reply under the event its draft streamed as', async () => {
+      const postReply = vi.fn().mockResolvedValue(undefined);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'Scratch that.',
+            completed: true,
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Final answer.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+      });
+
+      expect(postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: 'Final answer.',
+      });
+      const streamed = streamedReplies();
+      expect(streamed).toEqual([[expect.any(String), 'Scratch that.']]);
+      expect(persistedAssistantRows().at(-1)?.eventId).toBe(streamed[0]![0]);
+    });
+
+    it('streams a long reply into the surface and delivers through the stream', async () => {
+      const streamCalls: string[] = [];
+      const createReplyStream = vi.fn(() => ({
+        append: vi.fn(async (text: string) => {
+          streamCalls.push(`append:${text}`);
+        }),
+        finish: vi.fn(async (reply: { message: string }) => {
+          streamCalls.push(`finish:${reply.message}`);
+          return { messageId: 'slack-ts-1' };
+        }),
+        abort: vi.fn(async () => {
+          streamCalls.push('abort');
+        }),
+      }));
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'posted' });
+      const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'Looking at',
+            completed: false,
+          });
+          await tick();
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'Looking at the deploy history.',
+            completed: true,
+          });
+          await tick();
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+          });
+          return 'Looking at the deploy history.';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply, createReplyStream }),
+      });
+
+      expect(createReplyStream).toHaveBeenCalledTimes(1);
+      expect(streamCalls).toEqual([
+        'append:Looking at',
+        'append: the deploy history.',
+        'finish:Looking at the deploy history.',
+      ]);
+      expect(postReply).not.toHaveBeenCalled();
+      expect(persistedAssistantRows().at(-1)?.metadata).toMatchObject({
+        platformMessageId: 'slack-ts-1',
+      });
+    });
+
+    it('posts a reply that finished writing before the stream opened', async () => {
+      const createReplyStream = vi.fn();
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'posted' });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'Done.',
+            completed: true,
+          });
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+          });
+          return 'Done.';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply, createReplyStream }),
+      });
+
+      expect(createReplyStream).not.toHaveBeenCalled();
+      expect(postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: 'Done.',
+      });
+    });
+
+    it('stops streaming text that follows a closeout', async () => {
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await options.onAssistantMessageStarted?.({
+            id: 'assistant-message-1',
+            sessionId: 'opencode-session-1',
+            parentId: null,
+            createdAtMs: 100,
+          });
+          await invokeTool(
+            nativeToolNames.sendChatReply,
+            { purpose: 'closeout', message: 'Done.' },
+            undefined,
+            'assistant-message-1',
+          );
+          options.onAssistantTextUpdated?.({
+            messageId: 'assistant-message-1',
+            partId: 'text-1',
+            text: 'Trailing narration',
+            completed: true,
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(mocks.publishReplyStream).not.toHaveBeenCalled();
+    });
   });
 });

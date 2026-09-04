@@ -392,6 +392,80 @@ describe('resolveOpenCodeSmallModel', () => {
           },
         };
         yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'text-part-1',
+              messageID: 'assistant-message-1',
+              sessionID: 'session-1',
+              type: 'text' as const,
+              text: 'Look ',
+              time: { start: 160 },
+            },
+            delta: 'Look ',
+          },
+        };
+        yield {
+          type: 'message.part.delta',
+          properties: {
+            sessionID: 'session-1',
+            messageID: 'assistant-message-1',
+            partID: 'text-part-1',
+            field: 'text',
+            delta: 'here ',
+          },
+        };
+        // A reasoning part streams deltas under the same field name; it was
+        // never announced as a text part, so it is not reply text.
+        yield {
+          type: 'message.part.delta',
+          properties: {
+            sessionID: 'session-1',
+            messageID: 'assistant-message-1',
+            partID: 'reasoning-part-1',
+            field: 'text',
+            delta: '**Thinking about the request**',
+          },
+        };
+        // The user prompt's own text part is not assistant reply text.
+        yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'user-text-part-1',
+              messageID: 'user-message-1',
+              sessionID: 'session-1',
+              type: 'text' as const,
+              text: '[USER] Use the native tools.',
+              time: { start: 100, end: 100 },
+            },
+          },
+        };
+        // Other sessions and non-text fields are not assistant reply text.
+        yield {
+          type: 'message.part.delta',
+          properties: {
+            sessionID: 'subagent-session-1',
+            messageID: 'other',
+            partID: 'other',
+            field: 'text',
+            delta: 'ignored',
+          },
+        };
+        yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'text-part-1',
+              messageID: 'assistant-message-1',
+              sessionID: 'session-1',
+              type: 'text' as const,
+              text: 'Look here ',
+              time: { start: 160, end: 170 },
+            },
+          },
+        };
+        yield {
           type: 'session.created',
           properties: {
             sessionID: 'subagent-session-1',
@@ -430,6 +504,7 @@ describe('resolveOpenCodeSmallModel', () => {
     const onAssistantMessageCompleted = vi.fn();
     const onSubagentSessionReady = vi.fn(() => markSubagentReady());
     const onParentTaskPartUpdated = vi.fn();
+    const onAssistantTextUpdated = vi.fn();
     const session: { id?: string } = {};
 
     await expect(
@@ -458,11 +533,36 @@ describe('resolveOpenCodeSmallModel', () => {
           onSessionReady,
           onSubagentSessionReady,
           onParentTaskPartUpdated,
+          onAssistantTextUpdated,
           permission: FAST_AGENT_SESSION_PERMISSIONS,
           promptOnlySubagents: true,
         },
       ),
     ).resolves.toBe('native tool turn complete');
+
+    // Boundary whitespace is preserved verbatim: deltas are appended to
+    // the previous text without any trimming.
+    expect(onAssistantTextUpdated.mock.calls.map(([text]) => text)).toEqual([
+      {
+        messageId: 'assistant-message-1',
+        partId: 'text-part-1',
+        text: 'Look ',
+        delta: 'Look ',
+        completed: false,
+      },
+      {
+        messageId: 'assistant-message-1',
+        partId: 'text-part-1',
+        delta: 'here ',
+        completed: false,
+      },
+      {
+        messageId: 'assistant-message-1',
+        partId: 'text-part-1',
+        text: 'Look here ',
+        completed: true,
+      },
+    ]);
 
     expect(session.id).toBe('session-1');
     expect(onModelResolved).toHaveBeenCalledWith('openrouter/openai/gpt-5.4');
@@ -1435,6 +1535,51 @@ describe('resolveOpenCodeSmallModel', () => {
         },
       },
     });
+  });
+
+  it('uses the deployment coding model for Fast inference when no orchestration override is configured', async () => {
+    process.env = {
+      ...originalEnv,
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      OPENROUTER_API_KEY: 'test-key',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {},
+        parts: [{ type: 'text', text: 'ok' }],
+      },
+      error: undefined,
+    });
+
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskTextInOpenCodeSession(
+      {
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        modelRole: 'orchestration',
+        prompt: 'Answer.',
+      },
+      { id: 'default-fast-session' },
+      {
+        directory: '/tmp/roomote-fast-default-test',
+        tools: { '*': false, send_chat_reply: true },
+      },
+    );
+
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'openrouter',
+          modelID: 'z-ai/glm-5.2',
+        },
+      }),
+      expect.any(Object),
+    );
   });
 
   it('does not apply coding reasoning to a non-reasoning orchestration model', async () => {

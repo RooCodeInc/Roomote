@@ -51,6 +51,13 @@ vi.mock('@/trpc/client', () => ({
     },
   }),
   useTRPC: () => ({
+    slack: {
+      resolveUsers: {
+        queryOptions: (input: unknown) => ({
+          queryKey: ['slack.resolveUsers', input],
+        }),
+      },
+    },
     fastSessions: {
       composerSuggestion: {
         queryOptions: (input: unknown, options?: Record<string, unknown>) => ({
@@ -70,7 +77,7 @@ vi.mock('@tanstack/react-query', async (importOriginal) => ({
   useQuery: () => ({ data: composerSuggestionState.data }),
 }));
 
-vi.mock('./SessionModelSwitcher', () => ({
+vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
   SessionModelSwitcher: ({
     model,
     onModelChange,
@@ -1447,6 +1454,7 @@ describe('FastSessionTranscript', () => {
     );
 
     const input = screen.getByPlaceholderText('Message agent');
+    expect(input).toHaveFocus();
     fireEvent.change(input, { target: { value: 'Follow up question' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
@@ -1769,11 +1777,140 @@ describe('FastSessionTranscript', () => {
     );
   });
 
+  it('uses content-driven wrapping for header extras', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        initialTitle="Short session title"
+        headerExtras={
+          <a href="https://github.com/acme/widgets/pull/42">widgets#42</a>
+        }
+      />,
+    );
+
+    const heading = screen.getByRole('heading', {
+      name: 'Short session title',
+    });
+    expect(heading).toHaveClass('max-w-full', 'flex-[0_1_auto]');
+    expect(heading.parentElement).toHaveClass(
+      'flex-row',
+      'flex-wrap',
+      'items-center',
+    );
+    expect(heading.parentElement?.className).not.toContain('@[480px]');
+  });
+
   it('hides the reply composer for non-web sessions', () => {
     render(
       <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
     );
 
     expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
+  });
+  const chunkEvent = (eventId: string, text: string, ts = 2) => ({
+    event: {
+      id: eventId,
+      kind: 'text',
+      ts,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk,
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text }],
+      metadata: { sessionId: 'opencode-1', turnId: 'msg-1' },
+      payload: { sessionId: 'opencode-1', turnId: 'msg-1', text },
+      text,
+    },
+  });
+
+  it('streams reply chunks live and lets the persisted row replace them', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({ id: 'user-1', role: 'user', text: 'Hi', ts: 1 }),
+        ]}
+        canReply
+      />,
+    );
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit(
+        'chunk',
+        chunkEvent('assistant-1:event', 'Looking'),
+      );
+    });
+    expect(screen.getByText('Looking')).toBeInTheDocument();
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit(
+        'chunk',
+        chunkEvent('assistant-1:event', ' into it'),
+      );
+    });
+    expect(screen.getByText('Looking into it')).toBeInTheDocument();
+    const streamedNode = screen.getByText('Looking into it');
+
+    // The persisted row lands under the same eventId and takes over in
+    // place: the same element is updated rather than remounted.
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Looking into it now.',
+            ts: 3,
+          }),
+        ],
+      });
+    });
+    expect(screen.getByText('Looking into it now.')).toBe(streamedNode);
+    expect(screen.queryByText('Looking into it')).not.toBeInTheDocument();
+
+    // A later reply streams as its own message.
+    act(() => {
+      FakeEventSource.instances[0]!.emit(
+        'chunk',
+        chunkEvent('assistant-2:event', 'Done.', 4),
+      );
+    });
+    expect(screen.getByText('Looking into it now.')).toBeInTheDocument();
+    expect(screen.getByText('Done.')).toBeInTheDocument();
+  });
+
+  it('withdraws streamed text that no reply delivered once the turn settles', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({ id: 'user-1', role: 'user', text: 'Hi', ts: 1 }),
+          textMessage({
+            id: 'assistant-0',
+            role: 'assistant',
+            text: 'Earlier answer',
+            ts: 2,
+          }),
+        ]}
+        canReply
+      />,
+    );
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit(
+        'chunk',
+        chunkEvent('assistant-1:event', 'Draft text', 3),
+      );
+    });
+    expect(screen.getByText('Draft text')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: false,
+      });
+    });
+    expect(screen.queryByText('Draft text')).not.toBeInTheDocument();
+    expect(screen.getByText('Earlier answer')).toBeInTheDocument();
   });
 });

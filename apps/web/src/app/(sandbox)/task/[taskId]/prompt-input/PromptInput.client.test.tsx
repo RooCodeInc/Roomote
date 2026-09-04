@@ -109,17 +109,12 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: useTRPCMock,
 }));
 
-const userFlagsState = vi.hoisted(() => ({
-  current: { composerSuggestions: true } as Record<string, boolean>,
-}));
-
 vi.mock('@/hooks/useUser', () => ({
   useUser: () => ({
     authStatus: 'signed-in',
     isSignedIn: true,
     user: {
       name: null,
-      featureFlags: userFlagsState.current,
       resource: { imageUrl: undefined },
     },
   }),
@@ -423,6 +418,31 @@ describe('PromptInput', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Connecting...');
     expect(screen.getByPlaceholderText(/Message agent/i)).toBeDisabled();
     expect(screen.queryByText('Task status')).not.toBeInTheDocument();
+  });
+
+  it('focuses an auto-focus composer once it is connected without stealing focus again', () => {
+    const composer = () => (
+      <>
+        <button type="button">Other control</button>
+        <PromptInput
+          autoFocus
+          onFileSearchOpen={() => {}}
+          onCommandSearchOpen={() => {}}
+        />
+      </>
+    );
+    const { rerender } = render(composer());
+    const textarea = screen.getByPlaceholderText(/Message agent/i);
+
+    expect(textarea).not.toHaveFocus();
+    useSandboxConnectedMock.mockReturnValue(true);
+    rerender(composer());
+    expect(textarea).toHaveFocus();
+
+    const otherControl = screen.getByRole('button', { name: 'Other control' });
+    act(() => otherControl.focus());
+    rerender(composer());
+    expect(otherControl).toHaveFocus();
   });
 
   it('opens command search when a slash is typed at the start of the prompt', () => {
@@ -1262,7 +1282,6 @@ describe('PromptInput', () => {
 
 describe('PromptInput ghost suggestion', () => {
   function renderConnectedComposer() {
-    userFlagsState.current = { composerSuggestions: true };
     useSandboxTaskPhaseMock.mockReturnValue('waiting_for_prompt');
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
@@ -1380,25 +1399,6 @@ describe('PromptInput ghost suggestion', () => {
     expect(screen.getByPlaceholderText(/Message agent/i)).toHaveValue(
       'my own message',
     );
-  });
-
-  it('does not request a suggestion when the experimental flag is off', () => {
-    renderConnectedComposer();
-    cleanup();
-
-    userFlagsState.current = {};
-    render(
-      <PromptInput
-        onFileSearchOpen={() => {}}
-        onCommandSearchOpen={() => {}}
-        taskRun={createTaskRun(1)}
-      />,
-    );
-
-    const queryArg = useQueryMock.mock.calls.at(-1)?.[0] as {
-      enabled?: boolean;
-    };
-    expect(queryArg?.enabled).toBe(false);
   });
 
   it('hides the ghost suggestion while the agent is still working', () => {

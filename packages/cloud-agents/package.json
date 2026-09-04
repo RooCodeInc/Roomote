@@ -30,6 +30,11 @@
       "types": "./src/router-mcp-policy.ts",
       "import": "./src/router-mcp-policy.ts",
       "require": "./src/router-mcp-policy.ts"
+    },
+    "./mcp-nullable-optionals": {
+      "types": "./src/server/mcp-nullable-optionals.ts",
+      "import": "./src/server/mcp-nullable-optionals.ts",
+      "require": "./src/server/mcp-nullable-optionals.ts"
     }
   },
   "typesVersions": {
@@ -54,13 +59,8 @@
     "check-types": "tsc --noEmit",
     "check-types:fast": "tsgo --noEmit",
     "test": "dotenvx run -f ../../.env.test -- vitest",
-    "test:router": "dotenvx run -f ../../.env.local -- tsx scripts/test-llm-router.ts",
     "deployment:launch-docker-task": "tsx src/server/deployment-ci-launch-task.ts",
-    "clean": "rimraf .turbo",
-    "eval:router": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 eval -c evals/router/promptfooconfig.ts --no-cache --table-cell-max-length 200",
-    "eval:router:followup": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 eval -c evals/router/promptfooconfig.followup.ts --no-cache --table-cell-max-length 200",
-    "eval:router:view": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 view",
-    "eval:router:share": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 share -c evals/router/promptfooconfig.ts"
+    "clean": "rimraf .turbo"
   },
   "dependencies": {
     "@ai-sdk/mcp": "^1.0.25",

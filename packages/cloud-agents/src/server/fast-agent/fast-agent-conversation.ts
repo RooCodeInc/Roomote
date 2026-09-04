@@ -1,4 +1,8 @@
-import type { FastAgentConversation, ReasoningEffort } from '@roomote/types';
+import type {
+  FastAgentConversation,
+  FastAgentReactionExternalInput as SharedFastAgentReactionExternalInput,
+  ReasoningEffort,
+} from '@roomote/types';
 
 export {
   isFastAgentCommunicationConversation,
@@ -28,20 +32,9 @@ export type FastAgentPlatformEventKind =
   | 'setup'
   | 'input_response';
 
-export type FastAgentReactionExternalInput = {
-  type: 'reaction_added';
-  provider: 'slack' | 'discord' | 'teams' | 'telegram';
-  reactions: Array<{ name: string; id?: string }>;
-  reactor: { externalUserId: string; displayName?: string };
-  message: {
-    workspaceId: string;
-    channelId: string;
-    messageId: string;
-    threadId?: string;
-    text?: string;
-  };
-  eventId: string;
-};
+/** Shared with the durable follow-up event so an admitted reaction resumes as the same input. */
+export type FastAgentReactionExternalInput =
+  SharedFastAgentReactionExternalInput;
 
 export const FAST_AGENT_REACTION_INPUT_TYPE = 'reaction' as const;
 
@@ -82,11 +75,39 @@ export type FastAgentReplyHandle = {
   messageId: string;
 };
 
+/**
+ * A reply rendered on its surface while the model is still writing it.
+ * `append` opens the stream on first use and extends it afterwards;
+ * `finish` ends it with the delivered reply and returns the message, or
+ * nothing when the stream never opened so the caller posts normally;
+ * `abort` ends it without a reply, leaving what was streamed.
+ */
+export type FastAgentReplyStream = {
+  append: (text: string) => Promise<void>;
+  finish: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | undefined>;
+  abort: () => Promise<void>;
+};
+
 export type FastAgentReaction = {
   name: string;
   purpose: 'ack' | 'closeout';
   messageId: string;
 };
+
+export type CreateFastAgentArtifact = (params: {
+  path: string;
+  content: string;
+  contentType: string;
+  artifactType: 'general' | 'plan';
+}) => Promise<{
+  id: string;
+  path: string;
+  version: number;
+  artifactType: 'general' | 'plan';
+  contentType: string;
+  size: number;
+  viewUrl: string;
+}>;
 
 export type LaunchFastAgentTask = (params: {
   prompt: string;
@@ -154,12 +175,16 @@ export type FastAgentInputPreset = 'setup_starter_tasks';
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
+  /** Persist inline text output against the owning Session. */
+  createArtifact?: CreateFastAgentArtifact;
   /**
    * Optional surface-specific launch gate. Use this for durable product
    * readiness conditions that the model prompt alone must not enforce.
    */
   assertTaskLaunch?: () => Promise<void>;
   postReply: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | void>;
+  /** Surfaces with a streaming API render the reply as it is written. */
+  createReplyStream?: () => FastAgentReplyStream;
   replaceReply?: (
     handle: FastAgentReplyHandle,
     reply: FastAgentReply,
@@ -184,7 +209,7 @@ export type FastAgentTurnAdapter = {
    */
   requestDurableResume?: () => Promise<void>;
   /**
-   * Called when a replay-safe turn has parked itself for a durable inference
+   * Called when a turn has parked itself for a durable inference
    * retry; schedules the queue wakeup for `retryAt` so the retry does not
    * wait for a recovery sweep. Best effort. Without this hook the turn keeps
    * its retry backoff in process.

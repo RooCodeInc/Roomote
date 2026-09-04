@@ -883,6 +883,29 @@ export function extractVisibleAcpPromptText(text: string): string {
 }
 
 /**
+ * Extract the user-configured prompt from a trusted custom automation event.
+ * Returns undefined for every other platform event or malformed envelope so
+ * callers never need to expose the raw event as a fallback.
+ */
+export function extractAutomationTriggeredPromptText(
+  text: string,
+): string | undefined {
+  const match = /^<platform_event>(.*)<\/platform_event>$/su.exec(text.trim());
+  if (!match?.[1]) return undefined;
+
+  try {
+    const event = asRecord(JSON.parse(match[1]));
+    return event?.type === 'automation_triggered' &&
+      typeof event.prompt === 'string' &&
+      event.prompt.trim().length > 0
+      ? event.prompt
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Resolve transcript visibility for Roomote runtime envelopes.
  *
  * Newer envelopes rely on an explicit metadata flag written by the server.

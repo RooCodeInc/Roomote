@@ -213,6 +213,7 @@ x-roomote-api-env: &roomote-api-env
 
 x-roomote-controller-env: &roomote-controller-env
   <<: *roomote-base-env
+  SANDBOX_OPENROUTER_API_KEY: ${SANDBOX_OPENROUTER_API_KEY:-}
   DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}
   JOB_AUTH_PRIVATE_KEY: ${JOB_AUTH_PRIVATE_KEY:?JOB_AUTH_PRIVATE_KEY is required}
@@ -289,7 +290,9 @@ x-roomote-service: &roomote-service
   restart: unless-stopped
   read_only: true
   tmpfs:
-    - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    # HOME=/tmp carries OpenCode's Fast runtime, local sessions, logs, and
+    # caches. Keep the cap configurable and large enough for Fast-by-default.
+    - /tmp:rw,noexec,nosuid,nodev,size=${ROOMOTE_APP_TMPFS_SIZE:-512m},mode=1777
   cap_drop:
     - ALL
   security_opt:
@@ -405,7 +408,7 @@ services:
       ROOMOTE_SERVICE: web
       PORT: 3000
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /tmp:rw,noexec,nosuid,nodev,size=${ROOMOTE_APP_TMPFS_SIZE:-512m},mode=1777
       - /roomote/apps/web/.next/cache:rw,noexec,nosuid,nodev,size=128m,uid=10000,gid=10000,mode=700
     healthcheck:
       test:

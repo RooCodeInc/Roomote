@@ -50,8 +50,9 @@ export const TaskCard = ({
   const router = useRouter();
 
   const hasUser = task.user !== null;
-  const showUserAvatar = hasUser;
-  const showAgentAvatar = !hasUser;
+  const showAutomationAvatar = task.attributionKind === 'automation';
+  const showUserAvatar = hasUser && !showAutomationAvatar;
+  const showAgentAvatar = !hasUser || showAutomationAvatar;
   const userDisplayName = getUserDisplayName(task.user) ?? PRODUCT_NAME;
   const actorName =
     task.attributionLabel?.trim() ||
@@ -108,7 +109,7 @@ export const TaskCard = ({
                   {task.attributionKind === 'automation' ? (
                     <TaskAutomationIcon
                       automationKey={task.initiatorAutomation}
-                      className="size-4 text-muted-foreground"
+                      className="size-7"
                     />
                   ) : (
                     <FileText className="size-4 text-muted-foreground" />

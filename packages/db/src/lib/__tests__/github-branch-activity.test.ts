@@ -1,4 +1,6 @@
 import {
+  githubInstallationFactory,
+  repositoryFactory,
   runFactory,
   db,
   eq,
@@ -19,6 +21,7 @@ import {
   findActiveGitHubBranchWork,
   findReusableGitHubPrFollowUpOwner,
   findReusableGitHubIssueTaskOwner,
+  findRoomoteOpenedPullRequestTask,
   hasRecentGitHubBranchCommit,
 } from '../github-branch-activity';
 
@@ -35,6 +38,8 @@ async function createPrLinkedTask({
   prSha,
   sourceControlProvider = 'github',
   host,
+  repositoryId,
+  createdByRoomote = false,
 }: {
   repoFullName: string;
   prNumber: number;
@@ -42,6 +47,8 @@ async function createPrLinkedTask({
   prSha?: string;
   sourceControlProvider?: SourceControlProvider;
   host?: string | null;
+  repositoryId?: string | null;
+  createdByRoomote?: boolean;
 }) {
   const task = await taskFactory.create({
     initiatorUserId: userId,
@@ -56,7 +63,9 @@ async function createPrLinkedTask({
     prSha: prSha ?? null,
     sourceControlProvider,
     host: host ?? null,
+    repositoryId: repositoryId ?? null,
     status: 'open',
+    createdByRoomote,
   });
 
   return task.id;
@@ -72,6 +81,7 @@ async function createPrLinkedTaskRun({
   prSha,
   sourceControlProvider,
   host,
+  createdByRoomote,
 }: {
   repoFullName: string;
   prNumber: number;
@@ -82,6 +92,7 @@ async function createPrLinkedTaskRun({
   prSha?: string;
   sourceControlProvider?: SourceControlProvider;
   host?: string | null;
+  createdByRoomote?: boolean;
 }) {
   const taskId = await createPrLinkedTask({
     repoFullName,
@@ -90,6 +101,7 @@ async function createPrLinkedTaskRun({
     prSha,
     sourceControlProvider,
     host,
+    createdByRoomote,
   });
 
   return runFactory.create({
@@ -733,6 +745,98 @@ describe('findActiveGitHubBranchWork', () => {
 });
 
 describe('findReusableGitHubPrFollowUpOwner', () => {
+  it('pins linkage matches to the exact repository row when repositoryId is given', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'owner/repo-reusable-owner-repo-pin';
+    const branchName = 'feature/repo-pin';
+    const installation = await githubInstallationFactory.create({
+      installedByUserId: user.id,
+    });
+    const reviewingRepo = await repositoryFactory.create({
+      installationId: installation.id,
+      linkedByUserId: user.id,
+      fullName: repoFullName,
+    });
+    const otherRepo = await repositoryFactory.create({
+      installationId: installation.id,
+      linkedByUserId: user.id,
+      fullName: repoFullName,
+      host: 'ghe-other.example.com',
+    });
+    const taskId = await createPrLinkedTask({
+      repoFullName,
+      prNumber: 905,
+      userId: user.id,
+      repositoryId: reviewingRepo.id,
+    });
+    await runFactory.create({
+      actingUserId: user.id,
+      taskId,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Pending,
+      payload: { repo: repoFullName, branch: branchName },
+    });
+
+    await expect(
+      findReusableGitHubPrFollowUpOwner({
+        repoFullName,
+        prNumber: 905,
+        branchName,
+        repositoryId: reviewingRepo.id,
+      }),
+    ).resolves.toMatchObject({ taskId });
+
+    await expect(
+      findReusableGitHubPrFollowUpOwner({
+        repoFullName,
+        prNumber: 905,
+        branchName,
+        repositoryId: otherRepo.id,
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('skips the branch fallback entirely for repository-pinned lookups', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'owner/repo-reusable-owner-repo-pin-fallback';
+    const branchName = 'feature/repo-pin-fallback';
+    const installation = await githubInstallationFactory.create({
+      installedByUserId: user.id,
+    });
+    const reviewingRepo = await repositoryFactory.create({
+      installationId: installation.id,
+      linkedByUserId: user.id,
+      fullName: repoFullName,
+    });
+    // No linkage row: only the payload-branch fallback could match this run,
+    // and a repository-pinned lookup must not take it.
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Pending,
+      payload: { repo: repoFullName, branch: branchName },
+    });
+
+    await expect(
+      findReusableGitHubPrFollowUpOwner({
+        repoFullName,
+        prNumber: 906,
+        branchName,
+      }),
+    ).resolves.toMatchObject({ taskId: task.id });
+
+    await expect(
+      findReusableGitHubPrFollowUpOwner({
+        repoFullName,
+        prNumber: 906,
+        branchName,
+        repositoryId: reviewingRepo.id,
+      }),
+    ).resolves.toBeNull();
+  });
+
   it('skips the branch fallback when no branch name is given', async () => {
     const { user } = await createActor();
     const repoFullName = 'owner/repo-reusable-owner-empty-branch';
@@ -1847,5 +1951,113 @@ describe('hasRecentGitHubBranchCommit', () => {
         now,
       }),
     ).toBe(false);
+  });
+});
+
+describe('findRoomoteOpenedPullRequestTask', () => {
+  it('returns the task that opened the pull request even after its run finished', async () => {
+    const { user } = await createActor();
+    const run = await createPrLinkedTaskRun({
+      repoFullName: 'acme/api',
+      prNumber: 42,
+      userId: user.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Completed,
+      createdByRoomote: true,
+    });
+
+    await expect(
+      findRoomoteOpenedPullRequestTask({
+        repoFullName: 'acme/api',
+        prNumber: 42,
+        host: 'github.com',
+      }),
+    ).resolves.toEqual({
+      runId: run.id,
+      taskId: run.taskId,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Completed,
+    });
+  });
+
+  it('ignores a pull request a task merely mentioned', async () => {
+    const { user } = await createActor();
+    await createPrLinkedTaskRun({
+      repoFullName: 'acme/api',
+      prNumber: 43,
+      userId: user.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Completed,
+      createdByRoomote: false,
+    });
+
+    await expect(
+      findRoomoteOpenedPullRequestTask({
+        repoFullName: 'acme/api',
+        prNumber: 43,
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('ignores review-pipeline and conflict-resolver linkage', async () => {
+    const { user } = await createActor();
+    for (const payloadKind of [
+      TaskPayloadKind.GithubPrReview,
+      TaskPayloadKind.GithubPrReviewSync,
+      TaskPayloadKind.GithubPrConflictResolve,
+    ]) {
+      await createPrLinkedTaskRun({
+        repoFullName: 'acme/api',
+        prNumber: 44,
+        userId: user.id,
+        payloadKind,
+        status: RunStatus.Running,
+        createdByRoomote: true,
+      });
+    }
+
+    await expect(
+      findRoomoteOpenedPullRequestTask({
+        repoFullName: 'acme/api',
+        prNumber: 44,
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('host-scopes the lookup, tolerating legacy null-host rows', async () => {
+    const { user } = await createActor();
+    await createPrLinkedTaskRun({
+      repoFullName: 'acme/api',
+      prNumber: 45,
+      userId: user.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Completed,
+      host: 'github.example.com',
+      createdByRoomote: true,
+    });
+    const legacy = await createPrLinkedTaskRun({
+      repoFullName: 'acme/api',
+      prNumber: 46,
+      userId: user.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Completed,
+      host: null,
+      createdByRoomote: true,
+    });
+
+    await expect(
+      findRoomoteOpenedPullRequestTask({
+        repoFullName: 'acme/api',
+        prNumber: 45,
+        host: 'github.com',
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      findRoomoteOpenedPullRequestTask({
+        repoFullName: 'acme/api',
+        prNumber: 46,
+        host: 'github.com',
+      }),
+    ).resolves.toEqual(expect.objectContaining({ taskId: legacy.taskId }));
   });
 });

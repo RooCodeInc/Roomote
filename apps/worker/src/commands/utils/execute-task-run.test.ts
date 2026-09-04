@@ -1,5 +1,6 @@
 const {
   createHarnessLoggerMock,
+  buildEnvironmentShellEnvVarsMock,
   createComputeProviderUsageIntervalMock,
   createWorkerHeartbeatIntervalMock,
   createStartupLoggerMock,
@@ -15,6 +16,7 @@ const {
   workerEnvFromProcessEnvMock,
   writeBashrcMock,
 } = vi.hoisted(() => ({
+  buildEnvironmentShellEnvVarsMock: vi.fn(() => ({ FOO: 'bar' })),
   createHarnessLoggerMock: vi.fn(),
   createComputeProviderUsageIntervalMock: vi.fn(() => ({
     stop: vi.fn(),
@@ -95,6 +97,7 @@ vi.mock('../setup', () => ({
 }));
 
 vi.mock('./env-vars', () => ({
+  buildEnvironmentShellEnvVars: buildEnvironmentShellEnvVarsMock,
   injectEnvVars: injectEnvVarsMock,
   writeBashrc: writeBashrcMock,
 }));
@@ -245,6 +248,108 @@ describe('executeTaskRun', () => {
       runId: 42,
       field: 'setupCompletedAt',
     });
+  });
+
+  it('scrubs the sandbox OpenRouter source key before shell and repository setup', async () => {
+    const runFn = vi.fn().mockResolvedValue({ status: RunStatus.Idle });
+    const fetchFn = vi.fn().mockResolvedValue({
+      taskRun: {
+        id: 42,
+        taskId: 'task-42',
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        payload: { environmentId: 'environment-1' },
+      },
+      envVars: {
+        FOO: 'bar',
+        SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+      },
+    });
+
+    await executeTaskRun({
+      runId: 42,
+      setupMode: 'full',
+      fetchFn,
+      workspaceConfigFn: vi.fn().mockResolvedValue({ env: {} }),
+      runFn,
+    });
+
+    expect(injectEnvVarsMock.mock.calls[0]?.[0]).toEqual(
+      expect.not.objectContaining({
+        SANDBOX_OPENROUTER_API_KEY: expect.anything(),
+      }),
+    );
+    const setupArgs = setupMock.mock.calls[0]?.[0];
+    expect(setupArgs.sandboxOpenRouterApiKey).toBe('sandbox-openrouter-key');
+    expect(setupArgs.workspace.envVars).not.toHaveProperty(
+      'SANDBOX_OPENROUTER_API_KEY',
+    );
+    expect(setupArgs.workspace.userEnvVars).toEqual({ FOO: 'bar' });
+    expect(runFn.mock.calls[0]?.[0]?.jobContext.envVars).not.toHaveProperty(
+      'SANDBOX_OPENROUTER_API_KEY',
+    );
+  });
+
+  it('writes environment preview shell files without outer model transport values', async () => {
+    const runFn = vi.fn().mockResolvedValue({ status: RunStatus.Idle });
+    const buildUserFacingEnv = vi.fn(() => ({
+      FOO: 'bar',
+      R_MODEL: 'openai/outer-model',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
+      R_VISION_MODEL: 'openai/nested-vision-model',
+    }));
+    workerEnvFromProcessEnvMock.mockReturnValueOnce({
+      authToken: 'run-token-123',
+      trpcUrl: 'https://api-example.ngrok.dev',
+      appEnv: 'development',
+      setRuntimeEnv: vi.fn(),
+      buildUserFacingEnv,
+    });
+
+    await executeTaskRun({
+      runId: 42,
+      setupMode: 'full',
+      fetchFn: vi.fn().mockResolvedValue({
+        taskRun: {
+          id: 42,
+          taskId: 'task-42',
+          payloadKind: TaskPayloadKind.StandardTask,
+          harness: 'opencode-server',
+          payload: { environmentId: 'environment-1' },
+        },
+        envVars: {
+          R_MODEL: 'openai/outer-model',
+          R_SMALL_MODEL_REASONING_EFFORT: 'low',
+        },
+      }),
+      workspaceConfigFn: vi.fn().mockResolvedValue({
+        type: 'environment',
+        environmentId: 'environment-1',
+        environmentConfig: {
+          name: 'Test Environment',
+          repositories: [{ repository: 'owner/repo' }],
+          env: { R_VISION_MODEL: 'openai/nested-vision-model' },
+        },
+      }),
+      runFn,
+    });
+
+    expect(injectEnvVarsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ R_MODEL: 'openai/outer-model' }),
+      expect.anything(),
+      expect.objectContaining({
+        omitInheritedModelRuntimeEnvFromShell: true,
+      }),
+    );
+    expect(buildEnvironmentShellEnvVarsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        R_MODEL: 'openai/outer-model',
+        R_VISION_MODEL: 'openai/nested-vision-model',
+      }),
+      ['R_VISION_MODEL'],
+    );
+    expect(writeBashrcMock).toHaveBeenCalledWith({ FOO: 'bar' });
+    expect(runFn).toHaveBeenCalledTimes(1);
   });
 
   it('passes environment setup warnings through to the task runtime', async () => {

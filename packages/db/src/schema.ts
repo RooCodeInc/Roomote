@@ -174,6 +174,9 @@ export const deploymentSettings = pgTable('deployment_settings', {
   workspaceRoutingSettings: jsonb(
     'workspace_routing_settings',
   ).$type<WorkspaceRoutingSettings>(),
+  // N-1 rollback: router diagnostics were removed with the LLM router. The
+  // previous release still reads and writes these four columns; drop them
+  // only after that release is no longer the supported rollback target.
   routerDebugProvider: text('router_debug_provider'),
   routerDebugChannelId: text('router_debug_channel_id'),
   routerDebugDisabled: boolean('router_debug_disabled')
@@ -918,9 +921,14 @@ export const taskArtifacts = pgTable(
   'task_artifacts',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    taskId: text('task_id')
-      .notNull()
-      .references(() => tasks.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
+    // Additive Session ownership keeps N-1 task-only writers safe. N-1 readers
+    // ignore these rows because their task joins cannot match a null task_id.
+    sessionId: uuid('session_id').references(() => sessions.id, {
+      onDelete: 'cascade',
+    }),
     runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
@@ -937,6 +945,7 @@ export const taskArtifacts = pgTable(
   },
   (table) => [
     index('task_artifacts_task_id_idx').on(table.taskId),
+    index('task_artifacts_session_id_idx').on(table.sessionId),
     index('task_artifacts_run_id_idx').on(table.runId),
     index('task_artifacts_uploaded_idx').on(table.uploaded),
     index('task_artifacts_created_at_idx').on(table.createdAt),
@@ -945,6 +954,13 @@ export const taskArtifacts = pgTable(
       table.taskId,
       table.path,
       table.version,
+    ),
+    uniqueIndex('task_artifacts_session_id_path_version_unique')
+      .on(table.sessionId, table.path, table.version)
+      .where(sql`${table.sessionId} IS NOT NULL`),
+    check(
+      'task_artifacts_owner_shape_check',
+      sql`(${table.taskId} IS NOT NULL) <> (${table.sessionId} IS NOT NULL)`,
     ),
   ],
 );
@@ -957,6 +973,10 @@ export const taskArtifactsRelations = relations(taskArtifacts, ({ one }) => ({
   run: one(taskRuns, {
     fields: [taskArtifacts.runId],
     references: [taskRuns.id],
+  }),
+  session: one(sessions, {
+    fields: [taskArtifacts.sessionId],
+    references: [sessions.id],
   }),
 }));
 
@@ -3054,6 +3074,7 @@ export const slackAuthTokens = pgTable(
     slackTeamId: text('slack_team_id').notNull(),
     channel: text('channel').notNull(),
     threadTs: text('thread_ts').notNull(),
+    messageTs: text('message_ts'),
     originalText: text('original_text').notNull(),
     expiresAt: timestamp('expires_at').notNull(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -3076,9 +3097,12 @@ export const fastAgentConversations = pgTable(
   'fast_agent_conversations',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: text('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+    // N-1 keeps writing user-owned rows. Automation-owned rows carry no Fast
+    // parent events, so an older binary safely falls back to its task-only UI.
+    userId: text('user_id').references(() => users.id, {
+      onDelete: 'cascade',
+    }),
+    ownerAutomation: text('owner_automation').$type<BackgroundAutomationKey>(),
     surface: text('surface').notNull().$type<FastAgentSurface>(),
     workspaceId: text('workspace_id').notNull(),
     conversationId: text('conversation_id').notNull(),
@@ -3112,6 +3136,17 @@ export const fastAgentConversations = pgTable(
       table.conversationId,
     ),
     index('fast_agent_conversations_user_idx').on(table.userId),
+    index('fast_agent_conversations_owner_automation_idx').on(
+      table.ownerAutomation,
+    ),
+    check(
+      'fast_agent_conversations_owner_shape_check',
+      sql`(
+        (${table.userId} is not null and ${table.ownerAutomation} is null)
+        or
+        (${table.userId} is null and ${table.ownerAutomation} is not null)
+      )`,
+    ),
     index('fast_agent_conversations_legacy_ids_idx').using(
       'gin',
       table.legacyConversationIds,
@@ -3538,6 +3573,12 @@ export const slackFastIntegrationCallsRelations = relations(
  * stores the workspace choices shown to the user.
  */
 
+/**
+ * N-1 rollback: no longer written since Linear sessions enter Fast Sessions
+ * (the workspace elicitation flow is gone). The previous release still reads
+ * and writes this table; drop it only after that release is no longer the
+ * supported rollback target.
+ */
 export const linearPendingSelections = pgTable(
   'linear_pending_selections',
   {

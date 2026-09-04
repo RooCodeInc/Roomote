@@ -12,6 +12,14 @@ describe('getVisiblePrimaryNavItems', () => {
     ]);
   });
 
+  it('marks Home, Automations, and Analytics as setup-gated', () => {
+    const items = getVisiblePrimaryNavItems({ isAdmin: true });
+
+    expect(
+      items.filter((item) => item.requiresSetup).map((item) => item.href),
+    ).toEqual(['/', '/automations', '/analytics']);
+  });
+
   it('hides analytics from non-admins', () => {
     const items = getVisiblePrimaryNavItems({
       isAdmin: false,

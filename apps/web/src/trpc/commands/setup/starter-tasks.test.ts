@@ -100,7 +100,7 @@ describe('completeSetupWithStarterTasksCommand', () => {
   it('completes setup first, then starts one setup session carrying the selected starter tasks', async () => {
     const result = await completeSetupWithStarterTasksCommand(buildAuth(), {
       launchBatchId: '11111111-1111-4111-8111-111111111111',
-      selectedStarterTaskIds: ['speed-up-ci', 'security-scan'],
+      selectedStarterTaskIds: ['speed-up-ci', 'security-scan', 'address-todos'],
       anonymousAnalyticsEnabled: true,
       productUpdatesEnabled: false,
     });
@@ -131,6 +131,10 @@ describe('completeSetupWithStarterTasksCommand', () => {
               id: 'security-scan',
               prompt: getSetupStarterTask('security-scan').prompt,
             }),
+            expect.objectContaining({
+              id: 'address-todos',
+              prompt: getSetupStarterTask('address-todos').prompt,
+            }),
           ],
         }),
       },
@@ -145,8 +149,8 @@ describe('completeSetupWithStarterTasksCommand', () => {
       {
         userId: 'admin-1',
         properties: {
-          selectedCount: 2,
-          starterTaskIds: 'speed-up-ci,security-scan',
+          selectedCount: 3,
+          starterTaskIds: 'speed-up-ci,security-scan,address-todos',
           setupSessionCreated: true,
         },
       },

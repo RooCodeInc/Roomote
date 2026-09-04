@@ -8,7 +8,9 @@ import { HonoAdapter } from '@bull-board/hono';
 
 import {
   bootstrapGeneratedAuthKeypairs,
+  db,
   ensureAutomationRows,
+  waitForMigrations,
 } from '@roomote/db/server';
 import {
   DISCORD_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME,
@@ -51,6 +53,26 @@ import { startPullRequestMergeabilityCheckQueue } from './pull-request-mergeabil
 import { startTaskSleepQueue } from './task-sleep-queue';
 import { startAutomationRecommendationsQueue } from './automation-recommendations-queue';
 import { startFastAgentParentEventQueue } from './fast-agent-parent-event-queue';
+import { installBullMqGracefulShutdown } from './graceful-shutdown';
+
+// Deployments roll every service at once while migrations run only ahead
+// of the api service. A boot that reads a column the pending migration adds
+// would crash-loop past the platform's restart budget and stay down after
+// the migration lands, so wait for the schema instead.
+try {
+  const readiness = await waitForMigrations({
+    database: db,
+    log: (message) => console.info(message),
+  });
+  if (readiness.state === 'unmanaged') {
+    console.info(
+      'Database has no migration bookkeeping; assuming its schema is managed directly.',
+    );
+  }
+} catch (error) {
+  console.error('Database migrations did not become ready', error);
+  process.exit(1);
+}
 
 // Resolve auto-generated auth keypairs before any queue worker starts so
 // scheduled jobs that sign tokens observe the resolved keys.
@@ -352,10 +374,11 @@ app.route('/admin/queues', serverAdapter.registerPlugin());
 
 app.get('/', (c) => c.redirect('/admin/queues'));
 
-async function gracefulShutdown() {
-  console.log('[Shutdown] Starting graceful shutdown...');
-
-  try {
+// Resumed Fast turns execute inside this process, so shutdown drains and
+// aborts them before anything else closes; see graceful-shutdown.ts.
+installBullMqGracefulShutdown({
+  fastAgentWorker: fastAgentParentEventWorker,
+  closeRemaining: async () => {
     await schedulerWorker.close();
     await schedulerQueueEvents.close();
     await schedulerQueue.close();
@@ -406,20 +429,12 @@ async function gracefulShutdown() {
     await pullRequestMergeabilityCheckWorker.close();
     await pullRequestMergeabilityCheckQueueEvents.close();
     await pullRequestMergeabilityCheckQueue.close();
-    await fastAgentParentEventWorker.close();
     await fastAgentParentEventQueueEvents.close();
     await fastAgentParentEventQueue.close();
     await discordGatewaySupervisor.stop();
     await closeRedis();
-  } catch (error) {
-    console.error('[Shutdown] Error during shutdown:', error);
-  }
-
-  process.exit(0);
-}
-
-process.on('SIGTERM', gracefulShutdown);
-process.on('SIGINT', gracefulShutdown);
+  },
+});
 
 const port = Number(process.env.PORT || 13002);
 

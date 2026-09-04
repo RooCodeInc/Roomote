@@ -24,6 +24,7 @@ import {
   useGhostSuggestion,
 } from '@/hooks/useGhostSuggestion';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
+import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import {
@@ -94,6 +95,7 @@ interface PromptInputProps {
   showInputMenu?: boolean;
   placeholder?: string;
   hasTransportError?: boolean;
+  autoFocus?: boolean;
 }
 
 export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
@@ -110,6 +112,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       showInputMenu = true,
       placeholder: placeholderProp,
       hasTransportError = false,
+      autoFocus = false,
     },
     ref,
   ) {
@@ -168,16 +171,12 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     // this gate each one would generate and surface a premature suggestion
     // while the agent is still working.
     const isAwaitingHuman = taskPhase === 'waiting_for_prompt';
-    // Experimental, deployment-wide opt-in. The server enforces the flag too;
-    // this just avoids pointless requests while it is off.
-    const suggestionsEnabled = user?.featureFlags?.composerSuggestions === true;
 
     const composerSuggestionQuery = useQuery(
       trpc.tasks.composerSuggestion.queryOptions(
         { taskId: taskId ?? '', historyRevision },
         {
           enabled:
-            suggestionsEnabled &&
             Boolean(taskId) &&
             connected &&
             !readOnly &&
@@ -211,6 +210,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     );
 
     const isTaskRunning = taskPhase === 'running';
+    useAutoFocusOnce(textareaRef, autoFocus && connected && !sending);
     const canSteerQueuedMessages =
       isSteerablePhase(taskPhase) &&
       (taskPhase !== 'waiting_for_prompt' || connected);

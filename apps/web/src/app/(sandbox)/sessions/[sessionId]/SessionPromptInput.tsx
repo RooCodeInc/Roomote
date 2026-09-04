@@ -1,14 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import type { ReasoningEffort } from '@roomote/types';
 
 import { ROOMOTE_FILE_ATTACHMENT_ACCEPT } from '@/lib/prompt-attachments';
-import { useUser } from '@/hooks/useUser';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
+import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
 import {
   SUGGESTION_MIN_HISTORY_MESSAGES,
   useGhostSuggestion,
@@ -29,10 +29,10 @@ import {
   usePromptInputAttachments,
 } from '@/components/ai-elements';
 import { BasicTooltip } from '@/components/system';
+import { SessionModelSwitcher } from '@/components/tasks/SessionModelSwitcher';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/AttachmentsDisplay';
-import { SessionModelSwitcher } from './SessionModelSwitcher';
 
 export type SessionPromptSubmission = PromptInputMessage & {
   model: string | null;
@@ -100,16 +100,13 @@ export function SessionPromptInput({
     useState<ReasoningEffort | null>(initialReasoningEffort);
   const [isUpdatingModelSelection, setIsUpdatingModelSelection] =
     useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  useAutoFocusOnce(textareaRef, !isBusy);
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => setPrompt(text),
     getPrefix: () => prompt,
     disabled: isBusy,
   });
-
-  // Experimental, deployment-wide opt-in. The server enforces the flag too;
-  // this just avoids pointless requests while it is off.
-  const { user } = useUser();
-  const suggestionsEnabled = user?.featureFlags?.composerSuggestions === true;
 
   const composerSuggestionQuery = useQuery(
     trpc.fastSessions.composerSuggestion.queryOptions(
@@ -123,7 +120,6 @@ export function SessionPromptInput({
         // the agent is still working, and each would otherwise generate and
         // surface a premature suggestion.
         enabled:
-          suggestionsEnabled &&
           !agentWorking &&
           historyMessageCount >= SUGGESTION_MIN_HISTORY_MESSAGES,
         staleTime: Number.POSITIVE_INFINITY,
@@ -224,6 +220,7 @@ export function SessionPromptInput({
         <PromptInputBody>
           <div className="relative">
             <PromptInputTextarea
+              ref={textareaRef}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               onFocus={() => setIsTextareaFocused(true)}

@@ -908,6 +908,42 @@ export class MockSlackServer {
         return;
       }
 
+      case 'POST chat.startStream': {
+        const ts = this.nextTs();
+        const message = this.storeOutgoingMessage({
+          ts,
+          payload: {
+            channel: jsonBody.channel,
+            thread_ts: jsonBody.thread_ts,
+            text: String(jsonBody.markdown_text ?? ''),
+          },
+          ephemeral: false,
+        });
+        json(response, 200, { ok: true, channel: message.channel, ts });
+        return;
+      }
+
+      case 'POST chat.appendStream':
+      case 'POST chat.stopStream': {
+        const channel = String(jsonBody.channel ?? '');
+        const ts = String(jsonBody.ts ?? '');
+        const message = (this.state.messages ?? []).find(
+          (entry) => entry.channel === channel && entry.ts === ts,
+        );
+
+        if (!message) {
+          json(response, 200, { ok: false, error: 'message_not_found' });
+          return;
+        }
+
+        message.text += String(jsonBody.markdown_text ?? '');
+        if (Array.isArray(jsonBody.blocks)) {
+          message.blocks = [...(message.blocks ?? []), ...jsonBody.blocks];
+        }
+        json(response, 200, { ok: true, channel, ts });
+        return;
+      }
+
       case 'POST chat.update': {
         const channel = String(jsonBody.channel ?? '');
         const ts = String(jsonBody.ts ?? '');

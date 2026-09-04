@@ -16,7 +16,11 @@ import { db, eq, taskRuns } from '@roomote/db/server';
  */
 export async function renderSlackLiveTaskCardForRun(
   runId: number,
-  input: { status: SlackLiveTaskCardRenderStatus; message?: string },
+  input: {
+    status: SlackLiveTaskCardRenderStatus;
+    details?: string;
+    output?: string;
+  },
 ): Promise<SlackLiveTaskCardRenderResult> {
   const run = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, runId),
@@ -30,7 +34,8 @@ export async function renderSlackLiveTaskCardForRun(
   return renderSlackLiveTaskCard({
     taskId: run.taskId,
     status: input.status,
-    ...(input.message ? { message: input.message } : {}),
+    ...(input.details ? { details: input.details } : {}),
+    ...(input.output ? { output: input.output } : {}),
     taskTitle: run.task?.title,
   });
 }

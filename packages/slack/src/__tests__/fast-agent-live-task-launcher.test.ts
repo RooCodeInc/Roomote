@@ -155,8 +155,11 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       thread_ts: '100.001',
       text: 'Preparing workspace…\n<https://roomote.example/task/task-1|Open in Roomote>',
       blocks: [
-        expect.objectContaining({
+        {
           type: 'task_card',
+          block_id: expect.stringMatching(
+            /^roomote-task-task-1-card-[0-9a-f-]{36}$/,
+          ),
           task_id: 'roomote-task-task-1',
           title: 'Preparing workspace…',
           status: 'in_progress',
@@ -167,7 +170,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
               text: 'Open in Roomote',
             },
           ],
-        }),
+        },
       ],
       unfurl_links: false,
       unfurl_media: false,
@@ -198,7 +201,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     });
   });
 
-  it('normalizes Slack mentions before launching the child task', async () => {
+  it('normalizes Slack links but keeps raw mentions before launching the child task', async () => {
     await createLauncher()({
       prompt: 'Ask <@U456> about the regression',
       environmentId: 'env-1',
@@ -208,6 +211,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
 
     expect(mocks.normalizeIncomingText).toHaveBeenCalledWith(
       'Ask <@U456> about the regression',
+      { preserveMentions: true },
     );
     expect(mocks.setSlackLiveTaskStreamData).toHaveBeenCalledWith(
       'task-1',

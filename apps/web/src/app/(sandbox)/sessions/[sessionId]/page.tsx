@@ -32,6 +32,10 @@ import { SessionReadTracker } from './SessionReadTracker';
 import { SetupAutomationRecommendationsCard } from './setup/SetupAutomationRecommendationsCard';
 import { SetupSandboxCard } from './setup/SetupSandboxCard';
 import { SetupSessionSourceControlCard } from './setup/SetupSourceControlCard';
+import {
+  SESSION_HEADER_CONTENT_CLASS_NAME,
+  SESSION_HEADER_TITLE_CLASS_NAME,
+} from './session-header-layout';
 
 const getSessionPageData = cache(async (sessionId: string) => {
   const authorizedUser = await authorize();
@@ -126,6 +130,7 @@ export default async function SessionDetailPage({
       createdAt: unifiedSession.createdAt,
       status: unifiedSession.status,
       tasks: unifiedSession.tasks,
+      artifacts: unifiedSession.artifacts,
     };
     // The setup session keeps its inline automation-recommendations card on
     // its normal route after activation: recommendations are optional and
@@ -168,7 +173,9 @@ export default async function SessionDetailPage({
                         },
                       }
                     : {})}
-                  headerExtras={<SessionHeaderPullRequests />}
+                  headerExtras={
+                    <SessionHeaderPullRequests key="session-pull-requests" />
+                  }
                   {...(isSetupSession
                     ? { timelineExtras: setupTimelineExtras }
                     : {})}
@@ -179,9 +186,9 @@ export default async function SessionDetailPage({
             <>
               <WorkspaceHeader
                 className="py-4"
-                contentClassName="items-stretch gap-2 pr-12 @[600px]:items-center @[600px]:gap-3 @[600px]:pr-4"
+                contentClassName={SESSION_HEADER_CONTENT_CLASS_NAME}
               >
-                <h1 className="min-w-0 flex-1 break-words text-sm font-medium @[600px]:flex-[0_1_auto] @[600px]:truncate">
+                <h1 className={SESSION_HEADER_TITLE_CLASS_NAME}>
                   {unifiedSession.title}
                 </h1>
                 <SessionHeaderPullRequests />
@@ -223,6 +230,7 @@ export default async function SessionDetailPage({
     createdAt: session.createdAt,
     status: null,
     tasks: [],
+    artifacts: [],
     taskSource: 'fast',
     taskCards: fastTasks,
   };
@@ -247,12 +255,16 @@ export default async function SessionDetailPage({
           sessionReasoningEffort={session.reasoningEffort}
           defaultModelId={defaultModelId}
           defaultReasoningEffort={defaultReasoningEffort}
-          owner={{
-            userId: session.userId,
-            name: session.ownerName,
-            email: session.ownerEmail,
-            imageUrl: session.ownerImageUrl,
-          }}
+          {...(session.userId
+            ? {
+                owner: {
+                  userId: session.userId,
+                  name: session.ownerName,
+                  email: session.ownerEmail,
+                  imageUrl: session.ownerImageUrl,
+                },
+              }
+            : {})}
         />
       </div>
     </SessionWorkspace>
