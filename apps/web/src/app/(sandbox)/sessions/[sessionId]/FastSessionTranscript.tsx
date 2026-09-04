@@ -219,12 +219,9 @@ export function pendingResponseReducer(
   };
 }
 
-function ThinkingMessage({ initial }: { initial: boolean }) {
+function ThinkingMessage() {
   return (
-    <Message
-      from="assistant"
-      className={`chat-reasoning-message${initial ? ' mt-4' : ''}`}
-    >
+    <Message from="assistant" className="chat-reasoning-message">
       <MessageContent>
         <Shimmer className="text-sm font-light" direction="rl" duration={1}>
           Thinking
@@ -772,9 +769,13 @@ export function FastSessionTranscript({
             {hasVisibleAssistantMessage ? timelineExtras : null}
             {pendingResponseState.pendingAfter !== null &&
             streamMessages.length === 0 ? (
-              <ThinkingMessage
-                initial={pendingResponseState.pendingAfter.id === ''}
-              />
+              pendingResponseState.pendingAfter.id === '' ? (
+                <div className="mt-4">
+                  <ThinkingMessage />
+                </div>
+              ) : (
+                <ThinkingMessage />
+              )
             ) : !isSending &&
               conversationResponding !== true &&
               runningTaskCount > 0 &&
