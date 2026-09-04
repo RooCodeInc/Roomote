@@ -933,6 +933,32 @@ describe('queuePrReviewSummaryNotification', () => {
     });
   });
 
+  it('reconciles a terminal summary rewrite without notifying the completed task', async () => {
+    const cleanBody = TERMINAL_SUMMARY_BODY.replace(
+      '1 minor doc note; no blocking issues.',
+      '**All 1 issue addressed.**',
+    ).replace('- [ ] Update the doc comment', '- [x] Update the doc comment');
+
+    await queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: cleanBody,
+        previousBody: TERMINAL_SUMMARY_BODY,
+      }),
+    );
+
+    expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
+    expect(mockStartPrReviewNotificationCycle).not.toHaveBeenCalled();
+    expect(mockCompleteGithubPrReviewCheckFromSummary).toHaveBeenCalledWith({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'x',
+      reviewHeadSha,
+      reviewSummaryBody: cleanBody,
+      allowCompletedCheckUpdate: true,
+    });
+  });
+
   it('opens and completes a cycle when in-progress status prose varies', async () => {
     await queuePrReviewSummaryNotification(
       summaryPayload({ body: NATURAL_IN_PROGRESS_SUMMARY_BODY }),

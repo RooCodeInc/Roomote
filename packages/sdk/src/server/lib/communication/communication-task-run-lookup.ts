@@ -37,6 +37,7 @@ const ACTIVE_SELECTION = {
   port: taskRuns.port,
   snapshotId: taskRuns.snapshotId,
   snapshotCreatedAt: taskRuns.snapshotCreatedAt,
+  vendor: taskRuns.vendor,
 };
 
 const SNAPSHOT_SELECTION = {
@@ -50,6 +51,7 @@ const SNAPSHOT_SELECTION = {
   port: taskRuns.port,
   snapshotId: taskRuns.snapshotId,
   snapshotCreatedAt: taskRuns.snapshotCreatedAt,
+  vendor: taskRuns.vendor,
 };
 
 function withResolvedUserId<
@@ -118,7 +120,10 @@ export async function findCompletedCommunicationTaskRunWithSnapshot(
     .orderBy(desc(taskRuns.createdAt))
     .limit(1);
 
-  if (!row?.snapshotId || !isSnapshotResumable(row.snapshotCreatedAt)) {
+  if (
+    !row?.snapshotId ||
+    !isSnapshotResumable(row.snapshotCreatedAt, row.vendor)
+  ) {
     return null;
   }
   return withResolvedUserId(row);

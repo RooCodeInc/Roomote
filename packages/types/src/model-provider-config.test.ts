@@ -572,6 +572,11 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
 
   it.each([
     {
+      displayName: 'GPT-6 Astra',
+      modelId: 'gpt-6-astra',
+      providerIds: ['openrouter', 'openai', 'chatgpt'],
+    },
+    {
       displayName: 'GPT 5.6 Sol',
       modelId: 'gpt-5.6-sol',
     },
@@ -585,7 +590,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     },
   ])(
     'recommends $displayName only from providers that support it',
-    ({ displayName, modelId }) => {
+    ({ displayName, modelId, providerIds }) => {
       const providersByModel = userSelectableProviders.flatMap((provider) => {
         const model = provider.suggestedTaskModels.find(
           (suggestion) => suggestion.displayName === displayName,
@@ -594,7 +599,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         return model ? [{ providerId: provider.id, modelId: model.id }] : [];
       });
 
-      expect(providersByModel).toEqual([
+      const providerCandidates = [
         { providerId: 'openrouter', modelId: `openrouter/openai/${modelId}` },
         { providerId: 'vercel', modelId: `vercel/openai/${modelId}` },
         { providerId: 'requesty', modelId: `requesty/${modelId}@eu` },
@@ -619,7 +624,15 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         },
         { providerId: 'github-copilot', modelId: `github-copilot/${modelId}` },
         { providerId: 'chatgpt', modelId: `openai/${modelId}` },
-      ]);
+      ];
+
+      expect(providersByModel).toEqual(
+        providerIds
+          ? providerCandidates.filter(({ providerId }) =>
+              providerIds.includes(providerId),
+            )
+          : providerCandidates,
+      );
     },
   );
 

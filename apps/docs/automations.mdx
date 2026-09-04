@@ -156,7 +156,10 @@ when repository or workspace execution is required.
 Fast runs deliver to every custom-automation report destination: Slack,
 Discord, Microsoft Teams, or Telegram, as either a channel/chat or a direct
 message to the automation owner. Each run keeps a distinct Fast session, and
-the report links back to that session in the web app. Replies on all four
+the report links back to that session in the web app. The Session transcript
+shows the automation's configured prompt, and its normal composer lets a signed-in
+teammate continue the run from the dashboard even when the automation owns the
+Session. Replies on all four
 providers continue the Fast session directly in chat. Roomote verifies the
 active provider installation, conversation, and linked user before resuming.
 Runs with no report destination remain stored Fast sessions and do not post to

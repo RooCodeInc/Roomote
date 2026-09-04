@@ -12,12 +12,18 @@ describe('mergeOpenCodeChatGptFastModeOptions', () => {
           },
         },
       },
-      ['openai/gpt-5.6-terra', 'openai/gpt-5.6-sol', 'openai/gpt-5.6-luna'],
+      [
+        'openai/gpt-6-astra',
+        'openai/gpt-5.6-terra',
+        'openai/gpt-5.6-sol',
+        'openai/gpt-5.6-luna',
+      ],
     );
 
     expect(result).toEqual({
       openai: {
         models: {
+          'gpt-6-astra': { options: { serviceTier: 'priority' } },
           'gpt-5.6-terra': {
             options: { reasoningEffort: 'high', serviceTier: 'priority' },
           },

@@ -275,7 +275,10 @@ describe('snapshotJob', () => {
         runId: 123,
         source: 'snapshot_queue',
         eventType: 'completed',
-        details: expect.objectContaining({ snapshotId: 'snap_success_1' }),
+        details: expect.objectContaining({
+          snapshotId: 'snap_success_1',
+          snapshotExpiresAt: null,
+        }),
       }),
     );
     expect(mockAttachEnvironmentSnapshot).toHaveBeenCalledWith(
@@ -285,6 +288,7 @@ describe('snapshotJob', () => {
         provider: 'modal',
         snapshotId: 'snap_success_1',
         snapshotStatus: 'ready',
+        snapshotExpiresAt: null,
       }),
     );
     expect(mockCreateComputeProviderMutationEventRecorder).toHaveBeenCalledWith(
