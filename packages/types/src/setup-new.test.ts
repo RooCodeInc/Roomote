@@ -41,7 +41,7 @@ describe('setup-session metadata', () => {
         ...session,
         starterTaskSelection: {
           requestId: 'request-1',
-          taskIds: ['speed-up-ci', 'not-real'],
+          taskIds: ['speed-up-ci', 'address-todos', 'not-real'],
           selectedAt: '2026-08-29T00:01:00.000Z',
         },
       },
@@ -51,7 +51,7 @@ describe('setup-session metadata', () => {
     expect(state.setupSession?.startedAt).toBe(session.startedAt);
     expect(state.setupSession?.starterTaskSelection).toEqual({
       requestId: 'request-1',
-      taskIds: ['speed-up-ci'],
+      taskIds: ['speed-up-ci', 'address-todos'],
       selectedAt: '2026-08-29T00:01:00.000Z',
     });
   });

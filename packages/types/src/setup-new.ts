@@ -133,6 +133,7 @@ export const SETUP_STARTER_TASK_IDS = [
   'speed-up-ci',
   'security-scan',
   'fix-test-flakes',
+  'address-todos',
   'update-dependencies',
 ] as const;
 
