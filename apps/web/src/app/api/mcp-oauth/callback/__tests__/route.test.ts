@@ -10,6 +10,7 @@ const {
   getMcpIntegrationMock,
   getMcpIntegrationDefaultDisabledToolsMock,
   getMcpIntegrationOauthEndpointsMock,
+  getMcpIntegrationOauthResourceMock,
   hydrateLinearMcpConnectionAfterOauthMock,
   isDeploymentScopedMcpIntegrationMock,
   isSelfServeMcpIntegrationMock,
@@ -33,6 +34,7 @@ const {
   getMcpIntegrationMock: vi.fn(),
   getMcpIntegrationDefaultDisabledToolsMock: vi.fn(),
   getMcpIntegrationOauthEndpointsMock: vi.fn(),
+  getMcpIntegrationOauthResourceMock: vi.fn(),
   hydrateLinearMcpConnectionAfterOauthMock: vi.fn(),
   isDeploymentScopedMcpIntegrationMock: vi.fn(),
   isSelfServeMcpIntegrationMock: vi.fn(),
@@ -113,6 +115,7 @@ vi.mock('@roomote/types', () => ({
   getMcpIntegrationDefaultDisabledTools:
     getMcpIntegrationDefaultDisabledToolsMock,
   getMcpIntegrationOauthEndpoints: getMcpIntegrationOauthEndpointsMock,
+  getMcpIntegrationOauthResource: getMcpIntegrationOauthResourceMock,
   isDeploymentScopedMcpIntegration: isDeploymentScopedMcpIntegrationMock,
   isSelfServeMcpIntegration: isSelfServeMcpIntegrationMock,
   isCustomMcpConnectionId: (mcpId: string) => mcpId.startsWith('custom:'),
@@ -175,6 +178,7 @@ describe('GET /api/mcp-oauth/callback', () => {
       authorizationEndpoint: 'https://linear.app/oauth/authorize',
       tokenEndpoint: 'https://api.linear.app/oauth/token',
     });
+    getMcpIntegrationOauthResourceMock.mockReturnValue(undefined);
     isSelfServeMcpIntegrationMock.mockReturnValue(true);
     isDeploymentScopedMcpIntegrationMock.mockReturnValue(false);
     getClientInformationMock.mockResolvedValue({
@@ -211,6 +215,39 @@ describe('GET /api/mcp-oauth/callback', () => {
       userId: 'user-1',
       properties: { integration_id: 'linear' },
     });
+  });
+
+  it('includes the monday.com MCP resource in the token exchange', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'monday',
+      userId: 'user-1',
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue({
+      id: 'monday',
+      name: 'monday.com',
+      url: 'https://mcp.monday.com/mcp',
+    });
+    getMcpIntegrationOauthEndpointsMock.mockReturnValue(undefined);
+    getMcpIntegrationOauthResourceMock.mockReturnValue(
+      'https://mcp.monday.com/mcp',
+    );
+    discoverOAuthEndpointsMock.mockResolvedValue({
+      authorization_endpoint: 'https://auth.monday.com/oauth2/authorize',
+      token_endpoint: 'https://auth.monday.com/oauth_ms/oauth/token',
+    });
+
+    await GET(buildRequest('?code=auth-code&state=state-1'));
+
+    expect(exchangeCodeForTokensMock).toHaveBeenCalledWith(
+      'https://auth.monday.com/oauth_ms/oauth/token',
+      'auth-code',
+      'verifier-1',
+      { client_id: 'client-1' },
+      PUBLIC_CALLBACK,
+      { resource: 'https://mcp.monday.com/mcp' },
+    );
   });
 
   it('rejects a pending callback when integrations become disabled', async () => {

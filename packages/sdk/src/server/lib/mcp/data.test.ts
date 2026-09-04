@@ -182,4 +182,70 @@ describe('getClientInformation', () => {
       expect.objectContaining({ refreshToken: 'refresh-token' }),
     );
   });
+
+  it('includes the monday.com MCP resource when refreshing tokens', async () => {
+    findFirstMock.mockResolvedValue({
+      id: 'conn-1',
+      mcpId: 'monday',
+      accessToken: 'expired-access-token',
+      refreshToken: 'refresh-token',
+      tokenExpiresAt: new Date(0),
+      scopes: ['boards:read'],
+      authConfig: {
+        type: 'oauth_client',
+        client_id: 'monday-client',
+        client_secret: 'enc:monday-secret',
+        registered_redirect_uri:
+          'https://customer.example/api/mcp-oauth/callback',
+        token_endpoint_auth_method: 'client_secret_post',
+      },
+    });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (
+        url === 'https://mcp.monday.com/.well-known/oauth-authorization-server'
+      ) {
+        return new Response(null, { status: 404 });
+      }
+      if (
+        url ===
+        'https://mcp.monday.com/.well-known/oauth-protected-resource/mcp'
+      ) {
+        return Response.json({
+          resource: 'https://mcp.monday.com/mcp',
+          authorization_servers: ['https://auth.monday.com/mcp'],
+        });
+      }
+      if (
+        url ===
+        'https://auth.monday.com/.well-known/oauth-authorization-server/mcp'
+      ) {
+        return Response.json({
+          authorization_endpoint: 'https://auth.monday.com/oauth2/authorize',
+          token_endpoint: 'https://auth.monday.com/oauth_ms/oauth/token',
+        });
+      }
+      if (url === 'https://auth.monday.com/oauth_ms/oauth/token') {
+        return Response.json({
+          access_token: 'fresh-access-token',
+          refresh_token: 'fresh-refresh-token',
+          expires_in: 3_600,
+        });
+      }
+
+      throw new Error(
+        `Unexpected OAuth request: ${url} ${init?.method ?? 'GET'}`,
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      getValidAccessToken('conn-1', 'https://mcp.monday.com/mcp'),
+    ).resolves.toBe('fresh-access-token');
+
+    const tokenRequest = fetchMock.mock.calls.find(
+      ([url]) => url === 'https://auth.monday.com/oauth_ms/oauth/token',
+    );
+    const tokenBody = new URLSearchParams(String(tokenRequest?.[1]?.body));
+    expect(tokenBody.get('resource')).toBe('https://mcp.monday.com/mcp');
+  });
 });

@@ -12,6 +12,7 @@ import {
   getMcpIntegration,
   getMcpIntegrationDefaultDisabledTools,
   getMcpIntegrationOauthEndpoints,
+  getMcpIntegrationOauthResource,
   isCustomMcpConnectionId,
   isDeploymentScopedMcpIntegration,
   isSelfServeMcpIntegration,
@@ -344,6 +345,9 @@ export async function GET(request: NextRequest) {
     failureStage = 'token_exchange';
     // Catalog exchanges keep their historical call shape; custom targets add
     // the guarded fetch + resource indicator options.
+    const integrationResource = getMcpIntegrationOauthResource(
+      integration ?? undefined,
+    );
     const tokens = customTarget
       ? await exchangeCodeForTokens(
           tokenEndpoint,
@@ -353,13 +357,22 @@ export async function GET(request: NextRequest) {
           redirectUri,
           customTarget.oauthOptions,
         )
-      : await exchangeCodeForTokens(
-          tokenEndpoint,
-          code,
-          oauthState.codeVerifier,
-          clientInfo,
-          redirectUri,
-        );
+      : integrationResource
+        ? await exchangeCodeForTokens(
+            tokenEndpoint,
+            code,
+            oauthState.codeVerifier,
+            clientInfo,
+            redirectUri,
+            { resource: integrationResource },
+          )
+        : await exchangeCodeForTokens(
+            tokenEndpoint,
+            code,
+            oauthState.codeVerifier,
+            clientInfo,
+            redirectUri,
+          );
 
     if (integration?.id === 'linear') {
       failureStage = 'linear_metadata';

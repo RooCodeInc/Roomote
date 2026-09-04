@@ -26,6 +26,7 @@ import {
   type McpConnectionRole,
   getMcpIntegrationAuthorizationParameters,
   getMcpIntegrationOauthEndpoints,
+  getMcpIntegrationOauthResource,
   getMcpIntegrationOauthScopeMode,
   getMcpIntegrationOauthScopeSeparator,
   getMcpIntegrationOauthScopes,
@@ -367,6 +368,13 @@ export async function GET(
       // RFC 8707 resource indicator, required of MCP clients by the current
       // authorization spec; per-server opt-out for servers that reject it.
       authUrl.searchParams.set('resource', customTarget.oauthOptions.resource);
+    }
+
+    const integrationResource = getMcpIntegrationOauthResource(
+      integration ?? undefined,
+    );
+    if (integrationResource) {
+      authUrl.searchParams.set('resource', integrationResource);
     }
 
     if (integration) {
