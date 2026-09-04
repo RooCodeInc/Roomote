@@ -2,17 +2,8 @@
 
 import { pathToFileURL } from 'node:url';
 
-import {
-  McpServer,
-  type RegisteredTool,
-  type ToolCallback,
-} from '@modelcontextprotocol/sdk/server/mcp.js';
-import type {
-  AnySchema,
-  ZodRawShapeCompat,
-} from '@modelcontextprotocol/sdk/server/zod-compat.js';
-import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
@@ -107,43 +98,13 @@ import {
   handleSendSessionMessage,
   handleStartSession,
 } from './sessions.js';
-import { withNullableOptionals } from './nullable-optionals.js';
 
 export {
   taskSuggestionResultHasSubmittedSuggestions,
   automationWorkItemsResultHasSubmittedWorkItems,
 } from './automation-slack-summary-state.js';
 
-/**
- * Every Roomote tool registers through this server so its optional input
- * fields accept null on the wire (see withNullableOptionals). Handlers still
- * receive undefined for those fields.
- */
-class RoomoteMcpServer extends McpServer {
-  override registerTool<
-    OutputArgs extends ZodRawShapeCompat | AnySchema,
-    InputArgs extends undefined | ZodRawShapeCompat | AnySchema = undefined,
-  >(
-    name: string,
-    config: {
-      title?: string;
-      description?: string;
-      inputSchema?: InputArgs;
-      outputSchema?: OutputArgs;
-      annotations?: ToolAnnotations;
-      _meta?: Record<string, unknown>;
-    },
-    cb: ToolCallback<InputArgs>,
-  ): RegisteredTool {
-    return super.registerTool(
-      name,
-      { ...config, inputSchema: withNullableOptionals(config.inputSchema) },
-      cb,
-    );
-  }
-}
-
-export const roomoteMcpServer = new RoomoteMcpServer({
+export const roomoteMcpServer = new NullableOptionalsMcpServer({
   name: 'roomote-mcp-server',
   version: '1.0.0',
 });

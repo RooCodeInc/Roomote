@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { and, db, eq, isNull, mcpConnections } from '@roomote/db/server';
 import { isMcpConnectionGranolaConfig } from '@roomote/types';
@@ -45,7 +45,7 @@ async function resolveGranolaConnection() {
 function createGranolaMcpServer(
   config: Awaited<ReturnType<typeof resolveGranolaConnection>>,
 ) {
-  const server = new McpServer(GRANOLA_MCP_SERVER_INFO, {
+  const server = new NullableOptionalsMcpServer(GRANOLA_MCP_SERVER_INFO, {
     instructions:
       'Use these read-only Granola tools to inspect notes, transcripts, and folders through the configured workspace API key.',
   });
