@@ -200,6 +200,57 @@ describe('createSlackFastReplyStream', () => {
     );
   });
 
+  it('does not finalize when Slack cannot stop the stream and falls back after cleanup', async () => {
+    const slack = slackMock();
+    slack.stopMessageStream.mockResolvedValue(false);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { stream, onDelivered } = build(slack, null);
+
+    await stream.append('Looking');
+    await expect(
+      stream.finish({ purpose: 'closeout', message: 'Looking.' }),
+    ).resolves.toBeUndefined();
+
+    expect(mocks.finalizeStream).not.toHaveBeenCalled();
+    expect(slack.deleteMessage).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: '200.1',
+    });
+    expect(mocks.endStream).toHaveBeenCalledWith({
+      channel: 'C1',
+      threadTs: '100.1',
+      token: 'stream-token',
+    });
+    expect(mocks.recordMessage).not.toHaveBeenCalled();
+    expect(onDelivered).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('did not stop streamed reply'),
+    );
+  });
+
+  it('retains the barrier when Slack cannot stop or delete the partial stream', async () => {
+    const slack = slackMock();
+    slack.stopMessageStream.mockResolvedValue(false);
+    slack.deleteMessage.mockResolvedValue(false);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { stream, onDelivered } = build(slack, null);
+
+    await stream.append('Looking');
+    await expect(
+      stream.finish({ purpose: 'closeout', message: 'Looking.' }),
+    ).resolves.toEqual({ messageId: '200.1' });
+
+    expect(mocks.finalizeStream).not.toHaveBeenCalled();
+    expect(mocks.endStream).not.toHaveBeenCalled();
+    expect(mocks.recordMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: '200.1' }),
+    );
+    expect(onDelivered).toHaveBeenCalledOnce();
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('retaining the relocation barrier'),
+    );
+  });
+
   it('keeps the partial stream as the delivery when it cannot be removed', async () => {
     const slack = slackMock();
     mocks.finalizeStream.mockResolvedValue(false);
@@ -254,5 +305,16 @@ describe('createSlackFastReplyStream', () => {
       threadTs: '100.1',
       token: 'stream-token',
     });
+  });
+
+  it('retains the barrier when abort cannot confirm the stream stopped', async () => {
+    const slack = slackMock();
+    slack.stopMessageStream.mockResolvedValue(false);
+    const { stream } = build(slack, null);
+
+    await stream.append('Half');
+    await stream.abort();
+
+    expect(mocks.endStream).not.toHaveBeenCalled();
   });
 });

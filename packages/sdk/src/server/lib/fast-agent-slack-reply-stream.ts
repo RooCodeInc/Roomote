@@ -103,7 +103,36 @@ export function createSlackFastReplyStream(params: {
       if (!ts || !token) return undefined;
       messageTs = null;
       streamToken = null;
-      await params.slack.stopMessageStream({ channel: params.channelId, ts });
+      const stopped = await params.slack.stopMessageStream({
+        channel: params.channelId,
+        ts,
+      });
+      if (!stopped) {
+        const deleted = await params.slack
+          .deleteMessage({ channel: params.channelId, ts })
+          .catch(() => false);
+        if (deleted) {
+          await endSlackThreadReplyStream({
+            channel: params.channelId,
+            threadTs: params.threadTs,
+            token,
+          });
+          console.warn(
+            `[Fast Agent] Slack did not stop streamed reply ${ts}; removed it so the reply can post normally.`,
+          );
+          return undefined;
+        }
+        console.error(
+          `[Fast Agent] Slack did not stop streamed reply ${ts}, and it could not be removed; retaining the relocation barrier and keeping the partial stream as the delivery.`,
+        );
+        await recordFastAgentConversationMessageBestEffort({
+          sessionId: params.sessionId,
+          conversation: params.conversation,
+          messageId: ts,
+        });
+        params.onDelivered?.();
+        return { messageId: ts };
+      }
       const quote = params.getQuote?.() ?? null;
       let updated = false;
       try {
@@ -165,8 +194,11 @@ export function createSlackFastReplyStream(params: {
       const token = streamToken;
       messageTs = null;
       streamToken = null;
-      await params.slack.stopMessageStream({ channel: params.channelId, ts });
-      if (token) {
+      const stopped = await params.slack.stopMessageStream({
+        channel: params.channelId,
+        ts,
+      });
+      if (stopped && token) {
         await endSlackThreadReplyStream({
           channel: params.channelId,
           threadTs: params.threadTs,
