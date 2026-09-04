@@ -344,12 +344,14 @@ export async function githubPrReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
+  therapistModeEnabled,
 }: {
   taskSpec: GithubPullRequestReviewOpenTask;
   gitHubToken: string;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
+  therapistModeEnabled?: boolean;
 }): Promise<{
   prompt: string;
   harnessInstructions?: string;
@@ -548,6 +550,7 @@ export async function githubPrReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems,
+    therapistModeEnabled,
   });
 
   return {

@@ -340,6 +340,7 @@ export async function githubPrReviewSync({
   taskRunUrl,
   additionalInstructions,
   attribution,
+  therapistModeEnabled,
 }: {
   runId?: number;
   taskSpec: GithubPullRequestReviewSyncTask;
@@ -347,6 +348,7 @@ export async function githubPrReviewSync({
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
+  therapistModeEnabled?: boolean;
 }): Promise<{
   prompt: string;
   harnessInstructions?: string;
@@ -571,5 +573,6 @@ export async function githubPrReviewSync({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems,
+    therapistModeEnabled,
   });
 }

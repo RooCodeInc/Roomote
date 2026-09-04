@@ -250,6 +250,7 @@ export async function generatePrompt({
         taskRunUrl,
         additionalInstructions: reviewCodeInstructions,
         attribution: commitAuthor,
+        therapistModeEnabled: await resolveTherapistMode(),
       });
     case TaskPayloadKind.GithubPrReviewSync:
       return githubPrReviewSync({
@@ -259,6 +260,7 @@ export async function generatePrompt({
         taskRunUrl,
         additionalInstructions: reviewCodeInstructions,
         attribution: commitAuthor,
+        therapistModeEnabled: await resolveTherapistMode(),
       });
 
     // <Workflow: PR review follow-up, Trigger: GitHub>
@@ -269,6 +271,7 @@ export async function generatePrompt({
         taskRunUrl,
         additionalInstructions: reviewCodeInstructions,
         attribution: commitAuthor,
+        therapistModeEnabled: await resolveTherapistMode(),
       });
 
     // <Workflow: PR conflict resolution, Trigger: GitHub>
@@ -277,6 +280,7 @@ export async function generatePrompt({
         taskSpec,
         taskRunUrl,
         attribution: commitAuthor,
+        therapistModeEnabled: await resolveTherapistMode(),
       });
 
     // <Workflow: standard, Trigger: Slack>
