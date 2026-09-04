@@ -3784,7 +3784,7 @@ export async function answerFastAgentQuestion({
                 linkedSession = await getSessionForTask(db, task.taskId);
               } catch (error) {
                 console.warn(
-                  `[sessions] Failed to resolve Session kickoff link: ${formatErrorForLog(error)}`,
+                  `[sessions] Failed to resolve Session task link: ${formatErrorForLog(error)}`,
                 );
               }
               const destinationUrl = linkedSession
@@ -3838,8 +3838,8 @@ export async function answerFastAgentQuestion({
                   .update(signature)
                   .digest('hex')
                   .slice(0, 32)}`,
-                // Preserve provider launch preparation and task-card hooks,
-                // but keep fallback link delivery off the startup path.
+                // Providers still use this callback for task-card setup. The
+                // fallback link is posted after launch completes.
                 postKickoff: async (task) => {
                   preparedTaskLink = task;
                 },

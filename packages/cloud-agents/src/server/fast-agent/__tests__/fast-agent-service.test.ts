@@ -6102,7 +6102,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(results[2]).toMatchObject({ success: true });
     });
 
-    it('reuses a delivered acknowledgement instead of posting a duplicate launch kickoff', async () => {
+    it('starts the task after acknowledgement without posting a second message', async () => {
       const order: string[] = [];
       const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
         order.push('launch');
@@ -7417,7 +7417,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('does not block task startup when the best-effort task link fails', async () => {
+  it('keeps a successful launch result when the task link post fails', async () => {
     let launchResult: unknown;
     const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
       await postKickoff({
