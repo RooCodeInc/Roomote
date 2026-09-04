@@ -51,6 +51,7 @@ import {
   finalizeSlackThreadReplyStreamWithFooterText,
   isSlackThreadReplyFooterBlock,
   postSlackThreadMessageWithStickyFooter,
+  registerSlackThreadActiveTaskAndMoveFooter,
   removeSlackThreadReplyFooter,
 } from '../thread-reply-footer-ops';
 
@@ -243,6 +244,53 @@ describe('thread-reply-footer-ops', () => {
     expect(warning).toHaveBeenCalledWith(
       expect.stringContaining('Failed to relocate active task cards'),
     );
+  });
+
+  it('moves an existing exact footer into a footer-only carrier after registration', async () => {
+    const footerBlock = {
+      type: 'context',
+      block_id: 'roomote_thread_reply_footer',
+      elements: [{ type: 'mrkdwn', text: '_Exact footer._' }],
+    };
+    const slack = {
+      postMessage: vi.fn().mockResolvedValue('footer-new'),
+      getMessageBlocks: vi
+        .fn()
+        .mockResolvedValue([
+          { type: 'markdown', text: 'prior body' },
+          footerBlock,
+        ]),
+      updateMessage: vi.fn().mockResolvedValue(true),
+      getRawMessage: vi.fn(),
+      deleteMessage: vi.fn().mockResolvedValue(true),
+    };
+    mockRedisEval.mockResolvedValueOnce(
+      JSON.stringify({
+        teamId: 'T1',
+        channel: 'C1',
+        threadTs: '100.000',
+        version: 'v1',
+      }),
+    );
+
+    await registerSlackThreadActiveTaskAndMoveFooter({
+      slack,
+      teamId: 'T1',
+      channel: 'C1',
+      threadTs: '100.000',
+      taskId: 'task-1',
+    });
+
+    expect(mockRelocate.mock.invocationCallOrder[0]).toBeLessThan(
+      slack.postMessage.mock.invocationCallOrder[0]!,
+    );
+    expect(slack.postMessage).toHaveBeenCalledWith({
+      channel: 'C1',
+      thread_ts: '100.000',
+      text: '_Exact footer._',
+      blocks: [footerBlock],
+    });
+    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', 'footer-new');
   });
 
   it('finalizes all streamed reply content before relocating cards and posting the footer', async () => {
