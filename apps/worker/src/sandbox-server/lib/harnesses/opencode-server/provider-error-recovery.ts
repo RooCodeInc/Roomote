@@ -33,8 +33,9 @@ const TERMINAL_ERROR_NAMES = new Set(['contextoverflowerror']);
 const POLICY_ERROR_NAMES = new Set(['contentfiltererror']);
 
 // Client errors are terminal because replaying the same request cannot
-// succeed, except timeouts (408) and rate limits (429) which are transient.
-const RETRYABLE_CLIENT_STATUS_CODES = new Set([408, 429]);
+// succeed, except timeouts (408), rate limits (429), and provider-defined 402s
+// without structured evidence of a permanent account limit.
+const RETRYABLE_CLIENT_STATUS_CODES = new Set([402, 408, 429]);
 
 export function collectProviderErrorValues(error: unknown): unknown[] {
   const pending: Array<{ value: unknown; depth: number }> = [
@@ -46,7 +47,7 @@ export function collectProviderErrorValues(error: unknown): unknown[] {
   while (pending.length > 0) {
     const current = pending.shift();
 
-    if (!current || current.depth > 4) {
+    if (!current || current.depth > 6) {
       continue;
     }
 
@@ -130,6 +131,15 @@ function hasErrorName(values: unknown[], names: Set<string>): boolean {
   });
 }
 
+function isOpenRouterCreditsLimitError(values: unknown[]): boolean {
+  return (
+    extractProviderErrorHttpStatus(values) === 402 &&
+    values.some(
+      (value) => asRecord(value)?.limit_source === 'openrouter_credits',
+    )
+  );
+}
+
 export function isOpenCodeContextOverflowError(error: unknown): boolean {
   return hasErrorName(collectProviderErrorValues(error), TERMINAL_ERROR_NAMES);
 }
@@ -140,6 +150,10 @@ function isExplicitlyTerminal(values: unknown[]): boolean {
   }
 
   if (hasErrorName(values, TERMINAL_ERROR_NAMES)) {
+    return true;
+  }
+
+  if (isOpenRouterCreditsLimitError(values)) {
     return true;
   }
 

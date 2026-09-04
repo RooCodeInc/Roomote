@@ -56,6 +56,11 @@ vi.mock('@roomote/cloud-agents/server', () => ({
           error.cause.name === 'FastAgentDurableRetryScheduledError'
         ? error.cause
         : null,
+  isNonRetryableFastAgentInferenceError: (error: unknown) =>
+    error instanceof Error &&
+    error.name === 'FastAgentInferenceError' &&
+    'failure' in error &&
+    (error.failure as { retryable?: boolean }).retryable === false,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -898,6 +903,39 @@ describe('Fast parent event durable queue', () => {
     ).rejects.toThrow('provider offline');
     expect(mocks.deliver).toHaveBeenCalledOnce();
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it('discards a non-retryable inference failure and continues', async () => {
+    const first = pendingRow('event-1');
+    const second = pendingRow('event-2', { ...event, messageId: 'message-2' });
+    mocks.findPending
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second)
+      .mockResolvedValueOnce(undefined);
+    const terminalError = Object.assign(
+      new Error('Fast mode inference failed (insufficient_credits).'),
+      {
+        name: 'FastAgentInferenceError',
+        failure: { reason: 'insufficient_credits', retryable: false },
+      },
+    );
+    mocks.deliver
+      .mockRejectedValueOnce(terminalError)
+      .mockResolvedValueOnce('delivered');
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: first.eventKey,
+    });
+
+    expect(mocks.deliver).toHaveBeenCalledTimes(2);
+    expect(mocks.updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        discardedAt: expect.any(Date),
+        lastError: terminalError.message,
+      }),
+    );
   });
 
   it('discards a permanent head failure and continues to the next event', async () => {

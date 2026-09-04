@@ -2209,6 +2209,52 @@ describe('resolveOpenCodeSmallModel', () => {
     ).toMatchObject({ retryable: false });
   });
 
+  it('classifies structured OpenRouter credit exhaustion as terminal', async () => {
+    const { classifyNonTaskInferenceError } =
+      await import('../non-task-provider-usage.js');
+
+    expect(
+      classifyNonTaskInferenceError({
+        name: 'APIError',
+        data: {
+          message:
+            'This request requires more credits than your account balance.',
+          statusCode: 402,
+          isRetryable: false,
+          responseBody: JSON.stringify({
+            error: {
+              metadata: { limit_source: 'openrouter_credits' },
+            },
+          }),
+        },
+      }),
+    ).toEqual({
+      message:
+        'The inference provider account does not have enough credits or quota.',
+      reason: 'insufficient_credits',
+      retryable: false,
+    });
+  });
+
+  it('does not infer credit exhaustion from an arbitrary 402 response', async () => {
+    const { classifyNonTaskInferenceError } =
+      await import('../non-task-provider-usage.js');
+
+    expect(
+      classifyNonTaskInferenceError({
+        name: 'APIError',
+        data: {
+          message: 'Payment required: insufficient credits.',
+          statusCode: 402,
+        },
+      }),
+    ).toEqual({
+      message: 'The inference provider rejected the validation request.',
+      reason: 'provider_error',
+      retryable: true,
+    });
+  });
+
   it('continues observing provider errors when retry reporting fails', async () => {
     process.env = {
       ...originalEnv,
@@ -2772,8 +2818,8 @@ describe('resolveOpenCodeSmallModel', () => {
     },
     {
       providerError: '402 payment required: insufficient credits',
-      reason: 'insufficient_credits',
-      retryable: false,
+      reason: 'provider_error',
+      retryable: true,
     },
     {
       providerError: '429 too many requests',
@@ -2832,8 +2878,8 @@ describe('resolveOpenCodeSmallModel', () => {
     {
       providerMessage: 'upgrade your plan',
       statusCode: 402,
-      reason: 'insufficient_credits',
-      retryable: false,
+      reason: 'provider_error',
+      retryable: true,
     },
     {
       providerMessage: 'slow down',

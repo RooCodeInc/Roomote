@@ -92,16 +92,19 @@ describe('getOpenCodeProviderErrorRecovery', () => {
     });
   });
 
-  it('classifies HTTP client-error statuses inside JSON strings as terminal', () => {
+  it('retries an otherwise-unclassified 402 response', () => {
     const error = JSON.stringify({
       error: {
         code: 402,
-        message: 'There is not enough credit to run this request.',
+        message: 'Provider-defined payment response.',
       },
     });
 
-    expect(isOpenCodeTerminalProviderError(error)).toBe(true);
-    expect(getOpenCodeProviderErrorRecovery(error)).toBeNull();
+    expect(isOpenCodeTerminalProviderError(error)).toBe(false);
+    expect(getOpenCodeProviderErrorRecovery(error)).toMatchObject({
+      kind: 'provider_error',
+      maxRetries: 6,
+    });
   });
 
   it.each([408, 429, 500, 503])(
@@ -137,14 +140,20 @@ describe('getOpenCodeProviderErrorRecovery', () => {
     expect(getOpenCodeProviderErrorRecovery(error)).toBeNull();
   });
 
-  it('classifies payment-required responses as terminal', () => {
+  it('classifies an explicit OpenRouter credit limit as terminal', () => {
     expect(
       isOpenCodeTerminalProviderError({
         name: 'APIError',
         data: {
-          message: 'Payment required',
+          message:
+            'This request requires more credits than your account balance.',
           statusCode: 402,
           isRetryable: true,
+          responseBody: JSON.stringify({
+            error: {
+              metadata: { limit_source: 'openrouter_credits' },
+            },
+          }),
         },
       }),
     ).toBe(true);

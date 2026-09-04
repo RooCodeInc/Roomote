@@ -1919,6 +1919,43 @@ function isInferenceErrorExplicitlyNonRetryable(error: unknown): boolean {
   return false;
 }
 
+function isOpenRouterCreditsLimitError(
+  error: unknown,
+  statusCode: number | undefined,
+): boolean {
+  if (statusCode !== 402) return false;
+
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value: error, depth: 0 },
+  ];
+  const seen = new Set<object>();
+
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current || current.depth > 6) continue;
+
+    const { value, depth } = current;
+    if (typeof value === 'string') {
+      try {
+        pending.push({ value: JSON.parse(value), depth: depth + 1 });
+      } catch {
+        // Only structured OpenRouter metadata identifies this account limit.
+      }
+      continue;
+    }
+    if (!value || typeof value !== 'object' || seen.has(value)) continue;
+
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    if (record.limit_source === 'openrouter_credits') return true;
+    for (const nested of Object.values(record)) {
+      pending.push({ value: nested, depth: depth + 1 });
+    }
+  }
+
+  return false;
+}
+
 function isContentFilterInferenceError(error: unknown): boolean {
   const pending: Array<{ value: unknown; depth: number }> = [
     { value: error, depth: 0 },
@@ -1985,6 +2022,10 @@ export function classifyNonTaskInferenceError(
       ? (record.data as Record<string, unknown>)
       : undefined;
   const statusCode = findInferenceErrorStatusCode(inferenceError);
+  const openRouterCreditsLimited = isOpenRouterCreditsLimitError(
+    inferenceError,
+    statusCode,
+  );
   const responseBody =
     typeof data?.responseBody === 'string' ? data.responseBody : '';
   const detail =
@@ -2000,6 +2041,15 @@ export function classifyNonTaskInferenceError(
       message:
         'The inference provider blocked the response with its content filter.',
       reason: 'content_filter',
+      retryable: false,
+    };
+  }
+
+  if (openRouterCreditsLimited) {
+    return {
+      message:
+        'The inference provider account does not have enough credits or quota.',
+      reason: 'insufficient_credits',
       retryable: false,
     };
   }
@@ -2084,15 +2134,6 @@ export function classifyNonTaskInferenceError(
     };
   }
 
-  if (statusCode === 402) {
-    return {
-      message:
-        'The inference provider account does not have enough credits or quota.',
-      reason: 'insufficient_credits',
-      retryable: false,
-    };
-  }
-
   if (statusCode === 404) {
     return {
       message: 'The selected model is unavailable with these credentials.',
@@ -2123,12 +2164,13 @@ export function classifyNonTaskInferenceError(
   }
 
   if (
-    detail.includes('insufficient_quota') ||
-    detail.includes('insufficient quota') ||
-    detail.includes('insufficient credit') ||
-    detail.includes('payment required') ||
-    detail.includes('billing') ||
-    /\b402\b/u.test(detail)
+    statusCode !== 402 &&
+    !/\b402\b/u.test(detail) &&
+    (detail.includes('insufficient_quota') ||
+      detail.includes('insufficient quota') ||
+      detail.includes('insufficient credit') ||
+      detail.includes('payment required') ||
+      detail.includes('billing'))
   ) {
     return {
       message:
@@ -2199,11 +2241,13 @@ export function classifyNonTaskInferenceError(
 
   // Remaining structured 4xx responses (400, 413, 422, …) are client errors:
   // resending the same request cannot recover them. 408 stays retryable as a
-  // timeout; 401/402/403/404/429 were classified above.
+  // timeout; provider-defined 402 responses stay retryable unless structured
+  // metadata or an explicit isRetryable=false signal classified them above.
   if (
     statusCode !== undefined &&
     statusCode >= 400 &&
     statusCode < 500 &&
+    statusCode !== 402 &&
     statusCode !== 408
   ) {
     return {
