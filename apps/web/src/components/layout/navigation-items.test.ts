@@ -27,4 +27,13 @@ describe('getVisiblePrimaryNavItems', () => {
 
     expect(items.map((item) => item.href)).toEqual(['/', '/sessions']);
   });
+
+  it('only exposes Sessions while admin setup is incomplete', () => {
+    const items = getVisiblePrimaryNavItems({
+      isAdmin: true,
+      setupIncomplete: true,
+    });
+
+    expect(items.map((item) => item.href)).toEqual(['/sessions']);
+  });
 });
