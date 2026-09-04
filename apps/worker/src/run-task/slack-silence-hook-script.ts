@@ -28,8 +28,12 @@ function getChatSurfaceLabel() {
 }
 
 const SURFACE_LABEL = getChatSurfaceLabel();
+const IS_FAST_AGENT_CHILD = process.env.ROOMOTE_FAST_AGENT_CHILD === 'true';
+const PARENT_SESSION_REPORT_DISABLED =
+  IS_FAST_AGENT_CHILD &&
+  process.env.ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY === 'false';
 const REPORTS_TO_PARENT_SESSION =
-  process.env.ROOMOTE_FAST_AGENT_CHILD === 'true';
+  IS_FAST_AGENT_CHILD && !PARENT_SESSION_REPORT_DISABLED;
 const LIFECYCLE_TOOL_NAME = REPORTS_TO_PARENT_SESSION
   ? 'report_to_parent_session'
   : 'send_chat_reply';
@@ -562,6 +566,11 @@ function writeInitialAckReminderState(stateFilePath, state, nowMs) {
       reason: 'slack_reply_satisfaction_not_configured',
       tool: getToolName(hookInput),
     });
+    process.exit(0);
+  }
+
+  if (PARENT_SESSION_REPORT_DISABLED) {
+    logAllow({ reason: 'parent_session_report_disabled' });
     process.exit(0);
   }
 

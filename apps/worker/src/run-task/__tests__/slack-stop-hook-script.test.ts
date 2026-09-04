@@ -37,6 +37,7 @@ describe('SLACK_STOP_HOOK_SCRIPT', () => {
         ROOMOTE_COMMUNICATION_PROVIDER: undefined,
         ROOMOTE_SLACK_CHANNEL: undefined,
         ROOMOTE_FAST_AGENT_CHILD: undefined,
+        ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY: undefined,
         ...options.env,
       },
     });
@@ -67,6 +68,22 @@ describe('SLACK_STOP_HOOK_SCRIPT', () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
     expect(result.stderr).toBe('');
+  });
+
+  it('skips enforcement when a PR-review child has no parent report tool', () => {
+    const result = runHook({
+      env: {
+        ROOMOTE_FAST_AGENT_CHILD: 'true',
+        ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY: 'false',
+        ROOMOTE_SLACK_HOOK_DEBUG: 'true',
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: '/tmp/roomote-state.json',
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('decision="allow"');
+    expect(result.stderr).toContain('reason="parent_session_report_disabled"');
   });
 
   it('allows Stop for non-parent subagent threads', () => {
