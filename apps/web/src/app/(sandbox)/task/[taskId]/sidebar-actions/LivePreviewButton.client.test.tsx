@@ -1,5 +1,11 @@
 import { type MouseEventHandler, type ReactNode } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 
 const {
   usePreviewUrlsMock,
@@ -21,6 +27,7 @@ const {
   restoreSnapshotMutateAsyncMock: vi.fn(),
   restoreSnapshotState: {
     isPending: false,
+    onSuccess: undefined as (() => void) | undefined,
     onError: undefined as ((error: unknown) => void) | undefined,
   },
   resolvePreviewTargetMock: vi.fn(
@@ -114,8 +121,10 @@ vi.mock('../hooks/use-preview-pane', () => ({
 
 vi.mock('@/hooks/snapshots', () => ({
   useRestoreTaskRunSnapshot: (options?: {
+    onSuccess?: () => void;
     onError?: (error: unknown) => void;
   }) => {
+    restoreSnapshotState.onSuccess = options?.onSuccess;
     restoreSnapshotState.onError = options?.onError;
 
     return {
@@ -195,6 +204,7 @@ describe('LivePreviewButton', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     restoreSnapshotState.isPending = false;
+    restoreSnapshotState.onSuccess = undefined;
     restoreSnapshotState.onError = undefined;
     restoreSnapshotMutateAsyncMock.mockResolvedValue({
       success: true,
@@ -486,6 +496,50 @@ describe('LivePreviewButton', () => {
     fireEvent.click(wakeButton);
 
     expect(restoreSnapshotMutateAsyncMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the stale sleeping run blocked after restore succeeds', async () => {
+    const sleepingRun = {
+      id: 123,
+      snapshotId: 'snapshot-1',
+      snapshotCreatedAt: new Date(),
+      payload: { environmentId: 'env-1' },
+    } as never;
+    const { rerender } = render(
+      <LivePreviewButton taskId="task-1" taskRun={sleepingRun} />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Live Preview' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Wake up' }));
+
+    await waitFor(() =>
+      expect(restoreSnapshotMutateAsyncMock).toHaveBeenCalledTimes(1),
+    );
+    act(() => restoreSnapshotState.onSuccess?.());
+    rerender(<LivePreviewButton taskId="task-1" taskRun={sleepingRun} />);
+
+    const staleTrigger = screen.getByRole('button', {
+      name: 'Live Preview',
+    });
+    expect(staleTrigger).toBeDisabled();
+    expect(staleTrigger).toHaveAttribute('title', 'Live Preview is waking up');
+    fireEvent.click(staleTrigger);
+    expect(restoreSnapshotMutateAsyncMock).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <LivePreviewButton
+        taskId="task-1"
+        taskRun={
+          {
+            id: 456,
+            status: 'running',
+            payload: { environmentId: 'env-1' },
+          } as never
+        }
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'Live Preview' })).toBeEnabled();
   });
 
   it('disables wake when the retained preview snapshot has expired', () => {

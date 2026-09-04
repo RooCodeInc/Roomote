@@ -42,7 +42,10 @@ function LivePreviewButtonBase({
 }: SidebarActionBaseProps & { disabled?: boolean }) {
   const [showWakeDialog, setShowWakeDialog] = useState(false);
   const [wakeError, setWakeError] = useState<string | null>(null);
-  const wakeInFlightRef = useRef(false);
+  const [wakeRequestedRunId, setWakeRequestedRunId] = useState<number | null>(
+    null,
+  );
+  const wakeRequestedRunIdRef = useRef<number | null>(null);
   const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
     useAuthorizedUser();
   const { initialPaths, previewUrl, previewUrls, primaryPortName } =
@@ -61,6 +64,8 @@ function LivePreviewButtonBase({
       setShowWakeDialog(false);
     },
     onError: (error) => {
+      wakeRequestedRunIdRef.current = null;
+      setWakeRequestedRunId(null);
       setWakeError(
         error instanceof Error
           ? error.message
@@ -93,6 +98,7 @@ function LivePreviewButtonBase({
   const goingToSleep = asleep && !taskRun.snapshotId;
   const canWakeForPreview =
     asleep && !snapshotExpired && !!taskRun.snapshotId && !!resolvedPreviewUrl;
+  const wakeTransitionPending = wakeRequestedRunId === taskRun.id;
   const taskLaunchDisabledReason = getTaskLaunchDisabledReason(managedAccess);
   const wakeDisabled = canWakeForPreview && Boolean(taskLaunchDisabledReason);
   const openUrl =
@@ -104,34 +110,38 @@ function LivePreviewButtonBase({
     disabledUntilReady ||
     !taskRun ||
     wakeDisabled ||
+    wakeTransitionPending ||
     snapshotExpired ||
     goingToSleep;
   const tooltip = disabledUntilReady
     ? undefined
-    : snapshotExpired
-      ? EXPIRED_SNAPSHOT_RESUME_ERROR
-      : goingToSleep
-        ? 'Live Preview will be available after the task finishes going to sleep'
-        : wakeDisabled
-          ? taskLaunchDisabledReason
-          : canWakeForPreview
-            ? 'Wake up Roomote to use Live Preview'
-            : !hasPreviewUrl
-              ? 'Set up Live Preview'
-              : 'Live Preview';
+    : wakeTransitionPending
+      ? 'Waking up Roomote'
+      : snapshotExpired
+        ? EXPIRED_SNAPSHOT_RESUME_ERROR
+        : goingToSleep
+          ? 'Live Preview will be available after the task finishes going to sleep'
+          : wakeDisabled
+            ? taskLaunchDisabledReason
+            : canWakeForPreview
+              ? 'Wake up Roomote to use Live Preview'
+              : !hasPreviewUrl
+                ? 'Set up Live Preview'
+                : 'Live Preview';
 
   const handleWakeConfirm = async () => {
     if (
       !taskRun?.snapshotId ||
       restoreSnapshot.isPending ||
-      wakeInFlightRef.current ||
+      wakeRequestedRunIdRef.current === taskRun.id ||
       taskLaunchDisabledReason
     ) {
       return;
     }
 
     setWakeError(null);
-    wakeInFlightRef.current = true;
+    wakeRequestedRunIdRef.current = taskRun.id;
+    setWakeRequestedRunId(taskRun.id);
 
     try {
       await restoreSnapshot.mutateAsync({
@@ -141,8 +151,8 @@ function LivePreviewButtonBase({
       });
     } catch {
       // The mutation hook already surfaces the error to the user.
-    } finally {
-      wakeInFlightRef.current = false;
+      wakeRequestedRunIdRef.current = null;
+      setWakeRequestedRunId(null);
     }
   };
 
@@ -175,19 +185,21 @@ function LivePreviewButtonBase({
         label="Live Preview"
         tooltip={tooltip}
         description={
-          snapshotExpired
-            ? EXPIRED_SNAPSHOT_RESUME_ERROR
-            : goingToSleep
-              ? 'This task is going to sleep'
-              : wakeDisabled
-                ? taskLaunchDisabledReason
-                : canWakeForPreview
-                  ? 'Wake this task so live preview becomes available'
-                  : disabled
-                    ? undefined
-                    : hasPreviewUrl
-                      ? "Preview this task's app"
-                      : 'Set up live previews for this task'
+          wakeTransitionPending
+            ? 'Live Preview is waking up'
+            : snapshotExpired
+              ? EXPIRED_SNAPSHOT_RESUME_ERROR
+              : goingToSleep
+                ? 'This task is going to sleep'
+                : wakeDisabled
+                  ? taskLaunchDisabledReason
+                  : canWakeForPreview
+                    ? 'Wake this task so live preview becomes available'
+                    : disabled
+                      ? undefined
+                      : hasPreviewUrl
+                        ? "Preview this task's app"
+                        : 'Set up live previews for this task'
         }
         active={!disabled && !canWakeForPreview && isViewActive('preview')}
         disabled={disabled}
@@ -252,7 +264,9 @@ function LivePreviewButtonBase({
               type="button"
               onClick={() => void handleWakeConfirm()}
               disabled={
-                restoreSnapshot.isPending || Boolean(taskLaunchDisabledReason)
+                restoreSnapshot.isPending ||
+                wakeTransitionPending ||
+                Boolean(taskLaunchDisabledReason)
               }
               aria-busy={restoreSnapshot.isPending}
             >
