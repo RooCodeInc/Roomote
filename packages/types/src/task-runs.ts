@@ -12,7 +12,7 @@ import {
   queuedCommunicationMessageSchema,
 } from './communication';
 import { fastAgentParentSchema, taskReportConsumerSchema } from './fast-agent';
-import { SANDBOX_SNAPSHOT_EXPIRY_MS } from './compute-providers/worker-runtime';
+import { getSnapshotExpiryMs } from './compute-providers/snapshot-retention';
 import { prActions } from './cloud-agents';
 import { ALL_REPOSITORIES } from './constants';
 import { sourceControlProviderSchema } from './source-control';
@@ -463,6 +463,7 @@ export const EXPIRED_SNAPSHOT_RESUME_ERROR =
 
 export function isSnapshotResumable(
   snapshotCreatedAt: Date | null | undefined,
+  provider: string | null | undefined,
   nowMs: number = Date.now(),
 ): boolean {
   if (
@@ -472,7 +473,8 @@ export function isSnapshotResumable(
     return false;
   }
 
-  return nowMs - snapshotCreatedAt.getTime() < SANDBOX_SNAPSHOT_EXPIRY_MS;
+  const expiryMs = getSnapshotExpiryMs(provider);
+  return expiryMs === null || nowMs - snapshotCreatedAt.getTime() < expiryMs;
 }
 
 const COMPLETE_TASK_ON_SNAPSHOT_PAYLOAD_FLAG = '__completeTaskOnSnapshot';
@@ -534,6 +536,46 @@ export function shouldUseAppTokenOnly(type: TaskPayloadKind): boolean {
   ];
 
   return appTokenOnlyTypes.includes(type);
+}
+
+/**
+ * Review-pipeline runs carry a Fast parent only for session visibility:
+ * review outcomes reach the session through the reviewed PR's feedback relay
+ * and the PR summary comment, so review runs stay quiet on the parent-event
+ * channel except for failures.
+ *
+ * Runs persist the bare payload with the kind in their own `payloadKind`
+ * column, so this reads the run's kind and never `payload.type`.
+ */
+export function isPrReviewRun(run: {
+  payloadKind?: TaskPayloadKind | string | null;
+}): boolean {
+  return (
+    run.payloadKind === TaskPayloadKind.GithubPrReview ||
+    run.payloadKind === TaskPayloadKind.GithubPrReviewSync
+  );
+}
+
+/**
+ * A Session explicitly asked for this review through `review_pull_request`,
+ * so its outcome must reach that Session even though review runs otherwise
+ * stay quiet there. The single carrier is the pull-request feedback relay.
+ */
+export function isSessionRequestedReviewRun(run: {
+  payloadKind?: TaskPayloadKind | string | null;
+  payload?: unknown;
+}): boolean {
+  if (!isPrReviewRun(run)) {
+    return false;
+  }
+  const payload = run.payload;
+  return (
+    Boolean(payload) &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    (payload as { fastParentRequestedReview?: unknown })
+      .fastParentRequestedReview === true
+  );
 }
 
 /**
@@ -1053,6 +1095,10 @@ const sharedTaskPayloadSchema = z.object({
   liveTaskStream: z.boolean().optional(),
   /** Runless Fast conversation that delegated this task on any chat provider. */
   fastAgentSessionId: z.string().uuid().optional(),
+  /** A Session explicitly requested this review, so its result reaches that
+   * Session through the pull-request feedback relay even though review runs
+   * otherwise stay quiet there. Settle still announces only failures. */
+  fastParentRequestedReview: z.boolean().optional(),
   /** Provider event that caused this fresh launch; used for idempotent retries. */
   communicationSourceEventId: z.string().optional(),
   /**

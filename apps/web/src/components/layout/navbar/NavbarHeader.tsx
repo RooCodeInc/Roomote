@@ -1,11 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 
 import { cn } from '@/lib/utils';
-import { Button, Search } from '@/components/system';
+import { Button, Plus, Search } from '@/components/system';
 import { useCommandPalette } from '@/components/layout/CommandPaletteContext';
+import { NewTaskDialog } from '@/components/tasks/NewTaskDialog';
 import { useAuthorizedUser } from '@/hooks/useUser';
 
 import { ChatWidgetButton } from '../ChatWidgetButton';
@@ -23,55 +25,71 @@ export const NavbarHeader = ({
   ...props
 }: NavbarHeaderProps & { setupIncomplete?: boolean }) => {
   const { setOpen: openCommandPalette } = useCommandPalette();
+  const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
   useAuthorizedUser();
 
   return (
-    <div
-      className={cn(
-        'flex items-center justify-between gap-2 h-(--header-height) mx-auto px-1 pr-2 md:pr-5',
-        className,
-      )}
-      {...props}
-    >
-      <NavbarDrawer setupIncomplete={setupIncomplete} />
-      {setupIncomplete ? (
-        <Image
-          src={MOBILE_HEADER_LOGO_SRC}
-          alt="Roomote"
-          width={28}
-          height={28}
-          priority
-          className="h-7 w-7 shrink-0 opacity-50 dark:invert"
-        />
-      ) : (
-        <Link href="/" className="shrink-0">
+    <>
+      <div
+        className={cn(
+          'flex items-center justify-between gap-2 h-(--header-height) mx-auto px-1 pr-2 md:pr-5',
+          className,
+        )}
+        {...props}
+      >
+        <NavbarDrawer setupIncomplete={setupIncomplete} />
+        {setupIncomplete ? (
           <Image
             src={MOBILE_HEADER_LOGO_SRC}
             alt="Roomote"
             width={28}
             height={28}
             priority
-            className="h-7 w-7 cursor-pointer transition-all duration-300 hover:scale-105 hover:opacity-80 dark:invert"
+            className="h-7 w-7 shrink-0 opacity-50 dark:invert"
           />
-        </Link>
-      )}
-      <div className="flex-1" />
-      <div className="hidden md:flex items-center gap-2">
-        <UserMenu />
-      </div>
-      <div className="flex md:hidden items-center gap-2">
+        ) : (
+          <Link href="/" className="shrink-0">
+            <Image
+              src={MOBILE_HEADER_LOGO_SRC}
+              alt="Roomote"
+              width={28}
+              height={28}
+              priority
+              className="h-7 w-7 cursor-pointer transition-all duration-300 hover:scale-105 hover:opacity-80 dark:invert"
+            />
+          </Link>
+        )}
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => openCommandPalette(true)}
-          aria-label="Search"
+          onClick={() => setIsNewTaskDialogOpen(true)}
+          aria-label="New Session"
           className="size-9 text-muted-foreground"
         >
-          <Search className="size-5" />
+          <Plus className="size-5" />
         </Button>
-        <ChatWidgetButton />
-        <UserMenu />
+        <div className="flex-1" />
+        <div className="hidden md:flex items-center gap-2">
+          <UserMenu />
+        </div>
+        <div className="flex md:hidden items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => openCommandPalette(true)}
+            aria-label="Search"
+            className="size-9 text-muted-foreground"
+          >
+            <Search className="size-5" />
+          </Button>
+          <ChatWidgetButton />
+          <UserMenu />
+        </div>
       </div>
-    </div>
+      <NewTaskDialog
+        open={isNewTaskDialogOpen}
+        onOpenChange={setIsNewTaskDialogOpen}
+      />
+    </>
   );
 };

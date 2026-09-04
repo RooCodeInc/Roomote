@@ -1,10 +1,15 @@
-import { SlackNotifier, shouldResumeSlackAuthThread } from '@roomote/slack';
+import {
+  SlackChannelInfoCache,
+  SlackNotifier,
+  shouldResumeSlackAuthThread,
+} from '@roomote/slack';
 import {
   enqueueSlackAccountLinkEducation,
   recordSlackConversationMessageBestEffort,
 } from '@roomote/sdk/server';
 import {
   PRODUCT_NAME,
+  buildSlackChannelUrl,
   buildSlackUserProfileUrl,
   getSlackTeamIdFromTaskPayload,
 } from '@roomote/types';
@@ -823,6 +828,37 @@ export async function completePendingSlackAuthenticationCommand(
 }
 
 const SLACK_USER_ID_PATTERN = /^[UW][A-Z0-9]+$/;
+const SLACK_CHANNEL_ID_PATTERN = /^[CDG][A-Z0-9]+$/;
+/** Parallel `conversations.info` calls per resolve request, kept well under Slack's per-method quota. */
+const SLACK_CHANNEL_LOOKUP_CONCURRENCY = 4;
+/** How long one in-process channel-info cache serves a workspace before a fresh instance replaces it. */
+const SLACK_CHANNEL_INFO_CACHE_WINDOW_MS = 60_000;
+
+const channelInfoCachesByTeam = new Map<
+  string,
+  { cache: SlackChannelInfoCache; createdAt: number }
+>();
+
+/**
+ * One `SlackChannelInfoCache` per workspace, shared across concurrent resolve
+ * requests in this process so transcript messages that mount together
+ * coalesce on a single in-flight `conversations.info` call per channel
+ * instead of each racing the cold Redis layer. Instances are recycled on a
+ * short window so the in-memory memo cannot serve a renamed channel forever.
+ */
+function getSharedChannelInfoCache(teamId: string): SlackChannelInfoCache {
+  const now = Date.now();
+  const existing = channelInfoCachesByTeam.get(teamId);
+  if (
+    existing &&
+    now - existing.createdAt < SLACK_CHANNEL_INFO_CACHE_WINDOW_MS
+  ) {
+    return existing.cache;
+  }
+  const cache = new SlackChannelInfoCache(teamId);
+  channelInfoCachesByTeam.set(teamId, { cache, createdAt: now });
+  return cache;
+}
 
 /**
  * Slack team a transcript belongs to, derived server-side from the task run
@@ -865,9 +901,11 @@ export async function resolveSlackUsersCommand(
       | { kind: 'task'; taskId: string }
       | { kind: 'session'; sessionId: string };
     userIds: string[];
+    channelIds?: string[];
   },
 ): Promise<{
   users: Record<string, { name: string; profileUrl: string | null }>;
+  channels: Record<string, { name: string; url: string | null }>;
 }> {
   const userIds = [
     ...new Set(
@@ -876,14 +914,22 @@ export async function resolveSlackUsersCommand(
         .filter((userId) => SLACK_USER_ID_PATTERN.test(userId)),
     ),
   ];
+  const channelIds = [
+    ...new Set(
+      (input.channelIds ?? [])
+        .map((channelId) => channelId.trim())
+        .filter((channelId) => SLACK_CHANNEL_ID_PATTERN.test(channelId)),
+    ),
+  ];
   const users: Record<string, { name: string; profileUrl: string | null }> = {};
-  if (userIds.length === 0) {
-    return { users };
+  const channels: Record<string, { name: string; url: string | null }> = {};
+  if (userIds.length === 0 && channelIds.length === 0) {
+    return { users, channels };
   }
 
   const teamId = await resolveSlackMentionScopeTeamId(auth, input.scope);
   if (!teamId) {
-    return { users };
+    return { users, channels };
   }
 
   const installation =
@@ -945,12 +991,18 @@ export async function resolveSlackUsersCommand(
   }
 
   const unresolved = userIds.filter((userId) => !users[userId]);
-  if (unresolved.length > 0 && installation?.botAccessToken) {
-    const slack = new SlackNotifier(installation.botAccessToken, {
-      botUserId: installation.botUserId,
-      botName: installation.botName,
-      appName: installation.appName,
-    });
+  // The channel-info cache is Redis-backed and shared across requests in
+  // this process, so a channel name is fetched from Slack once per TTL and
+  // concurrent cold lookups for the same channel collapse into one call.
+  const slack = installation?.botAccessToken
+    ? new SlackNotifier(installation.botAccessToken, {
+        botUserId: installation.botUserId,
+        botName: installation.botName,
+        appName: installation.appName,
+        channelInfoCache: getSharedChannelInfoCache(teamId),
+      })
+    : null;
+  if (unresolved.length > 0 && slack) {
     try {
       const names = await slack.getUserDisplayNames(unresolved);
       for (const [slackUserId, name] of names) {
@@ -963,5 +1015,35 @@ export async function resolveSlackUsersCommand(
     }
   }
 
-  return { users };
+  if (channelIds.length > 0 && slack) {
+    for (
+      let start = 0;
+      start < channelIds.length;
+      start += SLACK_CHANNEL_LOOKUP_CONCURRENCY
+    ) {
+      const batch = channelIds.slice(
+        start,
+        start + SLACK_CHANNEL_LOOKUP_CONCURRENCY,
+      );
+      await Promise.all(
+        batch.map(async (slackChannelId) => {
+          const name = await slack
+            .getChannelName(slackChannelId)
+            .catch(() => null);
+          if (name) {
+            channels[slackChannelId] = {
+              name,
+              url: buildSlackChannelUrl({
+                slackChannelId,
+                slackTeamId: teamId,
+                slackWorkspaceDomain: teamDomain,
+              }),
+            };
+          }
+        }),
+      );
+    }
+  }
+
+  return { users, channels };
 }

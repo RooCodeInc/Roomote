@@ -1,13 +1,17 @@
 import { and, eq, inArray } from 'drizzle-orm';
 
-import { createEmptySetupNewState } from '@roomote/types';
+import { createEmptySetupNewState, RunStatus } from '@roomote/types';
 
 import {
   taskRuns,
   deploymentSettings,
   environments,
+  fastAgentConversations,
+  fastAgentMessages,
   githubInstallations,
   repositories,
+  sessionParticipants,
+  sessions,
   taskPullRequests,
   tasks,
   users,
@@ -15,6 +19,7 @@ import {
 import { db } from '../../db';
 import {
   demoSeedEnvironmentName,
+  demoSeedFastSession,
   demoSeedRepositories,
   demoSeedPullRequests,
   demoSeedTasks,
@@ -34,6 +39,12 @@ function withoutSettings(labels: string[]) {
 }
 
 async function cleanup() {
+  await db
+    .delete(sessions)
+    .where(eq(sessions.fastConversationId, demoSeedFastSession.conversationId));
+  await db
+    .delete(fastAgentConversations)
+    .where(eq(fastAgentConversations.id, demoSeedFastSession.conversationId));
   await db
     .delete(taskPullRequests)
     .where(inArray(taskPullRequests.taskId, demoTaskIds));
@@ -84,8 +95,10 @@ describe('seedDemoData', () => {
 
     expect(withoutSettings(summary.skipped)).toEqual([]);
     expect(withoutSettings(summary.created)).toHaveLength(
-      // user + installation + environment + repositories + tasks + task runs + PRs
-      3 +
+      // user + Fast conversation/messages/Session/participant + installation +
+      // environment + repositories + tasks + task runs + PRs
+      6 +
+        demoSeedFastSession.messages.length +
         demoSeedRepositories.length +
         demoSeedTasks.length * 2 +
         demoSeedPullRequests.length,
@@ -101,6 +114,62 @@ describe('seedDemoData', () => {
     });
     expect(user).toBeDefined();
     expect(user?.onboardingCompletedAt).not.toBeNull();
+
+    const fastConversation = await db.query.fastAgentConversations.findFirst({
+      where: eq(fastAgentConversations.id, demoSeedFastSession.conversationId),
+    });
+    expect(fastConversation).toMatchObject({
+      userId: demoSeedUserId,
+      surface: 'slack',
+      workspaceId: demoSeedFastSession.workspaceId,
+      conversationId: demoSeedFastSession.providerConversationId,
+      currentReplyChannelId: demoSeedFastSession.channelId,
+      currentReplyThreadId: demoSeedFastSession.threadId,
+      title: demoSeedFastSession.title,
+    });
+
+    const fastMessages = await db.query.fastAgentMessages.findMany({
+      where: eq(
+        fastAgentMessages.conversationId,
+        demoSeedFastSession.conversationId,
+      ),
+      orderBy: (message, { asc }) => [asc(message.turnSeq)],
+    });
+    expect(fastMessages).toHaveLength(demoSeedFastSession.messages.length);
+    expect(fastMessages.map(({ role }) => role)).toEqual(['user', 'assistant']);
+    expect(fastMessages.map(({ contentBlocks }) => contentBlocks)).toEqual(
+      demoSeedFastSession.messages.map(({ text }) => [{ type: 'text', text }]),
+    );
+    expect(fastMessages[0]?.metadata).toMatchObject({
+      visibleInTranscript: true,
+      userId: demoSeedUserId,
+    });
+
+    const fastSession = await db.query.sessions.findFirst({
+      where: eq(
+        sessions.fastConversationId,
+        demoSeedFastSession.conversationId,
+      ),
+    });
+    expect(fastSession).toMatchObject({
+      id: demoSeedFastSession.sessionId,
+      title: demoSeedFastSession.title,
+      ownerKind: 'user',
+      ownerUserId: demoSeedUserId,
+      sourceSurface: 'slack',
+      sourceTrigger: 'message',
+      fastConversationId: demoSeedFastSession.conversationId,
+      cachedStatus: 'ready',
+    });
+
+    const participant = await db.query.sessionParticipants.findFirst({
+      where: eq(sessionParticipants.id, demoSeedFastSession.participantId),
+    });
+    expect(participant).toMatchObject({
+      sessionId: demoSeedFastSession.sessionId,
+      userId: demoSeedUserId,
+      role: 'owner',
+    });
 
     const installation = await db.query.githubInstallations.findFirst({
       where: eq(githubInstallations.installedByUserId, demoSeedUserId),
@@ -143,6 +212,12 @@ describe('seedDemoData', () => {
       });
       expect(taskRun).toBeDefined();
       expect(taskRun?.status).toBe(seedTask.taskRunStatus);
+      expect(taskRun?.startedAt).toBeInstanceOf(Date);
+      expect(taskRun?.completedAt).toEqual(
+        seedTask.taskRunStatus === RunStatus.Completed
+          ? expect.any(Date)
+          : null,
+      );
     }
 
     const seededPullRequests = await db.query.taskPullRequests.findMany({
@@ -232,12 +307,20 @@ describe('seedDemoData', () => {
     const userBefore = await db.query.users.findFirst({
       where: eq(users.id, demoSeedUserId),
     });
+    const fastConversationBefore =
+      await db.query.fastAgentConversations.findFirst({
+        where: eq(
+          fastAgentConversations.id,
+          demoSeedFastSession.conversationId,
+        ),
+      });
 
     const summary = await seedDemoData();
 
     expect(summary.created).toEqual([]);
     expect(withoutSettings(summary.skipped)).toHaveLength(
-      3 +
+      6 +
+        demoSeedFastSession.messages.length +
         demoSeedRepositories.length +
         demoSeedTasks.length * 2 +
         demoSeedPullRequests.length,
@@ -249,8 +332,18 @@ describe('seedDemoData', () => {
     const userAfter = await db.query.users.findFirst({
       where: eq(users.id, demoSeedUserId),
     });
+    const fastConversationAfter =
+      await db.query.fastAgentConversations.findFirst({
+        where: eq(
+          fastAgentConversations.id,
+          demoSeedFastSession.conversationId,
+        ),
+      });
     expect(settingsAfter).toEqual(settingsBefore);
     expect(userAfter?.updatedAt).toEqual(userBefore?.updatedAt);
+    expect(fastConversationAfter?.updatedAt).toEqual(
+      fastConversationBefore?.updatedAt,
+    );
 
     const seededTasks = await db.query.tasks.findMany({
       where: inArray(tasks.id, demoTaskIds),
@@ -261,5 +354,64 @@ describe('seedDemoData', () => {
       where: inArray(taskRuns.taskId, demoTaskIds),
     });
     expect(seededTaskRuns).toHaveLength(demoSeedTasks.length);
+  });
+
+  it('backfills missing lifecycle timestamps without overwriting existing values', async () => {
+    await seedDemoData();
+
+    const completedTask = demoSeedTasks.find(
+      ({ taskRunStatus }) => taskRunStatus === RunStatus.Completed,
+    );
+    const runningTask = demoSeedTasks.find(
+      ({ taskRunStatus }) => taskRunStatus === RunStatus.Running,
+    );
+    expect(completedTask).toBeDefined();
+    expect(runningTask).toBeDefined();
+
+    const preservedStartedAt = new Date('2025-01-02T03:04:05.000Z');
+    const otherCompletedTask = demoSeedTasks.find(
+      ({ id, taskRunStatus }) =>
+        id !== completedTask!.id && taskRunStatus === RunStatus.Completed,
+    );
+    expect(otherCompletedTask).toBeDefined();
+
+    await db
+      .update(taskRuns)
+      .set({ startedAt: null, completedAt: null })
+      .where(eq(taskRuns.taskId, completedTask!.id));
+    await db
+      .update(taskRuns)
+      .set({ startedAt: null, completedAt: null })
+      .where(eq(taskRuns.taskId, runningTask!.id));
+    await db
+      .update(taskRuns)
+      .set({ startedAt: preservedStartedAt })
+      .where(eq(taskRuns.taskId, otherCompletedTask!.id));
+
+    const summary = await seedDemoData();
+    const runsByTaskId = new Map(
+      (
+        await db.query.taskRuns.findMany({
+          where: inArray(taskRuns.taskId, demoTaskIds),
+        })
+      ).map((run) => [run.taskId, run]),
+    );
+
+    expect(runsByTaskId.get(completedTask!.id)?.startedAt).toBeInstanceOf(Date);
+    expect(runsByTaskId.get(completedTask!.id)?.completedAt).toBeInstanceOf(
+      Date,
+    );
+    expect(runsByTaskId.get(runningTask!.id)?.startedAt).toBeInstanceOf(Date);
+    expect(runsByTaskId.get(runningTask!.id)?.completedAt).toBeNull();
+    expect(runsByTaskId.get(otherCompletedTask!.id)?.startedAt).toEqual(
+      preservedStartedAt,
+    );
+    expect(summary.created).toEqual(
+      expect.arrayContaining([
+        `task run for ${completedTask!.id}`,
+        `task run for ${runningTask!.id}`,
+      ]),
+    );
+    expect(summary.skipped).toContain(`task run for ${otherCompletedTask!.id}`);
   });
 });

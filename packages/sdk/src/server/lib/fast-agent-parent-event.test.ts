@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   findCustomAutomation: vi.fn(),
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
+  findTaskRuns: vi.fn(),
+  getConversationLookupIds: vi.fn(),
   findTaskPullRequests: vi.fn(),
   postMessage: vi.fn(),
   updateMessage: vi.fn(),
@@ -45,6 +47,11 @@ const mocks = vi.hoisted(() => ({
   postDiscordSuggestions: vi.fn(),
   postTeamsSuggestions: vi.fn(),
   postTelegramSuggestions: vi.fn(),
+  buildSourceControlFastDelivery: vi.fn(),
+  postSourceControlComment: vi.fn(),
+  updateSourceControlComment: vi.fn(),
+  linearEmitResponse: vi.fn(),
+  createConversationArtifact: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -80,6 +87,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   fastAgentConversationRepository: {
     findById: mocks.findSession,
     getOrCreate: mocks.bindConversation,
+    getLookupIds: mocks.getConversationLookupIds,
   },
   createFastAgentTaskLauncher:
     ({
@@ -120,7 +128,10 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: vi.fn().mockResolvedValue(null),
         findMany: mocks.findTaskPullRequests,
       },
-      taskRuns: { findFirst: mocks.findTaskRun },
+      taskRuns: {
+        findFirst: mocks.findTaskRun,
+        findMany: mocks.findTaskRuns,
+      },
     },
   },
   and: vi.fn((...args: unknown[]) => args),
@@ -133,7 +144,10 @@ vi.mock('@roomote/db/server', () => ({
   },
   taskArtifacts: { id: 'task_artifacts.id' },
   taskPullRequests: { taskId: 'task_pull_requests.task_id' },
-  taskRuns: { id: 'task_runs.id' },
+  taskRuns: {
+    id: 'task_runs.id',
+    fastAgentSessionId: 'task_runs.fast_agent_session_id',
+  },
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -160,6 +174,10 @@ vi.mock('./task-runs/pr-review-action', () => ({
     mocks.attachPendingPrReviewActionMessage,
   retirePrReviewActionMessagesBestEffort:
     mocks.retirePrReviewActionMessagesBestEffort,
+}));
+
+vi.mock('./artifacts/create-session-artifact', () => ({
+  createFastAgentConversationArtifact: mocks.createConversationArtifact,
 }));
 
 vi.mock('./artifacts/raw-url', () => ({
@@ -197,12 +215,26 @@ vi.mock('../routers/mcp-connections', () => ({
   resolveUserMcpServerConfigs: mocks.resolveUserMcpServerConfigs,
 }));
 
+vi.mock('./linear-fast-session', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./linear-fast-session')>()),
+  resolveLinearFastSessionClient: vi.fn(async () => ({
+    emitResponse: mocks.linearEmitResponse,
+    getAgentSessionIssue: vi.fn(),
+  })),
+  createFastAgentLinearTaskLauncher: vi.fn(() => mocks.launchTask),
+}));
+
 vi.mock('./fast-automation-suggestions', () => ({
   appendFastAutomationSuggestionInstruction: mocks.appendSuggestionInstruction,
   postFastAutomationSuggestionsToSlack: mocks.postSlackSuggestions,
   postFastAutomationSuggestionsToDiscord: mocks.postDiscordSuggestions,
   postFastAutomationSuggestionsToTeams: mocks.postTeamsSuggestions,
   postFastAutomationSuggestionsToTelegram: mocks.postTelegramSuggestions,
+}));
+
+vi.mock('./source-control-fast-delivery', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./source-control-fast-delivery')>()),
+  buildSourceControlFastDelivery: mocks.buildSourceControlFastDelivery,
 }));
 
 import {
@@ -282,6 +314,8 @@ describe('deliverFastAgentParentEvent', () => {
       },
     ]);
     mocks.findTaskRun.mockResolvedValue({ status: 'running' });
+    mocks.findTaskRuns.mockResolvedValue([{ id: 42, taskId: 'task-1' }]);
+    mocks.getConversationLookupIds.mockResolvedValue([parent.sessionId]);
     mocks.findTaskPullRequests.mockResolvedValue([]);
     mocks.postMessage.mockResolvedValue('101.001');
     mocks.updateMessage.mockResolvedValue(true);
@@ -424,6 +458,206 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('posts a recovered child image on a later Slack human turn', async () => {
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'human_follow_up',
+        eventId: '100.004',
+        currentMessageId: '100.004',
+        userId: 'user-2',
+        question: 'Show me the screenshot.',
+      },
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        thread_ts: '100.001',
+        blocks: expect.arrayContaining([
+          {
+            type: 'image',
+            image_url:
+              'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+            alt_text: 'result.png',
+          },
+        ]),
+      }),
+    );
+    expect(mocks.getConversationLookupIds).toHaveBeenCalledWith(
+      parent.sessionId,
+    );
+  });
+
+  it('rejects a recovered image from a task outside the Fast Session', async () => {
+    mocks.findTaskRuns.mockResolvedValueOnce([]);
+
+    await expect(
+      deliverFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.005',
+          currentMessageId: '100.005',
+          userId: 'user-2',
+          question: 'Show me the screenshot.',
+        },
+      }),
+    ).rejects.toThrow('Invalid Fast parent image artifact: artifact-1');
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('posts a recovered child image on a later Discord human turn', async () => {
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'guild-1',
+          conversationId: 'thread-1',
+          replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+        },
+      },
+      event: {
+        type: 'human_follow_up',
+        eventId: 'discord-message-2',
+        currentMessageId: 'discord-message-2',
+        userId: 'user-2',
+        question: 'Show me the screenshot.',
+      },
+    });
+
+    expect(mocks.discordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+        images: [
+          {
+            url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+            altText: 'result.png',
+            contentType: 'image/png',
+          },
+        ],
+      }),
+    );
+  });
+
+  it('resumes a durable reaction or platform-event row with its recorded framing', async () => {
+    mocks.answerQuestion.mockResolvedValue('');
+    const externalInput = {
+      type: 'reaction_added' as const,
+      provider: 'slack' as const,
+      reactions: [{ name: 'eyes' }],
+      reactor: { externalUserId: 'U123' },
+      message: {
+        workspaceId: 'T1',
+        channelId: 'C1',
+        messageId: '100.001',
+        threadId: '100.000',
+      },
+      eventId: '102.000',
+    };
+
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'slack-reaction:102.000',
+          currentMessageId: 'slack-reaction:102.000',
+          userId: 'user-2',
+          question: '<external_input>{}</external_input>',
+          input: { type: 'reaction', externalInput },
+        },
+        resumedAfterInterruption: true,
+        durableAdmission: { eventId: 'row-1' },
+      },
+      mocks.releaseTurnLock,
+    );
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'setup-kickoff:conversation-1',
+          currentMessageId: 'setup-kickoff:conversation-1',
+          userId: 'user-2',
+          question: '<platform_event>{}</platform_event>',
+          turnSource: 'platform_event',
+          platformEventKind: 'setup',
+          platformEventVisibility: 'required',
+          setupSession: true,
+        },
+        resumedAfterInterruption: true,
+        durableAdmission: { eventId: 'row-2' },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    // The reaction resumes as a reaction, the platform event as a platform
+    // event; neither is read as a typed human message.
+    expect(mocks.answerQuestion).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        turnSource: 'human',
+        input: { type: 'reaction', externalInput },
+        resumedAfterInterruption: true,
+        durableAdmission: { eventId: 'row-1' },
+      }),
+    );
+    expect(mocks.answerQuestion).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        turnSource: 'platform_event',
+        platformEventKind: 'setup',
+        platformEventVisibility: 'required',
+        setupSession: true,
+        resumedAfterInterruption: true,
+        durableAdmission: { eventId: 'row-2' },
+      }),
+    );
+    expect(mocks.answerQuestion.mock.calls[1]?.[0]).not.toHaveProperty('input');
+  });
+
+  it('lets a queued web turn create artifacts in its Session', async () => {
+    const webParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: 'user-1',
+        conversationId: 'session-1',
+      },
+    };
+    mocks.createConversationArtifact.mockResolvedValue({ id: 'artifact-1' });
+    mocks.answerQuestion.mockImplementation(async ({ adapter }) =>
+      adapter.createArtifact({
+        path: 'notes/decision.md',
+        content: '# Decision',
+        contentType: 'text/markdown',
+        artifactType: 'general',
+      }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: webParent,
+      event: {
+        type: 'human_follow_up',
+        eventId: 'web-message-1',
+        currentMessageId: 'web-message-1',
+        userId: 'user-1',
+        question: 'Write up the decision',
+      },
+    });
+
+    expect(mocks.createConversationArtifact).toHaveBeenCalledWith({
+      fastConversationId: parent.sessionId,
+      path: 'notes/decision.md',
+      content: '# Decision',
+      contentType: 'text/markdown',
+      artifactType: 'general',
+    });
+  });
+
   it('passes a canonical review offer into the web transcript payload', async () => {
     const webParent = {
       sessionId: parent.sessionId,
@@ -560,6 +794,29 @@ describe('deliverFastAgentParentEvent', () => {
       conversation: parent.conversation,
       messageId: '101.001',
     });
+  });
+
+  it('carries child-selected image IDs into the Fast parent turn by default', async () => {
+    mocks.answerQuestion.mockResolvedValueOnce('Shared the proof.');
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'child_message',
+        taskId: 'task-1',
+        runId: 42,
+        messageId: '33333333-3333-4333-8333-333333333333',
+        purpose: 'closeout',
+        message: 'The visual comparison is ready.',
+        imageArtifactIds: ['artifact-1'],
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultImageArtifactIds: ['artifact-1'],
+      }),
+    );
   });
 
   it('captures an automation platform turn without a chat provider', async () => {
@@ -2122,5 +2379,356 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
     expect(mocks.postMessage).not.toHaveBeenCalled();
     expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+  });
+
+  it('answers a pull request mention routed into a Slack Session on both the thread and the pull request', async () => {
+    mocks.buildSourceControlFastDelivery.mockResolvedValue({
+      postComment: async (input: unknown) => {
+        mocks.postSourceControlComment(input);
+        return { messageId: 'comment-1' };
+      },
+      resolveTarget: async () => ({
+        repositoryId: 'repo-1',
+        branch: 'feature/ship',
+        pullRequest: { url: 'https://github.com/acme/api/pull/42' },
+      }),
+    });
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => Promise<unknown> };
+      }) => {
+        await adapter.postReply({
+          purpose: 'closeout',
+          message: 'Done: the changelog now mentions the fix.',
+        });
+        return 'Done';
+      },
+    );
+
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'github:comment:900',
+          currentMessageId: 'github:comment:900',
+          userId: 'user-2',
+          question: 'Can you also update the changelog?',
+          senderDisplayName: 'alice',
+          agentContext: '<pull_request>#42</pull_request>',
+          activeTasks: [{ taskId: 'task-owner', status: 'running' }],
+          sourceControlReplyTarget: {
+            provider: 'github',
+            host: 'github.com',
+            repositoryFullName: 'acme/api',
+            kind: 'pull',
+            number: 42,
+            reviewCommentId: '800',
+            url: 'https://github.com/acme/api/pull/42#discussion_r900',
+          },
+        },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Can you also update the changelog?',
+        currentMessageAgentContext: '<pull_request>#42</pull_request>',
+        activeTasks: [{ taskId: 'task-owner', status: 'running' }],
+        turnSource: 'human',
+      }),
+    );
+    expect(mocks.buildSourceControlFastDelivery).toHaveBeenCalledWith({
+      surface: 'github',
+      workspaceId: 'github.com/acme/api',
+      conversationId: 'pull/42',
+      replyTarget: { channelId: 'pull/42', threadId: '800' },
+    });
+    // The pull request gets the answer in the review thread the mention
+    // came from; the reply sits under the mention, so it is not quoted.
+    expect(mocks.postSourceControlComment).toHaveBeenCalledOnce();
+    const comment = mocks.postSourceControlComment.mock.calls[0]?.[0] as {
+      discussion: { number: number; reviewCommentId?: string };
+      body: string;
+    };
+    expect(comment.discussion).toEqual(
+      expect.objectContaining({ number: 42, reviewCommentId: '800' }),
+    );
+    expect(comment.body).not.toContain('> Can you also update the changelog?');
+    expect(comment.body).toContain('Done: the changelog now mentions the fix.');
+    // The Slack thread gets the same answer with attribution to the mention.
+    const slackPosts = JSON.stringify(mocks.postMessage.mock.calls);
+    expect(slackPosts).toContain(
+      '**alice** on [acme/api#42](https://github.com/acme/api/pull/42#discussion_r900):',
+    );
+    expect(slackPosts).toContain('Done: the changelog now mentions the fix.');
+  });
+
+  it('replaces a retry notice on both the Slack thread and the pull request for a routed mention', async () => {
+    mocks.buildSourceControlFastDelivery.mockResolvedValue({
+      postComment: async (input: unknown) => {
+        mocks.postSourceControlComment(input);
+        return { messageId: 'comment-1' };
+      },
+      updateCommentById: async (input: unknown) => {
+        mocks.updateSourceControlComment(input);
+      },
+      resolveTarget: async () => ({
+        repositoryId: 'repo-1',
+        branch: 'feature/ship',
+        pullRequest: { url: 'https://github.com/acme/api/pull/42' },
+      }),
+    });
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: {
+          postReply: (reply: unknown) => Promise<unknown>;
+          replaceReply?: (handle: unknown, reply: unknown) => Promise<unknown>;
+        };
+      }) => {
+        const notice = await adapter.postReply({
+          purpose: 'progress',
+          message: 'Inference is being retried.',
+        });
+        expect(adapter.replaceReply).toBeDefined();
+        await adapter.replaceReply!(notice, {
+          purpose: 'closeout',
+          message: 'Done after the retry.',
+        });
+        return 'Done';
+      },
+    );
+
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'github:comment:901',
+          currentMessageId: 'github:comment:901',
+          userId: 'user-2',
+          question: 'Please retry that.',
+          senderDisplayName: 'alice',
+          sourceControlReplyTarget: {
+            provider: 'github',
+            host: 'github.com',
+            repositoryFullName: 'acme/api',
+            kind: 'pull',
+            number: 42,
+            url: 'https://github.com/acme/api/pull/42',
+          },
+        },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    // The notice went to both surfaces...
+    expect(mocks.postSourceControlComment).toHaveBeenCalledOnce();
+    expect(
+      (mocks.postSourceControlComment.mock.calls[0]?.[0] as { body: string })
+        .body,
+    ).toContain('Inference is being retried.');
+    expect(JSON.stringify(mocks.postMessage.mock.calls)).toContain(
+      'Inference is being retried.',
+    );
+    // ...and so did the replacement: the pull request comment is edited in
+    // place to the real answer instead of keeping the retry notice.
+    expect(mocks.updateSourceControlComment).toHaveBeenCalledOnce();
+    const update = mocks.updateSourceControlComment.mock.calls[0]?.[0] as {
+      messageId: string;
+      body: string;
+    };
+    expect(update.messageId).toBe('comment-1');
+    expect(update.body).toContain('Done after the retry.');
+    expect(update.body).not.toContain('Inference is being retried.');
+    expect(JSON.stringify(mocks.updateMessage.mock.calls)).toContain(
+      'Done after the retry.',
+    );
+  });
+
+  it('replaces the mirrored pull request comment on a resumed turn that only has the persisted handle', async () => {
+    mocks.buildSourceControlFastDelivery.mockResolvedValue({
+      postComment: async (input: unknown) => {
+        mocks.postSourceControlComment(input);
+        return { messageId: 'comment-1' };
+      },
+      updateCommentById: async (input: unknown) => {
+        mocks.updateSourceControlComment(input);
+      },
+      resolveTarget: async () => ({
+        repositoryId: 'repo-1',
+        branch: 'feature/ship',
+        pullRequest: { url: 'https://github.com/acme/api/pull/42' },
+      }),
+    });
+    const event = {
+      type: 'human_follow_up' as const,
+      eventId: 'github:comment:902',
+      currentMessageId: 'github:comment:902',
+      userId: 'user-2',
+      question: 'Please retry that.',
+      senderDisplayName: 'alice',
+      sourceControlReplyTarget: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repositoryFullName: 'acme/api',
+        kind: 'pull' as const,
+        number: 42,
+        url: 'https://github.com/acme/api/pull/42',
+      },
+    };
+
+    // First process: the retry notice is posted and its handle persisted.
+    let persistedHandle: { messageId: string } | undefined;
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: {
+          postReply: (reply: unknown) => Promise<{ messageId: string } | void>;
+        };
+      }) => {
+        persistedHandle =
+          (await adapter.postReply({
+            purpose: 'progress',
+            message: 'Inference is being retried.',
+          })) ?? undefined;
+        return 'Parked';
+      },
+    );
+    await deliverFastAgentParentEventWithLock(
+      { parent, event },
+      mocks.releaseTurnLock,
+    );
+    expect(persistedHandle).toBeDefined();
+    // Both surfaces' ids travel in the one persisted message id.
+    expect(persistedHandle?.messageId).toBe('101.001|scm:comment-1');
+
+    // Second process: a fresh wrapper receives only the persisted handle.
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: {
+          replaceReply?: (handle: unknown, reply: unknown) => Promise<unknown>;
+        };
+      }) => {
+        await adapter.replaceReply!(
+          { messageId: persistedHandle!.messageId },
+          { purpose: 'closeout', message: 'Done after the resume.' },
+        );
+        return 'Done';
+      },
+    );
+    await deliverFastAgentParentEventWithLock(
+      { parent, event, resumedAfterInferenceRetry: true },
+      mocks.releaseTurnLock,
+    );
+
+    // The pull request comment from the first process is edited, not
+    // duplicated, and Slack replaces its own message by its own ts.
+    expect(mocks.postSourceControlComment).toHaveBeenCalledOnce();
+    expect(mocks.updateSourceControlComment).toHaveBeenCalledOnce();
+    expect(mocks.updateSourceControlComment.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        messageId: 'comment-1',
+        body: expect.stringContaining('Done after the resume.'),
+      }),
+    );
+    expect(mocks.updateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ ts: '101.001' }),
+    );
+  });
+
+  it('edits the mirrored pull request comment for a Linear home that cannot replace its own reply', async () => {
+    const linearParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'linear' as const,
+        workspaceId: 'linear-org',
+        conversationId: 'agent-session-1',
+        replyTarget: { channelId: 'agent-session-1' },
+      },
+    };
+    mocks.linearEmitResponse.mockResolvedValue({ success: true });
+    mocks.buildSourceControlFastDelivery.mockResolvedValue({
+      postComment: async (input: unknown) => {
+        mocks.postSourceControlComment(input);
+        return { messageId: 'comment-1' };
+      },
+      updateCommentById: async (input: unknown) => {
+        mocks.updateSourceControlComment(input);
+      },
+      resolveTarget: async () => ({
+        repositoryId: 'repo-1',
+        branch: 'feature/ship',
+        pullRequest: { url: 'https://github.com/acme/api/pull/42' },
+      }),
+    });
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: {
+          postReply: (reply: unknown) => Promise<unknown>;
+          replaceReply?: (handle: unknown, reply: unknown) => Promise<unknown>;
+        };
+      }) => {
+        const notice = await adapter.postReply({
+          purpose: 'progress',
+          message: 'Inference is being retried.',
+        });
+        expect(adapter.replaceReply).toBeDefined();
+        await adapter.replaceReply!(notice, {
+          purpose: 'closeout',
+          message: 'Done from Linear.',
+        });
+        return 'Done';
+      },
+    );
+
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent: linearParent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'github:comment:903',
+          currentMessageId: 'github:comment:903',
+          userId: 'user-2',
+          question: 'Please retry that.',
+          senderDisplayName: 'alice',
+          sourceControlReplyTarget: {
+            provider: 'github',
+            host: 'github.com',
+            repositoryFullName: 'acme/api',
+            kind: 'pull',
+            number: 42,
+            url: 'https://github.com/acme/api/pull/42',
+          },
+        },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    // Linear cannot edit, so it receives the final reply as a new response,
+    // the same as it would without a routed target; the pull request comment
+    // is edited in place rather than duplicated.
+    expect(mocks.linearEmitResponse).toHaveBeenCalledTimes(2);
+    expect(mocks.linearEmitResponse.mock.calls[1]?.[1]).toContain(
+      'Done from Linear.',
+    );
+    expect(mocks.postSourceControlComment).toHaveBeenCalledOnce();
+    expect(mocks.updateSourceControlComment).toHaveBeenCalledOnce();
+    expect(mocks.updateSourceControlComment.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        messageId: 'comment-1',
+        body: expect.stringContaining('Done from Linear.'),
+      }),
+    );
   });
 });

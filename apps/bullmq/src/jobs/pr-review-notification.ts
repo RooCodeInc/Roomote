@@ -7,6 +7,7 @@ import {
   db,
   desc,
   eq,
+  getCanonicalPrReviewAction,
   slackInstallations,
   taskPullRequests,
   taskRuns,
@@ -16,9 +17,7 @@ import {
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS,
   PrReviewNotificationRateLimitError,
   attachPendingPrReviewActionMessageWithRetirement,
-  beginCanonicalPrReviewAutoDispatch,
   beginCanonicalPrReviewPrompt,
-  beginCanonicalPrReviewWebAutoDispatch,
   beginCanonicalPrReviewWebPrompt,
   buildPrReviewNotificationPostInput,
   createPrReviewNotificationTelemetry,
@@ -27,7 +26,7 @@ import {
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
   completeCanonicalPrReviewAutoDispatch,
-  dispatchPrReviewFollowUp,
+  dispatchCanonicalPrReviewAutoFollowUp,
   findAutoHandlePrReviewFeedbackPreference,
   finalizePrReviewNotificationRequest,
   isDurablePrReviewNotificationRequest,
@@ -41,8 +40,11 @@ import {
   prReviewNotificationRequestSchema,
   recordPrReviewNotificationDeliveryBestEffort,
   requeuePendingPrReviewActivity,
+  retrySupersededPrReviewAction,
   schedulePrReviewNotificationJob,
   setPendingPrReviewAction,
+  updateFastAgentPrReviewOfferStatus,
+  updateTaskPrReviewOfferStatus,
 } from '@roomote/sdk/server';
 import {
   buildSlackPrReviewActionBlocks,
@@ -54,6 +56,8 @@ import {
   PR_REVIEW_ACTION_LABELS,
   isTaskExecutingTurn,
   getFastAgentParentFromPayload,
+  isPrReviewRun,
+  isSessionRequestedReviewRun,
   WORKER_HEARTBEAT_STALE_MS,
 } from '@roomote/types';
 
@@ -157,9 +161,16 @@ function isButtonRoute(
 }
 
 function getFastParentButtonRoute(
-  payload: unknown,
+  run: Pick<typeof taskRuns.$inferSelect, 'payload' | 'payloadKind'>,
 ): ButtonPrReviewNotificationRoute | null {
-  const parent = getFastAgentParentFromPayload(payload);
+  // An automatic review carries a Fast parent for session visibility only;
+  // its PR notifications must not route buttons into the parent thread. A
+  // review the session requested is that session's carrier for the outcome,
+  // so it keeps the buttons.
+  if (isPrReviewRun(run) && !isSessionRequestedReviewRun(run)) {
+    return null;
+  }
+  const parent = getFastAgentParentFromPayload(run.payload);
   if (
     !parent ||
     parent.conversation.surface === 'automation' ||
@@ -216,6 +227,23 @@ function getPersistedButtonRoute(
     channelId: data.routeChannelId,
     threadId: data.routeThreadId ?? null,
   };
+}
+
+/**
+ * A lost publish fence means another actor moved the delivery out of
+ * `prompt_posting`. Only flip the transcript card to dismissed when the
+ * delivery really was superseded; an expired lease re-claimed by another
+ * worker leaves the same delivery id live, and that worker's card must stay
+ * actionable.
+ */
+async function dismissWebOfferIfSuperseded(
+  deliveryId: string,
+  dismiss: () => Promise<void>,
+): Promise<void> {
+  const action = await getCanonicalPrReviewAction(deliveryId);
+  if (action?.status === 'dismissed') {
+    await dismiss();
+  }
 }
 
 async function postPrReviewNotification({
@@ -305,6 +333,12 @@ async function postPrReviewNotification({
           },
         );
       if (canonicalDeliveryId && !attached) {
+        if (pendingAction) {
+          await retirePrReviewActionMessagesBestEffort(
+            [{ ...pendingAction, messageId: messageTs }],
+            'Superseded by newer PR activity.',
+          );
+        }
         throw new Error('Canonical PR review prompt lost its posting fence');
       }
       if (superseded.length > 0) {
@@ -358,6 +392,17 @@ async function postPrReviewNotification({
         },
       );
     if (canonicalDeliveryId && !attached) {
+      if (pendingAction) {
+        await retirePrReviewActionMessagesBestEffort(
+          [
+            {
+              ...pendingAction,
+              messageId: posted.lastTextMessageId ?? posted.messageId,
+            },
+          ],
+          'Superseded by newer PR activity.',
+        );
+      }
       throw new Error('Canonical PR review prompt lost its posting fence');
     }
     if (superseded.length > 0) {
@@ -582,7 +627,9 @@ export const prReviewNotificationJob = async (
     }
 
     const followUp =
-      delivery.followUpQuestion && delivery.followUpPrompt
+      !data.reviewActionSuperseded &&
+      delivery.followUpQuestion &&
+      delivery.followUpPrompt
         ? {
             question: delivery.followUpQuestion,
             prompt: delivery.followUpPrompt,
@@ -599,7 +646,7 @@ export const prReviewNotificationJob = async (
     const roomoteReviewResult = events.find(
       (event) => event.reviewResult,
     )?.reviewResult;
-    const fallbackAutoHandleRoute = getFastParentButtonRoute(latestJob.payload);
+    const fallbackAutoHandleRoute = getFastParentButtonRoute(latestJob);
     const fastParent = getFastAgentParentFromPayload(latestJob.payload);
     const isWebFastParent = fastParent?.conversation.surface === 'web';
     const persistedAutoHandleRoute = getPersistedButtonRoute(data);
@@ -682,6 +729,7 @@ export const prReviewNotificationJob = async (
           followUpPrompt: followUp.prompt,
         }))
       ) {
+        await retrySupersededPrReviewAction(data);
         console.log(
           `[PrReviewNotification] Canonical Fast web delivery ${data.deliveryId} lost its prompt-posting fence, skipping`,
         );
@@ -759,6 +807,12 @@ export const prReviewNotificationJob = async (
           { leaseToken: data.leaseToken },
         );
       if (!attached) {
+        await dismissWebOfferIfSuperseded(webReviewActionDeliveryId, () =>
+          updateFastAgentPrReviewOfferStatus({
+            deliveryIds: [webReviewActionDeliveryId],
+            status: 'dismissed',
+          }),
+        );
         throw new Error(
           'Canonical Fast web review offer lost its publish fence',
         );
@@ -775,36 +829,19 @@ export const prReviewNotificationJob = async (
       (autoHandleRoute || canAutoHandleWeb) &&
       ownsAutoHandleDispatch
     ) {
-      if (
-        data.deliveryState !== 'auto_dispatch_pending' &&
-        !(await (canAutoHandleWeb
-          ? beginCanonicalPrReviewWebAutoDispatch({
-              request: data,
-              followUpPrompt: followUp.prompt,
-              targetTaskId: autoHandlePreference.taskId,
-              actingUserId: autoHandleUserId,
-            })
-          : beginCanonicalPrReviewAutoDispatch({
-              request: data,
-              followUpPrompt: followUp.prompt,
-              targetTaskId: autoHandlePreference.taskId,
-              actingUserId: autoHandleUserId,
-              route: autoHandleRoute!,
-            })))
-      ) {
-        console.log(
-          `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its automatic-dispatch fence, skipping`,
-        );
-        return;
-      }
       const dispatchInput = {
         taskId: autoHandlePreference.taskId,
         followUpPrompt: followUp.prompt,
         actingUserId: autoHandleUserId,
         ...(data.dispatchKey ? { idempotencyKey: data.dispatchKey } : {}),
       };
-      const dispatched = await dispatchPrReviewFollowUp(
-        canAutoHandleWeb
+      const dispatched = await dispatchCanonicalPrReviewAutoFollowUp({
+        request: data,
+        followUpPrompt: followUp.prompt,
+        targetTaskId: autoHandlePreference.taskId,
+        actingUserId: autoHandleUserId,
+        route: canAutoHandleWeb ? null : autoHandleRoute!,
+        dispatchInput: canAutoHandleWeb
           ? {
               ...dispatchInput,
               provider: 'web',
@@ -819,7 +856,14 @@ export const prReviewNotificationJob = async (
               channelId: autoHandleRoute!.channelId,
               threadId: autoHandleRoute!.threadId ?? null,
             },
-      );
+      });
+      if (!dispatched) {
+        await retrySupersededPrReviewAction(data);
+        console.log(
+          `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its automatic-dispatch fence, skipping`,
+        );
+        return;
+      }
 
       if (dispatched.outcome !== 'unavailable') {
         if (
@@ -868,6 +912,7 @@ ${delivery.text}`;
               followUpPrompt: followUp.prompt,
             }))
           ) {
+            await retrySupersededPrReviewAction(data);
             console.log(
               `[PrReviewNotification] Canonical Fast web delivery ${data.deliveryId} lost its interactive-fallback fence, skipping`,
             );
@@ -882,13 +927,20 @@ ${delivery.text}`;
               'Canonical Fast web review fallback was not delivered',
             );
           }
+          const fallbackDeliveryId = data.deliveryId;
           const { attached } =
             await attachPendingPrReviewActionMessageWithRetirement(
-              data.deliveryId,
-              data.deliveryId,
+              fallbackDeliveryId,
+              fallbackDeliveryId,
               { leaseToken: data.leaseToken },
             );
           if (!attached) {
+            await dismissWebOfferIfSuperseded(fallbackDeliveryId, () =>
+              updateFastAgentPrReviewOfferStatus({
+                deliveryIds: [fallbackDeliveryId],
+                status: 'dismissed',
+              }),
+            );
             throw new Error(
               'Canonical Fast web review fallback lost its publish fence',
             );
@@ -952,6 +1004,7 @@ ${delivery.text}`;
           followUpPrompt: followUp.prompt,
         }))
       ) {
+        await retrySupersededPrReviewAction(data);
         console.log(
           `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its prompt-posting fence, skipping`,
         );
@@ -1003,6 +1056,7 @@ ${delivery.text}`;
             followUpPrompt: followUp.prompt,
           }))
         ) {
+          await retrySupersededPrReviewAction(data);
           console.log(
             `[PrReviewNotification] Canonical web task delivery ${data.deliveryId} lost its prompt-posting fence, skipping`,
           );
@@ -1040,6 +1094,13 @@ ${delivery.text}`;
           { leaseToken: data.leaseToken },
         );
       if (!attached) {
+        await dismissWebOfferIfSuperseded(taskReviewActionDeliveryId, () =>
+          updateTaskPrReviewOfferStatus({
+            taskId: data.taskId,
+            deliveryIds: [taskReviewActionDeliveryId],
+            status: 'dismissed',
+          }),
+        );
         throw new Error(
           'Canonical web task review offer lost its publish fence',
         );

@@ -13,6 +13,7 @@ import { INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME } from '@roomote/types';
 export const OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT = String.raw`
 const CHATGPT_GATEWAY_ENV_VAR = ${JSON.stringify(INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME)};
 const ALLOWED_MODELS = new Set([
+  'gpt-6-astra',
   'gpt-5.5',
   'gpt-5.3-codex-spark',
   'gpt-5.4',

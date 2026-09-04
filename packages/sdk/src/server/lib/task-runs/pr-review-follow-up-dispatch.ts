@@ -15,6 +15,7 @@ import {
   setTrustedRunActingUser,
   taskRuns,
   tasks,
+  isSnapshotResumableCondition,
 } from '@roomote/db/server';
 import {
   queueCommunicationMessage,
@@ -37,7 +38,6 @@ import {
   type FastAgentParent,
   getFastAgentParentFromPayload,
   RunStatus,
-  SANDBOX_SNAPSHOT_EXPIRY_MS,
   TaskPayloadKind,
   populateSnapshotResumeSlackMetadata,
   restoreSnapshotResumeVisiblePromptFields,
@@ -56,7 +56,7 @@ export type PrReviewFollowUpDispatchResult =
   | { outcome: 'resumed'; runId: number }
   | { outcome: 'unavailable' };
 
-type PrReviewFollowUpDispatchInput = {
+export type PrReviewFollowUpDispatchInput = {
   taskId: string;
   followUpPrompt: string;
   actingUserId: string;
@@ -133,7 +133,6 @@ async function findActiveFastAgentSlackTaskRun(input: FastAgentSlackLookup) {
 async function findCompletedFastAgentSlackTaskRunWithSnapshot(
   input: FastAgentSlackLookup,
 ) {
-  const snapshotCutoff = new Date(Date.now() - SANDBOX_SNAPSHOT_EXPIRY_MS);
   const [completedRun] = await db
     .select({
       id: taskRuns.id,
@@ -152,7 +151,7 @@ async function findCompletedFastAgentSlackTaskRunWithSnapshot(
         isNull(taskRuns.snapshotFailedAt),
         isNull(taskRuns.canceledAt),
         isNull(tasks.deletedAt),
-        gt(taskRuns.snapshotCreatedAt, snapshotCutoff),
+        isSnapshotResumableCondition(taskRuns),
       ),
     )
     .orderBy(desc(taskRuns.createdAt))

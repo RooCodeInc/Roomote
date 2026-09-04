@@ -35,6 +35,7 @@ export const CHATGPT_FAST_MODE_ENV_VAR_NAME = 'R_CHATGPT_FAST_MODE';
 export const CHATGPT_OPENCODE_PROVIDER_ID = 'openai';
 
 const CHATGPT_FAST_MODE_MODEL_IDS = new Set([
+  'gpt-6-astra',
   'gpt-5.4',
   'gpt-5.5',
   'gpt-5.6',

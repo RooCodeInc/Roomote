@@ -22,8 +22,6 @@ export const TASK_SANDBOX_DOCKER_MEMORY_MIB = 8_192;
 
 export const SANDBOX_FILES_DIR = '/sandbox';
 
-export const SANDBOX_SNAPSHOT_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
-
 export const SNAPSHOT_JOB_RETRY_OPTIONS = {
   attempts: 3,
   backoff: { type: 'exponential' as const, delay: 5_000 },

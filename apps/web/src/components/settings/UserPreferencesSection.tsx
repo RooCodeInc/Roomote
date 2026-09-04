@@ -3,6 +3,7 @@
 import { useColorTheme } from '@/hooks/useColorTheme';
 import { useMindReaderMode } from '@/hooks/useMindReaderMode';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
+import { useTherapistMode } from '@/hooks/useTherapistMode';
 import type { PersonalColorTheme } from '@/types/preferences';
 
 import {
@@ -46,6 +47,12 @@ export function UserPreferencesSection() {
     isUpdating: isNarrationModeUpdating,
     setEnabled: setNarrationModeEnabled,
   } = useNarrationMode();
+  const {
+    enabled: therapistModeEnabled,
+    isLoading: isTherapistModeLoading,
+    isUpdating: isTherapistModeUpdating,
+    setEnabled: setTherapistModeEnabled,
+  } = useTherapistMode();
   const isThemeDisabled = isThemeLoading || isThemeUpdating;
 
   return (
@@ -110,6 +117,23 @@ export function UserPreferencesSection() {
             <p className="text-sm text-foreground">
               Streamline conversations, keeping only text messages and LLM
               thoughts.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <Switch
+            aria-label="Toggle therapist mode"
+            checked={therapistModeEnabled}
+            disabled={isTherapistModeLoading || isTherapistModeUpdating}
+            onCheckedChange={setTherapistModeEnabled}
+          />
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-foreground">
+              Therapist mode
+            </p>
+            <p className="text-sm text-foreground">
+              Mention the specific memory used to inform a session or task.
             </p>
           </div>
         </div>

@@ -150,7 +150,13 @@ const apps = [
     env: { ...env, PORT: String(localPorts.previewProxy) },
   }),
   app('bullmq', { env: { ...env, PORT: String(localPorts.bullmq) } }),
-  app('controller', { startup_delay: 15000 }),
+  app('controller', {
+    startup_delay: 15000,
+    env: {
+      ...env,
+      SANDBOX_OPENROUTER_API_KEY: process.env.SANDBOX_OPENROUTER_API_KEY,
+    },
+  }),
 ];
 
 if (!useWorkerRelease) {

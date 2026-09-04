@@ -374,6 +374,16 @@ export async function drainFastAgentParentEvents(
           conversationId: request.conversationId,
           eventKey: row.eventKey,
         };
+        if (row.admission === 'inline') {
+          // Bind the row to the lock the way the inline surfaces do, so a
+          // process shutdown that aborts this turn before it reaches its own
+          // abort handling (still in setup, no inference yet) can release
+          // the claim and wake the queue instead of leaving the row held
+          // until its lease expires.
+          turnLock.durableRowId = row.id;
+          turnLock.durableResume = () =>
+            wakeFastAgentParentEventNow(wakeRequest);
+        }
         await deliverFastAgentParentEventWithLock(
           {
             parent: row.parent,
@@ -387,10 +397,10 @@ export async function drainFastAgentParentEvents(
                   ...(row.retryAt
                     ? { resumedAfterInferenceRetry: true }
                     : { resumedAfterInterruption: true }),
-                  // The resumed run owns the same row: it revokes replay
-                  // before any non-replayable action, so a worker death
-                  // after such an action cannot drain the row again. The
-                  // consumed retry count keeps the per-turn cap honest.
+                  // The resumed run owns the same row and is told what the
+                  // earlier attempt already did, so it continues rather than
+                  // repeating actions. The consumed retry count keeps the
+                  // per-turn cap honest.
                   durableAdmission: {
                     eventId: row.id,
                     inferenceRetries: row.inferenceRetries,
@@ -454,6 +464,11 @@ export async function drainFastAgentParentEvents(
           })
           .where(eq(fastAgentParentEvents.id, row.id));
         throw error;
+      } finally {
+        // The same lock carries every row this drain delivers; a settled or
+        // handed-back row must not stay bound to it.
+        delete turnLock.durableRowId;
+        delete turnLock.durableResume;
       }
     }
   } finally {

@@ -230,6 +230,7 @@ export async function ensureSessionForFastConversation(
     .select({
       id: fastAgentConversations.id,
       userId: fastAgentConversations.userId,
+      ownerAutomation: fastAgentConversations.ownerAutomation,
       surface: fastAgentConversations.surface,
       title: fastAgentConversations.title,
       titleEditedByUserAt: fastAgentConversations.titleEditedByUserAt,
@@ -256,8 +257,9 @@ export async function ensureSessionForFastConversation(
       title: conversation.title?.trim() || 'New session',
       titleEditedByUserAt: conversation.titleEditedByUserAt,
       llmTitleCheckpoint: conversation.llmTitleCheckpoint,
-      ownerKind: 'user',
+      ownerKind: conversation.ownerAutomation ? 'automation' : 'user',
       ownerUserId: conversation.userId,
+      ownerAutomation: conversation.ownerAutomation,
       sourceSurface: conversation.surface,
       sourceTrigger:
         conversation.surface === 'automation' ? 'schedule' : 'message',
@@ -277,14 +279,16 @@ export async function ensureSessionForFastConversation(
     );
   }
 
-  await tx
-    .insert(sessionParticipants)
-    .values({
-      sessionId: session.id,
-      userId: conversation.userId,
-      role: 'owner',
-    })
-    .onConflictDoNothing();
+  if (conversation.userId) {
+    await tx
+      .insert(sessionParticipants)
+      .values({
+        sessionId: session.id,
+        userId: conversation.userId,
+        role: 'owner',
+      })
+      .onConflictDoNothing();
+  }
 
   return session;
 }
@@ -439,6 +443,30 @@ export async function ensureSessionForTask(
   }
 
   return touchSessionActivity(tx, session.id, task.activityAt);
+}
+
+/**
+ * Binds a Fast conversation to a Session that has none yet, so a launch can
+ * land in the Session that produced the request instead of opening a new
+ * one. Returns null when the Session is missing or already has a
+ * conversation; the caller then keeps the conversation's own Session.
+ */
+export async function attachFastConversationToSession(
+  tx: DatabaseOrTransaction,
+  input: { sessionId: string; fastConversationId: string },
+): Promise<Session | null> {
+  const [updated] = await tx
+    .update(sessions)
+    .set({ fastConversationId: input.fastConversationId })
+    .where(
+      and(
+        eq(sessions.id, input.sessionId),
+        isNull(sessions.fastConversationId),
+      ),
+    )
+    .returning();
+
+  return updated ?? null;
 }
 
 export async function getSessionForTask(

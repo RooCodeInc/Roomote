@@ -3,7 +3,6 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
   Menu,
-  Plus,
   X,
   Settings,
   Tooltip,
@@ -11,7 +10,6 @@ import {
   TooltipTrigger,
 } from '@/components/system';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { NewTaskDialog } from '@/components/tasks/NewTaskDialog';
 
 import {
   Button,
@@ -37,7 +35,6 @@ export const NavbarDrawer = ({
   const visibleNavItems = getVisiblePrimaryNavItems({ isAdmin });
 
   const [open, setOpen] = useState(false);
-  const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
 
   useEffect(() => setOpen(false), [pathname]);
 
@@ -66,19 +63,6 @@ export const NavbarDrawer = ({
             </DrawerHeader>
 
             <div className="flex flex-1 flex-col gap-2 p-4">
-              <Button
-                variant="ghost"
-                size="lg"
-                className="justify-start"
-                onClick={() => {
-                  setOpen(false);
-                  setIsNewTaskDialogOpen(true);
-                }}
-              >
-                <Plus className="size-5" />
-                New Session
-              </Button>
-
               {visibleNavItems.map((item) => {
                 const Icon = item.icon;
                 const disabled = setupIncomplete && item.requiresSetup;
@@ -131,10 +115,6 @@ export const NavbarDrawer = ({
           </div>
         </DrawerContent>
       </Drawer>
-      <NewTaskDialog
-        open={isNewTaskDialogOpen}
-        onOpenChange={setIsNewTaskDialogOpen}
-      />
     </>
   );
 };

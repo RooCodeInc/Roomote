@@ -12,7 +12,6 @@ export function buildModalWorkerEnv({
   baseImageRef,
 }: BuildWorkerEnvOptions & {
   deploymentSlug?: string;
-  environmentId?: string;
   baseImageRef: string;
 }): Record<string, string> {
   return {
@@ -20,6 +19,7 @@ export function buildModalWorkerEnv({
       authToken,
       sandboxExpiresAtMs,
       extraEnv,
+      environmentId,
     }),
     ...buildWorkerContextEnv({
       provider: 'modal',

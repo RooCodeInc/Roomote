@@ -2,8 +2,8 @@
 
 import { pathToFileURL } from 'node:url';
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
@@ -68,7 +68,7 @@ import {
   SHOW_WIDGET_THEME_GUIDANCE,
 } from './show-widget.js';
 import { handleSendChatReply } from './send-chat-reply.js';
-import { handleRelayFastAgentChatReply } from './relay-fast-agent-chat-reply.js';
+import { handleReportToParentSession } from './report-to-parent-session.js';
 import {
   type ChatReplyPurpose,
   recordChatReplyDeliveryFailure,
@@ -104,7 +104,7 @@ export {
   automationWorkItemsResultHasSubmittedWorkItems,
 } from './automation-slack-summary-state.js';
 
-export const roomoteMcpServer = new McpServer({
+export const roomoteMcpServer = new NullableOptionalsMcpServer({
   name: 'roomote-mcp-server',
   version: '1.0.0',
 });
@@ -289,7 +289,9 @@ roomoteMcpServer.registerTool(
       'Create, upload, download, and list artifacts in Roomote. ' +
       'Use action "create_plan" to create a markdown plan artifact (requires title and content). Returns viewUrl for sharing. ' +
       'Use action "upload" to upload a workspace-relative file or an absolute file under /tmp (requires path and type). Use type "general" for ordinary files. ' +
-      'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not posted to chat automatically; when the image should appear in the originating thread, pass returned artifact IDs to `send_chat_reply` via `imageArtifactIds` (or share `viewUrl`/`rawUrl` in the reply text for non-images). ' +
+      (isFastAgentChild()
+        ? 'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not sent to the parent Session automatically; pass returned artifact IDs to `report_to_parent_session` via `imageArtifactIds` when they belong in the report (or include `viewUrl`/`rawUrl` in the report text for non-images). '
+        : 'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not posted to chat automatically; when the image should appear in the originating thread, pass returned artifact IDs to `send_chat_reply` via `imageArtifactIds` (or share `viewUrl`/`rawUrl` in the reply text for non-images). ') +
       'Returns rawUrl for direct embedding (for example PR <img src>). ' +
       'Use action "download" to retrieve an artifact by task ID and artifact path (requires taskId and path). Downloads may target the current task or another task, so artifacts such as plans published by earlier tasks can be retrieved. ' +
       'For download, the path must include the category prefix exactly as stored in Roomote (e.g., "plans/my-plan.md" or "tmp/capture.png", not just the filename). ' +
@@ -459,6 +461,14 @@ function isFastAgentChild(): boolean {
   return process.env.ROOMOTE_FAST_AGENT_CHILD === 'true';
 }
 
+/** Review children report through the PR feedback relay instead. */
+function fastAgentChildReportsToParentSession(): boolean {
+  return (
+    isFastAgentChild() &&
+    process.env.ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY !== 'false'
+  );
+}
+
 function hasSlackChatContext(): boolean {
   return Boolean(process.env.ROOMOTE_SLACK_CHANNEL?.trim());
 }
@@ -529,7 +539,7 @@ const manageTasksToolDescription =
   'Always call action "list_environments" immediately before action "launch" so you can copy a valid environmentId. ' +
   'Use action "list_environments" to list launch targets (named environments and the org-wide target). ' +
   'Use action "search_tasks" only to search direct tasks by query or status. ' +
-  `Use action "get_summary" with taskId to inspect a specific task's latest status and failure details. ` +
+  `Use action "get_summary" with taskId to inspect a specific task's latest status, failure details, and uploaded image artifact IDs and viewer links. Use those stable IDs to attach a delegated task's images to a later reply. ` +
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
   'Use action "get_messages" with sessionId for Session history, or taskId for a specific task transcript; results are newest first. ' +
   `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
@@ -1430,9 +1440,15 @@ if (!isFastAgentChild()) {
   );
 }
 
-if (shouldRegisterSlackThreadReplyTool() || isFastAgentChild()) {
+if (
+  shouldRegisterSlackThreadReplyTool() ||
+  fastAgentChildReportsToParentSession()
+) {
   const chatReplySurfaceLabel = getChatReplySurfaceLabel();
-  const relaysThroughFastParent = isFastAgentChild();
+  const reportsToParentSession = isFastAgentChild();
+  const lifecycleToolName = reportsToParentSession
+    ? 'report_to_parent_session'
+    : 'send_chat_reply';
   const supportsChatReplySuggestions =
     process.env.ROOMOTE_AUTOMATION_TASK === 'true';
   const usesPinnedSuggestionContract =
@@ -1495,25 +1511,27 @@ if (shouldRegisterSlackThreadReplyTool() || isFastAgentChild()) {
   const chatReplySuggestionGuidance = supportsChatReplySuggestions
     ? 'Use the optional suggestions parameter when the automation prompt explicitly asks for task suggestions, launchable follow-ups, or help taking concrete actions. Do not infer suggested-task intent from a request that only asks for a summary or action-item list. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. '
     : '';
-  const chatReplyDescription = relaysThroughFastParent
-    ? 'Fast-internal: sends a lifecycle update privately to the Fast parent, which owns any user-visible reply. The raw message is never posted directly to the user. The kickoff already acknowledged the request, so do not send another generic ack. Use progress to pass concrete findings, blockers, meaningful work milestones, required input, or a brief note after roughly 10 minutes of silence. Describe the work itself without labeling the message as a progress update or using policy vocabulary such as phase transition, checkpoint, lifecycle, or user-facing. Use closeout for the final result or blocker and clarification when user input is needed. Ack and progress keep the coding task active.'
+  const chatReplyDescription = reportsToParentSession
+    ? 'Session-internal: reports lifecycle information privately to the parent Session, which owns any user-visible reply. The report may be a complete engineering handoff and is never posted directly to the user. The kickoff already acknowledged the request, so do not send another generic ack. Use progress to pass concrete findings, blockers, meaningful work milestones, required input, or a brief note after roughly 10 minutes of silence. Describe the work itself without labeling the message as a progress update or using policy vocabulary such as phase transition, checkpoint, lifecycle, or user-facing. Use closeout for the final result or blocker and clarification when user input is needed. Ack and progress keep the coding task active.'
     : `${chatReplySurfaceLabel}-visible: posts a lifecycle reply in the originating ${chatReplySurfaceLabel} thread. Choose the current ${chatReplySurfaceLabel} turn purpose before writing: ack, progress, closeout, or clarification. Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the ${chatReplySurfaceLabel} turn open. Use it again on later ${chatReplySurfaceLabel} turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. ${chatReplyMarkdownGuidance}${chatReplySourceLinkingGuidance}${chatReplySuggestionGuidance}Write the message so its content clearly matches the selected purpose.`;
   roomoteMcpServer.registerTool(
-    'send_chat_reply',
+    lifecycleToolName,
     {
-      title: 'Send Chat Reply',
+      title: reportsToParentSession
+        ? 'Report to Parent Session'
+        : 'Send Chat Reply',
       description: chatReplyDescription,
       inputSchema: {
         purpose: z
           .enum(['ack', 'progress', 'closeout', 'clarification'])
           .describe(
-            relaysThroughFastParent
-              ? 'The lifecycle purpose of this private update to the Fast parent. The kickoff already acknowledged the request, so avoid another generic ack. Use progress for concrete findings, blockers, meaningful work milestones, required input, or a brief update after roughly 10 minutes of silence. Use closeout for the final result or blocker and clarification when user input is needed.'
+            reportsToParentSession
+              ? 'The lifecycle purpose of this private report to the parent Session. The kickoff already acknowledged the request, so avoid another generic ack. Use progress for concrete findings, blockers, meaningful work milestones, required input, or a brief update after roughly 10 minutes of silence. Use closeout for the final result or blocker and clarification when user input is needed.'
               : `The lifecycle purpose for this ${chatReplySurfaceLabel}-visible reply. Choose ack for the first visible response before work that will not post to ${chatReplySurfaceLabel}, progress for new useful state or silence prevention, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.`,
           ),
         message: nonEmptyStringSchema.describe(
-          (relaysThroughFastParent
-            ? 'Non-empty Markdown source text for the Fast parent. State concrete facts about the work or the needed handoff; the Fast parent will compose the user-visible message. '
+          (reportsToParentSession
+            ? 'Non-empty Markdown report for the parent Session. State concrete facts about the work or the needed handoff; the parent Session will compose any user-visible message. '
             : `Non-empty Markdown text to post in the ${chatReplySurfaceLabel} thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. `) +
             "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. " +
             chatReplyMessageMarkdownGuidance,
@@ -1528,9 +1546,9 @@ if (shouldRegisterSlackThreadReplyTool() || isFastAgentChild()) {
           .array(z.string())
           .optional()
           .describe(
-            'Optional already-uploaded artifact IDs for images to attach.',
+            'Optional already-uploaded artifact IDs for images to attach. A reply must not claim an image or screenshot is attached, shown, or included unless the matching imageArtifactIds or imagePaths are supplied. If attachment delivery fails, provide an accessible artifact viewer link and say that the image could not be attached.',
           ),
-        ...(supportsChatReplySuggestions
+        ...(supportsChatReplySuggestions && !reportsToParentSession
           ? {
               suggestions: z
                 .array(chatReplySuggestionSchema)
@@ -1568,8 +1586,8 @@ if (shouldRegisterSlackThreadReplyTool() || isFastAgentChild()) {
         return errorResult('ROOMOTE_TASK_ID environment variable not set');
       }
 
-      const result = relaysThroughFastParent
-        ? await handleRelayFastAgentChatReply(
+      const result = reportsToParentSession
+        ? await handleReportToParentSession(
             {
               runId: Number(process.env.ROOMOTE_TASK_RUN_ID),
               taskId,
@@ -1608,7 +1626,7 @@ if (shouldRegisterSlackThreadReplyTool() || isFastAgentChild()) {
         hasSubmittedAutomationSlackSummary = true;
       }
 
-      recordSuccessfulSlackTurnSatisfactionResult(result, 'send_chat_reply', {
+      recordSuccessfulSlackTurnSatisfactionResult(result, lifecycleToolName, {
         replyPurpose: params.purpose,
         sessionId: extra.sessionId,
       });
@@ -1621,7 +1639,10 @@ if (shouldRegisterSlackThreadReplyTool() || isFastAgentChild()) {
 
 function recordSuccessfulSlackTurnSatisfactionResult(
   result: ToolResult,
-  tool: 'send_chat_reply' | 'send_chat_reaction_emoji',
+  tool:
+    | 'send_chat_reply'
+    | 'report_to_parent_session'
+    | 'send_chat_reaction_emoji',
   options: {
     replyPurpose?: ChatReplyPurpose;
     sessionId?: string;

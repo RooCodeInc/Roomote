@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   appendMemory: vi.fn(),
   isBrainEnabled: vi.fn(),
   generateText: vi.fn(),
+  generateHelperText: vi.fn(),
+  resolveImageDelivery: vi.fn(),
   classifyInferenceError: vi.fn(),
   invalidateSession: vi.fn(),
   runSession: vi.fn(),
@@ -19,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
   getUserIdentity: vi.fn(),
+  getTherapistMode: vi.fn(),
   refreshTitle: vi.fn(),
   bindExecutor: vi.fn(),
   bindMcpExecutor: vi.fn(),
@@ -38,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   revokeDurableReplay: vi.fn(),
   scheduleDurableRetry: vi.fn(),
   findActiveRetryNotice: vi.fn(),
+  loadTurnAttempt: vi.fn(),
   getUnifiedSession: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
@@ -68,8 +72,10 @@ const nativeToolNames = vi.hoisted(
     ({
       callIntegrationTool: 'call_integration_tool',
       cancelTask: 'cancel_task',
+      createArtifact: 'create_artifact',
       findIntegrationTools: 'find_integration_tools',
       ignoreEvent: 'ignore_event',
+      inspectImages: 'inspect_images',
       launchTask: 'launch_task',
       retryTaskStart: 'retry_task_start',
       saveMemory: 'save_memory',
@@ -101,8 +107,6 @@ vi.mock('../fast-agent-session', () => ({
 vi.mock('../fast-agent-conversation-repository', () => ({
   INTERRUPTED_INFERENCE_RETRY_MESSAGE:
     'The inference retry was interrupted before it completed. Please send the request again.',
-  RESTARTED_ACTIVE_TURN_MESSAGE:
-    'Roomote restarted while working on this request. Please send it again.',
   reconcileFastAgentInferenceRetryNotices: mocks.reconcileRetryNotices,
   markFastAgentInferenceRetryNoticeInterruption:
     mocks.markRetryNoticeInterruption,
@@ -114,9 +118,10 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   revokeFastAgentDurableTurnReplay: mocks.revokeDurableReplay,
   scheduleFastAgentDurableTurnRetry: mocks.scheduleDurableRetry,
   findFastAgentActiveInferenceRetryNotice: mocks.findActiveRetryNotice,
+  loadFastAgentTurnAttemptSummary: mocks.loadTurnAttempt,
 }));
 
-vi.mock('../../router', () => ({
+vi.mock('../../available-environments', () => ({
   getAvailableEnvironments: mocks.getEnvironments,
 }));
 
@@ -152,14 +157,28 @@ vi.mock('@roomote/db/server', () => ({
   touchSessionActivity: mocks.touchSessionActivity,
 }));
 
+const NonTaskInputModalityUnsupportedError = vi.hoisted(
+  () =>
+    class NonTaskInputModalityUnsupportedError extends Error {
+      constructor(public readonly modality: string) {
+        super(`No configured model supports ${modality} input.`);
+        this.name = 'NonTaskInputModalityUnsupportedError';
+      }
+    },
+);
+
 vi.mock('../../non-task-provider-usage', () => ({
   FAST_AGENT_SESSION_PERMISSIONS: fastAgentSessionPermissions,
   FAST_AGENT_SESSION_TOOL_FILTER: fastAgentSessionToolFilter,
   NON_TASK_INFERENCE_SURFACES: {
+    fastAgentImageInspection: 'fast_agent_image_inspection',
     fastAgentQuestionAnswering: 'fast_agent',
   },
+  NonTaskInputModalityUnsupportedError,
   classifyNonTaskInferenceError: mocks.classifyInferenceError,
+  generateTrackedNonTaskText: mocks.generateHelperText,
   generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
+  resolveNonTaskInputModalityDelivery: mocks.resolveImageDelivery,
   NonTaskOpenCodePromptTimeoutError: class extends Error {
     constructor(timeoutMs: number) {
       super(`Timed out waiting for OpenCode output after ${timeoutMs}ms.`);
@@ -217,6 +236,14 @@ vi.mock('../fast-agent-tasks', () => ({
 vi.mock('../fast-agent-user-identity', () => ({
   getFastAgentUserIdentity: mocks.getUserIdentity,
 }));
+
+vi.mock('../../therapist-mode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../therapist-mode')>();
+  return {
+    ...actual,
+    getTherapistModeEnabledForUser: mocks.getTherapistMode,
+  };
+});
 
 vi.mock('../fast-agent-title', () => ({
   refreshFastAgentSessionTitle: mocks.refreshTitle,
@@ -360,6 +387,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.refreshTitle.mockResolvedValue(null);
+    mocks.resolveImageDelivery.mockResolvedValue({
+      delivery: 'direct',
+      model: 'openrouter/openai/gpt-5.4',
+    });
     mocks.nativeExecutor = undefined;
     mocks.mcpExecutor = undefined;
     mocks.mcpCapabilityAvailable = false;
@@ -435,6 +466,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.revokeDurableReplay.mockResolvedValue(true);
     mocks.scheduleDurableRetry.mockResolvedValue(true);
     mocks.findActiveRetryNotice.mockResolvedValue(null);
+    mocks.loadTurnAttempt.mockResolvedValue({
+      events: [],
+      next: {
+        assistantOrdinal: 0,
+        toolOrdinal: 0,
+        retryNoticeOrdinal: 0,
+        turnSeq: 0,
+      },
+      prompt: null,
+    });
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
@@ -459,6 +500,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       githubLogin: 'mrubens',
       isAdmin: true,
     });
+    mocks.getTherapistMode.mockResolvedValue(false);
     mocks.classifyInferenceError.mockImplementation((error: unknown) => {
       const detail = error instanceof Error ? error.message.toLowerCase() : '';
 
@@ -516,6 +558,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         });
         return '';
       },
+    );
+  });
+
+  it('applies the current user therapist mode preference to the system prompt', async () => {
+    mocks.getTherapistMode.mockResolvedValueOnce(true);
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.getTherapistMode).toHaveBeenCalledWith('user-1');
+    expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
+      '<therapist_mode>',
     );
   });
 
@@ -711,6 +764,109 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       sessionId: 'conversation-1',
       openCodeSessionId: 'opencode-session-1',
     });
+  });
+
+  it('persists child-selected image IDs when the parent omits the optional attachment argument', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Here is the screenshot.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      defaultImageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'Here is the screenshot.',
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+    const assistantMessage = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) => message.eventType === 'roomote_runtime.assistant_message',
+      );
+    expect(assistantMessage?.payload).toMatchObject({
+      purpose: 'closeout',
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+  });
+
+  it('persists child-selected image IDs on a text-only terminal closeout', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        return 'The visual comparison is attached.';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      defaultImageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'The visual comparison is attached.',
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+    const assistantMessage = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) => message.eventType === 'roomote_runtime.assistant_message',
+      );
+    expect(assistantMessage?.payload).toMatchObject({
+      purpose: 'closeout',
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+  });
+
+  it('reports local storage exhaustion instead of a generic Fast error', async () => {
+    const storageError = Object.assign(
+      new Error('ENOSPC: no space left on device, write'),
+      { code: 'ENOSPC' },
+    );
+    mocks.getNativeRuntime.mockRejectedValueOnce(storageError);
+    const adapter = callbacks();
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      await expect(
+        answerFastAgentQuestion({ ...baseParams, adapter }),
+      ).resolves.toContain("Fast's local working");
+
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: expect.stringContaining("Fast's local working"),
+      });
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining('reason="local_storage_'),
+      );
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining('filesystemPath=/tmp'),
+      );
+      expect(mocks.generateText).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it('lets a trusted preset win when the model also passes placeholder questions', async () => {
@@ -1115,6 +1271,284 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('holds follow-up images for inspect_images when the model cannot view them', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'helper',
+        model: 'openrouter/openai/gpt-5.4',
+        helperModel: 'openrouter/google/gemini-3.8-flash',
+      });
+      mocks.generateHelperText.mockResolvedValue('Two screenshots.');
+      const first = {
+        id: '11111111-1111-4111-8111-111111111111',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.3',
+          currentMessageId: '100.3',
+          userId: 'user-1',
+          question: 'First pending correction.',
+          images: ['data:image/png;base64,Zmlyc3Q='],
+        },
+      };
+      const second = {
+        id: '22222222-2222-4222-8222-222222222222',
+        createdAt: new Date('2026-08-31T12:00:01.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.4',
+          currentMessageId: '100.4',
+          userId: 'user-1',
+          question: 'Second pending correction.',
+          images: ['data:image/jpeg;base64,c2Vjb25k'],
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([first, second])
+        .mockResolvedValue([]);
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+
+      const steer = mocks.nativeSteer.mock.calls[0]?.[0];
+      expect(steer?.files).toEqual([]);
+      expect(steer?.text).toContain(
+        'Image attachments: image-1 (image/png), image-2 (image/jpeg)',
+      );
+      expect(steer?.text).toContain('inspect_images');
+
+      await expect(
+        invokeTool(nativeToolNames.inspectImages, {
+          question: 'What changed between them?',
+        }),
+      ).resolves.toEqual({
+        success: true,
+        imageIds: ['image-1', 'image-2'],
+        observations: 'Two screenshots.',
+      });
+      expect(mocks.generateHelperText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'openrouter/google/gemini-3.8-flash',
+          files: [
+            { mime: 'image/png', url: 'data:image/png;base64,Zmlyc3Q=' },
+            { mime: 'image/jpeg', url: 'data:image/jpeg;base64,c2Vjb25k' },
+          ],
+        }),
+      );
+
+      finishGeneration?.('Steered answer');
+      await expect(resultPromise).resolves.toBe('Steered answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not hold follow-up images twice when a rejected steer is retried', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'helper',
+        model: 'openrouter/openai/gpt-5.4',
+        helperModel: 'openrouter/google/gemini-3.8-flash',
+      });
+      mocks.generateHelperText.mockResolvedValue('One screenshot.');
+      const followUp = {
+        id: '11111111-1111-4111-8111-111111111111',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.3',
+          currentMessageId: '100.3',
+          userId: 'user-1',
+          question: 'Look at this.',
+          images: ['data:image/png;base64,Zmlyc3Q='],
+        },
+      };
+      let pendingRows = [followUp];
+      mocks.getPendingHumanFollowUp.mockImplementation(async () => pendingRows);
+      mocks.nativeSteer
+        .mockRejectedValueOnce(new Error('OpenCode is busy'))
+        .mockImplementationOnce(async () => {
+          pendingRows = [];
+        });
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      let completeAssistantBoundary: (() => Promise<void>) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          completeAssistantBoundary = async () => {
+            await options.onAssistantMessageCompleted?.({
+              id: 'assistant-after-rejected-steer',
+              sessionId: 'opencode-session-1',
+              createdAtMs: 100,
+              completedAtMs: 200,
+            });
+          };
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      // The rejected steer leaves the follow-up pending; the next boundary
+      // drains it again.
+      await completeAssistantBoundary?.();
+      await vi.waitFor(() =>
+        expect(mocks.nativeSteer).toHaveBeenCalledTimes(2),
+      );
+
+      for (const call of mocks.nativeSteer.mock.calls) {
+        expect(call[0]?.files).toEqual([]);
+        expect(call[0]?.text).toContain(
+          'Image attachments: image-1 (image/png)',
+        );
+        expect(call[0]?.text).not.toContain('image-2');
+      }
+      await expect(
+        invokeTool(nativeToolNames.inspectImages, {
+          question: 'Describe it.',
+        }),
+      ).resolves.toEqual({
+        success: true,
+        imageIds: ['image-1'],
+        observations: 'One screenshot.',
+      });
+      expect(mocks.generateHelperText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          files: [{ mime: 'image/png', url: 'data:image/png;base64,Zmlyc3Q=' }],
+        }),
+      );
+
+      finishGeneration?.('Steered answer');
+      await expect(resultPromise).resolves.toBe('Steered answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaves a same-user follow-up routed in from a pull request out of native steering', async () => {
+    vi.useFakeTimers();
+    try {
+      const steerable = {
+        id: '66666666-6666-4666-8666-666666666666',
+        createdAt: new Date('2026-08-31T12:00:00.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.8',
+          currentMessageId: '100.8',
+          userId: 'user-1',
+          question: 'Steer this one.',
+        },
+      };
+      const routedFromPullRequest = {
+        id: '77777777-7777-4777-8777-777777777777',
+        createdAt: new Date('2026-08-31T12:00:01.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: 'github:comment:900',
+          currentMessageId: 'github:comment:900',
+          userId: 'user-1',
+          question: 'Also update the changelog on the PR.',
+          sourceControlReplyTarget: {
+            provider: 'github',
+            host: 'github.com',
+            repositoryFullName: 'acme/api',
+            kind: 'pull',
+            number: 42,
+          },
+        },
+      };
+      const afterRouted = {
+        id: '88888888-8888-4888-8888-888888888888',
+        createdAt: new Date('2026-08-31T12:00:02.000Z'),
+        parent: { sessionId: 'conversation-1' },
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.9',
+          currentMessageId: '100.9',
+          userId: 'user-1',
+          question: 'Do not jump ahead of the pull request mention.',
+        },
+      };
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([steerable, routedFromPullRequest, afterRouted])
+        .mockResolvedValue([routedFromPullRequest, afterRouted]);
+
+      let finishGeneration: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          return await new Promise<string>((resolve) => {
+            finishGeneration = resolve;
+          });
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+
+      // Only the plain follow-up is injected; the routed mention and every
+      // later row stay durable for the whole-turn delivery that answers on
+      // the pull request too.
+      const steer = mocks.nativeSteer.mock.calls[0]?.[0];
+      expect(steer?.text).toContain('Steer this one.');
+      expect(steer?.text).not.toContain('Also update the changelog on the PR.');
+      expect(steer?.text).not.toContain(
+        'Do not jump ahead of the pull request mention.',
+      );
+      expect(mocks.inArray).toHaveBeenCalledWith('id', [steerable.id]);
+      expect(mocks.upsertMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({
+            eventId: 'github:comment:900:user',
+          }),
+        }),
+      );
+
+      finishGeneration?.('Steered answer');
+      await expect(resultPromise).resolves.toBe('Steered answer');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('batches rapidly arriving messages at the next assistant boundary', async () => {
     vi.useFakeTimers();
     try {
@@ -1409,6 +1843,183 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('settles an ambient turn silently when the model ends a steered aside with nothing to say', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([
+          {
+            id: '2b6d0e0a-5f0e-4d8b-9d0c-6a4a1a1b2c3d',
+            createdAt: new Date('2026-09-04T16:56:45.000Z'),
+            parent: { sessionId: 'conversation-1' },
+            event: {
+              type: 'human_follow_up',
+              eventId: '100.4',
+              currentMessageId: '100.4',
+              userId: 'user-1',
+              question: 'https://example.com/deploy/123',
+              directedAtRoomote: false,
+            },
+          },
+        ])
+        .mockResolvedValue([]);
+
+      let continueGeneration: (() => void) | undefined;
+      const generationPaused = new Promise<void>((resolve) => {
+        continueGeneration = resolve;
+      });
+      const adapter = callbacks();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-ignores-aside',
+            sessionId: 'opencode-session-1',
+            parentId: 'initial-user-message',
+            createdAtMs: 100,
+          });
+          // The opener is an aside between people; the model ignores it.
+          await invokeTool(
+            nativeToolNames.ignoreEvent,
+            {},
+            undefined,
+            'assistant-ignores-aside',
+          );
+          await generationPaused;
+          // The steered link opens a new instruction; the model says nothing.
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-after-steer',
+            sessionId: 'opencode-session-1',
+            parentId: 'steered-user-message',
+            createdAtMs: 200,
+          });
+          return '';
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        allowSilentAmbientReply: true,
+        adapter,
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      continueGeneration?.();
+      await expect(resultPromise).resolves.toBe('');
+
+      expect(adapter.postReply).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still closes out when a steered follow-up directed at Roomote goes unanswered', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getPendingHumanFollowUp
+        .mockResolvedValueOnce([
+          {
+            id: '3c7e1f1b-6a1f-4e9c-8e1d-7b5b2b2c3d4e',
+            createdAt: new Date('2026-09-04T16:56:45.000Z'),
+            parent: { sessionId: 'conversation-1' },
+            event: {
+              type: 'human_follow_up',
+              eventId: '100.4',
+              currentMessageId: '100.4',
+              userId: 'user-1',
+              question: '<@UBOT> can you check the deploy?',
+              directedAtRoomote: true,
+            },
+          },
+        ])
+        .mockResolvedValue([]);
+
+      let continueGeneration: (() => void) | undefined;
+      const generationPaused = new Promise<void>((resolve) => {
+        continueGeneration = resolve;
+      });
+      const adapter = callbacks();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          options.onNativeSteerReady?.(mocks.nativeSteer);
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-ignores-aside',
+            sessionId: 'opencode-session-1',
+            parentId: 'initial-user-message',
+            createdAtMs: 100,
+          });
+          await invokeTool(
+            nativeToolNames.ignoreEvent,
+            {},
+            undefined,
+            'assistant-ignores-aside',
+          );
+          await generationPaused;
+          options.onAssistantMessageStarted?.({
+            id: 'assistant-after-steer',
+            sessionId: 'opencode-session-1',
+            parentId: 'steered-user-message',
+            createdAtMs: 200,
+          });
+          return '';
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        allowSilentAmbientReply: true,
+        adapter,
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(mocks.nativeSteer).toHaveBeenCalledOnce());
+      continueGeneration?.();
+      await resultPromise;
+
+      expect(adapter.postReply).toHaveBeenCalledTimes(1);
+      expect(adapter.postReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          purpose: 'closeout',
+          message:
+            'I didn’t have a response to that. Could you rephrase it or add a bit more detail?',
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('tells the user plainly when a directed request ends with no response', async () => {
+    const adapter = callbacks();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        options.onAssistantMessageStarted?.({
+          id: 'assistant-silent',
+          sessionId: 'opencode-session-1',
+          parentId: 'initial-user-message',
+          createdAtMs: 100,
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(adapter.postReply).toHaveBeenCalledTimes(1);
+    expect(adapter.postReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'closeout',
+        message:
+          'I didn’t have a response to that. Could you rephrase it or add a bit more detail?',
+      }),
+    );
   });
 
   it('ignores plain terminal text from an assistant superseded by a native steer', async () => {
@@ -2625,6 +3236,50 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('creates a durable Session artifact with inferred content type', async () => {
+    const createArtifact = vi.fn().mockResolvedValue({
+      id: 'artifact-1',
+      path: 'notes/decision.md',
+      version: 1,
+      artifactType: 'general',
+      contentType: 'text/markdown',
+      size: 8,
+      viewUrl: 'https://roomote.example/sessions/session-1',
+    });
+    const adapter = callbacks({ createArtifact });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Creating that document.',
+        });
+        const result = await invokeTool(nativeToolNames.createArtifact, {
+          path: 'notes/decision.md',
+          content: '# Decision',
+        });
+        expect(result).toMatchObject({
+          success: true,
+          artifact: { id: 'artifact-1', contentType: 'text/markdown' },
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The document is ready.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(createArtifact).toHaveBeenCalledWith({
+      path: 'notes/decision.md',
+      content: '# Decision',
+      contentType: 'text/markdown',
+      artifactType: 'general',
+    });
+  });
+
   it('posts the Fast widget preview with its Discord session link', async () => {
     const adapter = callbacks();
     mocks.generateText.mockImplementation(
@@ -3528,7 +4183,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   describe('durable admission', () => {
     const durableAdmission = { eventId: 'durable-row-1' };
 
-    it('keeps replay open through an acknowledgement and closes it before the closeout', async () => {
+    it('keeps replay open through the acknowledgement and the closeout', async () => {
       const order: string[] = [];
       mocks.revokeDurableReplay.mockImplementation(async (_id, reason) => {
         order.push(`revoke:${reason}`);
@@ -3542,7 +4197,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             message: 'Looking into it.',
           });
           order.push('acked');
-          expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
             message: 'Done.',
@@ -3558,30 +4212,24 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         durableAdmission,
       });
 
-      expect(order).toEqual([
-        'acked',
-        'revoke:Native tool send_chat_reply is not replay-safe.',
-        'closed',
-      ]);
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
-        'durable-row-1',
-        expect.any(String),
-      );
+      // Nothing withdraws the turn from replay any more: a run that resumes
+      // it after the closeout settles on the recorded reply instead.
+      expect(order).toEqual(['acked', 'closed']);
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 
-    it('revokes replay before a task launch runs', async () => {
+    it('keeps replay open through a task launch and gives the launch a stable key', async () => {
       const order: string[] = [];
       mocks.revokeDurableReplay.mockImplementation(async () => {
         order.push('revoke');
         return true;
       });
-      const adapter = callbacks({
-        launchTask: vi.fn<LaunchFastAgentTask>(async () => {
-          order.push('launch');
-          return { success: true, taskId: 'task-1' };
-        }),
+      const launchTask = vi.fn<LaunchFastAgentTask>(async () => {
+        order.push('launch');
+        return { success: true, taskId: 'task-1' };
       });
+      const adapter = callbacks({ launchTask });
       mocks.generateText.mockImplementationOnce(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
@@ -3604,94 +4252,47 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         durableAdmission,
       });
 
-      expect(order.slice(0, 2)).toEqual(['revoke', 'launch']);
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledTimes(1);
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
-        'durable-row-1',
-        'Native tool launch_task is not replay-safe.',
+      // Neither the launch nor the closeout ends replay: the turn stays
+      // resumable and a resumed run is told what happened.
+      expect(order).toEqual(['launch']);
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+      // The key is stable for this turn and launch, so a repeat after a kill
+      // between launching and recording returns the same task.
+      expect(launchTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          launchIdempotencyKey: expect.stringMatching(
+            /^fast:[^:]+:[^:]+:[0-9a-f]{32}$/u,
+          ),
+        }),
       );
     });
 
-    it('refuses a non-replayable action when the revocation does not land', async () => {
-      mocks.revokeDurableReplay.mockRejectedValueOnce(new Error('db down'));
-      const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
-        success: true,
-        taskId: 'task-1',
-      }));
-      let launchResult: unknown;
-      mocks.generateText.mockImplementationOnce(
-        async (_params, _session, options) => {
-          await options.onSessionReady('opencode-session-1');
-          launchResult = await invokeTool(nativeToolNames.launchTask, {
-            prompt: 'Fix the bug',
-            environmentId: 'env-1',
-            kickoffMessage: 'Starting.',
-          });
-          await invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'closeout',
-            message: 'Could not launch.',
-          });
-          return '';
-        },
-      );
-
-      await answerFastAgentQuestion({
-        ...baseParams,
-        adapter: callbacks({ launchTask }),
-        durableAdmission,
-      });
-
-      expect(launchTask).not.toHaveBeenCalled();
-      expect(launchResult).toMatchObject({
-        success: false,
-        error: expect.stringContaining('could not durably record'),
-      });
-      // The later closeout retried the revocation successfully.
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledTimes(2);
-    });
-
-    it('refuses a non-replayable action when the row was already settled elsewhere', async () => {
-      mocks.revokeDurableReplay.mockResolvedValue(false);
-      const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
-        success: true,
-        taskId: 'task-1',
-      }));
-      let launchResult: unknown;
-      mocks.generateText.mockImplementationOnce(
-        async (_params, _session, options) => {
-          await options.onSessionReady('opencode-session-1');
-          launchResult = await invokeTool(nativeToolNames.launchTask, {
-            prompt: 'Fix the bug',
-            environmentId: 'env-1',
-            kickoffMessage: 'Starting.',
-          });
-          return 'Stopping.';
-        },
-      );
-
-      await answerFastAgentQuestion({
-        ...baseParams,
-        adapter: callbacks({ launchTask }),
-        durableAdmission,
-      });
-
-      expect(launchTask).not.toHaveBeenCalled();
-      expect(launchResult).toMatchObject({
-        success: false,
-        error: expect.stringContaining('could not durably record'),
-      });
-    });
-
-    it('withdraws a plain-text turn from replay before its terminal closeout', async () => {
+    // Records the order of a system-posted closeout's intent row, its
+    // surface post, and its result row.
+    const recordCloseoutOrder = (postReply: ReturnType<typeof vi.fn>) => {
       const order: string[] = [];
-      mocks.revokeDurableReplay.mockImplementation(async () => {
-        order.push('revoke');
-        return true;
-      });
-      const postReply = vi.fn(async () => {
+      postReply.mockImplementation(async () => {
         order.push('post');
         return { messageId: 'reply-1' };
       });
+      mocks.upsertMessage.mockImplementation(async ({ message }) => {
+        const payload = message.payload as {
+          title?: string;
+          rawInput?: { arguments?: { purpose?: string; message?: string } };
+        };
+        if (payload.title === nativeToolNames.sendChatReply) {
+          order.push(
+            `${message.eventType === 'roomote_runtime.tool_call' ? 'call' : 'result'}:${payload.rawInput?.arguments?.message}`,
+          );
+        }
+        return { initialHumanTurn: false };
+      });
+      return order;
+    };
+
+    it('records the terminal closeout as a call before posting it and a result after', async () => {
+      const postReply = vi.fn();
+      const order = recordCloseoutOrder(postReply);
       mocks.generateText.mockResolvedValueOnce('All done.');
 
       await answerFastAgentQuestion({
@@ -3700,49 +4301,159 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         durableAdmission,
       });
 
-      expect(order).toEqual(['revoke', 'post']);
+      // Same recorded intent as a model-authored closeout, so a resumed run
+      // finds it in the transcript whether or not the post completed.
+      expect(order).toEqual(['call:All done.', 'post', 'result:All done.']);
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('records the error closeout as a call before posting it and a result after', async () => {
+      const postReply = vi.fn();
+      const order = recordCloseoutOrder(postReply);
+      mocks.generateText.mockRejectedValueOnce(new Error('provider exploded'));
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+      });
+
+      expect(order).toHaveLength(3);
+      expect(order[0]).toMatch(/^call:/u);
+      expect(order[1]).toBe('post');
+      expect(order[2]).toMatch(/^result:/u);
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    const attemptCounters = {
+      next: {
+        assistantOrdinal: 2,
+        toolOrdinal: 2,
+        retryNoticeOrdinal: 0,
+        turnSeq: 6,
+      },
+      prompt: { ts: 1_000, turnSeq: 0 },
+    };
+
+    it('settles a resumed turn whose earlier attempt already delivered its closeout without asking the model', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        ...attemptCounters,
+        events: [
+          { kind: 'reply', text: 'Looking into it.', purpose: 'ack' },
+          { kind: 'reply', text: 'All done.', purpose: 'closeout' },
+        ],
+      });
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+
+      const result = await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      // The answer already reached the surface; the resumed run only closes
+      // the books.
+      expect(result).toBe('All done.');
+      expect(mocks.generateText).not.toHaveBeenCalled();
+      expect(postReply).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('settles a resumed turn whose closeout replaced the retry notice, leaving the completed call as the last event', async () => {
+      // The replaced notice keeps its earlier sequence, so the closeout's
+      // reply row sits before the call that delivered it; the completed
+      // call is the proof of delivery.
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        ...attemptCounters,
+        events: [
+          { kind: 'reply', text: 'All done.', purpose: 'closeout' },
+          {
+            kind: 'action',
+            tool: nativeToolNames.sendChatReply,
+            arguments: { purpose: 'closeout', message: 'All done.' },
+            status: 'completed',
+            result: '{"success":true,"delivered":true}',
+          },
+        ],
+      });
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+
+      const result = await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      expect(result).toBe('All done.');
+      expect(mocks.generateText).not.toHaveBeenCalled();
+      expect(postReply).not.toHaveBeenCalled();
+      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('posts the closeout again when the earlier attempt died inside the call before recording it', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        ...attemptCounters,
+        events: [
+          { kind: 'reply', text: 'Looking into it.', purpose: 'ack' },
+          {
+            kind: 'action',
+            tool: nativeToolNames.sendChatReply,
+            arguments: { purpose: 'closeout', message: 'All done.' },
+            status: 'unknown',
+          },
+        ],
+      });
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-2' });
+
+      const result = await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      // The text is on record but its post is not, so it goes out once more
+      // without a model request; a duplicate is possible only if the first
+      // post landed in the instant before the process died.
+      expect(result).toBe('All done.');
+      expect(mocks.generateText).not.toHaveBeenCalled();
+      expect(postReply).toHaveBeenCalledOnce();
       expect(postReply).toHaveBeenCalledWith(
         expect.objectContaining({ purpose: 'closeout', message: 'All done.' }),
       );
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 
-    it('hands the turn to the queue when the terminal closeout cannot be withdrawn from replay', async () => {
-      mocks.revokeDurableReplay.mockResolvedValue(false);
-      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
-      const requestDurableResume = vi.fn().mockResolvedValue(undefined);
-      mocks.generateText.mockResolvedValueOnce('All done.');
+    it('lets the model finish a resumed turn whose lost closeout carried no explicit text', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        ...attemptCounters,
+        events: [
+          {
+            kind: 'action',
+            tool: nativeToolNames.sendChatReply,
+            arguments: { purpose: 'closeout' },
+            status: 'unknown',
+          },
+        ],
+      });
+      mocks.generateText.mockResolvedValueOnce('Finished.');
 
       await answerFastAgentQuestion({
         ...baseParams,
-        adapter: callbacks({ postReply, requestDurableResume }),
+        adapter: callbacks(),
         durableAdmission,
+        resumedAfterInterruption: true,
       });
 
-      // No closeout, and the row stays recoverable so the resumed run
-      // delivers the answer instead of the user getting nothing.
-      expect(postReply).not.toHaveBeenCalled();
-      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
-      expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
-      expect(requestDurableResume).toHaveBeenCalledOnce();
-    });
-
-    it('hands the turn to the queue when the error closeout cannot be withdrawn from replay', async () => {
-      mocks.revokeDurableReplay.mockResolvedValue(false);
-      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
-      const requestDurableResume = vi.fn().mockResolvedValue(undefined);
-      mocks.generateText.mockRejectedValueOnce(new Error('provider exploded'));
-
-      await answerFastAgentQuestion({
-        ...baseParams,
-        adapter: callbacks({ postReply, requestDurableResume }),
-        durableAdmission,
-      });
-
-      expect(postReply).not.toHaveBeenCalled();
-      expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
-      expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
-      expect(requestDurableResume).toHaveBeenCalledOnce();
+      // Nothing to re-post verbatim: the model resumes with the transcript
+      // and the lost-result placeholder, as for any other cut-off call.
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      const call = mocks.generateText.mock.calls[0]?.[0];
+      expect(call.prompt).toContain('lost due to restart');
     });
 
     it('posts no interruption closeout when a cancelled turn cannot be withdrawn from replay', async () => {
@@ -3824,9 +4535,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           'Post an acknowledgement with send_chat_reply before this action.',
       });
       expect(results[1]).toMatchObject({ success: true });
-      expect(mocks.revokeDurableReplay).toHaveBeenCalledWith(
+      // The memory write itself no longer ends replay; only the closeout does.
+      expect(mocks.revokeDurableReplay).not.toHaveBeenCalledWith(
         'durable-row-1',
-        'Native tool save_memory is not replay-safe.',
+        expect.stringContaining('save_memory'),
       );
     });
 
@@ -3869,7 +4581,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
     });
 
-    it('posts the restart closeout when the interrupted turn already acted', async () => {
+    it('hands an acted turn back to the queue on shutdown without a closeout', async () => {
       const controller = new AbortController();
       const shutdown = new FastAgentProcessShutdownError('SIGTERM');
       const requestDurableResume = vi.fn().mockResolvedValue(undefined);
@@ -3890,19 +4602,26 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await expect(
         answerFastAgentQuestion({
           ...baseParams,
-          adapter: callbacks({ postReply, requestDurableResume }),
+          adapter: callbacks({
+            postReply,
+            requestDurableResume,
+            launchTask: vi.fn<LaunchFastAgentTask>(async () => ({
+              success: true,
+              taskId: 'task-1',
+            })),
+          }),
           signal: controller.signal,
           durableAdmission,
         }),
       ).rejects.toBe(shutdown);
 
-      expect(postReply).toHaveBeenCalledWith({
-        purpose: 'closeout',
-        message:
-          'Roomote restarted while working on this request. Please send it again.',
-      });
-      expect(mocks.releaseDurableClaim).not.toHaveBeenCalled();
-      expect(requestDurableResume).not.toHaveBeenCalled();
+      // The launch is on record, so the turn is resumable: the claim goes
+      // back to the queue, the queue is woken, and the user sees no closeout.
+      expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('durable-row-1');
+      expect(requestDurableResume).toHaveBeenCalledOnce();
+      expect(postReply).not.toHaveBeenCalledWith(
+        expect.objectContaining({ purpose: 'closeout' }),
+      );
     });
 
     it('does not resume a deliberately cancelled turn', async () => {
@@ -3974,6 +4693,208 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         call.prompt.indexOf('What does this service do?'),
       );
       expect(call.system).toContain('`<resumed_turn>` marker');
+    });
+
+    it('tells a resumed run what the earlier attempt already did', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        events: [
+          { kind: 'reply', text: 'Starting on it.' },
+          {
+            kind: 'action',
+            tool: 'launch_task',
+            arguments: { prompt: 'Fix the bug' },
+            status: 'completed',
+            result: '{"success":true,"taskId":"task-1"}',
+          },
+          {
+            kind: 'action',
+            tool: 'send_task_message',
+            arguments: { taskId: 'task-1', message: 'Focus on the root.' },
+            status: 'failed',
+            result:
+              '{"success":false,"error":"Task is not accepting messages yet."}',
+          },
+          {
+            kind: 'action',
+            tool: 'save_memory',
+            arguments: { content: 'Prefers bullets.' },
+            status: 'unknown',
+          },
+        ],
+        next: {
+          assistantOrdinal: 2,
+          toolOrdinal: 3,
+          retryNoticeOrdinal: 0,
+          turnSeq: 7,
+        },
+        prompt: { ts: 1_700_000_000_000, turnSeq: 0 },
+      });
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-2' });
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Done: 12 files.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      // This run's rows are numbered after the attempt's, so the earlier
+      // attempt's transcript survives the resume.
+      const written = mocks.upsertMessage.mock.calls.map(
+        ([input]) => input.message,
+      );
+      expect(
+        written.some((message) => message.eventId.endsWith(':assistant:2')),
+      ).toBe(true);
+      expect(
+        written.some((message) => /:assistant:[01]$/u.test(message.eventId)),
+      ).toBe(false);
+      expect(
+        written.some((message) => message.eventId.endsWith(':tool:3')),
+      ).toBe(true);
+      // The prompt keeps the attempt's place and time; everything new lands
+      // after the attempt's rows.
+      const prompt = written.find((message) =>
+        message.eventId.endsWith(':user'),
+      );
+      expect(prompt).toMatchObject({ ts: 1_700_000_000_000, turnSeq: 0 });
+      expect(
+        Math.min(
+          ...written
+            .filter((message) => !message.eventId.endsWith(':user'))
+            .map((message) => message.turnSeq),
+        ),
+      ).toBeGreaterThanOrEqual(7);
+
+      expect(mocks.loadTurnAttempt).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+      );
+      const call = mocks.generateText.mock.calls[0]?.[0];
+      // The attempt is replayed as a transcript, in order, with the call the
+      // process died on given a synthetic lost result that only the model
+      // ever sees.
+      const block = call.prompt.slice(
+        call.prompt.indexOf('<previous_attempt_transcript>'),
+        call.prompt.indexOf('</previous_attempt_transcript>'),
+      );
+      expect(block).toContain('[ASSISTANT]\nStarting on it.');
+      expect(block).toContain('[TOOL_CALL launch_task]');
+      expect(block).toContain('[TOOL_RESULT completed]');
+      expect(block).toContain('task-1');
+      expect(block).toContain('[TOOL_CALL save_memory]');
+      expect(block).toContain(
+        '[TOOL_RESULT lost]\nTool result lost due to restart.',
+      );
+      expect(block.indexOf('[ASSISTANT]')).toBeLessThan(
+        block.indexOf('[TOOL_CALL launch_task]'),
+      );
+      expect(block.indexOf('[TOOL_CALL launch_task]')).toBeLessThan(
+        block.indexOf('[TOOL_CALL save_memory]'),
+      );
+      expect(call.prompt).toContain('Continue from the last entry');
+      // A failed call is replayed with its error so the model can judge a
+      // retry; "failed" is not asserted to mean "had no effect", since a lost
+      // response to a write is recorded the same way.
+      expect(block).toContain('[TOOL_RESULT failed]');
+      expect(block).toContain('Task is not accepting messages yet.');
+      expect(call.prompt).toContain(
+        'read that error before deciding whether to retry',
+      );
+      // The envelope, the transcript block, and the lost-result placeholder
+      // are model input only: no persisted row ever contains them.
+      const persistedTexts = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .flatMap((message) =>
+          (message.contentBlocks ?? []).map(
+            (block: { text?: string }) => block.text ?? '',
+          ),
+        )
+        .join('\n');
+      expect(persistedTexts).not.toContain('lost due to restart');
+      expect(persistedTexts).not.toContain('<previous_attempt_transcript>');
+      expect(persistedTexts).not.toContain('<resumed_turn>');
+      // Nor does the durable history that seeds future cold starts.
+      const historyTexts = JSON.stringify(
+        mocks.appendVisibleMessages.mock.calls.map(([input]) => input.messages),
+      );
+      expect(historyTexts).not.toContain('lost due to restart');
+      expect(historyTexts).not.toContain('previous_attempt_transcript');
+      expect(historyTexts).not.toContain('resumed_turn');
+      expect(call.prompt.indexOf('<previous_attempt_transcript>')).toBeLessThan(
+        call.prompt.indexOf('What does this service do?'),
+      );
+    });
+
+    it('keeps the previous-attempt block bounded however large the attempt was', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        events: [
+          { kind: 'reply', text: 'x'.repeat(50_000) },
+          {
+            kind: 'action',
+            tool: 'create_artifact',
+            arguments: { content: 'y'.repeat(130_000) },
+            status: 'completed',
+            result: 'z'.repeat(5_000),
+          },
+        ],
+        next: {
+          assistantOrdinal: 1,
+          toolOrdinal: 1,
+          retryNoticeOrdinal: 0,
+          turnSeq: 3,
+        },
+        prompt: null,
+      });
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      const call = mocks.generateText.mock.calls[0]?.[0];
+      const start = call.prompt.indexOf('<previous_attempt_transcript>');
+      const end = call.prompt.indexOf('</previous_attempt_transcript>');
+      expect(start).toBeGreaterThan(-1);
+      // Replies and arguments are clipped individually, so the block stays
+      // far under the cap even for a 130 KiB artifact body.
+      expect(end - start).toBeLessThan(12_000 + 200);
+      expect(call.prompt.slice(start, end)).toContain('create_artifact');
+      expect(call.prompt.slice(start, end)).toContain('…');
+    });
+
+    it('adds no attempt block when nothing happened before the interruption', async () => {
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+      const resumed = mocks.generateText.mock.calls[0]?.[0];
+      expect(resumed.prompt).toContain('<resumed_turn>');
+      expect(resumed.prompt).not.toContain('<previous_attempt_transcript>');
+
+      mocks.generateText.mockClear();
+      mocks.loadTurnAttempt.mockClear();
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        durableAdmission,
+      });
+      // A fresh turn has no earlier attempt to load.
+      expect(mocks.loadTurnAttempt).not.toHaveBeenCalled();
     });
 
     it('renews the durable claim alongside the responding lease', async () => {
@@ -4262,7 +5183,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
 
-    it('keeps the retry in process once the turn is no longer replay-safe', async () => {
+    it('rides out the first retry in place after a task launch', async () => {
       vi.useFakeTimers();
       try {
         mocks.generateText
@@ -4508,11 +5429,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('posts a terminal closeout when API shutdown interrupts silent retry backoff', async () => {
+  it('posts nothing when API shutdown cuts off an unadmitted turn during silent retry backoff', async () => {
+    // No durable row (the admission write failed) and no visible retry
+    // notice to correct: there is no restart notice any more, so the turn
+    // ends without a user-facing message.
     const controller = new AbortController();
     const shutdown = new FastAgentProcessShutdownError('SIGTERM');
-    const expectedCloseout =
-      'Roomote restarted while working on this request. Please send it again.';
     const postReply = vi.fn().mockResolvedValue({ messageId: 'closeout-1' });
     const originalSetTimeout = globalThis.setTimeout;
     let shouldAbort = true;
@@ -4539,35 +5461,22 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ).rejects.toBe(shutdown);
 
       expect(mocks.generateText).toHaveBeenCalledOnce();
-      expect(postReply).toHaveBeenCalledOnce();
-      expect(postReply).toHaveBeenCalledWith({
-        purpose: 'closeout',
-        message: expectedCloseout,
-      });
-      const retryWrites = mocks.upsertMessage.mock.calls
-        .map(([input]) => input.message)
-        .filter((message) => message.eventId === '100.2:retry-notice:0');
-      expect(retryWrites.at(-1)).toMatchObject({
-        contentBlocks: [
-          {
-            type: 'text',
-            text: expectedCloseout,
-          },
-        ],
-        metadata: {
-          visibleInTranscript: true,
-          purpose: 'closeout',
-          platformMessageId: 'closeout-1',
-          inferenceRetryNotice: true,
-          inferenceRetryActive: false,
-          interruptionReason: 'api_shutdown',
-        },
-      });
+      expect(postReply).not.toHaveBeenCalled();
+      const persisted = mocks.upsertMessage.mock.calls.map(
+        ([input]) => input.message,
+      );
       expect(
-        mocks.upsertMessage.mock.calls
-          .map(([input]) => input.message.eventId)
-          .filter((eventId) => eventId.startsWith('100.2:assistant:')),
+        persisted.filter((message) =>
+          message.eventId.startsWith('100.2:assistant:'),
+        ),
       ).toHaveLength(0);
+      expect(
+        persisted.some(
+          (message) =>
+            (message.metadata as { purpose?: string } | undefined)?.purpose ===
+            'closeout',
+        ),
+      ).toBe(false);
     } finally {
       timeout.mockRestore();
     }
@@ -4608,13 +5517,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(answer).rejects.toBe(shutdown);
   });
 
-  it('passes image data URLs to the Fast model as image-capable file input', async () => {
+  it('passes image data URLs to the Fast model as file input when it can view images', async () => {
     await answerFastAgentQuestion({
       ...baseParams,
       images: ['data:image/png;base64,aGVsbG8=', 'not-an-image'],
       adapter: callbacks(),
     });
 
+    expect(mocks.resolveImageDelivery).toHaveBeenCalledWith({
+      modality: 'image',
+      modelRole: 'orchestration',
+    });
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.objectContaining({
         files: [
@@ -4623,11 +5536,162 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             url: 'data:image/png;base64,aGVsbG8=',
           },
         ],
-        requiredInputModality: 'image',
       }),
       expect.any(Object),
       expect.any(Object),
     );
+    expect(mocks.generateText.mock.calls[0]?.[0]).not.toHaveProperty(
+      'requiredInputModality',
+    );
+    expect(mocks.generateText.mock.calls[0]?.[0].prompt).not.toContain(
+      'inspect_images',
+    );
+  });
+
+  it('keeps the orchestration model and inspects images through a helper model when it cannot view them', async () => {
+    mocks.resolveImageDelivery.mockResolvedValue({
+      delivery: 'helper',
+      model: 'openrouter/openai/gpt-5.4',
+      helperModel: 'openrouter/google/gemini-3.8-flash',
+      helperReasoningEffort: 'low',
+    });
+    mocks.generateHelperText.mockResolvedValue(
+      'A settings page with a red error banner reading "Review check failed".',
+    );
+    let inspection: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        inspection = await invokeTool(nativeToolNames.inspectImages, {
+          question: 'What does the screenshot show?',
+          imageIds: null,
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The screenshot shows a failed review check.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      images: [
+        'data:image/png;base64,aGVsbG8=',
+        'data:image/jpeg;base64,d29ybGQ=',
+      ],
+      adapter: callbacks(),
+    });
+
+    const promptParams = mocks.generateText.mock.calls[0]?.[0];
+    expect(promptParams).not.toHaveProperty('files');
+    expect(promptParams.prompt).toContain(
+      'Image attachments: image-1 (image/png), image-2 (image/jpeg)',
+    );
+    expect(promptParams.prompt).toContain('inspect_images');
+    expect(inspection).toEqual({
+      success: true,
+      imageIds: ['image-1', 'image-2'],
+      observations:
+        'A settings page with a red error banner reading "Review check failed".',
+    });
+    expect(mocks.generateHelperText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surface: 'fast_agent_image_inspection',
+        userId: 'user-1',
+        fastConversationId: 'conversation-1',
+        model: 'openrouter/google/gemini-3.8-flash',
+        reasoningEffort: 'low',
+        requiredInputModality: 'image',
+        files: [
+          { mime: 'image/png', url: 'data:image/png;base64,aGVsbG8=' },
+          { mime: 'image/jpeg', url: 'data:image/jpeg;base64,d29ybGQ=' },
+        ],
+      }),
+    );
+    expect(mocks.generateHelperText.mock.calls[0]?.[0].prompt).toContain(
+      'What does the screenshot show?',
+    );
+  });
+
+  it('rejects unknown attachment IDs passed to inspect_images', async () => {
+    mocks.resolveImageDelivery.mockResolvedValue({
+      delivery: 'helper',
+      model: 'openrouter/openai/gpt-5.4',
+      helperModel: 'openrouter/google/gemini-3.8-flash',
+    });
+    let inspection: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        inspection = await invokeTool(nativeToolNames.inspectImages, {
+          question: 'Describe it.',
+          imageIds: ['image-9'],
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Done.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      images: ['data:image/png;base64,aGVsbG8='],
+      adapter: callbacks(),
+    });
+
+    expect(inspection).toEqual({
+      success: false,
+      error: expect.stringContaining('Unknown image attachment ID(s): image-9'),
+    });
+    expect(mocks.generateHelperText).not.toHaveBeenCalled();
+  });
+
+  it('tells the model no image-capable model exists instead of failing the turn', async () => {
+    mocks.resolveImageDelivery.mockRejectedValue(
+      new NonTaskInputModalityUnsupportedError('image'),
+    );
+    let inspection: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        inspection = await invokeTool(nativeToolNames.inspectImages, {
+          question: 'Describe it.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I could not view the image.',
+        });
+        return '';
+      },
+    );
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        images: ['data:image/png;base64,aGVsbG8='],
+        adapter: callbacks(),
+      }),
+    ).resolves.toBe('I could not view the image.');
+
+    const promptParams = mocks.generateText.mock.calls[0]?.[0];
+    expect(promptParams).not.toHaveProperty('files');
+    expect(promptParams.prompt).toContain(
+      'No configured model accepts image input',
+    );
+    expect(inspection).toEqual({
+      success: false,
+      error: expect.stringContaining('No configured model accepts image input'),
+    });
+    expect(mocks.generateHelperText).not.toHaveBeenCalled();
   });
 
   it('still answers when the canonical user prompt cannot persist', async () => {

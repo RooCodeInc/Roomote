@@ -116,18 +116,16 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
 - mention the bot in a thread reply to start work in that same thread (Slack-
   style), with earlier thread messages and supported attachments as context
 - send the bot a direct message
-- use `/new request:<request>` to force a fresh task instead of continuing the
-  current one
+- use `/new request:<request>` in a server channel or thread to open a fresh
+  conversation in its own thread instead of continuing the current one; in a
+  DM, `/new` sends the request into the DM conversation
 - use `/goal objective:<objective>` to keep working toward an objective across
   multiple turns in an active task thread or DM; this does not create a new task
-- ordinary Discord DMs, mentions, and eligible thread replies from your linked
-  account are always answered in Fast mode, which can delegate repository work
-  into tasks
-- replies in a Fast-owned DM or thread continue that Fast session; replies in
-  an existing task-only conversation continue or resume the task
-- when Roomote asks where to run a task, use a button or reply naturally in the
-  same thread or DM; `yes`, `never mind`, and `use API instead` confirm, cancel,
-  or revise the pending route
+- Discord DMs, mentions, attachments, and eligible thread replies from your
+  linked account always enter a Fast Session, which answers directly or
+  delegates repository work into tasks
+- replies in a Fast-owned DM or thread continue that Session; replies in an
+  existing task conversation continue or resume the task
 - reply naturally inside a task thread, forum post, or DM to continue it
   (same Slack-style rules: after someone else posts or is @mentioned in the
   thread since Roomote's last reply, tag Roomote again to keep going)

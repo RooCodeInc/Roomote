@@ -16,7 +16,9 @@ import {
   upsertFastAgentMessage,
 } from '@roomote/cloud-agents/server';
 import {
+  buildFastAgentArtifactCreator,
   buildFastAgentSurfaceReplyDelivery,
+  createFastAgentSessionArtifact,
   persistFastAgentInlineHumanTurn,
   resolveUserMcpServerConfigs,
   wakeFastAgentParentEventAt,
@@ -26,16 +28,14 @@ import {
 import {
   and,
   db,
+  ensureSessionForFastConversation,
   eq,
   fastAgentConversations,
   fastAgentMessages,
   getSessionForFastConversation,
-  isNull,
   retireCanonicalPrReviewActionsForDestinationKey,
   sessions,
-  sessionTasks,
   sql,
-  taskRuns,
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
@@ -61,13 +61,13 @@ import {
   getFastSessionTasks,
   updateFastSessionPrReviewOfferStatus,
 } from '@/lib/server/fast-sessions';
-import { getArtifactBuildParentSession } from '@/lib/server/sessions';
 import { handleWebPrReviewAction } from '@/lib/server/pr-review-actions';
 import {
   currentEpochSeconds,
   signArtifactId,
 } from '@/lib/server/artifact-signature';
-import { notifySourceTaskArtifactBuild } from '../task-runs';
+import type { PinnedFastSessionLaunchInput } from './input';
+import { startPinnedFastSessionLaunch } from './pinned-launch';
 
 const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
 
@@ -150,8 +150,6 @@ type WebFastAgentTurnInput = {
   skipIfEventExists?: {
     conversationId: string;
     eventId: string;
-    artifactBuildLaunchId?: string;
-    artifactBuildSessionId?: string;
   };
   /** Skip an idempotent platform turn only after it has a durable terminal
    * response. The synthetic prompt is deliberately not a completion marker:
@@ -161,21 +159,6 @@ type WebFastAgentTurnInput = {
   setupSession?: boolean;
   adapterExtensions?: Partial<FastAgentTurnAdapter>;
 };
-
-function findArtifactBuildTask(sessionId: string, launchId: string) {
-  return db
-    .select({ taskId: sessionTasks.taskId })
-    .from(sessionTasks)
-    .innerJoin(taskRuns, eq(taskRuns.taskId, sessionTasks.taskId))
-    .where(
-      and(
-        eq(sessionTasks.sessionId, sessionId),
-        sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${`artifact-build:${launchId}`}`,
-        isNull(taskRuns.canceledAt),
-      ),
-    )
-    .limit(1);
-}
 
 async function hasCompletedWebFastAgentTurn(input: {
   conversationId: string;
@@ -253,29 +236,10 @@ async function runWebFastAgentTurn({
         )
         .limit(1);
       if (existingEvent) {
-        if (skipIfEventExists.artifactBuildLaunchId) {
-          const [existingTask] = skipIfEventExists.artifactBuildSessionId
-            ? await findArtifactBuildTask(
-                skipIfEventExists.artifactBuildSessionId,
-                skipIfEventExists.artifactBuildLaunchId,
-              )
-            : [];
-          if (!existingTask) {
-            console.log(
-              `[Fast Web] Recovering incomplete turn for ${conversation.conversationId}: event ${skipIfEventExists.eventId} exists without an attached task.`,
-            );
-          } else {
-            console.log(
-              `[Fast Web] Skipping duplicate turn for ${conversation.conversationId}: event ${skipIfEventExists.eventId} already launched task ${existingTask.taskId}.`,
-            );
-            return;
-          }
-        } else {
-          console.log(
-            `[Fast Web] Skipping duplicate turn for ${conversation.conversationId}: event ${skipIfEventExists.eventId} already ran.`,
-          );
-          return;
-        }
+        console.log(
+          `[Fast Web] Skipping duplicate turn for ${conversation.conversationId}: event ${skipIfEventExists.eventId} already ran.`,
+        );
+        return;
       }
     }
 
@@ -289,10 +253,13 @@ async function runWebFastAgentTurn({
     }
 
     const turnMessageId = currentMessageId ?? `web-${randomUUID()}`;
-    // Durable admission: a human web turn is persisted under this process's
-    // claim before it runs, so an interruption hands it to the queue.
+    // Durable admission: a web turn is persisted under this process's claim
+    // before it runs, so an interruption hands it to the queue. Platform
+    // events ride the same row with their framing recorded; the ones that
+    // need adapter extensions or a setup snapshot cannot be rebuilt by the
+    // queue and stay process-bound.
     const durableTurn =
-      durableSessionId && !platformEventKind
+      durableSessionId && !adapterExtensions && !setupSnapshot
         ? await persistFastAgentInlineHumanTurn({
             parent: { sessionId: durableSessionId, conversation },
             event: {
@@ -303,6 +270,16 @@ async function runWebFastAgentTurn({
               question,
               ...(images?.length ? { images } : {}),
               ...(senderDisplayName ? { senderDisplayName } : {}),
+              ...(turnSource === 'platform_event'
+                ? {
+                    turnSource,
+                    ...(platformEventKind ? { platformEventKind } : {}),
+                    ...(platformEventVisibility
+                      ? { platformEventVisibility }
+                      : {}),
+                  }
+                : {}),
+              ...(setupSession ? { setupSession: true } : {}),
             },
           }).catch((error) => {
             console.error(
@@ -329,6 +306,10 @@ async function runWebFastAgentTurn({
       currentMessageId: turnMessageId,
       signal: release.signal,
       ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
+      // A row admission found still pending is an interrupted earlier
+      // attempt (a kickoff re-scheduled after a restart); run it as a
+      // resumption so recorded actions are not repeated.
+      ...(durableTurn?.resumed ? { resumedAfterInterruption: true } : {}),
       model,
       reasoningEffort,
       senderDisplayName,
@@ -390,116 +371,6 @@ export function scheduleWebFastAgentTurn(input: WebFastAgentTurnInput): void {
   // A detached promise can be suspended between a retry notice and its timer.
   after(() => runWebFastAgentTurn(input));
 }
-type ArtifactBuildInput = {
-  launchId: string;
-  environmentId: string;
-  branch?: string;
-  taskModel: string;
-  sourceArtifactId: string;
-  sourceArtifactPath: string;
-  sourceArtifactVersion: number;
-};
-
-async function startArtifactBuildInParentSession(
-  auth: UserAuthSuccess,
-  input: { text: string; artifactBuild: ArtifactBuildInput },
-): Promise<{ sessionId: string; fastConversationId: string }> {
-  const source = await getArtifactBuildParentSession(
-    auth,
-    input.artifactBuild.sourceArtifactId,
-  );
-  if (!source) {
-    throw new Error('The artifact could not be found.');
-  }
-  if (!source.sessionId) {
-    throw new Error(
-      'The task that created this artifact is not attached to a Session.',
-    );
-  }
-  if (!source.fastConversationId) {
-    throw new Error("This artifact's Session cannot start a delegated task.");
-  }
-  const parentFastConversationId = source.fastConversationId;
-
-  const [existingTask] = await findArtifactBuildTask(
-    source.sessionId,
-    input.artifactBuild.launchId,
-  );
-  if (existingTask) {
-    return {
-      sessionId: source.sessionId,
-      fastConversationId: parentFastConversationId,
-    };
-  }
-
-  const senderDisplayName =
-    getUserDisplayName({ name: auth.name, email: auth.primaryEmail }) ?? null;
-  const delivery = await buildFastAgentSurfaceReplyDelivery({
-    sessionId: parentFastConversationId,
-    userId: auth.userId,
-    senderDisplayName,
-    question: input.text,
-  });
-  if (!delivery) {
-    throw new Error(
-      "This artifact's Session is not connected, so the build cannot be started.",
-    );
-  }
-
-  const launchTask = delivery.adapter.launchTask;
-  const attributedLaunchTask = async (
-    params: Parameters<typeof launchTask>[0],
-  ) => {
-    const result = await launchTask({
-      ...params,
-      environmentId: input.artifactBuild.environmentId,
-      branch: input.artifactBuild.branch,
-      launchIdempotencyKey: `artifact-build:${input.artifactBuild.launchId}`,
-      model: input.artifactBuild.taskModel,
-      parentSessionId: parentFastConversationId,
-    });
-    if (result.success) {
-      try {
-        await notifySourceTaskArtifactBuild({
-          auth,
-          sourceTaskId: source.sourceTaskId,
-          sourceArtifactId: input.artifactBuild.sourceArtifactId,
-          sourceArtifactPath: source.sourceArtifactPath,
-          sourceArtifactVersion: source.sourceArtifactVersion,
-          newTaskId: result.taskId,
-        });
-      } catch (error) {
-        console.error(
-          `[startFastSession] Failed to notify Slack threads for source task ${source.sourceTaskId}: ${formatErrorForLog(error)}`,
-        );
-      }
-    }
-    return result;
-  };
-
-  const currentMessageId = `artifact-build:${input.artifactBuild.launchId}`;
-  scheduleWebFastAgentTurn({
-    userId: auth.userId,
-    delivery: {
-      ...delivery,
-      adapter: { ...delivery.adapter, launchTask: attributedLaunchTask },
-    },
-    question: input.text,
-    ...(senderDisplayName ? { senderDisplayName } : {}),
-    currentMessageId,
-    skipIfEventExists: {
-      conversationId: parentFastConversationId,
-      eventId: `${currentMessageId}:user`,
-      artifactBuildLaunchId: input.artifactBuild.launchId,
-      artifactBuildSessionId: source.sessionId,
-    },
-  });
-
-  return {
-    sessionId: source.sessionId,
-    fastConversationId: parentFastConversationId,
-  };
-}
 export async function startFastSessionCommand(
   auth: UserAuthSuccess,
   input: {
@@ -509,21 +380,21 @@ export async function startFastSessionCommand(
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
     conversationId?: string;
-    artifactBuild?: {
-      launchId: string;
-      environmentId: string;
-      branch?: string;
-      taskModel: string;
-      sourceArtifactId: string;
-      sourceArtifactPath: string;
-      sourceArtifactVersion: number;
-    };
+    pinnedLaunch?: PinnedFastSessionLaunchInput;
   },
-): Promise<{ sessionId: string; fastConversationId?: string }> {
-  if (input.artifactBuild) {
-    return startArtifactBuildInParentSession(auth, {
+): Promise<{
+  sessionId: string;
+  fastConversationId?: string;
+  taskId?: string;
+}> {
+  if (input.pinnedLaunch) {
+    return startPinnedFastSessionLaunch(auth, {
       text: input.text,
-      artifactBuild: input.artifactBuild,
+      images: input.images,
+      attachmentTexts: input.attachmentTexts,
+      model: input.model,
+      reasoningEffort: input.reasoningEffort,
+      pinnedLaunch: input.pinnedLaunch,
     });
   }
 
@@ -541,7 +412,7 @@ export async function startFastSessionCommand(
     model: null,
     reasoningEffort: null,
   });
-  const unifiedSession = await getSessionForFastConversation(db, session.id);
+  const unifiedSession = await ensureSessionForFastConversation(db, session.id);
 
   const kickoffTurnId = input.conversationId
     ? `web-kickoff:${session.id}`
@@ -577,6 +448,12 @@ export async function startFastSessionCommand(
       delivery: {
         conversation,
         adapter: {
+          createArtifact: (artifact) => {
+            return createFastAgentSessionArtifact({
+              sessionId: unifiedSession.id,
+              ...artifact,
+            });
+          },
           launchTask,
           postReply: async () => {},
         },
@@ -672,6 +549,7 @@ export async function startSetupFastSessionCommand(
       delivery: {
         conversation,
         adapter: {
+          createArtifact: buildFastAgentArtifactCreator(session.id),
           launchTask: createFastAgentWebTaskLauncher({
             userId: auth.userId,
             conversation,
@@ -684,6 +562,7 @@ export async function startSetupFastSessionCommand(
       platformEventKind: 'setup',
       platformEventVisibility: 'required',
       currentMessageId: kickoffTurnId,
+      durableSessionId: session.id,
       skipIfTurnCompleted: {
         conversationId: session.id,
         turnId: kickoffTurnId,
@@ -956,22 +835,27 @@ export async function submitFastSessionUserInputCommand(
 
   const scheduleResponseTurn = (answers: AcpRequestUserInputAnswers) => {
     const responseTurnId = `input-response:${input.requestId}`;
+    const conversation =
+      session.surface === 'automation'
+        ? {
+            surface: 'automation' as const,
+            workspaceId: session.workspaceId,
+            conversationId: session.conversationId,
+          }
+        : {
+            surface: 'web' as const,
+            workspaceId: session.userId ?? auth.userId,
+            conversationId: session.conversationId,
+          };
     scheduleWebFastAgentTurn({
       userId: auth.userId,
       delivery: {
-        conversation: {
-          surface: 'web',
-          workspaceId: session.userId,
-          conversationId: session.conversationId,
-        },
+        conversation,
         adapter: {
+          createArtifact: buildFastAgentArtifactCreator(session.id),
           launchTask: createFastAgentWebTaskLauncher({
-            userId: session.userId,
-            conversation: {
-              surface: 'web',
-              workspaceId: session.userId,
-              conversationId: session.conversationId,
-            },
+            userId: auth.userId,
+            conversation,
           }),
           postReply: async () => {},
         },
@@ -984,6 +868,7 @@ export async function submitFastSessionUserInputCommand(
       platformEventKind: 'input_response',
       platformEventVisibility: 'required',
       currentMessageId: responseTurnId,
+      durableSessionId: session.id,
       skipIfTurnCompleted: {
         conversationId: session.id,
         turnId: responseTurnId,

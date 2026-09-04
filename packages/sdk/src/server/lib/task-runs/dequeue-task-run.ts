@@ -568,6 +568,9 @@ export const dequeueTaskRun = async (
         fn: async () =>
           await fetchResolvedRuntimeEnvVars(txResult.envVars, {
             sourceControlProvider: txResult.sourceControlProviders,
+            includeSandboxOpenRouterApiKey: Boolean(
+              txResult.taskRun.payload.environmentId,
+            ),
           }),
       });
     } catch (error) {

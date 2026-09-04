@@ -4,8 +4,28 @@ import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import {
   activeRunStatuses,
   exitedRunStatuses,
-  SANDBOX_SNAPSHOT_EXPIRY_MS,
+  SNAPSHOT_HARD_EXPIRY_MS,
+  SNAPSHOT_PROVIDERS_WITHOUT_APPLICATION_EXPIRY,
 } from '@roomote/types';
+
+export function isSnapshotResumableCondition(
+  columns: {
+    vendor: AnyPgColumn;
+    snapshotCreatedAt: AnyPgColumn;
+  },
+  now = new Date(),
+): SQL {
+  return and(
+    isNotNull(columns.snapshotCreatedAt),
+    or(
+      inArray(columns.vendor, SNAPSHOT_PROVIDERS_WITHOUT_APPLICATION_EXPIRY),
+      gt(
+        columns.snapshotCreatedAt,
+        new Date(now.getTime() - SNAPSHOT_HARD_EXPIRY_MS),
+      ),
+    ),
+  ) as SQL;
+}
 
 export function isTaskRunFollowUpCandidate(
   columns: {
@@ -14,6 +34,7 @@ export function isTaskRunFollowUpCandidate(
     snapshotId: AnyPgColumn;
     snapshotCreatedAt: AnyPgColumn;
     snapshotFailedAt: AnyPgColumn;
+    vendor: AnyPgColumn;
   },
   now = new Date(),
 ): SQL {
@@ -27,10 +48,7 @@ export function isTaskRunFollowUpCandidate(
       isNull(columns.canceledAt),
       isNotNull(columns.snapshotId),
       isNull(columns.snapshotFailedAt),
-      gt(
-        columns.snapshotCreatedAt,
-        new Date(now.getTime() - SANDBOX_SNAPSHOT_EXPIRY_MS),
-      ),
+      isSnapshotResumableCondition(columns, now),
     ),
   ) as SQL;
 }

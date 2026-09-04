@@ -34,7 +34,10 @@ export async function handleLaunchTask(
     return successResult({
       runId: result.runId,
       taskId: result.taskId,
-      message: `Task launched successfully. Task Run ID: ${result.runId}, Task ID: ${result.taskId}`,
+      ...(result.sessionId ? { sessionId: result.sessionId } : {}),
+      message: `Task launched successfully. Task Run ID: ${result.runId}, Task ID: ${result.taskId}${
+        result.sessionId ? `, Session ID: ${result.sessionId}` : ''
+      }`,
     });
   } catch (error) {
     return catchError(error);

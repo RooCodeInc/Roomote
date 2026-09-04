@@ -93,6 +93,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'launch_task.js'),
       'utf8',
     );
+    const createArtifactSource = await readFile(
+      join(toolsDirectory, 'create_artifact.js'),
+      'utf8',
+    );
     const sendTaskMessageSource = await readFile(
       join(toolsDirectory, 'send_task_message.js'),
       'utf8',
@@ -134,7 +138,13 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain('__all_repositories__');
     expect(replySource).toContain('__fast__');
     expect(replySource).toContain('Launchable follow-ups');
+    expect(replySource).toContain(
+      'Never claim an image or screenshot is attached, shown, or included unless this list is non-empty',
+    );
+    expect(replySource).toContain('accessible artifact viewer link');
     expect(launchTaskSource).toContain('model: z.string().min(1)');
+    expect(createArtifactSource).toContain('invoke("create_artifact"');
+    expect(createArtifactSource).toContain('maximum 128 KiB');
     expect(launchTaskSource).toContain('deployment-enabled model ID');
     expect(launchTaskSource).toContain(
       'includeAttachments: z.boolean().optional()',
@@ -228,6 +238,7 @@ describe('Fast native OpenCode tool bridge', () => {
       '*': false,
       task: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.listSkills]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.showWidget]: true,
@@ -238,6 +249,7 @@ describe('Fast native OpenCode tool bridge', () => {
       '*': true,
       task: false,
       roomote_manage_custom_automations: false,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: false,
     });
     for (const rawFilesystemTool of [
       'read',

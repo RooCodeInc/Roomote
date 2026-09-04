@@ -24,6 +24,7 @@ import {
   useGhostSuggestion,
 } from '@/hooks/useGhostSuggestion';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
+import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import {
@@ -94,6 +95,7 @@ interface PromptInputProps {
   showInputMenu?: boolean;
   placeholder?: string;
   hasTransportError?: boolean;
+  autoFocus?: boolean;
 }
 
 export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
@@ -110,6 +112,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       showInputMenu = true,
       placeholder: placeholderProp,
       hasTransportError = false,
+      autoFocus = false,
     },
     ref,
   ) {
@@ -207,6 +210,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     );
 
     const isTaskRunning = taskPhase === 'running';
+    useAutoFocusOnce(textareaRef, autoFocus && connected && !sending);
     const canSteerQueuedMessages =
       isSteerablePhase(taskPhase) &&
       (taskPhase !== 'waiting_for_prompt' || connected);

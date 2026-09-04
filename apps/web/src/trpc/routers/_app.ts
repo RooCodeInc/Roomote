@@ -5,11 +5,11 @@ import {
 } from '@roomote/auth';
 
 import {
+  SLACK_RESOLVE_CHANNELS_MAX_IDS,
   SLACK_RESOLVE_USERS_MAX_IDS,
   ALL_REPOSITORIES,
   FAST_EXECUTION,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
-  launchCodingHarnesses,
   computeProviders,
   environmentConfigSchema,
   workspaceRoutingSettingsSchema,
@@ -25,7 +25,6 @@ import {
   prActions,
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
-  standardTaskSchema,
   taskGoalInputSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
@@ -56,6 +55,7 @@ import {
   listSessionPins,
   markSessionReadCommand,
   sessionIdInputSchema,
+  sessionTimelineInputSchema,
   sessionsListInputSchema,
   setSessionPinned,
   updateSessionMetadata,
@@ -137,7 +137,6 @@ import {
   syncRepositoriesCommand,
 } from '../commands/source-control';
 import {
-  createStandardTaskRunCommand,
   cancelTaskRunCommand,
   retryFailedTaskStartCommand,
   startTaskGoalCommand,
@@ -373,7 +372,6 @@ import {
   listTaskSuggestionsCommand,
   listTaskSuggestionHistoryCommand,
   dismissTaskSuggestionCommand,
-  implementTaskSuggestionCommand,
   triggerTaskSuggestionsCommand,
 } from '../commands/task-suggestions';
 import {
@@ -446,10 +444,6 @@ import {
 import { getSubscriptionProviderUsageCommand } from '../commands/subscription-usage';
 import { getProviderCreditBalancesCommand } from '../commands/provider-credits';
 import {
-  getRouterDebugSettingsCommand,
-  updateRouterDebugSettingsCommand,
-} from '../commands/router-debug';
-import {
   listCustomSkillsCommand,
   searchCustomSkillsCommand,
   setCustomSkillAvailabilityCommand,
@@ -484,7 +478,6 @@ import {
 } from '../commands/product-releases';
 import { getStatuspageIncident } from '@roomote/slack';
 
-const standardTaskPayloadSchema = standardTaskSchema.shape.payload;
 const stateRecordSchema = z.record(z.string());
 
 function assertAdmin(auth: { isAdmin: boolean }) {
@@ -1071,18 +1064,33 @@ export const appRouter = createRouter({
   artifacts: createRouter({
     byPath: protectedProcedure
       .input(
-        z.object({
-          taskId: z.string(),
-          path: z.string(),
-          version: z.number().optional(),
-        }),
+        z
+          .object({
+            taskId: z.string().optional(),
+            sessionId: z.string().uuid().optional(),
+            path: z.string(),
+            version: z.number().optional(),
+          })
+          .refine(
+            (value) => Boolean(value.taskId) !== Boolean(value.sessionId),
+          ),
       )
       .query(({ ctx: { auth }, input }) =>
         getArtifactByPathCommand(auth, input),
       ),
 
     versions: protectedProcedure
-      .input(z.object({ taskId: z.string(), path: z.string() }))
+      .input(
+        z
+          .object({
+            taskId: z.string().optional(),
+            sessionId: z.string().uuid().optional(),
+            path: z.string(),
+          })
+          .refine(
+            (value) => Boolean(value.taskId) !== Boolean(value.sessionId),
+          ),
+      )
       .query(({ ctx: { auth }, input }) =>
         getArtifactVersionsCommand(auth, input),
       ),
@@ -1106,23 +1114,6 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         startTaskGoalCommand(auth, input),
-      ),
-
-    createStandardTask: protectedProcedure
-      .input(
-        z.object({
-          harness: z.enum(launchCodingHarnesses).optional(),
-          model: z.string().trim().min(1).optional(),
-          computeProvider: z.enum(computeProviders).optional(),
-          sourceTaskId: z.string().optional(),
-          sourceArtifactId: z.string().uuid().optional(),
-          sourceArtifactPath: z.string().optional(),
-          sourceArtifactVersion: z.number().int().optional(),
-          payload: standardTaskPayloadSchema,
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        createStandardTaskRunCommand(auth, input),
       ),
 
     cancel: protectedProcedure
@@ -1373,6 +1364,10 @@ export const appRouter = createRouter({
           userIds: z
             .array(z.string().trim().min(1).max(64))
             .max(SLACK_RESOLVE_USERS_MAX_IDS),
+          channelIds: z
+            .array(z.string().trim().min(1).max(64))
+            .max(SLACK_RESOLVE_CHANNELS_MAX_IDS)
+            .optional(),
         }),
       )
       .query(({ ctx: { auth }, input }) =>
@@ -1554,12 +1549,14 @@ export const appRouter = createRouter({
             colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
+            therapistMode: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
-              input.narrationMode !== undefined,
+              input.narrationMode !== undefined ||
+              input.therapistMode !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -2553,26 +2550,6 @@ export const appRouter = createRouter({
     ),
   }),
 
-  routerDebug: createRouter({
-    getSettings: protectedProcedure.query(({ ctx: { auth } }) =>
-      getRouterDebugSettingsCommand(auth),
-    ),
-
-    updateSettings: protectedProcedure
-      .input(
-        z.object({
-          provider: z
-            .enum(['slack', 'teams', 'telegram', 'discord'])
-            .nullable(),
-          channelId: z.string().trim().min(1).max(255).nullable(),
-          disabled: z.boolean(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        updateRouterDebugSettingsCommand(auth, input),
-      ),
-  }),
-
   setup: createRouter({
     status: protectedProcedure.query(({ ctx: { auth } }) =>
       getSetupStatusCommand(auth),
@@ -2915,16 +2892,6 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         dismissTaskSuggestionCommand(auth, input),
       ),
-
-    implement: protectedProcedure
-      .input(
-        z.object({
-          suggestionId: z.string().uuid(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        implementTaskSuggestionCommand(auth, input),
-      ),
   }),
 
   backgroundAgents: automationsRouter,
@@ -3003,9 +2970,9 @@ export const appRouter = createRouter({
         getSessionByIdCommand(auth, input.sessionId),
       ),
     timeline: protectedProcedure
-      .input(sessionIdInputSchema.extend({ since: z.number().optional() }))
+      .input(sessionTimelineInputSchema)
       .query(({ ctx: { auth }, input }) =>
-        getSessionTimeline(auth, input.sessionId, input.since),
+        getSessionTimeline(auth, input.sessionId, input.cursor ?? input.since),
       ),
     forTask: protectedProcedure
       .input(z.object({ taskId: z.string().min(1) }))

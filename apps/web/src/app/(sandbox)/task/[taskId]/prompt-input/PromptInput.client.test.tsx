@@ -420,6 +420,31 @@ describe('PromptInput', () => {
     expect(screen.queryByText('Task status')).not.toBeInTheDocument();
   });
 
+  it('focuses an auto-focus composer once it is connected without stealing focus again', () => {
+    const composer = () => (
+      <>
+        <button type="button">Other control</button>
+        <PromptInput
+          autoFocus
+          onFileSearchOpen={() => {}}
+          onCommandSearchOpen={() => {}}
+        />
+      </>
+    );
+    const { rerender } = render(composer());
+    const textarea = screen.getByPlaceholderText(/Message agent/i);
+
+    expect(textarea).not.toHaveFocus();
+    useSandboxConnectedMock.mockReturnValue(true);
+    rerender(composer());
+    expect(textarea).toHaveFocus();
+
+    const otherControl = screen.getByRole('button', { name: 'Other control' });
+    act(() => otherControl.focus());
+    rerender(composer());
+    expect(otherControl).toHaveFocus();
+  });
+
   it('opens command search when a slash is typed at the start of the prompt', () => {
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({

@@ -48,6 +48,8 @@ type ToolPresentationPhase = 'running' | 'completed' | 'failed';
 
 type ToolData = AcpToolCallPayload | AcpToolResultPayload;
 
+type ToolArguments = Record<string, unknown>;
+
 interface ResolvedToolPresentation {
   identity: {
     providerKind: 'native' | 'mcp';
@@ -84,9 +86,11 @@ const READ_TOOL_NAMES = new Set([
   'read_file',
   'spill_read',
   'load_skill',
+  'inspect_images',
 ]);
 const TASK_TOOL_NAMES = new Set([
   'launch_task',
+  'review_pull_request',
   'retry_task_start',
   'cancel_task',
   'send_task_message',
@@ -162,9 +166,17 @@ export function resolveToolPresentation(
     ? formatToolIdentifier(toolName)
     : sanitizeSandboxPathString(data.title ?? 'Tool');
   const providerLabel =
-    integration?.name ??
-    (serverName ? formatToolIdentifier(serverName) : undefined);
-  const receipt = resolveReceiptLanguage(toolName, phase);
+    serverName === 'roomote' || serverName === 'gbrain'
+      ? undefined
+      : (integration?.name ??
+        (serverName ? formatToolIdentifier(serverName) : undefined));
+  const receipt = resolveReceiptLanguage(
+    toolName,
+    phase,
+    readToolArguments(data),
+    category,
+    serverName,
+  );
   const verb = receipt?.verb ?? (phase === 'running' ? 'Using' : 'Used');
   const object = receipt?.object ?? displayName;
 
@@ -204,6 +216,13 @@ function resolveToolCategory(input: {
   )
     return 'execute';
   if (
+    input.kind === 'memory' ||
+    input.serverName === 'gbrain' ||
+    input.toolName === 'save_memory' ||
+    input.toolName === 'save_task_memory'
+  )
+    return 'memory';
+  if (
     input.kind === 'read' ||
     input.isRead ||
     (input.toolName && READ_TOOL_NAMES.has(input.toolName))
@@ -230,12 +249,6 @@ function resolveToolCategory(input: {
     (input.toolName && COMMUNICATION_TOOL_NAMES.has(input.toolName))
   )
     return 'communication';
-  if (
-    input.kind === 'memory' ||
-    input.serverName === 'gbrain' ||
-    input.toolName === 'save_memory'
-  )
-    return 'memory';
   if (input.kind === 'artifact' || input.toolName === 'manage_artifacts')
     return 'artifact';
   if (input.kind === 'widget' || input.toolName === 'show_widget')
@@ -278,6 +291,9 @@ function resolveToolGroupKey(input: {
 function resolveReceiptLanguage(
   toolName: string | null,
   phase: ToolPresentationPhase,
+  args: ToolArguments | null,
+  category: ToolPresentationCategory,
+  serverName: string | null,
 ): { verb: string; object: string } | null {
   const byPhase = (running: string, completed: string, failed: string) =>
     phase === 'running' ? running : phase === 'failed' ? failed : completed;
@@ -285,49 +301,198 @@ function resolveReceiptLanguage(
   if (toolName === 'launch_task')
     return {
       verb: byPhase('Starting', 'Started', 'Failed to Start'),
-      object: 'Coding Task',
+      object: 'coding task',
+    };
+  if (toolName === 'review_pull_request')
+    return {
+      verb: byPhase('Starting', 'Started', 'Failed to Start'),
+      object: 'code review',
     };
   if (toolName === 'cancel_task')
     return {
       verb: byPhase('Cancelling', 'Cancelled', 'Failed to Cancel'),
-      object: 'Task',
+      object: 'task',
     };
   if (toolName === 'retry_task_start')
     return {
       verb: byPhase('Retrying', 'Retried', 'Failed to Retry'),
-      object: 'Task',
+      object: 'task',
     };
   if (toolName === 'send_task_message')
     return {
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),
-      object: 'Task Message',
+      object: 'message to task',
     };
   if (toolName === 'send_chat_reply')
     return {
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),
-      object: 'Chat Reply',
+      object: 'chat reply',
     };
   if (toolName === 'post_to_channel')
     return {
       verb: byPhase('Posting', 'Posted', 'Failed to Post'),
-      object: 'Channel Message',
+      object: 'message to channel',
     };
-  if (toolName === 'send_chat_reaction_emoji')
+  if (
+    toolName === 'send_chat_reaction' ||
+    toolName === 'send_chat_reaction_emoji'
+  )
     return {
       verb: byPhase('Adding', 'Added', 'Failed to Add'),
-      object: 'Chat Reaction',
+      object: 'chat reaction',
     };
-  if (toolName === 'save_memory')
+  if (
+    toolName === 'save_memory' ||
+    (toolName === 'save_task_memory' && serverName === 'roomote')
+  )
     return {
-      verb: byPhase('Saving', 'Saved', 'Failed to Save'),
-      object: 'Memory',
+      verb: byPhase('Adding', 'Added', 'Failed to Add'),
+      object: memoryObject(args, toolName),
     };
+  if (category === 'memory' && (toolName === 'query' || toolName === 'search'))
+    return {
+      verb: byPhase('Searching', 'Searched', 'Failed to Search'),
+      object: 'my memory',
+    };
+  if (category === 'memory' && toolName === 'entity')
+    return {
+      verb: byPhase('Looking Up', 'Looked Up', 'Failed to Look Up'),
+      object: 'a memory',
+    };
+  if (category === 'memory' && toolName === 'get_page')
+    return {
+      verb: byPhase('Reading', 'Read', 'Failed to Read'),
+      object: 'a memory',
+    };
+  if (category === 'memory' && toolName === 'list_pages')
+    return {
+      verb: byPhase('Listing', 'Listed', 'Failed to List'),
+      object: 'memories',
+    };
+  if (category === 'memory' && toolName === 'synthesize')
+    return {
+      verb: byPhase('Summarizing', 'Summarized', 'Failed to Summarize'),
+      object: 'my memory',
+    };
+  if (category === 'memory' && toolName === 'recall')
+    return {
+      verb: byPhase('Recalling From', 'Recalled From', 'Failed to Recall From'),
+      object: 'my memory',
+    };
+  if (toolName === 'manage_tasks' && serverName === 'roomote')
+    return manageTasksReceipt(args, phase);
   if (toolName === 'find_integration_tools')
     return {
       verb: byPhase('Searching', 'Searched', 'Failed to Search'),
-      object: 'Integration Tools',
+      object: 'integration tools',
+    };
+  if (toolName === 'inspect_images')
+    return {
+      verb: byPhase('Inspecting', 'Inspected', 'Failed to Inspect'),
+      object: 'Images',
     };
   return null;
+}
+
+function readToolArguments(data: ToolData): ToolArguments | null {
+  const rawInput = (data as unknown as Record<string, unknown>).rawInput;
+  if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
+    return null;
+  }
+
+  const input = rawInput as ToolArguments;
+  const nested = input.arguments;
+  return nested && typeof nested === 'object' && !Array.isArray(nested)
+    ? (nested as ToolArguments)
+    : input;
+}
+
+function stringArgument(
+  args: ToolArguments | null,
+  key: string,
+): string | null {
+  const value = args?.[key];
+  if (typeof value !== 'string') return null;
+
+  const normalizedValue = value.replace(/\s+/g, ' ').trim();
+  if (!normalizedValue) return null;
+  return normalizedValue.length > 80
+    ? `${normalizedValue.slice(0, 77).trimEnd()}...`
+    : normalizedValue;
+}
+
+function memoryObject(
+  args: ToolArguments | null,
+  toolName: 'save_memory' | 'save_task_memory',
+): string {
+  const subject = stringArgument(
+    args,
+    toolName === 'save_memory' ? 'memory' : 'outcome',
+  );
+  return subject ? `a memory about ${subject}` : 'a memory';
+}
+
+function manageTasksReceipt(
+  args: ToolArguments | null,
+  phase: ToolPresentationPhase,
+): { verb: string; object: string } | null {
+  const action = stringArgument(args, 'action');
+  const target = stringArgument(args, 'sessionId') ? 'session' : 'task';
+  const byPhase = (running: string, completed: string, failed: string) =>
+    phase === 'running' ? running : phase === 'failed' ? failed : completed;
+
+  const receipts: Record<string, { verb: string; object: string }> = {
+    start: {
+      verb: byPhase('Starting', 'Started', 'Failed to Start'),
+      object: 'session',
+    },
+    search: {
+      verb: byPhase('Searching', 'Searched', 'Failed to Search'),
+      object: 'sessions',
+    },
+    get_summary: {
+      verb: byPhase('Getting', 'Received', 'Failed to Get'),
+      object: `summary from ${target}`,
+    },
+    get_messages: {
+      verb: byPhase('Getting', 'Received', 'Failed to Get'),
+      object: `message from ${target}`,
+    },
+    send_message: {
+      verb: byPhase('Sending', 'Sent', 'Failed to Send'),
+      object: `message to ${target}`,
+    },
+    search_tasks: {
+      verb: byPhase('Searching', 'Searched', 'Failed to Search'),
+      object: 'tasks',
+    },
+    get_compute_logs: {
+      verb: byPhase('Getting', 'Received', 'Failed to Get'),
+      object: 'logs from task',
+    },
+    launch: {
+      verb: byPhase('Starting', 'Started', 'Failed to Start'),
+      object: 'task',
+    },
+    cancel: {
+      verb: byPhase('Cancelling', 'Cancelled', 'Failed to Cancel'),
+      object: 'task',
+    },
+    list_environments: {
+      verb: byPhase('Listing', 'Listed', 'Failed to List'),
+      object: 'environments',
+    },
+    list_models: {
+      verb: byPhase('Listing', 'Listed', 'Failed to List'),
+      object: 'models',
+    },
+    update_models: {
+      verb: byPhase('Updating', 'Updated', 'Failed to Update'),
+      object: 'task model',
+    },
+  };
+
+  return action ? (receipts[action] ?? null) : null;
 }
 
 export function summarizeToolGroup(
