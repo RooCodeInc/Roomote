@@ -16,10 +16,17 @@ import {
 
 import { getVisiblePrimaryNavItems } from '../navigation-items';
 
-export const NavbarDrawer = () => {
+export const NavbarDrawer = ({
+  setupIncomplete = false,
+}: {
+  setupIncomplete?: boolean;
+}) => {
   const pathname = usePathname();
   const { isAdmin } = useAuthorizedUser();
-  const visibleNavItems = getVisiblePrimaryNavItems({ isAdmin });
+  const visibleNavItems = getVisiblePrimaryNavItems({
+    isAdmin,
+    setupIncomplete,
+  });
 
   const [open, setOpen] = useState(false);
   const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);

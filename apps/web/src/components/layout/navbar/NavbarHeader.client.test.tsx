@@ -9,6 +9,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 const state = vi.hoisted(() => ({
   setOpen: vi.fn(),
   user: {},
+  drawerSetupIncomplete: false,
 }));
 
 vi.mock('next/image', () => ({
@@ -57,7 +58,10 @@ vi.mock('../UserMenu', () => ({
 }));
 
 vi.mock('./NavbarDrawer', () => ({
-  NavbarDrawer: () => <div>NavbarDrawer</div>,
+  NavbarDrawer: ({ setupIncomplete }: { setupIncomplete?: boolean }) => {
+    state.drawerSetupIncomplete = setupIncomplete ?? false;
+    return <div>NavbarDrawer</div>;
+  },
 }));
 
 import { NavbarHeader } from './NavbarHeader';
@@ -65,6 +69,7 @@ import { NavbarHeader } from './NavbarHeader';
 describe('NavbarHeader', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    state.drawerSetupIncomplete = false;
   });
 
   it('renders the current Roomote mark in the mobile header', () => {
@@ -83,5 +88,17 @@ describe('NavbarHeader', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 
     expect(state.setOpen).toHaveBeenCalledWith(true);
+  });
+
+  it('passes incomplete setup state to the mobile drawer', () => {
+    render(<NavbarHeader setupIncomplete />);
+
+    expect(state.drawerSetupIncomplete).toBe(true);
+  });
+
+  it('does not link the mobile logo to gated Home during setup', () => {
+    render(<NavbarHeader setupIncomplete />);
+
+    expect(screen.getByAltText('Roomote').closest('a')).toBeNull();
   });
 });

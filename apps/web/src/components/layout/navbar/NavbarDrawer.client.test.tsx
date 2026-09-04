@@ -146,4 +146,15 @@ describe('NavbarDrawer', () => {
       screen.queryByRole('link', { name: /automations/i }),
     ).not.toBeInTheDocument();
   });
+
+  it('hides gated destinations during setup while keeping Settings available', () => {
+    render(<NavbarDrawer setupIncomplete />);
+
+    expect(
+      screen
+        .getAllByRole('link')
+        .map((link) => link.textContent?.trim())
+        .filter(Boolean),
+    ).toEqual(['Sessions', 'Settings']);
+  });
 });

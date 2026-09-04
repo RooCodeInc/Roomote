@@ -51,6 +51,11 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
 
 export function getVisiblePrimaryNavItems(opts: {
   isAdmin: boolean;
+  setupIncomplete?: boolean;
 }): PrimaryNavItem[] {
-  return PRIMARY_NAV_ITEMS.filter((item) => !item.adminOnly || opts.isAdmin);
+  return PRIMARY_NAV_ITEMS.filter(
+    (item) =>
+      (!item.adminOnly || opts.isAdmin) &&
+      (!opts.setupIncomplete || item.href === '/sessions'),
+  );
 }
