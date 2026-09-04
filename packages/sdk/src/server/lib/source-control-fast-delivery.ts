@@ -864,13 +864,10 @@ async function buildAdoFastDelivery(
  *
  * A turn owns one comment: the first reply opens it and later replies append
  * to it by editing in place, so a turn never stacks comments on the
- * discussion. On the discussion's main thread the footer is rendered once, at
- * the bottom, on every edit. Inside a review thread there is no footer: the
- * thread is a conversation about one finding, and the Session link belongs
- * on the top-level comment, not on every reply. A review thread also holds
- * one Roomote comment per human message: a turn that reports on delegated
- * work (`continuesThreadComment`) extends the comment the last human turn
- * opened there instead of adding another.
+ * discussion. The footer is rendered once, at the bottom, on every edit. A
+ * review thread holds one Roomote comment per human message: a turn that
+ * reports on delegated work (`continuesThreadComment`) extends the comment
+ * the last human turn opened there instead of adding another.
  */
 export function buildSourceControlFastAdapter(params: {
   conversation: FastAgentSourceControlConversation;
@@ -905,17 +902,16 @@ export function buildSourceControlFastAdapter(params: {
   const discussion = parseSourceControlFastConversation(params.conversation);
   const threadId = params.conversation.replyTarget.threadId;
   const threaded = Boolean(discussion?.reviewCommentId && threadId);
-  const footer =
-    discussion && !threaded
-      ? buildFastSessionReplyFooterText({
-          provider: discussion.provider,
-          sessionId: params.sessionId,
-        })
-      : null;
+  const footer = discussion
+    ? buildFastSessionReplyFooterText({
+        provider: discussion.provider,
+        sessionId: params.sessionId,
+      })
+    : '';
   const quote = threaded ? null : params.quote;
   let turnComment: SourceControlPostedComment | null = null;
   let turnBody = '';
-  const renderBody = () => (footer ? `${turnBody}\n\n${footer}` : turnBody);
+  const renderBody = () => `${turnBody}\n\n${footer}`;
   const editorFor = (messageId: string): SourceControlPostedComment => ({
     messageId,
     ...(params.delivery.updateCommentById && discussion
