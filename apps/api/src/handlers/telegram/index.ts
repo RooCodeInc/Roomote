@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 
 import {
   queueCommunicationMessage,
+  queueCommunicationMessageOnce,
   setLatestInboundMessageId,
 } from '@roomote/communication/messages';
 import {
@@ -712,7 +713,11 @@ telegram.post('/', async (c) => {
       runId: activeRun.id,
       senderUserId: queuedMessage.userId,
     });
-    await queueCommunicationMessage('telegram', activeRun.id, queuedMessage);
+    await queueCommunicationMessageOnce(
+      'telegram',
+      activeRun.id,
+      queuedMessage,
+    );
     // A typed reply supersedes any pending PR review offers in the chat.
     retireTelegramPrReviewOffersBestEffort({
       chatId: conversation.chatId,

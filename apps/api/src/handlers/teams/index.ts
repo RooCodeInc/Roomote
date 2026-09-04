@@ -18,7 +18,10 @@ import {
   parseTeamsActivity,
   teamsActivityToQueuedCommunicationMessage,
 } from '@roomote/communication/teams-activity';
-import { queueCommunicationMessage } from '@roomote/communication/messages';
+import {
+  queueCommunicationMessage,
+  queueCommunicationMessageOnce,
+} from '@roomote/communication/messages';
 import {
   buildAccountLinkPromptText,
   buildAccountLinkThreadReplyText,
@@ -2534,7 +2537,14 @@ teams.post('/', async (c) => {
     outOfBandClaim = attached.claim;
   }
   try {
-    await queueCommunicationMessage('teams', activeRun.id, activeFollowUp);
+    const queued = await queueCommunicationMessageOnce(
+      'teams',
+      activeRun.id,
+      activeFollowUp,
+    );
+    if (!queued) {
+      await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+    }
   } catch (error) {
     await releaseCommunicationOutOfBandClaim(outOfBandClaim);
     throw error;

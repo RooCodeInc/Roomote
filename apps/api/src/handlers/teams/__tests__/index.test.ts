@@ -24,6 +24,7 @@ const {
   redisDelMock,
   redisGetMock,
   queueCommunicationMessageMock,
+  queueCommunicationMessageOnceMock,
   redisSetMock,
   routeTaskMock,
   launchClaimedTeamsSuggestionMock,
@@ -84,6 +85,7 @@ const {
   redisDelMock: vi.fn(),
   redisGetMock: vi.fn(),
   queueCommunicationMessageMock: vi.fn(),
+  queueCommunicationMessageOnceMock: vi.fn(),
   redisSetMock: vi.fn(),
   routeTaskMock: vi.fn(),
   launchClaimedTeamsSuggestionMock: vi.fn(),
@@ -268,6 +270,7 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/communication/messages', () => ({
   queueCommunicationMessage: queueCommunicationMessageMock,
+  queueCommunicationMessageOnce: queueCommunicationMessageOnceMock,
 }));
 
 vi.mock('@roomote/communication/teams-provider', () => ({
@@ -406,6 +409,7 @@ describe('Teams webhook handler', () => {
       payload: {},
     });
     queueCommunicationMessageMock.mockResolvedValue(undefined);
+    queueCommunicationMessageOnceMock.mockResolvedValue(true);
     claimPendingOutOfBandMock.mockResolvedValue([]);
     releaseClaimedOutOfBandMock.mockResolvedValue(undefined);
     buildTeamsRoutingContextMock.mockResolvedValue({ context: true });
@@ -506,7 +510,7 @@ describe('Teams webhook handler', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'teams',
       77,
       expect.objectContaining({
@@ -810,15 +814,19 @@ describe('Teams webhook handler', () => {
       'NX',
     );
     expect(findFirstMock).toHaveBeenCalled();
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith('teams', 77, {
-      provider: 'teams',
-      text: 'continue',
-      user: 'Ada Lovelace',
-      userId: 'mapped-user-1',
-      ts: 'activity-2',
-      channel: '19:conversation@thread.v2',
-      threadTs: 'activity-root',
-    });
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
+      'teams',
+      77,
+      {
+        provider: 'teams',
+        text: 'continue',
+        user: 'Ada Lovelace',
+        userId: 'mapped-user-1',
+        ts: 'activity-2',
+        channel: '19:conversation@thread.v2',
+        threadTs: 'activity-root',
+      },
+    );
     expect(setTrustedRunActingUserMock).toHaveBeenCalledWith({
       runId: 77,
       userId: 'mapped-user-1',
@@ -830,7 +838,7 @@ describe('Teams webhook handler', () => {
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
     });
-    queueCommunicationMessageMock.mockRejectedValueOnce(
+    queueCommunicationMessageOnceMock.mockRejectedValueOnce(
       new Error('database unavailable'),
     );
 
@@ -845,6 +853,30 @@ describe('Teams webhook handler', () => {
 
     expect(response.status).toBe(500);
     expect(redisDelMock).toHaveBeenCalledWith('teams:activity:activity-2');
+  });
+
+  it('acks a retried active-run activity already queued by message id', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    queueCommunicationMessageOnceMock.mockResolvedValueOnce(false);
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(createTeamsActivity()),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: true,
+      runId: 77,
+    });
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledTimes(1);
   });
 
   it('continues the bound Fast session before ordinary Teams task routing', async () => {
@@ -1041,15 +1073,19 @@ describe('Teams webhook handler', () => {
       runId: 77,
     });
     expect(enqueueTaskMock).not.toHaveBeenCalled();
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith('teams', 77, {
-      provider: 'teams',
-      text: 'keep going',
-      user: 'Ada Lovelace',
-      userId: 'mapped-user-1',
-      ts: 'activity-followup',
-      channel: '19:conversation@thread.v2;messageid=activity-root',
-      threadTs: 'activity-root',
-    });
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
+      'teams',
+      77,
+      {
+        provider: 'teams',
+        text: 'keep going',
+        user: 'Ada Lovelace',
+        userId: 'mapped-user-1',
+        ts: 'activity-followup',
+        channel: '19:conversation@thread.v2;messageid=activity-root',
+        threadTs: 'activity-root',
+      },
+    );
   });
 
   it('ignores bot-authored Teams message activities before queueing or launching', async () => {
@@ -1132,7 +1168,7 @@ describe('Teams webhook handler', () => {
       ],
       { serviceUrl: 'https://smba.trafficmanager.net/amer/' },
     );
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'teams',
       77,
       expect.objectContaining({
@@ -1211,7 +1247,7 @@ describe('Teams webhook handler', () => {
       queued: true,
       runId: 77,
     });
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'teams',
       77,
       expect.objectContaining({
@@ -1261,7 +1297,7 @@ describe('Teams webhook handler', () => {
         threadId: 'activity-root',
       }),
     );
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'teams',
       77,
       expect.objectContaining({
@@ -1311,15 +1347,19 @@ describe('Teams webhook handler', () => {
         }),
       }),
     );
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith('teams', 77, {
-      provider: 'teams',
-      text: 'continue',
-      user: 'Ada Lovelace',
-      userId: 'microsoft-user-1',
-      ts: 'activity-2',
-      channel: '19:conversation@thread.v2',
-      threadTs: 'activity-root',
-    });
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
+      'teams',
+      77,
+      {
+        provider: 'teams',
+        text: 'continue',
+        user: 'Ada Lovelace',
+        userId: 'microsoft-user-1',
+        ts: 'activity-2',
+        channel: '19:conversation@thread.v2',
+        threadTs: 'activity-root',
+      },
+    );
     expect(setTrustedRunActingUserMock).toHaveBeenCalledWith({
       runId: 77,
       userId: 'microsoft-user-1',
@@ -1355,7 +1395,7 @@ describe('Teams webhook handler', () => {
       runId: 77,
     });
     expect(authAccountsFindManyMock).not.toHaveBeenCalled();
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'teams',
       77,
       expect.objectContaining({
@@ -1400,7 +1440,7 @@ describe('Teams webhook handler', () => {
     expect(insertOnConflictDoNothingMock).toHaveBeenCalledWith({
       target: 'userId',
     });
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'teams',
       77,
       expect.objectContaining({
