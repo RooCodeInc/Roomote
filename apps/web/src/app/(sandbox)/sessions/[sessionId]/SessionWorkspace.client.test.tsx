@@ -16,6 +16,7 @@ import {
   type SessionInfo,
 } from './SessionWorkspace';
 import {
+  useOpenSessionArtifactViewer,
   useOpenSessionTaskPanel,
   useOpenSessionTasksPanel,
   useSessionRunningTaskCount,
@@ -314,6 +315,25 @@ function OpenNestedTask() {
   return (
     <button type="button" onClick={() => openTaskPanel?.('child-1')}>
       Open child
+    </button>
+  );
+}
+
+function OpenSessionArtifact() {
+  const openArtifactViewer = useOpenSessionArtifactViewer();
+
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        openArtifactViewer?.({
+          owner: { sessionId: 'session-1' },
+          path: 'notes/decision.md',
+          version: 1,
+        })
+      }
+    >
+      Open decision link
     </button>
   );
 }
@@ -879,6 +899,39 @@ describe('SessionWorkspace', () => {
     expect(
       screen.getByRole('button', { name: 'Open Decision from Session' }),
     ).toBeVisible();
+  });
+
+  it('opens a transcript artifact link in the side panel and backs out to the gallery', async () => {
+    artifactQueryState.dataByPath['session-1:notes/decision.md'] = {
+      id: 'session-artifact',
+      taskId: null,
+      sessionId: 'session-1',
+      path: 'notes/decision.md',
+      version: 1,
+      artifactType: 'general',
+      contentType: 'text/markdown',
+      size: 100,
+      createdAt: new Date('2026-01-05T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/session-artifact/download',
+    };
+    renderWorkspace({ isMobile: false, children: <OpenSessionArtifact /> });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open decision link' }));
+
+    expect(screen.getByRole('heading', { name: 'Decision' })).toBeVisible();
+    expect(
+      await screen.findByText('Artifact preview: notes/decision.md'),
+    ).toBeVisible();
+    expect(artifactQueryInputs).toContainEqual({
+      sessionId: 'session-1',
+      path: 'notes/decision.md',
+      version: 1,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to artifacts' }));
+
+    expect(screen.getByRole('heading', { name: 'Artifacts' })).toBeVisible();
+    expect(screen.getByText('No artifacts in this session yet.')).toBeVisible();
   });
 
   it('shows the artifact gallery when a deep link matches no Session artifact', () => {

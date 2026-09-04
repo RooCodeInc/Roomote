@@ -276,17 +276,31 @@ describe('Fast session queries', () => {
     const expectedImages = [
       `/api/artifacts/${screenshot!.id}/raw?sig=sig-${screenshot!.id}-7200&ts=7200`,
     ];
+    const expectedImageArtifacts = [
+      {
+        url: expectedImages[0],
+        owner: { taskId: task.id },
+        path: 'proof/session.png',
+        version: 1,
+      },
+    ];
     const detail = await getFastSessionById(
       { userId: owner.id, isAdmin: false },
       session.id,
     );
     expect(detail?.messages.map((message) => message.payload)).toEqual([
-      expect.objectContaining({ images: expectedImages }),
+      expect.objectContaining({
+        images: expectedImages,
+        imageArtifacts: expectedImageArtifacts,
+      }),
     ]);
 
     const since = await getFastSessionMessagesSince(session.id, 0);
     expect(since.messages.map((message) => message.payload)).toEqual([
-      expect.objectContaining({ images: expectedImages }),
+      expect.objectContaining({
+        images: expectedImages,
+        imageArtifacts: expectedImageArtifacts,
+      }),
     ]);
   });
 
