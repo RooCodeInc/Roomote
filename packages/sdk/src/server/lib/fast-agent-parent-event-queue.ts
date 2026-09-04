@@ -18,6 +18,7 @@ import {
   lte,
   or,
   recordCustomAutomationRunOutcome,
+  recordSessionWakeupOutcome,
   sql,
   taskRuns,
 } from '@roomote/db/server';
@@ -320,6 +321,22 @@ async function finalizeAutomationLaunch(
   });
 }
 
+async function finalizeScheduledWakeup(
+  event: FastAgentParentEvent,
+  status: 'succeeded' | 'failed',
+  error?: unknown,
+) {
+  if (event.type !== 'scheduled_wakeup') return;
+
+  await recordSessionWakeupOutcome({
+    id: event.wakeupId,
+    status,
+    ...(status === 'failed'
+      ? { error: error instanceof Error ? error.message : String(error) }
+      : {}),
+  });
+}
+
 /** Drain one parent's durable inbox in creation order under one turn lock. */
 export async function drainFastAgentParentEvents(
   request: FastAgentParentEventQueueRequest,
@@ -432,6 +449,7 @@ export async function drainFastAgentParentEvents(
           continue;
         }
         await finalizeAutomationLaunch(row.event, 'succeeded');
+        await finalizeScheduledWakeup(row.event, 'succeeded');
         await markDelivered(row.id);
       } catch (error) {
         if (findFastAgentDurableRetryScheduledError(error)) {
@@ -447,11 +465,13 @@ export async function drainFastAgentParentEvents(
           error instanceof FastAgentParentEventDeliveryError ? error : null;
         if (deliveryError?.replyPosted) {
           await finalizeAutomationLaunch(row.event, 'succeeded');
+          await finalizeScheduledWakeup(row.event, 'succeeded');
           await markDelivered(row.id);
           continue;
         }
         if (deliveryError?.permanent) {
           await finalizeAutomationLaunch(row.event, 'failed', deliveryError);
+          await finalizeScheduledWakeup(row.event, 'failed', deliveryError);
           await markDiscarded(row.id, deliveryError);
           continue;
         }

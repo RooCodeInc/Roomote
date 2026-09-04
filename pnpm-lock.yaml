@@ -1164,6 +1164,12 @@ importers:
       ai:
         specifier: ^6.0.116
         version: 6.0.116(zod@3.25.76)
+      bullmq:
+        specifier: ^5.78.0
+        version: 5.78.0
+      cron-parser:
+        specifier: 5.6.1
+        version: 5.6.1
       dompurify:
         specifier: 3.4.13
         version: 3.4.13

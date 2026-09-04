@@ -145,6 +145,31 @@ In shared Slack and Discord conversations, Fast can stay silent when linked
 participants are talking to each other. A direct reply to Roomote, a mention,
 or a direct message still requires a response.
 
+## Reminders and monitors
+
+A Session can schedule a message to itself. Ask Fast to "remind me in twenty
+minutes", "check every ten minutes whether CI is green", or "every weekday at
+nine, summarize the open pull requests", and it creates a wakeup for that
+Session. When the wakeup fires, Fast picks the conversation back up with its
+full history in context, does what was asked, and replies on the same surface
+the Session lives on: the transcript in the dashboard, or the originating Slack,
+Discord, Teams, or Telegram thread.
+
+A one-shot wakeup is a reminder and always replies. A recurring wakeup is a
+monitor and stays quiet unless it has something to report, such as a change, a
+result, a blocker, or a decision you need to make. When the monitored condition
+resolves, Fast tells you and cancels the wakeup itself. You can also ask Fast to
+list or cancel wakeups at any time; archiving a Session cancels all of its
+wakeups.
+
+Wakeups belong to the conversation and do not require an administrator. A
+Session may hold up to ten active wakeups, intervals range from one minute to
+seven days, and recurring wakeups can be bounded by a run count or an end time.
+Intervals under five minutes must carry one of those bounds. A recurring wakeup
+whose turns fail five times in a row is retired. Deployment-wide recurring work
+that should run outside a conversation or report to a channel is an
+[automation](/automations) instead.
+
 ## Session and execution access
 
 Any signed-in deployment user with a Session link can view its timeline and

@@ -64,6 +64,7 @@ import type {
   environmentRepositoryMappings,
   automations,
   customAutomations,
+  sessionWakeups,
   trackedMessages,
 } from './schema';
 
@@ -624,5 +625,16 @@ export type CustomAutomation = typeof customAutomations.$inferSelect;
 
 export type CreateCustomAutomation = Omit<
   typeof customAutomations.$inferInsert,
+  Timestamp
+>;
+
+/**
+ * session_wakeups
+ */
+
+export type SessionWakeup = typeof sessionWakeups.$inferSelect;
+
+export type CreateSessionWakeup = Omit<
+  typeof sessionWakeups.$inferInsert,
   Timestamp
 >;

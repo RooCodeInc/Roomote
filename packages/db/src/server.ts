@@ -59,6 +59,7 @@ export * from './lib/sync-task-state';
 export * from './lib/cancel-task-run';
 export * from './lib/automations';
 export * from './lib/custom-automations';
+export * from './lib/session-wakeups';
 export * from './lib/background-automation-slack-threads';
 export * from './lib/task-run-events';
 export * from './lib/declarative-environments';
@@ -201,6 +202,8 @@ export {
   fastAgentMessagesRelations,
   fastAgentParentEvents,
   fastAgentParentEventsRelations,
+  sessionWakeups,
+  sessionWakeupsRelations,
   fastAgentProviderMessages,
   fastAgentProviderMessagesRelations,
   fastAgentPrFeedbackDeliveries,

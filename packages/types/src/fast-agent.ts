@@ -223,6 +223,7 @@ export const fastAgentPlatformEventKindSchema = z.enum([
   'automation',
   'setup',
   'input_response',
+  'scheduled_wakeup',
 ]);
 
 export const fastAgentPlatformEventVisibilitySchema = z.enum([

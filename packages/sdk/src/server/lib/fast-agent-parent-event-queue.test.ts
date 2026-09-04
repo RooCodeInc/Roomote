@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => {
     deliver: vi.fn(),
     retryStartup: vi.fn(),
     recordAutomationOutcome: vi.fn(),
+    recordWakeupOutcome: vi.fn(),
     DeliveryError,
   };
 });
@@ -87,6 +88,7 @@ vi.mock('@roomote/db/server', () => ({
   lte: vi.fn((...values: unknown[]) => values),
   or: vi.fn((...values: unknown[]) => values),
   recordCustomAutomationRunOutcome: mocks.recordAutomationOutcome,
+  recordSessionWakeupOutcome: mocks.recordWakeupOutcome,
   sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
     strings: [...strings],
     values,
@@ -347,6 +349,75 @@ describe('Fast parent event durable queue', () => {
     );
   });
 
+  it('records the outcome of a scheduled wakeup turn once delivery settles', async () => {
+    const wakeupEvent = {
+      type: 'scheduled_wakeup' as const,
+      eventId: 'wakeup-1:3',
+      wakeupId: 'wakeup-1',
+      name: 'Check PR #85',
+      prompt: 'Check whether PR #85 merged.',
+      runNumber: 3,
+      maxRuns: null,
+      firedAt: '2026-09-04T17:10:00.000Z',
+      nextRunAt: '2026-09-04T17:20:00.000Z',
+      reportPolicy: 'only_when_notable' as const,
+      createdByUserId: 'user-1',
+    };
+    const row = pendingRow('wakeup-event', wakeupEvent);
+    mocks.findPending
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(undefined);
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    });
+
+    expect(mocks.recordWakeupOutcome).toHaveBeenCalledWith({
+      id: 'wakeup-1',
+      status: 'succeeded',
+    });
+    expect(mocks.recordAutomationOutcome).not.toHaveBeenCalled();
+  });
+
+  it('counts a permanent delivery failure against the scheduled wakeup', async () => {
+    const wakeupEvent = {
+      type: 'scheduled_wakeup' as const,
+      eventId: 'wakeup-1:4',
+      wakeupId: 'wakeup-1',
+      name: 'Check PR #85',
+      prompt: 'Check whether PR #85 merged.',
+      runNumber: 4,
+      maxRuns: null,
+      firedAt: '2026-09-04T17:20:00.000Z',
+      nextRunAt: null,
+      reportPolicy: 'always' as const,
+      createdByUserId: 'user-1',
+    };
+    const row = pendingRow('wakeup-event', wakeupEvent);
+    mocks.findPending
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(undefined);
+    mocks.deliver.mockRejectedValueOnce(
+      new mocks.DeliveryError('parent session missing', {
+        replyPosted: false,
+        permanent: true,
+      }),
+    );
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    });
+
+    expect(mocks.recordWakeupOutcome).toHaveBeenCalledWith({
+      id: 'wakeup-1',
+      status: 'failed',
+      error: 'parent session missing',
+    });
+  });
   it('records success when delivery fails after a reply was posted', async () => {
     const launchClaimedAt = new Date('2026-09-01T15:18:41.782Z');
     const automationEvent = {

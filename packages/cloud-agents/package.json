@@ -79,6 +79,8 @@
     "@roomote/telemetry": "workspace:^",
     "@roomote/types": "workspace:^",
     "ai": "^6.0.116",
+    "bullmq": "^5.78.0",
+    "cron-parser": "5.6.1",
     "dompurify": "3.4.13",
     "jsdom": "26.1.0",
     "jszip": "^3.10.1",

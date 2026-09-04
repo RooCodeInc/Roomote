@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { SESSION_STATUSES } from '@roomote/types';
-import { advanceSessionReadCursor, db } from '@roomote/db/server';
+import {
+  advanceSessionReadCursor,
+  cancelSessionWakeupsForConversation,
+  db,
+} from '@roomote/db/server';
 import { captureEvent } from '@roomote/telemetry/server';
 
 import type { UserAuthSuccess } from '@/types';
@@ -131,6 +135,16 @@ export async function archiveSessionCommand(
     archivedAt: new Date(),
   });
   if (archived) {
+    if (archived.fastConversationId) {
+      // An archived session must not wake itself up later.
+      await cancelSessionWakeupsForConversation(
+        archived.fastConversationId,
+      ).catch((error) => {
+        console.error(
+          `[sessions] Failed to cancel wakeups for archived session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+    }
     void captureEvent('session_archived', {
       userId: auth.userId,
       properties: { surface: 'web', outcome: 'archived' },

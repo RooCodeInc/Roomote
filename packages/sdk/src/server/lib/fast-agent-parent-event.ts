@@ -54,6 +54,7 @@ import {
   exitedRunStatuses,
   type FastAgentConversation,
   type FastAgentHumanFollowUpEvent,
+  type FastAgentScheduledWakeupEvent,
   type FastAgentSourceControlReplyTarget,
   type FastAgentParent,
   type PullRequestStatus,
@@ -167,6 +168,7 @@ export type FastAgentPullRequestContext = {
 
 export type FastAgentParentEvent =
   | FastAgentHumanFollowUpEvent
+  | FastAgentScheduledWakeupEvent
   | {
       type: 'automation_triggered';
       eventId: string;
@@ -368,6 +370,8 @@ export function buildEventClientMessageSeed(
       return `fast-parent-human-follow-up:${event.eventId}`;
     case 'automation_triggered':
       return `fast-parent-automation:${event.eventId}`;
+    case 'scheduled_wakeup':
+      return `fast-parent-wakeup:${event.eventId}`;
     case 'child_message':
       return `fast-parent-child-message:${event.messageId}`;
     case 'artifact_published':
@@ -2190,7 +2194,11 @@ export async function deliverFastAgentParentEventWithLock(
     const parentTurn = await createFastAgentParentTurn({
       parent: params.parent,
       event: params.event,
-      ...(humanFollowUp ? { actorUserId: humanFollowUp.userId } : {}),
+      ...(humanFollowUp
+        ? { actorUserId: humanFollowUp.userId }
+        : params.event.type === 'scheduled_wakeup'
+          ? { actorUserId: params.event.createdByUserId }
+          : {}),
       onReplyPosted: () => {
         replyPosted = true;
       },
@@ -2277,14 +2285,18 @@ export async function deliverFastAgentParentEventWithLock(
         humanFollowUp?.platformEventVisibility ??
         (params.event.type === 'pull_request_feedback' ||
         params.event.type === 'pull_request_conflict_detected' ||
-        params.event.type === 'automation_triggered'
+        params.event.type === 'automation_triggered' ||
+        (params.event.type === 'scheduled_wakeup' &&
+          params.event.reportPolicy === 'always')
           ? 'required'
           : 'optional'),
       platformEventKind:
         humanFollowUp?.platformEventKind ??
         (params.event.type === 'automation_triggered'
           ? 'automation'
-          : 'delegated_task'),
+          : params.event.type === 'scheduled_wakeup'
+            ? 'scheduled_wakeup'
+            : 'delegated_task'),
       automationReport:
         params.event.type === 'task_settled' &&
         Boolean(params.event.customAutomationId),
