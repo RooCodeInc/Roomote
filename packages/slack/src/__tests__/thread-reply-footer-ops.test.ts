@@ -32,6 +32,10 @@ vi.mock('@roomote/redis', () => ({
 vi.mock('../relocate-active-task-cards', () => ({
   relocateSlackThreadActiveTaskCards: mockRelocate,
 }));
+vi.mock('../thread-reply-stream', () => ({
+  beginSlackThreadReplyStream: vi.fn(),
+  endSlackThreadReplyStream: vi.fn(),
+}));
 
 vi.mock('../slack-messages', () => ({
   getSlackThreadReplyFooterMessageTs: mockGetFooterTs,
@@ -44,11 +48,11 @@ vi.mock('../thread-footer', () => ({
 }));
 
 import {
+  finalizeSlackThreadReplyStreamWithFooterText,
   isSlackThreadReplyFooterBlock,
   postSlackThreadMessageWithStickyFooter,
   registerSlackThreadActiveTaskAndMoveFooter,
   removeSlackThreadReplyFooter,
-  updateSlackThreadMessageWithFooterText,
 } from '../thread-reply-footer-ops';
 
 describe('thread-reply-footer-ops', () => {
@@ -289,7 +293,7 @@ describe('thread-reply-footer-ops', () => {
     expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', 'footer-new');
   });
 
-  it('rewrites an existing message into the footer carrier and strips the previous one', async () => {
+  it('finalizes all streamed reply content before relocating cards and posting the footer', async () => {
     const slack = {
       getMessageBlocks: vi.fn().mockResolvedValue([
         { type: 'section', text: { type: 'mrkdwn', text: 'old body' } },
@@ -301,11 +305,12 @@ describe('thread-reply-footer-ops', () => {
       ]),
       updateMessage: vi.fn().mockResolvedValue(true),
       getRawMessage: vi.fn(),
+      postMessage: vi.fn().mockResolvedValue('footer-new'),
       deleteMessage: vi.fn().mockResolvedValue(true),
     };
 
     await expect(
-      updateSlackThreadMessageWithFooterText({
+      finalizeSlackThreadReplyStreamWithFooterText({
         slack,
         channel: 'C1',
         threadTs: '100.000',
@@ -313,6 +318,7 @@ describe('thread-reply-footer-ops', () => {
         text: 'final reply',
         bodyBlocks: [{ type: 'markdown', text: 'final reply' }],
         footerText: 'footer',
+        streamToken: 'stream-token',
       }),
     ).resolves.toBe(true);
 
@@ -321,24 +327,32 @@ describe('thread-reply-footer-ops', () => {
       ts: '333.000',
       message: {
         text: 'final reply',
-        blocks: [
-          { type: 'markdown', text: 'final reply' },
-          expect.objectContaining({
-            type: 'context',
-            block_id: 'roomote_thread_reply_footer',
-          }),
-        ],
+        blocks: [{ type: 'markdown', text: 'final reply' }],
       },
+    });
+    expect(slack.updateMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mockRelocate.mock.invocationCallOrder[0]!,
+    );
+    expect(mockRelocate.mock.invocationCallOrder[0]).toBeLessThan(
+      slack.postMessage.mock.invocationCallOrder[0]!,
+    );
+    expect(slack.postMessage).toHaveBeenCalledWith({
+      channel: 'C1',
+      thread_ts: '100.000',
+      text: 'footer',
+      blocks: [
+        expect.objectContaining({ block_id: 'roomote_thread_reply_footer' }),
+      ],
     });
     // The prior carrier loses its footer and the pointer moves.
     expect(slack.updateMessage).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ ts: '111.000' }),
     );
-    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', '333.000');
+    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', 'footer-new');
   });
 
-  it('takes the footer back off a rewritten message when the pointer cannot be saved', async () => {
+  it('deletes a new footer carrier when its pointer cannot be saved', async () => {
     mockGetFooterTs.mockResolvedValue(null);
     mockSetFooterTs.mockRejectedValue(new Error('redis down'));
     const slack = {
@@ -351,11 +365,14 @@ describe('thread-reply-footer-ops', () => {
         },
       ]),
       updateMessage: vi.fn().mockResolvedValue(true),
+      getRawMessage: vi.fn(),
+      postMessage: vi.fn().mockResolvedValue('footer-new'),
+      deleteMessage: vi.fn().mockResolvedValue(true),
     };
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await expect(
-      updateSlackThreadMessageWithFooterText({
+      finalizeSlackThreadReplyStreamWithFooterText({
         slack,
         channel: 'C1',
         threadTs: '100.000',
@@ -363,15 +380,14 @@ describe('thread-reply-footer-ops', () => {
         text: 'final reply',
         bodyBlocks: [{ type: 'markdown', text: 'final reply' }],
         footerText: 'footer',
+        streamToken: 'stream-token',
       }),
     ).resolves.toBe(true);
 
-    expect(slack.updateMessage).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        ts: '333.000',
-        message: { blocks: [{ type: 'markdown', text: 'final reply' }] },
-      }),
-    );
+    expect(slack.deleteMessage).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: 'footer-new',
+    });
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining('Failed to persist latest footer message ts'),
     );
