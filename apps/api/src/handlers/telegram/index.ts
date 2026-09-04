@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 
 import {
-  queueCommunicationMessage,
   queueCommunicationMessageOnce,
   setLatestInboundMessageId,
 } from '@roomote/communication/messages';
