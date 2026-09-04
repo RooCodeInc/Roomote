@@ -284,6 +284,17 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     expect(failures).toEqual([]);
   });
 
+  it('does not expose kickoffMessage on launch_task', () => {
+    const launchTask = tools.find((tool) => tool.name === 'launch_task');
+    expect(launchTask).toBeDefined();
+    const schema = toOpenCodeJsonSchema(zod, launchTask!.args) as {
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+    expect(schema.properties).not.toHaveProperty('kickoffMessage');
+    expect(schema.required).not.toContain('kickoffMessage');
+  });
+
   it('rejects a bare union or object as args, the shape that broke OpenAI models', () => {
     const { z } = zod;
     const question = z.object({ id: z.string() });

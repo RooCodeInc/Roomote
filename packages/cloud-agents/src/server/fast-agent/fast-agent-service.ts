@@ -411,7 +411,6 @@ const launchTaskArgsSchema = z.object({
   environmentId: z.string().trim().min(1).nullable().optional(),
   model: z.string().trim().min(1).nullable().optional(),
   includeAttachments: z.boolean().optional().default(false),
-  kickoffMessage: z.string().trim().min(1),
 });
 
 const reviewPullRequestArgsSchema = z.object({
@@ -3767,8 +3766,14 @@ export async function answerFastAgentQuestion({
               };
             }
             completedTaskActions.add(signature);
-            let kickoffDelivered = false;
-            const deliverKickoff = async (task: {
+            let preparedTaskLink:
+              | {
+                  taskId: string;
+                  taskUrl?: string;
+                  taskLinkRendered?: boolean;
+                }
+              | undefined;
+            const postTaskLink = async (task: {
               taskId: string;
               taskUrl?: string;
               taskLinkRendered?: boolean;
@@ -3790,26 +3795,21 @@ export async function answerFastAgentQuestion({
                     taskId: task.taskId,
                   })
                 : task.taskUrl;
-              // The delegated task's live Slack card owns the workspace
-              // startup status; the kickoff is a permanent thread message
-              // that nothing can update later, so it must not carry
-              // transient "preparing" copy.
-              const message = [
-                args.kickoffMessage,
-                destinationUrl &&
-                !task.taskLinkRendered &&
-                !args.kickoffMessage.includes(destinationUrl)
-                  ? `[Open in Roomote](${destinationUrl})`
-                  : undefined,
-              ]
-                .filter((part): part is string => Boolean(part))
-                .join('\n\n');
+              if (!destinationUrl || task.taskLinkRendered) return;
               throwIfTurnCancelled();
-              await postReply(
-                { purpose: 'progress', message, kickoff: true },
-                true,
-              );
-              kickoffDelivered = true;
+              try {
+                await postReply(
+                  {
+                    purpose: 'progress',
+                    message: `[Open in Roomote](${destinationUrl})`,
+                  },
+                  true,
+                );
+              } catch (error) {
+                console.warn(
+                  `[Fast Agent] Failed to post task link after launch: ${formatErrorForLog(error)}`,
+                );
+              }
             };
             throwIfTurnCancelled();
             const prompt = args.includeAttachments
@@ -3838,7 +3838,11 @@ export async function answerFastAgentQuestion({
                   .update(signature)
                   .digest('hex')
                   .slice(0, 32)}`,
-                postKickoff: deliverKickoff,
+                // Preserve provider launch preparation and task-card hooks,
+                // but keep fallback link delivery off the startup path.
+                postKickoff: async (task) => {
+                  preparedTaskLink = task;
+                },
               });
             } catch (error) {
               completedTaskActions.delete(signature);
@@ -3854,10 +3858,9 @@ export async function answerFastAgentQuestion({
               currentTasks.set(result.taskId, { taskId: result.taskId });
               if (result.kickoffDelivered) {
                 visibleUpdatePosted = true;
-                substantiveWorkAcknowledged = true;
               }
-              if (!kickoffDelivered && !result.kickoffDelivered) {
-                await deliverKickoff(result);
+              if (!result.kickoffDelivered) {
+                await postTaskLink(preparedTaskLink ?? result);
               }
             }
             return result;
@@ -4809,7 +4812,7 @@ export async function answerFastAgentQuestion({
         }
       } else if (platformEvent && platformEventVisibility === 'required') {
         // A visibility-required platform event promises a closeout even when
-        // an intro ack or launch kickoff already posted a visible update
+        // an opening acknowledgement already posted a visible update
         // (e.g. the setup kickoff ending on an empty terminal response).
         const fallback = 'I will post updates here as this progresses.';
         await postRecordedSystemCloseout(fallback, () =>

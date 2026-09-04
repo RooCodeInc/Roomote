@@ -170,7 +170,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'the first model-selected action must communicate with the user before substantive model-invoked work',
     );
     expect(prompt).toContain(
-      'use `send_chat_reply` with purpose `ack`, or use `launch_task` so its kickoff is posted first',
+      'use `send_chat_reply` with purpose `ack` before calling `launch_task`',
     );
     expect(prompt).toContain(
       'A reaction never satisfies this startup requirement, including an "eyes" reaction',
@@ -180,7 +180,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'A direct closeout or clarification that fully handles the turn is already the first communication',
     );
     expect(prompt).toContain(
-      '`launch_task` may be the first action because its required kickoff is durably posted inside the launch gate before the child becomes runnable',
+      'The acknowledgement streams independently of coding-task startup',
+    );
+    expect(prompt).toContain(
+      'If launch fails, explain the failure through the normal closeout or clarification path',
     );
     expect(prompt).toContain(
       'Before Brain recall, integrations, subagents, task steering, skills, result recovery, widgets, memory, custom automation management, or any other model-invoked work, communicate first',
@@ -291,20 +294,20 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'On a human-authored turn, acknowledge first, then send the instruction immediately',
     );
-    expect(prompt).toContain('kickoffMessage');
+    expect(prompt).toContain('Its "kickoffMessage" should describe the review');
     expect(prompt).toContain('"includeAttachments"');
     expect(prompt).toContain('attachments are not forwarded by default');
     expect(prompt).toContain(
       'supported attachments from the active conversation turn are relevant to that instruction',
     );
     expect(prompt).toContain(
-      '"launch_task" carries its first communication in "kickoffMessage"',
+      'Before "launch_task", acknowledge with `send_chat_reply` so the response can stream before task startup',
     );
     expect(prompt).toContain(
-      'Do not send a separate acknowledgement before it',
+      'Do not restate that acknowledgement after launch',
     );
     expect(prompt).toContain(
-      'The runtime durably posts that kickoff and task link before the child becomes runnable',
+      'The task card or a separate task link keeps the started work associated with this conversation',
     );
     expect(prompt).not.toContain('explaining what is being delegated');
     expect(prompt).toContain('launch multiple independent tasks in one turn');
@@ -432,9 +435,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'Delegated tasks, child or parent runs, queues, steering, routing, environments, and lifecycle states are internal details',
     );
-    expect(prompt).toContain(
-      'details already visible in an automatically posted kickoff or task card',
-    );
+    expect(prompt).toContain('details already visible in a task card');
     expect(prompt).toContain(
       'Surface an execution failure only when it changes the user-visible outcome',
     );
@@ -462,14 +463,14 @@ describe('buildFastAgentSystemPrompt', () => {
       'would this still be useful if the user did not know delegation existed?',
     );
     expect(prompt).toContain(
-      'A launch kickoff is already visible and needs no duplicate launch reply, but it does not suppress later useful updates while work continues',
+      'The opening acknowledgement is already visible and needs no duplicate launch reply, but it does not suppress later useful updates while work continues',
     );
   });
 
-  it('provides repository-focused coding task kickoff guidance', () => {
+  it('provides repository-focused coding task acknowledgement guidance', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
-    expect(prompt).toContain('## Coding Task Kickoffs');
+    expect(prompt).toContain('## Coding Task Acknowledgements');
     expect(prompt).toContain(
       'For repository work, describe the work underway and name the target repository when known',
     );
@@ -643,7 +644,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Preserve concrete findings, blockers, meaningful work milestones, required questions, and brief updates sent after roughly 10 minutes of silence',
     );
     expect(prompt).toContain(
-      'Treat an acknowledgement that repeats the launch kickoff as a duplicate; otherwise ignore only duplicate, lifecycle-only, machinery-only, and routine-log messages',
+      'Treat an acknowledgement that repeats the opening acknowledgement as a duplicate; otherwise ignore only duplicate, lifecycle-only, machinery-only, and routine-log messages',
     );
     expect(prompt).toContain(
       'Child-message events with concrete findings, blockers, meaningful work milestones, required input, or roughly 10 minutes of silence during active work carry useful substance even when expectations have not changed',
