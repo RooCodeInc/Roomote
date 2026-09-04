@@ -139,4 +139,37 @@ describe('TaskPromptInput', () => {
 
     expect(onSubmit).not.toHaveBeenCalled();
   });
+
+  it('shows the live voice toggle only when voice controls are provided', () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(
+      <TaskPromptInput
+        isBusy={false}
+        promptText=""
+        onPromptTextChange={() => {}}
+        onSubmit={() => {}}
+        placeholder="Describe a task"
+      />,
+    );
+    expect(
+      screen.queryByRole('button', { name: /^voice conversation$/i }),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <TaskPromptInput
+        isBusy={false}
+        promptText=""
+        onPromptTextChange={() => {}}
+        onSubmit={() => {}}
+        placeholder="Describe a task"
+        voice={{ active: false, onToggle }}
+        banner={<div data-testid="voice-banner">Listening</div>}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: /^voice conversation$/i }),
+    );
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('voice-banner')).toBeInTheDocument();
+  });
 });

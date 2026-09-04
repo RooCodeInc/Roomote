@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, type Ref } from 'react';
+import { useState, useCallback, useEffect, useRef, type Ref } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
@@ -17,12 +17,19 @@ import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { useStartFastSession } from '@/hooks/task-runs';
+import { useLiveVoice } from '@/hooks/useLiveVoice';
+import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 
-import type { PromptInputMessage } from '@/components/ai-elements';
+import {
+  LiveVoiceStatusBar,
+  type PromptInputMessage,
+} from '@/components/ai-elements';
 import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
 import { useTaskLaunchConfig } from '@/components/tasks/TaskLaunchConfig';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
+/** Opens the new session straight into a voice conversation. */
+const VOICE_AUTOSTART_QUERY = 'voice=1';
 
 type SubmissionSnapshot = {
   description?: string;
@@ -69,13 +76,16 @@ export function NewTaskForm({
   const startFastSessionMutation = useStartFastSession();
 
   const startFastSession = useCallback(
-    async (payload: {
-      text: string;
-      images?: string[];
-      attachmentTexts?: string[];
-      model?: string | null;
-      reasoningEffort?: ReasoningEffort | null;
-    }): Promise<void> => {
+    async (
+      payload: {
+        text: string;
+        images?: string[];
+        attachmentTexts?: string[];
+        model?: string | null;
+        reasoningEffort?: ReasoningEffort | null;
+      },
+      options: { voice?: boolean } = {},
+    ): Promise<void> => {
       // A second submit while the first is in flight would mint a second
       // session and orphan one of them.
       if (startFastSessionMutation.isPending) {
@@ -85,7 +95,11 @@ export function NewTaskForm({
         const { sessionId } =
           await startFastSessionMutation.mutateAsync(payload);
         onTaskStarted?.();
-        router.push(`/sessions/${sessionId}`);
+        router.push(
+          options.voice
+            ? `/sessions/${sessionId}?${VOICE_AUTOSTART_QUERY}`
+            : `/sessions/${sessionId}`,
+        );
       } catch (error) {
         toast.error(
           error instanceof Error
@@ -163,6 +177,61 @@ export function NewTaskForm({
 
   const submitDisabledReason = getTaskLaunchDisabledReason(managedAccess);
 
+  // --- Voice-started sessions ----------------------------------------------
+  // A session needs content to exist, so the composer listens for the first
+  // utterance here, starts the session with it, and hands the conversation
+  // to the session page (which resumes voice and speaks the reply).
+  const voiceEnabled = useVoiceEnabled();
+  const startFastSessionRef = useRef(startFastSession);
+  startFastSessionRef.current = startFastSession;
+  const voiceContextRef = useRef({
+    promptText,
+    model: selectedModelOverrideId,
+    reasoningEffort: selectedReasoningEffort,
+  });
+  voiceContextRef.current = {
+    promptText,
+    model: selectedModelOverrideId,
+    reasoningEffort: selectedReasoningEffort,
+  };
+  const stopLiveVoiceRef = useRef<() => void>(() => undefined);
+
+  const handleVoiceUtterance = useCallback((utterance: string) => {
+    stopLiveVoiceRef.current();
+    const {
+      promptText: typed,
+      model,
+      reasoningEffort,
+    } = voiceContextRef.current;
+    const text = [typed.trim(), utterance.trim()].filter(Boolean).join('\n\n');
+    void startFastSessionRef.current(
+      {
+        text,
+        model,
+        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+      },
+      { voice: true },
+    );
+  }, []);
+
+  const liveVoice = useLiveVoice({
+    onUtterance: handleVoiceUtterance,
+    disabled: isBusy || Boolean(submitDisabledReason),
+  });
+  stopLiveVoiceRef.current = liveVoice.stop;
+  const voiceActive = liveVoice.active || liveVoice.status === 'connecting';
+
+  const handleVoiceToggle = useCallback(() => {
+    if (voiceActive) {
+      liveVoice.stop();
+      return;
+    }
+    void liveVoice.start();
+  }, [liveVoice, voiceActive]);
+
+  // Voice only applies to Fast sessions; an environment launch is a task.
+  const showVoice = voiceEnabled && !environmentIdParam;
+
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
       const text = message.text.trim();
@@ -237,6 +306,22 @@ export function NewTaskForm({
         animateContainer={false}
         submitWithMetaKey={false}
         submitDisabledReason={submitDisabledReason}
+        voice={
+          showVoice
+            ? { active: voiceActive, onToggle: handleVoiceToggle }
+            : undefined
+        }
+        banner={
+          showVoice && liveVoice.status !== 'idle' ? (
+            <LiveVoiceStatusBar
+              status={liveVoice.status}
+              interimTranscript={liveVoice.interimTranscript}
+              thinking={isBusy}
+              error={liveVoice.error}
+              onStop={liveVoice.stop}
+            />
+          ) : null
+        }
         tools={
           <SessionModelSwitcher
             model={selectedModelOverrideId ?? ''}

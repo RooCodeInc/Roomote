@@ -2262,5 +2262,64 @@ describe('FastSessionTranscript', () => {
       expect(screen.getByText('Structured input request')).toBeVisible();
       expect(liveVoiceState.stop).toHaveBeenCalledTimes(1);
     });
+
+    it('auto-starts voice for a session opened from a spoken prompt and speaks the first reply', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      window.history.replaceState(null, '', '/sessions/session-1?voice=1');
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Hey there',
+              ts: 1,
+            }),
+          ]}
+          canReply
+          autoStartVoice
+        />
+      );
+      const { rerender } = render(transcript());
+
+      await waitFor(() =>
+        expect(liveVoiceState.start).toHaveBeenCalledTimes(1),
+      );
+      // The flag is one-shot: a reload must not restart the conversation.
+      expect(window.location.search).toBe('');
+
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      rerender(transcript());
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Hi! What can I do?',
+              ts: 2,
+            }),
+          ],
+        });
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledWith('Hi! What can I do?');
+    });
+
+    it('does not auto-start voice when the deployment has it disabled', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: false });
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+          autoStartVoice
+        />,
+      );
+      await waitFor(() => expect(voiceStatusQuery).toHaveBeenCalled());
+      expect(liveVoiceState.start).not.toHaveBeenCalled();
+    });
   });
 });

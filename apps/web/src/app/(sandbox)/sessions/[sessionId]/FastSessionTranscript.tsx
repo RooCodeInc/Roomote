@@ -41,6 +41,7 @@ import {
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
+import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 import { findSpeakableBoundary } from '@/lib/voice-speech';
 import {
   SessionPromptInput,
@@ -223,6 +224,9 @@ export function pendingResponseReducer(
   };
 }
 
+/** Query param that opens a session straight into a voice conversation. */
+export const VOICE_AUTOSTART_QUERY_PARAM = 'voice';
+
 function ThinkingMessage() {
   return (
     <Message from="assistant" className="chat-reasoning-message">
@@ -290,6 +294,7 @@ export function FastSessionTranscript({
   owner,
   headerExtras,
   timelineExtras,
+  autoStartVoice = false,
 }: {
   sessionId: string;
   initialMessages: FastSessionMessage[];
@@ -304,6 +309,12 @@ export function FastSessionTranscript({
   owner?: TranscriptOwner;
   headerExtras?: ReactNode;
   timelineExtras?: ReactNode;
+  /**
+   * Begin a voice conversation as soon as the page loads: set when the
+   * session was opened from a voice utterance in the new-session composer,
+   * so the first reply is spoken rather than read.
+   */
+  autoStartVoice?: boolean;
 }) {
   const trpcClient = useTRPCClient();
   const openTaskPanel = useOpenSessionTaskPanel();
@@ -745,7 +756,7 @@ export function FastSessionTranscript({
 
   // --- Live voice conversation -------------------------------------------
 
-  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const voiceEnabled = useVoiceEnabled();
   const modelSelectionRef = useRef<SessionModelSelection>({
     model: sessionModel,
     reasoningEffort: sessionReasoningEffort,
@@ -760,21 +771,6 @@ export function FastSessionTranscript({
   const spokenCursorsRef = useRef(new Map<string, number>());
   const pendingUtterancesRef = useRef<string[]>([]);
   const [utteranceQueueVersion, setUtteranceQueueVersion] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    trpcClient.voice.status
-      .query()
-      .then((voiceStatus) => {
-        if (!cancelled) {
-          setVoiceEnabled(voiceStatus.enabled);
-        }
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [trpcClient]);
 
   const enqueueVoiceUtterance = useCallback((text: string) => {
     pendingUtterancesRef.current.push(text);
@@ -889,6 +885,34 @@ export function FastSessionTranscript({
     pendingUtterancesRef.current = [];
     void liveVoice.start();
   }, [liveVoice, messages]);
+
+  // A session opened from a spoken prompt picks the conversation straight
+  // up: voice starts once the deployment confirms it is configured, with no
+  // cutoff so the reply to that first utterance is spoken. The flag is
+  // dropped from the URL so a reload does not restart the conversation.
+  const autoStartedVoiceRef = useRef(false);
+  const startLiveVoiceRef = useRef(liveVoice.start);
+  startLiveVoiceRef.current = liveVoice.start;
+
+  useEffect(() => {
+    if (!autoStartVoice || !voiceEnabled || autoStartedVoiceRef.current) {
+      return;
+    }
+
+    autoStartedVoiceRef.current = true;
+    voiceCutoffTsRef.current = 0;
+    spokenCursorsRef.current.clear();
+    pendingUtterancesRef.current = [];
+    void startLiveVoiceRef.current();
+
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has(VOICE_AUTOSTART_QUERY_PARAM)) {
+        url.searchParams.delete(VOICE_AUTOSTART_QUERY_PARAM);
+        window.history.replaceState(window.history.state, '', url);
+      }
+    }
+  }, [autoStartVoice, voiceEnabled]);
 
   // A structured input request replaces the composer (and with it the voice
   // controls), so end the conversation rather than leaving the microphone
