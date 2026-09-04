@@ -859,6 +859,21 @@ async function buildAdoFastDelivery(
 }
 
 /**
+ * True when a provider rejected a comment edit because the comment is gone.
+ * Every provider client (Octokit's RequestError and the GitLab, Bitbucket,
+ * Gitea, and Azure DevOps API errors) carries the HTTP status on the error.
+ * Anything else (a timeout, a 5xx) is indeterminate: the edit may have
+ * landed, so it must not be answered with a second comment.
+ */
+function isCommentGoneError(error: unknown): boolean {
+  const status =
+    error && typeof error === 'object' && 'status' in error
+      ? (error as { status?: unknown }).status
+      : undefined;
+  return status === 404 || status === 410;
+}
+
+/**
  * The reply surface a Session uses in a discussion: replies post as comments
  * with the Session footer, and tasks launch against the discussion's target.
  *
@@ -1008,10 +1023,11 @@ export function buildSourceControlFastAdapter(params: {
           await turnComment.update(renderBody());
         } catch (error) {
           // The remembered comment can be gone (deleted by its author or a
-          // maintainer) or otherwise uneditable. Treat that as a miss on the
-          // thread record and post this turn's own comment, which replaces
-          // the stale record so later turns stop adopting it.
-          if (!adoptedThreadComment) {
+          // maintainer). Treat that as a miss on the thread record and post
+          // this turn's own comment, which replaces the stale record so
+          // later turns stop adopting it. Any other failure rethrows so the
+          // normal retry path keeps one comment per human turn.
+          if (!adoptedThreadComment || !isCommentGoneError(error)) {
             throw error;
           }
           console.warn(

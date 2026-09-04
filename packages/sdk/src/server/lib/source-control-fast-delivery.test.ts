@@ -601,6 +601,50 @@ describe('GitHub Fast delivery', () => {
     );
   });
 
+  it('rethrows an indeterminate failure on the remembered thread comment instead of posting twice', async () => {
+    const updateReviewComment = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Bad Gateway'), { status: 502 }),
+      );
+    mocks.getInstallationOctokit.mockResolvedValue({
+      rest: {
+        issues: { createComment },
+        pulls: { get: pullsGet, updateReviewComment },
+      },
+      request,
+    });
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+      reviewCommentId: '800',
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    await buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+    }).postReply({ message: 'Rebasing now.' });
+
+    const taskTurn = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+      continuesThreadComment: true,
+    });
+    await expect(
+      taskTurn.postReply({ message: 'Rebased and pushed.' }),
+    ).rejects.toThrow('Bad Gateway');
+
+    // The edit may have landed; no second comment is posted.
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it('opens a new comment for the next human message in the thread', async () => {
     const updateReviewComment = vi.fn().mockResolvedValue({});
     mocks.getInstallationOctokit.mockResolvedValue({
