@@ -1051,7 +1051,10 @@ describe('fetchResolvedRuntimeEnvVars', () => {
       MODAL_TOKEN_SECRET: 'as-secret',
       MODAL_BASE_IMAGE_REF: 'ghcr.io/roocodeinc/roomote-worker:develop',
     });
-    expect(mockResolveComputeProviderEnvValues).toHaveBeenCalledWith('modal');
+    expect(mockResolveComputeProviderEnvValues).toHaveBeenCalledWith(
+      'modal',
+      expect.objectContaining({ runtimeEnv: expect.any(Object) }),
+    );
   });
 
   it('withholds compute config when the environment did not opt in', async () => {

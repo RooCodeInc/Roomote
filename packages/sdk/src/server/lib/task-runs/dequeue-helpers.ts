@@ -39,6 +39,7 @@ import {
   sql,
 } from '@roomote/db/server';
 import { captureTaskSettled } from '@roomote/telemetry/server';
+import { Env } from '@roomote/env';
 import { decryptSecrets } from '@roomote/db/encryption';
 import {
   createTaskRunWorkerGitHubTokenWithMetadata,
@@ -290,9 +291,14 @@ async function resolveNestedComputeEnvVar(
   }
 
   const provider = await resolveDefaultComputeProvider();
+  // The validated Env carries the resolved NODE_ENV/APP_ENV and worker image
+  // that the derived Modal base image depends on; the raw process env does
+  // not, and a missing base image ref would drop the whole forward.
   const nestedComputeEnv = buildNestedComputeEnv({
     provider,
-    resolvedEnvValues: await resolveComputeProviderEnvValues(provider),
+    resolvedEnvValues: await resolveComputeProviderEnvValues(provider, {
+      runtimeEnv: Env,
+    }),
   });
 
   return nestedComputeEnv ? serializeNestedComputeEnv(nestedComputeEnv) : null;
