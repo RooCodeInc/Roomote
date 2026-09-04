@@ -33,8 +33,11 @@ describe('buildSlackLiveTaskCardBlocks', () => {
         taskUrl: 'https://roomote.example/task/task-1',
       });
 
-      expect(blocks[0]).toMatchObject({
+      expect(blocks[0]).toEqual({
         type: 'task_card',
+        block_id: 'roomote-task-task-1-card',
+        task_id: 'roomote-task-task-1',
+        title: 'Fix the button',
         status,
         details: {
           type: 'rich_text',
@@ -69,9 +72,21 @@ describe('buildSlackLiveTaskCardBlocks', () => {
       output: 'Ready for review.',
     });
 
-    expect(blocks[0]).toMatchObject({
+    expect(blocks[0]).toEqual({
+      type: 'task_card',
+      block_id: 'roomote-task-task-1-card',
+      task_id: 'roomote-task-task-1',
+      title: 'Fix the button',
       status: 'complete',
-      details: expect.objectContaining({ type: 'rich_text' }),
+      details: {
+        type: 'rich_text',
+        elements: [
+          {
+            type: 'rich_text_section',
+            elements: [{ type: 'text', text: 'Running the tests.' }],
+          },
+        ],
+      },
       output: {
         type: 'rich_text',
         elements: [

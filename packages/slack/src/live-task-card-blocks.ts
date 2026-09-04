@@ -28,10 +28,15 @@ export interface SlackLiveTaskCardContent {
 }
 
 /**
- * A native `task_card` block in an ordinary message. Unlike streamed
- * task_update chunks (whose details/output/sources only ever append), the
- * whole block is replaced on every chat.update, so the card shows exactly
- * the latest state.
+ * A native `task_card` block in an ordinary message. Slack renders this as
+ * the standard collapsible card regardless of whether `details` or `output`
+ * is present. The compact timeline treatment belongs to `task_update` chunks
+ * sent through chat.startStream with `task_display_mode: "timeline"`; there is
+ * no equivalent display selector on chat.postMessage or chat.update.
+ *
+ * The whole block is replaced on every chat.update, so the card shows exactly
+ * the latest state. Keeping an ordinary message also lets Roomote relocate the
+ * card and reopen it after an input-waiting run resumes.
  *
  * `block_id` is pinned (Slack generates a new one per update otherwise) so
  * the client keeps treating every render as the same block; a changing id
