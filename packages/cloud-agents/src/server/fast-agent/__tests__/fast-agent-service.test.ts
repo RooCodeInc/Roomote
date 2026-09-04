@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
   getUserIdentity: vi.fn(),
+  getTherapistMode: vi.fn(),
   refreshTitle: vi.fn(),
   bindExecutor: vi.fn(),
   bindMcpExecutor: vi.fn(),
@@ -218,6 +219,14 @@ vi.mock('../fast-agent-tasks', () => ({
 vi.mock('../fast-agent-user-identity', () => ({
   getFastAgentUserIdentity: mocks.getUserIdentity,
 }));
+
+vi.mock('../../therapist-mode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../therapist-mode')>();
+  return {
+    ...actual,
+    getTherapistModeEnabledForUser: mocks.getTherapistMode,
+  };
+});
 
 vi.mock('../fast-agent-title', () => ({
   refreshFastAgentSessionTitle: mocks.refreshTitle,
@@ -470,6 +479,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       githubLogin: 'mrubens',
       isAdmin: true,
     });
+    mocks.getTherapistMode.mockResolvedValue(false);
     mocks.classifyInferenceError.mockImplementation((error: unknown) => {
       const detail = error instanceof Error ? error.message.toLowerCase() : '';
 
@@ -527,6 +537,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         });
         return '';
       },
+    );
+  });
+
+  it('applies the current user therapist mode preference to the system prompt', async () => {
+    mocks.getTherapistMode.mockResolvedValueOnce(true);
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.getTherapistMode).toHaveBeenCalledWith('user-1');
+    expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
+      '<therapist_mode>',
     );
   });
 

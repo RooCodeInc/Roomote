@@ -73,6 +73,7 @@ import {
 } from './fast-agent-constants';
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
+import { getTherapistModeEnabledForUser } from '../therapist-mode';
 import {
   appendFastAgentVisibleMessages,
   getActiveFastAgentTasks,
@@ -2424,6 +2425,7 @@ export async function answerFastAgentQuestion({
       session,
       discoveredIntegrations,
       currentUser,
+      therapistModeEnabled,
     ] = await Promise.all([
       getAvailableEnvironments(),
       getDeploymentTaskModelOptions().catch((error) => {
@@ -2457,6 +2459,12 @@ export async function answerFastAgentQuestion({
             );
             return { displayName: null, githubLogin: null, isAdmin: false };
           }),
+      getTherapistModeEnabledForUser(userId).catch((error) => {
+        console.warn(
+          `[Fast Agent] Personal preferences unavailable: ${formatErrorForLog(error)}`,
+        );
+        return false;
+      }),
     ]);
     const availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
@@ -2698,6 +2706,7 @@ export async function answerFastAgentQuestion({
       releaseVersion,
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
+      therapistModeEnabled,
     });
     diagnostics.recordPromptContext({
       systemPromptChars: system.length,
