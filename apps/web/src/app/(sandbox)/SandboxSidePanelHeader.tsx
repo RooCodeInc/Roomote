@@ -57,7 +57,9 @@ export function SandboxSidePanelHeader({
           </div>
         ) : null}
         {titleAdornment ? (
-          <div className="min-w-0 shrink">{titleAdornment}</div>
+          <div className={title ? 'min-w-0 shrink' : 'min-w-0 flex-1'}>
+            {titleAdornment}
+          </div>
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">

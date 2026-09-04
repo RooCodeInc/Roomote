@@ -320,10 +320,12 @@ export function NestedTaskSidePanel({
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="relative -left-2 h-7 min-w-0 gap-1.5 px-2 text-sm hover:text-accent-foreground"
+                  className="relative -left-2 flex h-7 w-full min-w-0 justify-start gap-1.5 px-2 text-sm hover:text-accent-foreground"
                 >
-                  <span className="font-semibold">Task:</span>
-                  <span className="max-w-48 truncate font-medium">{title}</span>
+                  <span className="shrink-0 font-semibold">Task:</span>
+                  <span className="min-w-0 flex-1 truncate text-left font-medium">
+                    {title}
+                  </span>
                   <ChevronDown className="size-3.5 shrink-0" />
                 </Button>
               </DropdownMenuTrigger>
