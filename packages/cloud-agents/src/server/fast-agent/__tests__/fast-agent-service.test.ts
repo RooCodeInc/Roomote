@@ -816,6 +816,54 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('rejects a later human reply that claims a recovered image without its ID', async () => {
+    let missingIdResult: unknown;
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        missingIdResult = await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Attaching the Google screenshot via imageArtifactIds now.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Attaching the Google screenshot via imageArtifactIds now.',
+          imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      question: 'use imageArtifactIds for me to test',
+    });
+
+    expect(missingIdResult).toEqual({
+      success: false,
+      error: expect.stringContaining('supplies no imageArtifactIds'),
+    });
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'Attaching the Google screenshot via imageArtifactIds now.',
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+    const assistantMessages = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .filter(
+        (message) => message.eventType === 'roomote_runtime.assistant_message',
+      );
+    expect(assistantMessages).toHaveLength(1);
+    expect(assistantMessages[0]?.payload).toMatchObject({
+      imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
+    });
+  });
+
   it('reports local storage exhaustion instead of a generic Fast error', async () => {
     const storageError = Object.assign(
       new Error('ENOSPC: no space left on device, write'),

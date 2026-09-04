@@ -227,6 +227,10 @@ export {
   type FastAgentDurableTurn,
   type FastAgentHumanFollowUpAdmission,
 } from './lib/fast-agent-human-follow-up';
+export {
+  resolveFastAgentSessionImages,
+  type FastAgentReplyImage,
+} from './lib/fast-agent-session-images';
 
 export {
   getCommunicationProviderAdapter,

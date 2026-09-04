@@ -31,6 +31,7 @@ import {
   type FastAgentDurableTurn,
   createSlackFastReplyStream,
   recordFastAgentConversationMessageBestEffort,
+  resolveFastAgentSessionImages,
   resolveUserMcpServerConfigs,
 } from '@roomote/sdk/server';
 
@@ -388,6 +389,11 @@ export async function processFastAgentMessage(params: {
                     recipientUserId: event.user,
                     sessionId: session.id,
                     footerContext,
+                    resolveImages: (artifactIds) =>
+                      resolveFastAgentSessionImages({
+                        artifactIds,
+                        sessionId: session.id,
+                      }),
                     onDelivered: () => {
                       didSendVisibleResponse = true;
                     },
@@ -401,7 +407,11 @@ export async function processFastAgentMessage(params: {
                 ),
             }
           : {}),
-        postReply: async ({ message, kickoff }) => {
+        postReply: async ({ message, kickoff, imageArtifactIds = [] }) => {
+          const replyImages = await resolveFastAgentSessionImages({
+            artifactIds: imageArtifactIds,
+            sessionId: session.id,
+          });
           const posted = await postSlackThreadMarkdownMessage({
             slack,
             channel: event.channel,
@@ -414,6 +424,10 @@ export async function processFastAgentMessage(params: {
               source: 'fast_agent',
             },
             fastSessionFooter: { sessionId: session.id, ...footerContext },
+            images: replyImages.map((image) => ({
+              url: image.url,
+              altText: image.altText,
+            })),
           });
           if (posted === 'failed') {
             throw new Error('Slack did not accept the Fast parent reply.');
