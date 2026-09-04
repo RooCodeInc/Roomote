@@ -2262,11 +2262,15 @@ teams.post('/', async (c) => {
       apiLogger.warn(
         `[teams] Fast session ${fastSession.id} could not resolve an active delivery route`,
       );
-      return c.json({
-        ok: true,
-        queued: false,
-        reason: 'fast_session_delivery_unavailable',
-      });
+      await releaseTeamsActivityClaim(queuedMessage.ts).catch(() => {});
+      return c.json(
+        {
+          ok: true,
+          queued: false,
+          reason: 'fast_session_delivery_unavailable',
+        },
+        503,
+      );
     }
     return c.json({ ok: true, fastAnswered: true, fastContinued: true });
   }
