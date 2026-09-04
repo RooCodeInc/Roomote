@@ -155,12 +155,18 @@ export const SideNav = ({
       {/* Logo */}
       {isSideNavExpanded ? (
         <div className="flex w-full items-center justify-between gap-3 px-2 py-1 shrink-0">
-          <Link href="/" className="min-w-0 flex-1">
-            <RoomoteWordmark
-              className="h-7 transition-all duration-300 hover:opacity-80"
-              aria-label="Roomote"
-            />
-          </Link>
+          {setupIncomplete ? (
+            <div className="min-w-0 flex-1">
+              <RoomoteWordmark className="h-7" aria-label="Roomote" />
+            </div>
+          ) : (
+            <Link href="/" className="min-w-0 flex-1">
+              <RoomoteWordmark
+                className="h-7 transition-all duration-300 hover:opacity-80"
+                aria-label="Roomote"
+              />
+            </Link>
+          )}
 
           <Button
             type="button"

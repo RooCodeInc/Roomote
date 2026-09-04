@@ -95,4 +95,10 @@ describe('NavbarHeader', () => {
 
     expect(state.drawerSetupIncomplete).toBe(true);
   });
+
+  it('does not link the mobile logo to gated Home during setup', () => {
+    render(<NavbarHeader setupIncomplete />);
+
+    expect(screen.getByAltText('Roomote').closest('a')).toBeNull();
+  });
 });

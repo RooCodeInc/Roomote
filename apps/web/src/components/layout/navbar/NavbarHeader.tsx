@@ -39,16 +39,27 @@ export const NavbarHeader = ({
       {...props}
     >
       <NavbarDrawer setupIncomplete={setupIncomplete} />
-      <Link href="/" className="shrink-0">
+      {setupIncomplete ? (
         <Image
           src={MOBILE_HEADER_LOGO_SRC}
           alt="Roomote"
           width={28}
           height={28}
           priority
-          className="h-7 w-7 cursor-pointer transition-all duration-300 hover:scale-105 hover:opacity-80 dark:invert"
+          className="h-7 w-7 shrink-0 dark:invert"
         />
-      </Link>
+      ) : (
+        <Link href="/" className="shrink-0">
+          <Image
+            src={MOBILE_HEADER_LOGO_SRC}
+            alt="Roomote"
+            width={28}
+            height={28}
+            priority
+            className="h-7 w-7 cursor-pointer transition-all duration-300 hover:scale-105 hover:opacity-80 dark:invert"
+          />
+        </Link>
+      )}
       <div className="flex-1" />
       <div className="hidden md:flex items-center gap-2">
         <UserMenu />

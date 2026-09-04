@@ -506,4 +506,14 @@ describe('SideNav recent sessions', () => {
       'false',
     );
   });
+
+  it('does not link the expanded wordmark to gated Home during setup', () => {
+    state.isSideNavExpanded = true;
+
+    render(<SideNav setupIncomplete />);
+
+    expect(
+      screen.getByRole('img', { name: 'Roomote' }).closest('a'),
+    ).toBeNull();
+  });
 });
