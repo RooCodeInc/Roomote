@@ -49,6 +49,10 @@ export async function handleGetTaskSummary(
         : null,
       result.taskRunError ? `Error: ${result.taskRunError}` : null,
       getEnvironmentSetupLine(result.environmentSetupState ?? null),
+      ...(result.imageArtifacts ?? []).map(
+        (artifact) =>
+          `Image Artifact: ${artifact.path} [id: ${artifact.id}] [view: ${artifact.viewUrl}]`,
+      ),
     ].filter(Boolean);
 
     return textResult(lines.join('\n'));

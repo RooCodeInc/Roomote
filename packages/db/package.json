@@ -47,7 +47,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@faker-js/faker": "^8.4.1",
+    "@faker-js/faker": "10.5.0",
     "@roomote/config-typescript": "workspace:^",
     "@types/node": "^24.10.13",
     "commander": "^14.0.2",

@@ -3,23 +3,11 @@ import crypto from 'node:crypto';
 import { Hono } from 'hono';
 
 import {
-  type TaskPayload,
-  TaskPayloadKind,
   formatErrorForLog,
   parseAcpRequestUserInputAnswerReply,
-  ALL_REPOSITORIES,
-  populateSnapshotResumeSlackMetadata,
   PRODUCT_NAME,
-  restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
 import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
-import {
-  type RoutingDebugInfo,
-  enqueueTask,
-} from '@roomote/cloud-agents/server';
-import { buildTaskStartingText } from '@roomote/communication/chat-messages';
-import { getRedis } from '@roomote/redis';
-import { postRouterDebugMessage } from '@roomote/slack';
 import {
   db,
   resolveDeploymentEnvVar,
@@ -32,6 +20,8 @@ import {
   getLinearDeploymentMetadata,
   getValidAccessToken,
   LINEAR_USER_CONNECTION_ROLE,
+  resolveLinearAutomationLaunchUserId,
+  startLinearFastSessionTurn,
 } from '@roomote/sdk/server';
 import {
   type AgentSessionEventPayload,
@@ -40,52 +30,18 @@ import {
   createLinearClient,
   LinearClient,
   findActiveLinearTaskRun,
-  findCompletedLinearTaskRunWithSnapshot,
-  queueLinearMessage,
   getPendingLinearRequestUserInput,
   clearPendingLinearRequestUserInput,
   markPendingLinearRequestUserInputSubmitted,
   queueLinearRequestUserInputAnswer,
   cancelLinearTaskRun,
   parseAgentSessionEventPayload,
-  createLinearAgentRun,
-  findPendingSelection,
-  handleElicitationResponse,
-  deletePendingSelection,
   enrichSessionComments,
-  resolveLinearTaskDestination,
-  type CreateLinearAgentRunResult,
-  type LinearWorkspaceSelection,
-  type ResolvedLinearTaskDestination,
 } from '@roomote/linear';
 
 import type { WebhookResponse } from '../../types';
-import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 
 import { recordLinearWebhook } from './recordWebhook';
-
-function describeLinearRunResult(
-  runResult: Exclude<CreateLinearAgentRunResult, { status: 'error' }>,
-): string {
-  return `task run ${runResult.runId}`;
-}
-
-async function updateLinearSessionTaskUrlForDirectLaunch({
-  linearClient,
-  sessionId,
-  runResult,
-}: {
-  linearClient: LinearClient;
-  sessionId: string;
-  runResult: Exclude<CreateLinearAgentRunResult, { status: 'error' }>;
-}): Promise<void> {
-  await linearClient.updateSessionExternalUrls(sessionId, [
-    {
-      label: 'Open task',
-      url: `${Env.R_APP_URL}/task/${runResult.taskId}`,
-    },
-  ]);
-}
 
 /**
  * Get the base URL for auth links.
@@ -113,134 +69,8 @@ function generateAuthToken(): string {
  */
 const AUTH_TOKEN_EXPIRY_MS = 15 * 60 * 1000;
 
-/**
- * Result of workspace mapping that properly distinguishes between
- * repository names and environment IDs.
- */
-type WorkspaceSelection = LinearWorkspaceSelection;
-
-/**
- * Maps an elicitation workspace type + value to the appropriate WorkspaceSelection.
- */
-function mapElicitationWorkspaceToSelection(
-  workspaceType: 'environment' | 'all',
-  value: string,
-): WorkspaceSelection {
-  switch (workspaceType) {
-    case 'environment':
-      return { environmentId: value };
-    case 'all':
-      return { repo: ALL_REPOSITORIES };
-  }
-}
-
-function formatLinearRouterDebugSource(payload: AgentSessionEventPayload) {
-  return `Linear ${payload.agentSession.issue.identifier}`;
-}
-
-function getLinearTaskDescription(payload: AgentSessionEventPayload): string {
-  return (
-    payload.agentSession.issue.description || payload.agentSession.issue.title
-  );
-}
-
-function postLinearFinalRouterDebug({
-  payload,
-  selectedWorkspace,
-  reasoning,
-  routingDebug,
-  routingDurationMs,
-  userRoute,
-}: {
-  payload: AgentSessionEventPayload;
-  selectedWorkspace: { name: string; type: string };
-  reasoning?: string;
-  routingDebug?: RoutingDebugInfo;
-  routingDurationMs?: number;
-  userRoute?: string;
-}) {
-  void postRouterDebugMessage({
-    source: formatLinearRouterDebugSource(payload),
-    taskDescription: getLinearTaskDescription(payload),
-    selectedWorkspace,
-    reasoning: reasoning ?? '',
-    routingDebug,
-    routingDurationMs,
-    userRoute,
-  });
-}
-
-type RoutedLinearTask = ResolvedLinearTaskDestination;
-
-async function startLinearTask({
-  linearClient,
-  payload,
-  userId,
-  routedTask,
-  agentSession,
-}: {
-  linearClient: LinearClient;
-  payload: AgentSessionEventPayload;
-  userId?: string;
-  routedTask: RoutedLinearTask;
-  agentSession: AgentSessionEventPayload['agentSession'];
-}): Promise<WebhookResponse> {
-  const sessionId = payload.agentSession.id;
-
-  await linearClient.emitThought(
-    sessionId,
-    buildTaskStartingText({
-      workspaceDisplayName: routedTask.workspaceDisplayName,
-      kickoffMessage: routedTask.kickoffMessage,
-    }),
-    true,
-  );
-
-  const runResult = await createLinearAgentRun({
-    agentSession,
-    payload,
-    userId,
-    repo: routedTask.workspaceSelection.repo,
-    environmentId: routedTask.workspaceSelection.environmentId,
-  });
-
-  if (runResult.status === 'error') {
-    console.error(
-      `[LinearWebhook] Failed to create task run for session ${sessionId}: ${runResult.message}`,
-    );
-
-    await linearClient.emitError(
-      sessionId,
-      `Failed to start agent: ${runResult.message}`,
-    );
-
-    return { status: 'error', message: runResult.message };
-  }
-
-  postLinearFinalRouterDebug({
-    payload,
-    selectedWorkspace: {
-      name: routedTask.workspaceDisplayName,
-      type: routedTask.workspaceType,
-    },
-    reasoning: routedTask.reasoning,
-    routingDebug: routedTask.routingDebug,
-    routingDurationMs: routedTask.routingDurationMs,
-    userRoute: routedTask.userRoute,
-  });
-
-  await updateLinearSessionTaskUrlForDirectLaunch({
-    linearClient,
-    sessionId,
-    runResult,
-  });
-
-  console.log(
-    `[LinearWebhook] Created ${describeLinearRunResult(runResult)} for session ${sessionId}`,
-  );
-
-  return { status: 'ok' };
-}
+const LINEAR_FAST_UNAVAILABLE_MESSAGE =
+  "Roomote couldn't start a conversation right now. Please try again in a moment.";
 
 export const linear = new Hono();
 
@@ -352,7 +182,12 @@ linear.post('/', async (c) => {
 });
 
 /**
- * Handle an AgentSessionEvent webhook
+ * Handle an AgentSessionEvent webhook.
+ *
+ * Every session event enters the session's Fast Session: the Session reads
+ * the issue, replies as agent responses, and delegates work to tasks bound
+ * to the session. Only two things bypass it: stop signals, and answers to a
+ * question a running task asked through request_user_input.
  */
 async function handleAgentSessionEvent(
   payload: AgentSessionEventPayload,
@@ -508,373 +343,92 @@ async function handleAgentSessionEvent(
       `[LinearWebhook] Linear user ${linearUserId} is linked to Roomote user ${userId}`,
     );
   } else {
+    // A trusted delegation with no human runs in a Session owned by the
+    // deployment's first administrator.
+    const automationUserId = await resolveLinearAutomationLaunchUserId();
+    if (!automationUserId) {
+      console.error(
+        `[LinearWebhook] No administrator available to own the automation session ${sessionId}`,
+      );
+      await linearClient.emitError(
+        sessionId,
+        `No ${PRODUCT_NAME} administrator is available to run this request.`,
+      );
+      return { status: 'error', message: 'No automation launch identity' };
+    }
+    userId = automationUserId;
     console.log(
-      `[LinearWebhook] Starting trusted Linear automation for session ${sessionId}`,
+      `[LinearWebhook] Starting trusted Linear automation for session ${sessionId} as user ${userId}`,
     );
   }
 
-  // Check if this is a follow-up prompt for an existing session
+  // A running task that asked a question through request_user_input owns
+  // the next reply. Everything else in the session belongs to Fast.
   if (action === 'prompted') {
-    if (!userId) {
-      return {
-        status: 'error',
-        message: 'No linked user for prompted session',
-      };
-    }
-    // First, check for an active task run. When a job is running (e.g. waiting
-    // on ask_followup_question), the user's reply must be delivered to it
-    // immediately. This takes priority over routing confirmation and
-    // elicitation checks which are only relevant before a job starts.
     const activeRun = await findActiveLinearTaskRun(
       sessionId,
       agentSession.issue.id,
     );
+    const pendingRequest = activeRun
+      ? await getPendingLinearRequestUserInput(sessionId)
+      : null;
 
-    if (activeRun) {
-      console.log(
-        `[LinearWebhook] Found active task run ${activeRun.id} for session ${sessionId} - queuing message`,
-      );
-
-      // Also clean up any stale pending elicitation selection.
-      await deletePendingSelection(sessionId);
-
-      const pendingRequest = await getPendingLinearRequestUserInput(sessionId);
-
-      if (pendingRequest) {
-        if (pendingRequest.runId !== activeRun.id) {
-          await clearPendingLinearRequestUserInput(sessionId, {
-            requestId: pendingRequest.requestId,
-          }).catch(() => {});
-        } else if (pendingRequest.status === 'submitted') {
-          await linearClient.emitThought(
-            sessionId,
-            'I already received your answer. Please wait for the agent to continue.',
-            true,
-          );
-          return { status: 'ok' };
-        } else {
-          const responseText = agentActivity?.content?.body ?? '';
-          const parsedReply = parseAcpRequestUserInputAnswerReply(
-            pendingRequest.questions,
-            responseText,
-          );
-
-          if (parsedReply) {
-            // Question answers return before the normal active-message actor
-            // sync below, so apply the trusted sender before marking the
-            // request submitted. Otherwise the worker drops a different
-            // linked user's answer as a mismatch and it cannot be resent.
-            await setTrustedRunActingUserOnSuccess({
-              runId: activeRun.id,
-              userId,
-              operation: async () => {
-                await queueLinearRequestUserInputAnswer(activeRun.id, {
-                  requestId: pendingRequest.requestId,
-                  answers: parsedReply.answers,
-                  userId,
-                  timestamp: Date.now(),
-                });
-
-                await markPendingLinearRequestUserInputSubmitted(
-                  sessionId,
-                  pendingRequest.requestId,
-                );
-
-                return true;
-              },
-            });
-
-            return { status: 'ok' };
-          }
-          // Not a recognizable answer: fall through and deliver the reply to
-          // the agent as a normal message instead of blocking it behind the
-          // pending question.
-        }
-      }
-
-      // Trusted pre-queue actor switch; see acting-user-sync.ts. The worker
-      // only runs the queued turn as this sender if the server actor matches.
-      await syncActingUserForInboundMessage({
-        logContext: 'linear.activeRunMessage',
-        runId: activeRun.id,
-        senderUserId: userId,
-      });
-      // Queue the message for the running worker to pick up
-      await queueLinearMessage(activeRun.id, sessionId, payload, userId);
-
-      return { status: 'ok' };
-    }
-
-    // Next, check if this is a response to a pending elicitation (backward compat)
-    const pendingSelection = await findPendingSelection(sessionId);
-
-    if (pendingSelection) {
-      console.log(
-        `[LinearWebhook] Found pending selection for session ${sessionId}, step: ${pendingSelection.step}`,
-      );
-
-      // Get the response text from the user's activity
-      const responseText = agentActivity?.content?.body ?? '';
-
-      if (!responseText) {
-        console.log(
-          `[LinearWebhook] No response text in prompted action for pending selection`,
-        );
-        // Re-prompt the user
-        await linearClient.emitElicitation(
-          sessionId,
-          'Please select an option from the list above.',
-        );
-        return { status: 'ok' };
-      }
-
-      // Handle the elicitation response
-      const elicitationResult = await handleElicitationResponse({
-        sessionId,
-        responseText,
-        linearClient,
-      });
-
-      if (elicitationResult.status === 'completed') {
-        console.log(
-          `[LinearWebhook] Elicitation completed for session ${sessionId} - ` +
-            `workspace repo: ${elicitationResult.repo}`,
-        );
-
-        // Clean up the pending selection
-        await deletePendingSelection(sessionId);
-
-        // Emit a thought to acknowledge
-        await linearClient.emitThought(sessionId, 'Starting task...', true);
-
-        // Get the original payload from the pending selection
-        const originalPayload = elicitationResult.pendingSelection
-          .payload as unknown as AgentSessionEventPayload;
-
-        // Enrich the original payload's session with all issue comments (including external ones)
-        const enrichedElicitationSession = await enrichSessionComments(
-          linearClient,
-          originalPayload.agentSession,
-        );
-
-        // Create the standard task run with the selected workspace.
-        const elicitationWorkspace = mapElicitationWorkspaceToSelection(
-          elicitationResult.workspaceType,
-          elicitationResult.repo,
-        );
-        const runResult = await createLinearAgentRun({
-          agentSession: enrichedElicitationSession,
-          payload: originalPayload,
-          userId,
-          repo: elicitationWorkspace.repo,
-          environmentId: elicitationWorkspace.environmentId,
-        });
-
-        if (runResult.status === 'error') {
-          console.error(
-            `[LinearWebhook] Failed to create task run: ${runResult.message}`,
-          );
-          await linearClient.emitError(
-            sessionId,
-            `Failed to start agent: ${runResult.message}`,
-          );
-          return { status: 'error', message: runResult.message };
-        }
-
-        console.log(
-          `[LinearWebhook] Created ${describeLinearRunResult(runResult)} for session ${sessionId}`,
-        );
-
-        await updateLinearSessionTaskUrlForDirectLaunch({
-          linearClient,
-          sessionId,
-          runResult,
-        });
-
-        return { status: 'ok' };
-      }
-
-      if (elicitationResult.status === 'awaiting_workspace') {
-        console.log(
-          `[LinearWebhook] Elicitation awaiting workspace selection for session ${sessionId}`,
-        );
-        return { status: 'ok' };
-      }
-
-      if (elicitationResult.status === 'error') {
-        console.error(
-          `[LinearWebhook] Elicitation error for session ${sessionId}: ${elicitationResult.message}`,
-        );
-
-        await linearClient.emitError(
-          sessionId,
-          `Something went wrong. Please try again.`,
-        );
-
-        await deletePendingSelection(sessionId);
-        return { status: 'error', message: elicitationResult.message };
-      }
-
-      // not_found - fall through to normal flow
-    }
-
-    // No active task run found - check for a completed task run with snapshot to resume from
-    console.log(
-      `[LinearWebhook] No active task run for session ${sessionId} - checking for snapshot resume`,
-    );
-
-    const completedRun = await findCompletedLinearTaskRunWithSnapshot(
-      agentSession.issue.id,
-    );
-
-    if (completedRun && completedRun.snapshotId) {
-      console.log(
-        `[LinearWebhook] Found completed task run ${completedRun.id} with snapshot ${completedRun.snapshotId} - creating SnapshotResume run`,
-      );
-
-      // Acquire a short-lived distributed lock on the issue ID to prevent
-      // concurrent webhook deliveries from creating duplicate resume task runs.
-      const redis = getRedis();
-      const lockKey = `linear:resume-lock:${agentSession.issue.id}`;
-      const lockTTLSeconds = 30;
-
-      const acquired = await redis.set(
-        lockKey,
-        '1',
-        'EX',
-        lockTTLSeconds,
-        'NX',
-      );
-
-      if (!acquired) {
-        console.log(
-          `[LinearWebhook] Resume lock already held for issue ${agentSession.issue.id} - polling for resume task run`,
-        );
-
-        // Another handler is already creating the resume task run. Poll for
-        // the new active task run so we can queue the message to the correct
-        // (resume) job ID instead of the completed source task run.
-        const POLL_INTERVAL_MS = 500;
-        const MAX_POLL_ATTEMPTS = 10;
-        let resumeRun: Awaited<ReturnType<typeof findActiveLinearTaskRun>> =
-          null;
-
-        for (let attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt++) {
-          await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-
-          resumeRun = await findActiveLinearTaskRun(
-            sessionId,
-            agentSession.issue.id,
-          );
-
-          if (resumeRun) {
-            console.log(
-              `[LinearWebhook] Found resume task run ${resumeRun.id} after ${attempt} poll attempt(s)`,
-            );
-
-            break;
-          }
-        }
-
-        if (resumeRun) {
-          await queueLinearMessage(resumeRun.id, sessionId, payload, userId);
-        } else {
-          console.warn(
-            `[LinearWebhook] Could not find resume task run for issue ${agentSession.issue.id} after ${MAX_POLL_ATTEMPTS} attempts - message may be lost`,
-          );
-        }
-
-        return { status: 'ok' };
-      }
-
-      try {
-        const completedPayload = completedRun.payload as Record<
-          string,
-          unknown
-        >;
-
-        const repo =
-          typeof completedPayload?.repo === 'string'
-            ? completedPayload.repo
-            : ALL_REPOSITORIES;
-
-        const environmentId =
-          typeof completedPayload?.environmentId === 'string'
-            ? completedPayload.environmentId
-            : undefined;
-        const resumePayload: TaskPayload<
-          typeof TaskPayloadKind.SnapshotResume
-        > = {
-          repo,
-          environmentId,
-          port: completedRun.port ?? undefined,
-          sourceSnapshotId: completedRun.snapshotId,
-          sourceRunId: completedRun.id,
-        };
-        populateSnapshotResumeSlackMetadata(resumePayload, {
-          sourcePayload: completedPayload,
-          threadTs: completedRun.slackThreadTs,
-        });
-        restoreSnapshotResumeVisiblePromptFields(
-          resumePayload,
-          completedPayload,
-        );
-
-        // Resumes never create tasks and never re-attribute; the resuming
-        // human becomes the new run's acting user.
-        const resumeLaunch = await enqueueTask(
-          {
-            task: {
-              type: TaskPayloadKind.SnapshotResume,
-              sourceSnapshotId: completedRun.snapshotId,
-              sourceRunId: completedRun.id,
-              payload: resumePayload,
-            },
-            actingUserId: userId ?? completedRun.actingUserId ?? null,
-          },
-          {},
-        );
-
-        await queueLinearMessage(resumeLaunch.id, sessionId, payload, userId);
-
-        await linearClient.updateSessionExternalUrl(
-          sessionId,
-          `${Env.R_APP_URL}/task/${resumeLaunch.taskId}`,
-        );
-
-        console.log(
-          `[LinearWebhook] Created snapshot resume task run ${resumeLaunch.id} for session ${sessionId}`,
-        );
-
-        // Emit thought so user sees activity
+    if (activeRun && pendingRequest) {
+      if (pendingRequest.runId !== activeRun.id) {
+        await clearPendingLinearRequestUserInput(sessionId, {
+          requestId: pendingRequest.requestId,
+        }).catch(() => {});
+      } else if (pendingRequest.status === 'submitted') {
         await linearClient.emitThought(
           sessionId,
-          `Sorry for the delay. Reconnecting you with ${PRODUCT_NAME}...`,
+          'I already received your answer. Please wait for the agent to continue.',
           true,
         );
-
         return { status: 'ok' };
-      } catch (error) {
-        // Release the lock on failure so a retry can attempt resume again.
-        await redis.del(lockKey).catch(() => {});
-
-        console.error(
-          `[LinearWebhook] Failed to create snapshot resume task run for session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+      } else {
+        const responseText = agentActivity?.content?.body ?? '';
+        const parsedReply = parseAcpRequestUserInputAnswerReply(
+          pendingRequest.questions,
+          responseText,
         );
 
-        // Fall through to fresh job creation.
+        if (parsedReply) {
+          const answerUserId = userId;
+          // Apply the trusted sender before marking the request submitted.
+          // Otherwise the worker drops a different linked user's answer as
+          // a mismatch and it cannot be resent.
+          await setTrustedRunActingUserOnSuccess({
+            runId: activeRun.id,
+            userId: answerUserId,
+            operation: async () => {
+              await queueLinearRequestUserInputAnswer(activeRun.id, {
+                requestId: pendingRequest.requestId,
+                answers: parsedReply.answers,
+                userId: answerUserId,
+                timestamp: Date.now(),
+              });
+
+              await markPendingLinearRequestUserInputSubmitted(
+                sessionId,
+                pendingRequest.requestId,
+              );
+
+              return true;
+            },
+          });
+
+          return { status: 'ok' };
+        }
+        // Not a recognizable answer: the Session handles it like any other
+        // message and can steer the task itself.
       }
-    } else {
-      console.log(
-        `[LinearWebhook] No completed task run with snapshot for session ${sessionId} - creating new task run`,
-      );
     }
   }
 
-  // Immediately emit a "thought" activity to acknowledge receipt (only for new task runs)
+  // Linear expects an activity within seconds; the Session's reply follows.
   const thoughtResult = await linearClient.emitThought(
     sessionId,
-    'Getting started...',
+    action === 'prompted' ? 'Thinking...' : 'Getting started...',
     true,
   );
 
@@ -886,66 +440,33 @@ async function handleAgentSessionEvent(
     // Continue anyway - the thought is nice to have but not critical
   }
 
-  // Enrich the session with all issue comments (including external ones from GitHub, Slack, etc.)
-  // This must happen before LLM routing and job creation so all comment context is available.
-  const enrichedSession = await enrichSessionComments(
+  // The first turn carries the whole discussion, including comments from
+  // other integrations; later turns already have that context in the Session.
+  const enrichedSession =
+    action === 'prompted'
+      ? agentSession
+      : await enrichSessionComments(linearClient, agentSession);
+
+  const started = await startLinearFastSessionTurn({
+    payload,
+    agentSession: enrichedSession,
+    userId,
     linearClient,
-    agentSession,
+  });
+
+  if (started.status !== 'queued') {
+    console.error(
+      `[LinearWebhook] Fast entry unavailable for session ${sessionId}: ${started.reason}`,
+    );
+    await linearClient.emitError(sessionId, LINEAR_FAST_UNAVAILABLE_MESSAGE);
+    return { status: 'error', message: started.reason };
+  }
+
+  console.log(
+    `[LinearWebhook] Session ${sessionId} entered Fast conversation ${started.fastConversationId}`,
   );
 
-  console.log(`[LinearWebhook] Attempting to route Linear task`);
-  const destinationResult = await resolveLinearTaskDestination({
-    payload,
-    agentSession: enrichedSession,
-    userId,
-    linearClient,
-    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-  });
-
-  if (destinationResult.status === 'platform_answer') {
-    const responseResult = await linearClient.emitResponse(
-      sessionId,
-      destinationResult.answer,
-    );
-
-    if (!responseResult.success) {
-      console.error(
-        `[LinearWebhook] Failed to emit platform answer to Linear: ${responseResult.error}`,
-      );
-    }
-
-    return { status: 'ok' };
-  }
-
-  if (destinationResult.status === 'awaiting_selection') {
-    console.log(
-      `[LinearWebhook] Elicitation started, awaiting workspace selection for session ${sessionId}`,
-    );
-    return { status: 'ok' };
-  }
-
-  if (destinationResult.status === 'error') {
-    const errorResult = await linearClient.emitError(
-      sessionId,
-      `Failed to start workspace selection: ${destinationResult.message}`,
-    );
-
-    if (!errorResult.success) {
-      console.error(
-        `[LinearWebhook] Failed to emit error to Linear: ${errorResult.error}`,
-      );
-    }
-
-    return { status: 'error', message: destinationResult.message };
-  }
-
-  return startLinearTask({
-    linearClient,
-    payload,
-    userId,
-    routedTask: destinationResult.destination,
-    agentSession: enrichedSession,
-  });
+  return { status: 'ok' };
 }
 
 /**

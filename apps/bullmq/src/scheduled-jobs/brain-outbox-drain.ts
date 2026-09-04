@@ -645,7 +645,7 @@ export function buildFastMemoryPage(input: {
   conversationId: string;
   conversationTitle: string | null;
   userName: string | null;
-  userId: string;
+  userId: string | null;
   surface: string;
   memory: string;
   createdAt: Date;
@@ -662,7 +662,7 @@ export function buildFastMemoryPage(input: {
       created: input.createdAt,
       fields: [
         `roomote_conversation_id: ${input.conversationId}`,
-        `roomote_user_id: ${input.userId}`,
+        input.userId && `roomote_user_id: ${input.userId}`,
         input.userName && `saved_by: ${JSON.stringify(input.userName)}`,
         `surface: ${input.surface}`,
         // GBrain derives effective_date from this conventional field. The

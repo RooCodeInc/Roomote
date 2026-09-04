@@ -3284,6 +3284,18 @@ describe('SlackNotifier', () => {
 
       expect(output).toBe('Hi @Alice [Example](https://example.com/path)');
     });
+
+    it('keeps raw mention tokens when preserveMentions is set', async () => {
+      const replaceSpy = vi.spyOn(notifier, 'replaceMentionsWithNames');
+
+      const output = await notifier.normalizeIncomingText(
+        'Hi <@U123> <https://example.com/path|Example>',
+        { preserveMentions: true },
+      );
+
+      expect(output).toBe('Hi <@U123> [Example](https://example.com/path)');
+      expect(replaceSpy).not.toHaveBeenCalled();
+    });
   });
 
   describe('unfurlTaskUrl', () => {

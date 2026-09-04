@@ -11,11 +11,13 @@ import {
 
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
 import {
-  SessionHeaderExtras,
+  getSessionTaskPanelCapacity,
+  SessionHeaderPullRequests,
   SessionWorkspace,
   type SessionInfo,
 } from './SessionWorkspace';
 import {
+  useOpenSessionArtifactViewer,
   useOpenSessionTaskPanel,
   useOpenSessionTasksPanel,
   useSessionRunningTaskCount,
@@ -23,6 +25,7 @@ import {
 
 const {
   useMediaQueryMock,
+  useResizeObserverMock,
   sessionQueryState,
   fastTaskQueryState,
   searchParamsState,
@@ -31,13 +34,15 @@ const {
   artifactQueryInputs,
 } = vi.hoisted(() => ({
   useMediaQueryMock: vi.fn(),
+  useResizeObserverMock: vi.fn(),
   sessionQueryState: { data: null as unknown },
   fastTaskQueryState: { data: null as unknown },
   searchParamsState: { value: '' },
   routerReplaceMock: vi.fn(),
   artifactQueryState: { dataByPath: {} as Record<string, unknown> },
   artifactQueryInputs: [] as Array<{
-    taskId: string;
+    taskId?: string;
+    sessionId?: string;
     path: string;
     version?: number;
   }>,
@@ -45,6 +50,7 @@ const {
 
 vi.mock('usehooks-ts', () => ({
   useMediaQuery: useMediaQueryMock,
+  useResizeObserver: useResizeObserverMock,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -87,17 +93,46 @@ vi.mock('@/trpc/client', () => ({
     artifacts: {
       byPath: {
         queryOptions: (
-          input: { taskId: string; path: string; version?: number },
+          input: {
+            taskId?: string;
+            sessionId?: string;
+            path: string;
+            version?: number;
+          },
           options?: Record<string, unknown>,
         ) => ({
           queryKey: ['artifacts', 'byPath', input],
           queryFn: async () => {
             artifactQueryInputs.push(input);
             return (
-              artifactQueryState.dataByPath[`${input.taskId}:${input.path}`] ??
-              artifactQueryState.dataByPath[input.path]
+              artifactQueryState.dataByPath[
+                `${input.taskId ?? input.sessionId}:${input.path}`
+              ] ?? artifactQueryState.dataByPath[input.path]
             );
           },
+          ...options,
+        }),
+      },
+    },
+    previewSettings: {
+      taskStatus: {
+        queryOptions: (
+          input: { taskId: string },
+          options?: Record<string, unknown>,
+        ) => ({
+          queryKey: ['previewSettings', 'taskStatus', input],
+          queryFn: async () => null,
+          ...options,
+        }),
+        queryKey: (input: { taskId: string }) => [
+          'previewSettings',
+          'taskStatus',
+          input,
+        ],
+      },
+      startSetupTask: {
+        mutationOptions: (options?: Record<string, unknown>) => ({
+          mutationFn: async () => ({ taskId: 'task-1', alreadyRunning: false }),
           ...options,
         }),
       },
@@ -105,12 +140,22 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({ isAdmin: true }),
+}));
+
 vi.mock('@/components/tasks/ArtifactViewerContent', () => ({
   ArtifactViewerContent: ({
     artifact,
+    isLoading,
   }: {
     artifact: { path: string } | null;
-  }) => <div>Artifact preview: {artifact?.path}</div>,
+    isLoading?: boolean;
+  }) => (
+    <div data-loading={isLoading || undefined}>
+      Artifact preview: {artifact?.path}
+    </div>
+  ),
 }));
 
 vi.mock('./NestedTaskSidePanel', () => ({
@@ -118,13 +163,18 @@ vi.mock('./NestedTaskSidePanel', () => ({
     taskId,
     onClose,
     onOpenArtifact,
+    onSelectTask,
+    tasks,
   }: {
     taskId: string;
     onClose: () => void;
     onOpenArtifact: (path: string, version?: number) => void;
+    onSelectTask: (taskId: string) => void;
+    tasks: Array<{ taskId: string }>;
   }) => (
-    <div aria-label={`Full task ${taskId}`}>
+    <div aria-label={`Full task ${taskId}`} data-session-task-panel={taskId}>
       Nested panel {taskId}
+      <textarea aria-label={`Task prompt ${taskId}`} />
       <button
         type="button"
         onClick={() => onOpenArtifact('proof/nested.png', 3)}
@@ -132,8 +182,17 @@ vi.mock('./NestedTaskSidePanel', () => ({
         Open nested artifact
       </button>
       <button type="button" onClick={onClose}>
-        Close panel
+        Close panel {taskId}
       </button>
+      {tasks.map((task) => (
+        <button
+          key={task.taskId}
+          type="button"
+          onClick={() => onSelectTask(task.taskId)}
+        >
+          Select {task.taskId} from {taskId}
+        </button>
+      ))}
     </div>
   ),
 }));
@@ -187,7 +246,14 @@ const singleTask: SessionInfo['tasks'][number] = {
   canAccessDetails: true,
   latestRun: null,
   artifacts: [],
+  previews: [],
   pullRequests: [],
+};
+
+const secondTask: SessionInfo['tasks'][number] = {
+  ...singleTask,
+  taskId: 'task-2',
+  title: 'Review homepage accessibility',
 };
 
 function SandboxLayoutProvider({ children }: { children: ReactNode }) {
@@ -214,6 +280,7 @@ function renderWorkspace({
   queriedFastTasks,
   selectedTaskId,
   searchParams,
+  workspaceWidth,
 }: {
   isMobile: boolean;
   children?: ReactNode;
@@ -222,8 +289,14 @@ function renderWorkspace({
   queriedFastTasks?: NonNullable<SessionInfo['taskCards']>;
   selectedTaskId?: string;
   searchParams?: string;
+  workspaceWidth?: number;
 }) {
   useMediaQueryMock.mockReturnValue(!isMobile);
+  let observedWorkspaceWidth = workspaceWidth ?? (isMobile ? 390 : 1024);
+  useResizeObserverMock.mockImplementation(() => ({
+    width: observedWorkspaceWidth,
+    height: 800,
+  }));
   searchParamsState.value =
     searchParams ?? (selectedTaskId ? `task=${selectedTaskId}` : '');
   let viewportChangeListener: ((event: MediaQueryListEvent) => void) | null =
@@ -253,17 +326,22 @@ function renderWorkspace({
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  const result = render(
+  const workspace = () => (
     <QueryClientProvider client={queryClient}>
       <SandboxLayoutProvider>
         <SessionWorkspace session={initialSession}>{children}</SessionWorkspace>
       </SandboxLayoutProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const result = render(workspace());
 
   return {
     ...result,
     queryClient,
+    resizeWorkspace(width: number) {
+      observedWorkspaceWidth = width;
+      result.rerender(workspace());
+    },
     resizeToMobile() {
       mediaQuery.matches = true;
       act(() =>
@@ -279,6 +357,25 @@ function OpenNestedTask() {
   return (
     <button type="button" onClick={() => openTaskPanel?.('child-1')}>
       Open child
+    </button>
+  );
+}
+
+function OpenSessionArtifact() {
+  const openArtifactViewer = useOpenSessionArtifactViewer();
+
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        openArtifactViewer?.({
+          owner: { sessionId: 'session-1' },
+          path: 'notes/decision.md',
+          version: 1,
+        })
+      }
+    >
+      Open decision link
     </button>
   );
 }
@@ -339,17 +436,21 @@ describe('SessionWorkspace', () => {
     };
   });
 
-  it('orders panel controls as tasks, artifacts, then session info', () => {
+  it('orders panel controls as tasks, preview, artifacts, then session info', () => {
     renderWorkspace({
       isMobile: false,
       sessionOverride: { tasks: [singleTask] },
     });
 
     const tasks = screen.getByRole('button', { name: 'Tasks' });
+    const preview = screen.getByRole('button', { name: 'Live Preview' });
     const artifacts = screen.getByRole('button', { name: 'Artifacts' });
     const sessionInfo = screen.getByRole('button', { name: 'Session info' });
 
-    expect(tasks.compareDocumentPosition(artifacts)).toBe(
+    expect(tasks.compareDocumentPosition(preview)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(preview.compareDocumentPosition(artifacts)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
     expect(artifacts.compareDocumentPosition(sessionInfo)).toBe(
@@ -421,11 +522,11 @@ describe('SessionWorkspace', () => {
 
     renderWorkspace({
       isMobile: false,
-      children: <SessionHeaderExtras status="active" />,
+      children: <SessionHeaderPullRequests />,
       sessionOverride: { tasks: [firstTask, secondTask] },
     });
 
-    expect(await screen.findByText('active')).toBeVisible();
+    expect(screen.queryByText('active')).toBeNull();
     expect(screen.getByRole('link', { name: 'widgets#42' })).toHaveAttribute(
       'href',
       'https://github.com/acme/widgets/pull/42',
@@ -440,7 +541,7 @@ describe('SessionWorkspace', () => {
   it('updates header pull requests from refreshed session tasks', async () => {
     const { queryClient } = renderWorkspace({
       isMobile: false,
-      children: <SessionHeaderExtras status="active" />,
+      children: <SessionHeaderPullRequests />,
       sessionOverride: { tasks: [] },
     });
 
@@ -475,6 +576,7 @@ describe('SessionWorkspace', () => {
     expect(
       await screen.findByRole('link', { name: 'new#123' }),
     ).toHaveAttribute('target', '_blank');
+    expect(screen.queryByText('active')).toBeNull();
   });
 
   it('matches the task sidebar replacement behavior and controls on mobile', () => {
@@ -493,7 +595,7 @@ describe('SessionWorkspace', () => {
     expect(
       screen.getByRole('heading', { name: 'Session Info' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('needs input')).toBeInTheDocument();
+    expect(screen.queryByText('needs input')).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Close session info' }),
     ).toBeNull();
@@ -609,30 +711,205 @@ describe('SessionWorkspace', () => {
     },
   );
 
-  it.each([false, true])(
-    'keeps the full task closed when a sole task arrives without a selector and isMobile=%s',
-    async (isMobile) => {
-      renderWorkspace({
-        isMobile,
-        sessionOverride: { tasks: [] },
-        queriedTasks: [singleTask],
-        searchParams:
-          'utm_source=slack&utm_medium=link&utm_campaign=slack.fast_reply',
-      });
+  it('keeps a newly arrived task closed on mobile without a selector', async () => {
+    renderWorkspace({
+      isMobile: true,
+      sessionOverride: { tasks: [] },
+      queriedTasks: [singleTask],
+      searchParams:
+        'utm_source=slack&utm_medium=link&utm_campaign=slack.fast_reply',
+    });
 
-      if (isMobile) {
-        fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }));
-      }
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Tasks' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Tasks' })).toBeEnabled();
+    });
+    expect(screen.getByText('Session transcript')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Full task task-1')).not.toBeInTheDocument();
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+  });
+
+  it('opens as many initial task panels as fit beside the session', async () => {
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 2560,
+      sessionOverride: {
+        tasks: Array.from({ length: 7 }, (_, index) => ({
+          ...singleTask,
+          taskId: `task-${index + 1}`,
+          title: `Task ${index + 1}`,
+        })),
+      },
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    for (let index = 2; index <= 5; index += 1) {
+      expect(screen.getByLabelText(`Full task task-${index}`)).toBeVisible();
+    }
+    expect(screen.queryByLabelText('Full task task-6')).toBeNull();
+    expect(screen.getByText('Session transcript')).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Select task-7 from task-5' }),
+    );
+
+    expect(screen.getByLabelText('Full task task-7')).toBeVisible();
+    expect(screen.queryByLabelText('Full task task-5')).toBeNull();
+  });
+
+  it('limits focus dimming to the Session and task conversations', async () => {
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: { tasks: [singleTask, secondTask] },
+    });
+
+    expect(
+      screen
+        .getByText('Session transcript')
+        .closest('[data-slot=resizable-panel]'),
+    ).toHaveAttribute('data-dim-when-unfocused', 'true');
+    expect(
+      (await screen.findByLabelText('Full task task-1')).closest(
+        '[data-slot=resizable-panel]',
+      ),
+    ).toHaveAttribute('data-dim-when-unfocused', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
+
+    expect(
+      screen
+        .getByRole('heading', { name: 'Session Info' })
+        .closest('[data-slot=resizable-panel]'),
+    ).not.toHaveAttribute('data-dim-when-unfocused');
+  });
+
+  it('restores task panels after temporarily viewing a utility panel', async () => {
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: { tasks: [singleTask, secondTask] },
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
+    expect(screen.getByRole('heading', { name: 'Session Info' })).toBeVisible();
+    expect(screen.queryByLabelText('Full task task-1')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close session info' }));
+    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-2')).toBeVisible();
+  });
+
+  it('keeps multi-task sessions on the transcript below xl widths', () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { tasks: [singleTask, secondTask] },
+    });
+
+    expect(screen.getByText('Session transcript')).toBeVisible();
+    expect(screen.queryByLabelText('Full task task-1')).toBeNull();
+    expect(screen.queryByLabelText('Full task task-2')).toBeNull();
+  });
+
+  it('retains task panel selections as workspace capacity changes', async () => {
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Add homepage tests',
+    };
+    const { resizeWorkspace } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1024,
+      sessionOverride: { tasks: [singleTask, secondTask, thirdTask] },
+    });
+
+    expect(screen.queryByLabelText('Full task task-1')).toBeNull();
+    resizeWorkspace(1600);
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-3')).toBeVisible();
+
+    resizeWorkspace(1024);
+    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
+    expect(screen.queryByLabelText('Full task task-2')).toBeNull();
+    resizeWorkspace(1600);
+    expect(screen.getByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-3')).toBeVisible();
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+  });
+
+  it('opens a newly created task in the rightmost visible panel', async () => {
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: { tasks: [singleTask, secondTask] },
+    });
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Add homepage tests',
+    };
+
+    expect(await screen.findByLabelText('Full task task-2')).toBeVisible();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [singleTask, secondTask, thirdTask],
       });
-      expect(screen.getByText('Session transcript')).toBeInTheDocument();
+    });
+
+    expect(await screen.findByLabelText('Full task task-3')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
+    expect(screen.queryByLabelText('Full task task-2')).toBeNull();
+  });
+
+  it('opens the first newly created task beside the session on a wide screen', async () => {
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1024,
+      sessionOverride: { tasks: [] },
+    });
+
+    await waitFor(() =>
       expect(
-        screen.queryByLabelText('Full task task-1'),
-      ).not.toBeInTheDocument();
-      expect(routerReplaceMock).not.toHaveBeenCalled();
-    },
-  );
+        queryClient.getQueryState(['sessions', 'byId', session.id])?.status,
+      ).toBe('success'),
+    );
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [singleTask],
+      });
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    expect(screen.getByText('Session transcript')).toBeVisible();
+  });
+
+  it('swaps task panels when a title dropdown selects another open task', async () => {
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: { tasks: [singleTask, secondTask] },
+    });
+
+    const primary = await screen.findByLabelText('Full task task-1');
+    const secondary = screen.getByLabelText('Full task task-2');
+    expect(primary.compareDocumentPosition(secondary)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Select task-1 from task-2' }),
+    );
+
+    const swappedPrimary = screen.getByLabelText('Full task task-2');
+    const swappedSecondary = screen.getByLabelText('Full task task-1');
+    expect(swappedPrimary.compareDocumentPosition(swappedSecondary)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
 
   it.each([false, true])(
     'opens an explicitly selected full task in the responsive panel when isMobile=%s',
@@ -654,7 +931,9 @@ describe('SessionWorkspace', () => {
       }
       expect(routerReplaceMock).not.toHaveBeenCalled();
 
-      fireEvent.click(screen.getByRole('button', { name: 'Close panel' }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Close panel task-1' }),
+      );
       expect(routerReplaceMock).toHaveBeenCalledWith(
         '/sessions/session-1?utm_source=slack&utm_medium=link&utm_campaign=slack.fast_reply',
       );
@@ -719,6 +998,11 @@ describe('SessionWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
 
     expect(screen.getByRole('heading', { name: 'Tasks' })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'When opened side by side, use Alt/Option + ←/→ to move between panels',
+      ),
+    ).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', {
         name: 'View coding task: Update homepage background',
@@ -726,6 +1010,171 @@ describe('SessionWorkspace', () => {
     );
 
     expect(screen.getByText('Nested panel task-1')).toBeInTheDocument();
+    expect(screen.getByLabelText('Task prompt task-1')).toHaveFocus();
+  });
+
+  it('reopens as many tasks as fit from the task list panel', async () => {
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Add homepage tests',
+    };
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1600,
+      sessionOverride: { tasks: [singleTask, secondTask, thirdTask] },
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    for (const taskId of ['task-1', 'task-2', 'task-3']) {
+      fireEvent.click(
+        screen.getByRole('button', { name: `Close panel ${taskId}` }),
+      );
+    }
+    expect(screen.queryByLabelText('Full task task-1')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open side-by-side' }));
+
+    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-3')).toBeVisible();
+    expect(screen.getByText('Session transcript')).toBeVisible();
+  });
+
+  it('opens tasks side-by-side when the Tasks rail item is middle-clicked', async () => {
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: { tasks: [singleTask, secondTask] },
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel task-1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel task-2' }));
+
+    fireEvent(
+      screen.getByRole('button', { name: 'Tasks' }),
+      new MouseEvent('auxclick', { bubbles: true, button: 1 }),
+    );
+
+    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.getByText('Session transcript')).toBeVisible();
+  });
+
+  it('moves focus between visible prompt inputs with Alt+Arrow keys', async () => {
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Add homepage tests',
+    };
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1600,
+      children: <textarea aria-label="Session prompt" />,
+      sessionOverride: { tasks: [singleTask, secondTask, thirdTask] },
+    });
+
+    expect(await screen.findByLabelText('Task prompt task-3')).toBeVisible();
+    const sessionPrompt = screen.getByLabelText('Session prompt');
+    const firstTaskPrompt = screen.getByLabelText('Task prompt task-1');
+    const secondTaskPrompt = screen.getByLabelText('Task prompt task-2');
+    const thirdTaskPrompt = screen.getByLabelText('Task prompt task-3');
+
+    sessionPrompt.focus();
+    fireEvent.keyDown(sessionPrompt, { key: 'ArrowRight', altKey: true });
+    expect(firstTaskPrompt).toHaveFocus();
+
+    fireEvent.keyDown(firstTaskPrompt, { key: 'ArrowRight', altKey: true });
+    expect(secondTaskPrompt).toHaveFocus();
+
+    fireEvent.keyDown(secondTaskPrompt, { key: 'ArrowRight', altKey: true });
+    expect(thirdTaskPrompt).toHaveFocus();
+
+    fireEvent.keyDown(thirdTaskPrompt, { key: 'ArrowRight', altKey: true });
+    expect(thirdTaskPrompt).toHaveFocus();
+
+    fireEvent.keyDown(thirdTaskPrompt, { key: 'ArrowLeft', altKey: true });
+    expect(secondTaskPrompt).toHaveFocus();
+
+    fireEvent.keyDown(secondTaskPrompt, { key: 'ArrowLeft', altKey: true });
+    expect(firstTaskPrompt).toHaveFocus();
+
+    fireEvent.keyDown(firstTaskPrompt, { key: 'ArrowLeft', altKey: true });
+    expect(sessionPrompt).toHaveFocus();
+
+    fireEvent.keyDown(sessionPrompt, { key: 'ArrowLeft', altKey: true });
+    expect(sessionPrompt).toHaveFocus();
+  });
+
+  it('focuses the first task when several task panels open initially', async () => {
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Add homepage tests',
+    };
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1600,
+      children: <textarea aria-label="Session prompt" />,
+      sessionOverride: { tasks: [singleTask, secondTask, thirdTask] },
+    });
+
+    expect(await screen.findByLabelText('Task prompt task-3')).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByLabelText('Task prompt task-1')).toHaveFocus(),
+    );
+  });
+
+  it('opens and focuses the first task when several delegated tasks start', async () => {
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Add homepage tests',
+    };
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1600,
+      children: <textarea aria-label="Session prompt" />,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    expect(screen.getByRole('heading', { name: 'Tasks' })).toBeVisible();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [singleTask, secondTask, thirdTask],
+      });
+    });
+
+    expect(await screen.findByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-3')).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByLabelText('Task prompt task-2')).toHaveFocus(),
+    );
+  });
+
+  it('replaces the URL-selected task when a task card opens at one-panel capacity', () => {
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1024,
+      sessionOverride: { tasks: [singleTask, secondTask] },
+      selectedTaskId: singleTask.taskId,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'View coding task: Review homepage accessibility',
+      }),
+    );
+
+    expect(routerReplaceMock).toHaveBeenCalledWith(
+      '/sessions/session-1?task=task-2',
+    );
   });
 
   it('navigates to an empty session Artifacts panel and back', () => {
@@ -740,6 +1189,179 @@ describe('SessionWorkspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Close artifacts' }));
     expect(screen.queryByText('No artifacts in this session yet.')).toBeNull();
+  });
+
+  it('shows artifacts created directly by the Session', async () => {
+    artifactQueryState.dataByPath['session-1:notes/decision.md'] = {
+      id: 'session-artifact',
+      taskId: null,
+      sessionId: 'session-1',
+      path: 'notes/decision.md',
+      version: 1,
+      artifactType: 'general',
+      contentType: 'text/markdown',
+      size: 100,
+      createdAt: new Date('2026-01-05T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/session-artifact/download',
+    };
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: {
+        artifacts: [
+          {
+            id: 'session-artifact',
+            path: 'notes/decision.md',
+            version: 1,
+            artifactType: 'general',
+            contentType: 'text/markdown',
+            size: 100,
+            createdAt: new Date('2026-01-05T00:00:00.000Z'),
+          },
+        ],
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Open Decision from Session' }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Open Decision from Session' }),
+    );
+    await waitFor(() =>
+      expect(artifactQueryInputs).toContainEqual({
+        sessionId: 'session-1',
+        path: 'notes/decision.md',
+        version: 1,
+      }),
+    );
+  });
+
+  it('opens a deep-linked Session artifact without a click and clears the link on back', async () => {
+    artifactQueryState.dataByPath['session-1:notes/decision.md'] = {
+      id: 'session-artifact',
+      taskId: null,
+      sessionId: 'session-1',
+      path: 'notes/decision.md',
+      version: 1,
+      artifactType: 'general',
+      contentType: 'text/markdown',
+      size: 100,
+      createdAt: new Date('2026-01-05T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/session-artifact/download',
+    };
+    renderWorkspace({
+      isMobile: false,
+      searchParams: 'artifact=notes%2Fdecision.md&v=1',
+      sessionOverride: {
+        artifacts: [
+          {
+            id: 'session-artifact',
+            path: 'notes/decision.md',
+            version: 2,
+            artifactType: 'general',
+            contentType: 'text/markdown',
+            size: 100,
+            createdAt: new Date('2026-01-05T00:00:00.000Z'),
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByRole('heading', { name: 'Decision' })).toBeVisible();
+    expect(
+      screen.getByRole('heading', { name: 'Decision' }).parentElement
+        ?.parentElement?.parentElement,
+    ).toHaveClass('px-4', 'pt-3', 'pb-2.5');
+    expect(
+      screen.queryByRole('button', { name: 'Open Decision from Session' }),
+    ).toBeNull();
+    await waitFor(() =>
+      expect(artifactQueryInputs).toContainEqual({
+        sessionId: 'session-1',
+        path: 'notes/decision.md',
+        version: 1,
+      }),
+    );
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to artifacts' }));
+
+    expect(routerReplaceMock).toHaveBeenCalledWith('/sessions/session-1');
+    expect(
+      screen.getByRole('button', { name: 'Open Decision from Session' }),
+    ).toBeVisible();
+  });
+
+  it('opens a transcript artifact link in the side panel and backs out to the gallery', async () => {
+    artifactQueryState.dataByPath['session-1:notes/decision.md'] = {
+      id: 'session-artifact',
+      taskId: null,
+      sessionId: 'session-1',
+      path: 'notes/decision.md',
+      version: 1,
+      artifactType: 'general',
+      contentType: 'text/markdown',
+      size: 100,
+      createdAt: new Date('2026-01-05T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/session-artifact/download',
+    };
+    renderWorkspace({ isMobile: false, children: <OpenSessionArtifact /> });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open decision link' }));
+
+    expect(screen.getByRole('heading', { name: 'Decision' })).toBeVisible();
+    expect(
+      await screen.findByText('Artifact preview: notes/decision.md'),
+    ).toBeVisible();
+    expect(artifactQueryInputs).toContainEqual({
+      sessionId: 'session-1',
+      path: 'notes/decision.md',
+      version: 1,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to artifacts' }));
+
+    expect(screen.getByRole('heading', { name: 'Artifacts' })).toBeVisible();
+    expect(screen.getByText('No artifacts in this session yet.')).toBeVisible();
+  });
+
+  it('shows the artifact gallery when a deep link matches no Session artifact', () => {
+    renderWorkspace({
+      isMobile: false,
+      searchParams: 'artifact=notes%2Fmissing.md&v=1',
+    });
+
+    expect(screen.getByRole('heading', { name: 'Artifacts' })).toBeVisible();
+    expect(screen.getByText('No artifacts in this session yet.')).toBeVisible();
+    expect(artifactQueryInputs).toEqual([]);
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+  });
+
+  it('leaves the side panel to the URL-selected task when a deep link also names an artifact', () => {
+    renderWorkspace({
+      isMobile: false,
+      queriedTasks: [singleTask],
+      searchParams: 'task=task-1&artifact=notes%2Fdecision.md&v=1',
+      sessionOverride: {
+        tasks: [singleTask],
+        artifacts: [
+          {
+            id: 'session-artifact',
+            path: 'notes/decision.md',
+            version: 1,
+            artifactType: 'general',
+            contentType: 'text/markdown',
+            size: 100,
+            createdAt: new Date('2026-01-05T00:00:00.000Z'),
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Decision' })).toBeNull();
   });
 
   it('aggregates latest artifacts per task and preserves duplicate paths across tasks', async () => {
@@ -848,6 +1470,68 @@ describe('SessionWorkspace', () => {
     ).toBeVisible();
   });
 
+  it('disables the Live Preview control until a linked task has a live preview', () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    expect(screen.getByRole('button', { name: 'Live Preview' })).toBeDisabled();
+  });
+
+  it('collates live previews across tasks into the embedded preview panel', () => {
+    const firstTask = {
+      ...singleTask,
+      title: 'First execution',
+      previews: [
+        {
+          serviceName: 'WEB_APP',
+          url: 'https://task-1-web-app.preview.test/dashboard',
+          isPrimary: true,
+          runId: 11,
+        },
+      ],
+    };
+    const secondTask = {
+      ...singleTask,
+      taskId: 'task-2',
+      title: 'Second execution',
+      previews: [
+        {
+          serviceName: 'API',
+          url: 'https://task-2-api.preview.test/',
+          isPrimary: true,
+          runId: 22,
+        },
+      ],
+    };
+
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { tasks: [firstTask, secondTask] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Live Preview' }));
+
+    // The first task's primary preview opens by default, with the task title
+    // folded into the service picker since several tasks expose previews.
+    expect(
+      screen.getByRole('button', {
+        name: /Live Preview: Web App - First execution/,
+      }),
+    ).toBeVisible();
+    const iframe = screen.getByTitle('Live Preview');
+    expect(iframe).toHaveAttribute(
+      'src',
+      `/api/auth/preview-iframe?${new URLSearchParams({
+        preview_url: 'https://task-1-web-app.preview.test/dashboard',
+        task_run_id: '11',
+      }).toString()}`,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel' }));
+    expect(screen.queryByTitle('Live Preview')).toBeNull();
+  });
+
   it('enables and populates the Tasks panel from refreshed session tasks', async () => {
     const delegatedTask = {
       taskId: 'task-2',
@@ -860,6 +1544,7 @@ describe('SessionWorkspace', () => {
       canAccessDetails: true,
       latestRun: null,
       artifacts: [],
+      previews: [],
       pullRequests: [],
     };
     renderWorkspace({
@@ -894,6 +1579,7 @@ describe('SessionWorkspace', () => {
             taskPhase: 'running',
           },
           artifacts: [],
+          previews: [],
         },
       ],
     });
@@ -927,6 +1613,7 @@ describe('SessionWorkspace', () => {
             taskPhase: 'running',
           },
           artifacts: [],
+          previews: [],
         },
         {
           taskId: 'task-3',
@@ -936,6 +1623,7 @@ describe('SessionWorkspace', () => {
             taskPhase: null,
           },
           artifacts: [],
+          previews: [],
         },
       ],
     });
@@ -958,6 +1646,60 @@ describe('SessionWorkspace', () => {
     expect(routerReplaceMock).not.toHaveBeenCalled();
   });
 
+  it('automatically opens a newly started task in a desktop panel', async () => {
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      sessionOverride: { taskSource: 'fast', taskCards: [] },
+      queriedFastTasks: [
+        {
+          taskId: 'task-2',
+          title: 'First running task',
+          latestRun: {
+            status: RunStatus.Running,
+            taskPhase: 'running',
+          },
+          artifacts: [],
+          previews: [],
+        },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Tasks' })).toBeEnabled(),
+    );
+
+    act(() => {
+      queryClient.setQueryData(
+        ['fastSessions', 'tasks', session.id],
+        [
+          {
+            taskId: 'task-2',
+            title: 'First running task',
+            latestRun: {
+              status: RunStatus.Running,
+              taskPhase: 'running',
+            },
+            artifacts: [],
+            previews: [],
+          },
+          {
+            taskId: 'task-3',
+            title: 'Second running task',
+            latestRun: {
+              status: RunStatus.Pending,
+              taskPhase: null,
+            },
+            artifacts: [],
+            previews: [],
+          },
+        ],
+      );
+    });
+
+    expect(await screen.findByLabelText('Full task task-3')).toBeVisible();
+    expect(screen.queryByLabelText('Full task task-2')).toBeNull();
+  });
+
   it('populates the Artifacts panel from refreshed Fast-session tasks', async () => {
     renderWorkspace({
       isMobile: false,
@@ -967,6 +1709,7 @@ describe('SessionWorkspace', () => {
           taskId: 'fast-task-1',
           title: 'Fast execution',
           latestRun: null,
+          previews: [],
           artifacts: [
             {
               id: 'fast-artifact-1',
@@ -1005,6 +1748,7 @@ describe('SessionWorkspace', () => {
         taskPhase,
       },
       artifacts: [],
+      previews: [],
     });
     const { queryClient } = renderWorkspace({
       isMobile: false,
@@ -1118,4 +1862,20 @@ describe('SessionWorkspace', () => {
     expect(screen.queryByRole('button', { name: 'Session info' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
   });
+});
+
+describe('getSessionTaskPanelCapacity', () => {
+  it.each([
+    { width: 700, isMdOrLarger: false, expected: 1 },
+    { width: 1024, isMdOrLarger: true, expected: 1 },
+    { width: 1280, isMdOrLarger: true, expected: 2 },
+    { width: 1920, isMdOrLarger: true, expected: 3 },
+    { width: 2560, isMdOrLarger: true, expected: 5 },
+    { width: 3840, isMdOrLarger: true, expected: 8 },
+  ])(
+    'returns $expected task panels for a $width px workspace',
+    ({ width, isMdOrLarger, expected }) => {
+      expect(getSessionTaskPanelCapacity(width, isMdOrLarger)).toBe(expected);
+    },
+  );
 });

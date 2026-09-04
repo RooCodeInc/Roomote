@@ -1,66 +1,46 @@
-import type { ComponentType } from 'react';
-import type { BackgroundAutomationKey } from '@roomote/types';
-import { GitMergeIcon } from '@primer/octicons-react';
-
+import Image from 'next/image';
 import {
-  BellElectric,
-  Bot,
-  BrandIcon,
-  ChartColumnIncreasing,
-  GitMergeConflict,
-  GitPullRequest,
-  Lightbulb,
-  MessagesSquare,
-  Smile,
-  SquarePen,
-  TriangleAlert,
-  Wrench,
-} from '@/components/system';
+  getTriggerableBackgroundAutomationDescriptorByKey,
+  type BackgroundAutomationKey,
+} from '@roomote/types';
 
 type TaskAutomationIconProps = {
   automationKey: string | null;
   className?: string;
 };
 
-const AUTOMATION_ICONS: Partial<
-  Record<BackgroundAutomationKey, ComponentType<{ className?: string }>>
-> = {
-  review_code: GitPullRequest,
-  conflict_resolver: GitMergeConflict,
-  suggester: Lightbulb,
-  announcer: GitMergeIcon,
-  call_roomote_via_emoji: Smile,
-  slack_channel_auto_start: MessagesSquare,
-  manager_stats: ChartColumnIncreasing,
-  platform_issue_alerts: BellElectric,
-  issue_fixer: Wrench,
-  security_auditor: TriangleAlert,
-  code_quality_auditor: SquarePen,
-  ci_failure_triage: Wrench,
-};
+const AUTOMATION_ICON_ASSETS: Partial<Record<BackgroundAutomationKey, string>> =
+  {
+    review_code: 'git-pull-request',
+    call_roomote_via_emoji: 'smile',
+    slack_channel_auto_start: 'messages-square',
+    platform_issue_alerts: 'bell-electric',
+  };
 
 export function TaskAutomationIcon({
   automationKey,
   className,
 }: TaskAutomationIconProps) {
-  if (automationKey === 'dependabot_triage') {
-    return (
-      <BrandIcon icon="dependabot" name="Dependabot" className={className} />
-    );
-  }
+  const descriptor = automationKey
+    ? getTriggerableBackgroundAutomationDescriptorByKey(
+        automationKey as BackgroundAutomationKey,
+      )
+    : null;
 
-  if (automationKey === 'codeql_triage') {
-    return <BrandIcon icon="github" name="CodeQL" className={className} />;
-  }
-
-  if (automationKey === 'sentry_triage') {
-    return <BrandIcon icon="sentry" name="Sentry" className={className} />;
-  }
-
-  const Icon =
+  const icon =
+    descriptor?.slackIcon ??
     (automationKey
-      ? AUTOMATION_ICONS[automationKey as BackgroundAutomationKey]
-      : undefined) ?? Bot;
+      ? AUTOMATION_ICON_ASSETS[automationKey as BackgroundAutomationKey]
+      : undefined) ??
+    'zap';
 
-  return <Icon className={className} />;
+  return (
+    <Image
+      src={`/automation-icons/${icon}.png`}
+      width={96}
+      height={96}
+      alt=""
+      className={className}
+    />
+  );
 }

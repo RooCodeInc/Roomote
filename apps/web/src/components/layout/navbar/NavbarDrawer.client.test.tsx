@@ -3,7 +3,7 @@ import type {
   ButtonHTMLAttributes,
   ReactNode,
 } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 
 const state = vi.hoisted(() => ({
   pathname: '/',
@@ -38,7 +38,6 @@ vi.mock('@/hooks/useUser', () => ({
 
 vi.mock('@/components/system', () => ({
   Menu: Icon,
-  Plus: Icon,
   X: Icon,
   House: Icon,
   Rows4: Icon,
@@ -71,11 +70,12 @@ vi.mock('@/components/system', () => ({
     <div>{children}</div>
   ),
   DrawerTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-}));
-
-vi.mock('@/components/tasks/NewTaskDialog', () => ({
-  NewTaskDialog: ({ open }: { open: boolean }) => (
-    <div data-testid="new-task-dialog" data-open={String(open)} />
+  Tooltip: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  TooltipTrigger: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  TooltipContent: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
   ),
 }));
 
@@ -109,22 +109,27 @@ describe('NavbarDrawer', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('opens a new session dialog from an action above Home', () => {
-    render(<NavbarDrawer />);
+  it('keeps setup-gated destinations visible but disabled with an explanation', () => {
+    render(<NavbarDrawer setupIncomplete />);
 
-    const newTaskButton = screen.getByRole('button', { name: 'New Session' });
-    const homeLink = screen.getByRole('link', { name: 'Home' });
-
-    expect(newTaskButton.compareDocumentPosition(homeLink)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
+    expect(screen.getByRole('link', { name: 'Sessions' })).toHaveAttribute(
+      'href',
+      '/sessions',
     );
-
-    fireEvent.click(newTaskButton);
-
-    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
-      'data-open',
-      'true',
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/settings',
     );
+    for (const name of ['Home', 'Automations', 'Analytics']) {
+      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
+    }
+    expect(
+      screen.getAllByText('Available when setup is completed.'),
+    ).toHaveLength(3);
   });
 
   it('hides analytics from non-admins', () => {

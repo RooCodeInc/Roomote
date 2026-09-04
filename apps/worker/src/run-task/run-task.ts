@@ -18,6 +18,7 @@ import {
   getSlackThreadTsFromTaskPayload,
   getTaskReportConsumerFromPayload,
   isCommunicationProvider,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   SANDBOX_SERVER_PORT,
   SANDBOX_TIMEOUT_MS,
 } from '@roomote/types';
@@ -89,7 +90,7 @@ import {
   buildMcpTaskEnv,
   getCommunicationReplyContext,
   getSlackReplyContext,
-  isFastAgentChildTaskRun,
+  getFastAgentChildRuntimeEnv,
 } from './mcp-task-env';
 import {
   type ActorMismatchPolicy,
@@ -713,13 +714,19 @@ export const runTask = async ({
       githubTokenRefreshInterval: undefined,
     };
 
+    const taskEnvVars = Object.fromEntries(
+      Object.entries(envVars).filter(
+        ([name]) => name !== SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+      ),
+    );
     const unsanitizedEnv = workerEnv
       ? {
           ...workerEnv.buildUserFacingEnv(),
           ...(workerEnv.buildOpenCodeHarnessEnv?.() ?? {}),
-          ...envVars,
+          ...taskEnvVars,
         }
-      : { ...process.env, ...envVars };
+      : { ...process.env, ...taskEnvVars };
+    delete unsanitizedEnv[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
 
     const sanitizedEnv = sanitizeEnv(unsanitizedEnv);
     const openCodeHarnessEnv = buildOpenCodeHarnessEnv(unsanitizedEnv);
@@ -729,7 +736,7 @@ export const runTask = async ({
     // sanitized allowlist always take precedence. This prevents an org from
     // accidentally (or maliciously) overriding vars the worker relies on.
     const deploymentEnvVars: Record<string, string> = Object.fromEntries(
-      Object.entries(envVars).filter(
+      Object.entries(taskEnvVars).filter(
         (entry): entry is [string, string] => entry[1] !== undefined,
       ),
     );
@@ -757,11 +764,6 @@ export const runTask = async ({
       ...(unsanitizedEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME && {
         ROOMOTE_AUTH_BYPASS_HEADER_NAME:
           unsanitizedEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME,
-      }),
-      // Consumed (and removed) by generateOpenCodeConfig, which registers the
-      // hidden proof-runner subagent only when a browser surface exists.
-      ...(environmentConfig?.initialUrl && {
-        ROOMOTE_PROOF_BROWSER_TARGET: environmentConfig.initialUrl,
       }),
     };
     // Strip credentials for disabled providers as defense in depth, even if a
@@ -974,9 +976,7 @@ export const runTask = async ({
 
     const slackReplyContext = getSlackReplyContext(taskRun);
     const communicationReplyContext = getCommunicationReplyContext(taskRun);
-    if (isFastAgentChildTaskRun(taskRun)) {
-      runtimeEnv.ROOMOTE_FAST_AGENT_CHILD = 'true';
-    }
+    Object.assign(runtimeEnv, getFastAgentChildRuntimeEnv(taskRun));
     if (slackReplyContext?.threadTs) {
       runtimeEnv.ROOMOTE_SLACK_CHANNEL = slackReplyContext.channel;
       runtimeEnv.ROOMOTE_SLACK_THREAD_TS = slackReplyContext.threadTs;

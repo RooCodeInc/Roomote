@@ -17,6 +17,7 @@ const read = (path) => readFileSync(join(root, path), 'utf8');
 const catalog = JSON.parse(read('deploy/deployment-catalog.json'));
 const installer = read('deploy/install.sh');
 const deployer = read('deploy/scripts/deploy.sh');
+const upgradeCompatibility = read('deploy/ci/upgrade-compatibility.sh');
 const productionEnvExample = read('.env.production.example');
 
 function fail(message) {
@@ -26,6 +27,13 @@ function fail(message) {
 function assert(condition, message) {
   if (!condition) fail(message);
 }
+
+assert(
+  installer.includes('--no-setup-url') &&
+    installer.includes("print_setup_url='false'") &&
+    installer.includes('sudo roomote setup-url'),
+  'installer: automated installs must be able to suppress the tokenized setup URL',
+);
 
 assert(
   installer.includes('preview_domain="$domain"') &&
@@ -88,6 +96,33 @@ assert(
     digitalOceanTerraform.includes('var.domain == var.dns_zone'),
   'DigitalOcean Terraform: zone-apex domains must map to "@"/"*" record names',
 );
+assert(
+  upgradeCompatibility.includes('COMPOSE_PROFILES=local-postgres,brain') &&
+    upgradeCompatibility.includes('bullmq gbrain preview-proxy'),
+  'upgrade compatibility: the Brain profile must boot gbrain explicitly',
+);
+assert(
+  upgradeCompatibility.includes(
+    'postgres_port="${DEPLOYMENT_CI_POSTGRES_PORT:-0}"',
+  ) &&
+    upgradeCompatibility.includes(
+      'postgres_endpoint="$(compose port postgres 5432)"',
+    ) &&
+    upgradeCompatibility.includes("'' | *[!0-9]*)") &&
+    upgradeCompatibility.includes(
+      'DATABASE_URL="postgres://postgres:roomote-postgres-password@127.0.0.1:$postgres_port/roomote"',
+    ),
+  'upgrade compatibility: Docker must allocate the default host Postgres port',
+);
+assert(
+  upgradeCompatibility.includes('trap finish EXIT') &&
+    upgradeCompatibility.includes('compose ps --all') &&
+    upgradeCompatibility.includes('Required service logs:') &&
+    upgradeCompatibility.includes(
+      'postgres redis minio minio-init docker-proxy db-migrate api web controller bullmq gbrain preview-proxy',
+    ),
+  'upgrade compatibility: startup failures must report Compose state and service logs',
+);
 
 function commandText(command) {
   if (Array.isArray(command)) return command.join(' ');
@@ -116,6 +151,7 @@ const composeEnv = {
   DEFAULT_COMPUTE_PROVIDER: 'docker',
   DOCKER_WORKER_IMAGE: 'roomote-worker:deployment-ci',
   ENCRYPTION_KEY: 'deployment-ci-encryption-key',
+  GBRAIN_IMAGE: '',
   IMAGE_NAMESPACE: 'roomote',
   IMAGE_REGISTRY: 'localhost',
   JOB_AUTH_PRIVATE_KEY: 'deployment-ci-job-private-key',
@@ -228,6 +264,38 @@ function validateComposeShape(shape) {
           `${shape.name}: ${serviceName} must receive PREVIEW_PROXY_SUBDOMAIN_SUFFIX`,
         );
       }
+    }
+
+    if (shape.name === 'installer-production') {
+      const expectedGbrainImage = `${composeEnv.IMAGE_REGISTRY}/${composeEnv.IMAGE_NAMESPACE}/roomote-gbrain:${composeEnv.ROOMOTE_VERSION}`;
+      assert(
+        config.services.gbrain?.image === expectedGbrainImage,
+        `installer-production: gbrain must default to matching release image ${expectedGbrainImage}`,
+      );
+
+      const overrideImage = 'registry.example/roomote/gbrain:operator-pinned';
+      const overrideConfig = JSON.parse(
+        execFileSync('docker', args, {
+          cwd: root,
+          env: { ...composeEnv, GBRAIN_IMAGE: overrideImage },
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      );
+      assert(
+        overrideConfig.services.gbrain?.image === overrideImage,
+        'installer-production: explicit GBRAIN_IMAGE must override the matching release default',
+      );
+      assert(
+        config.services.gbrain?.healthcheck?.test?.length,
+        'installer-production: gbrain must have a healthcheck for upgrade validation',
+      );
+      assert(
+        config.services.gbrain?.depends_on?.postgres?.condition ===
+          'service_healthy' &&
+          config.services.gbrain?.depends_on?.postgres?.required === false,
+        'installer-production: gbrain must wait for optional local Postgres health',
+      );
     }
 
     if (

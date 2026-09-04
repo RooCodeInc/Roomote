@@ -10,6 +10,7 @@ import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getSetupBootstrapState } from '@/lib/server/setup-bootstrap-state';
 import { syncRepositoriesCommand } from '@/trpc/commands/source-control';
+import { notifySetupSourceControlSynchronized } from '@/trpc/commands/setup/setup-session';
 import {
   addSourceControlOAuthResult,
   getSourceControlOAuthReturnCookieName,
@@ -80,14 +81,14 @@ export async function GET(request: NextRequest) {
       code,
       redirectUri: buildGitLabOAuthRedirectUri(publicAppUrl),
     });
-    if (!isSetupOAuthReturnTarget(returnTarget)) {
-      const syncResult = await syncRepositoriesCommand(authResult, {
-        provider: 'gitlab',
-      });
-      if (!syncResult.success) {
-        throw new Error(syncResult.error);
-      }
+    const syncResult = await syncRepositoriesCommand(authResult, {
+      provider: 'gitlab',
+    });
+    if (!syncResult.success) {
+      throw new Error(syncResult.error);
     }
+    if (isSetupOAuthReturnTarget(returnTarget))
+      await notifySetupSourceControlSynchronized(authResult);
     const resultTarget = addSourceControlOAuthResult(
       returnTarget,
       'gitlab',
@@ -100,6 +101,7 @@ export async function GET(request: NextRequest) {
       returnTarget,
       'gitlab',
       'error',
+      error instanceof Error ? error.message : 'GitLab authorization failed.',
     );
     redirect.href = new URL(resultTarget, publicAppUrl).href;
   }

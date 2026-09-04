@@ -4,6 +4,28 @@ import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { createMemoryMcpInstructions } from '@roomote/types';
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('adds safe memory disclosure guidance only when therapist mode is enabled', () => {
+    const enabledPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      therapistModeEnabled: true,
+    });
+    const disabledPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+
+    expect(enabledPrompt).toContain('<therapist_mode>');
+    expect(enabledPrompt).toContain(
+      'which remembered fact you retrieved and how you used it',
+    );
+    expect(enabledPrompt).toContain(
+      'Never expose internal memory IDs, page slugs, storage paths, raw metadata, source fields, or other internal provenance',
+    );
+    expect(disabledPrompt).not.toContain('<therapist_mode>');
+    expect(disabledPrompt).not.toContain(
+      'which remembered fact you retrieved and how you used it',
+    );
+  });
+
   it('includes a resolved release identifier before turn startup and environments', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -173,6 +195,15 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('Existing active tasks do not block');
     expect(prompt).toContain('send_chat_reply');
+    expect(prompt).toContain(
+      "use that task's known ID with `manage_tasks` `get_summary` to recover its stable image artifact IDs and viewer links",
+    );
+    expect(prompt).toContain(
+      'Never say an image or screenshot is attached, shown, included, above, or below unless the same reply actually supplies its stable ID in "imageArtifactIds"',
+    );
+    expect(prompt).toContain(
+      'provide an accessible artifact viewer link when available and accurately say that the image could not be attached',
+    );
     expect(prompt).toContain('send_chat_reaction');
     expect(prompt).toContain(
       'Use `send_chat_reaction` only for an optional reaction or an emoji-only terminal answer',
@@ -587,7 +618,9 @@ describe('buildFastAgentSystemPrompt', () => {
       retryTaskStartAvailable: true,
     });
 
-    expect(prompt).toContain('post exactly one closeout');
+    expect(prompt).toContain(
+      'produce exactly one user-visible terminal response',
+    );
     expect(prompt.indexOf('## Turn Startup (Highest Priority)')).toBeLessThan(
       prompt.indexOf('## Delegated Task Platform Event'),
     );
@@ -675,6 +708,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Automation Platform Event');
     expect(prompt).toContain('Execute the automation prompt now');
     expect(prompt).toContain("closeout's `suggestions` array");
+    expect(prompt).toContain('Each suggestion may independently set');
+    expect(prompt).toContain('`__all_repositories__`');
+    expect(prompt).toContain('`__fast__`');
     expect(prompt).toContain('do not promise reaction-triggered launching');
     expect(prompt).not.toContain('<slack_modern_markdown>');
   });
@@ -735,7 +771,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('requires a visible closeout for visibility-required platform events', () => {
+  it('requires a visible terminal response for visibility-required platform events', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       turnSource: 'platform_event',
@@ -743,12 +779,15 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(prompt).toContain(
-      'requires a user-visible closeout because it carries user-useful substance',
+      'requires one user-visible terminal response because it carries user-useful substance',
     );
     expect(prompt).toContain(
       'Present its result, changed expectation, required decision, or recovery action; never narrate lifecycle state alone',
     );
     expect(prompt).toContain('Do not call "ignore_event"');
+    expect(prompt).toContain(
+      'Use a closeout unless the setup instructions require `request_user_input`',
+    );
     expect(prompt).not.toContain(
       'Call "ignore_event" when it is routine, redundant, or not worth interrupting the user',
     );

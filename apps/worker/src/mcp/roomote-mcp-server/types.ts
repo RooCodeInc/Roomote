@@ -68,6 +68,14 @@ export interface TaskSummaryResponse {
   environmentSetupState: string | null;
   linkedEnvironmentId: string | null;
   linkedEnvironmentName: string | null;
+  imageArtifacts?: Array<{
+    id: string;
+    path: string;
+    version: number;
+    artifactType: string;
+    contentType: string;
+    viewUrl: string;
+  }>;
 }
 
 export interface TaskComputeLog {
@@ -124,6 +132,8 @@ export interface LaunchTaskResponse {
   success: boolean;
   runId?: number;
   taskId?: string;
+  /** The Session that owns the launched task. */
+  sessionId?: string;
   error?: string;
 }
 

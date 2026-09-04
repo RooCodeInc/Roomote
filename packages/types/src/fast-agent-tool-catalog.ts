@@ -7,6 +7,7 @@ import { ACP_TOOL_KINDS, type KnownAcpToolKind } from './acp';
 export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   callIntegrationTool: 'call_integration_tool',
   cancelTask: 'cancel_task',
+  createArtifact: 'create_artifact',
   findIntegrationTools: 'find_integration_tools',
   ignoreEvent: 'ignore_event',
   launchTask: 'launch_task',
@@ -20,6 +21,8 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   showWidget: 'show_widget',
   spillGrep: 'spill_grep',
   spillRead: 'spill_read',
+  requestUserInput: 'request_user_input',
+  reviewPullRequest: 'review_pull_request',
 } as const;
 
 export type FastAgentNativeToolName =
@@ -31,6 +34,14 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
     kind: ACP_TOOL_KINDS.mcp,
   },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask, kind: ACP_TOOL_KINDS.task },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest,
+    kind: ACP_TOOL_KINDS.task,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact,
+    kind: ACP_TOOL_KINDS.artifact,
+  },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools,
     kind: ACP_TOOL_KINDS.search,
@@ -68,6 +79,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep, kind: ACP_TOOL_KINDS.search },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead, kind: ACP_TOOL_KINDS.read },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
+    kind: ACP_TOOL_KINDS.communication,
+  },
 ] as const satisfies readonly {
   name: FastAgentNativeToolName;
   kind: KnownAcpToolKind;

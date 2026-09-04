@@ -24,6 +24,7 @@ import {
   useGhostSuggestion,
 } from '@/hooks/useGhostSuggestion';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
+import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import {
@@ -94,6 +95,7 @@ interface PromptInputProps {
   showInputMenu?: boolean;
   placeholder?: string;
   hasTransportError?: boolean;
+  autoFocus?: boolean;
 }
 
 export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
@@ -110,6 +112,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       showInputMenu = true,
       placeholder: placeholderProp,
       hasTransportError = false,
+      autoFocus = false,
     },
     ref,
   ) {
@@ -129,6 +132,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const { user } = useUser();
     const pendingUserInputState = useOptionalPendingUserInputRequestState();
     const [prompt, setPrompt] = useState(initialPrompt);
+    const [isTextareaFocused, setIsTextareaFocused] = useState(false);
     const [sending, setSending] = useState(false);
     const cancellingRef = useRef(false);
     const steeringQueuedMessageRef = useRef(false);
@@ -167,16 +171,12 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     // this gate each one would generate and surface a premature suggestion
     // while the agent is still working.
     const isAwaitingHuman = taskPhase === 'waiting_for_prompt';
-    // Experimental, deployment-wide opt-in. The server enforces the flag too;
-    // this just avoids pointless requests while it is off.
-    const suggestionsEnabled = user?.featureFlags?.composerSuggestions === true;
 
     const composerSuggestionQuery = useQuery(
       trpc.tasks.composerSuggestion.queryOptions(
         { taskId: taskId ?? '', historyRevision },
         {
           enabled:
-            suggestionsEnabled &&
             Boolean(taskId) &&
             connected &&
             !readOnly &&
@@ -210,6 +210,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     );
 
     const isTaskRunning = taskPhase === 'running';
+    useAutoFocusOnce(textareaRef, autoFocus && connected && !sending);
     const canSteerQueuedMessages =
       isSteerablePhase(taskPhase) &&
       (taskPhase !== 'waiting_for_prompt' || connected);
@@ -814,7 +815,11 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
                 ref={textareaRef}
                 value={prompt}
                 onChange={handleChange}
-                onBlur={() => flushDraft()}
+                onFocus={() => setIsTextareaFocused(true)}
+                onBlur={() => {
+                  setIsTextareaFocused(false);
+                  flushDraft();
+                }}
                 onKeyDown={handleTextareaKeyDown}
                 placeholder={ghostSuggestion ?? placeholder}
                 aria-describedby={
@@ -828,14 +833,17 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
                     Suggested message: {ghostSuggestion}. Press Tab to accept or
                     Escape to dismiss.
                   </span>
-                  <button
-                    type="button"
-                    aria-label="Insert suggested message"
-                    onClick={acceptGhostSuggestion}
-                    className="absolute right-4 top-4 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
-                  >
-                    Tab
-                  </button>
+                  {isTextareaFocused && (
+                    <button
+                      type="button"
+                      aria-label="Insert suggested message"
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={acceptGhostSuggestion}
+                      className="absolute right-4 top-4 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
+                    >
+                      Tab to accept
+                    </button>
+                  )}
                 </>
               )}
             </div>

@@ -10,7 +10,9 @@ import {
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  CONTROL_PLANE_ENV_VAR_NAMES,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   isEnvVarRequestFulfillmentClientMessageId,
   isExitedRunStatus,
   deploymentEnvVarNameSchema,
@@ -138,6 +140,17 @@ export async function fulfillTaskEnvVarRequestCommand(
   const { taskId, clientMessageId, names, values } =
     fulfillTaskEnvVarRequestSchema.parse(input);
   const requestedNames = sortNames(names);
+
+  const reservedName = requestedNames.find(
+    (name) =>
+      CONTROL_PLANE_ENV_VAR_NAMES.has(name) ||
+      name === SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+  );
+  if (reservedName) {
+    throw new Error(
+      `"${reservedName}" is a reserved deployment variable and cannot be requested by a task.`,
+    );
+  }
 
   if (new Set(requestedNames).size !== requestedNames.length) {
     throw new Error(

@@ -2049,7 +2049,11 @@ export async function connectMcpCommand(
       set: {
         userId: isDeploymentScoped ? null : auth.userId,
         connectionRole,
-        authConfig: {},
+        // Keep Linear's last verified account identity through the pending
+        // authorization flow. The callback uses it to retain an omitted
+        // refresh token only when the newly authorized account matches.
+        // Other integrations still reset their client configuration.
+        ...(integration.id === 'linear' ? {} : { authConfig: {} }),
         enabled: false,
         authStatus: 'pending',
         updatedAt: new Date(),

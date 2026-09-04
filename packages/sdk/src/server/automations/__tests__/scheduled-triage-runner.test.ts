@@ -8,7 +8,6 @@ const {
   mockBuildDestinationTaskPayloadFields,
   mockIsRunDue,
   mockResolveSlackWorkspaceTimezone,
-  mockPostScheduledTriageRoutingDebug,
 } = vi.hoisted(() => ({
   mockDbSelect: vi.fn(),
   mockGetAutomationRuntime: vi.fn(),
@@ -19,7 +18,6 @@ const {
   mockBuildDestinationTaskPayloadFields: vi.fn(),
   mockIsRunDue: vi.fn(),
   mockResolveSlackWorkspaceTimezone: vi.fn(),
-  mockPostScheduledTriageRoutingDebug: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -57,10 +55,6 @@ vi.mock('../custom-automation-schedule', () => ({
   })),
 }));
 
-vi.mock('../triage-routing-debug', () => ({
-  postScheduledTriageRoutingDebug: mockPostScheduledTriageRoutingDebug,
-}));
-
 import { TaskPayloadKind } from '@roomote/types';
 
 import { createScheduledTriageJob } from '../scheduled-triage-runner';
@@ -93,7 +87,6 @@ describe('createScheduledTriageJob', () => {
     mockBuildDestinationTaskPayloadFields.mockReturnValue({});
     mockIsRunDue.mockReturnValue(true);
     mockResolveSlackWorkspaceTimezone.mockResolvedValue('UTC');
-    mockPostScheduledTriageRoutingDebug.mockResolvedValue(undefined);
     mockRecordAutomationRunOutcome.mockResolvedValue(undefined);
   });
 

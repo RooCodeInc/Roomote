@@ -1,8 +1,12 @@
 import { Home } from './home/Home';
+import { getRandomHomeHeading } from './home/headings';
 import { getRandomHomePromptPlaceholderIndex } from './home/promptPlaceholders';
 
 export default function Page() {
   return (
-    <Home initialPlaceholderIndex={getRandomHomePromptPlaceholderIndex()} />
+    <Home
+      initialHeading={getRandomHomeHeading()}
+      initialPlaceholderIndex={getRandomHomePromptPlaceholderIndex()}
+    />
   );
 }

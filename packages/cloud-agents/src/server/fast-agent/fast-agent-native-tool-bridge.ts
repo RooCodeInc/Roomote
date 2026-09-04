@@ -26,6 +26,8 @@ import {
   FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS,
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
+  type FastAgentSurface,
+  FAST_EXECUTION,
 } from '@roomote/types';
 import { z } from 'zod';
 
@@ -262,14 +264,15 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Post a user-visible reply. Fast automation reports may attach launchable suggested tasks on Slack or Discord.",
+  description: "Deliver a user-visible reply. Write the reply as ordinary assistant text first, then call this with its purpose; the text you wrote since your last reply is delivered. Fast automation reports may attach launchable suggested tasks on Slack or Discord.",
   args: {
-    message: z.string().min(1).describe("Markdown reply text"),
+    message: z.string().min(1).optional().describe("Markdown reply text. Omit to deliver the assistant text written since the last reply; pass it only when the reply was not written as text."),
     purpose: z.enum(["ack", "progress", "closeout", "clarification"]),
-    imageArtifactIds: z.array(z.string()).optional(),
+    imageArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded images to attach. Never claim an image or screenshot is attached, shown, or included unless this list is non-empty. If attachment delivery fails, reply with an accessible artifact viewer link and say that the image could not be attached."),
     suggestions: z.array(z.object({
       title: z.string().min(1).max(140),
       brief: z.string().min(1).max(2000),
+      environmentId: z.string().min(1).optional().describe(${JSON.stringify(`Exact environment ID from the system prompt, "${ALL_REPOSITORIES}" for all repositories, or "${FAST_EXECUTION}" for Fast mode. Omit to use normal workspace routing.`)}),
     })).max(10).optional().describe("Launchable follow-ups for a Slack or Discord automation report only"),
   },
   execute: (args, context) => invoke("send_chat_reply", args, context),
@@ -290,6 +293,22 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Create a durable text artifact in this Session. Use this for documents the user should keep, share, or build from; use show_widget for transient visual presentation and launch_task for repository or filesystem work.",
+  args: {
+    path: z.string().min(1).max(255).describe("Relative artifact path, including a useful file extension"),
+    content: z.string().min(1).max(131072).describe("UTF-8 text content; maximum 128 KiB"),
+    contentType: z.string().min(1).max(200).optional().describe("MIME type; inferred from the path when omitted"),
+    artifactType: z.enum(["general", "plan"]).optional().describe("Use plan only for implementation plans; defaults to general"),
+  },
+  execute: (args, context) => invoke("create_artifact", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
@@ -304,6 +323,21 @@ export default {
     kickoffMessage: z.string().min(1).describe("Brief user-facing description of the work now underway; do not mention delegation, launching, or queue state"),
   },
   execute: (args, context) => invoke("launch_task", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Run Roomote's structured code review pipeline on a pull request. The review posts a findings summary on the pull request itself and reports back here when it finishes. In a pull request conversation, omit repository and pullRequestNumber to review this pull request.",
+  args: {
+    repository: z.string().min(1).optional().describe("Repository full name like owner/name; omit in a pull request conversation to review the current pull request"),
+    pullRequestNumber: z.number().int().positive().optional().describe("Pull request number; omit in a pull request conversation to review the current pull request"),
+    kickoffMessage: z.string().min(1).describe("Brief user-facing note that the review is underway; do not mention delegation or queue state"),
+  },
+  execute: (args, context) => invoke("review_pull_request", args, context),
 }
 `,
 
@@ -476,6 +510,31 @@ export default {
     offset: z.number().int().nonnegative().optional(),
   },
   execute: (args, context) => invoke("spill_grep", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Ask structured questions, or use a trusted setup preset whose options Roomote supplies. Pass a preset alone when setup instructions name one; questions are ignored when a preset is set. Multiple-choice questions require explicit submission. The turn resumes from the persisted answer.",
+  args: {
+    questions: z.array(z.object({
+      id: z.string().min(1).max(80),
+      header: z.string().min(1).max(60),
+      question: z.string().min(1).max(500),
+      isOther: z.boolean().optional().describe("Allow a free-text Other answer"),
+      isSecret: z.boolean().optional().describe("Mask the answer in user-visible history"),
+      options: z.array(z.object({
+        label: z.string().min(1).max(140),
+        description: z.string().min(1).max(500),
+      })).min(1).max(12).optional().describe("Present options as choices; omit for free-text"),
+      multiple: z.boolean().optional().describe("Allow more than one option; defaults to false"),
+    })).min(1).max(4).optional().describe("Structured questions to ask; omit when using a preset"),
+    preset: z.enum(["setup_starter_tasks"]).optional().describe("Use the trusted starter-task preset instead of questions"),
+  },
+  execute: (args, context) => invoke("request_user_input", args, context),
 }
 `,
   };
@@ -882,7 +941,6 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
         });
         return;
       }
-
       const call = {
         sessionId: parsed.sessionID,
         name: parsed.tool,
@@ -1126,12 +1184,14 @@ function createSharedToolsDirectory(): string {
   const toolsDirectory = join(directory, 'tools');
   mkdirSync(toolsDirectory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
-  // OpenCode installs `@opencode-ai/plugin` (and with it the zod major it
-  // validates tool arguments against) into this directory the first time it
-  // boots here, then reuses the install for every later conversation on the
-  // host. The tools' `zod` import must resolve to that copy: pointing it at
-  // the app's own zod 3 made OpenCode's zod 4 validator reject array
-  // arguments. Leave package.json without a lockfile so the install runs.
+  // `@opencode-ai/plugin` (and with it the zod major OpenCode validates tool
+  // arguments against) must be installed in this directory: the tools' `zod`
+  // import has to resolve to that copy, because pointing it at the app's own
+  // zod 3 made OpenCode's zod 4 validator reject array arguments. The SDK
+  // server spawn copies the image-baked install in (opencode-plugin-seed.ts)
+  // so OpenCode never fetches it at runtime; where no seed is baked (local
+  // dev), leaving package.json without a lockfile lets OpenCode's own install
+  // run on first boot as before.
   if (!existsSync(join(directory, 'package.json'))) {
     writeFileSync(
       join(directory, 'package.json'),
@@ -1183,6 +1243,7 @@ function pruneSessionRuntimes(): void {
 export async function getFastAgentNativeToolRuntime(
   sessionId: string,
   integrations: FastAgentIntegration[],
+  options: { surface?: FastAgentSurface } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
   const bridge = await bridgePromise;
@@ -1236,6 +1297,7 @@ export async function getFastAgentNativeToolRuntime(
         build: {
           tools: buildFastAgentToolFilter(
             nativeIntegrations.map((integration) => integration.id),
+            { surface: options.surface ?? 'web' },
           ),
         },
       },

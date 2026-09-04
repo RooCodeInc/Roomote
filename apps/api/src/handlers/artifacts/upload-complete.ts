@@ -55,7 +55,7 @@ export async function markArtifactUploadComplete(
 
   const notification = await notifyFastAgentParentOnArtifact({
     id: artifact.id,
-    taskId: artifact.taskId,
+    taskId: artifact.taskId!,
     runId: artifact.runId,
     path: artifact.path,
     version: artifact.version,

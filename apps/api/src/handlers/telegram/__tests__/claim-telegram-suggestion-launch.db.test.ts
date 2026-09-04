@@ -26,6 +26,7 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
     launchClaimedAt?: Date | null;
     channelId?: string;
     launchRouting?: 'router';
+    launchTarget?: string;
   }): Promise<string> {
     const [row] = await db
       .insert(workItems)
@@ -56,6 +57,9 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
         suggestionKey: `source-task:${workItemId}`,
         ...(overrides?.launchRouting
           ? { launchRouting: overrides.launchRouting }
+          : {}),
+        ...(overrides?.launchTarget
+          ? { launchTarget: overrides.launchTarget }
           : {}),
       },
     });
@@ -134,6 +138,23 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
       targetRepositoryFullName: null,
       targetEnvironmentId: null,
       usesRouterLaunch: true,
+    });
+    expect(claimed?.launchTarget).toBeUndefined();
+  });
+
+  it("keeps the card's explicit launch target so a deleted environment fails loudly", async () => {
+    const workItemId = await seedSuggestionWorkItem({
+      launchTarget: '11111111-1111-4111-8111-111111111111',
+    });
+
+    const claimed = await claimTelegramSuggestionLaunch({
+      suggestionId: workItemId,
+      chatId,
+    });
+
+    expect(claimed).toMatchObject({
+      launchTarget: '11111111-1111-4111-8111-111111111111',
+      usesRouterLaunch: false,
     });
   });
 
