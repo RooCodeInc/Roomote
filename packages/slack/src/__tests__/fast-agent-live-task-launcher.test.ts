@@ -169,7 +169,9 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       blocks: [
         {
           type: 'task_card',
-          block_id: 'roomote-task-task-1-card',
+          block_id: expect.stringMatching(
+            /^roomote-task-task-1-card-[0-9a-f-]{36}$/,
+          ),
           task_id: 'roomote-task-task-1',
           title: 'Preparing workspace…',
           status: 'in_progress',
