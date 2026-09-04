@@ -93,6 +93,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'launch_task.js'),
       'utf8',
     );
+    const reviewPullRequestSource = await readFile(
+      join(toolsDirectory, 'review_pull_request.js'),
+      'utf8',
+    );
     const createArtifactSource = await readFile(
       join(toolsDirectory, 'create_artifact.js'),
       'utf8',
@@ -146,6 +150,12 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(createArtifactSource).toContain('invoke("create_artifact"');
     expect(createArtifactSource).toContain('maximum 128 KiB');
     expect(launchTaskSource).toContain('deployment-enabled model ID');
+    expect(reviewPullRequestSource).toContain(
+      'model: z.string().min(1).nullable().optional()',
+    );
+    expect(reviewPullRequestSource).toContain(
+      'reasoningEffort: z.enum(["low","medium","high","xhigh","max"])',
+    );
     expect(launchTaskSource).toContain(
       'includeAttachments: z.boolean().optional()',
     );

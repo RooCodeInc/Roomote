@@ -106,6 +106,25 @@ describe('resolveEffectiveHarnessModelState', () => {
     expect(model).toBe('openrouter/openai/gpt-5.6-terra');
   });
 
+  it('keeps an explicit reasoning effort for a PR review model override', () => {
+    const reviewTask = makeTask(
+      { 'opencode-server': 'openrouter/openai/gpt-5.6-terra' },
+      TaskPayloadKind.GithubPrReview,
+    );
+    reviewTask.payload.reasoningEffort = 'max';
+
+    const { model, task } = resolveEffectiveHarnessModelState({
+      task: reviewTask,
+      targetHarness: 'opencode-server',
+      isSnapshotResume: false,
+      deploymentCodeReviewModelId: 'openrouter/z-ai/glm-5.2',
+      deploymentCodeReviewReasoningEffort: 'medium',
+    });
+
+    expect(model).toBe('openrouter/openai/gpt-5.6-terra');
+    expect(task.payload.reasoningEffort).toBe('max');
+  });
+
   it('stamps the default coding reasoning effort for a model override', () => {
     const { task } = resolveEffectiveHarnessModelState({
       task: makeTask({ 'opencode-server': 'openrouter/z-ai/glm-5.3' }),
