@@ -230,6 +230,7 @@ describe('handleSendMessage', () => {
     expect(parsed.message).toBe(
       'Linked review handoff skipped because the pull request is no longer open.',
     );
+    expect(parsed).not.toHaveProperty('sent');
     expect(tasksApiClient.sendMessageToTask).toHaveBeenCalledWith(
       config,
       'task-1',

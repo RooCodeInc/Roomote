@@ -74,11 +74,6 @@ export async function handleSendMessage(
         message:
           result.result.reason ||
           'Linked review handoff was skipped for this task.',
-        sent: {
-          direction: 'Codex → Roomote',
-          target: { kind: 'task', id: params.taskId },
-          text: params.message,
-        },
       });
     }
 

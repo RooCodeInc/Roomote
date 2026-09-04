@@ -63,6 +63,7 @@ describe('getTaskRelayUpdates', () => {
         contentBlocks: [{ type: 'text', text: 'Please inspect the failure.' }],
         metadata: { visibleInTranscript: true, credential: 'not-returned' },
         payload: {},
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
       },
       {
         runId: run.id,
@@ -96,6 +97,7 @@ describe('getTaskRelayUpdates', () => {
         contentBlocks: [{ type: 'text', text: 'Which rollout should I use?' }],
         metadata: { visibleInTranscript: true },
         payload: {},
+        createdAt: new Date('2026-01-01T00:00:01.000Z'),
       },
       {
         runId: run.id,
@@ -107,6 +109,7 @@ describe('getTaskRelayUpdates', () => {
         contentBlocks: [{ type: 'text', text: 'private narrative' }],
         metadata: { visibleInTranscript: false },
         payload: {},
+        createdAt: new Date('2026-01-01T00:00:02.000Z'),
       },
     ]);
 
@@ -201,6 +204,7 @@ describe('getTaskRelayUpdates', () => {
         contentBlocks: [{ type: 'text', text: 'First' }],
         metadata: {},
         payload: {},
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
       },
       {
         runId: run.id,
@@ -212,6 +216,7 @@ describe('getTaskRelayUpdates', () => {
         contentBlocks: [{ type: 'text', text: 'Second' }],
         metadata: {},
         payload: {},
+        createdAt: new Date('2026-01-01T00:00:01.000Z'),
       },
     ]);
     const app = createApp({ userId: user.id, tokenType: 'auth', version: 1 });
@@ -230,16 +235,149 @@ describe('getTaskRelayUpdates', () => {
     await expect(retry.json()).resolves.toMatchObject({
       narrative: first.narrative,
     });
-    const second = await app.request(
+    const secondResponse = await app.request(
       `/tasks/${task.id}/updates?limit=1&cursor=${encodeURIComponent(first.nextCursor)}`,
     );
-    await expect(second.json()).resolves.toMatchObject({
+    const second = (await secondResponse.json()) as {
+      narrative: Array<{ text: string }>;
+      hasMore: boolean;
+      nextCursor: string;
+    };
+    expect(second).toMatchObject({
       narrative: [{ text: 'Second' }],
       hasMore: false,
+    });
+
+    await db.insert(taskMessages).values({
+      runId: run.id,
+      taskId: task.id,
+      ts: 5,
+      eventType: 'roomote_runtime.assistant_message',
+      protocol: 'roomote_runtime',
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Late lower timestamp' }],
+      metadata: {},
+      payload: {},
+    });
+    const late = await app.request(
+      `/tasks/${task.id}/updates?cursor=${encodeURIComponent(second.nextCursor)}`,
+    );
+    await expect(late.json()).resolves.toMatchObject({
+      narrative: [{ text: 'Late lower timestamp', ts: 5 }],
     });
     const wrongTarget = await app.request(
       `/tasks/${otherTask.id}/updates?cursor=${encodeURIComponent(first.nextCursor)}`,
     );
     expect(wrongTarget.status).toBe(400);
+  });
+
+  it('relays typed structured questions and never exposes raw request or answer payload fields', async () => {
+    const user = await userFactory.create();
+    createdUserIds.push(user.id);
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    createdTaskIds.push(task.id);
+    const run = await runFactory.create({
+      taskId: task.id,
+      actingUserId: user.id,
+      taskPhase: 'waiting_for_prompt',
+    });
+    await db.insert(taskMessages).values({
+      runId: run.id,
+      taskId: task.id,
+      ts: 20,
+      eventType: 'roomote_runtime.request_user_input',
+      protocol: 'roomote_runtime',
+      role: 'assistant',
+      contentBlocks: [],
+      metadata: { visibleInTranscript: true, credential: 'metadata-secret' },
+      payload: {
+        requestId: 'rui:test',
+        sessionId: 'session-internal',
+        turnId: 'turn-internal',
+        callId: 'call-internal',
+        status: 'pending',
+        questions: [
+          {
+            id: 'rollout',
+            header: 'Rollout',
+            question: 'Which rollout should I use?',
+            isOther: false,
+            isSecret: false,
+            options: [
+              { label: 'Canary', description: 'Start with a small cohort.' },
+              { label: 'Global', description: 'Release to everyone.' },
+            ],
+          },
+        ],
+        unsafeRawPayload: 'payload-secret',
+      },
+    });
+    const app = createApp({ userId: user.id, tokenType: 'auth', version: 1 });
+    const requestResponse = await app.request(`/tasks/${task.id}/updates`);
+    const requestUpdate = (await requestResponse.json()) as {
+      narrative: Array<{ text: string }>;
+      responseNeeded: boolean;
+      nextCursor: string;
+    };
+    expect(requestUpdate.responseNeeded).toBe(true);
+    expect(requestUpdate.narrative).toEqual([
+      expect.objectContaining({
+        direction: 'Roomote → Codex',
+        text: [
+          'Which rollout should I use?',
+          '1. Canary - Start with a small cohort.',
+          '2. Global - Release to everyone.',
+        ].join('\n'),
+      }),
+    ]);
+    const serializedRequest = JSON.stringify(requestUpdate);
+    expect(serializedRequest).not.toContain('metadata-secret');
+    expect(serializedRequest).not.toContain('payload-secret');
+    expect(serializedRequest).not.toContain('session-internal');
+    expect(serializedRequest).not.toContain('call-internal');
+
+    await db.insert(taskMessages).values({
+      runId: run.id,
+      taskId: task.id,
+      ts: 21,
+      eventType: 'roomote_runtime.request_user_input_response',
+      protocol: 'roomote_runtime',
+      role: 'user',
+      contentBlocks: [],
+      metadata: { visibleInTranscript: true },
+      payload: {
+        requestId: 'rui:test',
+        sessionId: 'session-internal',
+        turnId: 'turn-internal',
+        callId: 'call-internal',
+        resolution: 'submitted',
+        answers: { rollout: { answers: ['credential-value'] } },
+      },
+    });
+    const responseUpdateResponse = await app.request(
+      `/tasks/${task.id}/updates?cursor=${encodeURIComponent(requestUpdate.nextCursor)}`,
+    );
+    const responseUpdate = await responseUpdateResponse.json();
+    expect(responseUpdate).toMatchObject({
+      responseNeeded: false,
+      narrative: [
+        {
+          direction: 'Codex → Roomote',
+          text: 'Submitted input response',
+        },
+      ],
+    });
+    expect(JSON.stringify(responseUpdate)).not.toContain('credential-value');
+
+    const caughtUpResponse = await app.request(`/tasks/${task.id}/updates`);
+    await expect(caughtUpResponse.json()).resolves.toMatchObject({
+      responseNeeded: false,
+      narrative: [
+        {
+          text: 'Which rollout should I use?\n1. Canary - Start with a small cohort.\n2. Global - Release to everyone.',
+        },
+        { text: 'Submitted input response' },
+      ],
+    });
   });
 });

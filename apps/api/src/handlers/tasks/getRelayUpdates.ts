@@ -17,6 +17,8 @@ import { canUserAccessFastAgentSession } from '@roomote/sdk/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   getTextFromContentBlocks,
+  parseAcpRequestUserInputPayload,
+  parseAcpRequestUserInputResponsePayload,
   resolveAcpTranscriptVisibility,
   sanitizeEnvelopeFields,
   type RoomoteRelayNarrative,
@@ -133,7 +135,7 @@ function decodeCursor(
 }
 
 function afterTaskPosition(position: RelayPosition, taskId: string): SQL {
-  return sql`(${taskMessages.ts}, ${taskMessages.createdAt}, ${taskMessages.id}) > (select ${taskMessages.ts}, ${taskMessages.createdAt}, ${taskMessages.id} from ${taskMessages} where ${taskMessages.id} = ${position.id}::uuid and ${taskMessages.taskId} = ${taskId})`;
+  return sql`(${taskMessages.createdAt}, ${taskMessages.id}) > (select ${taskMessages.createdAt}, ${taskMessages.id} from ${taskMessages} where ${taskMessages.id} = ${position.id}::uuid and ${taskMessages.taskId} = ${taskId})`;
 }
 
 function afterSessionPosition(
@@ -150,6 +152,37 @@ function positionForRow(row: RelayRow): RelayPosition {
     createdAt: row.createdAt.toISOString(),
     id: row.id,
   };
+}
+
+function getStructuredInputNarrative(
+  eventType: TaskMessageEventType,
+  payload: Record<string, unknown>,
+): string | null {
+  if (eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput) {
+    const request = parseAcpRequestUserInputPayload(payload);
+    if (!request) return null;
+    return request.questions
+      .map((question, questionIndex) => {
+        const prefix =
+          request.questions.length > 1 ? `Question ${questionIndex + 1}: ` : '';
+        const options = (question.options ?? []).map(
+          (option, optionIndex) =>
+            `${optionIndex + 1}. ${option.label} - ${option.description}`,
+        );
+        return [`${prefix}${question.question}`, ...options].join('\n');
+      })
+      .join('\n\n');
+  }
+
+  if (eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse) {
+    const response = parseAcpRequestUserInputResponsePayload(payload);
+    if (!response) return null;
+    return response.resolution === 'cancelled'
+      ? 'Cancelled input request'
+      : 'Submitted input response';
+  }
+
+  return null;
 }
 
 function buildResponse(params: {
@@ -176,8 +209,18 @@ function buildResponse(params: {
           row.payload,
         )
       : null;
+    if (visible) {
+      if (row.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput) {
+        requestedInput = true;
+      } else if (
+        row.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse
+      ) {
+        requestedInput = false;
+      }
+    }
     const text = sanitized
-      ? getTextFromContentBlocks(sanitized.contentBlocks)?.trim()
+      ? (getTextFromContentBlocks(sanitized.contentBlocks)?.trim() ??
+        getStructuredInputNarrative(row.eventType, sanitized.payload ?? {}))
       : null;
     if (!visible || !text) {
       nextPosition = positionForRow(row);
@@ -210,8 +253,6 @@ function buildResponse(params: {
       truncated: renderedText.length < text.length,
     });
     textChars += renderedText.length;
-    requestedInput ||=
-      row.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput;
     nextPosition = positionForRow(row);
   }
 
@@ -295,11 +336,7 @@ export async function getTaskRelayUpdates(
       })
       .from(taskMessages)
       .where(and(...conditions))
-      .orderBy(
-        asc(taskMessages.ts),
-        asc(taskMessages.createdAt),
-        asc(taskMessages.id),
-      )
+      .orderBy(asc(taskMessages.createdAt), asc(taskMessages.id))
       .limit(limit + 1);
 
     return c.json(
