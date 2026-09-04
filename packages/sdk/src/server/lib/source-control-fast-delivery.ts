@@ -9,12 +9,18 @@ import { buildFastSessionReplyFooterText } from '@roomote/communication';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
+  formatErrorForLog,
   linkedWorkItemProviderSchema,
   TaskPayloadKind,
   type FastAgentConversation,
   type FastAgentSourceControlConversation,
   type FastAgentSourceControlSurface,
 } from '@roomote/types';
+
+import {
+  getSourceControlThreadCommentRecord,
+  setSourceControlThreadCommentRecord,
+} from './source-control-thread-comment-state';
 
 export type SourceControlDiscussionKind = 'pull' | 'issues';
 
@@ -861,7 +867,10 @@ async function buildAdoFastDelivery(
  * discussion. On the discussion's main thread the footer is rendered once, at
  * the bottom, on every edit. Inside a review thread there is no footer: the
  * thread is a conversation about one finding, and the Session link belongs
- * on the top-level comment, not on every reply.
+ * on the top-level comment, not on every reply. A review thread also holds
+ * one Roomote comment per human message: a turn that reports on delegated
+ * work (`continuesThreadComment`) extends the comment the last human turn
+ * opened there instead of adding another.
  */
 export function buildSourceControlFastAdapter(params: {
   conversation: FastAgentSourceControlConversation;
@@ -879,6 +888,11 @@ export function buildSourceControlFastAdapter(params: {
    * sits under the comment it answers, so the quote is dropped there.
    */
   quote?: string | null;
+  /**
+   * True for a turn no human wrote (a delegated task reporting back). In a
+   * review thread it appends to the comment the last human turn opened.
+   */
+  continuesThreadComment?: boolean;
   onReplyPosted?: () => void;
 }): {
   launchTask: LaunchFastAgentTask;
@@ -889,7 +903,8 @@ export function buildSourceControlFastAdapter(params: {
   ) => Promise<{ messageId: string }>;
 } {
   const discussion = parseSourceControlFastConversation(params.conversation);
-  const threaded = Boolean(discussion?.reviewCommentId);
+  const threadId = params.conversation.replyTarget.threadId;
+  const threaded = Boolean(discussion?.reviewCommentId && threadId);
   const footer =
     discussion && !threaded
       ? buildFastSessionReplyFooterText({
@@ -901,6 +916,59 @@ export function buildSourceControlFastAdapter(params: {
   let turnComment: SourceControlPostedComment | null = null;
   let turnBody = '';
   const renderBody = () => (footer ? `${turnBody}\n\n${footer}` : turnBody);
+  const editorFor = (messageId: string): SourceControlPostedComment => ({
+    messageId,
+    ...(params.delivery.updateCommentById && discussion
+      ? {
+          update: (nextBody: string) =>
+            params.delivery.updateCommentById!({
+              discussion,
+              messageId,
+              body: nextBody,
+            }),
+        }
+      : {}),
+  });
+  // The thread's comment record is a best-effort nicety: losing it costs one
+  // extra comment, never the reply.
+  const rememberThreadComment = async () => {
+    if (!threaded || !threadId || !turnComment) {
+      return;
+    }
+    await setSourceControlThreadCommentRecord(params.sessionId, threadId, {
+      messageId: turnComment.messageId,
+      body: turnBody,
+    }).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to remember the review thread comment: ${formatErrorForLog(error)}`,
+      );
+    });
+  };
+  const adoptThreadComment = async (): Promise<boolean> => {
+    if (
+      !threaded ||
+      !threadId ||
+      !params.continuesThreadComment ||
+      !params.delivery.updateCommentById
+    ) {
+      return false;
+    }
+    const record = await getSourceControlThreadCommentRecord(
+      params.sessionId,
+      threadId,
+    ).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to look up the review thread comment: ${formatErrorForLog(error)}`,
+      );
+      return null;
+    });
+    if (!record) {
+      return false;
+    }
+    turnComment = editorFor(record.messageId);
+    turnBody = record.body;
+    return true;
+  };
   return {
     launchTask: createFastAgentSourceControlTaskLauncher({
       userId: params.userId,
@@ -916,9 +984,13 @@ export function buildSourceControlFastAdapter(params: {
           'The discussion for this Session could not be resolved.',
         );
       }
+      if (!turnComment) {
+        await adoptThreadComment();
+      }
       if (turnComment?.update) {
         turnBody = `${turnBody}\n\n${message}`;
         await turnComment.update(renderBody());
+        await rememberThreadComment();
         params.onReplyPosted?.();
         return { messageId: turnComment.messageId };
       }
@@ -927,6 +999,7 @@ export function buildSourceControlFastAdapter(params: {
         discussion,
         body: renderBody(),
       });
+      await rememberThreadComment();
       params.onReplyPosted?.();
       return { messageId: turnComment.messageId };
     },
@@ -936,15 +1009,10 @@ export function buildSourceControlFastAdapter(params: {
           // editor from it, replace the comment's body, and adopt it as the
           // turn's comment so later replies keep appending in place.
           replaceReply: async ({ messageId }, { message }) => {
-            const update = (nextBody: string) =>
-              params.delivery.updateCommentById!({
-                discussion,
-                messageId,
-                body: nextBody,
-              });
+            turnComment = editorFor(messageId);
             turnBody = message;
-            await update(renderBody());
-            turnComment = { messageId, update };
+            await turnComment.update!(renderBody());
+            await rememberThreadComment();
             params.onReplyPosted?.();
             return { messageId };
           },

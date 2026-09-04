@@ -1,4 +1,5 @@
 const mocks = vi.hoisted(() => ({
+  redisStore: new Map<string, string>(),
   createFastAgentTaskLauncher: vi.fn(),
   repositoriesFindMany: vi.fn(),
   getInstallationOctokit: vi.fn(),
@@ -30,6 +31,16 @@ vi.mock('@roomote/db/server', () => ({
   db: { query: { repositories: { findMany: mocks.repositoriesFindMany } } },
   eq: vi.fn((left: unknown, right: unknown) => [left, right]),
   repositories: {},
+}));
+
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => ({
+    get: async (key: string) => mocks.redisStore.get(key) ?? null,
+    set: async (key: string, value: string) => {
+      mocks.redisStore.set(key, value);
+      return 'OK';
+    },
+  }),
 }));
 
 vi.mock('@roomote/communication', () => ({
@@ -296,6 +307,7 @@ describe('GitHub Fast delivery', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.redisStore.clear();
     createComment.mockResolvedValue({ data: { id: 5001 } });
     request.mockResolvedValue({ data: { id: 5002 } });
     pullsGet.mockResolvedValue({
@@ -457,6 +469,123 @@ describe('GitHub Fast delivery', () => {
         body: 'Yes, it stops after three tries.',
       }),
     );
+  });
+
+  it('extends the last human comment in a review thread when a delegated task reports back', async () => {
+    const updateReviewComment = vi.fn().mockResolvedValue({});
+    mocks.getInstallationOctokit.mockResolvedValue({
+      rest: {
+        issues: { createComment },
+        pulls: { get: pullsGet, updateReviewComment },
+      },
+      request,
+    });
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+      reviewCommentId: '800',
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+
+    // The human turn opens the thread's comment.
+    const humanTurn = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+    });
+    await humanTurn.postReply({ message: 'Rebasing now.' });
+
+    // A later platform-event turn (fresh adapter, no in-memory state)
+    // appends to that comment instead of posting a new one.
+    const taskTurn = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+      continuesThreadComment: true,
+    });
+    await expect(
+      taskTurn.postReply({ message: 'Rebased and pushed.' }),
+    ).resolves.toEqual({ messageId: '5002' });
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(updateReviewComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        comment_id: 5002,
+        body: 'Rebasing now.\n\nRebased and pushed.',
+      }),
+    );
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it('opens a new comment for the next human message in the thread', async () => {
+    const updateReviewComment = vi.fn().mockResolvedValue({});
+    mocks.getInstallationOctokit.mockResolvedValue({
+      rest: {
+        issues: { createComment },
+        pulls: { get: pullsGet, updateReviewComment },
+      },
+      request,
+    });
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+      reviewCommentId: '800',
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    const build = (continuesThreadComment: boolean) =>
+      buildSourceControlFastAdapter({
+        conversation,
+        delivery: delivery!,
+        userId: 'user-1',
+        sessionId: 'fast-1',
+        continuesThreadComment,
+      });
+
+    await build(false).postReply({ message: 'First answer.' });
+    await build(false).postReply({ message: 'Second answer.' });
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(updateReviewComment).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a new comment when the thread has no remembered comment', async () => {
+    const updateReviewComment = vi.fn().mockResolvedValue({});
+    mocks.getInstallationOctokit.mockResolvedValue({
+      rest: {
+        issues: { createComment },
+        pulls: { get: pullsGet, updateReviewComment },
+      },
+      request,
+    });
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+      reviewCommentId: '801',
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    const adapter = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+      continuesThreadComment: true,
+    });
+
+    await adapter.postReply({ message: 'Task finished.' });
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(updateReviewComment).not.toHaveBeenCalled();
   });
 
   it('replaces a resumed turn comment by id and keeps appending into it', async () => {
