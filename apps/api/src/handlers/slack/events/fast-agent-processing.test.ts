@@ -1332,7 +1332,10 @@ describe('processFastAgentMessage', () => {
     );
   });
 
-  it('allows silence for an unmentioned turn with another human participant', async () => {
+  it.each([
+    ['ambient peer message', 'Dan, can you send me the logs?'],
+    ['ambiguous acknowledgement', 'Sounds good'],
+  ])('allows reaction or silence for an %s', async (_scenario, text) => {
     const slack = {
       addReaction: vi.fn().mockResolvedValue(true),
       removeReaction: vi.fn().mockResolvedValue(true),
@@ -1346,7 +1349,7 @@ describe('processFastAgentMessage', () => {
           text: 'Hi Dan.',
           ts: '100.001',
         },
-        { user: 'U222', username: 'Matt', text: 'Makes sense', ts: '100.002' },
+        { user: 'U222', username: 'Matt', text, ts: '100.002' },
       ]),
     };
 
@@ -1355,7 +1358,7 @@ describe('processFastAgentMessage', () => {
         type: 'message',
         channel: 'C123',
         user: 'U222',
-        text: 'Makes sense',
+        text,
         ts: '100.002',
         thread_ts: '100.000',
       } as never,
@@ -1367,7 +1370,12 @@ describe('processFastAgentMessage', () => {
     });
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
-      expect.objectContaining({ allowSilentAmbientReply: true }),
+      expect.objectContaining({
+        allowSilentAmbientReply: true,
+        adapter: expect.objectContaining({
+          postReaction: expect.any(Function),
+        }),
+      }),
     );
   });
 

@@ -592,7 +592,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('permits silence only for eligible ambient human turns', () => {
+  it('prioritizes directedness for eligible multi-human turns', () => {
     const ambientPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       allowSilentAmbientReply: true,
@@ -602,7 +602,25 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(ambientPrompt).toContain(
-      'If it is ambient conversation between people rather than a request, reply, or answer directed at Roomote, call `ignore_event` and stop',
+      'decide from the current message and recent thread whether this unmentioned multi-human turn is specifically directed at Roomote',
+    );
+    expect(ambientPrompt).toContain(
+      "Respond to explicit platform mentions or commands, direct replies or answers to Roomote, requests about Roomote's work, and contextually clear follow-ups",
+    );
+    expect(ambientPrompt).toContain(
+      'Messages to another person or to the whole group default to ambient, even when actionable',
+    );
+    expect(ambientPrompt).toContain(
+      'Answer a whole-group message only when Roomote has a specific, materially useful contribution beyond what participants have already said',
+    );
+    expect(ambientPrompt).toContain(
+      'This bar is higher than for an ordinary response-required message',
+    );
+    expect(ambientPrompt).toContain(
+      'Use `send_chat_reaction` only when acknowledgement itself is useful; otherwise call `ignore_event`',
+    );
+    expect(ambientPrompt).toContain(
+      'A first-time participant is not ambient when the context shows they are addressing Roomote',
     );
     expect(ambientPrompt).toContain(
       'An eligible ambient message or optional human reaction may use `ignore_event` under its narrow rule below',
