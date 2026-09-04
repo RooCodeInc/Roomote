@@ -522,6 +522,85 @@ describe('GitHub Fast delivery', () => {
     expect(createComment).not.toHaveBeenCalled();
   });
 
+  it('posts a new comment when the remembered thread comment can no longer be edited', async () => {
+    const updateReviewComment = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Not Found'), { status: 404 }),
+      );
+    mocks.getInstallationOctokit.mockResolvedValue({
+      rest: {
+        issues: { createComment },
+        pulls: { get: pullsGet, updateReviewComment },
+      },
+      request,
+    });
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+      reviewCommentId: '800',
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    await buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+    }).postReply({ message: 'Rebasing now.' });
+    request.mockResolvedValue({ data: { id: 5003 } });
+
+    const taskTurn = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+      continuesThreadComment: true,
+    });
+    await expect(
+      taskTurn.postReply({ message: 'Rebased and pushed.' }),
+    ).resolves.toEqual({ messageId: '5003' });
+    await taskTurn.postReply({ message: 'Checks are green.' });
+
+    // The stale comment was tried once, then this turn posted its own reply
+    // and kept editing that one.
+    expect(updateReviewComment).toHaveBeenCalledTimes(2);
+    expect(updateReviewComment).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ comment_id: 5002 }),
+    );
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenLastCalledWith(
+      'POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies',
+      expect.objectContaining({
+        body: 'Rebased and pushed.\n\n[footer:github]',
+      }),
+    );
+    expect(updateReviewComment).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        comment_id: 5003,
+        body: 'Rebased and pushed.\n\nChecks are green.\n\n[footer:github]',
+      }),
+    );
+
+    // The record now points at the new comment, so the next task turn
+    // adopts it rather than the deleted one.
+    const nextTurn = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+      continuesThreadComment: true,
+    });
+    await nextTurn.postReply({ message: 'Merged.' });
+    expect(updateReviewComment).toHaveBeenLastCalledWith(
+      expect.objectContaining({ comment_id: 5003 }),
+    );
+  });
+
   it('opens a new comment for the next human message in the thread', async () => {
     const updateReviewComment = vi.fn().mockResolvedValue({});
     mocks.getInstallationOctokit.mockResolvedValue({

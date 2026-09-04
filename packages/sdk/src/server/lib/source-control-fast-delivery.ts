@@ -911,6 +911,9 @@ export function buildSourceControlFastAdapter(params: {
   const quote = threaded ? null : params.quote;
   let turnComment: SourceControlPostedComment | null = null;
   let turnBody = '';
+  // True while the turn is editing a comment it adopted from the thread's
+  // record rather than one it posted itself.
+  let adoptedThreadComment = false;
   const renderBody = () => `${turnBody}\n\n${footer}`;
   const editorFor = (messageId: string): SourceControlPostedComment => ({
     messageId,
@@ -963,7 +966,22 @@ export function buildSourceControlFastAdapter(params: {
     }
     turnComment = editorFor(record.messageId);
     turnBody = record.body;
+    adoptedThreadComment = true;
     return true;
+  };
+  const postTurnComment = async (
+    discussion: SourceControlFastDiscussion,
+    message: string,
+  ) => {
+    turnBody = quote ? `${quote}\n\n${message}` : message;
+    turnComment = await params.delivery.postComment({
+      discussion,
+      body: renderBody(),
+    });
+    adoptedThreadComment = false;
+    await rememberThreadComment();
+    params.onReplyPosted?.();
+    return { messageId: turnComment.messageId };
   };
   return {
     launchTask: createFastAgentSourceControlTaskLauncher({
@@ -984,20 +1002,30 @@ export function buildSourceControlFastAdapter(params: {
         await adoptThreadComment();
       }
       if (turnComment?.update) {
+        const previousBody = turnBody;
         turnBody = `${turnBody}\n\n${message}`;
-        await turnComment.update(renderBody());
+        try {
+          await turnComment.update(renderBody());
+        } catch (error) {
+          // The remembered comment can be gone (deleted by its author or a
+          // maintainer) or otherwise uneditable. Treat that as a miss on the
+          // thread record and post this turn's own comment, which replaces
+          // the stale record so later turns stop adopting it.
+          if (!adoptedThreadComment) {
+            throw error;
+          }
+          console.warn(
+            `[Fast Agent] The remembered review thread comment could not be updated; posting a new comment: ${formatErrorForLog(error)}`,
+          );
+          turnBody = previousBody;
+          turnComment = null;
+          return postTurnComment(discussion, message);
+        }
         await rememberThreadComment();
         params.onReplyPosted?.();
         return { messageId: turnComment.messageId };
       }
-      turnBody = quote ? `${quote}\n\n${message}` : message;
-      turnComment = await params.delivery.postComment({
-        discussion,
-        body: renderBody(),
-      });
-      await rememberThreadComment();
-      params.onReplyPosted?.();
-      return { messageId: turnComment.messageId };
+      return postTurnComment(discussion, message);
     },
     ...(params.delivery.updateCommentById && discussion
       ? {
@@ -1006,6 +1034,7 @@ export function buildSourceControlFastAdapter(params: {
           // turn's comment so later replies keep appending in place.
           replaceReply: async ({ messageId }, { message }) => {
             turnComment = editorFor(messageId);
+            adoptedThreadComment = false;
             turnBody = message;
             await turnComment.update!(renderBody());
             await rememberThreadComment();
