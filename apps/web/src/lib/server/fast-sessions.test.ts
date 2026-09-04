@@ -13,6 +13,11 @@ import {
 } from '@roomote/db/server';
 import { ACP_ENVELOPE_EVENT_TYPES, RunStatus } from '@roomote/types';
 
+vi.mock('./artifact-signature', () => ({
+  currentEpochSeconds: () => 7_300,
+  signArtifactId: (artifactId: string, ts: number) => `sig-${artifactId}-${ts}`,
+}));
+
 import {
   findAccessibleFastSession,
   getFastSessionPrReviewOfferStatus,
@@ -196,6 +201,93 @@ describe('Fast session queries', () => {
     await expect(
       getFastSessionById({ userId: otherUser.id, isAdmin: true }, session.id),
     ).resolves.toMatchObject({ id: session.id, userId: owner.id });
+  });
+
+  it('resolves reply image artifacts to signed raw URLs', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'reply-images-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const task = await taskFactory.create({
+      title: 'Screenshot task',
+      state: 'active',
+    });
+    await runFactory.create({
+      taskId: task.id,
+      status: RunStatus.Completed,
+      payload: {
+        repo: 'acme/widgets',
+        description: 'Capture a screenshot',
+        fastAgentSessionId: session.id,
+      },
+    });
+    const foreignTask = await taskFactory.create({
+      title: 'Unrelated task',
+      state: 'active',
+    });
+    const [screenshot, report, foreignImage] = await db
+      .insert(taskArtifacts)
+      .values([
+        {
+          taskId: task.id,
+          path: 'proof/session.png',
+          version: 1,
+          contentType: 'image/png',
+          size: 2_048,
+          uploaded: true,
+        },
+        {
+          taskId: task.id,
+          path: 'reports/result.md',
+          version: 1,
+          contentType: 'text/markdown',
+          size: 200,
+          uploaded: true,
+        },
+        {
+          taskId: foreignTask.id,
+          path: 'proof/other.png',
+          version: 1,
+          contentType: 'image/png',
+          size: 2_048,
+          uploaded: true,
+        },
+      ])
+      .returning({ id: taskArtifacts.id });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:assistant:0',
+      turnSeq: 1,
+      payload: {
+        purpose: 'closeout',
+        imageArtifactIds: [
+          screenshot!.id,
+          report!.id,
+          foreignImage!.id,
+          crypto.randomUUID(),
+          'not-a-uuid',
+          '',
+        ],
+      },
+    });
+
+    const expectedImages = [
+      `/api/artifacts/${screenshot!.id}/raw?sig=sig-${screenshot!.id}-7200&ts=7200`,
+    ];
+    const detail = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+    expect(detail?.messages.map((message) => message.payload)).toEqual([
+      expect.objectContaining({ images: expectedImages }),
+    ]);
+
+    const since = await getFastSessionMessagesSince(session.id, 0);
+    expect(since.messages.map((message) => message.payload)).toEqual([
+      expect.objectContaining({ images: expectedImages }),
+    ]);
   });
 
   it('lists every task associated with a Fast session', async () => {
