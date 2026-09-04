@@ -77,6 +77,42 @@ describe('handleManageCustomAutomations', () => {
     });
   });
 
+  it('inspects one prompt without returning unrelated automation fields', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          automation: {
+            id: 'automation-1',
+            name: 'Daily report',
+            prompt: 'Inspect this stored prompt.',
+            enabled: true,
+            lastError: 'previous failure',
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const result = await handleManageCustomAutomations(
+      { action: 'inspect', automationId: 'automation/1' },
+      config,
+    );
+
+    const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'https://api.example.com/api/mcp/custom-automations/automation%2F1',
+    );
+    expect(request.method).toBe('GET');
+    expect(request.body).toBeUndefined();
+    expect(JSON.parse(result.content[0]?.text ?? '{}')).toEqual({
+      automation: {
+        id: 'automation-1',
+        name: 'Daily report',
+        prompt: 'Inspect this stored prompt.',
+      },
+    });
+  });
+
   it('preserves structured schedule clarification on an ambiguous write', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(

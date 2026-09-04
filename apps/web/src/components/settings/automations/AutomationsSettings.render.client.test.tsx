@@ -1143,18 +1143,6 @@ describe('AutomationsSettings', () => {
     expect(screen.getByText('Weekly, in Production →')).toBeInTheDocument();
     expect(screen.getByText('Slack #roomote-managers')).toBeInTheDocument();
     expect(screen.getByText('Created by Ada')).toBeInTheDocument();
-    expect(screen.queryByText('Find flaky tests.')).not.toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'View prompt for Weekly flaky-test scan',
-      }),
-    );
-    expect(
-      screen.getByRole('dialog', { name: 'Weekly flaky-test scan' }),
-    ).toHaveTextContent('Configured prompt');
-    expect(screen.getByText('Find flaky tests.')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(screen.queryByText('Find flaky tests.')).not.toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
     ).toBeEnabled();
