@@ -130,7 +130,7 @@ export function AcpToolMessage({
             icon={ToolIcon}
             iconElement={
               !isFailed && referencedTaskId ? (
-                <TaskRobotIcon taskId={referencedTaskId} className="size-4" />
+                <TaskRobotIcon taskId={referencedTaskId} />
               ) : undefined
             }
             state={toolState}

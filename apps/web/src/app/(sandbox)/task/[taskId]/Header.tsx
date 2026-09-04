@@ -205,7 +205,6 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
               taskId={taskId}
               sessionId={iconSessionId}
               orderedTaskIds={iconSession?.tasks.map((item) => item.taskId)}
-              className="size-6"
             />
             <span className="truncate">{title}</span>
           </h1>

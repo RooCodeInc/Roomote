@@ -6,7 +6,7 @@ import {
   getTaskRobotIconPath,
   resolveTaskRobotIconId,
 } from '@/lib/task-robot-icons';
-import { cn } from '@/lib/utils';
+import { Avatar } from '@/components/system';
 
 type TaskRobotIconContextValue = {
   sessionId: string;
@@ -42,12 +42,10 @@ export function TaskRobotIcon({
   taskId,
   sessionId,
   orderedTaskIds,
-  className,
 }: {
   taskId: string;
   sessionId?: string | null;
   orderedTaskIds?: readonly string[];
-  className?: string;
 }) {
   const context = useTaskRobotIconContext();
   const iconId = resolveTaskRobotIconId({
@@ -57,21 +55,11 @@ export function TaskRobotIcon({
   });
 
   return (
-    <span
-      aria-hidden="true"
+    <Avatar
+      imageUrl={getTaskRobotIconPath(iconId)}
+      size="sm"
+      alt=""
       data-task-robot-icon={iconId}
-      className={cn(
-        'inline-flex shrink-0 overflow-hidden rounded-md bg-[#c7f33c]',
-        className,
-      )}
-    >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={getTaskRobotIconPath(iconId)}
-        alt=""
-        className="size-full object-cover"
-        draggable={false}
-      />
-    </span>
+    />
   );
 }
