@@ -6,7 +6,6 @@ const {
   mockResolveFooterContext,
   mockBuildFooterText,
   mockRedisSet,
-  mockRedisGet,
   mockRedisEval,
   mockRelocate,
 } = vi.hoisted(() => ({
@@ -15,7 +14,6 @@ const {
   mockResolveFooterContext: vi.fn(),
   mockBuildFooterText: vi.fn(),
   mockRedisSet: vi.fn(),
-  mockRedisGet: vi.fn(),
   mockRedisEval: vi.fn(),
   mockRelocate: vi.fn(),
 }));
@@ -27,13 +25,16 @@ vi.mock('@roomote/env', () => ({
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({
     set: mockRedisSet,
-    get: mockRedisGet,
     eval: mockRedisEval,
   }),
 }));
 
 vi.mock('../relocate-active-task-cards', () => ({
   relocateSlackThreadActiveTaskCards: mockRelocate,
+}));
+vi.mock('../thread-reply-stream', () => ({
+  beginSlackThreadReplyStream: vi.fn(),
+  endSlackThreadReplyStream: vi.fn(),
 }));
 
 vi.mock('../slack-messages', () => ({
@@ -58,7 +59,6 @@ describe('thread-reply-footer-ops', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRedisSet.mockResolvedValue('OK');
-    mockRedisGet.mockResolvedValue(null);
     mockRedisEval.mockResolvedValue(1);
     mockRelocate.mockResolvedValue(undefined);
     mockGetFooterTs.mockResolvedValue('111.000');
@@ -244,28 +244,6 @@ describe('thread-reply-footer-ops', () => {
     expect(warning).toHaveBeenCalledWith(
       expect.stringContaining('Failed to relocate active task cards'),
     );
-  });
-
-  it('does not relocate cards while a reply stream is still active', async () => {
-    mockRedisGet.mockResolvedValue('stream-token');
-    const slack = {
-      postMessage: vi.fn().mockResolvedValueOnce('reply-ts'),
-      getMessageBlocks: vi.fn().mockResolvedValue([]),
-      updateMessage: vi.fn().mockResolvedValue(true),
-      getRawMessage: vi.fn(),
-      deleteMessage: vi.fn().mockResolvedValue(true),
-    };
-
-    await postSlackThreadMessageWithStickyFooter({
-      slack,
-      channel: 'C1',
-      threadTs: '100.000',
-      taskId: 'task-1',
-      text: 'concurrent reply',
-    });
-
-    expect(mockRelocate).not.toHaveBeenCalled();
-    expect(slack.postMessage).toHaveBeenCalledOnce();
   });
 
   it('moves an existing exact footer into a footer-only carrier after registration', async () => {

@@ -8,6 +8,7 @@ import {
   getSlackThreadActiveTaskIds,
   removeSlackThreadActiveTaskByTaskId,
 } from './thread-active-tasks';
+import { isSlackThreadReplyStreamActive } from './thread-reply-stream';
 
 type RelocationSlack = Pick<
   SlackNotifier,
@@ -19,7 +20,15 @@ export async function relocateSlackThreadActiveTaskCards(params: {
   slack: RelocationSlack;
   channel: string;
   threadTs: string;
+  /** Only stream finalization may relocate while its own marker is active. */
+  replyStreamComplete?: boolean;
 }): Promise<void> {
+  if (
+    !params.replyStreamComplete &&
+    (await isSlackThreadReplyStreamActive(params))
+  ) {
+    return;
+  }
   const taskIds = await getSlackThreadActiveTaskIds(params);
 
   for (const taskId of taskIds) {
