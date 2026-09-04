@@ -22,6 +22,7 @@ import {
 import { isRecognizedInitialSkillInvocation } from './skillInvocationRouting';
 import { renderLinkedWorkItemsSection } from './pr-linked-work-items';
 import { buildGitHubMessageInstructions } from '../github-message-instructions';
+import { buildTherapistModeInstructions } from '../therapist-mode';
 
 const DEFAULT_ATTRIBUTION: ResolvedTaskCommitAuthor = {
   kind: 'roomote',
@@ -84,6 +85,7 @@ export function standardTask({
   sourceControlProvider,
   prAction,
   reportConsumer = 'direct-user',
+  therapistModeEnabled = false,
 }: {
   description: string;
   repo: string;
@@ -143,6 +145,7 @@ export function standardTask({
   sourceControlProvider?: SourceControlProvider;
   prAction?: PrAction;
   reportConsumer?: TaskReportConsumer;
+  therapistModeEnabled?: boolean;
 }) {
   const hintedDescription = description;
   const isAllRepositoriesSelection = repo === ALL_REPOSITORIES;
@@ -259,6 +262,8 @@ export function standardTask({
   const requestUserInputGuidance =
     reportConsumer === 'direct-user' ? getRequestUserInputGuidance() : '';
   const linkedWorkItemSection = renderLinkedWorkItemsSection(linkedWorkItems);
+  const therapistModeInstructions =
+    buildTherapistModeInstructions(therapistModeEnabled);
   const linkedWorkItemInstructions = linkedWorkItemSection
     ? `
 <pr_linked_work_items>
@@ -457,6 +462,7 @@ ${buildGitHubMessageInstructions()}`
   ${sourceControlContext}
   ${codeReviewSelfReviewCloseoutContext}
   ${reportingContext}
+  ${therapistModeInstructions}
 
   <todo_policy>
     <purpose>The shared todo discipline lives in the global system prompt. This workflow-owned policy adds the seeding, routing, delegation, and delivery-specific todo semantics that the generic prompt cannot infer on its own.</purpose>
