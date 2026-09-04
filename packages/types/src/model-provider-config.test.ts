@@ -435,7 +435,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         providerId: 'vercel',
         modelId: 'vercel/anthropic/claude-fable-5.1',
       },
-      { providerId: 'requesty', modelId: 'requesty/claude-fable-5-1' },
       { providerId: 'anthropic', modelId: 'anthropic/claude-fable-5-1' },
       { providerId: 'opencode', modelId: 'opencode/claude-fable-5-1' },
       {
@@ -988,7 +987,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(
       requestyProvider?.suggestedTaskModels.map((model) => model.id),
     ).toEqual([
-      'requesty/claude-fable-5-1',
       'requesty/claude-fable-5',
       'requesty/claude-haiku-4-5',
       'requesty/claude-opus-5',
