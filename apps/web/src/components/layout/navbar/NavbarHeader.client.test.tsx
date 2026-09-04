@@ -9,10 +9,16 @@ import { fireEvent, render, screen } from '@testing-library/react';
 const state = vi.hoisted(() => ({
   setOpen: vi.fn(),
   user: {},
+  drawerSetupIncomplete: false,
 }));
 
 vi.mock('next/image', () => ({
-  default: (props: ImgHTMLAttributes<HTMLImageElement>) => {
+  default: ({
+    priority: _priority,
+    ...props
+  }: ImgHTMLAttributes<HTMLImageElement> & {
+    priority?: boolean;
+  }) => {
     // eslint-disable-next-line @next/next/no-img-element
     return <img {...props} />;
   },
@@ -57,7 +63,10 @@ vi.mock('../UserMenu', () => ({
 }));
 
 vi.mock('./NavbarDrawer', () => ({
-  NavbarDrawer: () => <div>NavbarDrawer</div>,
+  NavbarDrawer: ({ setupIncomplete }: { setupIncomplete?: boolean }) => {
+    state.drawerSetupIncomplete = setupIncomplete ?? false;
+    return <div>NavbarDrawer</div>;
+  },
 }));
 
 import { NavbarHeader } from './NavbarHeader';
@@ -65,6 +74,15 @@ import { NavbarHeader } from './NavbarHeader';
 describe('NavbarHeader', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    state.drawerSetupIncomplete = false;
+  });
+
+  it('disables Home and passes incomplete setup state to the drawer', () => {
+    render(<NavbarHeader setupIncomplete />);
+
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(screen.getByAltText('Roomote')).toHaveClass('opacity-50');
+    expect(state.drawerSetupIncomplete).toBe(true);
   });
 
   it('renders the current Roomote mark in the mobile header', () => {

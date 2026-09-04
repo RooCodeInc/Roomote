@@ -71,6 +71,13 @@ vi.mock('@/components/system', () => ({
     <div>{children}</div>
   ),
   DrawerTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  Tooltip: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  TooltipTrigger: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  TooltipContent: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
 }));
 
 vi.mock('@/components/tasks/NewTaskDialog', () => ({
@@ -125,6 +132,29 @@ describe('NavbarDrawer', () => {
       'data-open',
       'true',
     );
+  });
+
+  it('keeps setup-gated destinations visible but disabled with an explanation', () => {
+    render(<NavbarDrawer setupIncomplete />);
+
+    expect(screen.getByRole('link', { name: 'Sessions' })).toHaveAttribute(
+      'href',
+      '/sessions',
+    );
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
+    for (const name of ['Home', 'Automations', 'Analytics']) {
+      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
+    }
+    expect(
+      screen.getAllByText('Available when setup is completed.'),
+    ).toHaveLength(3);
   });
 
   it('hides analytics from non-admins', () => {
