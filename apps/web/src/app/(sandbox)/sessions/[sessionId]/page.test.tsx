@@ -250,6 +250,63 @@ describe('Session detail page', () => {
     );
   });
 
+  it('renders a manually created empty Session without a pending kickoff', async () => {
+    authorizeMock.mockResolvedValue({
+      success: true,
+      userId: 'user-1',
+      isAdmin: false,
+    });
+    getSessionByIdCommandMock.mockResolvedValue({
+      id: '6a1f8f1e-0000-4000-8000-000000000004',
+      title: 'New session',
+      ownerName: 'User',
+      ownerEmail: 'user@example.com',
+      ownerImageUrl: null,
+      sourceSurface: 'web',
+      sourceTrigger: 'manual',
+      fastConversationId: '6a1f8f1e-0000-4000-8000-000000000005',
+      directInferenceCostMicroUsd: 0,
+      inferenceCostMicroUsd: 0,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      status: 'ready',
+      tasks: [],
+      artifacts: [],
+    });
+    getFastSessionByIdMock.mockResolvedValue({
+      id: '6a1f8f1e-0000-4000-8000-000000000005',
+      userId: 'user-1',
+      ownerName: 'User',
+      ownerEmail: 'user@example.com',
+      ownerImageUrl: null,
+      title: null,
+      surface: 'web',
+      model: null,
+      reasoningEffort: null,
+      inferenceCostMicroUsd: 0,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      messages: [],
+      hasOlderMessages: false,
+    });
+
+    renderToStaticMarkup(
+      await SessionDetailPage({
+        params: Promise.resolve({
+          sessionId: '6a1f8f1e-0000-4000-8000-000000000004',
+        }),
+      }),
+    );
+
+    expect(transcriptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: '6a1f8f1e-0000-4000-8000-000000000005',
+        initialMessages: [],
+        initialResponsePending: false,
+        canReply: true,
+      }),
+      undefined,
+    );
+  });
+
   it('hydrates a direct Session route without seeding the response lease', async () => {
     authorizeMock.mockResolvedValue({
       success: true,

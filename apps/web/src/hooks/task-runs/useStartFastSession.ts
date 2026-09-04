@@ -36,6 +36,10 @@ type StartFastSessionVariables = {
   attachmentTexts?: string[];
   model?: string | null;
   reasoningEffort?: ReasoningEffort | null;
+  /** Stable identity used to make a start retry idempotent. */
+  conversationId?: string;
+  /** Persist the Session without scheduling an initial Fast turn. */
+  empty?: true;
   /** Launch into a chosen workspace without a Fast decision. */
   pinnedLaunch?: {
     launchId: string;

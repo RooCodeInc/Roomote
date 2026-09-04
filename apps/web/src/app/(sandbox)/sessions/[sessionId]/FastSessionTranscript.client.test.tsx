@@ -795,6 +795,32 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByText('Thinking')).toBeInTheDocument();
   });
 
+  it('renders an empty persisted Session idle and accepts its first message', async () => {
+    replyMutate.mockResolvedValue({ success: true });
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        initialResponsePending={false}
+        canReply
+      />,
+    );
+
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'First message' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() =>
+      expect(replyMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        text: 'First message',
+        model: null,
+        reasoningEffort: null,
+      }),
+    );
+  });
+
   it('waits for the first visible assistant message before showing timeline extras', () => {
     render(
       <FastSessionTranscript

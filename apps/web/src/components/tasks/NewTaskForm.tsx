@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, type Ref } from 'react';
+import { useState, useCallback, useEffect, useRef, type Ref } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
@@ -21,6 +21,7 @@ import { useStartFastSession } from '@/hooks/task-runs';
 import type { PromptInputMessage } from '@/components/ai-elements';
 import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
 import { useTaskLaunchConfig } from '@/components/tasks/TaskLaunchConfig';
+import { BasicTooltip, Button } from '@/components/system';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
 
@@ -36,6 +37,7 @@ type NewTaskFormProps = {
   placeholder?: string;
   textareaMaxHeight?: number;
   promptContainerRef?: Ref<HTMLDivElement>;
+  allowEmptySession?: boolean;
 };
 
 export function NewTaskForm({
@@ -44,6 +46,7 @@ export function NewTaskForm({
   placeholder = DEFAULT_PROMPT_PLACEHOLDER,
   textareaMaxHeight,
   promptContainerRef,
+  allowEmptySession = false,
 }: NewTaskFormProps) {
   const { defaultComputeProvider } = useTaskLaunchConfig();
   const router = useRouter();
@@ -62,6 +65,7 @@ export function NewTaskForm({
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useState<
     ReasoningEffort | null | undefined
   >(undefined);
+  const emptySessionConversationIdRef = useRef<string | null>(null);
 
   useEffect(() => setPromptText(promptParam), [promptParam]);
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
@@ -75,6 +79,8 @@ export function NewTaskForm({
       attachmentTexts?: string[];
       model?: string | null;
       reasoningEffort?: ReasoningEffort | null;
+      conversationId?: string;
+      empty?: true;
     }): Promise<void> => {
       // A second submit while the first is in flight would mint a second
       // session and orphan one of them.
@@ -163,6 +169,19 @@ export function NewTaskForm({
 
   const submitDisabledReason = getTaskLaunchDisabledReason(managedAccess);
 
+  const handleStartEmptySession = useCallback(async () => {
+    emptySessionConversationIdRef.current ??= crypto.randomUUID();
+    await startFastSession({
+      text: '',
+      conversationId: emptySessionConversationIdRef.current,
+      empty: true,
+      model: selectedModelOverrideId,
+      ...(selectedReasoningEffort !== undefined
+        ? { reasoningEffort: selectedReasoningEffort }
+        : {}),
+    });
+  }, [selectedModelOverrideId, selectedReasoningEffort, startFastSession]);
+
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
       const text = message.text.trim();
@@ -238,14 +257,33 @@ export function NewTaskForm({
         submitWithMetaKey={false}
         submitDisabledReason={submitDisabledReason}
         tools={
-          <SessionModelSwitcher
-            model={selectedModelOverrideId ?? ''}
-            onModelChange={setSelectedModelOverrideId}
-            reasoningEffort={selectedReasoningEffort ?? null}
-            onReasoningEffortChange={setSelectedReasoningEffort}
-            defaultModelId={defaultModelId}
-            defaultReasoningEffort={defaultReasoningEffort}
-          />
+          <>
+            <SessionModelSwitcher
+              model={selectedModelOverrideId ?? ''}
+              onModelChange={setSelectedModelOverrideId}
+              reasoningEffort={selectedReasoningEffort ?? null}
+              onReasoningEffortChange={setSelectedReasoningEffort}
+              defaultModelId={defaultModelId}
+              defaultReasoningEffort={defaultReasoningEffort}
+            />
+            {allowEmptySession ? (
+              <BasicTooltip
+                content={submitDisabledReason ?? 'Start without a message'}
+              >
+                <span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={isBusy || Boolean(submitDisabledReason)}
+                    onClick={handleStartEmptySession}
+                  >
+                    Start empty session
+                  </Button>
+                </span>
+              </BasicTooltip>
+            ) : null}
+          </>
         }
       />
     </div>

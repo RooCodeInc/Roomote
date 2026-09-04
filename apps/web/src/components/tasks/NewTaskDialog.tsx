@@ -21,6 +21,7 @@ export function NewTaskDialog({
         <DialogTitle className="sr-only">New Session</DialogTitle>
         <NewTaskForm
           animate={false}
+          allowEmptySession
           onTaskStarted={() => onOpenChange(false)}
         />
       </DialogContent>

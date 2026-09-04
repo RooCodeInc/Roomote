@@ -352,6 +352,24 @@ describe('Home', () => {
     await waitFor(() => expect(onTaskStarted).toHaveBeenCalledOnce());
   });
 
+  it('starts an idempotent empty Session from the explicit dialog action', async () => {
+    render(<NewTaskForm allowEmptySession />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Start empty session' }),
+    );
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: '',
+        conversationId: expect.any(String),
+        empty: true,
+        model: undefined,
+      });
+    });
+    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
+  });
+
   it('starts a Fast session with an image-only prompt', async () => {
     mockPreparePromptAttachments.mockResolvedValueOnce({
       text: '',

@@ -380,6 +380,7 @@ export async function startFastSessionCommand(
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
     conversationId?: string;
+    empty?: true;
     pinnedLaunch?: PinnedFastSessionLaunchInput;
   },
 ): Promise<{
@@ -413,6 +414,17 @@ export async function startFastSessionCommand(
     reasoningEffort: null,
   });
   const unifiedSession = await ensureSessionForFastConversation(db, session.id);
+
+  if (input.empty) {
+    await db
+      .update(sessions)
+      .set({ sourceTrigger: 'manual' })
+      .where(eq(sessions.id, unifiedSession.id));
+    return {
+      sessionId: unifiedSession.id,
+      fastConversationId: session.id,
+    };
+  }
 
   const kickoffTurnId = input.conversationId
     ? `web-kickoff:${session.id}`
