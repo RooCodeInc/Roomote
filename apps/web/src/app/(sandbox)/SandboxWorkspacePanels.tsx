@@ -11,6 +11,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from '@/components/system';
+import { cn } from '@/lib/utils';
 
 import { useSandboxLayout } from './use-sandbox-layout';
 
@@ -68,6 +69,7 @@ interface ResponsiveWorkspacePanelsProps {
   panelSize?: number;
   mainMinSize?: number;
   panelMinSize?: number;
+  dimUnfocusedPanels?: boolean;
 }
 
 export function ResponsiveWorkspacePanels({
@@ -80,6 +82,7 @@ export function ResponsiveWorkspacePanels({
   panelSize = 50,
   mainMinSize = 30,
   panelMinSize = 20,
+  dimUnfocusedPanels = false,
 }: ResponsiveWorkspacePanelsProps) {
   const isMdOrLarger = useMediaQuery('(min-width: 768px)', {
     initializeWithValue: false,
@@ -100,7 +103,11 @@ export function ResponsiveWorkspacePanels({
       <ResizablePanelGroup
         key={panelCount}
         direction="horizontal"
-        className="min-h-0 flex-1"
+        className={cn(
+          'min-h-0 flex-1',
+          dimUnfocusedPanels &&
+            '[&_[data-slot=resizable-panel]]:transition-opacity [&:has([data-slot=resizable-panel]:focus-within)_[data-slot=resizable-panel]:not(:focus-within)]:opacity-80',
+        )}
       >
         <ResizablePanel
           id="main"

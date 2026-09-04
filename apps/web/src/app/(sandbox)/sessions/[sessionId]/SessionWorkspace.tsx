@@ -1245,6 +1245,7 @@ export function SessionWorkspace({
         >
           <ResponsiveWorkspacePanels
             isPanelOpen={panelOpen}
+            dimUnfocusedPanels
             mainMinSize={mainMinSize}
             panelMinSize={panelMinSize}
             main={
