@@ -2,6 +2,19 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.2.4 (2026-09-04)
+
+Roomote 1.2.4 completes first-admin setup at the infrastructure-ready boundary and removes navigation paths that loop administrators back into setup.
+
+### Highlights
+
+- Complete setup when inference, compute, source control, and repository synchronization are ready without requiring optional starter work.
+- Show only usable Sessions and Settings navigation during incomplete setup across desktop, mobile, and product-logo links.
+
+### Patch changes
+
+- Complete setup as soon as infrastructure and repository prerequisites are ready, and hide setup-gated navigation links until then so they do not reopen the active setup Session.
+
 ## 1.2.3 (2026-09-03)
 
 Roomote 1.2.3 restores Fast Sessions for deployments that rely on the default task model.
