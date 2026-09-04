@@ -169,7 +169,12 @@ export function buildFastSessionReplyFooterText(params: {
             formatLink: formatMarkdownLink,
             formatFooterText: (text: string) => `-# ${text}`,
           }
-        : { formatLink: formatMarkdownLink }),
+        : params.provider === 'github'
+          ? {
+              formatLink: formatMarkdownLink,
+              formatFooterText: (text: string) => `<sub>${text}</sub>`,
+            }
+          : { formatLink: formatMarkdownLink }),
   });
 }
 
