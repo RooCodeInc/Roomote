@@ -769,7 +769,13 @@ export function FastSessionTranscript({
             {hasVisibleAssistantMessage ? timelineExtras : null}
             {pendingResponseState.pendingAfter !== null &&
             streamMessages.length === 0 ? (
-              <ThinkingMessage />
+              pendingResponseState.pendingAfter.id === '' ? (
+                <div className="mt-4">
+                  <ThinkingMessage />
+                </div>
+              ) : (
+                <ThinkingMessage />
+              )
             ) : !isSending &&
               conversationResponding !== true &&
               runningTaskCount > 0 &&
