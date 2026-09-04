@@ -2,10 +2,14 @@ import {
   automations,
   db,
   deploymentSettings,
+  runFactory,
   slackInstallations,
+  taskFactory,
+  tasks,
   upsertAutomation,
   users,
 } from '@roomote/db/server';
+import { TaskPayloadKind } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -87,6 +91,7 @@ describe('getBackgroundAgentSettingsCommand Slack fan-out', () => {
   beforeEach(async () => {
     process.env.SLACK_API_BASE_URL = 'https://slack.com/api/';
 
+    await db.delete(tasks);
     await db.delete(automations);
     await db.delete(deploymentSettings);
     await db.delete(slackInstallations);
@@ -177,5 +182,94 @@ describe('getBackgroundAgentSettingsCommand Slack fan-out', () => {
     );
     expect(result.capabilities.slackConnected).toBe(true);
     expect(result.automationStatus.manager_stats?.enabled).toBe(true);
+  });
+
+  it('links automation history to the exact triggering Slack message', async () => {
+    await upsertAutomation(db, {
+      key: 'ci_failure_triage',
+      enabled: true,
+      schedule: { mode: 'off' },
+    });
+    const task = await taskFactory.create({
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      actorExternalId: null,
+      initiatorAutomation: 'ci_failure_triage',
+      surface: 'slack',
+      trigger: 'message',
+      slackChannelId: 'CSOURCE1',
+      slackThreadTs: '1788000000.000100',
+      title: 'Investigate failing CI',
+    });
+    await runFactory.create({
+      taskId: task.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: 'RooCodeInc/Roomote',
+        description: 'Investigate failing CI',
+        communicationProvider: 'slack',
+        communicationTeamId: 'T123',
+        communicationTeamDomain: 'acme',
+        communicationChannelId: 'CSOURCE1',
+        communicationThreadId: '1788000000.000100',
+        communicationMessageId: '1788000001.000200',
+      },
+    });
+    await runFactory.create({
+      taskId: task.id,
+      kind: 'resume',
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: 'RooCodeInc/Roomote',
+        description: 'Resume CI investigation',
+        communicationProvider: 'slack',
+        communicationTeamDomain: 'wrong-workspace',
+        communicationChannelId: 'CWRONG',
+        communicationThreadId: '1788000002.000300',
+        communicationMessageId: '1788000003.000400',
+      },
+    });
+
+    const scheduledTask = await taskFactory.create({
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      actorExternalId: null,
+      initiatorAutomation: 'ci_failure_triage',
+      surface: 'system',
+      trigger: 'schedule',
+      slackChannelId: 'CREPORT1',
+      slackThreadTs: '1788000004.000500',
+      title: 'Scheduled CI scan',
+    });
+    await runFactory.create({
+      taskId: scheduledTask.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: 'RooCodeInc/Roomote',
+        description: 'Scheduled CI scan',
+        communicationProvider: 'slack',
+        communicationTeamDomain: 'acme',
+        communicationChannelId: 'CREPORT1',
+        communicationThreadId: '1788000004.000500',
+      },
+    });
+
+    const result = await getBackgroundAgentSettingsCommand(adminAuth);
+
+    expect(result.recentRuns.ci_failure_triage).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskId: scheduledTask.id,
+          sourceLabel: null,
+          sourceUrl: null,
+        }),
+        expect.objectContaining({
+          taskId: task.id,
+          sourceLabel: 'Open source message',
+          sourceUrl:
+            'https://acme.slack.com/archives/CSOURCE1/p1788000001000200?thread_ts=1788000000.000100&cid=CSOURCE1',
+        }),
+      ]),
+    );
   });
 });

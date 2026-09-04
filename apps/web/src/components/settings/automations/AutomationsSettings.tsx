@@ -277,6 +277,8 @@ type AutomationRunSummary = {
   trigger: TaskTrigger;
   state: TaskState;
   createdAt: Date | string;
+  sourceUrl: string | null;
+  sourceLabel: string | null;
 };
 
 /**
@@ -1378,9 +1380,18 @@ function AutomationRunsDebugPanel({
                     )}
                   </div>
                 </div>
-                <Button asChild variant="outline" size="sm">
-                  <Link href={`/task/${run.taskId}`}>Open task</Link>
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  {run.sourceUrl && run.sourceLabel ? (
+                    <Button asChild variant="ghost" size="sm">
+                      <a href={run.sourceUrl} target="_blank" rel="noreferrer">
+                        {run.sourceLabel}
+                      </a>
+                    </Button>
+                  ) : null}
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={`/task/${run.taskId}`}>Open task</Link>
+                  </Button>
+                </div>
               </div>
             );
           })}

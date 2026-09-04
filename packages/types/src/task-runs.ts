@@ -958,6 +958,9 @@ const sharedTaskPayloadSchema = z.object({
    */
   sourceControlHost: z.string().optional(),
 
+  /** Canonical external event that caused this task to launch. */
+  sourceEventUrl: z.string().url().optional(),
+
   /**
    * Per-launch PR delivery override. When present, pull requests created for
    * this run derive their draft/ready state from this action instead of the
