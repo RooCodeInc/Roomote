@@ -5,8 +5,10 @@ export const SNAPSHOT_HARD_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
 /** Legacy providers can still appear on persisted task runs. */
 export type SnapshotRetentionProvider = ComputeProvider | 'vercel';
 
+// Both Roomote backends use the same Modal workspace and filesystem images.
 export const SNAPSHOT_PROVIDERS_WITHOUT_APPLICATION_EXPIRY = [
   'modal',
+  'roomote',
 ] as const satisfies readonly SnapshotRetentionProvider[];
 
 export function getSnapshotExpiryMs(

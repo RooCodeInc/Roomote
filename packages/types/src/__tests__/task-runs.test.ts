@@ -195,6 +195,15 @@ describe('snapshot resume helpers', () => {
     ).toBeNull();
   });
 
+  it('keeps old broker-backed Roomote snapshots resumable', () => {
+    expect(
+      isSnapshotResumable(new Date('2026-04-01T00:00:00.000Z'), 'roomote'),
+    ).toBe(true);
+    expect(
+      getSnapshotExpiresAt(new Date('2026-04-01T00:00:00.000Z'), 'roomote'),
+    ).toBeNull();
+  });
+
   it('expires Vercel snapshots at the seven-day boundary', () => {
     expect(
       isSnapshotResumable(new Date('2026-05-13T00:00:00.001Z'), 'vercel'),
