@@ -17,6 +17,7 @@ import {
   findFastAgentSessionForProviderMessage,
   persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
+  resolveFastAgentSessionImages,
   resolveUserMcpServerConfigs,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
@@ -189,7 +190,11 @@ async function processFastAgentReaction(params: {
           threadTs,
           messageId: event.item.ts,
         }),
-        postReply: async ({ message, kickoff }) => {
+        postReply: async ({ message, kickoff, imageArtifactIds = [] }) => {
+          const replyImages = await resolveFastAgentSessionImages({
+            artifactIds: imageArtifactIds,
+            sessionId: session.id,
+          });
           const posted = await postSlackThreadMarkdownMessage({
             slack: context.slack,
             channel: event.item.channel,
@@ -202,6 +207,10 @@ async function processFastAgentReaction(params: {
               source: 'fast_agent',
             },
             fastSessionFooter: { sessionId: session.id, ...footerContext },
+            images: replyImages.map((image) => ({
+              url: image.url,
+              altText: image.altText,
+            })),
           });
           if (posted === 'failed') {
             throw new Error('Slack did not accept the Fast reaction reply.');
