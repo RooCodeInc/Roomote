@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   getFastSessionTasks: vi.fn(),
   currentEpochSeconds: vi.fn(),
   createSessionArtifact: vi.fn(),
+  createConversationArtifact: vi.fn(),
   dbUpdate: vi.fn(),
   dbSet: vi.fn(),
   dbWhere: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  buildFastAgentArtifactCreator: vi.fn(() => mocks.createConversationArtifact),
   buildFastAgentSurfaceReplyDelivery: mocks.buildReplyDelivery,
   createFastAgentSessionArtifact: mocks.createSessionArtifact,
   persistFastAgentInlineHumanTurn: vi.fn().mockResolvedValue(null),
@@ -459,6 +461,9 @@ describe('startSetupFastSessionCommand', () => {
         platformEventKind: 'setup',
         platformEventVisibility: 'required',
         currentMessageId: 'setup-kickoff:setup-conversation-1',
+        adapter: expect.objectContaining({
+          createArtifact: mocks.createConversationArtifact,
+        }),
       }),
     );
     // The kickoff is admitted durably with its platform framing, so a

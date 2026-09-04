@@ -113,6 +113,7 @@ export {
   createFastAgentSessionArtifact,
   createSessionArtifact,
 } from './lib/artifacts/create-session-artifact';
+export { buildFastAgentArtifactCreator } from './lib/artifacts/fast-agent-artifact-creator';
 export {
   notifyFastAgentParentOnArtifact,
   type FastArtifactNotificationResult,

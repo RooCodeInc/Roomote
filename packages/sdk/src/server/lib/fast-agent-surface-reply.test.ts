@@ -18,6 +18,11 @@ const mocks = vi.hoisted(() => ({
   linearGetIssue: vi.fn(),
   buildSourceControlDelivery: vi.fn(),
   sourceControlPostComment: vi.fn(),
+  createConversationArtifact: vi.fn(),
+}));
+
+vi.mock('./artifacts/create-session-artifact', () => ({
+  createFastAgentConversationArtifact: mocks.createConversationArtifact,
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -176,6 +181,38 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     await expect(
       delivery!.adapter.postReply({ purpose: 'closeout', message: 'hi' }),
     ).resolves.toBeUndefined();
+  });
+
+  it('lets web follow-up turns create artifacts in the Session', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'web',
+    });
+    mocks.createConversationArtifact.mockResolvedValue({ id: 'artifact-1' });
+
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Matt',
+      question: 'Write this up as a plan',
+    });
+
+    await expect(
+      delivery!.adapter.createArtifact!({
+        path: 'plans/flying-animals.md',
+        content: '# Plan',
+        contentType: 'text/markdown',
+        artifactType: 'plan',
+      }),
+    ).resolves.toEqual({ id: 'artifact-1' });
+    expect(mocks.createConversationArtifact).toHaveBeenCalledWith({
+      fastConversationId: conversation.id,
+      path: 'plans/flying-animals.md',
+      content: '# Plan',
+      contentType: 'text/markdown',
+      artifactType: 'plan',
+    });
   });
 
   it('reports durable admission failures instead of acknowledging the queued follow-up', async () => {

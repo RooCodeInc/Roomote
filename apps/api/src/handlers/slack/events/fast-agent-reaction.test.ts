@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   acquireLock: vi.fn(),
   answerQuestion: vi.fn(),
+  createArtifact: vi.fn(),
   createActivity: vi.fn(() => ({ start: vi.fn(), settle: vi.fn() })),
   findConversation: vi.fn(),
   findSession: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock('@roomote/communication', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  buildFastAgentArtifactCreator: vi.fn(() => mocks.createArtifact),
   findFastAgentSessionForProviderMessage: mocks.findSession,
   persistFastAgentInlineHumanTurn: mocks.persistAdmission,
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
@@ -147,6 +149,7 @@ describe('Fast Slack reaction input', () => {
         durableAdmission: { eventId: 'row-1' },
         resumedAfterInterruption: true,
         adapter: expect.objectContaining({
+          createArtifact: mocks.createArtifact,
           requestDurableResume: expect.any(Function),
           requestDurableRetry: expect.any(Function),
         }),

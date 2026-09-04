@@ -16,6 +16,7 @@ import {
   upsertFastAgentMessage,
 } from '@roomote/cloud-agents/server';
 import {
+  buildFastAgentArtifactCreator,
   buildFastAgentSurfaceReplyDelivery,
   createFastAgentSessionArtifact,
   persistFastAgentInlineHumanTurn,
@@ -548,6 +549,7 @@ export async function startSetupFastSessionCommand(
       delivery: {
         conversation,
         adapter: {
+          createArtifact: buildFastAgentArtifactCreator(session.id),
           launchTask: createFastAgentWebTaskLauncher({
             userId: auth.userId,
             conversation,
@@ -842,6 +844,7 @@ export async function submitFastSessionUserInputCommand(
           conversationId: session.conversationId,
         },
         adapter: {
+          createArtifact: buildFastAgentArtifactCreator(session.id),
           launchTask: createFastAgentWebTaskLauncher({
             userId: session.userId,
             conversation: {
