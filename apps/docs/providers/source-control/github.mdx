@@ -233,6 +233,11 @@ Roomote runs the Review Code automation's structured review on the current
 head, posts the findings on the pull request, and reports back in the same
 discussion.
 
+To request a fresh review through GitHub, use **Re-run** on the Roomote code
+review check for the pull request's current head. Roomote ignores rerun events
+for stale commits and checks that were not created by the configured Roomote
+GitHub App.
+
 Replying inside a review thread that Roomote opened counts as talking to
 Roomote, so no `@mention` is needed there; Roomote answers in that thread. On
 a pull request that a Roomote task opened, those replies are instead collected

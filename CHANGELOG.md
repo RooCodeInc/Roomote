@@ -2,6 +2,52 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.3.0 (2026-09-04)
+
+Roomote 1.3 brings every supported entry point into continuous Sessions, expands the Session workspace with artifacts and live previews, and makes Fast conversations more resilient across shared and interrupted work.
+
+### Highlights
+
+- Continue work in one Session across the web, API, chat, Linear, and supported source-control providers.
+- Work across resizable task panels, durable artifacts, and live previews without losing the parent conversation.
+- Launch structured pull-request reviews from Sessions and opt into transparent disclosure when Memory informs Roomote's work.
+- Resume interrupted Fast turns without repeating requests or duplicating task launches.
+
+### Minor changes
+
+- Add a supported agent-guided installation path that uses the standard Linux installer, can evaluate Roomote inside a Linux VM, and suppresses tokenized setup URLs from captured transcripts.
+- Give nested Roomote preview deployments secure, run-scoped OpenRouter inference through the parent deployment without exposing its provider key.
+- Create durable artifacts from any Fast turn, open Session and task artifact links or images in the side panel, and use Build This to delegate a plan through its owning Session. Thanks to @mrubens for contributing this improvement.
+- Bring web, API, Slack, Discord, Microsoft Teams, Telegram, Linear, GitHub, GitLab, Bitbucket, Azure DevOps, and Gitea requests into continuous Sessions where Roomote can answer directly or delegate execution without losing the surrounding conversation. Thanks to @mrubens for contributing this improvement.
+- Collect live previews from delegated tasks in their parent Session and link source-control replies back to the active Session preview. Thanks to @mrubens for contributing this improvement.
+- Launch Roomote's structured pull-request review directly from a Session and keep automatic reviews attached to the Session that opened the pull request. Thanks to @mrubens for contributing this improvement.
+- Work across several resizable task panels inside a Session, switch between conversation and execution without losing your place, and navigate recent Sessions and task workspaces more directly.
+- Add an opt-in Therapist Mode that names the remembered fact that informed a Session or task without exposing internal Memory metadata.
+
+### Patch changes
+
+- Make scheduled automation Sessions continuable from the web composer, show the configured custom prompt in their transcripts, keep tool results concise, and include verified pull-request numbers in Merge Announcer reports.
+- Resume interrupted Fast work promptly when queue workers restart by draining active turns and handing unfinished work back immediately. Operators can tune the shutdown window with `R_BULLMQ_SHUTDOWN_DRAIN_MS`. Thanks to @mrubens for contributing this improvement.
+- Repair GitHub account linking and completed-deployment setup redirects, report missing GitHub App credentials clearly, preserve Linear refresh tokens during same-account reconnects, and work from the real Linear issue instead of its generated delegation stub. Thanks to @mrubens for contributing this improvement.
+- Keep image-containing Fast turns on the configured orchestration model, delegate image inspection only when needed, and reliably attach screenshots produced by delegated tasks to Fast replies. Thanks to @mrubens for contributing this improvement.
+- Let teammates participate in shared Fast Sessions from the web or a connected chat thread instead of rejecting every message from someone other than the Session owner. Thanks to @daniel-lxs for contributing this improvement.
+- Resume interrupted Fast turns from their recorded conversation, replies, and tool results, including turns that launched tasks, posted their final reply, reacted with emoji, or started from a platform event. Unfinished work continues without asking the user to repeat the request or duplicating an identical task launch. Thanks to @daniel-lxs for contributing this improvement.
+- Let Fast stay silent when people are talking among themselves instead of posting a false turn-budget error, while asking for a rephrase when a request directed at Roomote genuinely goes unanswered. Thanks to @daniel-lxs for contributing this improvement.
+- Give self-hosted Fast processes more configurable temporary storage and report actionable filesystem diagnostics instead of failing opaquely when that storage fills.
+- Keep delegated work attached to its parent Session, clear stale queued-message state after tasks start, return task results to the conversation, and render pinned launches as task cards. Thanks to @mrubens for contributing this improvement.
+- Accept unused optional MCP tool fields, respond to explicit GitHub mentions even in repositories excluded from unsolicited automation, and revalidate time-sensitive operational facts before acting. Thanks to @mrubens for contributing this improvement.
+- Improve task and Session readability with correctly clipped avatars, accurate demo-task start times, visible cost labels, restored environment badges, smoother artifact transitions, less intrusive initial activity, and a todo list that no longer crowds the prompt input.
+- Keep Modal- and Roomote-backed task snapshots resumable beyond the previous seven-day application limit when the provider still retains them.
+- Keep parent task model, reasoning, and provider overrides out of nested Roomote environments and preview shell files while preserving explicit nested inference configuration.
+- Start the first Fast conversation after a deployment without waiting several minutes for OpenCode to install its runtime plugin. Thanks to @mrubens for contributing this improvement.
+- Protect Roomote-reserved deployment variables from generic environment-variable updates and deletion.
+- Preserve reviewer feedback across new commits, retire controls for outdated revisions, restart Roomote reviews from GitHub's Re-run action, and clear failed review checks after findings are resolved. Thanks to @mrubens for contributing this improvement.
+- Make starting and navigating Sessions clearer with recent-session access, rotating home prompts, a streamlined launcher, friendlier setup suggestions, and an optional judgment-first TODO review task.
+- Keep Session timelines complete when events share a timestamp, collapse completed activity after conversation replies, and present tool activity in clearer product language.
+- Keep Slack task progress visible and stable as threads grow, show live activity separately from final output, and explain when buttons on retired task messages can no longer be used. Thanks to @mrubens and @daniel-lxs for contributing this improvement.
+- Render Slack links, channel references, and bare URLs correctly in web Session transcripts. Thanks to @mrubens for contributing this improvement.
+- Keep source-control conversations accurate by quoting the triggering comment, editing one reply throughout a Fast turn, linking forwarded Slack notifications to the exact GitHub comment, and resolving comment-edit endpoints safely. Thanks to @mrubens for contributing this improvement.
+
 ## 1.2.4 (2026-09-04)
 
 Roomote 1.2.4 completes setup from infrastructure readiness and makes unavailable product areas clear without interrupting the active setup Session.
