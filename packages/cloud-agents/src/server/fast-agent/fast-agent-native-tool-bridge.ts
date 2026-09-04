@@ -1184,12 +1184,14 @@ function createSharedToolsDirectory(): string {
   const toolsDirectory = join(directory, 'tools');
   mkdirSync(toolsDirectory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
-  // OpenCode installs `@opencode-ai/plugin` (and with it the zod major it
-  // validates tool arguments against) into this directory the first time it
-  // boots here, then reuses the install for every later conversation on the
-  // host. The tools' `zod` import must resolve to that copy: pointing it at
-  // the app's own zod 3 made OpenCode's zod 4 validator reject array
-  // arguments. Leave package.json without a lockfile so the install runs.
+  // `@opencode-ai/plugin` (and with it the zod major OpenCode validates tool
+  // arguments against) must be installed in this directory: the tools' `zod`
+  // import has to resolve to that copy, because pointing it at the app's own
+  // zod 3 made OpenCode's zod 4 validator reject array arguments. The SDK
+  // server spawn copies the image-baked install in (opencode-plugin-seed.ts)
+  // so OpenCode never fetches it at runtime; where no seed is baked (local
+  // dev), leaving package.json without a lockfile lets OpenCode's own install
+  // run on first boot as before.
   if (!existsSync(join(directory, 'package.json'))) {
     writeFileSync(
       join(directory, 'package.json'),
