@@ -1866,25 +1866,6 @@ export async function answerFastAgentQuestion({
     }
     const retryAt = new Date(now + parkDelayMs);
     const inferenceRetries = durableRetriesConsumed + 1;
-    if (notice.freshSession && canonicalConversationId) {
-      // The provider rejected this session's native history, so the resumed
-      // run must not reattach to it. Forget the durable OpenCode session
-      // first: the resume then rebuilds from the recorded transcript, which
-      // is what a human "try again" gets.
-      try {
-        await setFastAgentOpenCodeSession({
-          sessionId: canonicalConversationId,
-          openCodeSessionId: null,
-        });
-      } catch (error) {
-        console.warn(
-          `[Fast Agent] Failed to forget the rejected OpenCode session before parking: ${formatErrorForLog(error)}`,
-        );
-        return null;
-      }
-      durableOpenCodeSessionId = null;
-      fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
-    }
     const scheduled = await scheduleFastAgentDurableTurnRetry(
       durableAdmission.eventId,
       {
@@ -1902,6 +1883,29 @@ export async function answerFastAgentQuestion({
     durableTurnReplayable = false;
     durableTurnDeferred = true;
     durableRetriesConsumed = inferenceRetries;
+    if (notice.freshSession && canonicalConversationId) {
+      // The provider rejected this session's native history, so the resumed
+      // run must not reattach to it. Forget the durable OpenCode session so
+      // the resume rebuilds from the recorded transcript, which is what a
+      // human "try again" gets. This runs only once the park is committed:
+      // dropping the live session before that would send a failed schedule
+      // down the in-process cold-rebuild path and could repeat the tool
+      // side effects the durable guard exists to prevent. If forgetting
+      // fails, the resumed run reattaches, meets the same rejection, and
+      // closes out honestly, since a resumed run gets no second retry.
+      try {
+        await setFastAgentOpenCodeSession({
+          sessionId: canonicalConversationId,
+          openCodeSessionId: null,
+        });
+        durableOpenCodeSessionId = null;
+        fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
+      } catch (error) {
+        console.warn(
+          `[Fast Agent] Failed to forget the rejected OpenCode session for the parked retry: ${formatErrorForLog(error)}`,
+        );
+      }
+    }
     await adapter.requestDurableRetry(retryAt).catch((error) => {
       console.warn(
         `[Fast Agent] Failed to queue the durable inference retry wakeup: ${formatErrorForLog(error)}`,
