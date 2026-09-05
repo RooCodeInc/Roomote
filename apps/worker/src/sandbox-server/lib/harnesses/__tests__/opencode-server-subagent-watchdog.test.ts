@@ -936,7 +936,7 @@ describe('OpenCode visual proof deadline', () => {
     vi.useRealTimers();
   });
 
-  it.each(['running', 'completed', 'error'])(
+  it.each(['pending', 'running', 'completed', 'error'])(
     'ends proof at a %s judge handoff without waiting for turn completion',
     async (status) => {
       const { client, harness } = createHarness(undefined, {
@@ -965,14 +965,12 @@ describe('OpenCode visual proof deadline', () => {
           type: 'message.part.updated',
           properties: { part: { ...judge, state: { ...judge.state, status } } },
         });
-        // Replayed skill results and supplemental guidance cannot rearm proof
-        // while the parent is judging or delivering in this same turn.
-        for (const part of [proof, createSkillToolPart('agent-browser')]) {
-          await client.emit({
-            type: 'message.part.updated',
-            properties: { part },
-          });
-        }
+        // Do not load another skill: the judge may stay queued through the
+        // original deadline without a workflow transition clearing it for us.
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: proof },
+        });
         await vi.advanceTimersByTimeAsync(VISUAL_PROOF_TIMEOUT_MS * 2);
         expect(client.abort).not.toHaveBeenCalled();
         expect(client.promptAsync).toHaveBeenCalledTimes(1);
@@ -982,7 +980,7 @@ describe('OpenCode visual proof deadline', () => {
     },
   );
 
-  it.each(['pending', 'other-agent', 'child-session', 'upload'])(
+  it.each(['unidentified-pending', 'other-agent', 'child-session', 'upload'])(
     'does not treat %s as a proof handoff',
     async (kind) => {
       const { client, harness } = createHarness(undefined, {
@@ -999,10 +997,11 @@ describe('OpenCode visual proof deadline', () => {
         await vi.advanceTimersByTimeAsync(4_000);
         const part = createTaskToolPart({
           callId: 'not_a_handoff',
-          status: kind === 'pending' ? kind : 'completed',
-          input: {
-            subagent_type: kind === 'other-agent' ? 'general' : 'judge',
-          },
+          status: kind === 'unidentified-pending' ? 'pending' : 'completed',
+          input:
+            kind === 'unidentified-pending'
+              ? { subagent_type: undefined }
+              : { subagent_type: kind === 'other-agent' ? 'general' : 'judge' },
         });
         if (kind === 'child-session') part.sessionID = 'ses_child_1';
         if (kind === 'upload') {

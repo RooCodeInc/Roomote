@@ -4706,14 +4706,11 @@ export class OpenCodeServerHarness
         this.visualProofTimeoutTimer &&
         this.taskToolProofAttempts.get(eventKey) === this.visualProofAttempt &&
         !this.persistedToolResultKeys.has(eventKey) &&
-        extractOpenCodeTaskToolAgentType(toolPart) === 'judge' &&
-        (toolPart.state?.status === 'running' ||
-          toolPart.state?.status === 'completed' ||
-          toolPart.state?.status === 'error')
+        extractOpenCodeTaskToolAgentType(toolPart) === 'judge'
       ) {
         // The judge consumes the finished proof result, including no-op or
-        // blocked results. A failed judge is not a capture timeout, and uploads
-        // alone are not a completion boundary.
+        // blocked results. Queued or failed judges are not capture timeouts,
+        // and uploads alone are not a completion boundary.
         this.clearVisualProofTimeout();
         this.activeWorkflowSkill = null;
       }
