@@ -55,10 +55,10 @@ describe('Standard Task draft delivery policy', () => {
       '<alias path="create-pr">Aliases include “create PR”',
     );
     expect(skillContent).toContain(
-      'Generic requests such as “create PR”, “open PR”, or “deliver as a PR/MR” are not aliases for this path; they follow the task-level delivery policy, which defaults to draft delivery in Autonomous runs.',
+      'Generic requests such as "create PR", "open PR", or "deliver as a PR/MR" follow task-level delivery policy, which defaults to draft delivery in Autonomous runs; they do not select this ready path.',
     );
     expect(skillContent).toContain(
-      'Generic “create PR” / “open PR” / “deliver as a PR/MR” requests also resolve here whenever the task-level delivery policy selects draft delivery.',
+      'generic create/open/deliver PR/MR requests also select this path when task-level policy selects draft delivery.',
     );
   });
 });

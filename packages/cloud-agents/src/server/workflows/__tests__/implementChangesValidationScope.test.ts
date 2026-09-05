@@ -9,7 +9,7 @@ describe('implement-changes validation scope guidance', () => {
   it('discourages low-signal class-assertion tests for narrow visual-only polish', () => {
     const skillPath = path.resolve(
       thisDirPath,
-      '../skills/standard/implement-changes/SKILL.md',
+      '../skills/standard/implement-changes/resources/default-workflow.md',
     );
     const skillContent = fs.readFileSync(skillPath, 'utf8');
 
