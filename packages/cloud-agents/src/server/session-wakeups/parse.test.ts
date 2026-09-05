@@ -7,6 +7,85 @@ const now = new Date('2026-09-04T17:00:00.000Z');
 const options = { now, defaultTimeZone: 'America/New_York' };
 
 describe('parseSessionWakeupSchedule', () => {
+  it.each([
+    'in 30s',
+    'in 30 sec',
+    'in 30 secs',
+    'IN 30 seconds',
+    'once in 30s',
+  ])('reads seconds in %s', (text) => {
+    const parsed = parseSessionWakeupSchedule(text, options);
+    expect(parsed.schedule).toEqual({
+      mode: 'once',
+      inMinutes: 0.5,
+      at: '2026-09-04T17:00:30.000Z',
+    });
+    expect(parsed.firstRunAt.toISOString()).toBe('2026-09-04T17:00:30.000Z');
+    expect(parsed.maxRuns).toBeNull();
+  });
+
+  it('normalizes equivalent seconds and minute units identically', () => {
+    expect(parseSessionWakeupSchedule('in 60s', options)).toEqual(
+      parseSessionWakeupSchedule('in 1m', options),
+    );
+    expect(parseSessionWakeupSchedule('every 300s', options)).toEqual(
+      parseSessionWakeupSchedule('every 5m', options),
+    );
+  });
+
+  it('requires bounds for recurring seconds below five minutes', () => {
+    for (const text of ['every second', 'every 30s', 'every 299s']) {
+      expect(() => parseSessionWakeupSchedule(text, options)).toThrow(
+        /run count|end time/,
+      );
+    }
+    for (const text of ['every 30s x3', 'every 30 seconds for 3 runs']) {
+      const parsed = parseSessionWakeupSchedule(text, options);
+      expect(parsed.schedule).toEqual({ mode: 'interval', everyMinutes: 0.5 });
+      expect(parsed.firstRunAt.toISOString()).toBe('2026-09-04T17:00:30.000Z');
+      expect(parsed.maxRuns).toBe(3);
+    }
+    expect(
+      parseSessionWakeupSchedule('every second x3', options).schedule,
+    ).toEqual({ mode: 'interval', everyMinutes: 1 / 60 });
+    expect(
+      parseSessionWakeupSchedule(
+        'every 30s until 2026-09-04T17:01:00Z',
+        options,
+      ).until?.toISOString(),
+    ).toBe('2026-09-04T17:01:00.000Z');
+    expect(() =>
+      parseSessionWakeupSchedule(
+        'every 30s until 2026-09-04T17:00:30Z',
+        options,
+      ),
+    ).toThrow(/later than/);
+  });
+
+  it.each([
+    '0',
+    '-1',
+    '0.5',
+    'NaN',
+    'Infinity',
+    '1e2',
+    '999999999999999999999999999999999999',
+  ])('rejects invalid seconds %s', (amount) => {
+    expect(() => parseSessionWakeupSchedule(`in ${amount}s`, options)).toThrow(
+      SessionWakeupValidationError,
+    );
+    expect(() =>
+      parseSessionWakeupSchedule(`every ${amount}s x3`, options),
+    ).toThrow(SessionWakeupValidationError);
+  });
+
+  it('does not broaden fractional or compound syntax', () => {
+    for (const text of ['in 0.5m', 'in 1m 30s', 'in 30ms', 'every 0.5m x3']) {
+      expect(() => parseSessionWakeupSchedule(text, options)).toThrow(
+        SessionWakeupValidationError,
+      );
+    }
+  });
   it('reads one-shot delays in several spellings', () => {
     for (const text of ['in 2m', 'in 2 minutes', 'IN 2min', 'once in 2m']) {
       const parsed = parseSessionWakeupSchedule(text, options);
@@ -153,7 +232,7 @@ describe('parseSessionWakeupSchedule', () => {
       /say "in \.\.\."/,
     );
     expect(() => parseSessionWakeupSchedule('soon', options)).toThrow(
-      /"in <n>m\|h\|d"/,
+      /"in <n>s\|m\|h\|d"/,
     );
     expect(() =>
       parseSessionWakeupSchedule('every 10m until soon', options),

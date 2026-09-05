@@ -17,31 +17,36 @@ export type ParsedSessionWakeupSchedule = {
   until: Date | null;
 };
 
-const UNIT_MINUTES: Record<string, number> = {
-  m: 1,
-  min: 1,
-  mins: 1,
-  minute: 1,
-  minutes: 1,
-  h: 60,
-  hr: 60,
-  hrs: 60,
-  hour: 60,
-  hours: 60,
-  d: 24 * 60,
-  day: 24 * 60,
-  days: 24 * 60,
+const UNIT_SECONDS: Record<string, number> = {
+  s: 1,
+  sec: 1,
+  secs: 1,
+  second: 1,
+  seconds: 1,
+  m: 60,
+  min: 60,
+  mins: 60,
+  minute: 60,
+  minutes: 60,
+  h: 3600,
+  hr: 3600,
+  hrs: 3600,
+  hour: 3600,
+  hours: 3600,
+  d: 24 * 3600,
+  day: 24 * 3600,
+  days: 24 * 3600,
 };
 
 // Every pattern below runs on text whose whitespace has already been
 // collapsed to single spaces and whose length is capped by the contract, so
 // the patterns use literal single spaces and stay linear.
-const DURATION = String.raw`(\d+) ?(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)`;
+const DURATION = String.raw`(\d+) ?(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)`;
 const DURATION_RE = new RegExp(`^${DURATION}$`, 'i');
 const IN_RE = new RegExp(`^(?:once )?in ${DURATION}$`, 'i');
 const AT_RE = /^(?:once )?at (\S+)$/i;
 const EVERY_RE = new RegExp(
-  `^every (?:${DURATION}|(minute|hour|day))(?: (.*))?$`,
+  `^every (?:${DURATION}|(second|minute|hour|day))(?: (.*))?$`,
   'i',
 );
 const CRON_RE = /^cron ((?:\S+ ){4}\S+)(?: (.*))?$/i;
@@ -59,7 +64,7 @@ function invalid(text: string, detail?: string): SessionWakeupValidationError {
 
 function durationMinutes(amount: string, unit: string): number {
   const minutes =
-    Number.parseInt(amount, 10) * UNIT_MINUTES[unit.toLowerCase()]!;
+    (Number.parseInt(amount, 10) * UNIT_SECONDS[unit.toLowerCase()]!) / 60;
   if (!Number.isFinite(minutes) || minutes <= 0) {
     throw new SessionWakeupValidationError('A duration must be positive.');
   }
@@ -147,7 +152,7 @@ export function parseSessionWakeupSchedule(
   const everyMatch = EVERY_RE.exec(text);
   if (everyMatch) {
     const everyMinutes = everyMatch[3]
-      ? UNIT_MINUTES[everyMatch[3].toLowerCase()]!
+      ? UNIT_SECONDS[everyMatch[3].toLowerCase()]! / 60
       : durationMinutes(everyMatch[1]!, everyMatch[2]!);
     const normalized = normalizeSessionWakeupSchedule(
       { mode: 'interval', everyMinutes },
