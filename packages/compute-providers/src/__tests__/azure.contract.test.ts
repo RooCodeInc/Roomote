@@ -111,6 +111,7 @@ function createFetchMock(options: {
 
 function createClient(
   fetchImpl: typeof fetch,
+  overrides: Partial<AzureConfig> = {},
 ): ReturnType<typeof createComputeProviderClient> {
   const config: AzureConfig = {
     subscriptionId: 'sub-1',
@@ -121,6 +122,7 @@ function createClient(
     timeoutMs: 3_600_000,
     tokenProvider: { getToken: async () => 'test-token' },
     fetchImpl,
+    ...overrides,
   };
   return createComputeProviderClient({ provider: 'azure', config });
 }
@@ -152,7 +154,7 @@ describe('azure adapter contract', () => {
       sourcesRef: { diskImage: { id: 'disk-image-1' } },
       resources: { cpu: '1000m', memory: '2048Mi' },
       lifecycle: {
-        autoSuspendPolicy: { enabled: false, interval: 0, mode: 'Memory' },
+        autoSuspendPolicy: { enabled: true, interval: 3600, mode: 'Memory' },
         // Backstop floors to 30d (suspension-anchored TTL); the 3600s
         // task timeout stays Roomote-side.
         autoDeletePolicy: { enabled: true, deleteIntervalInSeconds: 2592000 },
@@ -169,6 +171,72 @@ describe('azure adapter contract', () => {
       // standby sandboxes on any inbound traffic.
       activationMode: 'Manual',
     });
+  });
+
+  it.each([
+    { config: { timeoutMs: undefined }, seconds: 18_000 },
+    { config: { timeoutMs: 3_600_001 }, seconds: 3601 },
+    { config: { autoSuspendSeconds: 900 }, seconds: 900 },
+    { config: { autoSuspendSeconds: 0 }, seconds: 0 },
+  ])('sets the idle fallback for $config', async ({ config, seconds }) => {
+    const { fetchImpl, requests } = createFetchMock({});
+    await createClient(fetchImpl, config).createInstance({});
+    expect(requests.find((r) => r.method === 'PUT')?.body).toMatchObject({
+      lifecycle: {
+        autoSuspendPolicy: {
+          enabled: seconds > 0,
+          interval: seconds,
+          mode: 'Memory',
+        },
+      },
+    });
+  });
+
+  it.each([
+    { timeoutMs: 0 },
+    { timeoutMs: Number.NaN },
+    { timeoutMs: Number.POSITIVE_INFINITY },
+    { autoSuspendSeconds: -1 },
+    { autoSuspendSeconds: 0.5 },
+  ])(
+    'rejects invalid lifecycle settings before creation: %j',
+    async (config) => {
+      const { fetchImpl, requests } = createFetchMock({});
+      await expect(
+        createClient(fetchImpl, config).createInstance({}),
+      ).rejects.toThrow('Azure requires a positive timeout');
+      expect(requests).toHaveLength(0);
+    },
+  );
+
+  it('refreshes the idle fallback when reusing an idempotent launch', async () => {
+    const { fetchImpl, requests } = createFetchMock({
+      onRequest: (request) =>
+        request.method === 'GET' && request.url.includes('/sandboxes?')
+          ? jsonResponse([
+              {
+                id: SANDBOX_ID,
+                state: 'Running',
+                labels: { 'roomote-idempotency-key': 'launch-1' },
+                lifecycle: { autoSuspendPolicy: { enabled: false } },
+              },
+            ])
+          : undefined,
+    });
+    await createClient(fetchImpl).createInstance({
+      idempotencyKey: 'launch-1',
+      ports: [3000],
+    });
+    expect(requests.some((r) => r.method === 'PUT')).toBe(false);
+    const lifecycleIndex = requests.findIndex((r) =>
+      r.url.includes('/lifecycle'),
+    );
+    expect(requests[lifecycleIndex]?.body).toMatchObject({
+      autoSuspendPolicy: { enabled: true, interval: 3600, mode: 'Memory' },
+    });
+    expect(
+      requests.findIndex((r) => r.url.includes('/ports/add')),
+    ).toBeGreaterThan(lifecycleIndex);
   });
 
   it('does not round small tier cpus up to whole cores', async () => {
@@ -617,7 +685,65 @@ describe('azure adapter contract', () => {
     expect(put?.body).toMatchObject({
       sourcesRef: { snapshot: { id: 'snap-1' } },
     });
+    expect(put?.body).not.toHaveProperty('lifecycle');
+    const lifecycleIndex = requests.findIndex((r) =>
+      r.url.includes('/lifecycle'),
+    );
+    expect(requests[lifecycleIndex]?.body).toMatchObject({
+      autoSuspendPolicy: { enabled: true, interval: 3600, mode: 'Memory' },
+    });
+    expect(
+      requests.findIndex((r) => r.url.includes('/ports/add')),
+    ).toBeGreaterThan(lifecycleIndex);
     expect(requests.some((r) => r.url.includes('/ports/add'))).toBe(true);
+  });
+
+  it('refreshes lifecycle after a legacy unlabeled snapshot restore', async () => {
+    const { fetchImpl, requests } = createFetchMock({
+      onRequest: (request) =>
+        request.method === 'PUT' &&
+        request.url.includes('/sandboxes?') &&
+        (request.body as { labels?: unknown })?.labels
+          ? jsonResponse(
+              { title: 'InvalidRequest', detail: 'Labels not supported' },
+              400,
+            )
+          : undefined,
+    });
+    await createClient(fetchImpl).resumeFromSnapshot({
+      sourceSnapshotId: 'snap-1',
+      tags: { app_environment: 'development' },
+    });
+    expect(requests.filter((r) => r.method === 'PUT')).toHaveLength(2);
+    expect(
+      requests.find((r) => r.url.includes('/lifecycle'))?.body,
+    ).toMatchObject({
+      autoSuspendPolicy: { enabled: true, interval: 3600 },
+    });
+  });
+
+  it('cleans up a restored clone if lifecycle installation fails without retrying the restore', async () => {
+    const { fetchImpl, requests } = createFetchMock({
+      onRequest: (request) =>
+        request.url.includes('/lifecycle')
+          ? jsonResponse(
+              { title: 'InvalidPolicy', detail: 'Policy rejected' },
+              400,
+            )
+          : undefined,
+    });
+    await expect(
+      createClient(fetchImpl).resumeFromSnapshot({
+        sourceSnapshotId: 'snap-1',
+        tags: { app_environment: 'development' },
+        ports: [3000],
+      }),
+    ).rejects.toThrow('Policy rejected');
+    expect(requests.filter((r) => r.method === 'PUT')).toHaveLength(1);
+    expect(
+      requests.some((r) => r.method === 'DELETE' && r.url.includes(SANDBOX_ID)),
+    ).toBe(true);
+    expect(requests.some((r) => r.url.includes('/ports/add'))).toBe(false);
   });
 
   it('enters standby via stop and resumes via resume', async () => {
@@ -640,9 +766,110 @@ describe('azure adapter contract', () => {
     expect(resumed?.status).toBe('running');
     expect(requests.some((r) => r.url.includes('/resume'))).toBe(true);
 
-    // No lifecycle refresh on resume: auto-delete is suspension-anchored,
-    // so each standby cycle re-anchors the TTL window by itself.
-    expect(requests.some((r) => r.url.includes('/lifecycle'))).toBe(false);
+    const lifecycleIndex = requests.findIndex((r) =>
+      r.url.includes('/lifecycle'),
+    );
+    expect(requests[lifecycleIndex]?.body).toMatchObject({
+      autoSuspendPolicy: { enabled: true, interval: 3600, mode: 'Memory' },
+      autoDeletePolicy: { enabled: true, deleteIntervalInSeconds: 2592000 },
+    });
+    expect(
+      requests.findIndex((r) => r.url.includes('/resume')),
+    ).toBeGreaterThan(lifecycleIndex);
+  });
+
+  it('does not resume a retained sandbox if lifecycle installation fails', async () => {
+    const { fetchImpl, requests } = createFetchMock({
+      states: ['Stopped'],
+      onRequest: (request) =>
+        request.url.includes('/lifecycle')
+          ? jsonResponse(
+              { title: 'InvalidPolicy', detail: 'Policy rejected' },
+              400,
+            )
+          : undefined,
+    });
+    await expect(
+      createClient(fetchImpl).resumeFromStandby?.({ resumeHandle: SANDBOX_ID }),
+    ).rejects.toThrow('Policy rejected');
+    expect(requests.some((r) => r.url.includes('/resume'))).toBe(false);
+    expect(requests.some((r) => r.method === 'DELETE')).toBe(false);
+  });
+
+  it('refreshes an already-running standby while preserving its deletion policy when no timeout is configured', async () => {
+    const autoDeletePolicy = {
+      enabled: true,
+      deleteIntervalInSeconds: 3_456_000,
+    };
+    const { fetchImpl, requests } = createFetchMock({
+      onRequest: (request) =>
+        request.method === 'GET' && request.url.includes(`${SANDBOX_ID}?`)
+          ? jsonResponse({
+              id: SANDBOX_ID,
+              state: 'Running',
+              lifecycle: {
+                autoDeletePolicy,
+                autoSuspendPolicy: { enabled: false },
+              },
+            })
+          : undefined,
+    });
+    await createClient(fetchImpl, { timeoutMs: undefined }).resumeFromStandby?.(
+      { resumeHandle: SANDBOX_ID },
+    );
+    expect(requests.find((r) => r.url.includes('/lifecycle'))?.body).toEqual({
+      autoDeletePolicy,
+      autoSuspendPolicy: { enabled: true, interval: 18_000, mode: 'Memory' },
+    });
+    expect(requests.some((r) => r.url.includes('/resume'))).toBe(false);
+  });
+
+  it('accepts a concurrent stop only after confirming the sandbox is stopped', async () => {
+    const { fetchImpl } = createFetchMock({
+      states: ['Stopped'],
+      onRequest: (request) =>
+        request.url.includes('/stop?')
+          ? jsonResponse(
+              { title: 'SandboxNotRunning', detail: 'Not running' },
+              409,
+            )
+          : undefined,
+    });
+    await expect(
+      createClient(fetchImpl).enterStandby?.({ instanceId: SANDBOX_ID }),
+    ).resolves.toMatchObject({ resumeHandle: SANDBOX_ID });
+  });
+
+  it.each(['Running', 'Failed', 'Deleting'])(
+    'does not report a successful suspension when stop conflicts and GET says %s',
+    async (state) => {
+      const { fetchImpl } = createFetchMock({
+        states: [state],
+        onRequest: (request) =>
+          request.url.includes('/stop?')
+            ? jsonResponse(
+                { title: 'SandboxNotRunning', detail: 'Not running' },
+                409,
+              )
+            : undefined,
+      });
+      await expect(
+        createClient(fetchImpl).enterStandby?.({ instanceId: SANDBOX_ID }),
+      ).rejects.toMatchObject({ status: 409, code: 'SandboxNotRunning' });
+    },
+  );
+
+  it('does not swallow unrelated stop conflicts', async () => {
+    const { fetchImpl } = createFetchMock({
+      states: ['Stopped'],
+      onRequest: (request) =>
+        request.url.includes('/stop?')
+          ? jsonResponse({ title: 'AnotherConflict', detail: 'Conflict' }, 409)
+          : undefined,
+    });
+    await expect(
+      createClient(fetchImpl).enterStandby?.({ instanceId: SANDBOX_ID }),
+    ).rejects.toMatchObject({ code: 'AnotherConflict' });
   });
 
   it('destroys an instance and reports usage', async () => {

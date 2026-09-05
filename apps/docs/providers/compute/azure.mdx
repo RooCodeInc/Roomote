@@ -85,6 +85,26 @@ memory-preserving suspend/resume, and sandboxes bill storage-only while
 suspended. Preview port URLs do not survive a snapshot restore; Roomote
 re-adds ports after resume.
 
+## Idle suspension and cost control
+
+Roomote enables Azure's memory-preserving auto-suspend policy for new
+sandboxes and refreshes it when restoring snapshots or resuming standby.
+The idle interval follows the task's sandbox timeout, normally five hours.
+This gives Azure a fallback when Roomote's cleanup service is offline or a
+development database has been reset. CPU and memory charges stop while the
+sandbox is suspended.
+
+Azure measures idle time from incoming traffic, API code execution, shell
+sessions, and file operations. This is an idle fallback, not a hard runtime
+or spending cap: continued activity can keep a sandbox running. Roomote's
+normal task sleep and timeout handling still applies.
+
+The separate auto-delete policy retains stopped task sandboxes for at least
+30 days. Its timer starts after suspension; it cannot stop a running sandbox.
+Upgrading refreshes lifecycle settings as sandboxes are reused. Existing
+orphaned sandboxes that Roomote no longer tracks need to be inspected and
+suspended separately in Azure.
+
 ## Egress TLS inspection
 
 The ACA egress proxy can TLS-inspect (MITM) outbound traffic. Roomote defaults
