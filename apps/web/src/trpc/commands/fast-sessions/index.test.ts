@@ -1,5 +1,6 @@
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
+  admitFollowUp: vi.fn(),
   acquireTurnLock: vi.fn(),
   answerQuestion: vi.fn(),
   findAccessibleSession: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  admitFastAgentHumanFollowUp: mocks.admitFollowUp,
   buildFastAgentArtifactCreator: vi.fn(() => mocks.createConversationArtifact),
   buildFastAgentSurfaceReplyDelivery: mocks.buildReplyDelivery,
   createFastAgentSessionArtifact: mocks.createSessionArtifact,
@@ -572,6 +574,7 @@ describe('Fast session PR review actions', () => {
     vi.clearAllMocks();
     mocks.findAccessibleSession.mockResolvedValue(session);
     mocks.updateOfferStatus.mockResolvedValue(undefined);
+    mocks.admitFollowUp.mockResolvedValue({ kind: 'queued' });
   });
 
   it('delegates an authorized offer to the shared web action lifecycle', async () => {
@@ -665,14 +668,11 @@ describe('Fast session PR review actions', () => {
       workspaceId: 'automation-1',
       conversationId: 'session-1',
     };
-    const release = vi.fn().mockResolvedValue(undefined);
     mocks.findAccessibleSession.mockResolvedValue(automationSession);
     mocks.buildReplyDelivery.mockResolvedValue({
       conversation,
       adapter: { launchTask: mocks.launchTask, postReply: vi.fn() },
     });
-    mocks.acquireTurnLock.mockResolvedValue(release);
-    mocks.answerQuestion.mockResolvedValue('Continued');
 
     await replyToFastSessionCommand(auth, {
       sessionId: automationSession.id,
@@ -685,15 +685,129 @@ describe('Fast session PR review actions', () => {
       senderDisplayName: 'User One',
       question: 'Continue this scheduled run.',
     });
-    const scheduled = mocks.after.mock.calls[0]?.[0];
-    expect(scheduled).toBeTypeOf('function');
-    await scheduled?.();
-    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+    expect(mocks.admitFollowUp).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user-1',
-        conversation,
+        forceQueue: true,
+        parent: { sessionId: automationSession.id, conversation },
+        event: expect.objectContaining({ userId: 'user-1' }),
       }),
     );
-    expect(release).toHaveBeenCalledOnce();
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+});
+
+describe('replyToFastSessionCommand admission', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.after.mockReset();
+    mocks.findAccessibleSession.mockResolvedValue(session);
+    mocks.retireReviewActions.mockResolvedValue([]);
+    mocks.updateOfferStatus.mockResolvedValue(undefined);
+    mocks.buildReplyDelivery.mockResolvedValue({
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'session-1',
+      },
+      adapter: { postReply: vi.fn() },
+    });
+    mocks.admitFollowUp.mockReset().mockResolvedValue({ kind: 'queued' });
+    mocks.dbUpdate.mockReturnValue({ set: mocks.dbSet });
+    mocks.dbSet.mockReturnValue({ where: mocks.dbWhere });
+    mocks.dbWhere.mockResolvedValue(undefined);
+  });
+
+  it.each(['idle', 'busy'])(
+    'awaits queued admission before success for an %s Session without scheduling a waiter',
+    async (state) => {
+      mocks.acquireTurnLock.mockResolvedValue(
+        state === 'idle' ? vi.fn() : null,
+      );
+      const { promise, resolve } = Promise.withResolvers<{ kind: string }>();
+      mocks.admitFollowUp.mockReturnValue(promise);
+      let completed = false;
+      const command = replyToFastSessionCommand(auth, {
+        sessionId: session.id,
+        text: 'Clarification',
+      }).then((result) => {
+        completed = true;
+        return result;
+      });
+      await vi.waitFor(() =>
+        expect(mocks.admitFollowUp).toHaveBeenCalledOnce(),
+      );
+      expect(completed).toBe(false);
+      expect(mocks.admitFollowUp).toHaveBeenCalledWith(
+        expect.objectContaining({ forceQueue: true }),
+      );
+      resolve({ kind: 'queued' });
+      await expect(command).resolves.toEqual({ success: true });
+      expect(mocks.after).not.toHaveBeenCalled();
+      expect(mocks.acquireTurnLock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('admits successive messages with distinct matching identities and attachments', async () => {
+    for (const text of ['First', 'Second']) {
+      await replyToFastSessionCommand(auth, {
+        sessionId: session.id,
+        text,
+        images: ['image'],
+        attachmentTexts: ['document'],
+      });
+    }
+    const events = mocks.admitFollowUp.mock.calls.map(([input]) => input.event);
+    expect(events.map((event) => event.question)).toEqual(['First', 'Second']);
+    expect(new Set(events.map((event) => event.eventId)).size).toBe(2);
+    for (const event of events)
+      expect(event).toMatchObject({
+        currentMessageId: event.eventId,
+        userId: 'user-1',
+        images: ['image'],
+        attachmentTexts: ['document'],
+      });
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+
+  it('rejects unauthorized and failed admissions without scheduling work', async () => {
+    mocks.findAccessibleSession.mockResolvedValueOnce(null);
+    await expect(
+      replyToFastSessionCommand(auth, {
+        sessionId: session.id,
+        text: 'No access',
+      }),
+    ).rejects.toThrow('Fast session not found');
+    expect(mocks.admitFollowUp).not.toHaveBeenCalled();
+    mocks.admitFollowUp.mockRejectedValueOnce(
+      new Error('Database unavailable'),
+    );
+    await expect(
+      replyToFastSessionCommand(auth, { sessionId: session.id, text: 'Retry' }),
+    ).rejects.toThrow('Database unavailable');
+    await expect(
+      replyToFastSessionCommand(auth, { sessionId: session.id, text: 'Retry' }),
+    ).resolves.toEqual({ success: true });
+    expect(mocks.admitFollowUp).toHaveBeenCalledTimes(2);
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+
+  it('awaits model settings persistence before admitting a reply', async () => {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    mocks.dbWhere.mockReturnValueOnce(promise);
+    const command = replyToFastSessionCommand(auth, {
+      sessionId: session.id,
+      text: 'Use this model',
+      model: 'openrouter/z-ai/glm-5.2',
+      reasoningEffort: 'high',
+    });
+    await vi.waitFor(() => expect(mocks.dbWhere).toHaveBeenCalledOnce());
+    expect(mocks.admitFollowUp).not.toHaveBeenCalled();
+    resolve();
+    await expect(command).resolves.toEqual({ success: true });
+    expect(mocks.dbSet).toHaveBeenCalledWith({
+      model: 'openrouter/z-ai/glm-5.2',
+      reasoningEffort: 'high',
+    });
+    expect(mocks.admitFollowUp).toHaveBeenCalledOnce();
   });
 });

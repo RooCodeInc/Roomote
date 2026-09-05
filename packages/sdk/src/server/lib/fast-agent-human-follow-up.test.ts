@@ -227,6 +227,7 @@ describe('admitFastAgentHumanFollowUp', () => {
   it('runs the turn inline with durable admission when the conversation is idle', async () => {
     const turnLock = vi.fn();
     mocks.acquireTurnLock.mockResolvedValue(turnLock);
+    mocks.findFirst.mockResolvedValueOnce(undefined);
 
     await expect(
       admitFastAgentHumanFollowUp({ parent, event }),
@@ -238,14 +239,70 @@ describe('admitFastAgentHumanFollowUp', () => {
     expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
   });
 
-  it('still runs the turn inline when durable admission cannot be persisted', async () => {
-    const turnLock = vi.fn();
+  it('rejects and releases the lock when durable admission cannot be persisted', async () => {
+    const turnLock = vi.fn().mockResolvedValue(undefined);
     mocks.acquireTurnLock.mockResolvedValue(turnLock);
+    mocks.findFirst.mockResolvedValueOnce(undefined);
     mocks.insertReturning.mockRejectedValue(new Error('db offline'));
 
     await expect(
       admitFastAgentHumanFollowUp({ parent, event }),
-    ).resolves.toEqual({ kind: 'turn', turnLock, durable: null });
+    ).rejects.toThrow('db offline');
+    expect(turnLock).toHaveBeenCalledOnce();
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('rejects and releases the lock when the backlog check fails', async () => {
+    const turnLock = vi.fn().mockResolvedValue(undefined);
+    mocks.acquireTurnLock.mockResolvedValue(turnLock);
+    mocks.findFirst.mockRejectedValueOnce(new Error('db offline'));
+
+    await expect(
+      admitFastAgentHumanFollowUp({ parent, event }),
+    ).rejects.toThrow('db offline');
+    expect(turnLock).toHaveBeenCalledOnce();
+    expect(mocks.insertReturning).not.toHaveBeenCalled();
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('queues behind the backlog before releasing a newly acquired lock', async () => {
+    const turnLock = vi.fn().mockResolvedValue(undefined);
+    mocks.acquireTurnLock.mockResolvedValue(turnLock);
+    mocks.enqueueParentEvent.mockImplementationOnce(async () => {
+      expect(turnLock).not.toHaveBeenCalled();
+      return { eventKey: 'stable-event-key', queued: true };
+    });
+
+    await expect(
+      admitFastAgentHumanFollowUp({ parent, event }),
+    ).resolves.toEqual({
+      kind: 'queued',
+      abort: expect.any(Function),
+    });
+    expect(mocks.findFirst).toHaveBeenCalledWith({
+      where: [
+        ['conversationId', parent.sessionId],
+        'admission',
+        'deliveredAt',
+        'discardedAt',
+      ],
+      columns: { id: true },
+    });
+    expect(mocks.insertReturning).not.toHaveBeenCalled();
+    expect(turnLock).toHaveBeenCalledOnce();
+  });
+
+  it('releases the acquired lock when queue persistence fails', async () => {
+    const turnLock = vi.fn().mockResolvedValue(undefined);
+    mocks.acquireTurnLock.mockResolvedValue(turnLock);
+    mocks.enqueueParentEvent.mockRejectedValueOnce(
+      new Error('queue write failed'),
+    );
+
+    await expect(
+      admitFastAgentHumanFollowUp({ parent, event }),
+    ).rejects.toThrow('queue write failed');
+    expect(turnLock).toHaveBeenCalledOnce();
   });
 
   it('durably deduplicates a follow-up before native steering when busy', async () => {

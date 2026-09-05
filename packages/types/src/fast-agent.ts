@@ -238,6 +238,7 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
   userId: z.string().min(1),
   question: z.string().min(1),
   images: z.array(z.string()).optional(),
+  attachmentTexts: z.array(z.string()).optional(),
   senderDisplayName: z.string().min(1).optional(),
   senderExternalId: z.string().min(1).optional(),
   /**

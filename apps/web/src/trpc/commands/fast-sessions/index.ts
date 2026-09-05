@@ -16,6 +16,7 @@ import {
   upsertFastAgentMessage,
 } from '@roomote/cloud-agents/server';
 import {
+  admitFastAgentHumanFollowUp,
   buildFastAgentArtifactCreator,
   buildFastAgentSurfaceReplyDelivery,
   createFastAgentSessionArtifact,
@@ -668,7 +669,7 @@ export async function replyToFastSessionCommand(
 
   const senderDisplayName =
     getUserDisplayName({ name: auth.name, email: auth.primaryEmail }) ?? null;
-  const [settings, delivery] = await Promise.all([
+  const [, delivery] = await Promise.all([
     resolveSessionModelSettings(session.id, input, {
       model: session.model,
       reasoningEffort: session.reasoningEffort,
@@ -697,16 +698,22 @@ export async function replyToFastSessionCommand(
     'dismissed',
   );
 
-  scheduleWebFastAgentTurn({
-    userId: auth.userId,
-    delivery,
-    question: input.text,
-    images: input.images,
-    attachmentTexts: input.attachmentTexts,
-    model: settings.model,
-    reasoningEffort: settings.reasoningEffort,
-    ...(senderDisplayName ? { senderDisplayName } : {}),
-    durableSessionId: session.id,
+  const currentMessageId = `web-${randomUUID()}`;
+  await admitFastAgentHumanFollowUp({
+    forceQueue: true,
+    parent: { sessionId: session.id, conversation: delivery.conversation },
+    event: {
+      type: 'human_follow_up',
+      eventId: currentMessageId,
+      currentMessageId,
+      userId: auth.userId,
+      question: input.text,
+      ...(input.images?.length ? { images: input.images } : {}),
+      ...(input.attachmentTexts?.length
+        ? { attachmentTexts: input.attachmentTexts }
+        : {}),
+      ...(senderDisplayName ? { senderDisplayName } : {}),
+    },
   });
 
   return { success: true };

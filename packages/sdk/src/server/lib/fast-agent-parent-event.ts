@@ -2332,6 +2332,9 @@ export async function deliverFastAgentParentEventWithLock(
         humanFollowUp?.question ??
         `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
       ...(humanFollowUp?.images ? { images: humanFollowUp.images } : {}),
+      ...(humanFollowUp?.attachmentTexts
+        ? { attachmentTexts: humanFollowUp.attachmentTexts }
+        : {}),
       userId: humanFollowUp?.userId ?? parentTurn.userId,
       conversation: parentTurn.conversation,
       currentMessageId:
