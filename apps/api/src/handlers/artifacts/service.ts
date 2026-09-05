@@ -55,6 +55,8 @@ export async function getArtifactByPath(input: {
 
   if (input.version !== undefined) {
     whereConditions.push(eq(taskArtifacts.version, input.version));
+  } else {
+    whereConditions.push(eq(taskArtifacts.uploaded, true));
   }
 
   const result = await db
