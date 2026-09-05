@@ -22,6 +22,7 @@ import {
   customAutomations,
   eq,
   getCustomAutomationById,
+  getSessionForFastConversation,
   getSessionWakeupById,
   inArray,
   slackInstallations,
@@ -2195,11 +2196,17 @@ export async function deliverFastAgentParentEventWithLock(
     // is already `completed` is fine, because the claim that completes a
     // one-shot or final run happens before delivery.
     if (params.event.type === 'scheduled_wakeup') {
-      const wakeup = await getSessionWakeupById(params.event.wakeupId);
+      const [wakeup, session] = await Promise.all([
+        getSessionWakeupById(params.event.wakeupId),
+        getSessionForFastConversation(db, params.parent.sessionId),
+      ]);
       if (
         !wakeup ||
         wakeup.status === 'cancelled' ||
-        wakeup.status === 'failed'
+        wakeup.status === 'failed' ||
+        // Archiving cancels wakeups, but if that cancellation failed the
+        // archived Session must still stay quiet.
+        session?.archivedAt
       ) {
         return 'skipped';
       }
