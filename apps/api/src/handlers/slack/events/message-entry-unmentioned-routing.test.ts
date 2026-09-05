@@ -236,7 +236,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     ).resolves.toMatchObject({ shouldRoute: true });
   });
 
-  it('routes to the bound Session when the previous participant addressed the sender', async () => {
+  it('keeps a reply silent when the previous participant addressed the sender', async () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
@@ -253,8 +253,11 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
           text: 'I agree',
         }),
       ),
-    ).resolves.toMatchObject({ shouldRoute: true });
-    expect(markSlackThreadExplicitMentionRequiredMock).not.toHaveBeenCalled();
+    ).resolves.toEqual({ shouldRoute: false });
+    expect(markSlackThreadExplicitMentionRequiredMock).toHaveBeenCalledWith(
+      'C123',
+      THREAD_TS,
+    );
   });
 
   it('keeps routing after the sender mentions themself in a fast-agent thread', async () => {
@@ -278,7 +281,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     expect(markSlackThreadExplicitMentionRequiredMock).not.toHaveBeenCalled();
   });
 
-  it('routes a peer-directed reply to the bound Session without deciding whether to answer', async () => {
+  it('keeps a peer-directed reply silent in an existing fast-agent thread', async () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
 
@@ -290,78 +293,9 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
           text: '<@U333> what do you think?',
         }),
       ),
-    ).resolves.toMatchObject({ shouldRoute: true });
+    ).resolves.toEqual({ shouldRoute: false });
     expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
   });
-
-  it.each(['root', 'prior reply'])(
-    'routes the same follow-up before and after a bot reply when the %s mentions a human',
-    async (mentionLocation) => {
-      hasFastAgentSessionMock.mockResolvedValue(true);
-      findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
-      const history =
-        mentionLocation === 'root'
-          ? [humanMessage('U111', THREAD_TS, '<@UBOT> check this with <@U333>')]
-          : [
-              humanMessage('U111', THREAD_TS, '<@UBOT> check this'),
-              botMessage('101.000'),
-              humanMessage('U111', '102.000', 'cc <@U333> for visibility'),
-            ];
-      const followUp = threadReplyEvent({
-        user: 'U111',
-        ts: '104.000',
-        text: 'Also check the tests',
-      });
-
-      // No bot response has arrived yet for the human-directed message.
-      fetchThreadMessagesMock.mockResolvedValue(history);
-      const beforeBotReply = await routeDecision(followUp);
-      fetchThreadMessagesMock.mockResolvedValue([
-        ...history,
-        botMessage('103.000'),
-      ]);
-      const afterBotReply = await routeDecision(followUp);
-
-      expect(afterBotReply).toMatchObject({ shouldRoute: true });
-      expect(beforeBotReply).toMatchObject({ shouldRoute: true });
-    },
-  );
-
-  it.each(['empty', 'rejected'])(
-    'routes a bound Session reply despite %s history',
-    async (historyResult) => {
-      hasFastAgentSessionMock.mockResolvedValue(true);
-      findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
-      if (historyResult === 'rejected') {
-        fetchThreadMessagesMock.mockRejectedValue(
-          new Error('Slack unavailable'),
-        );
-      }
-
-      await expect(
-        routeDecision(threadReplyEvent({ user: 'U111', ts: '102.000' })),
-      ).resolves.toMatchObject({ shouldRoute: true });
-    },
-  );
-
-  it.each([
-    { bot_id: 'B999', user: BOT_USER_ID },
-    { subtype: 'bot_message' },
-    { subtype: 'message_changed' },
-    { text: '<@UBOT> continue' },
-  ])(
-    'preserves basic event filters in bound Fast threads: %j',
-    async (fields) => {
-      hasFastAgentSessionMock.mockResolvedValue(true);
-      await expect(
-        routeDecision({
-          ...(threadReplyEvent({ user: 'U111', ts: '102.000' }) as object),
-          ...fields,
-        } as never),
-      ).resolves.toEqual({ shouldRoute: false });
-      expect(hasFastAgentSessionMock).not.toHaveBeenCalled();
-    },
-  );
 
   it('keeps routing between participants in a fast-agent thread', async () => {
     hasFastAgentSessionMock.mockResolvedValue(true);

@@ -1166,7 +1166,7 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
-  it('exposes native prompt_async steering only while the Fast prompt is active', async () => {
+  it('leaves native steering unavailable while the Fast prompt is active', async () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.4',
     });
@@ -1178,13 +1178,7 @@ describe('resolveOpenCodeSmallModel', () => {
         }),
     );
     const onNativeSteerClosed = vi.fn();
-    let steer:
-      | ((input: {
-          messageId: string;
-          text: string;
-          files?: Array<{ mime: string; url: string }>;
-        }) => Promise<void>)
-      | undefined;
+    const onNativeSteerReady = vi.fn();
     const { generateTrackedNonTaskTextInOpenCodeSession } =
       await import('../non-task-provider-usage.js');
 
@@ -1194,35 +1188,14 @@ describe('resolveOpenCodeSmallModel', () => {
       {
         directory: '/tmp/roomote-fast-native-test',
         tools: { '*': false, send_chat_reply: true },
-        onNativeSteerReady: (inject) => {
-          steer = inject;
-        },
+        onNativeSteerReady,
         onNativeSteerClosed,
       },
     );
-    await vi.waitFor(() => expect(steer).toBeTypeOf('function'));
-    await steer!({
-      messageId: 'msg_019cf00dbabe00000000000000',
-      text: 'Use the corrected requirement.',
-      files: [{ mime: 'image/png', url: 'data:image/png;base64,aGVsbG8=' }],
-    });
-
-    expect(sessionPromptAsyncMock).toHaveBeenCalledWith(
-      {
-        sessionID: 'session-1',
-        directory: '/tmp/roomote-fast-native-test',
-        messageID: 'msg_019cf00dbabe00000000000000',
-        parts: [
-          { type: 'text', text: 'Use the corrected requirement.' },
-          {
-            type: 'file',
-            mime: 'image/png',
-            url: 'data:image/png;base64,aGVsbG8=',
-          },
-        ],
-      },
-      expect.any(Object),
-    );
+    await vi.waitFor(() => expect(finishPrompt).toBeTypeOf('function'));
+    expect(onNativeSteerReady).not.toHaveBeenCalled();
+    expect(onNativeSteerClosed).not.toHaveBeenCalled();
+    expect(sessionPromptAsyncMock).not.toHaveBeenCalled();
 
     finishPrompt?.({
       data: {
@@ -1233,6 +1206,86 @@ describe('resolveOpenCodeSmallModel', () => {
     });
     await expect(result).resolves.toBe('updated answer');
     expect(onNativeSteerClosed).toHaveBeenCalledOnce();
+    expect(onNativeSteerReady).not.toHaveBeenCalled();
+    expect(sessionPromptAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it('does not advertise or dispatch native steering at assistant completion', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((finish) => {
+        resolve = finish;
+      });
+      return { promise, resolve };
+    }
+    const initialPrompt = deferred<unknown>();
+    const initialCompletion = deferred<void>();
+    sessionPromptMock.mockReturnValue(initialPrompt.promise);
+    let eventSignal: AbortSignal | undefined;
+    const initialInfo = {
+      id: 'msg_initial_answer',
+      sessionID: 'session-1',
+      parentID: 'msg_initial_request',
+      role: 'assistant',
+      time: { created: 1, completed: 2 },
+    };
+    eventSubscribeMock.mockImplementation(async (_query, { signal }) => {
+      eventSignal = signal;
+      return {
+        stream: (async function* () {
+          await initialCompletion.promise;
+          yield {
+            type: 'message.updated',
+            properties: { info: initialInfo },
+          };
+        })(),
+      };
+    });
+    const onNativeSteerClosed = vi.fn();
+    const onNativeSteerReady = vi.fn();
+    const onMessageCompleted = vi.fn();
+    const onAssistantMessageCompleted = vi.fn();
+    const { generateTrackedNonTaskTextInOpenCodeSession } =
+      await import('../non-task-provider-usage.js');
+    const result = generateTrackedNonTaskTextInOpenCodeSession(
+      { surface: 'fast_agent', prompt: 'Initial request.' },
+      {},
+      {
+        directory: '/tmp/roomote-fast-native-test',
+        tools: { '*': false, send_chat_reply: true },
+        onNativeSteerReady,
+        onNativeSteerClosed,
+        onMessageCompleted,
+        onAssistantMessageCompleted,
+      },
+    );
+    await vi.waitFor(() => expect(sessionPromptMock).toHaveBeenCalledOnce());
+    expect(onNativeSteerReady).not.toHaveBeenCalled();
+    initialCompletion.resolve();
+    await vi.waitFor(() =>
+      expect(onAssistantMessageCompleted).toHaveBeenCalledOnce(),
+    );
+    expect(onNativeSteerReady).not.toHaveBeenCalled();
+    expect(sessionPromptAsyncMock).not.toHaveBeenCalled();
+    expect(eventSignal?.aborted).toBe(false);
+    initialPrompt.resolve({
+      data: {
+        info: initialInfo,
+        parts: [{ type: 'text', text: 'Original answer only.' }],
+      },
+      error: undefined,
+    });
+    await expect(result).resolves.toBe('Original answer only.');
+    expect(onMessageCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({ id: initialInfo.id }),
+    );
+    expect(onNativeSteerClosed).toHaveBeenCalledOnce();
+    expect(eventSignal?.aborted).toBe(true);
+    expect(onNativeSteerReady).not.toHaveBeenCalled();
+    expect(sessionPromptAsyncMock).not.toHaveBeenCalled();
   });
 
   it('classifies a missing held OpenCode session for cold bootstrap recovery', async () => {
