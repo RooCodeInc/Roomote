@@ -1257,13 +1257,15 @@ describe('AutomationsSettings', () => {
       await screen.findByText('Daily, in All repositories →'),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'New' }));
-    fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Preferred environment' }),
+    );
     expect(
       screen.getByRole('option', { name: 'All repositories' }),
     ).toBeInTheDocument();
   });
 
-  it('offers Fast in the Environment menu and explains channel-less output', async () => {
+  it('offers no preference in the environment menu and explains channel-less output', async () => {
     state.customAutomations = [
       {
         id: 'automation-fast',
@@ -1291,15 +1293,15 @@ describe('AutomationsSettings', () => {
 
     render(<AutomationsSettings />);
 
-    expect(await screen.findByText('Daily, in Fast →')).toBeInTheDocument();
+    expect(await screen.findByText('Daily →')).toBeInTheDocument();
     expect(
       screen.getByText('No actionable regressions found.'),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole('link', {
+      screen.getByRole('link', {
         name: 'View previous runs for Fast daily digest',
       }),
-    ).not.toBeInTheDocument();
+    ).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', { name: 'Configure Fast daily digest' }),
     );
@@ -1310,14 +1312,16 @@ describe('AutomationsSettings', () => {
     ).toHaveTextContent('High');
     expect(
       screen.getByText(
-        'This run is stored as a Fast conversation without posting to chat.',
+        'Each run is a Session in the web app and does not post to chat.',
       ),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Preferred environment' }),
+    );
     expect(
-      screen.getByRole('option', { name: 'Fast (no sandbox)' }),
+      screen.getByRole('option', { name: 'Let Roomote decide' }),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('option', { name: 'Fast (no sandbox)' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(mutations.updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1410,7 +1414,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Each Fast run posts here, and replies continue the Fast session.',
+        'Each run is a Session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });
@@ -1461,7 +1465,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Each Fast run posts here, and replies continue the Fast session.',
+        'Each run is a Session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });
@@ -1504,7 +1508,7 @@ describe('AutomationsSettings', () => {
 
     expect(
       screen.getByText(
-        'Each Fast run posts here, and replies continue the Fast session.',
+        'Each run is a Session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });

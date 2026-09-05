@@ -1108,6 +1108,41 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage).toHaveBeenCalledOnce();
   });
 
+  it('posts a fixed failure report when a Fast automation task fails', async () => {
+    const pendingParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'C123' },
+      },
+    };
+
+    await deliverFastAgentParentEvent({
+      parent: pendingParent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        title: 'Flaky tests',
+        status: 'failed',
+        error: 'sandbox exited before reporting',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        text: '"Flaky tests" failed: sandbox exited before reporting',
+      }),
+    );
+  });
+
   it('creates the first Slack message when a pending Fast automation settles', async () => {
     const pendingParent = {
       sessionId: parent.sessionId,
@@ -1176,36 +1211,6 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.bindConversation.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.releaseRootBindingLock.mock.invocationCallOrder[0]!,
     );
-  });
-
-  it('keeps a failed pending Fast automation silent in Slack', async () => {
-    const pendingParent = {
-      sessionId: parent.sessionId,
-      conversation: {
-        surface: 'slack' as const,
-        workspaceId: 'T123',
-        conversationId: 'automation-1:occurrence-1',
-        replyTarget: { channelId: 'C123' },
-      },
-    };
-
-    await deliverFastAgentParentEvent({
-      parent: pendingParent,
-      event: {
-        type: 'task_settled',
-        taskId: 'child-task-1',
-        runId: 42,
-        customAutomationId: 'automation-1',
-        status: 'failed',
-        error: 'Sandbox startup failed.',
-        taskUrl: 'https://roomote.example/task/child-task-1',
-        pullRequests: [],
-      },
-    });
-
-    expect(mocks.postMessage).not.toHaveBeenCalled();
-    expect(mocks.updateMessage).not.toHaveBeenCalled();
-    expect(mocks.bindConversation).not.toHaveBeenCalled();
   });
 
   it('replaces an input root with the completed automation result', async () => {

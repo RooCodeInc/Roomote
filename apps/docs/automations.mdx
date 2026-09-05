@@ -115,7 +115,9 @@ Create arbitrary scheduled agent runs with:
 - a clear **name**
 - the **prompt** Roomote should run
 - a **cadence** (`every hour`, `every 6 hours`, `daily`, or `weekly`)
-- one required **execution target**: **Fast**, a named environment, or **All repositories**
+- an optional **preferred environment**: a named environment or **All
+  repositories**, offered to the run as a hint for delegated work; leave it
+  as **Let Roomote decide** to route normally
 - an optional **model** override for the runs; the default follows the
   deployment task model
 - an optional **effort** override (`low`, `medium`, `high`, `extra high`, or
@@ -148,25 +150,31 @@ five-field cron expression or a natural-language schedule such as “weekdays at
 clarification rather than guessing when the recurrence itself is ambiguous.
 Custom schedules do not support seconds or cron macros.
 
-On each due tick, Roomote either launches a normal task in the selected
-environment (or across all active repositories), or runs the prompt directly in
-**Fast** without starting a sandbox. A Fast run can still delegate a normal task
-when repository or workspace execution is required.
+Every run is a Session. On each due tick, Roomote opens a Session for the run
+and hands it the prompt exactly as if a teammate had typed it. The Session
+answers from integrations when that is enough, and delegates a normal task when
+repository or workspace work is needed, launching it in the preferred
+environment when one is set. Delegated tasks report back to the Session, and
+the Session is what talks to the report destination.
 
-Fast runs deliver to every custom-automation report destination: Slack,
-Discord, Microsoft Teams, or Telegram, as either a channel/chat or a direct
-message to the automation owner. Each run keeps a distinct Fast session, and
-the report links back to that session in the web app. The Session transcript
-shows the automation's configured prompt, and its normal composer lets a signed-in
-teammate continue the run from the dashboard even when the automation owns the
-Session. Replies on all four
-providers continue the Fast session directly in chat. Roomote verifies the
-active provider installation, conversation, and linked user before resuming.
-Runs with no report destination remain stored Fast sessions and do not post to
-chat.
+Runs deliver to every custom-automation report destination: Slack, Discord,
+Microsoft Teams, or Telegram, as either a channel/chat or a direct message to
+the automation owner. Each run keeps a distinct Session, and the report links
+back to that Session in the web app. The Session transcript shows the
+automation's configured prompt and any delegated task cards, and its normal
+composer lets a signed-in teammate continue the run from the dashboard. Replies
+on all four providers continue the Session directly in chat. Roomote verifies
+the active provider installation, conversation, and linked user before
+resuming. Runs with no report destination remain stored Sessions and do not
+post to chat.
+
+Runs execute as the automation's creator. An automation whose creator no longer
+exists fails until an administrator re-saves it.
 
 A run can skip or fail before execution when its configuration or launch state
-prevents it from starting.
+prevents it from starting. A failure always reaches the report destination: a
+run that cannot start, or whose delegated task fails, posts one short note
+there, so a broken automation is noticed rather than silently skipped.
 When a report destination is set, Roomote uses that conversation for actionable
 or important findings, meaningful completed results, blockers, and questions
 that need input. Routine success, healthy status, and no-change results stay

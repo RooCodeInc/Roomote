@@ -177,6 +177,12 @@ export type TaskInitiator =
       kind: 'automation';
       key: BackgroundAutomationKey;
       actor?: { externalId: string; displayName?: string };
+      /**
+       * The person the automation runs as. The task stays attributed to the
+       * automation; this only seeds the run's acting user so actor-scoped
+       * credentials (user API keys, user MCP connections) resolve to them.
+       */
+      actingUserId?: string;
     };
 
 /**
@@ -193,7 +199,7 @@ export function getTaskInitiatorLinkedUserId(
   initiator: TaskInitiator,
 ): string | null {
   if (initiator.kind === 'automation') {
-    return null;
+    return initiator.actingUserId ?? null;
   }
 
   if ('userId' in initiator) {

@@ -332,7 +332,7 @@ export function CustomAutomationsSection() {
 
   const environmentOptions = useMemo(
     () => [
-      { id: FAST_EXECUTION, name: 'Fast (no sandbox)' },
+      { id: FAST_EXECUTION, name: 'Let Roomote decide' },
       { id: ALL_REPOSITORIES, name: 'All repositories' },
       ...(environmentsQuery.data ?? []).map((environment) => ({
         id: environment.id,
@@ -740,7 +740,9 @@ export function CustomAutomationsSection() {
 
         <div className="flex flex-col gap-4 sm:flex-row">
           <div className="space-y-2 sm:w-52">
-            <Label htmlFor="custom-automation-environment">Environment</Label>
+            <Label htmlFor="custom-automation-environment">
+              Preferred environment
+            </Label>
             <Select
               value={form.environmentId || undefined}
               disabled={busy || environmentOptions.length === 0}
@@ -768,20 +770,12 @@ export function CustomAutomationsSection() {
           </div>
 
           <div className="min-w-0 flex-1 space-y-2">
-            <Label>
-              {form.environmentId === FAST_EXECUTION
-                ? 'Delegated task model'
-                : 'Model'}
-            </Label>
+            <Label>Delegated task model</Label>
             <ModelSelect
               size="default"
               ariaLabel="Automation model"
               value={form.model}
-              emptyOptionLabel={
-                form.environmentId === FAST_EXECUTION
-                  ? 'Default delegated task model'
-                  : 'Default coding model'
-              }
+              emptyOptionLabel="Default delegated task model"
               className="w-full"
               disabled={busy}
               onValueChange={(value) => {
@@ -842,15 +836,13 @@ export function CustomAutomationsSection() {
               }))
             }
           />
-          {form.environmentId === FAST_EXECUTION ? (
-            <p className="text-sm text-muted-foreground">
-              {form.targetProvider === 'none'
-                ? 'This run is stored as a Fast conversation without posting to chat.'
-                : form.targetProvider === 'telegram'
-                  ? 'Each Fast run posts here. Continue the session from the web app; chat replies on this provider do not resume Fast yet.'
-                  : 'Each Fast run posts here, and replies continue the Fast session.'}
-            </p>
-          ) : null}
+          <p className="text-sm text-muted-foreground">
+            {form.targetProvider === 'none'
+              ? 'Each run is a Session in the web app and does not post to chat.'
+              : form.targetProvider === 'telegram'
+                ? 'Each run is a Session that reports findings and failures here. Continue it from the web app; chat replies on this provider do not resume it yet.'
+                : 'Each run is a Session that reports findings and failures here, and replies continue it.'}
+          </p>
         </div>
 
         <div className="flex items-center justify-between gap-3">
@@ -976,7 +968,7 @@ export function CustomAutomationsSection() {
               {rows.map((row) => {
                 const environmentName =
                   row.executionMode === 'fast'
-                    ? 'Fast'
+                    ? null
                     : (environmentOptions.find(
                         (environment) => environment.id === row.environmentId,
                       )?.name ?? 'Environment missing');
@@ -1030,7 +1022,10 @@ export function CustomAutomationsSection() {
                       <p className="text-sm font-semibold">{row.name}</p>
                       <p className="flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
                         <span>
-                          {cadenceLabel(row)}, in {environmentName} →
+                          {cadenceLabel(row)}
+                          {environmentName
+                            ? `, in ${environmentName}`
+                            : ''} →
                         </span>
                         {target.provider !== 'none' ? (
                           <BrandIcon
@@ -1060,18 +1055,18 @@ export function CustomAutomationsSection() {
                           </>
                         ) : null}
                       </p>
-                      {row.executionMode === 'fast' && row.latestFastResult ? (
+                      {row.latestFastResult ? (
                         <p className="line-clamp-2 text-xs text-muted-foreground">
                           {row.latestFastResult}
                         </p>
                       ) : null}
                     </div>
                     <div className="col-start-2 row-start-2 flex shrink-0 items-center gap-1 sm:col-start-3 sm:row-start-1">
-                      {row.executionMode !== 'fast' ? (
+                      {historyFilter ? (
                         <BasicTooltip content="View previous runs">
                           <Button asChild size="icon" variant="ghost">
                             <Link
-                              href={`/tasks?userId=${encodeURIComponent(historyFilter!)}`}
+                              href={`/tasks?userId=${encodeURIComponent(historyFilter)}`}
                               aria-label={`View previous runs for ${row.name}`}
                             >
                               <RotateCcwClock />
