@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
@@ -1056,9 +1057,7 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Resolve these issues' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Fix findings' }));
     await waitFor(() =>
       expect(reviewActionMutate).toHaveBeenCalledWith({
         sessionId: '22222222-2222-4222-8222-222222222222',
@@ -1066,12 +1065,111 @@ describe('FastSessionTranscript', () => {
         choice: 'yes',
       }),
     );
-    expect(
-      await screen.findByText('Resolving the current review issues.'),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('Addressing findings…')).toBeInTheDocument();
   });
 
-  it('hides dismissed offers and renders late-click states without controls', async () => {
+  it('pins only the latest PR review outside the scrolling transcript and opens its task', async () => {
+    const old = reviewOfferMessage();
+    const prReview = {
+      url: 'https://github.com/acme/web/pull/42',
+      repository: 'acme/web',
+      number: 42,
+      summary: 'Provider coverage is missing.',
+      findingCount: 1,
+      status: 'feedback',
+      reviewTaskId: 'review-task-42',
+    };
+    const latest = {
+      ...old,
+      id: 'offer-2',
+      eventId: 'turn-offer-2:assistant:0',
+      ts: 3,
+      payload: {
+        prReview,
+        prReviewAction: {
+          ...old.payload.prReviewAction,
+          deliveryId: 'delivery-2',
+        },
+      },
+    };
+    reviewActionMutate.mockResolvedValue({ status: 'resolved' });
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        canReply
+        initialMessages={[
+          {
+            ...old,
+            payload: {
+              ...old.payload,
+              prReview: { ...prReview, findingCount: 2 },
+            },
+          },
+          latest,
+        ]}
+      />,
+    );
+    const strip = screen.getByLabelText('Pull request reviews');
+    expect(screen.getByRole('log')).not.toContainElement(strip);
+    expect(
+      within(screen.getByRole('log')).queryByText('Review feedback remains.'),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByText('PR #42')).toHaveLength(1);
+    expect(screen.getByText('1 unresolved finding')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'View review' }));
+    expect(openTaskPanel).toHaveBeenCalledWith('review-task-42');
+    fireEvent.click(screen.getByRole('button', { name: 'Fix finding' }));
+    await waitFor(() =>
+      expect(reviewActionMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        deliveryId: 'delivery-2',
+        choice: 'yes',
+      }),
+    );
+
+    act(() =>
+      FakeEventSource.instances.at(-1)?.emit('messages', {
+        messages: [
+          {
+            ...latest,
+            id: 'approval',
+            eventId: 'approval:assistant:0',
+            ts: 4,
+            payload: {
+              prReview: { ...prReview, status: 'approved', findingCount: 0 },
+            },
+          },
+        ],
+      }),
+    );
+    expect(await screen.findByText('Approved')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Fix finding' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss review' }));
+    expect(screen.queryByText('Approved')).not.toBeInTheDocument();
+  });
+
+  it('keeps a failed review action available for retry', async () => {
+    reviewActionMutate.mockRejectedValueOnce(new Error('offline'));
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[reviewOfferMessage()]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Fix findings' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not update this review',
+    );
+    expect(screen.getByRole('button', { name: 'Fix findings' })).toBeEnabled();
+    reviewActionMutate.mockResolvedValueOnce({ status: 'resolved' });
+    fireEvent.click(screen.getByRole('button', { name: 'Fix findings' }));
+    expect(await screen.findByText('Addressing findings…')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('removes dismissed and superseded offers from the pinned area', async () => {
     const { rerender } = render(
       <FastSessionTranscript
         sessionId="22222222-2222-4222-8222-222222222222"
@@ -1085,7 +1183,7 @@ describe('FastSessionTranscript', () => {
       screen.queryByTestId('pr-review-action-offer'),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Resolve these issues' }),
+      screen.queryByRole('button', { name: 'Fix findings' }),
     ).not.toBeInTheDocument();
 
     rerender(
@@ -1099,9 +1197,11 @@ describe('FastSessionTranscript', () => {
         messages: [reviewOfferMessage('stale')],
       });
     });
-    expect(
-      await screen.findByText('This offer was already handled or has expired.'),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Fix findings' }),
+      ).not.toBeInTheDocument(),
+    );
   });
   it('renders persisted user and assistant text with task transcript primitives', () => {
     render(

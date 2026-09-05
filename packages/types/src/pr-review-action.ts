@@ -28,6 +28,45 @@ export interface PrReviewActionOffer {
   status: PrReviewActionOfferStatus;
 }
 
+/** Canonical PR context for session review updates, independent of action offers. */
+export interface SessionPrReviewUpdate {
+  reviewTaskId?: string;
+  url: string;
+  repository: string;
+  number: number;
+  summary: string;
+  findingCount: number | null;
+  status: 'feedback' | 'approved' | 'merged' | 'closed';
+}
+
+export function parseSessionPrReviewUpdate(
+  payload: Record<string, unknown> | null | undefined,
+): SessionPrReviewUpdate | null {
+  const value = payload?.prReview;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const review = value as Record<string, unknown>;
+  if (
+    typeof review.url !== 'string' ||
+    !/^https?:\/\//i.test(review.url) ||
+    typeof review.repository !== 'string' ||
+    !Number.isInteger(review.number) ||
+    Number(review.number) <= 0 ||
+    typeof review.summary !== 'string' ||
+    (review.reviewTaskId !== undefined &&
+      typeof review.reviewTaskId !== 'string') ||
+    !(
+      review.findingCount === null ||
+      (Number.isInteger(review.findingCount) &&
+        Number(review.findingCount) >= 0)
+    ) ||
+    !['feedback', 'approved', 'merged', 'closed'].includes(
+      String(review.status),
+    )
+  )
+    return null;
+  return review as unknown as SessionPrReviewUpdate;
+}
+
 export function parsePrReviewActionOffer(
   payload: Record<string, unknown> | null | undefined,
 ): PrReviewActionOffer | null {

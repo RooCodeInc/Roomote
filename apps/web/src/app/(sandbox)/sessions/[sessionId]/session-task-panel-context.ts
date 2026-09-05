@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext } from 'react';
+import type { RunStatus } from '@roomote/types';
 
 export const OpenSessionTaskPanelContext = createContext<
   ((taskId: string) => void) | null
@@ -21,6 +22,19 @@ export const SessionRunningTaskCountContext = createContext(0);
 /** Fingerprint of the session's delegated-task state; see
  * `computeTaskStateRevision`. Drives composer-suggestion refreshes. */
 export const SessionTaskStateRevisionContext = createContext('');
+
+export interface SessionReviewTask {
+  taskId: string;
+  workflow: string;
+  latestRun: { status: RunStatus; taskPhase?: string | null } | null;
+  pullRequests: Array<{
+    url: string;
+    number: number | null;
+    repository: string | null;
+    status: string | null;
+  }>;
+}
+export const SessionReviewTasksContext = createContext<SessionReviewTask[]>([]);
 
 export function useOpenSessionTaskPanel() {
   return useContext(OpenSessionTaskPanelContext);

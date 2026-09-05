@@ -2,6 +2,7 @@
 
 import {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useReducer,
@@ -17,6 +18,7 @@ import {
   getTextFromContentBlocks,
   inferAcpMessageKind,
   parsePrReviewActionOffer,
+  parseSessionPrReviewUpdate,
   type AcpMessage,
   type PrReviewActionChoice,
   type AcpEventType,
@@ -49,11 +51,13 @@ import {
   useOpenSessionTasksPanel,
   useSessionRunningTaskCount,
   useSessionTaskStateRevision,
+  SessionReviewTasksContext,
 } from './session-task-panel-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { truncatePageTitle } from '@/lib/page-title';
-import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
+import { SessionPrReviewStrip } from './SessionPrReviewStrip';
+import { getSessionPrReviews } from './session-pr-reviews';
 import {
   findPendingSessionInputRequest,
   SessionUserInputCard,
@@ -306,6 +310,7 @@ export function FastSessionTranscript({
   const openTasksPanel = useOpenSessionTasksPanel();
   const runningTaskCount = useSessionRunningTaskCount();
   const taskStateRevision = useSessionTaskStateRevision();
+  const reviewTasks = useContext(SessionReviewTasksContext);
   const { enabled: narrationModeEnabled } = useNarrationMode();
   const displayMode = narrationModeEnabled ? 'narration' : 'default';
   const slackMentionScope = useMemo<SlackMentionScope>(
@@ -552,7 +557,9 @@ export function FastSessionTranscript({
           (message) =>
             message.eventType !== ACP_ENVELOPE_EVENT_TYPES.RequestUserInput &&
             message.eventType !==
-              ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+              ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse &&
+            !parsePrReviewActionOffer(message.payload) &&
+            !parseSessionPrReviewUpdate(message.payload),
         )
         .map((message) => {
           const uiMessage = toAcpUiMessage({
@@ -607,13 +614,9 @@ export function FastSessionTranscript({
     () => findPendingSessionInputRequest(messages),
     [messages],
   );
-  const reviewOffers = useMemo(
-    () =>
-      messages.flatMap((message) => {
-        const offer = parsePrReviewActionOffer(message.payload);
-        return offer ? [offer] : [];
-      }),
-    [messages],
+  const reviews = useMemo(
+    () => getSessionPrReviews(messages, reviewTasks),
+    [messages, reviewTasks],
   );
   const uiMessages = useMemo(
     () =>
@@ -785,17 +788,6 @@ export function FastSessionTranscript({
                 onOpenTasks={openTasksPanel}
               />
             ) : null}
-            {reviewOffers.map((offer) => (
-              <PrReviewActionOffer
-                key={offer.deliveryId}
-                className="mt-3 rounded-lg border border-border/70 bg-muted/40 px-3 py-3"
-                offer={offer}
-                showQuestion
-                onAction={(choice) =>
-                  handleReviewAction(offer.deliveryId, choice)
-                }
-              />
-            ))}
             {pendingInputRequest ? (
               <div className="mt-3">
                 {pendingInputRequest.preset === 'setup_starter_tasks' ? (
@@ -814,6 +806,7 @@ export function FastSessionTranscript({
           </ConversationContent>
           <ConversationScrollButton />
         </Conversation>
+        <SessionPrReviewStrip reviews={reviews} onAction={handleReviewAction} />
         {canReply && !pendingInputRequest ? (
           <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card outline-0 outline-offset-[-2px] outline-accent-foreground transition-[background-color,border-color,outline-width] has-[textarea:focus]:outline-2 @[56rem]:rounded-t-lg">
             <SessionPromptInput

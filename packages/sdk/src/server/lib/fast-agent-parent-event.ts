@@ -231,6 +231,7 @@ export type FastAgentParentEvent =
       suggestedActionQuestion?: string;
       suggestedActionPrompt?: string;
       reviewActionDeliveryId?: string;
+      reviewTaskId?: string;
       reviewResult?: {
         reviewKind: 'initial' | 'sync' | null;
         outcome: string | null;
@@ -2291,16 +2292,44 @@ export async function deliverFastAgentParentEventWithLock(
       params.event.imageArtifactIds?.length
         ? { defaultImageArtifactIds: params.event.imageArtifactIds }
         : {}),
-      ...(params.event.type === 'pull_request_feedback' &&
-      params.event.reviewActionDeliveryId &&
-      params.event.suggestedActionQuestion
+      ...(params.event.type === 'pull_request_feedback' ||
+      params.event.type === 'pull_request_status_changed'
         ? {
             platformEventTranscriptPayload: {
-              prReviewAction: {
-                deliveryId: params.event.reviewActionDeliveryId,
-                question: params.event.suggestedActionQuestion,
-                status: 'pending',
+              prReview: {
+                ...(params.event.type === 'pull_request_feedback' &&
+                params.event.reviewTaskId
+                  ? { reviewTaskId: params.event.reviewTaskId }
+                  : {}),
+                url: params.event.pullRequest.url,
+                repository: params.event.pullRequest.repository,
+                number: params.event.pullRequest.number,
+                summary:
+                  params.event.type === 'pull_request_feedback'
+                    ? params.event.summary
+                    : '',
+                findingCount:
+                  params.event.type === 'pull_request_feedback'
+                    ? (params.event.reviewResult?.findingCount ?? null)
+                    : null,
+                status:
+                  params.event.type === 'pull_request_status_changed'
+                    ? params.event.status
+                    : params.event.reviewResult?.approvalStatus === 'approved'
+                      ? 'approved'
+                      : 'feedback',
               },
+              ...(params.event.type === 'pull_request_feedback' &&
+              params.event.reviewActionDeliveryId &&
+              params.event.suggestedActionQuestion
+                ? {
+                    prReviewAction: {
+                      deliveryId: params.event.reviewActionDeliveryId,
+                      question: params.event.suggestedActionQuestion,
+                      status: 'pending',
+                    },
+                  }
+                : {}),
             },
           }
         : {}),
