@@ -191,6 +191,7 @@ import {
   type FastAgentTurnSource,
 } from './fast-agent-conversation';
 import { prepareShowWidget } from '../show-widget';
+import { decodeInferenceErrorEnvelope } from '../inference-error-envelope';
 import {
   formatFastAgentStorageFullMessage,
   inspectFastAgentStorageFullError,
@@ -791,27 +792,8 @@ const FAST_AGENT_INFERENCE_DETAIL_MAX_CHARS = 200;
 function describeInferenceErrorForUser(error: unknown): string | undefined {
   let statusCode: number | undefined;
   let message: string | undefined;
-  const pending: Array<{ value: unknown; depth: number }> = [
-    { value: error, depth: 0 },
-  ];
-  const seen = new Set<object>();
-  while (pending.length > 0) {
-    const current = pending.shift();
-    if (!current || current.depth > 4) continue;
-    const { value, depth } = current;
-    if (typeof value === 'string') {
-      if (value.trim().startsWith('{')) {
-        try {
-          pending.push({ value: JSON.parse(value), depth: depth + 1 });
-        } catch {
-          // Plain text; nothing nested to read.
-        }
-      }
-      continue;
-    }
-    if (!value || typeof value !== 'object' || seen.has(value)) continue;
-    seen.add(value);
-    const record = value as Record<string, unknown>;
+  for (const record of decodeInferenceErrorEnvelope(error, 'display')) {
+    if (typeof record === 'string') continue;
     if (statusCode === undefined) {
       const candidate = record.statusCode ?? record.status;
       if (typeof candidate === 'number' && candidate >= 100) {
@@ -830,18 +812,9 @@ function describeInferenceErrorForUser(error: unknown): string | undefined {
       message === undefined &&
       typeof record.message === 'string' &&
       record.message.trim() &&
-      !(value instanceof Error)
+      !(record instanceof Error)
     ) {
       message = record.message;
-    }
-    for (const key of [
-      'providerError',
-      'cause',
-      'data',
-      'error',
-      'responseBody',
-    ]) {
-      if (key in record) pending.push({ value: record[key], depth: depth + 1 });
     }
   }
   if (message === undefined && error instanceof Error) {

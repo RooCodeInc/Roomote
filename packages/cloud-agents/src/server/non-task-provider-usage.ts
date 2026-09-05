@@ -18,6 +18,7 @@ import {
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
 
+import { decodeInferenceErrorEnvelope } from './inference-error-envelope';
 import {
   DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS,
   leaseOpenCodeSdkServer,
@@ -1938,32 +1939,8 @@ function unwrapNonTaskInferenceError(error: unknown): unknown {
 }
 
 function findInferenceErrorStatusCode(error: unknown): number | undefined {
-  const pending: Array<{ value: unknown; depth: number }> = [
-    { value: error, depth: 0 },
-  ];
-  const seen = new Set<object>();
-
-  while (pending.length > 0) {
-    const current = pending.shift();
-    if (!current || current.depth > 4) {
-      continue;
-    }
-
-    const { value, depth } = current;
-    if (typeof value === 'string') {
-      try {
-        pending.push({ value: JSON.parse(value), depth: depth + 1 });
-      } catch {
-        // Provider prose is handled by the fallback signatures below.
-      }
-      continue;
-    }
-    if (!value || typeof value !== 'object' || seen.has(value)) {
-      continue;
-    }
-
-    seen.add(value);
-    const record = value as Record<string, unknown>;
+  for (const record of decodeInferenceErrorEnvelope(error, 'classification')) {
+    if (typeof record === 'string') continue;
     for (const key of ['statusCode', 'status', 'code'] as const) {
       const candidate = record[key];
       const parsed =
@@ -1981,58 +1958,22 @@ function findInferenceErrorStatusCode(error: unknown): number | undefined {
         return parsed;
       }
     }
-
-    for (const nested of Object.values(record)) {
-      pending.push({ value: nested, depth: depth + 1 });
-    }
   }
 
   return undefined;
 }
 
 function isInferenceErrorExplicitlyNonRetryable(error: unknown): boolean {
-  const pending: Array<{ value: unknown; depth: number }> = [
-    { value: error, depth: 0 },
-  ];
-  const seen = new Set<object>();
-
-  while (pending.length > 0) {
-    const current = pending.shift();
-    if (!current || current.depth > 4) continue;
-
-    const { value, depth } = current;
-    if (typeof value === 'string') {
-      try {
-        pending.push({ value: JSON.parse(value), depth: depth + 1 });
-      } catch {
-        // Provider prose is classified separately below.
-      }
-      continue;
-    }
-    if (!value || typeof value !== 'object' || seen.has(value)) continue;
-
-    seen.add(value);
-    const record = value as Record<string, unknown>;
+  for (const record of decodeInferenceErrorEnvelope(error, 'classification')) {
+    if (typeof record === 'string') continue;
     if (record.isRetryable === false) return true;
-    for (const nested of Object.values(record)) {
-      pending.push({ value: nested, depth: depth + 1 });
-    }
   }
 
   return false;
 }
 
 function isContentFilterInferenceError(error: unknown): boolean {
-  const pending: Array<{ value: unknown; depth: number }> = [
-    { value: error, depth: 0 },
-  ];
-  const seen = new Set<object>();
-
-  while (pending.length > 0) {
-    const current = pending.shift();
-    if (!current || current.depth > 4) continue;
-
-    const { value, depth } = current;
+  for (const value of decodeInferenceErrorEnvelope(error, 'content-filter')) {
     if (typeof value === 'string') {
       const normalized = value.toLowerCase();
       if (
@@ -2043,24 +1984,6 @@ function isContentFilterInferenceError(error: unknown): boolean {
       ) {
         return true;
       }
-
-      try {
-        pending.push({ value: JSON.parse(value), depth: depth + 1 });
-      } catch {
-        // The recognized provider message signatures above are sufficient.
-      }
-      continue;
-    }
-    if (!value || typeof value !== 'object' || seen.has(value)) continue;
-
-    seen.add(value);
-    const record = value as Record<string, unknown>;
-    pending.push(
-      { value: record.name, depth: depth + 1 },
-      { value: record.message, depth: depth + 1 },
-    );
-    for (const nested of Object.values(value)) {
-      pending.push({ value: nested, depth: depth + 1 });
     }
   }
 
