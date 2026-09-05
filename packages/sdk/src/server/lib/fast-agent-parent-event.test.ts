@@ -2789,6 +2789,53 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
   });
 
+  it('drops the reply and cancels the turn when the wakeup is cancelled mid-turn', async () => {
+    // Deliverable at the start of the turn, cancelled by the time the model
+    // wants to post.
+    mocks.findWakeup
+      .mockResolvedValueOnce({ status: 'active' })
+      .mockResolvedValueOnce({ status: 'cancelled' });
+    mocks.findWakeupSession.mockResolvedValue({ archivedAt: null });
+    let signalAbortedAfterPost: boolean | undefined;
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+        signal,
+      }: {
+        adapter: { postReply: (reply: unknown) => Promise<unknown> };
+        signal: AbortSignal;
+      }) => {
+        expect(signal.aborted).toBe(false);
+        await adapter.postReply({
+          purpose: 'closeout',
+          message: 'Time to check the deploy.',
+        });
+        signalAbortedAfterPost = signal.aborted;
+        return 'Time to check the deploy.';
+      },
+    );
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'scheduled_wakeup',
+        eventId: 'wakeup-1:1',
+        wakeupId: 'wakeup-1',
+        name: 'Check the deploy',
+        prompt: 'Tell the user to check the deploy.',
+        runNumber: 1,
+        maxRuns: null,
+        firedAt: '2026-09-04T17:10:00.000Z',
+        nextRunAt: null,
+        reportPolicy: 'always',
+        createdByUserId: 'user-1',
+      },
+    });
+
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(signalAbortedAfterPost).toBe(true);
+  });
+
   it('still runs a scheduled wakeup whose one-shot row completed at claim time', async () => {
     mocks.findWakeup.mockResolvedValueOnce({ status: 'completed' });
     mocks.findWakeupSession.mockResolvedValueOnce({ archivedAt: null });

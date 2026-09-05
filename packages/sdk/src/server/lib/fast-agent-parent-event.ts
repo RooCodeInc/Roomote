@@ -2173,12 +2173,98 @@ export async function deliverFastAgentParentEvent(
  * conversation. The caller owns lock release and may invoke this repeatedly
  * to preserve durable queue order without letting another turn interleave.
  */
+/**
+ * Whether a scheduled wakeup may still speak. The row is authoritative: a
+ * cancelled or failed wakeup must not run, and an archived Session must stay
+ * quiet even if its cancel-on-archive step failed. A row that is already
+ * `completed` is fine, because the claim that completes a one-shot or final
+ * run happens before delivery.
+ */
+async function isScheduledWakeupDeliverable(params: {
+  wakeupId: string;
+  conversationId: string;
+}): Promise<boolean> {
+  const [wakeup, session] = await Promise.all([
+    getSessionWakeupById(params.wakeupId),
+    getSessionForFastConversation(db, params.conversationId),
+  ]);
+  return Boolean(
+    wakeup &&
+    wakeup.status !== 'cancelled' &&
+    wakeup.status !== 'failed' &&
+    !session?.archivedAt,
+  );
+}
+
+type ScheduledWakeupReplyGuard = {
+  signal: AbortSignal;
+  guardPostReply: (
+    postReply: FastAgentTurnAdapter['postReply'],
+  ) => FastAgentTurnAdapter['postReply'];
+};
+
+/**
+ * Wrap a wakeup turn's reply path so the wakeup is re-checked immediately
+ * before anything user-visible goes out. If it was cancelled or its Session
+ * archived while the model was working, the post is dropped and the turn's
+ * signal is aborted so no further tool calls run. The next drain of the
+ * event sees the same state and settles it as skipped.
+ */
+function createScheduledWakeupReplyGuard(params: {
+  wakeupId: string;
+  conversationId: string;
+  upstream: AbortSignal;
+}): ScheduledWakeupReplyGuard {
+  const controller = new AbortController();
+  const abortFromUpstream = () => controller.abort(params.upstream.reason);
+  if (params.upstream.aborted) {
+    abortFromUpstream();
+  } else {
+    params.upstream.addEventListener('abort', abortFromUpstream, {
+      once: true,
+    });
+  }
+  return {
+    signal: controller.signal,
+    guardPostReply: (postReply) => async (reply) => {
+      if (
+        !controller.signal.aborted &&
+        (await isScheduledWakeupDeliverable(params))
+      ) {
+        return postReply(reply);
+      }
+      if (!controller.signal.aborted) {
+        console.warn(
+          `[SessionWakeups] Dropped a reply for wakeup ${params.wakeupId}: it was cancelled or its Session archived while the turn was running.`,
+        );
+        controller.abort(
+          new Error(
+            'Scheduled wakeup was cancelled or its Session archived while the turn was running.',
+          ),
+        );
+      }
+      return undefined;
+    },
+  };
+}
+
 export async function deliverFastAgentParentEventWithLock(
   params: FastAgentParentEventDeliveryParams,
   turnLock: FastAgentTurnLockHandle,
 ): Promise<'delivered' | 'skipped'> {
   let replyPosted = false;
-  const turnSignal = turnLock.signal;
+  // A wakeup turn revalidates at reply time as well as at start: a cancel or
+  // archive that lands while the model is generating must still win, so the
+  // guard suppresses the post and cancels the rest of the turn.
+  const wakeupGuard =
+    params.event.type === 'scheduled_wakeup'
+      ? createScheduledWakeupReplyGuard({
+          wakeupId: params.event.wakeupId,
+          conversationId: params.parent.sessionId,
+          upstream: turnLock.signal,
+        })
+      : null;
+  const turnSignal = wakeupGuard?.signal ?? turnLock.signal;
 
   try {
     if (params.event.type === 'pull_request_opened') {
@@ -2195,21 +2281,14 @@ export async function deliverFastAgentParentEventWithLock(
     // authoritative: a cancelled or failed wakeup must not speak. A row that
     // is already `completed` is fine, because the claim that completes a
     // one-shot or final run happens before delivery.
-    if (params.event.type === 'scheduled_wakeup') {
-      const [wakeup, session] = await Promise.all([
-        getSessionWakeupById(params.event.wakeupId),
-        getSessionForFastConversation(db, params.parent.sessionId),
-      ]);
-      if (
-        !wakeup ||
-        wakeup.status === 'cancelled' ||
-        wakeup.status === 'failed' ||
-        // Archiving cancels wakeups, but if that cancellation failed the
-        // archived Session must still stay quiet.
-        session?.archivedAt
-      ) {
-        return 'skipped';
-      }
+    if (
+      params.event.type === 'scheduled_wakeup' &&
+      !(await isScheduledWakeupDeliverable({
+        wakeupId: params.event.wakeupId,
+        conversationId: params.parent.sessionId,
+      }))
+    ) {
+      return 'skipped';
     }
 
     const humanFollowUp =
@@ -2344,6 +2423,13 @@ export async function deliverFastAgentParentEventWithLock(
         createArtifact: buildFastAgentArtifactCreator(params.parent.sessionId),
         ...parentTurn.adapter,
         launchTask: parentTurn.adapter.launchTask,
+        ...(wakeupGuard
+          ? {
+              postReply: wakeupGuard.guardPostReply(
+                parentTurn.adapter.postReply,
+              ),
+            }
+          : {}),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId: parentTurn.userId,
