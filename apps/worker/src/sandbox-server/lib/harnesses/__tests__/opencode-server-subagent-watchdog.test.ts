@@ -936,6 +936,194 @@ describe('OpenCode visual proof deadline', () => {
     vi.useRealTimers();
   });
 
+  it.each(['running', 'completed', 'error'])(
+    'ends proof at a %s judge handoff without waiting for turn completion',
+    async (status) => {
+      const { client, harness } = createHarness(undefined, {
+        visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+      });
+      try {
+        await connectHarness(harness, client);
+        vi.useFakeTimers();
+        await armSpawn(client, harness);
+        const proof = createSkillToolPart('capture-visual-proof');
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: proof },
+        });
+        await vi.advanceTimersByTimeAsync(4_000);
+        const judge = createTaskToolPart({
+          callId: 'judge_current',
+          status: 'pending',
+          input: { subagent_type: 'judge', prompt: 'Proof is not applicable.' },
+        });
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: judge },
+        });
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: { ...judge, state: { ...judge.state, status } } },
+        });
+        // Replayed skill results and supplemental guidance cannot rearm proof
+        // while the parent is judging or delivering in this same turn.
+        for (const part of [proof, createSkillToolPart('agent-browser')]) {
+          await client.emit({
+            type: 'message.part.updated',
+            properties: { part },
+          });
+        }
+        await vi.advanceTimersByTimeAsync(VISUAL_PROOF_TIMEOUT_MS * 2);
+        expect(client.abort).not.toHaveBeenCalled();
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      } finally {
+        harness.dispose();
+      }
+    },
+  );
+
+  it.each(['pending', 'other-agent', 'child-session', 'upload'])(
+    'does not treat %s as a proof handoff',
+    async (kind) => {
+      const { client, harness } = createHarness(undefined, {
+        visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+      });
+      try {
+        await connectHarness(harness, client);
+        vi.useFakeTimers();
+        await armSpawn(client, harness);
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: createSkillToolPart('capture-visual-proof') },
+        });
+        await vi.advanceTimersByTimeAsync(4_000);
+        const part = createTaskToolPart({
+          callId: 'not_a_handoff',
+          status: kind === 'pending' ? kind : 'completed',
+          input: {
+            subagent_type: kind === 'other-agent' ? 'general' : 'judge',
+          },
+        });
+        if (kind === 'child-session') part.sessionID = 'ses_child_1';
+        if (kind === 'upload') {
+          part.tool = 'roomote_manage_artifacts';
+          part.state.output = 'Uploaded visual proof: artifactId=proof';
+        }
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part },
+        });
+        await vi.advanceTimersByTimeAsync(999);
+        expect(client.abort).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(client.abort).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'ses_1' }),
+        );
+      } finally {
+        harness.dispose();
+      }
+    },
+  );
+
+  it.each(['pending', 'running', 'completed', 'error'])(
+    'ignores late updates from a previously %s judge during a fresh proof attempt',
+    async (status) => {
+      const { client, harness } = createHarness(undefined, {
+        visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+      });
+      try {
+        await connectHarness(harness, client);
+        vi.useFakeTimers();
+        await armSpawn(client, harness);
+        const judge = createTaskToolPart({
+          callId: 'judge_previous',
+          status,
+          input: { subagent_type: 'judge' },
+        });
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: judge },
+        });
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: createSkillToolPart('capture-visual-proof') },
+        });
+        await vi.advanceTimersByTimeAsync(4_000);
+        for (const lateStatus of ['running', 'completed']) {
+          await client.emit({
+            type: 'message.part.updated',
+            properties: {
+              part: { ...judge, state: { ...judge.state, status: lateStatus } },
+            },
+          });
+        }
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(client.abort).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'ses_1' }),
+        );
+      } finally {
+        harness.dispose();
+      }
+    },
+  );
+
+  it('arms a fresh deadline after a judge handoff and ignores replays from the previous attempt', async () => {
+    const { client, harness } = createHarness(undefined, {
+      visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+    });
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+      const proof = createSkillToolPart('capture-visual-proof');
+      const judge = createTaskToolPart({
+        callId: 'judge_first',
+        input: { subagent_type: 'judge' },
+      });
+      for (const part of [proof, judge]) {
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part },
+        });
+      }
+      const nextProof = {
+        ...proof,
+        id: 'proof_second',
+        callID: 'proof_second',
+      };
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part: nextProof },
+      });
+      await vi.advanceTimersByTimeAsync(4_000);
+      for (const part of [
+        proof,
+        nextProof,
+        { ...judge, state: { ...judge.state, status: 'completed' } },
+      ]) {
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part },
+        });
+      }
+      // Reloading capture during an attempt is a retry, not a fresh budget.
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: { ...proof, id: 'proof_retry', callID: 'proof_retry' },
+        },
+      });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(client.abort).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_1' }),
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('bounds the entire visual proof workflow and resumes with a timeout handoff', async () => {
     const client = new FakeOpenCodeServerClient();
     const { harness, logger } = createHarness(client, {

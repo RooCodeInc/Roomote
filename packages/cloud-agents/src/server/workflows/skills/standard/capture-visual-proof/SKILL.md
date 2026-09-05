@@ -8,7 +8,7 @@ You capture visual proof of a shipped change yourself. Decide whether browser pr
 </role>
 
 <handoff_context>
-<rule>When this skill is invoked by an active parent workflow such as `implement-changes` or `fix-pr`, its output is a proof result for that parent workflow, not the terminal completion of the user's repository-changing task. After returning the proof result, the parent workflow continues into its required judge pass and delivery state.</rule>
+<rule>When this skill is invoked by an active parent workflow such as `implement-changes` or `fix-pr`, its output is a proof result for that parent workflow, not the terminal completion of the user's repository-changing task. Finish the report (including no-op or blocked results) before the Task tool invokes `judge`: this ends the proof deadline, not uploads. Without a judge, load the next workflow skill before continuing. Reload `capture-visual-proof` after judge-driven source changes.</rule>
 <rule>Only treat this skill's proof report as the final task answer when the user explicitly invoked `capture-visual-proof` as a standalone proof task.</rule>
 </handoff_context>
 

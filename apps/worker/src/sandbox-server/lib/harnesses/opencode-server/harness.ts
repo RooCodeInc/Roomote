@@ -1691,6 +1691,8 @@ export class OpenCodeServerHarness
   // turns can run on the built-in read-only `plan` agent.
   private activeWorkflowSkill: string | null = null;
   private visualProofTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private visualProofAttempt = 0;
+  private readonly taskToolProofAttempts = new Map<string, number | null>();
   private commandEnv: Record<string, string> | undefined;
   private stopHookReminderCount = 0;
   private terminalChatReplyDeliveryFailed = false;
@@ -3713,6 +3715,7 @@ export class OpenCodeServerHarness
       return;
     }
 
+    this.visualProofAttempt += 1;
     const timer = setTimeout(() => {
       this.visualProofTimeoutTimer = null;
       void this.recoverVisualProofTimeout();
@@ -4672,8 +4675,6 @@ export class OpenCodeServerHarness
       this.knownMcpServerNames,
     );
 
-    this.trackActiveWorkflowSkill(toolPart, context.sessionId);
-
     if (isOpenCodeQuestionTool(normalized.toolName)) {
       this.registerQuestionToolRequest(toolPart, context, normalized.status);
       return;
@@ -4684,6 +4685,39 @@ export class OpenCodeServerHarness
       messageId: context.messageId,
       toolCallId: normalized.toolCallId,
     });
+
+    if (!this.persistedToolResultKeys.has(eventKey)) {
+      this.trackActiveWorkflowSkill(toolPart, context.sessionId);
+    }
+
+    if (
+      context.sessionId === this.sessionId &&
+      isOpenCodeSubagentTaskTool(toolPart.tool ?? '')
+    ) {
+      // Bind even pending calls to their original attempt. Late updates from
+      // an earlier judge must not end a fresh proof deadline.
+      if (!this.taskToolProofAttempts.has(eventKey)) {
+        this.taskToolProofAttempts.set(
+          eventKey,
+          this.visualProofTimeoutTimer ? this.visualProofAttempt : null,
+        );
+      }
+      if (
+        this.visualProofTimeoutTimer &&
+        this.taskToolProofAttempts.get(eventKey) === this.visualProofAttempt &&
+        !this.persistedToolResultKeys.has(eventKey) &&
+        extractOpenCodeTaskToolAgentType(toolPart) === 'judge' &&
+        (toolPart.state?.status === 'running' ||
+          toolPart.state?.status === 'completed' ||
+          toolPart.state?.status === 'error')
+      ) {
+        // The judge consumes the finished proof result, including no-op or
+        // blocked results. A failed judge is not a capture timeout, and uploads
+        // alone are not a completion boundary.
+        this.clearVisualProofTimeout();
+        this.activeWorkflowSkill = null;
+      }
+    }
 
     if (
       isFailedTerminalChatReply(normalized) &&
