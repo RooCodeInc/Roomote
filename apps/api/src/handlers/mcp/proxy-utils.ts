@@ -332,7 +332,7 @@ function isJsonResponse(contentType: string | null): boolean {
   return mediaType === 'application/json' || mediaType.endsWith('+json');
 }
 
-interface ResolvedCredentials {
+export interface ResolvedCredentials {
   /** `null` for upstreams that take no Authorization header. */
   authHeader: string | null;
   extraHeaders?: Record<string, string>;
@@ -348,6 +348,14 @@ interface ResolvedCredentials {
    */
   upstream?: string;
 }
+
+export type LocalMcpTool = {
+  definition: { name: string } & Record<string, unknown>;
+  execute: (
+    args: unknown,
+    credentials: ResolvedCredentials,
+  ) => Promise<unknown>;
+};
 
 export interface McpAuthContext {
   /**
@@ -382,6 +390,7 @@ interface McpProxyConfig {
   guardUpstreamEgress?: { allowedPrivateCidrs?: string };
   /** Reject request bodies larger than this many bytes (413). */
   maxRequestBodyBytes?: number;
+  localTools?: readonly LocalMcpTool[];
 }
 
 export class McpProxyError extends Error {
@@ -532,6 +541,10 @@ function filterToolsListPayload(
   },
   options?: {
     stripToolSchemaPatterns?: boolean;
+    localToolDefinitions?: readonly ({ name: string } & Record<
+      string,
+      unknown
+    >)[];
   },
 ): unknown {
   if (!payload || typeof payload !== 'object') {
@@ -551,7 +564,7 @@ function filterToolsListPayload(
     return payload;
   }
 
-  const namedTools = result.tools.filter(
+  const upstreamTools = result.tools.filter(
     (toolDef): toolDef is { name: string } & Record<string, unknown> =>
       Boolean(
         toolDef &&
@@ -560,6 +573,13 @@ function filterToolsListPayload(
         typeof toolDef.name === 'string',
       ),
   );
+  const upstreamToolNames = new Set(upstreamTools.map((tool) => tool.name));
+  const namedTools = [
+    ...upstreamTools,
+    ...(options?.localToolDefinitions ?? []).filter(
+      (tool) => !upstreamToolNames.has(tool.name),
+    ),
+  ];
 
   const filteredTools = filterMcpToolDefinitions(namedTools, toolPolicy).map(
     (tool) =>
@@ -762,6 +782,7 @@ export function createMcpProxy(config: McpProxyConfig) {
     stripToolSchemaPatterns: shouldStripToolSchemaPatterns = false,
     guardUpstreamEgress,
     maxRequestBodyBytes,
+    localTools = [],
   } = config;
 
   // Guarded dispatchers pin connections to DNS answers vetted against the
@@ -1017,6 +1038,40 @@ export function createMcpProxy(config: McpProxyConfig) {
         }
       }
 
+      const toolName = getToolCallName(parsedBody);
+      const localTool = toolName
+        ? localTools.find((tool) => tool.definition.name === toolName)
+        : undefined;
+
+      if (localTool) {
+        const params =
+          parsedBody && typeof parsedBody === 'object' && 'params' in parsedBody
+            ? (parsedBody as { params?: unknown }).params
+            : undefined;
+        const args =
+          params && typeof params === 'object' && 'arguments' in params
+            ? (params as { arguments?: unknown }).arguments
+            : undefined;
+
+        try {
+          const result = await localTool.execute(args, credentials);
+          return Response.json({
+            jsonrpc: '2.0',
+            id: getJsonRpcRequestId(parsedBody),
+            result,
+          });
+        } catch (error) {
+          const status =
+            error instanceof McpProxyError ? error.httpStatus : 502;
+          return jsonRpcErrorResponse(
+            status,
+            error instanceof McpProxyError ? -32602 : -32603,
+            error instanceof Error ? error.message : String(error),
+            getJsonRpcRequestId(parsedBody),
+          );
+        }
+      }
+
       const proxyHeaders = buildProxyRequestHeaders(
         credentials.authHeader,
         c.req.raw.headers,
@@ -1132,6 +1187,7 @@ export function createMcpProxy(config: McpProxyConfig) {
             },
             {
               stripToolSchemaPatterns: shouldStripToolSchemaPatterns,
+              localToolDefinitions: localTools.map((tool) => tool.definition),
             },
           );
           const headers = buildProxyResponseHeaders(upstreamResponse.headers);
