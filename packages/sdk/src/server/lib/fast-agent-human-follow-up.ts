@@ -158,40 +158,24 @@ export async function admitFastAgentHumanFollowUp(params: {
         maxWaitMs: 0,
       });
   if (turnLock) {
-    try {
-      // A released turn lock does not imply an empty inbox. Keep earlier
-      // queued work ahead of this turn, but preserve interrupted-inline
-      // supersession when there is no queued backlog.
-      const pending = await db.query.fastAgentParentEvents.findFirst({
-        where: and(
-          eq(fastAgentParentEvents.conversationId, params.parent.sessionId),
-          isNull(fastAgentParentEvents.admission),
-          isNull(fastAgentParentEvents.deliveredAt),
-          isNull(fastAgentParentEvents.discardedAt),
-        ),
-        columns: { id: true },
-      });
-      if (!pending) {
-        const durable = await persistFastAgentInlineHumanTurn(params);
-        return { kind: 'turn', turnLock, durable };
-      }
-    } catch (error) {
-      await turnLock().catch(() => {});
-      throw error;
-    }
+    const durable = await persistFastAgentInlineHumanTurn(params).catch(
+      (error) => {
+        // Admission durability is best effort; the turn still runs inline.
+        console.error(
+          `[Fast Agent] Failed to persist inline turn admission: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return null;
+      },
+    );
+    return { kind: 'turn', turnLock, durable };
   }
 
-  let eventKey: string;
-  try {
-    ({ eventKey } = await enqueueFastAgentParentEvent({
-      parent: params.parent,
-      event: params.event,
-    }));
-  } finally {
-    await turnLock?.().catch(() => {});
-  }
+  const { eventKey } = await enqueueFastAgentParentEvent({
+    parent: params.parent,
+    event: params.event,
+  });
   return {
-    kind: params.forceQueue || turnLock ? 'queued' : 'steered',
+    kind: params.forceQueue ? 'queued' : 'steered',
     abort: async () => {
       await db
         .update(fastAgentParentEvents)

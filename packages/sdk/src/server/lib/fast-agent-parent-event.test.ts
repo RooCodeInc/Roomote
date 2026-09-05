@@ -432,7 +432,6 @@ describe('deliverFastAgentParentEvent', () => {
           userId: 'user-2',
           question: 'Use the corrected requirement.',
           images: ['data:image/png;base64,aGVsbG8='],
-          attachmentTexts: ['Attached requirements'],
           senderDisplayName: 'Matt',
           senderExternalId: 'U123',
         },
@@ -444,7 +443,6 @@ describe('deliverFastAgentParentEvent', () => {
       expect.objectContaining({
         question: 'Use the corrected requirement.',
         images: ['data:image/png;base64,aGVsbG8='],
-        attachmentTexts: ['Attached requirements'],
         userId: 'user-2',
         currentMessageId: '100.003',
         currentDurableHumanFollowUpEventId: '100.003',
