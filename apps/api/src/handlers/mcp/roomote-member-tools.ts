@@ -138,7 +138,8 @@ export function registerRoomoteMemberTools(
           return resultFromApi(await invokeMemberApi(auth, `/tasks${suffix}`));
         }
         case 'get_summary':
-        case 'get_messages': {
+        case 'get_messages':
+        case 'get_updates': {
           const target = resolveRoomoteCommunicationTarget(params);
           if (!target) {
             return toolError({
@@ -147,11 +148,18 @@ export function registerRoomoteMemberTools(
           }
           if (target.kind === 'task') {
             const actionPath =
-              params.action === 'get_summary' ? 'summary' : 'messages';
+              params.action === 'get_summary'
+                ? 'summary'
+                : params.action === 'get_messages'
+                  ? 'messages'
+                  : 'updates';
             const query = new URLSearchParams();
             if (params.action === 'get_messages') {
               query.set('order', 'desc');
               if (params.limit) query.set('limit', String(params.limit));
+            } else if (params.action === 'get_updates') {
+              if (params.limit) query.set('limit', String(params.limit));
+              if (params.cursor) query.set('cursor', params.cursor);
             }
             const suffix = query.size > 0 ? `?${query.toString()}` : '';
             return resultFromApi(
@@ -162,11 +170,18 @@ export function registerRoomoteMemberTools(
             );
           }
           const actionPath =
-            params.action === 'get_summary' ? 'summary' : 'messages';
+            params.action === 'get_summary'
+              ? 'summary'
+              : params.action === 'get_messages'
+                ? 'messages'
+                : 'updates';
           const query = new URLSearchParams();
           if (params.action === 'get_messages') {
             query.set('order', 'desc');
             if (params.limit) query.set('limit', String(params.limit));
+          } else if (params.action === 'get_updates') {
+            if (params.limit) query.set('limit', String(params.limit));
+            if (params.cursor) query.set('cursor', params.cursor);
           }
           const suffix = query.size > 0 ? `?${query.toString()}` : '';
           return resultFromApi(

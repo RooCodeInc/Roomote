@@ -246,6 +246,13 @@ describe('Fast session communication through task routes', () => {
       },
     );
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      sent: {
+        direction: 'Codex → Roomote',
+        target: { kind: 'task', id: session.id },
+        text: 'Continue this conversation',
+      },
+    });
     expect(mocks.sendMessageToTask).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: session.id }),
     );
@@ -329,6 +336,13 @@ describe('Fast session communication through task routes', () => {
       },
     );
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      sent: {
+        direction: 'Codex → Roomote',
+        target: { kind: 'task', id: 'normal-task' },
+        text: 'Normal follow-up',
+      },
+    });
     expect(mocks.queueReply).not.toHaveBeenCalled();
   });
 
