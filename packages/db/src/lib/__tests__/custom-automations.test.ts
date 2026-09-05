@@ -293,6 +293,29 @@ describe('custom automations helpers', () => {
     await deleteCustomAutomation(created.id);
   });
 
+  it('does not claim a launch after the automation is disabled', async () => {
+    const created = await createCustomAutomation({
+      name: `Disabled claim gate ${Date.now()}`,
+      prompt: 'Scan for flaky tests.',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+    });
+    const staleLastRunAt = created.lastRunAt;
+
+    await db
+      .update(customAutomations)
+      .set({ enabled: false })
+      .where(eq(customAutomations.id, created.id));
+
+    expect(
+      await tryClaimCustomAutomationLaunch(created.id, staleLastRunAt),
+    ).toBeNull();
+
+    await deleteCustomAutomation(created.id);
+  });
+
   it('rejects a partially specified report destination', async () => {
     await expect(
       createCustomAutomation({
