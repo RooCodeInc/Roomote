@@ -2209,6 +2209,47 @@ describe('resolveOpenCodeSmallModel', () => {
     ).toMatchObject({ retryable: false });
   });
 
+  it.each([
+    [{ statusCode: ' 429 ', status: 401 }, 'rate_limited', true],
+    [
+      { statusCode: 'invalid', status: 402, code: 401 },
+      'insufficient_credits',
+      false,
+    ],
+    [{ statusCode: 399, status: 600, code: '404' }, 'model_unavailable', false],
+    [{ statusCode: 401.5, status: '0401', code: 429 }, 'rate_limited', true],
+    [{ extra: '[{"code":"401"}]' }, 'invalid_credentials', false],
+    [
+      { a: { nested: { status: 401 } }, b: { status: 429 } },
+      'rate_limited',
+      true,
+    ],
+    [{ status: 429, extra: { isRetryable: false } }, 'provider_error', false],
+    [{ status: 429, isRetryable: 'false' }, 'rate_limited', true],
+    [{ status: 429, isRetryable: 0 }, 'rate_limited', true],
+    [
+      { status: 401, isRetryable: false, extra: 'CONTENT_FILTER' },
+      'content_filter',
+      false,
+    ],
+    [
+      new Error('{"statusCode":418,"isRetryable":false}'),
+      'provider_error',
+      true,
+    ],
+    [{ error: new Error('ContentFilterError') }, 'content_filter', false],
+  ])(
+    'preserves classification policy for %j',
+    async (error, reason, retryable) => {
+      const { classifyNonTaskInferenceError } =
+        await import('../non-task-provider-usage.js');
+      expect(classifyNonTaskInferenceError(error)).toMatchObject({
+        reason,
+        retryable,
+      });
+    },
+  );
+
   it('continues observing provider errors when retry reporting fails', async () => {
     process.env = {
       ...originalEnv,

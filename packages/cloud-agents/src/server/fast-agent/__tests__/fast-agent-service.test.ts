@@ -5047,6 +5047,88 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       }
     });
 
+    it.each([
+      [
+        { statusCode: '401', status: 429, code: 403, message: 'Rejected' },
+        'Rejected',
+      ],
+      [
+        { statusCode: null, status: 201, message: 'Rejected' },
+        'HTTP 201: Rejected',
+      ],
+      [{ statusCode: 400.5, message: 'Rejected' }, 'HTTP 400.5: Rejected'],
+      [
+        { statusCode: Infinity, message: 'Rejected' },
+        'HTTP Infinity: Rejected',
+      ],
+      [{ statusCode: 99, status: 401, message: 'Rejected' }, 'Rejected'],
+      [
+        {
+          message: 'Outer',
+          extra: { status: 401, data: { message: 'Hidden' } },
+        },
+        'Outer',
+      ],
+      [
+        {
+          message: 'Outer',
+          responseBody: '[{"status":401,"message":"Hidden"}]',
+        },
+        'Outer',
+      ],
+      [
+        { responseBody: ' {"status":400,"message":"Decoded"}' },
+        'HTTP 400: Decoded',
+      ],
+      [{ message: 'Outer', error: { message: 'Inner' } }, 'Outer'],
+      [
+        { data: { message: 'First' }, cause: { data: { message: 'Later' } } },
+        'Later',
+      ],
+      [
+        new Error('Root fallback', { cause: new Error('Nested ignored') }),
+        'Root fallback',
+      ],
+      [
+        { message: ' \n Rejected\t sk-testsecret1234  ' },
+        'Rejected [redacted]',
+      ],
+      [
+        { message: `${'word '.repeat(45)}end` },
+        `${'word '.repeat(45).slice(0, 199)}…`,
+      ],
+      [{ message: `${'word '.repeat(39)}12345` }, `${'word '.repeat(39)}12345`],
+      [{ message: `sk-${'x'.repeat(250)} Rejected` }, '[redacted] Rejected'],
+    ])(
+      'preserves provider detail display policy for %j',
+      async (rejection, detail) => {
+        vi.useFakeTimers();
+        try {
+          mocks.classifyInferenceError.mockReturnValue({
+            message: 'The inference provider rejected the request.',
+            reason: 'provider_error',
+            retryable: false,
+          });
+          mocks.generateText.mockRejectedValue(rejection);
+          const postReply = vi.fn().mockResolvedValue(undefined);
+          const result = answerFastAgentQuestion({
+            ...baseParams,
+            adapter: callbacks({ postReply }),
+          }).catch(() => undefined);
+          await vi.runAllTimersAsync();
+          await result;
+          expect(postReply).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+              purpose: 'closeout',
+              message: `Could not complete the request because the inference provider returned an error. Please try again in a moment.\n\nProvider error: ${detail}`,
+            }),
+          );
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
     it('does not retry a rejection after tool use without a durable row', async () => {
       mocks.generateText.mockImplementationOnce(
         async (_params, _session, options) => {
