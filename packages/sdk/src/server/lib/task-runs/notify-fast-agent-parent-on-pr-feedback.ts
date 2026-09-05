@@ -15,13 +15,8 @@ import {
   isSessionRequestedReviewRun,
 } from '@roomote/types';
 
-import {
-  deliverFastAgentParentEvent,
-  type FastAgentPullRequestContext,
-} from '../fast-agent-parent-event';
-import { deliverFastAgentParentPrEvent } from './deliver-fast-agent-parent-pr-event';
-
-const PR_FEEDBACK_DELIVERY_LOCK_WAIT_MS = 30_000;
+import { type FastAgentPullRequestContext } from '../fast-agent-parent-event';
+import { enqueueFastAgentParentEvent } from '../fast-agent-parent-event-queue';
 
 function buildFeedbackId(params: {
   conversation: {
@@ -100,7 +95,6 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
   feedbackSourceIds?: string[];
   suggestedActionQuestion?: string;
   suggestedActionPrompt?: string;
-  canonicalDeliveryOwned?: boolean;
   reviewActionDeliveryId?: string;
   reviewResult?: {
     reviewKind: 'initial' | 'sync' | null;
@@ -153,7 +147,6 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
     reviewHeadSha: params.reviewHeadSha,
     reviewResult: params.reviewResult,
   });
-  const notifiedResultKey = `fastAgentParentPrFeedback:${feedbackId}`;
   const pullRequest: FastAgentPullRequestContext = {
     provider: params.pullRequest.provider,
     host: params.pullRequest.host ?? null,
@@ -164,60 +157,55 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
     status: params.pullRequest.status ?? null,
   };
 
-  const delivered = await deliverFastAgentParentPrEvent({
-    run: params.run,
-    deliveryKey: notifiedResultKey,
-    logPrefix: 'notifyFastAgentParentOnPrFeedback',
-    conversationClaim: {
-      conversation: parent.conversation,
+  await enqueueFastAgentParentEvent({
+    parent,
+    event: {
+      type: 'pull_request_feedback',
       feedbackId,
+      taskId: attributedTaskId,
+      runId: attributedRunId,
+      taskUrl: getTaskUrl({
+        taskId: attributedTaskId,
+        utm: {
+          source: parent.conversation.surface,
+          campaign: 'fast-delegation-pr-feedback',
+        },
+      }),
+      pullRequest,
+      summary: params.summary,
+      ...(params.reviewResult ? { reviewResult: params.reviewResult } : {}),
+      ...(params.suggestedActionQuestion
+        ? { suggestedActionQuestion: params.suggestedActionQuestion }
+        : {}),
+      ...(params.suggestedActionPrompt
+        ? { suggestedActionPrompt: params.suggestedActionPrompt }
+        : {}),
+      ...(params.reviewActionDeliveryId
+        ? { reviewActionDeliveryId: params.reviewActionDeliveryId }
+        : {}),
     },
-    canonicalDeliveryOwned: params.canonicalDeliveryOwned,
-    deliver: () =>
-      deliverFastAgentParentEvent({
-        parent,
-        event: {
-          type: 'pull_request_feedback',
-          feedbackId,
-          taskId: attributedTaskId,
-          runId: attributedRunId,
-          taskUrl: getTaskUrl({
-            taskId: attributedTaskId,
-            utm: {
-              source: parent.conversation.surface,
-              campaign: 'fast-delegation-pr-feedback',
-            },
-          }),
-          pullRequest,
-          summary: params.summary,
-          ...(params.reviewResult ? { reviewResult: params.reviewResult } : {}),
-          ...(params.suggestedActionQuestion
-            ? { suggestedActionQuestion: params.suggestedActionQuestion }
-            : {}),
-          ...(params.suggestedActionPrompt
-            ? { suggestedActionPrompt: params.suggestedActionPrompt }
-            : {}),
-          ...(params.reviewActionDeliveryId
-            ? { reviewActionDeliveryId: params.reviewActionDeliveryId }
-            : {}),
-        },
-        lockWaitMs: PR_FEEDBACK_DELIVERY_LOCK_WAIT_MS,
-      }),
-    recordLifecycle: () =>
-      recordTaskRunLifecycleEvent(db, {
-        runId: params.run.id,
-        taskId: params.run.taskId,
-        eventType: 'decision',
-        message: `Passed pull request feedback for ${pullRequest.repository ?? 'unknown'}#${pullRequest.number ?? 'unknown'} to the Fast parent orchestrator.`,
-        details: {
-          reason: 'fast_agent_parent_pr_feedback_event',
-          fastAgentSessionId: parent.sessionId,
-          provider: pullRequest.provider,
-          repository: pullRequest.repository,
-          prNumber: pullRequest.number,
-          prUrl: pullRequest.url,
-        },
-      }),
   });
-  return params.canonicalDeliveryOwned ? delivered === true : true;
+
+  try {
+    await recordTaskRunLifecycleEvent(db, {
+      runId: params.run.id,
+      taskId: params.run.taskId,
+      eventType: 'decision',
+      message: `Queued pull request feedback for ${pullRequest.repository ?? 'unknown'}#${pullRequest.number ?? 'unknown'} for the Fast parent orchestrator.`,
+      details: {
+        reason: 'fast_agent_parent_pr_feedback_event',
+        fastAgentSessionId: parent.sessionId,
+        provider: pullRequest.provider,
+        repository: pullRequest.repository,
+        prNumber: pullRequest.number,
+        prUrl: pullRequest.url,
+      },
+    });
+  } catch (error) {
+    console.error(
+      `[notifyFastAgentParentOnPrFeedback] Failed to record queue admission for run ${params.run.id}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  return true;
 }
