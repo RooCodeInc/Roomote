@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import {
   SETUP_MODEL_PROVIDER_CATALOG,
   buildTaskModelOption,
@@ -14,6 +16,24 @@ import { getPersistedEnvironmentVariableValues } from '../environment-variables'
 import { mergeMetadata } from './models-dev';
 
 const LOCAL_PROVIDER_REQUEST_TIMEOUT_MS = 15_000;
+
+const qualificationChunkSchema = z.object({
+  choices: z.array(
+    z.object({
+      index: z.number().int().nonnegative().optional(),
+      delta: z.object({
+        tool_calls: z
+          .array(
+            z.object({
+              index: z.number().int().nonnegative().optional(),
+              function: z.object({ name: z.string().optional() }).optional(),
+            }),
+          )
+          .optional(),
+      }),
+    }),
+  ),
+});
 
 const LOCAL_ENDPOINT_PROVIDER_CATALOG = SETUP_MODEL_PROVIDER_CATALOG.filter(
   (
@@ -548,10 +568,37 @@ export async function qualifyProviderModel(
       reader.releaseLock();
     }
 
-    if (
-      !streamText.includes('"tool_calls"') ||
-      !streamText.includes('"ping"')
-    ) {
+    const toolNames = new Map<string, string>();
+    for (const event of streamText.split(/\r?\n\r?\n/)) {
+      const data = event
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trimStart())
+        .join('\n');
+      if (!data || data.trim() === '[DONE]') continue;
+
+      let payload: unknown;
+      try {
+        payload = JSON.parse(data);
+      } catch {
+        continue;
+      }
+      const chunk = qualificationChunkSchema.safeParse(payload);
+      if (!chunk.success) continue;
+
+      chunk.data.choices.forEach((choice, choiceOffset) => {
+        choice.delta.tool_calls?.forEach((call, callOffset) => {
+          const key = `${choice.index ?? choiceOffset}:${call.index ?? callOffset}`;
+          // Function names may arrive in fragments across streamed deltas.
+          toolNames.set(
+            key,
+            (toolNames.get(key) ?? '') + (call.function?.name ?? ''),
+          );
+        });
+      });
+    }
+
+    if (![...toolNames.values()].includes('ping')) {
       return {
         success: false,
         error:
