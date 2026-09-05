@@ -96,6 +96,8 @@ const TASK_TOOL_NAMES = new Set([
   'send_task_message',
 ]);
 const COMMUNICATION_TOOL_NAMES = new Set([
+  'report_to_parent_session',
+  'receive_task_report',
   'send_chat_reply',
   'send_chat_reaction',
   'send_chat_reaction_emoji',
@@ -327,6 +329,16 @@ function resolveReceiptLanguage(
     return {
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),
       object: 'chat reply',
+    };
+  if (toolName === 'report_to_parent_session')
+    return {
+      verb: byPhase('Sending', 'Sent', 'Failed to Send'),
+      object: 'report to Session',
+    };
+  if (toolName === 'receive_task_report')
+    return {
+      verb: byPhase('Receiving', 'Received', 'Failed to Receive'),
+      object: 'task report',
     };
   if (toolName === 'post_to_channel')
     return {

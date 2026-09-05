@@ -8,6 +8,7 @@ import {
   llmUsageEvents,
   runFactory,
   sessions,
+  sql,
   taskArtifacts,
   taskFactory,
   userFactory,
@@ -96,6 +97,311 @@ async function createFastMessage({
 }
 
 describe('Fast session queries', () => {
+  it.each(['history', 'polling'])(
+    'enriches known task references with current non-deleted titles in %s',
+    async (readMode) => {
+      const owner = await userFactory.create();
+      const session = await createFastSession({
+        userId: owner.id,
+        conversationId: `task-titles-${readMode}`,
+        updatedAt: new Date(),
+      });
+      const task = await taskFactory.create({ title: 'Fix checkout' });
+      const deleted = await taskFactory.create({
+        title: 'Deleted title',
+        deletedAt: new Date(),
+      });
+      const blank = await taskFactory.create({ title: ' ' });
+      const payloads = [
+        {
+          toolName: 'send_task_message',
+          rawInput: { arguments: { taskId: deleted.id } },
+          output: JSON.stringify({ taskId: task.id }),
+        },
+        {
+          toolName: 'send_task_message',
+          rawInput: { taskId: task.id },
+          output: 'Delivery failed',
+        },
+        {
+          toolName: 'send_task_message',
+          rawInput: { taskId: deleted.id },
+          taskTitle: 'Stale title',
+        },
+        { toolName: 'send_task_message', rawInput: { taskId: 'missing-task' } },
+        {
+          toolName: 'send_task_message',
+          rawInput: {},
+          output: '{"delivered":true}',
+        },
+        { toolName: 'send_task_message', rawInput: { taskId: blank.id } },
+      ];
+      for (const [index, payload] of payloads.entries()) {
+        await createFastMessage({
+          conversationId: session.id,
+          eventId: `title-${index}`,
+          turnSeq: index,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+          role: 'tool',
+          payload,
+        });
+      }
+      await createFastMessage({
+        conversationId: session.id,
+        eventId: 'incoming-title',
+        turnSeq: payloads.length,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        metadata: {
+          visibleInTranscript: false,
+          turnSource: 'platform_event',
+          platformEventKind: 'delegated_task',
+        },
+        contentBlocks: [
+          {
+            type: 'text',
+            text: `<platform_event>${JSON.stringify({ type: 'child_message', taskId: task.id, runId: 1, messageId: 'report-1', purpose: 'closeout', message: 'Finished' })}</platform_event>`,
+          },
+        ],
+      });
+      const result =
+        readMode === 'history'
+          ? await getFastSessionById(
+              { userId: owner.id, isAdmin: false },
+              session.id,
+            )
+          : await getFastSessionMessagesSince(session.id, 0);
+      expect(
+        result?.messages.map((message) => message.payload.taskTitle),
+      ).toEqual([
+        'Fix checkout',
+        'Fix checkout',
+        null,
+        null,
+        undefined,
+        null,
+        'Fix checkout',
+      ]);
+      expect(result?.messages.at(-1)?.payload).toMatchObject({
+        toolName: 'receive_task_report',
+        rawInput: { taskId: task.id },
+      });
+      expect(JSON.stringify(result?.messages)).not.toContain('Deleted title');
+      const [persisted] = await db
+        .select()
+        .from(fastAgentMessages)
+        .where(eq(fastAgentMessages.conversationId, session.id))
+        .orderBy(fastAgentMessages.turnSeq)
+        .limit(1);
+      expect(persisted?.payload).not.toHaveProperty('taskTitle');
+    },
+  );
+
+  it.each(['history', 'polling'])(
+    'projects only valid incoming child reports as tool receipts in %s',
+    async (readMode) => {
+      const owner = await userFactory.create();
+      const session = await createFastSession({
+        userId: owner.id,
+        conversationId: `child-receipts-${readMode}`,
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      });
+      const event = {
+        type: 'child_message',
+        taskId: 'child-task-1',
+        runId: 42,
+        messageId: 'report-1',
+        purpose: 'closeout',
+        message: '## Outcome\nLiteral child report, not the parent summary.',
+        internalContext: 'Do not expose this extra field',
+        imageArtifactIds: ['not-an-authorized-image'],
+      };
+      const metadata = {
+        visibleInTranscript: false,
+        turnSource: 'platform_event',
+        platformEventKind: 'delegated_task',
+        internalContext: 'Do not expose this metadata',
+      };
+      const wrapper = `<platform_event>${JSON.stringify(event)}</platform_event>`;
+      const persisted = await createFastMessage({
+        conversationId: session.id,
+        eventId: 'receipt-row',
+        turnSeq: 0,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: wrapper }],
+        metadata,
+        payload: { internalContext: 'Do not expose this payload' },
+      });
+      const excluded = [
+        { text: '<platform_event>not json</platform_event>', metadata },
+        { text: wrapper, metadata: { ...metadata, turnSource: 'human' } },
+        {
+          text: wrapper,
+          metadata: { ...metadata, platformEventKind: 'setup' },
+        },
+        { text: `Internal instructions\n${wrapper}`, metadata },
+        ...[
+          { type: 'task_settled' },
+          { type: 'artifact_published' },
+          { type: 'pull_request_feedback' },
+          { runId: '42' },
+          { taskId: '' },
+          { messageId: null },
+          { purpose: 'internal' },
+          { message: null },
+        ].map((overrides) => ({
+          text: `<platform_event>${JSON.stringify({ ...event, ...overrides })}</platform_event>`,
+          metadata,
+        })),
+      ];
+      for (const [index, hidden] of excluded.entries()) {
+        await createFastMessage({
+          conversationId: session.id,
+          eventId: `hidden-${index}`,
+          turnSeq: index + 1,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          role: 'user',
+          contentBlocks: [{ type: 'text', text: hidden.text }],
+          metadata: hidden.metadata,
+        });
+      }
+      const result =
+        readMode === 'history'
+          ? await getFastSessionById(
+              { userId: owner.id, isAdmin: false },
+              session.id,
+            )
+          : await getFastSessionMessagesSince(session.id, 0);
+      expect(result?.messages).toEqual([
+        expect.objectContaining({
+          id: persisted.id,
+          eventId: 'receipt-row',
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+          role: 'tool',
+          contentBlocks: [{ type: 'text', text: event.message }],
+          metadata: { visibleInTranscript: true, toolCallId: 'receipt-row' },
+          payload: {
+            toolName: 'receive_task_report',
+            taskTitle: null,
+            toolCallId: 'receipt-row',
+            status: 'completed',
+            rawInput: {
+              taskId: event.taskId,
+              runId: 42,
+              messageId: 'report-1',
+              purpose: 'closeout',
+            },
+            output: event.message,
+          },
+        }),
+      ]);
+      expect(JSON.stringify(result?.messages)).not.toContain('platform_event');
+      expect(JSON.stringify(result?.messages)).not.toContain('Do not expose');
+      expect(JSON.stringify(result?.messages)).not.toContain(
+        'not-an-authorized-image',
+      );
+      const [stored] = await db
+        .select()
+        .from(fastAgentMessages)
+        .where(eq(fastAgentMessages.id, persisted.id));
+      expect(stored?.metadata).toEqual(metadata);
+      expect(stored?.contentBlocks).toEqual([{ type: 'text', text: wrapper }]);
+      expect(await getFastSessionSuggestableMessages(session.id)).toEqual([]);
+
+      await db
+        .update(fastAgentMessages)
+        .set({
+          contentBlocks: [
+            {
+              type: 'text',
+              text: `<platform_event>${JSON.stringify({ ...event, message: 'x'.repeat(100_000) })}</platform_event>`,
+            },
+          ],
+        })
+        .where(eq(fastAgentMessages.id, persisted.id));
+      const truncated = await getFastSessionMessagesSince(session.id, 0);
+      const payload = truncated.messages[0]?.payload as { output: string };
+      expect(payload.output).toContain('[output truncated');
+      expect(truncated.messages[0]?.contentBlocks).toEqual([
+        { type: 'text', text: payload.output },
+      ]);
+    },
+  );
+
+  it.each([2, 1000, 1001])(
+    'windows %i validated messages past a hidden delegated-event backlog',
+    async (visibleCount) => {
+      const owner = await userFactory.create();
+      const session = await createFastSession({
+        userId: owner.id,
+        conversationId: `hidden-backlog-${visibleCount}`,
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      });
+      const metadata = {
+        visibleInTranscript: false,
+        turnSource: 'platform_event',
+        platformEventKind: 'delegated_task',
+      };
+      await db.insert(fastAgentMessages).values(
+        Array.from({ length: visibleCount + 1002 }, (_, index) => {
+          const hidden = index >= visibleCount;
+          const receipt = index === visibleCount - 1;
+          return {
+            conversationId: session.id,
+            id: `${session.id.slice(0, 24)}${index.toString().padStart(12, '0')}`,
+            eventId: `event-${index}`,
+            turnId: `turn-${index}`,
+            // Tie every ordering field except id, including a sub-ms timestamp.
+            ts: 1,
+            turnSeq: 0,
+            createdAt: sql`'2026-01-01 00:00:00.123456+00'::timestamptz`,
+            eventType:
+              hidden || receipt
+                ? ACP_ENVELOPE_EVENT_TYPES.UserPrompt
+                : ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+            role:
+              hidden || receipt ? ('user' as const) : ('assistant' as const),
+            metadata:
+              hidden || receipt ? metadata : { visibleInTranscript: true },
+            contentBlocks: [
+              {
+                type: 'text' as const,
+                text: hidden
+                  ? index % 2 === 0
+                    ? '<platform_event>not json</platform_event>'
+                    : '<platform_event>{"type":"task_settled"}</platform_event>'
+                  : receipt
+                    ? '<platform_event>{"type":"child_message","taskId":"child-task","runId":42,"messageId":"report-1","purpose":"closeout","message":"Child report"}</platform_event>'
+                    : `Visible message ${index}`,
+              },
+            ],
+            payload: {},
+            source: 'slack',
+          };
+        }),
+      );
+
+      const result = await getFastSessionById(
+        { userId: owner.id, isAdmin: false },
+        session.id,
+      );
+      const expectedCount = Math.min(visibleCount, 1000);
+      expect(result?.hasOlderMessages).toBe(visibleCount > 1000);
+      expect(result?.messages.map((message) => message.eventId)).toEqual(
+        Array.from(
+          { length: expectedCount },
+          (_, index) => `event-${visibleCount - expectedCount + index}`,
+        ),
+      );
+      expect(result?.messages.at(-1)).toMatchObject({
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        payload: { toolName: 'receive_task_report', output: 'Child report' },
+      });
+      expect(JSON.stringify(result?.messages)).not.toContain('platform_event');
+    },
+  );
+
   it('returns only the newest 60 visible conversational suggestion messages', async () => {
     const owner = await userFactory.create();
     const conversation = await createFastSession({
