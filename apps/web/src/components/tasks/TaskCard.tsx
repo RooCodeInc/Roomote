@@ -109,7 +109,7 @@ export const TaskCard = ({
                   className={cn(
                     'size-8 flex items-center justify-center overflow-clip rounded-full border border-border ring-1 ring-background',
                     task.attributionKind === 'automation'
-                      ? 'bg-white'
+                      ? 'bg-white dark:bg-muted'
                       : 'bg-muted',
                   )}
                 >
