@@ -4,13 +4,13 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 1.3.1 (2026-09-05)
 
-Roomote 1.3.1 improves Fast, Live Preview, and chat reliability while adding focused controls for pull request reviews and custom automations.
+Roomote 1.3.1 improves Fast, Live Preview, chat, and MCP coordination while adding focused controls for pull request reviews and custom automations.
 
 ### Highlights
 
 - Tailor a structured pull request review with an enabled model and reasoning effort, and inspect one custom automation prompt without loading every prompt into the conversation.
 - Keep Fast responsive with earlier acknowledgements, an automatic retry for provider rejections, and Slack follow-ups that retain task screenshots.
-- Recover Live Previews through actionable states while keeping integration arguments and organization-wide pull request links accurate.
+- Poll compact Roomote MCP updates, recover Live Previews through actionable states, and keep integration arguments and organization-wide pull request links accurate.
 - Process chat conversations more reliably, keep expanded Slack task cards open through live updates, and report Redis outages accurately through BullMQ health checks.
 
 ### Patch changes
@@ -28,6 +28,7 @@ Roomote 1.3.1 improves Fast, Live Preview, and chat reliability while adding foc
 - Fast Sessions can run structured pull request reviews with an explicitly enabled model and reasoning effort, while omitted choices continue to use the deployment's review defaults.
 - Fast now stays out of Slack conversations between people unless a message is directed at Roomote or it has a useful contribution, while mentions, direct messages, and directed follow-ups remain responsive without a separate `!fast` command.
 - Expanded Slack task cards now stay open while live progress and terminal results update in place.
+- Roomote MCP clients can poll compact cursor-based Session and task updates without repeatedly loading full transcripts or raw tool activity.
 
 ## 1.3.0 (2026-09-04)
 
