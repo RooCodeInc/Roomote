@@ -1980,6 +1980,192 @@ describe('deliverFastAgentParentEvent', () => {
 
   it.each([
     {
+      surface: 'discord' as const,
+      workspaceId: 'dm',
+      channelId: 'discord-dm-1',
+      threadId: undefined,
+      serviceUrl: undefined,
+    },
+    {
+      surface: 'teams' as const,
+      workspaceId: 'tenant-1',
+      channelId: 'teams-channel-1',
+      threadId: 'teams-root-1',
+      serviceUrl: 'https://smba.example.com/amer/',
+    },
+    {
+      surface: 'telegram' as const,
+      workspaceId: 'telegram-chat-1',
+      channelId: 'telegram-chat-1',
+      threadId: undefined,
+      serviceUrl: undefined,
+    },
+  ])(
+    'marks a $surface automation delegation with the automation id',
+    async ({ surface, workspaceId, channelId, threadId, serviceUrl }) => {
+      mocks.answerQuestion.mockImplementationOnce(
+        async ({
+          adapter,
+        }: {
+          adapter: { launchTask: (input: unknown) => unknown };
+        }) =>
+          adapter.launchTask({
+            prompt: 'Inspect the repository.',
+            environmentId: null,
+            model: null,
+            parentSessionId: parent.sessionId,
+            postKickoff: vi.fn().mockResolvedValue(undefined),
+          }),
+      );
+
+      await deliverFastAgentParentEvent({
+        parent: {
+          ...parent,
+          conversation: {
+            surface,
+            workspaceId,
+            conversationId: 'automation-1:occurrence-1',
+            replyTarget: {
+              channelId,
+              ...(threadId ? { threadId } : {}),
+              ...(serviceUrl ? { serviceUrl } : {}),
+            },
+          },
+        },
+        event: {
+          type: 'automation_triggered',
+          eventId: 'automation-1:occurrence-1',
+          automationId: 'automation-1',
+          automationName: 'Weekly scan',
+          prompt: 'Find actionable regressions.',
+          trigger: 'schedule',
+        },
+      });
+
+      expect(mocks.enqueueTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          task: expect.objectContaining({
+            payload: expect.objectContaining({
+              customAutomationId: 'automation-1',
+              communicationProvider: surface,
+              fastAgentSessionId: parent.sessionId,
+            }),
+          }),
+        }),
+      );
+    },
+  );
+
+  it('keeps delegating as the automation after its task settles on Teams', async () => {
+    mocks.findTeamsConversationRoute.mockResolvedValueOnce({
+      serviceUrl: 'https://smba.example.com/amer/',
+      workspaceId: 'tenant-1',
+    });
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { launchTask: (input: unknown) => unknown };
+      }) =>
+        adapter.launchTask({
+          prompt: 'Fix the regression the scan found.',
+          environmentId: null,
+          model: null,
+          parentSessionId: parent.sessionId,
+          postKickoff: vi.fn().mockResolvedValue(undefined),
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'teams',
+          workspaceId: 'tenant-1',
+          conversationId: 'teams-conversation-1',
+          replyTarget: {
+            channelId: 'teams-channel-1',
+            threadId: 'teams-root-1',
+            serviceUrl: 'https://smba.example.com/amer/',
+          },
+        },
+      },
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            customAutomationId: 'automation-1',
+            communicationProvider: 'teams',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('marks Slack live launches in a bound automation thread with the automation id', async () => {
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { launchTask: (input: unknown) => unknown };
+      }) =>
+        adapter.launchTask({
+          prompt: 'Fix the regression the scan found.',
+          environmentId: null,
+          model: null,
+          parentSessionId: parent.sessionId,
+          postKickoff: vi.fn().mockResolvedValue(undefined),
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'T123',
+          conversationId: 'automation-1:occurrence-1',
+          replyTarget: { channelId: 'C123', threadId: '100.001' },
+        },
+      },
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.createLauncher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'C123',
+        threadTs: '100.001',
+        customAutomationId: 'automation-1',
+        initiator: expect.objectContaining({
+          kind: 'automation',
+          key: 'custom_automation',
+          actingUserId: 'u1',
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    {
       surface: 'teams' as const,
       workspaceId: 'tenant-1',
       channelId: 'teams-channel-1',
