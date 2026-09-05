@@ -4,6 +4,8 @@ import {
 } from '@/lib';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import YAML from 'yaml';
+import Link from 'next/link';
+import { getTaskMessageReference } from '@/lib/task-message-reference';
 
 import {
   CodeBlock,
@@ -42,6 +44,7 @@ export function AcpToolDetails({
 
   const sanitizedToolData = sanitizeSandboxPathsForDisplay(msg.data);
   const visibleToolInput = getVisibleToolInput(msg.data);
+  const taskReference = getTaskMessageReference(msg.data);
   const isSubagent = isSubagentToolPayload(msg.data);
   const subagentPrompt = getSubagentPrompt(msg);
   const subagentLastMessage = getSubagentLastMessage(msg);
@@ -104,9 +107,28 @@ export function AcpToolDetails({
     Boolean(formattedInput),
   );
 
-  if (formattedInput || formattedResult) {
+  if (formattedInput || formattedResult || taskReference) {
     return (
       <div className="space-y-3">
+        {taskReference ? (
+          <section className="space-y-1.5">
+            <div className="text-xs font-medium text-muted-foreground">
+              {taskReference.label}
+            </div>
+            {taskReference.taskId ? (
+              <Link
+                href={`/task/${encodeURIComponent(taskReference.taskId)}`}
+                className="ph-no-capture text-sm wrap-anywhere text-muted-foreground underline hover:text-foreground"
+              >
+                {sanitizeSandboxPathString(
+                  redactSecrets(taskReference.title || taskReference.taskId),
+                )}
+              </Link>
+            ) : (
+              <p className="text-sm text-muted-foreground">Unavailable</p>
+            )}
+          </section>
+        ) : null}
         {formattedInput ? (
           <ToolDetailSection
             label="Input"
@@ -258,22 +280,5 @@ function getVisibleToolInput(
     visible[visibleField] = sanitizeSandboxPathString(redactSecrets(value));
   }
 
-  if (toolName === 'send_task_message' || toolName === 'receive_task_report') {
-    let taskId = args.taskId;
-    if (toolName === 'send_task_message' && typeof record.output === 'string') {
-      try {
-        const output = JSON.parse(record.output) as { taskId?: unknown } | null;
-        if (typeof output?.taskId === 'string') taskId = output.taskId;
-      } catch {
-        // Failed calls and older receipts may not contain a resolved task.
-      }
-    }
-    const label =
-      toolName === 'send_task_message' ? 'destinationTaskId' : 'sourceTaskId';
-    visible[label] =
-      typeof taskId === 'string' && taskId.trim()
-        ? sanitizeSandboxPathString(redactSecrets(taskId))
-        : 'Unavailable';
-  }
   return visible;
 }

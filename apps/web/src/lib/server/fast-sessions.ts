@@ -30,6 +30,7 @@ import {
 import type { FastAgentMessage } from '@roomote/db';
 
 import type { UserAuthSuccess } from '@/types';
+import { getTaskMessageReference } from '@/lib/task-message-reference';
 import { currentEpochSeconds, signArtifactId } from './artifact-signature';
 import { COMPOSER_SUGGESTION_HISTORY_LIMIT } from './composer-suggestion-history';
 import {
@@ -524,6 +525,34 @@ export async function getFastSessionTasks(
   }));
 }
 
+async function attachFastSessionTaskTitles(messages: FastSessionMessage[]) {
+  const references = messages.map((message) =>
+    getTaskMessageReference(message.payload),
+  );
+  const taskIds = [
+    ...new Set(references.flatMap((ref) => (ref?.taskId ? [ref.taskId] : []))),
+  ];
+  if (!taskIds.length) return messages;
+
+  // Match task-by-ID access: this database is org-scoped; deleted tasks are hidden.
+  const rows = await db
+    .select({ id: tasks.id, title: tasks.title })
+    .from(tasks)
+    .where(and(inArray(tasks.id, taskIds), isNull(tasks.deletedAt)));
+  const titles = new Map(rows.map((task) => [task.id, task.title]));
+  return messages.map((message, index) => {
+    const taskId = references[index]?.taskId;
+    if (!taskId) return message;
+    return {
+      ...message,
+      payload: {
+        ...message.payload,
+        taskTitle: titles.get(taskId)?.trim() || null,
+      },
+    };
+  });
+}
+
 function prepareFastSessionMessageRow<
   T extends Pick<
     FastSessionMessage,
@@ -674,7 +703,7 @@ export async function getFastSessionMessagesSince(
     }),
   );
 
-  return { messages, cursor };
+  return { messages: await attachFastSessionTaskTitles(messages), cursor };
 }
 
 /**
@@ -748,23 +777,44 @@ export async function getFastSessionById(
     return null;
   }
 
-  const rows = await db
-    .select(fastSessionMessageSelection)
-    .from(fastAgentMessages)
-    .leftJoin(users, fastSessionMessageUserJoin)
-    .where(
-      and(
-        eq(fastAgentMessages.conversationId, session.id),
-        fastSessionTranscriptVisibilityWhere,
-      ),
-    )
-    .orderBy(
-      desc(fastAgentMessages.ts),
-      desc(fastAgentMessages.turnSeq),
-      desc(fastAgentMessages.createdAt),
-      desc(fastAgentMessages.id),
-    )
-    .limit(FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT + 1);
+  const rows: FastSessionMessage[] = [];
+  let before: ReturnType<typeof sql> | undefined;
+  // Hidden platform events can fail projection; count only validated rows
+  // toward the window, without loading an unbounded backlog into memory.
+  while (rows.length <= FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT) {
+    const batch = await db
+      .select({
+        ...fastSessionMessageSelection,
+        // Preserve Postgres microseconds for keyset ties instead of a JS Date.
+        cursorCreatedAt: sql<string>`${fastAgentMessages.createdAt}::text`,
+      })
+      .from(fastAgentMessages)
+      .leftJoin(users, fastSessionMessageUserJoin)
+      .where(
+        and(
+          eq(fastAgentMessages.conversationId, session.id),
+          fastSessionTranscriptVisibilityWhere,
+          before,
+        ),
+      )
+      .orderBy(
+        desc(fastAgentMessages.ts),
+        desc(fastAgentMessages.turnSeq),
+        desc(fastAgentMessages.createdAt),
+        desc(fastAgentMessages.id),
+      )
+      .limit(FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT + 1);
+
+    for (const { cursorCreatedAt: _cursorCreatedAt, ...row } of batch) {
+      const prepared = prepareFastSessionMessageRow(row);
+      if (prepared) rows.push(prepared);
+      if (rows.length > FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT) break;
+    }
+    if (batch.length <= FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT) break;
+    const last = batch[batch.length - 1]!;
+    before = sql`(${fastAgentMessages.ts}, ${fastAgentMessages.turnSeq}, ${fastAgentMessages.createdAt}, ${fastAgentMessages.id})
+      < (${last.ts}, ${last.turnSeq}, ${last.cursorCreatedAt}::timestamp, ${last.id}::uuid)`;
+  }
 
   const hasOlderMessages = rows.length > FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT;
   let windowed = rows.slice(0, FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT);
@@ -783,15 +833,9 @@ export async function getFastSessionById(
     }
   }
 
-  // Sanitize at the read boundary, matching the task transcript path: the DB
-  // stores full payloads, but oversized tool output is truncated before it is
-  // serialized into the RSC payload.
   const messages = await attachFastSessionReplyImages(
     session.id,
-    windowed.reverse().flatMap((row): FastSessionMessage[] => {
-      const prepared = prepareFastSessionMessageRow(row);
-      return prepared ? [prepared] : [];
-    }),
+    await attachFastSessionTaskTitles(windowed.reverse()),
   );
 
   // Fast usage events carry the OpenCode session id; a conversation can span

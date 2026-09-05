@@ -396,12 +396,7 @@ describe('AcpToolDetails', () => {
       expect(screen.getByText('Input')).toBeInTheDocument();
       expect(screen.getByText('Result')).toBeInTheDocument();
       expect(codeBlockSpy.mock.calls.map(([props]) => props.code)).toEqual([
-        [
-          'message: Review RooCodeInc/Roomote and use password=[redacted]',
-          ...(toolName === 'send_task_message'
-            ? ['destinationTaskId: task-1']
-            : []),
-        ].join('\n'),
+        'message: Review RooCodeInc/Roomote and use password=[redacted]',
         ['delivered: true', 'taskId: task-1'].join('\n'),
       ]);
       expect(codeBlockSpy.mock.calls[0]?.[0].className).toContain(
@@ -450,14 +445,54 @@ describe('AcpToolDetails', () => {
     );
 
     expect(codeBlockSpy.mock.calls[0]?.[0].code).toBe(
-      `message: Continue the investigation.\ndestinationTaskId: ${expected}`,
+      'message: Continue the investigation.',
     );
+    if (expected === 'Unavailable') {
+      expect(screen.getByText(expected)).toBeInTheDocument();
+      expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    } else {
+      expect(screen.getByRole('link', { name: expected })).toHaveAttribute(
+        'href',
+        `/task/${expected}`,
+      );
+    }
     expect(screen.getByText('Input')).toBeInTheDocument();
     expect(screen.getByText('Result')).toBeInTheDocument();
     expect(container.textContent).not.toContain('hidden metadata');
     expect(container.textContent).not.toContain('hidden wrapper');
     expect(toolInputSpy).not.toHaveBeenCalled();
   });
+
+  it.each(['send_task_message', 'receive_task_report'])(
+    'shows a linked title with ID fallback for %s',
+    (toolName) => {
+      const msg = buildMessage({
+        kind: 'tool',
+        toolName,
+        rawInput: { taskId: 'task/1' },
+        taskTitle: '  Fix checkout  ',
+        output: 'Report delivered',
+      } as Partial<AcpToolResultUiMessage['data']>);
+      const { rerender } = render(<AcpToolDetails msg={msg} />);
+      expect(
+        screen.getByRole('link', { name: 'Fix checkout' }),
+      ).toHaveAttribute('href', '/task/task%2F1');
+      rerender(
+        <AcpToolDetails
+          msg={
+            {
+              ...msg,
+              data: { ...msg.data, taskTitle: ' ' },
+            } as AcpToolResultUiMessage
+          }
+        />,
+      );
+      expect(screen.getByRole('link', { name: 'task/1' })).toHaveAttribute(
+        'href',
+        '/task/task%2F1',
+      );
+    },
+  );
 
   it.each(['child-task-1', undefined])(
     'shows the source task ID %s without incoming report metadata',
@@ -480,9 +515,17 @@ describe('AcpToolDetails', () => {
       );
 
       expect(codeBlockSpy.mock.calls.map(([props]) => props.code)).toEqual([
-        `sourceTaskId: ${taskId ?? 'Unavailable'}`,
         'The child investigation is complete.',
       ]);
+      if (taskId) {
+        expect(screen.getByRole('link', { name: taskId })).toHaveAttribute(
+          'href',
+          `/task/${taskId}`,
+        );
+      } else {
+        expect(screen.getByText('Unavailable')).toBeInTheDocument();
+        expect(screen.queryByRole('link')).not.toBeInTheDocument();
+      }
       for (const hidden of [
         'runId',
         'messageId',
@@ -584,9 +627,7 @@ describe('AcpToolDetails', () => {
           />,
         );
         if (toolName === 'send_task_message') {
-          expect(
-            screen.getByText('destinationTaskId: Unavailable'),
-          ).toBeInTheDocument();
+          expect(screen.getByText('Unavailable')).toBeInTheDocument();
           expect(screen.queryByText('Result')).not.toBeInTheDocument();
         } else {
           expect(screen.getByText('No details available.')).toBeInTheDocument();
