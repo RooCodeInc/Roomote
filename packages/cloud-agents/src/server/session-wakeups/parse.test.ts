@@ -13,6 +13,7 @@ describe('parseSessionWakeupSchedule', () => {
       expect(parsed.schedule).toEqual({
         mode: 'once',
         at: '2026-09-04T17:02:00.000Z',
+        inMinutes: 2,
       });
       expect(parsed.maxRuns).toBeNull();
       expect(parsed.until).toBeNull();
@@ -32,6 +33,28 @@ describe('parseSessionWakeupSchedule', () => {
         options,
       ).firstRunAt.toISOString(),
     ).toBe('2026-09-04T19:00:00.000Z');
+  });
+
+  it('keeps relative identity across changed clocks and equivalent units', () => {
+    const first = parseSessionWakeupSchedule('in 1h', options);
+    const retry = parseSessionWakeupSchedule('in 60m', {
+      ...options,
+      now: new Date(now.getTime() + 5_000),
+    });
+    expect(first.schedule).toEqual({
+      mode: 'once',
+      inMinutes: 60,
+      at: first.firstRunAt.toISOString(),
+    });
+    expect(retry.schedule).toEqual({
+      mode: 'once',
+      inMinutes: 60,
+      at: retry.firstRunAt.toISOString(),
+    });
+    expect(retry.firstRunAt.getTime() - first.firstRunAt.getTime()).toBe(5_000);
+    expect(
+      parseSessionWakeupSchedule('at 2026-09-04T18:00:00Z', options).schedule,
+    ).toEqual({ mode: 'once', at: first.firstRunAt.toISOString() });
   });
 
   it('reads intervals with run counts and end times in either order', () => {

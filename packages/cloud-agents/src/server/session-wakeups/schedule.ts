@@ -105,7 +105,11 @@ export function normalizeSessionWakeupSchedule(
         );
       }
       return {
-        schedule: { mode: 'once', at: at.toISOString() },
+        schedule: {
+          mode: 'once',
+          at: at.toISOString(),
+          ...(hasDelay ? { inMinutes: input.inMinutes } : {}),
+        },
         firstRunAt: at,
       };
     }

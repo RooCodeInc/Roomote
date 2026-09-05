@@ -52,7 +52,19 @@ export type SessionWakeupReportPolicy =
 
 /** The normalized schedule persisted with a wakeup. */
 export const sessionWakeupScheduleSchema = z.discriminatedUnion('mode', [
-  z.object({ mode: z.literal('once'), at: z.string() }).strict(),
+  z
+    .object({
+      mode: z.literal('once'),
+      at: z.string(),
+      // Stable relative identity for retries; at remains the firing time.
+      inMinutes: z
+        .number()
+        .int()
+        .positive()
+        .max(SESSION_WAKEUP_MAX_ONCE_HORIZON_MINUTES)
+        .optional(),
+    })
+    .strict(),
   z
     .object({ mode: z.literal('interval'), everyMinutes: z.number().int() })
     .strict(),

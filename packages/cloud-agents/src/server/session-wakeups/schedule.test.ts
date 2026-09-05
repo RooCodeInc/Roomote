@@ -22,6 +22,7 @@ describe('normalizeSessionWakeupSchedule', () => {
     expect(result.schedule).toEqual({
       mode: 'once',
       at: '2026-09-04T17:20:00.000Z',
+      inMinutes: 20,
     });
   });
 

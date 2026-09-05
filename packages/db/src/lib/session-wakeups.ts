@@ -128,7 +128,12 @@ export async function admitSessionWakeup(
     const existing = active.find(
       (row) =>
         row.promptSignature === promptSignature &&
-        isDeepStrictEqual(row.schedule, input.schedule),
+        (row.schedule.mode === 'once' &&
+        input.schedule.mode === 'once' &&
+        row.schedule.inMinutes !== undefined &&
+        input.schedule.inMinutes !== undefined
+          ? row.schedule.inMinutes === input.schedule.inMinutes
+          : isDeepStrictEqual(row.schedule, input.schedule)),
     );
     if (existing) return { outcome: 'duplicate', wakeup: existing };
     if (active.length >= MAX_ACTIVE_SESSION_WAKEUPS) {

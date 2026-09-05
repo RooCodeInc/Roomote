@@ -9,9 +9,23 @@ import {
   MANAGE_WAKEUPS_TOOL,
   fastAgentScheduledWakeupEventSchema,
   manageWakeupsInputSchema,
+  sessionWakeupScheduleSchema,
 } from './session-wakeups';
 
 describe('manage wakeups tool contract', () => {
+  it('accepts optional persisted relative identity without requiring it on legacy rows', () => {
+    const absolute = { mode: 'once', at: '2026-09-04T17:02:00.000Z' };
+    expect(sessionWakeupScheduleSchema.parse(absolute)).toEqual(absolute);
+    expect(
+      sessionWakeupScheduleSchema.parse({ ...absolute, inMinutes: 2 }),
+    ).toEqual({ ...absolute, inMinutes: 2 });
+    for (const inMinutes of [0, -1, 1.5, 43_201, '2', null]) {
+      expect(
+        sessionWakeupScheduleSchema.safeParse({ ...absolute, inMinutes })
+          .success,
+      ).toBe(false);
+    }
+  });
   it('keeps every supported action in the shared Zod schema', () => {
     for (const action of MANAGE_WAKEUPS_ACTIONS) {
       expect(manageWakeupsInputSchema.parse({ action })).toEqual({ action });
