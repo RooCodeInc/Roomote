@@ -285,6 +285,52 @@ describe('tool presentation resolver', () => {
 });
 
 describe('tool presentation policy', () => {
+  it.each([
+    'inspect_images',
+    'report_to_parent_session',
+    'send_task_message',
+    'receive_task_report',
+  ])('keeps %s expandable and standalone in every phase', (toolName) => {
+    for (const status of ['in_progress', 'completed', 'failed'] as const) {
+      expect(
+        resolveToolPresentationPolicy(toolMessage({ toolName, status }), {
+          displayMode: 'narration',
+          showInternalMessages: false,
+        }),
+      ).toMatchObject({
+        rowVisibility: 'visible',
+        detailMode: 'expandable',
+        activityMode: 'keep-visible',
+        groupingMode: 'standalone',
+      });
+    }
+  });
+
+  it.each([
+    ['in_progress', 'Sending'],
+    ['completed', 'Sent'],
+    ['failed', 'Failed to Send'],
+  ] as const)('presents parent reports in phase %s', (status, verb) => {
+    expect(
+      resolveToolPresentation(
+        toolData({ toolName: 'report_to_parent_session', status }),
+      ),
+    ).toMatchObject({
+      verb,
+      object: 'report to Session',
+      category: 'communication',
+    });
+  });
+
+  it.each(['read', 'read_file', 'spill_read', 'load_skill'])(
+    'keeps ordinary %s details hidden',
+    (toolName) => {
+      expect(
+        resolveToolPresentationPolicy(toolMessage({ toolName })).detailMode,
+      ).toBe('none');
+    },
+  );
+
   it('keeps consequential receipts outside collapsed activity', () => {
     expect(
       resolveToolPresentationPolicy(

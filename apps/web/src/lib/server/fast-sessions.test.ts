@@ -96,6 +96,137 @@ async function createFastMessage({
 }
 
 describe('Fast session queries', () => {
+  it.each(['history', 'polling'])(
+    'projects only valid incoming child reports as tool receipts in %s',
+    async (readMode) => {
+      const owner = await userFactory.create();
+      const session = await createFastSession({
+        userId: owner.id,
+        conversationId: `child-receipts-${readMode}`,
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      });
+      const event = {
+        type: 'child_message',
+        taskId: 'child-task-1',
+        runId: 42,
+        messageId: 'report-1',
+        purpose: 'closeout',
+        message: '## Outcome\nLiteral child report, not the parent summary.',
+        internalContext: 'Do not expose this extra field',
+        imageArtifactIds: ['not-an-authorized-image'],
+      };
+      const metadata = {
+        visibleInTranscript: false,
+        turnSource: 'platform_event',
+        platformEventKind: 'delegated_task',
+        internalContext: 'Do not expose this metadata',
+      };
+      const wrapper = `<platform_event>${JSON.stringify(event)}</platform_event>`;
+      const persisted = await createFastMessage({
+        conversationId: session.id,
+        eventId: 'receipt-row',
+        turnSeq: 0,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: wrapper }],
+        metadata,
+        payload: { internalContext: 'Do not expose this payload' },
+      });
+      const excluded = [
+        { text: '<platform_event>not json</platform_event>', metadata },
+        { text: wrapper, metadata: { ...metadata, turnSource: 'human' } },
+        {
+          text: wrapper,
+          metadata: { ...metadata, platformEventKind: 'setup' },
+        },
+        { text: `Internal instructions\n${wrapper}`, metadata },
+        ...[
+          { type: 'task_settled' },
+          { type: 'artifact_published' },
+          { type: 'pull_request_feedback' },
+          { runId: '42' },
+          { taskId: '' },
+          { messageId: null },
+          { purpose: 'internal' },
+          { message: null },
+        ].map((overrides) => ({
+          text: `<platform_event>${JSON.stringify({ ...event, ...overrides })}</platform_event>`,
+          metadata,
+        })),
+      ];
+      for (const [index, hidden] of excluded.entries()) {
+        await createFastMessage({
+          conversationId: session.id,
+          eventId: `hidden-${index}`,
+          turnSeq: index + 1,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          role: 'user',
+          contentBlocks: [{ type: 'text', text: hidden.text }],
+          metadata: hidden.metadata,
+        });
+      }
+      const result =
+        readMode === 'history'
+          ? await getFastSessionById(
+              { userId: owner.id, isAdmin: false },
+              session.id,
+            )
+          : await getFastSessionMessagesSince(session.id, 0);
+      expect(result?.messages).toEqual([
+        expect.objectContaining({
+          id: persisted.id,
+          eventId: 'receipt-row',
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+          role: 'tool',
+          contentBlocks: [{ type: 'text', text: event.message }],
+          metadata: { visibleInTranscript: true, toolCallId: 'receipt-row' },
+          payload: {
+            toolName: 'receive_task_report',
+            toolCallId: 'receipt-row',
+            status: 'completed',
+            rawInput: {
+              taskId: event.taskId,
+              runId: 42,
+              messageId: 'report-1',
+              purpose: 'closeout',
+            },
+            output: event.message,
+          },
+        }),
+      ]);
+      expect(JSON.stringify(result?.messages)).not.toContain('platform_event');
+      expect(JSON.stringify(result?.messages)).not.toContain('Do not expose');
+      expect(JSON.stringify(result?.messages)).not.toContain(
+        'not-an-authorized-image',
+      );
+      const [stored] = await db
+        .select()
+        .from(fastAgentMessages)
+        .where(eq(fastAgentMessages.id, persisted.id));
+      expect(stored?.metadata).toEqual(metadata);
+      expect(stored?.contentBlocks).toEqual([{ type: 'text', text: wrapper }]);
+      expect(await getFastSessionSuggestableMessages(session.id)).toEqual([]);
+
+      await db
+        .update(fastAgentMessages)
+        .set({
+          contentBlocks: [
+            {
+              type: 'text',
+              text: `<platform_event>${JSON.stringify({ ...event, message: 'x'.repeat(100_000) })}</platform_event>`,
+            },
+          ],
+        })
+        .where(eq(fastAgentMessages.id, persisted.id));
+      const truncated = await getFastSessionMessagesSince(session.id, 0);
+      const payload = truncated.messages[0]?.payload as { output: string };
+      expect(payload.output).toContain('[output truncated');
+      expect(truncated.messages[0]?.contentBlocks).toEqual([
+        { type: 'text', text: payload.output },
+      ]);
+    },
+  );
+
   it('returns only the newest 60 visible conversational suggestion messages', async () => {
     const owner = await userFactory.create();
     const conversation = await createFastSession({

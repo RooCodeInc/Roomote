@@ -381,16 +381,22 @@ describe('AcpToolMessage', () => {
     );
   });
 
-  it('renders Roomote chat replies as expandable receipts like task messages', () => {
+  it.each([
+    ['send_chat_reply', 'Sent', 'chat reply'],
+    ['send_task_message', 'Sent', 'message to task'],
+    ['report_to_parent_session', 'Sent', 'report to Session'],
+    ['receive_task_report', 'Received', 'task report'],
+    ['inspect_images', 'Inspected', 'Images'],
+  ])('renders %s as an expandable receipt', (toolName, action, object) => {
     render(
       <AcpToolMessage
         msg={buildResultMessage('mcp', {
-          title: 'send_chat_reply',
+          title: toolName,
           isMcp: true,
           mcpServerName: 'roomote',
-          mcpToolName: 'send_chat_reply',
+          mcpToolName: toolName,
           serverName: 'roomote',
-          toolName: 'send_chat_reply',
+          toolName,
           rawInput: { arguments: { message: 'Brief Slack update.' } },
           output: '{"success":true,"summary":"Brief Slack update."}',
         } as Partial<AcpToolResultUiMessage['data']>)}
@@ -399,8 +405,8 @@ describe('AcpToolMessage', () => {
 
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: 'Sent',
-        object: 'chat reply',
+        action,
+        object,
         collapsible: true,
       }),
     );

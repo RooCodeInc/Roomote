@@ -116,6 +116,11 @@ const fastSessionTranscriptVisibilityWhere = sql`(
     ${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
     and ${fastAgentMessages.metadata} ->> 'platformEventKind' = 'automation'
   )
+  or (
+    ${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+    and ${fastAgentMessages.metadata} ->> 'turnSource' = 'platform_event'
+    and ${fastAgentMessages.metadata} ->> 'platformEventKind' = 'delegated_task'
+  )
 )`;
 
 /** Signed raw URLs are bucketed so a polling transcript stays byte-stable. */
@@ -522,7 +527,7 @@ export async function getFastSessionTasks(
 function prepareFastSessionMessageRow<
   T extends Pick<
     FastSessionMessage,
-    'eventType' | 'contentBlocks' | 'metadata' | 'payload'
+    'eventId' | 'role' | 'eventType' | 'contentBlocks' | 'metadata' | 'payload'
   >,
 >(row: T): T | null {
   const sanitized = sanitizeEnvelopeFields(
@@ -534,6 +539,68 @@ function prepareFastSessionMessageRow<
   );
 
   if (sanitized.metadata?.visibleInTranscript === false) {
+    if (
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+      sanitized.metadata.turnSource === 'platform_event' &&
+      sanitized.metadata.platformEventKind === 'delegated_task'
+    ) {
+      // Project only the literal child report, never the internal event wrapper
+      // or arbitrary event fields. The persisted model input stays hidden.
+      const match = /^<platform_event>(.*)<\/platform_event>$/su.exec(
+        (getTextFromContentBlocks(sanitized.contentBlocks) ?? '').trim(),
+      );
+      if (!match?.[1]) return null;
+      let event: Record<string, unknown> | null;
+      try {
+        event = JSON.parse(match[1]) as Record<string, unknown> | null;
+      } catch {
+        return null;
+      }
+      if (
+        event?.type !== 'child_message' ||
+        typeof event.taskId !== 'string' ||
+        !event.taskId.trim() ||
+        typeof event.runId !== 'number' ||
+        !Number.isSafeInteger(event.runId) ||
+        event.runId <= 0 ||
+        typeof event.messageId !== 'string' ||
+        !event.messageId.trim() ||
+        typeof event.purpose !== 'string' ||
+        !['ack', 'progress', 'closeout', 'clarification'].includes(
+          event.purpose,
+        ) ||
+        typeof event.message !== 'string' ||
+        !event.message.trim()
+      ) {
+        return null;
+      }
+      const receipt = sanitizeEnvelopeFields(
+        ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        [{ type: 'text', text: event.message }],
+        { visibleInTranscript: true, toolCallId: row.eventId },
+        {
+          toolName: 'receive_task_report',
+          toolCallId: row.eventId,
+          status: 'completed',
+          rawInput: {
+            taskId: event.taskId,
+            runId: event.runId,
+            messageId: event.messageId,
+            purpose: event.purpose,
+          },
+          output: event.message,
+        },
+        { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
+      );
+      return {
+        ...row,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        role: 'tool',
+        contentBlocks: receipt.contentBlocks,
+        metadata: receipt.metadata,
+        payload: receipt.payload ?? {},
+      };
+    }
     const prompt = extractAutomationTriggeredPromptText(
       getTextFromContentBlocks(sanitized.contentBlocks) ?? '',
     );

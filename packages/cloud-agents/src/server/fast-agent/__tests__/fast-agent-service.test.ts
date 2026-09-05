@@ -7570,7 +7570,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             taskId: 'task-1',
             message: 'Include the regression test.',
           }),
-        ).resolves.toEqual({ success: true });
+        ).resolves.toEqual({ success: true, taskId: 'task-1' });
         await expect(
           invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
@@ -7993,9 +7993,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it.each(['running', 'completed'] as const)(
-    'forwards attachments to a %s task before posting a response',
-    async (status) => {
+  it.each([
+    { status: 'running', taskId: 'task-1' },
+    { status: 'completed', taskId: 'task-1' },
+    { status: 'running', taskId: undefined },
+    { status: 'completed', taskId: undefined },
+  ] as const)(
+    'forwards attachments to a $status task with target $taskId before posting a response',
+    async ({ status, taskId }) => {
       mocks.getActiveTasks.mockResolvedValue([
         { taskId: 'task-1', title: 'Checkout', status },
       ]);
@@ -8013,11 +8018,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           });
           await expect(
             invokeTool(nativeToolNames.sendTaskMessage, {
-              taskId: 'task-1',
+              ...(taskId ? { taskId } : {}),
               message: 'Include the failing test.',
               includeAttachments: true,
             }),
-          ).resolves.toEqual({ success: true });
+          ).resolves.toEqual({ success: true, taskId: 'task-1' });
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
             message: 'The task was updated.',
@@ -8056,6 +8061,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       // The text acknowledgement opens the gate, then attachments are
       // forwarded before the response is posted.
       expect(order).toEqual(['reply', 'steer', 'reply']);
+      const toolResult = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .find(
+          (message) =>
+            message.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult &&
+            message.payload.toolName === nativeToolNames.sendTaskMessage,
+        );
+      expect(toolResult).toBeDefined();
+      expect(JSON.parse(toolResult.payload.output)).toEqual({
+        success: true,
+        taskId: 'task-1',
+      });
     },
   );
 

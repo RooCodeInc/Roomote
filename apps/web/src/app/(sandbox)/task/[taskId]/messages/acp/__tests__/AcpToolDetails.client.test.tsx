@@ -2,12 +2,22 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 import { AcpToolDetails } from '../AcpToolDetails';
-import type { AcpToolResultUiMessage } from '../types';
+import { AcpToolMessage } from '../AcpToolMessage';
+import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from '../types';
 
 const codeBlockSpy = vi.fn();
 const toolInputSpy = vi.fn();
 
-vi.mock('@/components/ai-elements', () => ({
+vi.mock('../../../hooks', () => ({
+  useArtifactLink: () => ({ artifacts: [], getArtifactById: () => undefined }),
+}));
+
+vi.mock('@/components/ai-elements', async () => ({
+  ...(await import('@/components/ai-elements/tool')),
+  Message: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  MessageContent: ({ children }: { children?: ReactNode }) => (
+    <div>{children}</div>
+  ),
   CodeBlock: (props: {
     code: string;
     language: string;
@@ -61,6 +71,44 @@ describe('AcpToolDetails', () => {
     codeBlockSpy.mockClear();
     toolInputSpy.mockClear();
   });
+
+  it.each([
+    ['inspect_images', 'question', 'Inspected Images'],
+    ['report_to_parent_session', 'message', 'Sent report to Session'],
+    ['send_task_message', 'message', 'Sent message to task'],
+  ])(
+    'expands %s through the existing accessible trigger',
+    (toolName, field, label) => {
+      render(
+        <AcpToolMessage
+          msg={{
+            ...buildMessage({
+              kind: 'tool',
+              toolName,
+              title: toolName,
+              rawInput: { [field]: 'Requested work' },
+              output: 'Work result',
+            } as Partial<AcpToolResultUiMessage['data']>),
+            text: 'Work result',
+          }}
+        />,
+      );
+      const trigger = screen.getByRole('button', {
+        name: `${label} Completed`,
+      });
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      trigger.focus();
+      expect(trigger).toHaveFocus();
+      expect(screen.queryByText('Input')).not.toBeInTheDocument();
+      fireEvent.click(trigger);
+      expect(trigger).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByText('Input')).toBeInTheDocument();
+      expect(screen.getByText('Result')).toBeInTheDocument();
+      fireEvent.click(trigger);
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByText('Input')).not.toBeInTheDocument();
+    },
+  );
 
   it('leads with the most recent message and collapses the launch prompt', () => {
     render(
@@ -320,43 +368,234 @@ describe('AcpToolDetails', () => {
     },
   );
 
-  it('adds a sanitized send_task_message message to the existing result YAML', () => {
-    const result = { delivered: true, taskId: 'task-1' };
-    render(
-      <AcpToolDetails
-        msg={{
-          ...buildMessage({
-            kind: 'tool',
-            title: 'send_task_message',
-            toolName: 'send_task_message',
-            rawInput: {
-              arguments: {
-                taskId: 'task-1',
-                message:
-                  'Review /sandbox/repos/RooCodeInc/Roomote and use password=synthetic-test-value',
+  it.each(['send_task_message', 'report_to_parent_session'])(
+    'adds a sanitized %s message to the existing result YAML',
+    (toolName) => {
+      const result = { delivered: true, taskId: 'task-1' };
+      render(
+        <AcpToolDetails
+          msg={{
+            ...buildMessage({
+              kind: 'tool',
+              title: toolName,
+              toolName,
+              rawInput: {
+                arguments: {
+                  taskId: 'task-1',
+                  message:
+                    'Review /sandbox/repos/RooCodeInc/Roomote and use password=synthetic-test-value',
+                },
               },
+              output: JSON.stringify(result),
+            } as Partial<AcpToolResultUiMessage['data']>),
+            text: JSON.stringify(result),
+          }}
+        />,
+      );
+
+      expect(screen.getByText('Input')).toBeInTheDocument();
+      expect(screen.getByText('Result')).toBeInTheDocument();
+      expect(codeBlockSpy.mock.calls.map(([props]) => props.code)).toEqual([
+        [
+          'message: Review RooCodeInc/Roomote and use password=[redacted]',
+          ...(toolName === 'send_task_message'
+            ? ['destinationTaskId: task-1']
+            : []),
+        ].join('\n'),
+        ['delivered: true', 'taskId: task-1'].join('\n'),
+      ]);
+      expect(codeBlockSpy.mock.calls[0]?.[0].className).toContain(
+        '[&_pre]:whitespace-pre-wrap',
+      );
+      expect(codeBlockSpy.mock.calls[0]?.[0].className).toContain(
+        '[&_pre]:min-w-0',
+      );
+      expect(toolInputSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['explicit', 'requested-task', '{"delivered":true}', 'requested-task'],
+    ['inferred', undefined, '{"taskId":"resolved-task"}', 'resolved-task'],
+    [
+      'resolved over explicit',
+      'requested-task',
+      '{"taskId":"resolved-task"}',
+      'resolved-task',
+    ],
+    [
+      'explicit after failed output parsing',
+      'requested-task',
+      'Delivery failed',
+      'requested-task',
+    ],
+    ['unavailable', undefined, '{"delivered":true}', 'Unavailable'],
+  ])('shows the %s destination task ID', (_label, taskId, output, expected) => {
+    const { container } = render(
+      <AcpToolDetails
+        msg={buildMessage({
+          kind: 'tool',
+          toolName: 'send_task_message',
+          rawInput: {
+            arguments: {
+              taskId,
+              message: 'Continue the investigation.',
+              internal: 'hidden metadata',
             },
-            output: JSON.stringify(result),
-          } as Partial<AcpToolResultUiMessage['data']>),
-          text: JSON.stringify(result),
-        }}
+            internalContext: 'hidden wrapper',
+          },
+          output,
+        } as Partial<AcpToolResultUiMessage['data']>)}
       />,
     );
 
+    expect(codeBlockSpy.mock.calls[0]?.[0].code).toBe(
+      `message: Continue the investigation.\ndestinationTaskId: ${expected}`,
+    );
     expect(screen.getByText('Input')).toBeInTheDocument();
     expect(screen.getByText('Result')).toBeInTheDocument();
-    expect(codeBlockSpy.mock.calls.map(([props]) => props.code)).toEqual([
-      'message: Review RooCodeInc/Roomote and use password=[redacted]',
-      ['delivered: true', 'taskId: task-1'].join('\n'),
-    ]);
-    expect(codeBlockSpy.mock.calls[0]?.[0].className).toContain(
-      '[&_pre]:whitespace-pre-wrap',
-    );
-    expect(codeBlockSpy.mock.calls[0]?.[0].className).toContain(
-      '[&_pre]:min-w-0',
-    );
+    expect(container.textContent).not.toContain('hidden metadata');
+    expect(container.textContent).not.toContain('hidden wrapper');
     expect(toolInputSpy).not.toHaveBeenCalled();
   });
+
+  it.each(['child-task-1', undefined])(
+    'shows the source task ID %s without incoming report metadata',
+    (taskId) => {
+      const { container } = render(
+        <AcpToolDetails
+          msg={buildMessage({
+            kind: 'tool',
+            toolName: 'receive_task_report',
+            rawInput: {
+              taskId,
+              runId: 42,
+              messageId: 'internal-message-id',
+              purpose: 'closeout',
+              internalContext: 'hidden metadata',
+            },
+            output: 'The child investigation is complete.',
+          } as Partial<AcpToolResultUiMessage['data']>)}
+        />,
+      );
+
+      expect(codeBlockSpy.mock.calls.map(([props]) => props.code)).toEqual([
+        `sourceTaskId: ${taskId ?? 'Unavailable'}`,
+        'The child investigation is complete.',
+      ]);
+      for (const hidden of [
+        'runId',
+        'messageId',
+        'purpose',
+        'internalContext',
+        'hidden metadata',
+      ]) {
+        expect(container.textContent).not.toContain(hidden);
+      }
+      expect(toolInputSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([false, true])(
+    'shows the completed image question and answer with nested arguments=%s',
+    (nested) => {
+      const args = {
+        question:
+          'Inspect /sandbox/repos/RooCodeInc/Roomote with password=synthetic-test-value',
+        images: ['private-image-id'],
+        internal: 'hidden metadata',
+      };
+      render(
+        <AcpToolDetails
+          msg={buildMessage({
+            kind: 'read',
+            toolName: 'inspect_images',
+            rawInput: nested ? { arguments: args } : args,
+            output:
+              'Found /sandbox/repos/RooCodeInc/Roomote with api_key=synthetic-test-value',
+          } as Partial<AcpToolResultUiMessage['data']>)}
+        />,
+      );
+      expect(screen.getByText('Input')).toBeInTheDocument();
+      expect(screen.getByText('Result')).toBeInTheDocument();
+      expect(codeBlockSpy.mock.calls.map(([props]) => props.code)).toEqual([
+        'question: Inspect RooCodeInc/Roomote with password=[redacted]',
+        'Found RooCodeInc/Roomote with api_key=[redacted]',
+      ]);
+      expect(toolInputSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['inspect_images', 'report_to_parent_session', 'send_task_message'])(
+    'handles running, failed and empty %s without exposing raw input',
+    (toolName) => {
+      const field = toolName === 'inspect_images' ? 'question' : 'message';
+      const message = buildMessage({
+        kind: 'tool',
+        toolName,
+        status: 'in_progress',
+        rawInput: { [field]: 'Requested work', internal: 'hidden metadata' },
+        output: '',
+      } as Partial<AcpToolResultUiMessage['data']>);
+      const { rerender, container } = render(
+        <AcpToolDetails
+          msg={
+            {
+              ...message,
+              kind: 'tool_call',
+              partial: true,
+              text: 'Running tool',
+            } as unknown as AcpToolCallUiMessage
+          }
+        />,
+      );
+      expect(screen.getByText('Input')).toBeInTheDocument();
+      expect(screen.queryByText('Result')).not.toBeInTheDocument();
+      rerender(
+        <AcpToolDetails
+          msg={{
+            ...message,
+            text: '',
+            data: {
+              ...message.data,
+              status: 'failed',
+              output: 'Failed with password=synthetic-test-value',
+            },
+          }}
+        />,
+      );
+      expect(screen.getByText('Result')).toBeInTheDocument();
+      expect(container.textContent).toContain('password=[redacted]');
+      expect(container.textContent).not.toContain('synthetic-test-value');
+      for (const value of [undefined, '', '   ', 42]) {
+        rerender(
+          <AcpToolDetails
+            msg={
+              {
+                ...message,
+                text: '',
+                data: {
+                  ...message.data,
+                  status: 'completed',
+                  rawInput: { [field]: value, internal: 'hidden metadata' },
+                },
+              } as AcpToolResultUiMessage
+            }
+          />,
+        );
+        if (toolName === 'send_task_message') {
+          expect(
+            screen.getByText('destinationTaskId: Unavailable'),
+          ).toBeInTheDocument();
+          expect(screen.queryByText('Result')).not.toBeInTheDocument();
+        } else {
+          expect(screen.getByText('No details available.')).toBeInTheDocument();
+        }
+        expect(container.textContent).not.toContain('hidden metadata');
+      }
+      expect(toolInputSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it('does not fall back to unrelated input for recognized tools', () => {
     render(

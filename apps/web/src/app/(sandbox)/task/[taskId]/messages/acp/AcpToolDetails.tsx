@@ -94,7 +94,9 @@ export function AcpToolDetails({
         ? undefined
         : msg.text;
   const sanitizedResult = rawResult
-    ? sanitizeSandboxPathString(rawResult)
+    ? sanitizeSandboxPathString(
+        visibleToolInput !== null ? redactSecrets(rawResult) : rawResult,
+      )
     : undefined;
   const formattedInput = formatStructuredValue(visibleToolInput);
   const formattedResult = formatToolResult(
@@ -124,6 +126,15 @@ export function AcpToolDetails({
       </div>
     );
   }
+
+  if (visibleToolInput !== null)
+    return (
+      <p className="text-sm text-muted-foreground">
+        {msg.partial || msg.data.status === 'in_progress'
+          ? 'Waiting for result...'
+          : 'No details available.'}
+      </p>
+    );
 
   return (
     <ToolInput
@@ -214,23 +225,26 @@ function getVisibleToolInput(
   const visibleField =
     serverName === 'gbrain' && (toolName === 'search' || toolName === 'query')
       ? 'query'
-      : toolName === 'send_task_message' || toolName === 'send_chat_reply'
+      : toolName === 'send_task_message' ||
+          toolName === 'send_chat_reply' ||
+          toolName === 'report_to_parent_session'
         ? 'message'
-        : toolName === 'post_to_channel'
-          ? 'text'
-          : toolName === 'send_chat_reaction_emoji'
-            ? 'name'
-            : null;
-  if (!visibleField) {
+        : toolName === 'inspect_images'
+          ? 'question'
+          : toolName === 'post_to_channel'
+            ? 'text'
+            : toolName === 'send_chat_reaction_emoji'
+              ? 'name'
+              : null;
+  if (!visibleField && toolName !== 'receive_task_report') {
     return null;
   }
 
   const rawInput = record.rawInput;
-  if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
-    return {};
-  }
-
-  const rawInputRecord = rawInput as Record<string, unknown>;
+  const rawInputRecord =
+    rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput)
+      ? (rawInput as Record<string, unknown>)
+      : {};
   const nestedArguments = rawInputRecord.arguments;
   const args =
     nestedArguments &&
@@ -238,13 +252,28 @@ function getVisibleToolInput(
     !Array.isArray(nestedArguments)
       ? (nestedArguments as Record<string, unknown>)
       : rawInputRecord;
-  const value = args[visibleField];
-
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    return {};
+  const visible: Record<string, string> = {};
+  const value = visibleField ? args[visibleField] : undefined;
+  if (visibleField && typeof value === 'string' && value.trim()) {
+    visible[visibleField] = sanitizeSandboxPathString(redactSecrets(value));
   }
 
-  return {
-    [visibleField]: sanitizeSandboxPathString(redactSecrets(value)),
-  };
+  if (toolName === 'send_task_message' || toolName === 'receive_task_report') {
+    let taskId = args.taskId;
+    if (toolName === 'send_task_message' && typeof record.output === 'string') {
+      try {
+        const output = JSON.parse(record.output) as { taskId?: unknown } | null;
+        if (typeof output?.taskId === 'string') taskId = output.taskId;
+      } catch {
+        // Failed calls and older receipts may not contain a resolved task.
+      }
+    }
+    const label =
+      toolName === 'send_task_message' ? 'destinationTaskId' : 'sourceTaskId';
+    visible[label] =
+      typeof taskId === 'string' && taskId.trim()
+        ? sanitizeSandboxPathString(redactSecrets(taskId))
+        : 'Unavailable';
+  }
+  return visible;
 }

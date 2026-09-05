@@ -4163,7 +4163,7 @@ export async function answerFastAgentQuestion({
                   : {}),
               },
             );
-            return result;
+            return { ...result, taskId: target.taskId };
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask: {
