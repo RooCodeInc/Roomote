@@ -4,6 +4,7 @@ import type { SlackEvent } from '@roomote/slack';
 
 import {
   enrichSlackMessageEvent,
+  getIgnoredAutomatedSlackMentionLog,
   isRoutableAutomatedSlackAppMention,
 } from './event-normalization';
 
@@ -156,5 +157,90 @@ describe('event-normalization', () => {
     expect(isRoutableAutomatedSlackAppMention(event, slackInstallation)).toBe(
       false,
     );
+  });
+
+  describe('getIgnoredAutomatedSlackMentionLog', () => {
+    it('logs a workflow message mentioning a stale bot user instead of Roomote', () => {
+      // Real-world shape: a Slack Workflow Builder message whose template still
+      // mentions the bot user of a previous Roomote installation.
+      const event = {
+        type: 'message',
+        subtype: 'bot_message',
+        channel: 'C123',
+        bot_id: 'B_WORKFLOW',
+        app_id: 'A_WORKFLOW',
+        username: 'Roomote - Quick Win',
+        text: '<@U_OLD_ROOMOTE> fix this using the attached Jira card',
+        ts: '1712345678.000600',
+        thread_ts: '1712345678.000100',
+      } as unknown as SlackEvent;
+
+      const log = getIgnoredAutomatedSlackMentionLog(event, slackInstallation);
+
+      expect(log).toContain('U_OLD_ROOMOTE');
+      expect(log).toContain('U_ROOMOTE');
+      expect(log).toContain('subtype=bot_message');
+      expect(log).toContain('app_id=A_WORKFLOW');
+    });
+
+    it('returns null when the message mentions the Roomote bot user', () => {
+      const event = {
+        type: 'message',
+        subtype: 'bot_message',
+        channel: 'C123',
+        bot_id: 'B_WORKFLOW',
+        app_id: 'A_WORKFLOW',
+        text: '<@U_ROOMOTE> investigate this deployment',
+        ts: '1712345678.000700',
+      } as unknown as SlackEvent;
+
+      expect(
+        getIgnoredAutomatedSlackMentionLog(event, slackInstallation),
+      ).toBeNull();
+    });
+
+    it('returns null for messages without any user mention', () => {
+      const event = {
+        type: 'message',
+        subtype: 'bot_message',
+        channel: 'C123',
+        bot_id: 'B_WORKFLOW',
+        app_id: 'A_WORKFLOW',
+        text: 'deployment finished',
+        ts: '1712345678.000800',
+      } as unknown as SlackEvent;
+
+      expect(
+        getIgnoredAutomatedSlackMentionLog(event, slackInstallation),
+      ).toBeNull();
+    });
+
+    it('returns null for Roomote-authored messages', () => {
+      const event = {
+        type: 'message',
+        subtype: 'bot_message',
+        channel: 'C123',
+        bot_id: 'B_WORKFLOW',
+        app_id: 'A_ROOMOTE',
+        text: '<@U_SOMEONE> here is the summary you asked for',
+        ts: '1712345678.000900',
+      } as unknown as SlackEvent;
+
+      expect(
+        getIgnoredAutomatedSlackMentionLog(event, slackInstallation),
+      ).toBeNull();
+    });
+
+    it('returns null for non-message events', () => {
+      const event = {
+        type: 'reaction_added',
+        user: 'U123',
+        item: { channel: 'C123', ts: '1712345678.001000' },
+      } as never;
+
+      expect(
+        getIgnoredAutomatedSlackMentionLog(event, slackInstallation),
+      ).toBeNull();
+    });
   });
 });
