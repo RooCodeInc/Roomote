@@ -14,7 +14,10 @@ automations, and the web dashboard.
 
 A Session can also run Roomote's structured code review on demand. Ask it to
 review a pull request and the Review Code pipeline runs as a task inside the
-Session; in a pull request discussion, it reviews that pull request.
+Session; in a pull request discussion, it reviews that pull request. You can
+name an enabled model and reasoning effort in the request when a review needs a
+specific balance of speed and depth. If you omit either choice, the review uses
+the deployment's code review defaults.
 
 When a task in a Session opens a pull request, that pull request belongs to the
 Session. A mention on it joins the Session instead of starting a new one, and
