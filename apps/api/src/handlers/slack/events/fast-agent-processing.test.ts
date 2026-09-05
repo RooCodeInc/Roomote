@@ -890,6 +890,60 @@ describe('processFastAgentMessage', () => {
     expect(mocks.postThreadMessage).not.toHaveBeenCalled();
   });
 
+  it('preserves an existing conversation closeout reaction through the next turn', async () => {
+    mocks.hasSession.mockResolvedValue(true);
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
+      await adapter.postReaction({
+        name: 'thumbsup',
+        purpose: 'closeout',
+        messageId: '100.001',
+      });
+      return '';
+    });
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+    const event = {
+      type: 'message',
+      channel: 'D123',
+      channel_type: 'im',
+      user: 'U123',
+      text: 'Good :+1:',
+      thread_ts: '100.000',
+      ts: '100.001',
+    };
+
+    await processFastAgentMessage({
+      event: event as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+    });
+
+    expect(slack.addReaction).toHaveBeenCalledExactlyOnceWith({
+      channel: 'D123',
+      timestamp: '100.001',
+      name: 'thumbsup',
+    });
+    expect(slack.removeReaction).not.toHaveBeenCalled();
+    expect(mocks.postThreadMessage).not.toHaveBeenCalled();
+
+    await processFastAgentMessage({
+      event: { ...event, text: 'One more question', ts: '100.002' } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledTimes(2);
+    expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
+    expect(slack.addReaction).toHaveBeenCalledOnce();
+    expect(slack.removeReaction).not.toHaveBeenCalled();
+  });
+
   it('keeps the processing reaction when it becomes the visible closeout', async () => {
     mocks.answerQuestion.mockImplementationOnce(
       async ({
