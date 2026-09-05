@@ -388,6 +388,35 @@ export function buildEventClientMessageSeed(
   }
 }
 
+/**
+ * Events whose closeout is a custom automation's report: the run's own turn,
+ * and the settle of a task that turn delegated. Both may carry launchable
+ * suggestions.
+ */
+function isFastAutomationReportEvent(
+  event: FastAgentParentEvent,
+): event is Extract<
+  FastAgentParentEvent,
+  { type: 'automation_triggered' | 'task_settled' }
+> {
+  return (
+    event.type === 'automation_triggered' ||
+    (event.type === 'task_settled' && Boolean(event.customAutomationId))
+  );
+}
+
+/** Groups a report's suggestion cards; unique per run occurrence. */
+function buildFastAutomationSuggestionEventId(
+  event: Extract<
+    FastAgentParentEvent,
+    { type: 'automation_triggered' | 'task_settled' }
+  >,
+): string {
+  return event.type === 'automation_triggered'
+    ? event.eventId
+    : `${event.customAutomationId}:task:${event.taskId}`;
+}
+
 function buildPrReviewActionNonce(event: FastAgentParentEvent): string {
   return buildSlackClientMessageId(
     `${buildEventClientMessageSeed(event)}:pr-review-action`,
@@ -712,7 +741,7 @@ async function createSlackFastAgentParentTurn(
             : null;
 
         const reportMessage =
-          params.event.type === 'automation_triggered' && !kickoff
+          isFastAutomationReportEvent(params.event) && !kickoff
             ? appendFastAutomationSuggestionInstruction(
                 message,
                 'slack',
@@ -789,14 +818,14 @@ async function createSlackFastAgentParentTurn(
             await releaseRootBindingLock().catch(() => {});
           }
           if (
-            params.event.type === 'automation_triggered' &&
+            isFastAutomationReportEvent(params.event) &&
             suggestions.length > 0
           ) {
             await postFastAutomationSuggestionsToSlack({
               slack,
               channelId: conversation.replyTarget.channelId,
               threadTs: messageTs,
-              eventId: params.event.eventId,
+              eventId: buildFastAutomationSuggestionEventId(params.event),
               createdByUserId: actorUserId,
               suggestions,
             });
@@ -831,14 +860,14 @@ async function createSlackFastAgentParentTurn(
             throw new Error('Slack did not update the Fast automation root.');
           }
           if (
-            params.event.type === 'automation_triggered' &&
+            isFastAutomationReportEvent(params.event) &&
             suggestions.length > 0
           ) {
             await postFastAutomationSuggestionsToSlack({
               slack,
               channelId: conversation.replyTarget.channelId,
               threadTs: rootMessageId,
-              eventId: params.event.eventId,
+              eventId: buildFastAutomationSuggestionEventId(params.event),
               createdByUserId: actorUserId,
               suggestions,
             });
@@ -1220,7 +1249,20 @@ async function createDiscordFastAgentParentTurn(
         sessionId: params.parent.sessionId,
         ...params.footerContext,
       });
-      const bodyText = action ? `${message}\n${action.question}` : message;
+      const settleReport =
+        isFastAutomationReportEvent(params.event) && !kickoff
+          ? params.event
+          : null;
+      const reportMessage = settleReport
+        ? appendFastAutomationSuggestionInstruction(
+            message,
+            'discord',
+            suggestions.length > 0,
+          )
+        : message;
+      const bodyText = action
+        ? `${reportMessage}\n${action.question}`
+        : reportMessage;
       const textWithFooter = `${bodyText}\n\n${footerText}`;
       const posted = await postDiscordFastParentMessageWithFooter({
         provider,
@@ -1271,6 +1313,18 @@ async function createDiscordFastAgentParentTurn(
         conversation,
         messageId: posted.messageId,
       });
+      if (settleReport && suggestions.length > 0) {
+        await postFastAutomationSuggestionsToDiscord({
+          provider,
+          channelId: conversation.replyTarget.channelId,
+          ...(conversation.replyTarget.threadId
+            ? { threadId: conversation.replyTarget.threadId }
+            : {}),
+          eventId: buildFastAutomationSuggestionEventId(settleReport),
+          createdByUserId: actorUserId,
+          suggestions,
+        });
+      }
       if (action) {
         const { superseded } =
           await attachPendingPrReviewActionMessageWithRetirement(
@@ -1367,7 +1421,7 @@ async function createTeamsFastAgentParentTurn(
           sessionId: params.parent.sessionId,
         });
         const reportMessage =
-          params.event.type === 'automation_triggered' && !kickoff
+          isFastAutomationReportEvent(params.event) && !kickoff
             ? appendFastAutomationSuggestionInstruction(
                 message,
                 'teams',
@@ -1423,7 +1477,7 @@ async function createTeamsFastAgentParentTurn(
           images,
         });
         if (
-          params.event.type === 'automation_triggered' &&
+          isFastAutomationReportEvent(params.event) &&
           !kickoff &&
           suggestions.length > 0
         ) {
@@ -1434,7 +1488,7 @@ async function createTeamsFastAgentParentTurn(
             ...(conversation.replyTarget.threadId
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
-            eventId: params.event.eventId,
+            eventId: buildFastAutomationSuggestionEventId(params.event),
             createdByUserId: actorUserId,
             suggestions,
           });
@@ -1500,7 +1554,7 @@ async function createTelegramFastAgentParentTurn(
           sessionId: params.parent.sessionId,
         });
         const reportMessage =
-          params.event.type === 'automation_triggered' && !kickoff
+          isFastAutomationReportEvent(params.event) && !kickoff
             ? appendFastAutomationSuggestionInstruction(
                 message,
                 'telegram',
@@ -1522,7 +1576,7 @@ async function createTelegramFastAgentParentTurn(
           messageId: posted.lastTextMessageId ?? posted.messageId,
         });
         if (
-          params.event.type === 'automation_triggered' &&
+          isFastAutomationReportEvent(params.event) &&
           !kickoff &&
           suggestions.length > 0
         ) {
@@ -1532,7 +1586,7 @@ async function createTelegramFastAgentParentTurn(
             ...(conversation.replyTarget.threadId
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
-            eventId: params.event.eventId,
+            eventId: buildFastAutomationSuggestionEventId(params.event),
             createdByUserId: actorUserId,
             suggestions,
           });
@@ -2122,6 +2176,9 @@ export async function deliverFastAgentParentEventWithLock(
         (params.event.type === 'automation_triggered'
           ? 'automation'
           : 'delegated_task'),
+      automationReport:
+        params.event.type === 'task_settled' &&
+        Boolean(params.event.customAutomationId),
       ...(params.event.type === 'child_message' &&
       params.event.imageArtifactIds?.length
         ? { defaultImageArtifactIds: params.event.imageArtifactIds }

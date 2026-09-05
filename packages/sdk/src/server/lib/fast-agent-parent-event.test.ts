@@ -1143,6 +1143,152 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('posts suggestions beneath the Slack report when an automation task settles', async () => {
+    const pendingParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'C123' },
+      },
+    };
+    const suggestions = [
+      { title: 'Quarantine the flaky spec', brief: 'Skip it until fixed.' },
+    ];
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'Two flaky specs found.',
+          suggestions,
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: pendingParent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformEventKind: 'delegated_task',
+        automationReport: true,
+      }),
+    );
+    expect(mocks.appendSuggestionInstruction).toHaveBeenCalledWith(
+      'Two flaky specs found.',
+      'slack',
+      true,
+    );
+    expect(mocks.postSlackSuggestions).toHaveBeenCalledWith({
+      slack: expect.any(Object),
+      channelId: 'C123',
+      threadTs: '101.001',
+      eventId: 'automation-1:task:child-task-1',
+      createdByUserId: 'u1',
+      suggestions,
+    });
+  });
+
+  it('posts Discord suggestions when an automation task settles', async () => {
+    const discordParent = {
+      ...parent,
+      conversation: {
+        surface: 'discord' as const,
+        workspaceId: 'guild-1',
+        conversationId: 'thread-1',
+        replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+      },
+    };
+    const suggestions = [
+      { title: 'Verify retry behavior', brief: 'Exercise the failure path.' },
+    ];
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'Retry failures increased.',
+          suggestions,
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: discordParent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-2',
+        runId: 43,
+        customAutomationId: 'automation-2',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-2',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.appendSuggestionInstruction).toHaveBeenCalledWith(
+      'Retry failures increased.',
+      'discord',
+      true,
+    );
+    expect(mocks.postDiscordSuggestions).toHaveBeenCalledWith({
+      provider: expect.any(Object),
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      eventId: 'automation-2:task:child-task-2',
+      createdByUserId: 'u1',
+      suggestions,
+    });
+  });
+
+  it('does not treat an ordinary delegated-task settle as an automation report', async () => {
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'Done.',
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-3',
+        runId: 44,
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-3',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ automationReport: false }),
+    );
+    expect(mocks.appendSuggestionInstruction).not.toHaveBeenCalled();
+    expect(mocks.postSlackSuggestions).not.toHaveBeenCalled();
+  });
+
   it('creates the first Slack message when a pending Fast automation settles', async () => {
     const pendingParent = {
       sessionId: parent.sessionId,

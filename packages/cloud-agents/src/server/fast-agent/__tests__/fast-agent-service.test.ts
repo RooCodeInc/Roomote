@@ -7397,6 +7397,40 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('passes structured suggestions through an automation task-settled closeout', async () => {
+    const adapter = callbacks();
+    const suggestions = [
+      { title: 'Quarantine the flaky spec', brief: 'Skip it until fixed.' },
+    ];
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Two flaky specs found.',
+            suggestions,
+          }),
+        ).resolves.toMatchObject({ success: true, closed: true });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      automationReport: true,
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'Two flaky specs found.',
+      suggestions,
+    });
+  });
+
   it('rejects structured suggestions outside automation reports', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {

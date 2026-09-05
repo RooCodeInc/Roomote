@@ -1592,6 +1592,7 @@ export async function answerFastAgentQuestion({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  automationReport = false,
   defaultImageArtifactIds = [],
   allowSilentAmbientReply = false,
   platformEventTranscriptPayload,
@@ -1626,6 +1627,9 @@ export async function answerFastAgentQuestion({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  /** The settling delegated task ran for a custom automation; its closeout is
+   * the run's report and may carry launchable suggestions. */
+  automationReport?: boolean;
   /** Child-selected images to carry through when the parent model omits the
    * optional attachment argument while composing the child update. */
   defaultImageArtifactIds?: string[];
@@ -3089,6 +3093,7 @@ export async function answerFastAgentQuestion({
       platformEventHandling,
       platformEventVisibility,
       platformEventKind,
+      automationReport,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
       isCurrentUserAdmin: currentUser.isAdmin,
@@ -3691,7 +3696,7 @@ export async function answerFastAgentQuestion({
               args.suggestions?.length &&
               (args.purpose !== 'closeout' ||
                 !platformEvent ||
-                platformEventKind !== 'automation' ||
+                (platformEventKind !== 'automation' && !automationReport) ||
                 !['slack', 'discord', 'teams', 'telegram'].includes(
                   conversation.surface,
                 ))
