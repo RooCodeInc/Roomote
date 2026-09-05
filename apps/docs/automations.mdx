@@ -118,8 +118,9 @@ Create arbitrary scheduled agent runs with:
 - an optional **preferred environment**: a named environment or **All
   repositories**, offered to the run as a hint for delegated work; leave it
   as **Let Roomote decide** to route normally
-- an optional **model** override for the runs; the default follows the
-  deployment task model
+- an optional **model** override for the automation's Fast session, including
+  later turns; without an override, it uses the deployment orchestration default.
+  Delegated coding tasks use their own model selection or deployment coding default
 - an optional **effort** override (`low`, `medium`, `high`, `extra high`, or
   `max`) when the selected model supports configurable reasoning
 - an optional **report destination**: a direct message to the automation owner,

@@ -10,7 +10,11 @@ import {
   taskRuns,
   tasks,
 } from '@roomote/db/server';
-import type { FastAgentConversationOwner, RunStatus } from '@roomote/types';
+import type {
+  FastAgentConversationOwner,
+  ReasoningEffort,
+  RunStatus,
+} from '@roomote/types';
 import type { FastAgentConversation } from './fast-agent-conversation';
 import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
 import type {
@@ -23,6 +27,8 @@ type FastAgentSessionRecord = {
   userId: string | null;
   owner: FastAgentConversationOwner;
   title: string | null;
+  model: string | null;
+  reasoningEffort: ReasoningEffort | null;
   conversation: FastAgentConversation;
   compatibilityMessages: ModelMessage[];
   openCodeSessionId: string | null;
@@ -41,6 +47,8 @@ export async function getOrCreateFastAgentSession({
   conversation,
   sessionId,
   initialTitle,
+  initialModel,
+  initialReasoningEffort,
 }: {
   owner?: FastAgentConversationOwner;
   userId?: string;
@@ -49,6 +57,8 @@ export async function getOrCreateFastAgentSession({
   sessionId?: string;
   /** Title to seed only when this call creates the conversation. */
   initialTitle?: string;
+  initialModel?: string;
+  initialReasoningEffort?: ReasoningEffort;
 }): Promise<FastAgentSessionRecord> {
   return fastAgentConversationRepository.getOrCreate({
     ...(owner ? { owner } : {}),
@@ -56,6 +66,8 @@ export async function getOrCreateFastAgentSession({
     conversation,
     ...(sessionId ? { sessionId } : {}),
     ...(initialTitle ? { initialTitle } : {}),
+    ...(initialModel !== undefined ? { initialModel } : {}),
+    ...(initialReasoningEffort !== undefined ? { initialReasoningEffort } : {}),
   });
 }
 

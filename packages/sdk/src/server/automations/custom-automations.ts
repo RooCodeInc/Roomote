@@ -344,6 +344,8 @@ async function runFastCustomAutomation(params: {
     const session = await getOrCreateFastAgentSession({
       userId: params.automation.createdByUserId,
       conversation,
+      initialModel: params.automation.model ?? undefined,
+      initialReasoningEffort: params.automation.reasoningEffort ?? undefined,
     });
     if (rootMessageId) {
       await recordFastAgentConversationMessage({
@@ -360,14 +362,6 @@ async function runFastCustomAutomation(params: {
       launchClaimedAt: params.launchClaimedAt.toISOString(),
       prompt: params.automation.prompt,
       trigger: params.trigger,
-      ...(params.automation.model
-        ? { defaultTaskModel: params.automation.model }
-        : {}),
-      ...(params.automation.reasoningEffort
-        ? {
-            defaultTaskReasoningEffort: params.automation.reasoningEffort,
-          }
-        : {}),
       ...(params.preferredEnvironmentId
         ? { preferredEnvironmentId: params.preferredEnvironmentId }
         : {}),

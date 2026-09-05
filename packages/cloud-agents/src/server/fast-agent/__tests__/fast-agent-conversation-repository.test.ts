@@ -28,7 +28,10 @@ import {
   renewFastSessionRespondingLease,
 } from '../fast-agent-conversation-repository';
 import { FAST_AGENT_REACTION_INPUT_TYPE } from '../fast-agent-conversation';
-import { hasFastAgentSession } from '../fast-agent-session';
+import {
+  getOrCreateFastAgentSession,
+  hasFastAgentSession,
+} from '../fast-agent-session';
 
 const createdUserIds: string[] = [];
 
@@ -55,6 +58,52 @@ afterEach(async () => {
 });
 
 describe('Fast conversation repository', () => {
+  it.each([true, false])(
+    'seeds model settings only on insert (initial overrides: %s)',
+    async (withOverrides) => {
+      const user = await createUser();
+      const conversation = {
+        surface: 'automation' as const,
+        workspaceId: 'model-settings-test',
+        conversationId: crypto.randomUUID(),
+      };
+      const expected = {
+        model: withOverrides ? 'openai/gpt-5.6' : null,
+        reasoningEffort: withOverrides ? 'high' : null,
+      };
+      const created = await getOrCreateFastAgentSession({
+        userId: user.id,
+        conversation,
+        ...(withOverrides
+          ? {
+              initialModel: 'openai/gpt-5.6',
+              initialReasoningEffort: 'high' as const,
+            }
+          : {}),
+      });
+      expect(created).toMatchObject({ created: true, ...expected });
+
+      const reused = await getOrCreateFastAgentSession({
+        userId: user.id,
+        conversation,
+        initialModel: 'anthropic/claude-sonnet-5',
+        initialReasoningEffort: 'low',
+      });
+      expect(reused).toMatchObject({
+        id: created.id,
+        created: false,
+        ...expected,
+      });
+      await expect(
+        fastAgentConversationRepository.findById({ id: created.id }),
+      ).resolves.toMatchObject(expected);
+      const row = await db.query.fastAgentConversations.findFirst({
+        where: eq(fastAgentConversations.id, created.id),
+      });
+      expect(row).toMatchObject(expected);
+    },
+  );
+
   it('persists a channel-less automation conversation', async () => {
     const user = await createUser();
     const conversation = {

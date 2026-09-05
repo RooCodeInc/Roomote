@@ -5757,6 +5757,61 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(answer).rejects.toBe(shutdown);
   });
 
+  it.each([
+    { selection: {}, expectedModel: 'openai/gpt-5.6', expectedEffort: 'high' },
+    {
+      selection: {
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'low' as const,
+      },
+      expectedModel: 'anthropic/claude-sonnet-5',
+      expectedEffort: 'low',
+    },
+    {
+      selection: { model: null, reasoningEffort: null },
+      expectedModel: undefined,
+      expectedEffort: undefined,
+    },
+    {
+      selection: { model: null },
+      expectedModel: undefined,
+      expectedEffort: 'high',
+    },
+    {
+      selection: { reasoningEffort: null },
+      expectedModel: 'openai/gpt-5.6',
+      expectedEffort: undefined,
+    },
+  ])(
+    'applies persisted inference settings and explicit precedence on initial and resumed turns: $selection',
+    async ({ selection, expectedModel, expectedEffort }) => {
+      for (const resumed of [false, true]) {
+        mocks.getSession.mockResolvedValueOnce({
+          id: 'conversation-1',
+          compatibilityMessages: [],
+          openCodeSessionId: resumed ? 'opencode-session-1' : null,
+          model: 'openai/gpt-5.6',
+          reasoningEffort: 'high',
+          created: !resumed,
+        });
+        await answerFastAgentQuestion({
+          ...baseParams,
+          ...selection,
+          images: ['data:image/png;base64,aGVsbG8='],
+          resumedAfterInterruption: resumed,
+          adapter: callbacks(),
+        });
+        expect(mocks.generateText).toHaveBeenCalledTimes(resumed ? 2 : 1);
+        for (const mock of [mocks.generateText, mocks.resolveImageDelivery]) {
+          const options = mock.mock.lastCall?.[0];
+          expect(options).toBeDefined();
+          expect(options.model).toBe(expectedModel);
+          expect(options.reasoningEffort).toBe(expectedEffort);
+        }
+      }
+    },
+  );
+
   it('passes image data URLs to the Fast model as file input when it can view images', async () => {
     await answerFastAgentQuestion({
       ...baseParams,

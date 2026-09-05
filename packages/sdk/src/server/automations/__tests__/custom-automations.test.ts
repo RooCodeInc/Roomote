@@ -416,7 +416,7 @@ describe('customAutomationsJob', () => {
     expect(enqueued.event).not.toHaveProperty('preferredEnvironmentId');
   });
 
-  it('passes the model and effort as delegated-task defaults', async () => {
+  it('persists the model and effort for the scheduled Fast session, not its children', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {
         ...automation,
@@ -427,14 +427,15 @@ describe('customAutomationsJob', () => {
 
     await customAutomationsJob();
 
-    expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
+    expect(fastMocks.getSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        event: expect.objectContaining({
-          defaultTaskModel: 'anthropic/claude-sonnet-5',
-          defaultTaskReasoningEffort: 'high',
-        }),
+        initialModel: 'anthropic/claude-sonnet-5',
+        initialReasoningEffort: 'high',
       }),
     );
+    const { event } = fastMocks.enqueueParentEvent.mock.calls[0]![0];
+    expect(event).not.toHaveProperty('defaultTaskModel');
+    expect(event).not.toHaveProperty('defaultTaskReasoningEffort');
   });
 
   it('keeps the claim fenced when the failed outcome cannot be persisted', async () => {
@@ -1235,6 +1236,12 @@ describe('runCustomAutomationNow', () => {
     const result = await runCustomAutomationNow(automation.id);
 
     expect(result).toEqual({ outcome: 'queued' });
+    expect(fastMocks.getSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialModel: 'anthropic/claude-sonnet-5',
+        initialReasoningEffort: 'xhigh',
+      }),
+    );
     expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
@@ -1242,8 +1249,6 @@ describe('runCustomAutomationNow', () => {
           automationId: automation.id,
           launchClaimedAt: expect.any(String),
           trigger: 'manual',
-          defaultTaskModel: 'anthropic/claude-sonnet-5',
-          defaultTaskReasoningEffort: 'xhigh',
         }),
       }),
     );

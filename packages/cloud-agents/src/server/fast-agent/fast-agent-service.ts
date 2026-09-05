@@ -1618,8 +1618,8 @@ export async function answerFastAgentQuestion({
   activeTasks?: FastAgentActiveTask[];
   adapter: FastAgentTurnAdapter;
   signal?: AbortSignal;
-  /** Explicit model override for this turn; defaults to the deployment's
-   * orchestration model. */
+  /** Explicit turn overrides; undefined uses stored session settings,
+   * while null uses deployment defaults. */
   model?: string | null;
   reasoningEffort?: ReasoningEffort | null;
   turnSource?: FastAgentTurnSource;
@@ -2860,6 +2860,9 @@ export async function answerFastAgentQuestion({
         return false;
       }),
     ]);
+    if (model === undefined) model = session.model;
+    if (reasoningEffort === undefined)
+      reasoningEffort = session.reasoningEffort;
     const availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
       conversation,
