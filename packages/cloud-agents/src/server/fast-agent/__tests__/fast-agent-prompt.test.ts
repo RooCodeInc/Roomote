@@ -113,6 +113,18 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(eventPrompt).not.toContain('<resumed_turn>');
   });
 
+  it('tells automation turns to honor the preferred environment hint', () => {
+    const eventPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+    });
+
+    expect(eventPrompt).toContain("as you would a teammate's request");
+    expect(eventPrompt).toContain('`preferredEnvironmentId`');
+    expect(eventPrompt).toContain('unless the prompt names a different one');
+  });
+
   it('omits the release identifier when no version is resolved', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 

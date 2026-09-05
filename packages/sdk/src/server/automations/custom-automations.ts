@@ -1,8 +1,4 @@
-import {
-  enqueueTask,
-  getOrCreateFastAgentSession,
-  upsertFastAgentMessage,
-} from '@roomote/cloud-agents/server';
+import { getOrCreateFastAgentSession } from '@roomote/cloud-agents/server';
 import {
   db,
   and,
@@ -21,15 +17,10 @@ import {
   slackInstallations,
 } from '@roomote/db/server';
 import {
-  ACP_ENVELOPE_EVENT_TYPES,
   ALL_REPOSITORIES,
-  buildFastAgentChildTaskMetadata,
-  getCommunicationAutomationTargetKind,
   isConfiguredAutomationTarget,
   isBackgroundAutomationUserTargetKind,
   isCommunicationAutomationTarget,
-  resolveEvalHarnessSelection,
-  TaskPayloadKind,
   type AutomationTarget,
   type CommunicationProvider,
   type FastAgentConversation,
@@ -53,6 +44,8 @@ import {
   type AutomationRunNowResult,
   type AutomationRunOpts,
 } from './types';
+import { SlackNotifier } from '@roomote/slack';
+
 import { findUserDirectMessageDestination } from '../lib/user-direct-message';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../lib/discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../lib/teams-communication';
@@ -164,37 +157,6 @@ async function resolveDestination(
       ? { serviceUrl: target.metadata.serviceUrl }
       : {}),
   };
-}
-
-async function resolveOwnerFallbackDestination(
-  ownerUserId: string | null,
-): Promise<ResolvedAutomationDestination | null> {
-  if (!ownerUserId) {
-    return null;
-  }
-
-  const connectedProviders = await listConnectedCommunicationProviders();
-  for (const provider of connectedProviders) {
-    try {
-      const destination = await findUserDirectMessageDestination(
-        provider,
-        ownerUserId,
-      );
-      if (destination) {
-        return {
-          provider,
-          ...destination,
-          source: 'automation_target',
-        };
-      }
-    } catch (error) {
-      console.warn(
-        `${LOG_PREFIX} Failed to resolve owner DM on ${provider}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-
-  return null;
 }
 
 function isFastDeliveryTarget(target: AutomationTarget): boolean {
@@ -361,6 +323,8 @@ async function runFastCustomAutomation(params: {
   eventClaimedAt: Date;
   launchClaimedAt: Date;
   trigger: 'schedule' | 'manual';
+  /** Environment the automation was configured for, offered to the turn as a hint. */
+  preferredEnvironmentId: string | null;
 }): Promise<void> {
   if (!params.automation.createdByUserId) {
     throw new Error('Fast automation run-as user is not configured.');
@@ -404,6 +368,9 @@ async function runFastCustomAutomation(params: {
             defaultTaskReasoningEffort: params.automation.reasoningEffort,
           }
         : {}),
+      ...(params.preferredEnvironmentId
+        ? { preferredEnvironmentId: params.preferredEnvironmentId }
+        : {}),
       ...(rootMessageId ? { rootMessageId } : {}),
     };
     await enqueueFastAgentParentEvent({
@@ -422,9 +389,9 @@ async function runFastCustomAutomation(params: {
 }
 
 /**
- * A run that fails before its Session can speak leaves the surface root it
- * already posted (Discord, Teams) or the chat (Telegram) with a plain error,
- * so the destination is not left showing "is running" forever.
+ * A run that fails before its Session can speak tells the destination so: it
+ * edits the root it already posted (Discord, Teams) or posts the error
+ * (Slack, Telegram). A broken automation must not fail silently.
  */
 async function reportFastAutomationStartupFailure(params: {
   automation: CustomAutomation;
@@ -435,7 +402,26 @@ async function reportFastAutomationStartupFailure(params: {
   const { conversation, rootMessageId } = params;
   const message = `${params.automation.name} failed: ${params.error instanceof Error ? params.error.message : String(params.error)}`;
   try {
-    if (conversation.surface === 'discord' && rootMessageId) {
+    if (conversation.surface === 'slack') {
+      const installation = await db.query.slackInstallations.findFirst({
+        where: and(
+          eq(slackInstallations.isActive, true),
+          eq(slackInstallations.teamId, conversation.workspaceId),
+        ),
+        columns: { botAccessToken: true },
+      });
+      if (installation?.botAccessToken) {
+        await new SlackNotifier(installation.botAccessToken).postMessage({
+          channel: conversation.replyTarget.channelId,
+          ...(conversation.replyTarget.threadId
+            ? { thread_ts: conversation.replyTarget.threadId }
+            : {}),
+          text: message,
+          unfurl_links: false,
+          unfurl_media: false,
+        });
+      }
+    } else if (conversation.surface === 'discord' && rootMessageId) {
       const provider =
         await createDiscordCommunicationProviderFromRuntimeCredentials();
       await provider?.editMessage({
@@ -481,119 +467,6 @@ async function reportFastAutomationStartupFailure(params: {
   }
 }
 
-/**
- * An environment-targeted automation launches its task without a Fast turn,
- * so nothing else writes the rows the Session transcript is built from. This
- * records the same shape a delegating turn leaves behind: the automation
- * prompt as the request (rendered by the web the way Fast automation prompts
- * are), a kickoff line, and the `launch_task` result the transcript renders
- * as the task card.
- */
-function createSandboxAutomationTranscript(params: {
-  sessionId: string;
-  conversation: FastAgentConversation;
-  automation: CustomAutomation;
-  eventId: string;
-  trigger: 'schedule' | 'manual';
-  environmentName: string | null;
-}) {
-  const turnId = `automation-launch:${params.eventId}`;
-  const base = {
-    turnId,
-    source: params.conversation.surface,
-    nativeSessionId: null,
-  } as const;
-
-  return {
-    turnId,
-    recordPrompt: async () => {
-      const event = {
-        type: 'automation_triggered',
-        eventId: params.eventId,
-        automationId: params.automation.id,
-        automationName: params.automation.name,
-        prompt: params.automation.prompt,
-        trigger: params.trigger,
-      };
-      await upsertFastAgentMessage({
-        sessionId: params.sessionId,
-        message: {
-          ...base,
-          eventId: `${turnId}:user`,
-          turnSeq: 0,
-          ts: Date.now(),
-          eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-          role: 'user',
-          contentBlocks: [
-            {
-              type: 'text',
-              text: `<platform_event>${JSON.stringify(event)}</platform_event>`,
-            },
-          ],
-          metadata: {
-            visibleInTranscript: false,
-            turnSource: 'platform_event',
-            platformEventKind: 'automation',
-          },
-          payload: {},
-        },
-      });
-    },
-    recordKickoff: async () => {
-      await upsertFastAgentMessage({
-        sessionId: params.sessionId,
-        message: {
-          ...base,
-          eventId: `${turnId}:kickoff`,
-          turnSeq: 1,
-          ts: Date.now(),
-          eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-          role: 'assistant',
-          contentBlocks: [
-            {
-              type: 'text',
-              text: params.environmentName
-                ? `Started a task in ${params.environmentName}.`
-                : 'Started a task.',
-            },
-          ],
-          metadata: { visibleInTranscript: true, purpose: 'progress' },
-          payload: { purpose: 'progress', kickoff: true },
-        },
-      });
-    },
-    recordLaunch: async (taskId: string) => {
-      await upsertFastAgentMessage({
-        sessionId: params.sessionId,
-        message: {
-          ...base,
-          eventId: `${turnId}:launch`,
-          turnSeq: 2,
-          ts: Date.now(),
-          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
-          role: 'tool',
-          contentBlocks: [],
-          metadata: { visibleInTranscript: true },
-          payload: {
-            toolCallId: `${turnId}:tool:0`,
-            title: 'launch_task',
-            toolName: 'launch_task',
-            status: 'completed',
-            isExecute: false,
-            isRead: false,
-            isMcp: false,
-            isRoomoteNativeTool: true,
-            command: null,
-            exitCode: null,
-            output: JSON.stringify({ success: true, taskId }),
-            rawInput: { arguments: { prompt: params.automation.prompt } },
-          },
-        },
-      });
-    },
-  };
-}
-
 async function launchCustomAutomationRow(
   automation: CustomAutomation,
   opts: AutomationRunOpts,
@@ -601,7 +474,6 @@ async function launchCustomAutomationRow(
 ): Promise<AutomationJobResult> {
   const result = emptyJobResult();
   const frequency = getCustomAutomationFrequency(automation);
-  const fastExecution = automation.executionMode === 'fast';
 
   if (automation.scheduleMode !== 'cron' && frequency === 'off') {
     result.skippedReason = 'Automation is disabled.';
@@ -655,7 +527,6 @@ async function launchCustomAutomationRow(
   }
 
   if (
-    fastExecution &&
     automation.launchClaimedAt &&
     Date.now() - automation.launchClaimedAt.getTime() >=
       CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS
@@ -674,43 +545,20 @@ async function launchCustomAutomationRow(
     return result;
   }
 
-  if (
-    !fastExecution &&
-    !automation.allRepositories &&
-    !automation.environmentId
-  ) {
-    result.skippedReason = 'Environment is not configured.';
-    result.errors.push('Environment is not configured.');
-    await recordCustomAutomationRunOutcome(db, {
-      id: automation.id,
-      status: 'failed',
-      error: 'Environment is not configured.',
-    });
-    return result;
-  }
+  // The configured environment is a hint for the run's Session, not a mode:
+  // the turn delegates there when the prompt calls for repository work. A
+  // deleted environment simply drops the hint.
+  const preferredEnvironmentId = automation.allRepositories
+    ? ALL_REPOSITORIES
+    : automation.environmentId
+      ? ((
+          await db.query.environments.findFirst({
+            columns: { id: true },
+            where: eq(environments.id, automation.environmentId),
+          })
+        )?.id ?? null)
+      : null;
 
-  const environment =
-    fastExecution || automation.allRepositories
-      ? null
-      : await db.query.environments.findFirst({
-          columns: { id: true, name: true },
-          where: eq(environments.id, automation.environmentId!),
-        });
-
-  if (!fastExecution && !automation.allRepositories && !environment) {
-    result.skippedReason = 'Environment no longer exists.';
-    result.errors.push('Environment no longer exists.');
-    await recordCustomAutomationRunOutcome(db, {
-      id: automation.id,
-      status: 'failed',
-      error: 'Environment no longer exists.',
-    });
-    return result;
-  }
-
-  // A report destination is optional. Prefer a private DM to the admin who
-  // created/enabled the automation so an enabled run still has a chat-facing
-  // result; if that admin has no linked DM, preserve the task-UI fallback.
   let destination: ResolvedAutomationDestination | null = null;
   if (isConfiguredAutomationTarget(automation.target)) {
     if (!isFastDeliveryTarget(automation.target)) {
@@ -756,10 +604,6 @@ async function launchCustomAutomationRow(
       });
       return result;
     }
-  } else if (!fastExecution) {
-    destination = await resolveOwnerFallbackDestination(
-      automation.createdByUserId,
-    );
   }
 
   // The short claim fence prevents concurrent launchers from double-launching
@@ -773,172 +617,30 @@ async function launchCustomAutomationRow(
     return result;
   }
 
-  // A persisted model override is validated on save; a value that no longer
-  // parses is ignored so a stale pin degrades to the deployment default
-  // instead of blocking the scheduled run.
-  const modelSelection = automation.model
-    ? resolveEvalHarnessSelection({ model: automation.model })
-    : null;
-  if (modelSelection && !modelSelection.ok) {
-    console.warn(
-      `${LOG_PREFIX} Ignoring invalid model override "${automation.model}" on automation ${automation.id}: ${modelSelection.error}`,
-    );
-  }
-  const modelOverride = modelSelection?.ok ? modelSelection : null;
   const eventClaimedAt =
-    fastExecution &&
-    opts.manualTrigger &&
-    automation.lastError &&
-    automation.lastRunAt
+    opts.manualTrigger && automation.lastError && automation.lastRunAt
       ? automation.lastRunAt
       : launchClaimedAt;
 
   try {
-    if (fastExecution) {
-      await db
-        .update(customAutomations)
-        .set({ lastLaunchedTaskId: null })
-        .where(
-          and(
-            eq(customAutomations.id, automation.id),
-            eq(customAutomations.launchClaimedAt, launchClaimedAt),
-          ),
-        );
-      await runFastCustomAutomation({
-        automation,
-        destination,
-        eventClaimedAt,
-        launchClaimedAt,
-        trigger: opts.manualTrigger ? 'manual' : 'schedule',
-      });
-      result.queued = true;
-      return result;
-    }
-
-    // An environment-targeted run is the Session's own delegation: the Session
-    // owns the report conversation, the task reports back to it, and its
-    // settle turn is what talks to the channel. The launch is pinned rather
-    // than model-chosen, so no Fast turn runs until the task settles.
-    if (!automation.createdByUserId) {
-      throw new Error('Automation run-as user is not configured.');
-    }
-    const eventId = `${automation.id}:${eventClaimedAt.toISOString()}`;
-    const { conversation, rootMessageId } =
-      await buildFastAutomationConversation({
-        automation,
-        eventId,
-        destination,
-        target: isConfiguredAutomationTarget(automation.target)
-          ? automation.target
-          : destination
-            ? {
-                provider: destination.provider,
-                targetKind: getCommunicationAutomationTargetKind(
-                  destination.provider,
-                  'direct_message',
-                ),
-                externalRef: automation.createdByUserId,
-              }
-            : null,
-      });
-    let launchedTaskId: string;
-    try {
-      const session = await getOrCreateFastAgentSession({
-        userId: automation.createdByUserId,
-        conversation,
-        initialTitle: automation.name,
-      });
-      if (rootMessageId) {
-        await recordFastAgentConversationMessage({
-          sessionId: session.id,
-          conversation,
-          messageId: rootMessageId,
-        });
-      }
-      const transcript = createSandboxAutomationTranscript({
-        sessionId: session.id,
-        conversation,
-        automation,
-        eventId,
-        trigger: opts.manualTrigger ? 'manual' : 'schedule',
-        environmentName: environment?.name ?? null,
-      });
-      await transcript.recordPrompt();
-
-      const launchResult = await enqueueTask(
-        {
-          task: {
-            type: TaskPayloadKind.StandardTask,
-            ...(modelOverride?.harness
-              ? { harness: modelOverride.harness }
-              : {}),
-            payload: {
-              repo: automation.allRepositories ? ALL_REPOSITORIES : '',
-              description: automation.prompt,
-              customAutomationId: automation.id,
-              launchIdempotencyKey: transcript.turnId,
-              ...buildFastAgentChildTaskMetadata({
-                sessionId: session.id,
-                conversation,
-              }),
-              ...(automation.environmentId
-                ? { environmentId: automation.environmentId }
-                : {}),
-              ...(modelOverride?.harnessModelOverrides
-                ? { harnessModelOverrides: modelOverride.harnessModelOverrides }
-                : {}),
-              ...(automation.reasoningEffort
-                ? { reasoningEffort: automation.reasoningEffort }
-                : {}),
-            },
-          },
-          title: automation.name,
-          initiator: {
-            kind: 'automation',
-            key: 'custom_automation',
-            actor: {
-              externalId: automation.id,
-              displayName: automation.name,
-            },
-            actingUserId: automation.createdByUserId,
-          },
-          workflow: 'standard',
-          surface: 'system',
-          trigger: opts.manualTrigger ? 'manual' : 'schedule',
-        },
-        {
-          beforeEnqueue: async () => {
-            await transcript.recordKickoff();
-          },
-        },
+    await db
+      .update(customAutomations)
+      .set({ lastLaunchedTaskId: null })
+      .where(
+        and(
+          eq(customAutomations.id, automation.id),
+          eq(customAutomations.launchClaimedAt, launchClaimedAt),
+        ),
       );
-      launchedTaskId = launchResult.taskId;
-      // The task is already queued; a missing card is a transcript blemish,
-      // not a failed run.
-      await transcript.recordLaunch(launchedTaskId).catch((error: unknown) => {
-        console.warn(
-          `${LOG_PREFIX} Failed to record the launch card for task ${launchedTaskId}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      });
-    } catch (error) {
-      await reportFastAutomationStartupFailure({
-        automation,
-        conversation,
-        rootMessageId,
-        error,
-      });
-      throw error;
-    }
-
-    await recordCustomAutomationRunOutcome(db, {
-      id: automation.id,
-      status: 'succeeded',
-      lastLaunchedTaskId: launchedTaskId,
+    await runFastCustomAutomation({
+      automation,
+      destination,
+      eventClaimedAt,
       launchClaimedAt,
+      trigger: opts.manualTrigger ? 'manual' : 'schedule',
+      preferredEnvironmentId,
     });
-
-    result.launchedTaskId = launchedTaskId;
-    result.completed = true;
+    result.queued = true;
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -178,6 +178,8 @@ export type FastAgentParentEvent =
       trigger: 'schedule' | 'manual';
       defaultTaskModel?: string;
       defaultTaskReasoningEffort?: ReasoningEffort;
+      /** Environment the automation was configured for; `all` for every repository. */
+      preferredEnvironmentId?: string;
       rootMessageId?: string;
     }
   | {
@@ -725,14 +727,6 @@ async function createSlackFastAgentParentTurn(
             alt_text: image.altText,
           })),
         ];
-        if (
-          params.event.type === 'task_settled' &&
-          customAutomationId &&
-          params.event.status !== 'completed'
-        ) {
-          return;
-        }
-
         if (pendingAutomationRoot) {
           const shouldPostResult =
             !kickoff && (purpose === 'closeout' || purpose === 'clarification');
@@ -1951,6 +1945,18 @@ type FastAgentParentEventDeliveryParams = {
 };
 
 /** Give a structured child event to the Fast orchestrator for presentation. */
+function buildFastAutomationFailureReport(
+  event: Extract<FastAgentParentEvent, { type: 'task_settled' }>,
+  surface: FastAgentConversation['surface'],
+): string {
+  const subject = event.title ? `"${event.title}"` : 'The delegated task';
+  const detail = event.error ? `: ${event.error}` : '.';
+  // The Slack card carries the task link itself.
+  return surface === 'slack'
+    ? `${subject} failed${detail}`
+    : `${subject} failed${detail}\n${event.taskUrl}`;
+}
+
 export async function deliverFastAgentParentEvent(
   params: FastAgentParentEventDeliveryParams,
 ): Promise<'delivered' | 'skipped'> {
@@ -2008,6 +2014,24 @@ export async function deliverFastAgentParentEventWithLock(
         replyPosted = true;
       },
     });
+    // A failed automation run always reaches its destination. The model
+    // judges what a result is worth, but a broken automation must not stay
+    // silent, so this closeout is fixed text rather than a model turn.
+    if (
+      params.event.type === 'task_settled' &&
+      params.event.customAutomationId &&
+      params.event.status === 'failed' &&
+      parentTurn.conversation.surface !== 'automation'
+    ) {
+      await parentTurn.adapter.postReply({
+        purpose: 'closeout',
+        message: buildFastAutomationFailureReport(
+          params.event,
+          parentTurn.conversation.surface,
+        ),
+      });
+      return 'delivered';
+    }
     const defaultTaskModel =
       params.event.type === 'automation_triggered'
         ? params.event.defaultTaskModel
