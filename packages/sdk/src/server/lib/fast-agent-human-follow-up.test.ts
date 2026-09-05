@@ -133,6 +133,67 @@ describe('persistFastAgentInlineHumanTurn', () => {
     expect(mocks.updateWhere).toHaveBeenCalledOnce();
   });
 
+  it('does not let a reaction supersede a parked or interrupted turn', async () => {
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'inline',
+      deliveredAt: null,
+      discardedAt: null,
+    });
+
+    await expect(
+      persistFastAgentInlineHumanTurn({
+        parent,
+        event: {
+          ...event,
+          input: {
+            type: 'reaction',
+            externalInput: {
+              type: 'reaction_added',
+              provider: 'slack',
+              reactions: [{ name: 'thumbsup' }],
+              reactor: { externalUserId: 'user-1' },
+              message: {
+                workspaceId: 'team-1',
+                channelId: 'channel-1',
+                messageId: '100.1',
+                threadId: '100.1',
+                text: 'Earlier message',
+              },
+              eventId: '100.3',
+            },
+          },
+        },
+      }),
+    ).resolves.toEqual({ id: 'row-1', eventKey: 'stable-event-key' });
+    // The reaction's own row is persisted, but the older pending inline row
+    // (a turn parked for a retry or waiting to resume) is left alone.
+    expect(mocks.insertOnConflict).toHaveBeenCalledOnce();
+    expect(mocks.updateWhere).not.toHaveBeenCalled();
+  });
+
+  it('does not let a platform event supersede a parked or interrupted turn', async () => {
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'inline',
+      deliveredAt: null,
+      discardedAt: null,
+    });
+
+    await expect(
+      persistFastAgentInlineHumanTurn({
+        parent,
+        event: {
+          ...event,
+          turnSource: 'platform_event',
+          platformEventKind: 'delegated_task',
+          setupSession: true,
+        },
+      }),
+    ).resolves.toEqual({ id: 'row-1', eventKey: 'stable-event-key' });
+    expect(mocks.updateWhere).not.toHaveBeenCalled();
+  });
+
   it('returns no durable handle when the same message already settled', async () => {
     mocks.findFirst.mockResolvedValue({
       id: 'row-1',

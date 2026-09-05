@@ -2904,6 +2904,7 @@ export async function answerFastAgentQuestion({
       await reconcileFastAgentInferenceRetryNotices(
         session.id,
         'next_turn_reconcile',
+        durableAdmission ? { excludeEventId: durableAdmission.eventId } : {},
       ).catch((error) => {
         console.warn(
           `[Fast Agent] Failed to reconcile interrupted inference retry notices: ${formatErrorForLog(error)}`,
@@ -5253,6 +5254,7 @@ export async function answerFastAgentQuestion({
         await reconcileFastAgentInferenceRetryNotices(
           canonicalConversationId,
           'turn_settled_reconcile',
+          durableAdmission ? { excludeEventId: durableAdmission.eventId } : {},
         ).catch((error) => {
           console.warn(
             `[Fast Agent] Failed to reconcile settled inference retry notices: ${formatErrorForLog(error)}`,
