@@ -83,7 +83,7 @@ export function createFastAgentTaskLauncher(
       reasoningEffort,
       parentSessionId,
     });
-    const taskWithLaunchOverrides = {
+    const task = {
       ...builtTask,
       payload: {
         ...builtTask.payload,
@@ -95,17 +95,9 @@ export function createFastAgentTaskLauncher(
         }),
         ...(branch ? { branch } : {}),
         ...(launchIdempotencyKey ? { launchIdempotencyKey } : {}),
+        ...(images?.length ? { images } : {}),
       },
     };
-    const task = images?.length
-      ? {
-          ...taskWithLaunchOverrides,
-          payload: {
-            ...taskWithLaunchOverrides.payload,
-            images,
-          },
-        }
-      : taskWithLaunchOverrides;
     let taskUrl: string | undefined;
     let preparedTaskRun: { id: number; taskId: string } | undefined;
 
@@ -207,13 +199,7 @@ export function createFastAgentSlackTaskLauncher(
     afterKickoff: params.afterKickoff,
     onQueueFailure: params.onQueueFailure,
     rendersTaskLink: params.rendersTaskLink,
-    buildTask: ({
-      prompt,
-      environmentId,
-      model,
-      reasoningEffort,
-      parentSessionId,
-    }) => ({
+    buildTask: ({ prompt, environmentId, model, reasoningEffort }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
         repo: params.repoForPayload ?? ALL_REPOSITORIES,
@@ -232,18 +218,6 @@ export function createFastAgentSlackTaskLauncher(
           ? { communicationMessageId: params.messageId }
           : {}),
         ...(slackConversationUrl ? { slackConversationUrl } : {}),
-        ...buildFastAgentChildTaskMetadata({
-          sessionId: parentSessionId,
-          conversation: {
-            surface: 'slack',
-            workspaceId: params.teamId,
-            conversationId: params.threadTs,
-            replyTarget: {
-              channelId: params.channelId,
-              threadId: params.threadTs,
-            },
-          },
-        }),
         ...(params.liveTaskStream ? { liveTaskStream: true } : {}),
         ...(environmentId && environmentId !== ALL_REPOSITORIES
           ? { environmentId }
@@ -259,39 +233,20 @@ export function createFastAgentSlackTaskLauncher(
 
 export function createFastAgentWebTaskLauncher(params: {
   userId: string;
-  conversation: {
-    surface: 'web' | 'automation';
-    workspaceId: string;
-    conversationId: string;
-  };
 }): LaunchFastAgentTask {
   return createFastAgentTaskLauncher({
     userId: params.userId,
     surface: 'web',
     taskUrlCampaign: 'fast-delegation',
     rendersTaskLink: true,
-    buildTask: ({
-      prompt,
-      environmentId,
-      branch,
-      launchIdempotencyKey,
-      model,
-      reasoningEffort,
-      parentSessionId,
-    }) => ({
+    buildTask: ({ prompt, environmentId, model, reasoningEffort }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
         repo: ALL_REPOSITORIES,
         description: prompt,
-        ...buildFastAgentChildTaskMetadata({
-          sessionId: parentSessionId,
-          conversation: params.conversation,
-        }),
         ...(environmentId && environmentId !== ALL_REPOSITORIES
           ? { environmentId }
           : {}),
-        ...(branch ? { branch } : {}),
-        ...(launchIdempotencyKey ? { launchIdempotencyKey } : {}),
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),

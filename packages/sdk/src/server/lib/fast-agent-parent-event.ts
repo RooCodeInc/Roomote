@@ -655,7 +655,6 @@ async function createWebFastAgentParentTurn(params: {
     adapter: {
       launchTask: createFastAgentWebTaskLauncher({
         userId: actorUserId,
-        conversation: session.conversation,
       }),
       // Web replies are read from the canonical transcript; posting is the
       // persistence the service already performs.
