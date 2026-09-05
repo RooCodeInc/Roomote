@@ -79,9 +79,41 @@ describe('parseSessionWakeupSchedule', () => {
     });
   });
 
+  it('holds high-frequency cron to the same cap as intervals', () => {
+    expect(() => parseSessionWakeupSchedule('cron * * * * *', options)).toThrow(
+      /Cron schedules that fire more often/,
+    );
+    expect(() =>
+      parseSessionWakeupSchedule('cron */2 * * * * UTC', options),
+    ).toThrow(/Cron schedules that fire more often/);
+    const bounded = parseSessionWakeupSchedule('cron * * * * * x3', options);
+    expect(bounded.maxRuns).toBe(3);
+    expect(bounded.schedule).toEqual({
+      mode: 'cron',
+      expression: '* * * * *',
+      timezone: 'America/New_York',
+    });
+    const withTz = parseSessionWakeupSchedule(
+      'cron * * * * * UTC until 2026-09-04T18:00:00Z',
+      options,
+    );
+    expect(withTz.schedule).toEqual({
+      mode: 'cron',
+      expression: '* * * * *',
+      timezone: 'UTC',
+    });
+    expect(withTz.until?.toISOString()).toBe('2026-09-04T18:00:00.000Z');
+    expect(() =>
+      parseSessionWakeupSchedule('cron */10 * * * *', options),
+    ).not.toThrow();
+    expect(() =>
+      parseSessionWakeupSchedule('cron 0 9 * * 1-5 Europe/Berlin x2', options),
+    ).not.toThrow();
+  });
+
   it('enforces the tight-interval cap through the string form', () => {
     expect(() => parseSessionWakeupSchedule('every 1m', options)).toThrow(
-      /x<count>|until/,
+      /run count|end time/,
     );
     expect(() =>
       parseSessionWakeupSchedule('every 1m x3', options),

@@ -205,6 +205,7 @@ export function validateSessionWakeupCaps(params: {
   until: Date | null;
 }): void {
   const { schedule } = params;
+  const uncapped = params.maxRuns === null && params.until === null;
   // A once schedule is inherently a single run; a stray maxRuns or until from
   // the model is ignored rather than rejected.
   if (schedule.mode === 'once') return;
@@ -216,13 +217,56 @@ export function validateSessionWakeupCaps(params: {
   if (
     schedule.mode === 'interval' &&
     schedule.everyMinutes < SESSION_WAKEUP_UNCAPPED_MIN_INTERVAL_MINUTES &&
-    params.maxRuns === null &&
-    params.until === null
+    uncapped
   ) {
     throw new SessionWakeupValidationError(
-      `Intervals under ${SESSION_WAKEUP_UNCAPPED_MIN_INTERVAL_MINUTES} minutes need maxRuns or until so they cannot run forever.`,
+      `Intervals under ${SESSION_WAKEUP_UNCAPPED_MIN_INTERVAL_MINUTES} minutes need a run count ("x<count>") or an end time ("until <ISO date-time>") so they cannot run forever.`,
     );
   }
+  // A cron expression can fire as often as every minute; hold it to the same
+  // bound as an interval by sampling the gap between upcoming occurrences.
+  if (
+    schedule.mode === 'cron' &&
+    uncapped &&
+    estimateCronMinGapMinutes(schedule, params.firstRunAt) <
+      SESSION_WAKEUP_UNCAPPED_MIN_INTERVAL_MINUTES
+  ) {
+    throw new SessionWakeupValidationError(
+      `Cron schedules that fire more often than every ${SESSION_WAKEUP_UNCAPPED_MIN_INTERVAL_MINUTES} minutes need a run count ("x<count>") or an end time ("until <ISO date-time>") so they cannot run forever.`,
+    );
+  }
+}
+
+const CRON_GAP_SAMPLES = 24;
+
+/**
+ * The smallest gap, in minutes, between the next `CRON_GAP_SAMPLES`
+ * occurrences after `from`. A sample is enough to catch every-minute and
+ * every-few-minutes patterns, which are the ones the cap exists for.
+ */
+export function estimateCronMinGapMinutes(
+  schedule: Extract<SessionWakeupSchedule, { mode: 'cron' }>,
+  from: Date,
+): number {
+  const interval = CronExpressionParser.parse(schedule.expression, {
+    currentDate: from,
+    tz: schedule.timezone,
+  });
+  let previous: number | null = null;
+  let minGap = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < CRON_GAP_SAMPLES; index += 1) {
+    let next: number;
+    try {
+      next = interval.next().getTime();
+    } catch {
+      break;
+    }
+    if (previous !== null) {
+      minGap = Math.min(minGap, (next - previous) / MINUTE_MS);
+    }
+    previous = next;
+  }
+  return minGap;
 }
 
 function formatMinutes(minutes: number): string {

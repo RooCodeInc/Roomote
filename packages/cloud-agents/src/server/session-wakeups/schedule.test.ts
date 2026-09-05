@@ -180,7 +180,7 @@ describe('validateSessionWakeupCaps', () => {
         maxRuns: null,
         until: null,
       }),
-    ).toThrow(/maxRuns or until/);
+    ).toThrow(/run count|end time/);
     expect(() =>
       validateSessionWakeupCaps({
         schedule: { mode: 'interval', everyMinutes: 2 },

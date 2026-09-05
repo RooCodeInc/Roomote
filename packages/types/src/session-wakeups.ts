@@ -77,7 +77,7 @@ export const SESSION_WAKEUP_SCHEDULE_GRAMMAR = `One of:
 - "in <n>m|h|d" for a one-shot delay, e.g. "in 2m", "in 90m", "in 3h" (preferred for reminders and delayed follow-ups)
 - "at <ISO 8601 date-time with UTC offset>" for a one-shot at an absolute time, e.g. "at 2026-09-04T15:00:00-04:00"
 - "every <n>m|h|d" for a repeating interval, e.g. "every 10m", "every 6h"; add "x<count>" to stop after that many runs ("every 1m x3") or "until <ISO 8601>" to stop after a time ("every 10m until 2026-09-04T18:00:00Z")
-- "cron <five-field expression> [IANA timezone]" for a calendar schedule, e.g. "cron 0 9 * * 1-5 America/New_York" (timezone defaults to the deployment timezone)`;
+- "cron <five-field expression> [IANA timezone]" for a calendar schedule, e.g. "cron 0 9 * * 1-5 America/New_York" (timezone defaults to the deployment timezone); "x<count>" and "until <ISO 8601>" work here too, and a cron that fires more often than every 5 minutes requires one of them`;
 
 export const MANAGE_WAKEUPS_ACTIONS = [
   'create',

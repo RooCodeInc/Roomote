@@ -41,7 +41,9 @@ const EVERY_RE = new RegExp(
   `^every\\s+(?:${DURATION}|(minute|hour|day))(?:\\s+(.*))?$`,
   'i',
 );
-const CRON_RE = /^cron\s+(\S+\s+\S+\s+\S+\s+\S+\s+\S+)(?:\s+(\S+))?$/i;
+const CRON_RE = /^cron\s+(\S+\s+\S+\s+\S+\s+\S+\s+\S+)(?:\s+(.*))?$/i;
+// A timezone token is anything that is not a modifier keyword or number.
+const MODIFIER_START_RE = /^(?:x\s*\d*|\d+|for|until)$/i;
 const COUNT_RE =
   /^(?:x\s*(\d+)|(\d+)\s*(?:x|times|runs)|for\s+(\d+)\s+(?:runs|times))$/i;
 const UNTIL_RE = /^until\s+(\S+)$/i;
@@ -155,15 +157,22 @@ export function parseSessionWakeupSchedule(
 
   const cronMatch = CRON_RE.exec(text);
   if (cronMatch) {
+    const trailing = (cronMatch[2] ?? '').trim().split(/\s+/).filter(Boolean);
+    const timezone =
+      trailing[0] && !MODIFIER_START_RE.test(trailing[0])
+        ? trailing.shift()
+        : undefined;
     const normalized = normalizeSessionWakeupSchedule(
       {
         mode: 'cron',
         expression: cronMatch[1]!,
-        ...(cronMatch[2] ? { timezone: cronMatch[2] } : {}),
+        ...(timezone ? { timezone } : {}),
       },
       options,
     );
-    return { ...normalized, maxRuns: null, until: null };
+    const caps = parseModifiers(text, trailing.join(' '));
+    validateSessionWakeupCaps({ ...normalized, ...caps });
+    return { ...normalized, ...caps };
   }
 
   // A bare duration ("2m", "10 minutes") is ambiguous between a delay and a

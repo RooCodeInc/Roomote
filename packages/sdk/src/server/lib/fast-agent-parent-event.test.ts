@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   findCustomAutomation: vi.fn(),
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
+  findWakeup: vi.fn(),
   findTaskRuns: vi.fn(),
   getConversationLookupIds: vi.fn(),
   findTaskPullRequests: vi.fn(),
@@ -138,6 +139,7 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   inArray: vi.fn((...args: unknown[]) => args),
   getCustomAutomationById: mocks.findCustomAutomation,
+  getSessionWakeupById: mocks.findWakeup,
   slackInstallations: {
     isActive: 'slack_installations.is_active',
     teamId: 'slack_installations.team_id',
@@ -2733,6 +2735,61 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
     expect(mocks.postMessage).not.toHaveBeenCalled();
     expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+  });
+
+  it('skips a scheduled wakeup that was cancelled after its occurrence was admitted', async () => {
+    mocks.findWakeup.mockResolvedValueOnce({ status: 'cancelled' });
+    const result = await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'scheduled_wakeup',
+        eventId: 'wakeup-1:1',
+        wakeupId: 'wakeup-1',
+        name: 'Check the deploy',
+        prompt: 'Tell the user to check the deploy.',
+        runNumber: 1,
+        maxRuns: null,
+        firedAt: '2026-09-04T17:10:00.000Z',
+        nextRunAt: null,
+        reportPolicy: 'always',
+        createdByUserId: 'user-1',
+      },
+    });
+
+    expect(result).toBe('skipped');
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+    expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+  });
+
+  it('still runs a scheduled wakeup whose one-shot row completed at claim time', async () => {
+    mocks.findWakeup.mockResolvedValueOnce({ status: 'completed' });
+    const result = await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'scheduled_wakeup',
+        eventId: 'wakeup-1:1',
+        wakeupId: 'wakeup-1',
+        name: 'Check the deploy',
+        prompt: 'Tell the user to check the deploy.',
+        runNumber: 1,
+        maxRuns: null,
+        firedAt: '2026-09-04T17:10:00.000Z',
+        nextRunAt: null,
+        reportPolicy: 'always',
+        createdByUserId: 'user-1',
+      },
+    });
+
+    expect(result).toBe('delivered');
+    expect(mocks.answerQuestion).toHaveBeenCalledOnce();
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnSource: 'platform_event',
+        platformEventKind: 'scheduled_wakeup',
+        platformEventVisibility: 'required',
+        userId: 'user-1',
+      }),
+    );
   });
 
   it('answers a pull request mention routed into a Slack Session on both the thread and the pull request', async () => {

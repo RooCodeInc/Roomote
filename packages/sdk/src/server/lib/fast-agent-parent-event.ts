@@ -22,6 +22,7 @@ import {
   customAutomations,
   eq,
   getCustomAutomationById,
+  getSessionWakeupById,
   inArray,
   slackInstallations,
   taskArtifacts,
@@ -2185,6 +2186,21 @@ export async function deliverFastAgentParentEventWithLock(
         columns: { status: true },
       });
       if (!currentRun || EXITED_RUN_STATUSES.has(currentRun.status)) {
+        return 'skipped';
+      }
+    }
+    // A wakeup can be cancelled (or its Session archived) after its
+    // occurrence was admitted here but before this turn runs. The row is
+    // authoritative: a cancelled or failed wakeup must not speak. A row that
+    // is already `completed` is fine, because the claim that completes a
+    // one-shot or final run happens before delivery.
+    if (params.event.type === 'scheduled_wakeup') {
+      const wakeup = await getSessionWakeupById(params.event.wakeupId);
+      if (
+        !wakeup ||
+        wakeup.status === 'cancelled' ||
+        wakeup.status === 'failed'
+      ) {
         return 'skipped';
       }
     }
