@@ -1,6 +1,7 @@
 import {
   enqueueTask,
   getOrCreateFastAgentSession,
+  upsertFastAgentMessage,
 } from '@roomote/cloud-agents/server';
 import {
   db,
@@ -20,7 +21,10 @@ import {
   slackInstallations,
 } from '@roomote/db/server';
 import {
+  ACP_ENVELOPE_EVENT_TYPES,
   ALL_REPOSITORIES,
+  buildFastAgentChildTaskMetadata,
+  getCommunicationAutomationTargetKind,
   isConfiguredAutomationTarget,
   isBackgroundAutomationUserTargetKind,
   isCommunicationAutomationTarget,
@@ -32,8 +36,6 @@ import {
 } from '@roomote/types';
 
 import {
-  buildDestinationPromptContext,
-  buildDestinationTaskPayloadFields,
   findTeamsConversationRoute,
   listConnectedCommunicationProviders,
   type ResolvedAutomationDestination,
@@ -164,35 +166,6 @@ async function resolveDestination(
   };
 }
 
-function buildDefaultReportPresentationGuidance(
-  hasDestination: boolean,
-): string {
-  const channelGuidance = hasDestination
-    ? '\n- The first `send_chat_reply` is the report root and must stand alone. If important supporting detail would make it too long, keep the root concise and send the detail in follow-up replies in the same thread with clear headings. Keep essential conclusions and required actions in the root.'
-    : '';
-
-  return `<default_report_presentation>
-These are defaults, not requirements that override the automation request above. Before applying them, check the request for explicit guidance about format, structure, length, tone, audience, or where details should appear. On any conflict, follow the request. Apply these defaults only where the request is silent.
-
-- Lead with the result or most important takeaway in 1-2 sentences.
-- Keep the primary report concise, normally no more than about 250 words.
-- When the report has multiple topics, use 2-4 short bold Markdown headings with bullets underneath them.
-- Keep bullets short and put one finding, decision, or action in each bullet.
-- Prioritize decision-useful findings. Omit routine methodology, exhaustive test transcripts, and repeated conclusions unless the request asks for them or they materially support the result.
-- If the request explicitly requires a clean or no-action report, say so briefly and include only the most useful supporting evidence or caveats.
-- Use inline links with descriptive labels instead of raw URLs when possible.${channelGuidance}
-</default_report_presentation>`;
-}
-
-/**
- * Adds default reporting guidance to every custom automation prompt and,
- * when configured, makes its destination conversation available for
- * interruption-worthy results.
- *
- * A custom automation may intentionally omit a report destination. When it
- * does, prefer the admin who created/enabled it as a private fallback so an
- * enabled automation does not disappear from the communication surface.
- */
 async function resolveOwnerFallbackDestination(
   ownerUserId: string | null,
 ): Promise<ResolvedAutomationDestination | null> {
@@ -222,38 +195,6 @@ async function resolveOwnerFallbackDestination(
   }
 
   return null;
-}
-
-function buildCustomAutomationDescription(
-  prompt: string,
-  destination: ResolvedAutomationDestination | null,
-  options: { allRepositories: boolean },
-): string {
-  const presentationGuidance = buildDefaultReportPresentationGuidance(
-    destination !== null,
-  );
-
-  if (!destination) {
-    return `${prompt}
-
-${presentationGuidance}`;
-  }
-
-  const promptContext = buildDestinationPromptContext(destination);
-  const orgWideSuggestionInstruction = options.allRepositories
-    ? ' This run spans all active repositories. Every launchable suggestion must include the concrete `targetRepositoryFullName` that owns the work so Roomote can start it in the matching environment.'
-    : '';
-
-  return `${prompt}
-
-${presentationGuidance}
-
-<task_context>
-  <source>background-automation</source>
-  <${promptContext.channelTag}>${destination.channelId}</${promptContext.channelTag}>
-</task_context>
-
-The ${promptContext.surfaceLabel} conversation above is available for reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post anywhere else. Default to finishing silently. Interrupt the conversation only when there is something a human should see now: a concrete actionable or important finding, a meaningful completed result, a durable blocker, or required user input. Routine success, healthy status, no-change results, and findings that are neither actionable nor important should not produce a message unless the automation request explicitly asks for them. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. If you do report, your first message creates this run's thread in that conversation, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread. Write the report as the result itself, like a teammate sharing what they found or did: do not mention this automation, the schedule, the task, or that anything requested the work; the message footer already attributes the automation. Lead with the outcome, not with framing like "Automation requested ..." or "Outcome: ...".${orgWideSuggestionInstruction}`;
 }
 
 function isFastDeliveryTarget(target: AutomationTarget): boolean {
@@ -348,7 +289,7 @@ async function buildFastAutomationConversation(params: {
     const thread = await provider.createTaskThread({
       channelId: destination.channelId,
       name: automation.name,
-      initialText: `${automation.name} is running in Fast mode.`,
+      initialText: `${automation.name} is running.`,
     });
     return {
       ...(thread.messageId ? { rootMessageId: thread.messageId } : {}),
@@ -470,56 +411,187 @@ async function runFastCustomAutomation(params: {
       event,
     });
   } catch (error) {
-    const message = `${params.automation.name} failed: ${error instanceof Error ? error.message : String(error)}`;
-    try {
-      if (conversation.surface === 'discord' && rootMessageId) {
-        const provider =
-          await createDiscordCommunicationProviderFromRuntimeCredentials();
-        await provider?.editMessage({
-          channelId:
-            conversation.replyTarget.threadId ??
-            conversation.replyTarget.channelId,
-          messageId: rootMessageId,
-          text: message,
-        });
-      } else if (conversation.surface === 'teams' && rootMessageId) {
-        const provider =
-          await createTeamsCommunicationProviderFromRuntimeCredentials();
-        const route = await findTeamsConversationRoute(
+    await reportFastAutomationStartupFailure({
+      automation: params.automation,
+      conversation,
+      rootMessageId,
+      error,
+    });
+    throw error;
+  }
+}
+
+/**
+ * A run that fails before its Session can speak leaves the surface root it
+ * already posted (Discord, Teams) or the chat (Telegram) with a plain error,
+ * so the destination is not left showing "is running" forever.
+ */
+async function reportFastAutomationStartupFailure(params: {
+  automation: CustomAutomation;
+  conversation: FastAgentConversation;
+  rootMessageId?: string;
+  error: unknown;
+}): Promise<void> {
+  const { conversation, rootMessageId } = params;
+  const message = `${params.automation.name} failed: ${params.error instanceof Error ? params.error.message : String(params.error)}`;
+  try {
+    if (conversation.surface === 'discord' && rootMessageId) {
+      const provider =
+        await createDiscordCommunicationProviderFromRuntimeCredentials();
+      await provider?.editMessage({
+        channelId:
+          conversation.replyTarget.threadId ??
           conversation.replyTarget.channelId,
-          conversation.workspaceId,
-        );
-        const persistedDirectMessageServiceUrl = conversation.replyTarget
-          .threadId
-          ? undefined
-          : conversation.replyTarget.serviceUrl;
-        const serviceUrl =
-          route?.serviceUrl ?? persistedDirectMessageServiceUrl;
-        if (provider && serviceUrl) {
-          await provider.updateMessage({
-            channelId: conversation.replyTarget.channelId,
-            messageId: rootMessageId,
-            serviceUrl,
-            text: message,
-            textFormat: 'markdown',
-          });
-        }
-      } else if (conversation.surface === 'telegram') {
-        const provider =
-          await createTelegramCommunicationProviderFromRuntimeCredentials();
-        await provider?.postMessage({
+        messageId: rootMessageId,
+        text: message,
+      });
+    } else if (conversation.surface === 'teams' && rootMessageId) {
+      const provider =
+        await createTeamsCommunicationProviderFromRuntimeCredentials();
+      const route = await findTeamsConversationRoute(
+        conversation.replyTarget.channelId,
+        conversation.workspaceId,
+      );
+      const persistedDirectMessageServiceUrl = conversation.replyTarget.threadId
+        ? undefined
+        : conversation.replyTarget.serviceUrl;
+      const serviceUrl = route?.serviceUrl ?? persistedDirectMessageServiceUrl;
+      if (provider && serviceUrl) {
+        await provider.updateMessage({
           channelId: conversation.replyTarget.channelId,
+          messageId: rootMessageId,
+          serviceUrl,
           text: message,
           textFormat: 'markdown',
         });
       }
-    } catch (updateError) {
-      console.warn(
-        `${LOG_PREFIX} Failed to update Fast automation error output: ${updateError instanceof Error ? updateError.message : String(updateError)}`,
-      );
+    } else if (conversation.surface === 'telegram') {
+      const provider =
+        await createTelegramCommunicationProviderFromRuntimeCredentials();
+      await provider?.postMessage({
+        channelId: conversation.replyTarget.channelId,
+        text: message,
+        textFormat: 'markdown',
+      });
     }
-    throw error;
+  } catch (updateError) {
+    console.warn(
+      `${LOG_PREFIX} Failed to update Fast automation error output: ${updateError instanceof Error ? updateError.message : String(updateError)}`,
+    );
   }
+}
+
+/**
+ * An environment-targeted automation launches its task without a Fast turn,
+ * so nothing else writes the rows the Session transcript is built from. This
+ * records the same shape a delegating turn leaves behind: the automation
+ * prompt as the request (rendered by the web the way Fast automation prompts
+ * are), a kickoff line, and the `launch_task` result the transcript renders
+ * as the task card.
+ */
+function createSandboxAutomationTranscript(params: {
+  sessionId: string;
+  conversation: FastAgentConversation;
+  automation: CustomAutomation;
+  eventId: string;
+  trigger: 'schedule' | 'manual';
+  environmentName: string | null;
+}) {
+  const turnId = `automation-launch:${params.eventId}`;
+  const base = {
+    turnId,
+    source: params.conversation.surface,
+    nativeSessionId: null,
+  } as const;
+
+  return {
+    turnId,
+    recordPrompt: async () => {
+      const event = {
+        type: 'automation_triggered',
+        eventId: params.eventId,
+        automationId: params.automation.id,
+        automationName: params.automation.name,
+        prompt: params.automation.prompt,
+        trigger: params.trigger,
+      };
+      await upsertFastAgentMessage({
+        sessionId: params.sessionId,
+        message: {
+          ...base,
+          eventId: `${turnId}:user`,
+          turnSeq: 0,
+          ts: Date.now(),
+          eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          role: 'user',
+          contentBlocks: [
+            {
+              type: 'text',
+              text: `<platform_event>${JSON.stringify(event)}</platform_event>`,
+            },
+          ],
+          metadata: {
+            visibleInTranscript: false,
+            turnSource: 'platform_event',
+            platformEventKind: 'automation',
+          },
+          payload: {},
+        },
+      });
+    },
+    recordKickoff: async () => {
+      await upsertFastAgentMessage({
+        sessionId: params.sessionId,
+        message: {
+          ...base,
+          eventId: `${turnId}:kickoff`,
+          turnSeq: 1,
+          ts: Date.now(),
+          eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+          role: 'assistant',
+          contentBlocks: [
+            {
+              type: 'text',
+              text: params.environmentName
+                ? `Started a task in ${params.environmentName}.`
+                : 'Started a task.',
+            },
+          ],
+          metadata: { visibleInTranscript: true, purpose: 'progress' },
+          payload: { purpose: 'progress', kickoff: true },
+        },
+      });
+    },
+    recordLaunch: async (taskId: string) => {
+      await upsertFastAgentMessage({
+        sessionId: params.sessionId,
+        message: {
+          ...base,
+          eventId: `${turnId}:launch`,
+          turnSeq: 2,
+          ts: Date.now(),
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+          role: 'tool',
+          contentBlocks: [],
+          metadata: { visibleInTranscript: true },
+          payload: {
+            toolCallId: `${turnId}:tool:0`,
+            title: 'launch_task',
+            toolName: 'launch_task',
+            status: 'completed',
+            isExecute: false,
+            isRead: false,
+            isMcp: false,
+            isRoomoteNativeTool: true,
+            command: null,
+            exitCode: null,
+            output: JSON.stringify({ success: true, taskId }),
+            rawInput: { arguments: { prompt: params.automation.prompt } },
+          },
+        },
+      });
+    },
+  };
 }
 
 async function launchCustomAutomationRow(
@@ -621,7 +693,7 @@ async function launchCustomAutomationRow(
     fastExecution || automation.allRepositories
       ? null
       : await db.query.environments.findFirst({
-          columns: { id: true },
+          columns: { id: true, name: true },
           where: eq(environments.id, automation.environmentId!),
         });
 
@@ -641,12 +713,8 @@ async function launchCustomAutomationRow(
   // result; if that admin has no linked DM, preserve the task-UI fallback.
   let destination: ResolvedAutomationDestination | null = null;
   if (isConfiguredAutomationTarget(automation.target)) {
-    const deferSlackChannelResolution =
-      !fastExecution &&
-      automation.target.provider === 'slack' &&
-      automation.target.targetKind === 'slack_channel';
-    if (fastExecution && !isFastDeliveryTarget(automation.target)) {
-      const message = `${PROVIDER_LABELS[automation.target.provider as CommunicationProvider]} report destinations of this type are not supported in Fast mode.`;
+    if (!isFastDeliveryTarget(automation.target)) {
+      const message = `${PROVIDER_LABELS[automation.target.provider as CommunicationProvider]} report destinations of this type are not supported.`;
       result.skippedReason = message;
       result.errors.push(message);
       await recordCustomAutomationRunOutcome(db, {
@@ -657,16 +725,7 @@ async function launchCustomAutomationRow(
       return result;
     }
 
-    // Sandbox reports are late-bound: a clean run may intentionally never
-    // contact Slack, so validate installation and channel access only when its
-    // first send_chat_reply actually creates the report root.
-    destination = deferSlackChannelResolution
-      ? {
-          provider: 'slack',
-          channelId: automation.target.externalRef,
-          source: 'automation_target',
-        }
-      : await resolveDestination(automation.target);
+    destination = await resolveDestination(automation.target);
     if (!destination) {
       const message = isBackgroundAutomationUserTargetKind(
         automation.target.targetKind,
@@ -685,10 +744,8 @@ async function launchCustomAutomationRow(
       return result;
     }
 
-    const connected = deferSlackChannelResolution
-      ? null
-      : await listConnectedCommunicationProviders();
-    if (connected && !connected.includes(destination.provider)) {
+    const connected = await listConnectedCommunicationProviders();
+    if (!connected.includes(destination.provider)) {
       const message = `${destination.provider} is not connected.`;
       result.skippedReason = message;
       result.errors.push(message);
@@ -758,86 +815,122 @@ async function launchCustomAutomationRow(
       return result;
     }
 
+    // An environment-targeted run is the Session's own delegation: the Session
+    // owns the report conversation, the task reports back to it, and its
+    // settle turn is what talks to the channel. The launch is pinned rather
+    // than model-chosen, so no Fast turn runs until the task settles.
+    if (!automation.createdByUserId) {
+      throw new Error('Automation run-as user is not configured.');
+    }
     const eventId = `${automation.id}:${eventClaimedAt.toISOString()}`;
-    const conversation = buildAutomationConversation(automation, eventId);
-    const parentSession = await getOrCreateFastAgentSession({
-      owner: { kind: 'automation', automationKey: 'custom_automation' },
-      conversation,
-      initialTitle: automation.name,
-    });
-
-    const launchResult = await enqueueTask({
-      task: {
-        type: TaskPayloadKind.StandardTask,
-        ...(modelOverride?.harness ? { harness: modelOverride.harness } : {}),
-        payload: {
-          repo: automation.allRepositories ? ALL_REPOSITORIES : '',
-          fastAgentSessionId: parentSession.id,
-          ...(automation.environmentId
-            ? { environmentId: automation.environmentId }
-            : {}),
-          description: buildCustomAutomationDescription(
-            automation.prompt,
-            destination,
-            {
-              allRepositories: automation.allRepositories,
-            },
-          ),
-          ...(destination
-            ? buildDestinationTaskPayloadFields(destination)
-            : {}),
-          // customAutomationId authorizes the Slack late-bound thread flow:
-          // the run's first send_chat_reply posts a root message in the
-          // destination channel and binds it as the task thread, so later
-          // updates continue the thread and user replies route back into the
-          // task. The channel/slackChannel payload fields give the sandbox
-          // its Slack reply context (ROOMOTE_SLACK_CHANNEL).
-          ...(destination ? { customAutomationId: automation.id } : {}),
-          ...(destination?.provider === 'slack'
+    const { conversation, rootMessageId } =
+      await buildFastAutomationConversation({
+        automation,
+        eventId,
+        destination,
+        target: isConfiguredAutomationTarget(automation.target)
+          ? automation.target
+          : destination
             ? {
-                channel: destination.channelId,
-                slackChannel: destination.channelId,
-                ...(destination.teamId
-                  ? {
-                      teamId: destination.teamId,
-                      slackTeamId: destination.teamId,
-                    }
-                  : {}),
+                provider: destination.provider,
+                targetKind: getCommunicationAutomationTargetKind(
+                  destination.provider,
+                  'direct_message',
+                ),
+                externalRef: automation.createdByUserId,
               }
-            : {}),
-          ...(modelOverride?.harnessModelOverrides
-            ? { harnessModelOverrides: modelOverride.harnessModelOverrides }
-            : {}),
-          ...(automation.reasoningEffort
-            ? { reasoningEffort: automation.reasoningEffort }
-            : {}),
+            : null,
+      });
+    let launchedTaskId: string;
+    try {
+      const session = await getOrCreateFastAgentSession({
+        userId: automation.createdByUserId,
+        conversation,
+        initialTitle: automation.name,
+      });
+      if (rootMessageId) {
+        await recordFastAgentConversationMessage({
+          sessionId: session.id,
+          conversation,
+          messageId: rootMessageId,
+        });
+      }
+      const transcript = createSandboxAutomationTranscript({
+        sessionId: session.id,
+        conversation,
+        automation,
+        eventId,
+        trigger: opts.manualTrigger ? 'manual' : 'schedule',
+        environmentName: environment?.name ?? null,
+      });
+      await transcript.recordPrompt();
+
+      const launchResult = await enqueueTask(
+        {
+          task: {
+            type: TaskPayloadKind.StandardTask,
+            ...(modelOverride?.harness
+              ? { harness: modelOverride.harness }
+              : {}),
+            payload: {
+              repo: automation.allRepositories ? ALL_REPOSITORIES : '',
+              description: automation.prompt,
+              customAutomationId: automation.id,
+              launchIdempotencyKey: transcript.turnId,
+              ...buildFastAgentChildTaskMetadata({
+                sessionId: session.id,
+                conversation,
+              }),
+              ...(automation.environmentId
+                ? { environmentId: automation.environmentId }
+                : {}),
+              ...(modelOverride?.harnessModelOverrides
+                ? { harnessModelOverrides: modelOverride.harnessModelOverrides }
+                : {}),
+              ...(automation.reasoningEffort
+                ? { reasoningEffort: automation.reasoningEffort }
+                : {}),
+            },
+          },
+          title: automation.name,
+          initiator: {
+            kind: 'automation',
+            key: 'custom_automation',
+            actor: {
+              externalId: automation.id,
+              displayName: automation.name,
+            },
+          },
+          workflow: 'standard',
+          surface: 'system',
+          trigger: opts.manualTrigger ? 'manual' : 'schedule',
         },
-      },
-      title: automation.name,
-      initiator: {
-        kind: 'automation',
-        key: 'custom_automation',
-        actor: {
-          externalId: automation.id,
-          displayName: automation.name,
+        {
+          beforeEnqueue: async () => {
+            await transcript.recordKickoff();
+          },
         },
-      },
-      workflow: 'standard',
-      surface: 'system',
-      trigger: opts.manualTrigger ? 'manual' : 'schedule',
-      ...(destination?.provider === 'slack'
-        ? { channels: { slackChannelId: destination.channelId } }
-        : {}),
-    });
+      );
+      await transcript.recordLaunch(launchResult.taskId);
+      launchedTaskId = launchResult.taskId;
+    } catch (error) {
+      await reportFastAutomationStartupFailure({
+        automation,
+        conversation,
+        rootMessageId,
+        error,
+      });
+      throw error;
+    }
 
     await recordCustomAutomationRunOutcome(db, {
       id: automation.id,
       status: 'succeeded',
-      lastLaunchedTaskId: launchResult.taskId,
+      lastLaunchedTaskId: launchedTaskId,
       launchClaimedAt,
     });
 
-    result.launchedTaskId = launchResult.taskId;
+    result.launchedTaskId = launchedTaskId;
     result.completed = true;
     return result;
   } catch (error) {
