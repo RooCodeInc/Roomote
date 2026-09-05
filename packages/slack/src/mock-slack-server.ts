@@ -88,6 +88,12 @@ export type MockSlackState = {
   channels: MockSlackChannel[];
   users: MockSlackUser[];
   messages?: MockSlackStoredMessage[];
+  agentSessions?: Array<{
+    channel: string;
+    threadTs: string;
+    status: string;
+    title?: string;
+  }>;
   /**
    * Bearer tokens accepted by app-config endpoints (`apps.manifest.create`).
    * Slack app configuration tokens live in a different token space than bot
@@ -1047,9 +1053,31 @@ export class MockSlackServer {
         return;
       }
 
-      case 'POST reactions.add':
       case 'POST agents.sessions.setStatus':
-      case 'POST agents.sessions.rename':
+      case 'POST agents.sessions.rename': {
+        const channel = String(jsonBody.channel_id ?? '');
+        const threadTs = String(jsonBody.thread_ts ?? '');
+        const sessions = (this.state.agentSessions ??= []);
+        let session = sessions.find(
+          (entry) => entry.channel === channel && entry.threadTs === threadTs,
+        );
+        if (!session) {
+          if (path === 'agents.sessions.rename') {
+            json(response, 200, { ok: false, error: 'session_not_found' });
+            return;
+          }
+          session = { channel, threadTs, status: String(jsonBody.status) };
+          sessions.push(session);
+        }
+        if (path === 'agents.sessions.setStatus') {
+          session.status = String(jsonBody.status);
+        } else {
+          session.title = String(jsonBody.title);
+        }
+        json(response, 200, { ok: true, title: session.title });
+        return;
+      }
+      case 'POST reactions.add':
       case 'POST agents.sessions.setTitle':
       case 'POST assistant.threads.setStatus':
       case 'POST assistant.threads.setTitle':

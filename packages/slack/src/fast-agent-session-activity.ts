@@ -51,19 +51,6 @@ export function createFastAgentSlackSessionActivity({
     return titleUpdate;
   };
 
-  const syncSettledTitle = async () => {
-    if (!settled || processingUpdate || !sessionTitle) return;
-    const response = await slack.setAgentSessionStatus({
-      channel,
-      threadTs,
-      status: 'active',
-    });
-    processingSucceeded = response.ok;
-    if (response.ok) {
-      await queueTitleSync(response.title);
-    }
-  };
-
   return {
     start() {
       if (processingTimer || processingUpdate || settled) return;
@@ -93,7 +80,16 @@ export function createFastAgentSlackSessionActivity({
         processingTimer = undefined;
       }
       if (!processingUpdate) {
-        await syncSettledTitle();
+        // Create the session during settlement; late titles must not reset a newer turn's status.
+        const response = await slack.setAgentSessionStatus({
+          channel,
+          threadTs,
+          status: 'active',
+        });
+        processingSucceeded = response.ok;
+        if (response.ok) {
+          await queueTitleSync(response.title);
+        }
         return;
       }
 
@@ -112,8 +108,8 @@ export function createFastAgentSlackSessionActivity({
       sessionTitle = normalizeSlackAgentSessionTitle(title);
       if (processingUpdate) {
         void processingUpdate.then(() => queueTitleSync());
-      } else {
-        void syncSettledTitle();
+      } else if (settled) {
+        void queueTitleSync();
       }
     },
   };
