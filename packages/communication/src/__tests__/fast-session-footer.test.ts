@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildFastSessionReplyFooterText,
+  buildFastSessionUrl,
   buildSelectedTaskSessionUrl,
 } from '../fast-session-footer';
 
@@ -98,6 +99,24 @@ describe('buildFastSessionReplyFooterText', () => {
 
     expect(footer).toContain(
       'Working on [PR #123](https://github.com/roomote/roomote/pull/123) and [PR #456](https://github.com/roomote/roomote/pull/456), [live preview](https://preview.roomote.dev)',
+    );
+  });
+
+  it('renders the GitHub footer as small subtext without changing its content', () => {
+    const sessionId = '11111111-1111-4111-8111-111111111111';
+
+    expect(
+      buildFastSessionReplyFooterText({
+        provider: 'github',
+        sessionId,
+        pullRequest: {
+          number: 123,
+          url: 'https://github.com/roomote/roomote/pull/123',
+        },
+        livePreviewUrl: 'https://preview.roomote.dev',
+      }),
+    ).toBe(
+      `<sub>Working on [PR #123](https://github.com/roomote/roomote/pull/123), [live preview](https://preview.roomote.dev), reply with @-mention or use the [web app](${buildFastSessionUrl('github', sessionId)}).</sub>`,
     );
   });
 

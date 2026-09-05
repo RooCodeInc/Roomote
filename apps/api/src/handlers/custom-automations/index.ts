@@ -341,6 +341,20 @@ customAutomationsRouter.get('/models', async (c) =>
   c.json(await getDeploymentTaskModelOptions()),
 );
 
+customAutomationsRouter.get('/:id', async (c) => {
+  const automation = await getCustomAutomationById(c.req.param('id'));
+  if (!automation) {
+    return c.json({ error: 'Custom automation was not found.' }, 404);
+  }
+  return c.json({
+    automation: {
+      id: automation.id,
+      name: automation.name,
+      prompt: automation.prompt,
+    },
+  });
+});
+
 customAutomationsRouter.post('/resolve-schedule', async (c) => {
   const parsed = z
     .object({ schedule: z.string().trim().min(1).max(500) })

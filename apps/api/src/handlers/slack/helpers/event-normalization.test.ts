@@ -58,7 +58,7 @@ describe('event-normalization', () => {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: '!fast check this thread',
+            text: 'check this thread',
           },
         },
       ],
@@ -67,10 +67,10 @@ describe('event-normalization', () => {
     expect(() => enrichSlackMessageEvent(event)).not.toThrow();
     expect(event.authoredText).toBe('');
     expect(event.agentContext).toBe(
-      ['Slack block text:', '!fast check this thread'].join('\n'),
+      ['Slack block text:', 'check this thread'].join('\n'),
     );
     expect(event.text).toBe(
-      ['Slack block text:', '!fast check this thread'].join('\n'),
+      ['Slack block text:', 'check this thread'].join('\n'),
     );
   });
 

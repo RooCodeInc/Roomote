@@ -2,6 +2,34 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.3.1 (2026-09-05)
+
+Roomote 1.3.1 improves Fast, Live Preview, chat, and MCP coordination while adding focused controls for pull request reviews and custom automations.
+
+### Highlights
+
+- Tailor a structured pull request review with an enabled model and reasoning effort, and inspect one custom automation prompt without loading every prompt into the conversation.
+- Keep Fast responsive with earlier acknowledgements, an automatic retry for provider rejections, and Slack follow-ups that retain task screenshots.
+- Poll compact Roomote MCP updates, recover Live Previews through actionable states, and keep integration arguments and organization-wide pull request links accurate.
+- Process chat conversations more reliably, keep expanded Slack task cards open through live updates, and report Redis outages accurately through BullMQ health checks.
+
+### Patch changes
+
+- BullMQ health checks now fail promptly with HTTP 503 when Redis is unavailable instead of staying green or timing out, while healthy checks retain queue diagnostics.
+- Telegram and Microsoft Teams no longer drop retried inbound messages after a transient webhook-processing failure.
+- Admins can ask Roomote to inspect one custom automation's configured prompt without loading every automation prompt into the conversation.
+- Fast now streams its acknowledgement before coding-task startup, so users see an immediate response while provisioning begins and do not receive duplicate acknowledgements after a restart.
+- Fast retries an inference provider rejection once from a fresh Session instead of immediately asking you to try again, and terminal failures now identify the model and the provider's bounded, redacted error.
+- Later Fast replies in Slack can attach screenshots from earlier tasks in the same Session across normal, streamed, and reaction-triggered replies, while foreign-task artifacts remain blocked.
+- GitHub review-thread follow-ups now keep each human turn in one evolving Roomote comment with a single quieter footer, instead of adding a new bot comment whenever delegated work reports back.
+- On-demand integration tools now accept their discovered required arguments, including nested objects and arrays, instead of rejecting otherwise valid calls.
+- Live Preview now explains setup, startup, timeout, expiry, and wake failures with actionable retry states, while concurrent resume requests converge on the same recovery instead of showing a false failure.
+- Organization-wide tasks no longer create invalid pull request links when a bare GitHub checkout result does not identify a concrete repository.
+- Fast Sessions can run structured pull request reviews with an explicitly enabled model and reasoning effort, while omitted choices continue to use the deployment's review defaults.
+- Fast now stays out of Slack conversations between people unless a message is directed at Roomote or it has a useful contribution, while mentions, direct messages, and directed follow-ups remain responsive without a separate `!fast` command.
+- Expanded Slack task cards now stay open while live progress and terminal results update in place.
+- Roomote MCP clients can poll compact cursor-based Session and task updates without repeatedly loading full transcripts or raw tool activity.
+
 ## 1.3.0 (2026-09-04)
 
 Roomote 1.3 brings every supported entry point into continuous Sessions, expands the Session workspace with artifacts and live previews, and makes Fast conversations more resilient across shared and interrupted work.
@@ -418,7 +446,7 @@ This release expands Fast and automation workflows, shortens initial setup, adds
 - Keep ChatGPT subscription OAuth credentials on the control plane and out of task sandboxes and restored snapshots.
 - Deliver GitHub installation approval notifications to requesters who use Discord without Slack.
 - Include complete Fast parent and advisor or judge inference usage in Costs analytics.
-- Make empty Fast invocations respond contextually and keep updates focused on useful outcomes instead of orchestration details.
+- Make empty Fast messages respond contextually and keep updates focused on useful outcomes instead of orchestration details.
 - Preserve exact Slack or Discord source-message links in pull requests created by Fast-delegated tasks.
 - Stop pull-request review prompts from reappearing after a user selects automatic Fix all handling.
 - Move completed tasks to Done after their pull request merges and resume settled delegated work under the original task.

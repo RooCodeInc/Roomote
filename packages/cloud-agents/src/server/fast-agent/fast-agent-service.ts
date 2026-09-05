@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
+import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
@@ -14,6 +15,7 @@ import {
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
   ROOMOTE_MCP_ID,
+  REASONING_EFFORT_VALUES,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
   fastAgentHumanFollowUpEventSchema,
@@ -239,6 +241,7 @@ const chatReplyArgsSchema = z.object({
     .max(10)
     .optional(),
 });
+
 const chatReactionArgsSchema = z.object({
   name: z.string().trim().min(1),
   purpose: z.enum(['ack', 'closeout']),
@@ -411,12 +414,13 @@ const launchTaskArgsSchema = z.object({
   environmentId: z.string().trim().min(1).nullable().optional(),
   model: z.string().trim().min(1).nullable().optional(),
   includeAttachments: z.boolean().optional().default(false),
-  kickoffMessage: z.string().trim().min(1),
 });
 
 const reviewPullRequestArgsSchema = z.object({
   repository: z.string().trim().min(1).optional(),
   pullRequestNumber: z.number().int().positive().optional(),
+  model: z.string().trim().min(1).nullable().optional(),
+  reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
   kickoffMessage: z.string().trim().min(1),
 });
 
@@ -671,10 +675,23 @@ type FastAgentInferenceRetryNotice = {
   attemptNumber: number;
   maxAttempts?: number;
   delayMs?: number;
+  /** The one fresh-start retry granted to a rejected request. */
+  freshSession?: boolean;
 };
 
 type FastAgentInferenceRetryOptions = {
   canRetry?: (error: unknown, failure: FastAgentInferenceFailure) => boolean;
+  /**
+   * A provider rejection (a non-retryable `provider_error`, typically a 4xx
+   * on the request as sent) is not worth repeating as-is, but the same
+   * request from a fresh session usually succeeds: a human "try again" is
+   * exactly that. Return true to grant one such retry per turn; the caller
+   * must then rebuild rather than continue the rejected session.
+   */
+  retryRejection?: (
+    error: unknown,
+    failure: FastAgentInferenceFailure,
+  ) => boolean;
   prepareRetry?: () => Promise<void> | void;
   /**
    * Offered the pending backoff after its notice is recorded and before the
@@ -740,6 +757,9 @@ export function findFastAgentDurableRetryScheduledError(
 }
 
 class FastAgentInferenceError extends Error {
+  /** Provider status and message, redacted and bounded, for the closeout. */
+  public readonly detail: string | undefined;
+
   constructor(
     public readonly failure: FastAgentInferenceFailure,
     cause: unknown,
@@ -749,7 +769,88 @@ class FastAgentInferenceError extends Error {
       { cause },
     );
     this.name = 'FastAgentInferenceError';
+    this.detail = describeInferenceErrorForUser(cause);
   }
+}
+
+const FAST_AGENT_INFERENCE_DETAIL_MAX_CHARS = 200;
+
+/**
+ * The provider's own status and message, as OpenCode surfaces them
+ * (`{name, data: {statusCode, message, responseBody}}`, possibly wrapped in
+ * a prompt error's `providerError` or an Error `cause`). Secrets are
+ * redacted and the text is bounded so it can be shown in the thread; a
+ * closeout that only says "the provider returned an error" leaves the
+ * reader guessing which provider and why.
+ */
+function describeInferenceErrorForUser(error: unknown): string | undefined {
+  let statusCode: number | undefined;
+  let message: string | undefined;
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value: error, depth: 0 },
+  ];
+  const seen = new Set<object>();
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current || current.depth > 4) continue;
+    const { value, depth } = current;
+    if (typeof value === 'string') {
+      if (value.trim().startsWith('{')) {
+        try {
+          pending.push({ value: JSON.parse(value), depth: depth + 1 });
+        } catch {
+          // Plain text; nothing nested to read.
+        }
+      }
+      continue;
+    }
+    if (!value || typeof value !== 'object' || seen.has(value)) continue;
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    if (statusCode === undefined) {
+      const candidate = record.statusCode ?? record.status;
+      if (typeof candidate === 'number' && candidate >= 100) {
+        statusCode = candidate;
+      }
+    }
+    // Prefer the innermost provider message over the wrapper's own text.
+    const data = record.data;
+    const dataMessage =
+      data && typeof data === 'object'
+        ? (data as Record<string, unknown>).message
+        : undefined;
+    if (typeof dataMessage === 'string' && dataMessage.trim()) {
+      message = dataMessage;
+    } else if (
+      message === undefined &&
+      typeof record.message === 'string' &&
+      record.message.trim() &&
+      !(value instanceof Error)
+    ) {
+      message = record.message;
+    }
+    for (const key of [
+      'providerError',
+      'cause',
+      'data',
+      'error',
+      'responseBody',
+    ]) {
+      if (key in record) pending.push({ value: record[key], depth: depth + 1 });
+    }
+  }
+  if (message === undefined && error instanceof Error) {
+    message = error.message;
+  }
+  const parts = [
+    statusCode === undefined ? undefined : `HTTP ${statusCode}`,
+    message?.replace(/\s+/gu, ' ').trim() || undefined,
+  ].filter((part): part is string => Boolean(part));
+  if (parts.length === 0) return undefined;
+  const text = redactSecrets(parts.join(': '));
+  return text.length <= FAST_AGENT_INFERENCE_DETAIL_MAX_CHARS
+    ? text
+    : `${text.slice(0, FAST_AGENT_INFERENCE_DETAIL_MAX_CHARS - 1)}…`;
 }
 
 function resolveFastAgentInferenceMaxRetries(
@@ -792,6 +893,9 @@ function resolveFastAgentInferenceRetryDelayMs(
 function formatFastAgentInferenceRetryNotice(
   notice: FastAgentInferenceRetryNotice,
 ): string {
+  if (notice.freshSession) {
+    return 'The inference provider rejected the request. Retrying once from a fresh session…';
+  }
   const headline =
     notice.failure.reason === 'rate_limited'
       ? 'The inference provider is rate limiting requests.'
@@ -810,6 +914,20 @@ function formatFastAgentInferenceRetryNotice(
 }
 
 function formatFastAgentInferenceFailure(
+  failure: FastAgentInferenceFailure,
+  retried: boolean,
+  context: { detail?: string; model?: string } = {},
+): string {
+  const summary = formatFastAgentInferenceFailureSummary(failure, retried);
+  // The specific reasons already say what happened. The generic rejection
+  // is the one that leaves the reader guessing, so it carries the provider's
+  // own status and message, and the model that produced them.
+  if (failure.reason !== 'provider_error' || !context.detail) return summary;
+  const source = context.model ? ` (${context.model})` : '';
+  return `${summary}\n\nProvider error${source}: ${context.detail}`;
+}
+
+function formatFastAgentInferenceFailureSummary(
   failure: FastAgentInferenceFailure,
   retried: boolean,
 ): string {
@@ -871,6 +989,7 @@ async function runFastAgentInferenceWithRetries<T>(
   options: FastAgentInferenceRetryOptions = {},
 ): Promise<T> {
   let totalRetryCount = 0;
+  let rejectionRetryUsed = false;
   for (let retryNumber = 0; ; retryNumber += 1) {
     try {
       options.signal?.throwIfAborted();
@@ -898,14 +1017,20 @@ async function runFastAgentInferenceWithRetries<T>(
         retryNumber = 0;
       }
       const maxRetries = resolveFastAgentInferenceMaxRetries(failure);
+      const rejectionRetry =
+        !failure.retryable &&
+        failure.reason === 'provider_error' &&
+        !rejectionRetryUsed &&
+        options.retryRejection?.(error, failure) === true;
       if (
-        !failure.retryable ||
+        (!failure.retryable && !rejectionRetry) ||
         options.canRetry?.(error, failure) === false ||
         retryNumber >= maxRetries ||
         totalRetryCount >= FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN
       ) {
         throw new FastAgentInferenceError(failure, error);
       }
+      if (rejectionRetry) rejectionRetryUsed = true;
 
       totalRetryCount += 1;
       const attemptNumber = retryNumber + 1;
@@ -920,6 +1045,7 @@ async function runFastAgentInferenceWithRetries<T>(
           attemptNumber,
           maxAttempts: maxRetries,
           delayMs,
+          ...(rejectionRetry ? { freshSession: true } : {}),
         });
       } catch (noticeError) {
         console.warn(
@@ -934,6 +1060,7 @@ async function runFastAgentInferenceWithRetries<T>(
         maxAttempts: maxRetries,
         delayMs,
         inProcessAttempt: attemptNumber,
+        ...(rejectionRetry ? { freshSession: true } : {}),
       });
       if (parkedUntil) {
         throw new FastAgentDurableRetryScheduledError(parkedUntil);
@@ -1557,6 +1684,8 @@ export async function answerFastAgentQuestion({
   let canonicalConversationId: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
+  /** Last model OpenCode resolved for this turn, for the failure closeout. */
+  let lastResolvedInferenceModel: string | undefined;
   let currentInstructionVersion = 0;
   const assistantInstructionVersions = new Map<string, number>();
   const closedInstructionVersions = new Set<number>();
@@ -1682,24 +1811,37 @@ export async function answerFastAgentQuestion({
    * (row superseded or withdrawn, write failed) also falls back to the
    * in-process wait, so durability here is best effort like admission.
    */
+  /** Whether a pending retry could leave the process as a durable park. */
+  const canParkDurableRetry = () =>
+    Boolean(
+      durableAdmission &&
+      durableTurnReplayable &&
+      adapter.requestDurableRetry &&
+      !Env.R_FAST_DURABLE_RETRY_DISABLED &&
+      !signal?.aborted &&
+      !isInstructionClosed() &&
+      durableRetriesConsumed < FAST_AGENT_DURABLE_RETRY_MAX_PARKS,
+    );
   const deferInferenceRetry = async (
     notice: FastAgentInferenceRetryNotice & { inProcessAttempt: number },
   ): Promise<Date | null> => {
+    // The explicit checks repeat part of canParkDurableRetry so the
+    // admission row and the wakeup hook are narrowed for the calls below.
     if (
       !durableAdmission ||
-      !durableTurnReplayable ||
       !adapter.requestDurableRetry ||
-      Env.R_FAST_DURABLE_RETRY_DISABLED ||
-      notice.delayMs === undefined ||
-      signal?.aborted ||
-      isInstructionClosed()
+      !canParkDurableRetry() ||
+      notice.delayMs === undefined
     ) {
       return null;
     }
     // A one-off blip is cheapest to ride out where it happened: the first
     // in-process retry stays in place unless its wait is already long.
-    // From the second attempt on, the wait leaves the process.
+    // From the second attempt on, the wait leaves the process. A rejection
+    // always parks: the point of its one retry is a fresh session built
+    // from the recorded transcript, which only the resumed run provides.
     if (
+      !notice.freshSession &&
       notice.inProcessAttempt < 2 &&
       notice.delayMs < FAST_AGENT_DURABLE_RETRY_IMMEDIATE_PARK_WAIT_MS
     ) {
@@ -1744,6 +1886,29 @@ export async function answerFastAgentQuestion({
     durableTurnReplayable = false;
     durableTurnDeferred = true;
     durableRetriesConsumed = inferenceRetries;
+    if (notice.freshSession && canonicalConversationId) {
+      // The provider rejected this session's native history, so the resumed
+      // run must not reattach to it. Forget the durable OpenCode session so
+      // the resume rebuilds from the recorded transcript, which is what a
+      // human "try again" gets. This runs only once the park is committed:
+      // dropping the live session before that would send a failed schedule
+      // down the in-process cold-rebuild path and could repeat the tool
+      // side effects the durable guard exists to prevent. If forgetting
+      // fails, the resumed run reattaches, meets the same rejection, and
+      // closes out honestly, since a resumed run gets no second retry.
+      try {
+        await setFastAgentOpenCodeSession({
+          sessionId: canonicalConversationId,
+          openCodeSessionId: null,
+        });
+        durableOpenCodeSessionId = null;
+        fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
+      } catch (error) {
+        console.warn(
+          `[Fast Agent] Failed to forget the rejected OpenCode session for the parked retry: ${formatErrorForLog(error)}`,
+        );
+      }
+    }
     await adapter.requestDurableRetry(retryAt).catch((error) => {
       console.warn(
         `[Fast Agent] Failed to queue the durable inference retry wakeup: ${formatErrorForLog(error)}`,
@@ -2943,8 +3108,16 @@ export async function answerFastAgentQuestion({
       ),
       activeTaskCount: resolvedActiveTasks.length,
     });
-    let visibleUpdatePosted = false;
-    let substantiveWorkAcknowledged = false;
+    const resumedWithDeliveredAcknowledgement = Boolean(
+      previousAttempt?.events.some(
+        (event) =>
+          event.kind === 'reply' &&
+          (event.purpose === 'ack' ||
+            (event.purpose === 'progress' && !event.inferenceRetryNotice)),
+      ),
+    );
+    let visibleUpdatePosted = resumedWithDeliveredAcknowledgement;
+    let substantiveWorkAcknowledged = resumedWithDeliveredAcknowledgement;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
 
@@ -3004,9 +3177,9 @@ export async function answerFastAgentQuestion({
       inferenceRetryCanonicalEvent = undefined;
       lastVisibleMessage = replyWithImages.message;
       visibleUpdatePosted = true;
-      // Any text reply posted by the model (acknowledgement, first progress
-      // update, or task kickoff) is the textual communication the work-start
-      // gate requires. Reactions deliberately do not set this flag.
+      // Any text reply posted by the model (acknowledgement or first progress
+      // update) is the textual communication the work-start gate requires.
+      // Reactions deliberately do not set this flag.
       substantiveWorkAcknowledged = true;
       if (
         replyWithImages.purpose === 'closeout' ||
@@ -3206,14 +3379,12 @@ export async function answerFastAgentQuestion({
       }
     };
     // Single owner of the human-turn work-start gate, applied in-process to
-    // every native and MCP tool call before it runs. Only text communication
-    // (a reply, a first progress note, or a task kickoff) opens the gate; a
-    // reaction never does. The listed tools are the ones allowed to precede
-    // that communication.
+    // every native and MCP tool call before it runs. Only a delivered text
+    // reply opens the gate; a reaction never does. The listed tools are the
+    // ones allowed to precede that communication.
     const acknowledgementExemptToolIds = new Set<string>([
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
-      FAST_AGENT_NATIVE_TOOL_NAMES.launchTask,
       FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
       // A catalog lookup reads nothing external; the call it prepares for is
       // still gated on the acknowledgement.
@@ -3767,8 +3938,14 @@ export async function answerFastAgentQuestion({
               };
             }
             completedTaskActions.add(signature);
-            let kickoffDelivered = false;
-            const deliverKickoff = async (task: {
+            let preparedTaskLink:
+              | {
+                  taskId: string;
+                  taskUrl?: string;
+                  taskLinkRendered?: boolean;
+                }
+              | undefined;
+            const postTaskLink = async (task: {
               taskId: string;
               taskUrl?: string;
               taskLinkRendered?: boolean;
@@ -3779,7 +3956,7 @@ export async function answerFastAgentQuestion({
                 linkedSession = await getSessionForTask(db, task.taskId);
               } catch (error) {
                 console.warn(
-                  `[sessions] Failed to resolve Session kickoff link: ${formatErrorForLog(error)}`,
+                  `[sessions] Failed to resolve Session task link: ${formatErrorForLog(error)}`,
                 );
               }
               const destinationUrl = linkedSession
@@ -3790,26 +3967,21 @@ export async function answerFastAgentQuestion({
                     taskId: task.taskId,
                   })
                 : task.taskUrl;
-              // The delegated task's live Slack card owns the workspace
-              // startup status; the kickoff is a permanent thread message
-              // that nothing can update later, so it must not carry
-              // transient "preparing" copy.
-              const message = [
-                args.kickoffMessage,
-                destinationUrl &&
-                !task.taskLinkRendered &&
-                !args.kickoffMessage.includes(destinationUrl)
-                  ? `[Open in Roomote](${destinationUrl})`
-                  : undefined,
-              ]
-                .filter((part): part is string => Boolean(part))
-                .join('\n\n');
+              if (!destinationUrl || task.taskLinkRendered) return;
               throwIfTurnCancelled();
-              await postReply(
-                { purpose: 'progress', message, kickoff: true },
-                true,
-              );
-              kickoffDelivered = true;
+              try {
+                await postReply(
+                  {
+                    purpose: 'progress',
+                    message: `[Open in Roomote](${destinationUrl})`,
+                  },
+                  true,
+                );
+              } catch (error) {
+                console.warn(
+                  `[Fast Agent] Failed to post task link after launch: ${formatErrorForLog(error)}`,
+                );
+              }
             };
             throwIfTurnCancelled();
             const prompt = args.includeAttachments
@@ -3838,7 +4010,11 @@ export async function answerFastAgentQuestion({
                   .update(signature)
                   .digest('hex')
                   .slice(0, 32)}`,
-                postKickoff: deliverKickoff,
+                // Providers still use this callback for task-card setup. The
+                // fallback link is posted after launch completes.
+                postKickoff: async (task) => {
+                  preparedTaskLink = task;
+                },
               });
             } catch (error) {
               completedTaskActions.delete(signature);
@@ -3854,10 +4030,9 @@ export async function answerFastAgentQuestion({
               currentTasks.set(result.taskId, { taskId: result.taskId });
               if (result.kickoffDelivered) {
                 visibleUpdatePosted = true;
-                substantiveWorkAcknowledged = true;
               }
-              if (!kickoffDelivered && !result.kickoffDelivered) {
-                await deliverKickoff(result);
+              if (!result.kickoffDelivered) {
+                await postTaskLink(preparedTaskLink ?? result);
               }
             }
             return result;
@@ -3878,6 +4053,15 @@ export async function answerFastAgentQuestion({
                   'Name the repository (owner/name) and pull request number to review.',
               };
             }
+            if (
+              args.model &&
+              !taskModelOptions.models.some((model) => model.id === args.model)
+            ) {
+              return {
+                success: false,
+                error: `Model "${args.model}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
+              };
+            }
             const signature = `review_pull_request:${repository}#${pullRequestNumber}`;
             if (completedTaskActions.has(signature)) {
               return {
@@ -3896,6 +4080,8 @@ export async function answerFastAgentQuestion({
                   repository,
                   pullRequestNumber,
                   fastConversationId: session.id,
+                  model: args.model ?? undefined,
+                  reasoningEffort: args.reasoningEffort ?? undefined,
                 },
               );
             } catch (error) {
@@ -4494,6 +4680,7 @@ export async function answerFastAgentQuestion({
                       tools: FAST_AGENT_SESSION_TOOL_FILTER,
                       onModelResolved: (model) => {
                         resolvedInferenceModel = model;
+                        lastResolvedInferenceModel = model;
                         diagnostics.recordModelResolved(model);
                       },
                       onMessageCompleted: (message) => {
@@ -4691,6 +4878,20 @@ export async function answerFastAgentQuestion({
                 (!nativeToolInvoked || openCodeSession.id !== undefined) &&
                 !isNonTaskOpenCodePromptTimeoutError(error) &&
                 !isNonTaskOpenCodeSessionValidationError(error),
+              // A rejected request is retried once from a fresh start, the
+              // way a human "try again" would run it: before tools ran, an
+              // in-process rebuild from visible history; after tools ran, a
+              // durable park so the resumed run replays from the recorded
+              // transcript instead of the rejected native history.
+              // A run that is itself the resumed retry gets no second one:
+              // a rejection that survives a fresh session is terminal.
+              retryRejection: (error) =>
+                !signal?.aborted &&
+                !isInstructionClosed() &&
+                !resumedAfterInferenceRetry &&
+                !isNonTaskOpenCodePromptTimeoutError(error) &&
+                !isNonTaskOpenCodeSessionValidationError(error) &&
+                (!nativeToolInvoked || canParkDurableRetry()),
               // Grant a fresh bounded budget only when the failed attempt
               // advanced the turn and the next retry continues the same
               // OpenCode session. Cold rebuilds replay from scratch, so
@@ -4809,7 +5010,7 @@ export async function answerFastAgentQuestion({
         }
       } else if (platformEvent && platformEventVisibility === 'required') {
         // A visibility-required platform event promises a closeout even when
-        // an intro ack or launch kickoff already posted a visible update
+        // an opening acknowledgement already posted a visible update
         // (e.g. the setup kickoff ending on an empty terminal response).
         const fallback = 'I will post updates here as this progresses.';
         await postRecordedSystemCloseout(fallback, () =>
@@ -4963,6 +5164,7 @@ export async function answerFastAgentQuestion({
         ? formatFastAgentInferenceFailure(
             error.failure,
             inferenceRetryAttempted,
+            { detail: error.detail, model: lastResolvedInferenceModel },
           )
         : 'I hit an error while handling that request. Please try again in a moment.';
     // The error closeout is recorded like any other closeout: its intent

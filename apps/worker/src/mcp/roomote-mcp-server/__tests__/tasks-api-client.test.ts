@@ -15,10 +15,12 @@ import {
   getTaskGoal,
   updateTaskGoal,
   getSessionMessages,
+  getSessionUpdates,
   getSessionSummary,
   searchSessions,
   sendMessageToSession,
   startSession,
+  getTaskUpdates,
 } from '../tasks-api-client.js';
 import type { RoomoteConfig } from '../types.js';
 
@@ -94,6 +96,37 @@ describe('session API', () => {
         method: 'POST',
         body: JSON.stringify({ message: 'Continue' }),
       }),
+    );
+  });
+});
+
+describe('relay updates API', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('forwards opaque cursors for Session and direct task updates', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ narrative: [], nextCursor: 'next' }),
+    });
+
+    await getSessionUpdates(config, 'session-1', {
+      limit: 5,
+      cursor: 'session cursor',
+    });
+    await getTaskUpdates(config, 'task-1', {
+      limit: 7,
+      cursor: 'task cursor',
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      'https://test-api.example.com/api/mcp/sessions/session-1/updates?limit=5&cursor=session+cursor',
+      expect.any(Object),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      'https://test-api.example.com/api/mcp/tasks/task-1/updates?limit=7&cursor=task+cursor',
+      expect.any(Object),
     );
   });
 });

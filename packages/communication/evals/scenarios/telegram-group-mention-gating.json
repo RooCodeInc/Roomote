@@ -58,7 +58,7 @@
             "first_name": "Grace",
             "username": "grace_mock"
           },
-          "text": "@roomote_mock_bot !fast which env var stores the Telegram bot token?"
+          "text": "@roomote_mock_bot which env var stores the Telegram bot token?"
         }
       }
     }

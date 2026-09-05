@@ -10,7 +10,7 @@ import {
 
 describe('Roomote MCP management contract', () => {
   it('puts session actions before compatibility task actions', () => {
-    expect(ROOMOTE_MEMBER_MANAGEMENT_ACTIONS.slice(0, 5)).toEqual(
+    expect(ROOMOTE_MEMBER_MANAGEMENT_ACTIONS.slice(0, 6)).toEqual(
       ROOMOTE_SESSION_DEFAULT_ACTIONS,
     );
     expect(ROOMOTE_MEMBER_MANAGEMENT_ACTIONS).toContain('launch');
@@ -19,6 +19,12 @@ describe('Roomote MCP management contract', () => {
     );
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
       'direct task operations retained for compatibility',
+    );
+    expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
+      'Summarize substantive outbound messages as “Codex → Roomote”',
+    );
+    expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
+      'never expose hidden reasoning, credentials, raw tool traces, or giant internal payloads',
     );
   });
 

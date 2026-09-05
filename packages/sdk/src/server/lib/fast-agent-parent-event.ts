@@ -91,6 +91,10 @@ import {
   buildSignedArtifactRawUrl,
   currentEpochSeconds,
 } from './artifacts/raw-url';
+import {
+  resolveFastAgentSessionImages,
+  type FastAgentReplyImage,
+} from './fast-agent-session-images';
 import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
@@ -286,20 +290,21 @@ export async function listFastAgentPullRequestContexts(
   }));
 }
 
-type FastAgentEventImage = {
-  url: string;
-  altText: string;
-  contentType: string;
-};
-
 async function buildSelectedImages(params: {
   artifactIds: string[];
   event: FastAgentParentEvent;
   sessionId: string;
-}): Promise<FastAgentEventImage[]> {
+}): Promise<FastAgentReplyImage[]> {
   const artifactIds = [...new Set(params.artifactIds)];
   if (artifactIds.length === 0) {
     return [];
+  }
+
+  if (params.event.type === 'human_follow_up') {
+    return resolveFastAgentSessionImages({
+      artifactIds,
+      sessionId: params.sessionId,
+    });
   }
 
   const eventIds = new Set(
@@ -309,7 +314,7 @@ async function buildSelectedImages(params: {
         ? (params.event.imageArtifactIds ?? [])
         : [],
   );
-  if (params.event.type !== 'human_follow_up' && eventIds.size === 0) {
+  if (eventIds.size === 0) {
     return [];
   }
   const artifacts = await db.query.taskArtifacts.findMany({
@@ -324,27 +329,6 @@ async function buildSelectedImages(params: {
     },
   });
   const byId = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
-  const sessionRunTaskById = new Map<number, string>();
-  if (params.event.type === 'human_follow_up') {
-    const runIds = artifacts.flatMap((artifact) =>
-      artifact.runId === null ? [] : [artifact.runId],
-    );
-    if (runIds.length > 0) {
-      const lookupIds = await fastAgentConversationRepository.getLookupIds(
-        params.sessionId,
-      );
-      const sessionRuns = await db.query.taskRuns.findMany({
-        where: and(
-          inArray(taskRuns.id, runIds),
-          inArray(taskRuns.fastAgentSessionId, lookupIds),
-        ),
-        columns: { id: true, taskId: true },
-      });
-      for (const run of sessionRuns) {
-        sessionRunTaskById.set(run.id, run.taskId);
-      }
-    }
-  }
   const ts = currentEpochSeconds();
 
   return artifactIds.map((id) => {
@@ -355,14 +339,10 @@ async function buildSelectedImages(params: {
       'taskId' in params.event &&
       artifact.taskId === params.event.taskId &&
       artifact.runId === params.event.runId;
-    const belongsToSessionTask =
-      params.event.type === 'human_follow_up' &&
-      artifact?.runId != null &&
-      artifact?.taskId === sessionRunTaskById.get(artifact.runId);
     if (
       !artifact ||
       !artifact.uploaded ||
-      (!belongsToCurrentEvent && !belongsToSessionTask) ||
+      !belongsToCurrentEvent ||
       !artifact.contentType.startsWith('image/')
     ) {
       throw new Error(`Invalid Fast parent image artifact: ${id}`);
@@ -1673,6 +1653,7 @@ async function createSourceControlFastAgentParentTurn(params: {
         params.event.type === 'human_follow_up'
           ? buildSourceControlReplyQuote({ text: params.event.question })
           : null,
+      continuesThreadComment: params.event.type !== 'human_follow_up',
       onReplyPosted: params.onReplyPosted,
     }),
   };

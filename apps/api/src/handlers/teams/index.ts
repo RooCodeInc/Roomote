@@ -19,7 +19,10 @@ import {
   parseTeamsActivity,
   teamsActivityToQueuedCommunicationMessage,
 } from '@roomote/communication/teams-activity';
-import { queueCommunicationMessage } from '@roomote/communication/messages';
+import {
+  queueCommunicationMessage,
+  queueCommunicationMessageOnce,
+} from '@roomote/communication/messages';
 import {
   buildAccountLinkPromptText,
   buildAccountLinkThreadReplyText,
@@ -1796,7 +1799,21 @@ async function resumePendingTeamsAuthToken(
   return { success: true, status: 'fast' };
 }
 
-export const teams = new Hono();
+type TeamsWebhookVariables = {
+  claimedActivityId: string | undefined;
+};
+
+export const teams = new Hono<{
+  Variables: TeamsWebhookVariables;
+}>();
+
+teams.onError(async (error, c) => {
+  const claimedActivityId = c.get('claimedActivityId');
+  if (claimedActivityId !== undefined) {
+    await releaseTeamsActivityClaim(claimedActivityId).catch(() => {});
+  }
+  throw error;
+});
 
 teams.post('/auth/resume', async (c) => {
   let rawBody: unknown;
@@ -1899,6 +1916,7 @@ teams.post('/', async (c) => {
         );
         return c.json({ ok: true, duplicate: true });
       }
+      c.set('claimedActivityId', activity.id);
     }
 
     const reactionTargetMessageId = activity.replyToId?.trim();
@@ -2107,6 +2125,7 @@ teams.post('/', async (c) => {
     );
     return c.json({ ok: true, duplicate: true });
   }
+  c.set('claimedActivityId', queuedMessage.ts);
 
   const metadata = getTeamsActivityCommunicationMetadata(activity);
   if (claimedSuggestionReaction) {
@@ -2244,20 +2263,14 @@ teams.post('/', async (c) => {
     if (!question) {
       return c.json({ ok: true, queued: false, reason: 'fast_message_empty' });
     }
-    let continued: boolean;
-    try {
-      continued = await queueFastAgentSurfaceReply({
-        sessionId: fastSession.id,
-        userId: mappedUserId,
-        senderDisplayName: activity.from?.name?.trim() || null,
-        question,
-        currentMessageId: queuedMessage.ts,
-        ...(fastMessage.images ? { images: fastMessage.images } : {}),
-      });
-    } catch (error) {
-      await releaseTeamsActivityClaim(queuedMessage.ts).catch(() => {});
-      throw error;
-    }
+    const continued = await queueFastAgentSurfaceReply({
+      sessionId: fastSession.id,
+      userId: mappedUserId,
+      senderDisplayName: activity.from?.name?.trim() || null,
+      question,
+      currentMessageId: queuedMessage.ts,
+      ...(fastMessage.images ? { images: fastMessage.images } : {}),
+    });
     if (!continued) {
       apiLogger.warn(
         `[teams] Fast session ${fastSession.id} could not resolve an active delivery route`,
@@ -2626,7 +2639,14 @@ teams.post('/', async (c) => {
     outOfBandClaim = attached.claim;
   }
   try {
-    await queueCommunicationMessage('teams', activeRun.id, activeFollowUp);
+    const queued = await queueCommunicationMessageOnce(
+      'teams',
+      activeRun.id,
+      activeFollowUp,
+    );
+    if (!queued) {
+      await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+    }
   } catch (error) {
     await releaseCommunicationOutOfBandClaim(outOfBandClaim);
     throw error;

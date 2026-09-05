@@ -234,6 +234,8 @@ export type FastAgentTurnAttemptReply = {
   text: string;
   /** Recorded for replies the turn posted itself; absent on older rows. */
   purpose?: FastAgentTurnAttemptReplyPurpose;
+  /** System retry notices are visible but do not acknowledge model work. */
+  inferenceRetryNotice?: boolean;
 };
 
 function isFastAgentTurnAttemptReplyPurpose(
@@ -412,6 +414,9 @@ export async function loadFastAgentTurnAttemptSummary(
         kind: 'reply',
         text: reply,
         ...(isFastAgentTurnAttemptReplyPurpose(purpose) ? { purpose } : {}),
+        ...(metadata.inferenceRetryNotice === true
+          ? { inferenceRetryNotice: true }
+          : {}),
       });
     }
   }
@@ -786,9 +791,10 @@ export interface FastAgentConversationRepository {
     conversationId: string;
     message: FastAgentMessageWrite;
   }): Promise<FastAgentMessageUpsertResult>;
+  /** `null` forgets the native session so the next turn rebuilds it. */
   setOpenCodeSession(input: {
     conversationId: string;
-    openCodeSessionId: string;
+    openCodeSessionId: string | null;
   }): Promise<void>;
 }
 

@@ -177,15 +177,12 @@ so direct messages continue reaching Roomote.
 
 ## Fast answers
 
-Mention the app and use `!fast <request>` to ask the fast orchestrator a
-question or delegate work into a task. For example: `@Roomote !fast summarize
-this thread` or `@Roomote !fast fix the failing CI job`.
-
 **Fast response mode** is always on across Slack, Discord, Microsoft Teams, and
 Telegram: ordinary messages from your linked account go through the Fast
-orchestrator, which can delegate work into tasks. `!fast` remains available for
-an explicit Slack Fast request. Replies in a Fast-owned Slack thread continue
-that Fast session; replies in an existing task-only thread continue the task.
+orchestrator, which can delegate work into tasks. In channels, mention the app,
+for example `@Roomote summarize this thread` or `@Roomote fix the failing CI
+job`. Replies in a Fast-owned Slack thread continue that Fast session; replies
+in an existing task-only thread continue the task.
 
 Fast can read a bounded history from the current Slack channel, discover other
 channels in the same workspace, and post standalone updates to channels where

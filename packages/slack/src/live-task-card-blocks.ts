@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import { convertMarkdownToRichText } from './markdown-rich-text';
 import type { SlackTaskStreamStatus } from './slack-notifier';
 import { truncateWithEllipsis } from './truncate';
@@ -40,8 +38,9 @@ export interface SlackLiveTaskCardContent {
  * the latest state. Keeping an ordinary message also lets Roomote reopen the
  * card after an input-waiting run resumes.
  *
- * Slack requires a new `block_id` for each message update, so every render
- * receives a fresh suffix while retaining the task id as a debugging prefix.
+ * Keep `block_id` stable across updates so Slack preserves the user's expanded
+ * card state. This intentionally differs from Slack's recommendation to use a
+ * new block id for every message iteration.
  *
  * `text` is what Slack shows in notifications and in clients too old to
  * render the block, so it carries the whole card, link included.
@@ -73,7 +72,7 @@ export function buildSlackLiveTaskCardBlocks(
     blocks: [
       {
         type: 'task_card',
-        block_id: `${content.taskUpdateId}-card-${randomUUID()}`,
+        block_id: `${content.taskUpdateId}-card`,
         task_id: content.taskUpdateId,
         title: content.title,
         status: content.status,

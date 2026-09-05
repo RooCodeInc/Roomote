@@ -1,4 +1,5 @@
 import {
+  launchFastAgentPrReview,
   sendFastAgentTaskMessage,
   sendFastAgentTaskMessageOnce,
 } from '../fast-agent-tasks';
@@ -81,6 +82,45 @@ describe('fast-agent task operations', () => {
         body: JSON.stringify({
           message: 'Resolve the review feedback.',
           clientMessageId: 'pr-review-delivery:delivery-1',
+        }),
+      }),
+    );
+  });
+
+  it('forwards model and reasoning overrides for pull request reviews', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, taskId: 'review-task' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await launchFastAgentPrReview(
+      {
+        userId: 'user-1',
+        apiBaseUrl: 'https://app.example.test/_roomote-api',
+        getAuthToken: async () => 'auth-token',
+      },
+      {
+        repository: 'acme/api',
+        pullRequestNumber: 42,
+        fastConversationId: '33333333-3333-4333-8333-333333333333',
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'high',
+      },
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://app.example.test/_roomote-api/api/mcp/tasks',
+      expect.objectContaining({
+        body: JSON.stringify({
+          type: 'pr-review',
+          repo: 'acme/api',
+          prNumber: 42,
+          fastConversationId: '33333333-3333-4333-8333-333333333333',
+          model: 'anthropic/claude-sonnet-5',
+          reasoningEffort: 'high',
         }),
       }),
     );

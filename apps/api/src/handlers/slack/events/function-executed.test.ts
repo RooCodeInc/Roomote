@@ -141,7 +141,6 @@ describe('function-executed', () => {
       expect.objectContaining({
         userId: 'user_author',
         teamId: 'T123',
-        continuation: true,
         directedAtRoomote: true,
         event: expect.objectContaining({
           type: 'app_mention',

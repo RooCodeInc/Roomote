@@ -330,7 +330,6 @@ describe('chat reply suggestion reactions', () => {
 
     expect(mocks.startFastAgentResponse).toHaveBeenCalledWith(
       expect.objectContaining({
-        continuation: true,
         userId: 'user-1',
         event: expect.objectContaining({
           channel: 'C1',

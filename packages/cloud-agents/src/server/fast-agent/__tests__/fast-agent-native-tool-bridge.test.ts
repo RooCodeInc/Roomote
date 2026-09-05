@@ -93,6 +93,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'launch_task.js'),
       'utf8',
     );
+    const reviewPullRequestSource = await readFile(
+      join(toolsDirectory, 'review_pull_request.js'),
+      'utf8',
+    );
     const createArtifactSource = await readFile(
       join(toolsDirectory, 'create_artifact.js'),
       'utf8',
@@ -146,6 +150,12 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(createArtifactSource).toContain('invoke("create_artifact"');
     expect(createArtifactSource).toContain('maximum 128 KiB');
     expect(launchTaskSource).toContain('deployment-enabled model ID');
+    expect(reviewPullRequestSource).toContain(
+      'model: z.string().min(1).nullable().optional()',
+    );
+    expect(reviewPullRequestSource).toContain(
+      'reasoningEffort: z.enum(["low","medium","high","xhigh","max"])',
+    );
     expect(launchTaskSource).toContain(
       'includeAttachments: z.boolean().optional()',
     );
@@ -153,12 +163,7 @@ describe('Fast native OpenCode tool bridge', () => {
       'Supported current-turn attachments are forwarded only when includeAttachments is true',
     );
     expect(launchTaskSource).toContain('defaults to false');
-    expect(launchTaskSource).toContain(
-      'Brief user-facing description of the work now underway',
-    );
-    expect(launchTaskSource).toContain(
-      'do not mention delegation, launching, or queue state',
-    );
+    expect(launchTaskSource).not.toContain('kickoffMessage');
     expect(launchTaskSource).not.toContain(
       'explanation of what is being delegated',
     );

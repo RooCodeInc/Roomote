@@ -1,6 +1,6 @@
 import { tool, type ToolSet } from 'ai';
 import { createAuthToken } from '@roomote/auth';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, type ReasoningEffort } from '@roomote/types';
 import { z } from 'zod';
 
 import { resolveApiBaseUrl } from '../shared-utils';
@@ -232,6 +232,8 @@ export async function launchFastAgentPrReview(
     repository: string;
     pullRequestNumber: number;
     fastConversationId: string;
+    model?: string;
+    reasoningEffort?: ReasoningEffort;
   },
 ): Promise<
   FastAgentTaskToolResult & {
@@ -253,6 +255,10 @@ export async function launchFastAgentPrReview(
       repo: params.repository,
       prNumber: params.pullRequestNumber,
       fastConversationId: params.fastConversationId,
+      ...(params.model ? { model: params.model } : {}),
+      ...(params.reasoningEffort
+        ? { reasoningEffort: params.reasoningEffort }
+        : {}),
     },
   });
 }

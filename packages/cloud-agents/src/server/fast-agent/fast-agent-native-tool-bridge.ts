@@ -26,6 +26,7 @@ import {
   FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS,
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
+  REASONING_EFFORT_VALUES,
   type FastAgentSurface,
   FAST_EXECUTION,
 } from '@roomote/types';
@@ -320,7 +321,6 @@ export default {
     environmentId: z.string().nullable().optional().describe(${JSON.stringify(`Exact environment ID from the system prompt; omit, pass null, or pass "${ALL_REPOSITORIES}" to run against all active repositories`)}),
     model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
-    kickoffMessage: z.string().min(1).describe("Brief user-facing description of the work now underway; do not mention delegation, launching, or queue state"),
   },
   execute: (args, context) => invoke("launch_task", args, context),
 }
@@ -331,10 +331,12 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Run Roomote's structured code review pipeline on a pull request. The review posts a findings summary on the pull request itself and reports back here when it finishes. In a pull request conversation, omit repository and pullRequestNumber to review this pull request.",
+  description: "Run Roomote's structured code review pipeline on a pull request, optionally using an exact deployment-enabled model ID and reasoning effort. The review posts a findings summary on the pull request itself and reports back here when it finishes. In a pull request conversation, omit repository and pullRequestNumber to review this pull request.",
   args: {
     repository: z.string().min(1).optional().describe("Repository full name like owner/name; omit in a pull request conversation to review the current pull request"),
     pullRequestNumber: z.number().int().positive().optional().describe("Pull request number; omit in a pull request conversation to review the current pull request"),
+    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment code-review default"),
+    reasoningEffort: z.enum(${JSON.stringify(REASONING_EFFORT_VALUES)}).nullable().optional().describe("Optional reasoning effort override; omit or pass null to use the model's code-review default"),
     kickoffMessage: z.string().min(1).describe("Brief user-facing note that the review is underway; do not mention delegation or queue state"),
   },
   execute: (args, context) => invoke("review_pull_request", args, context),
@@ -435,7 +437,7 @@ export default {
   args: {
     integrationId: z.string().min(1).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.integrationId)}),
     toolName: z.string().min(1).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.toolName)}),
-    args: z.record(z.string(), z.unknown()).optional().describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args)}),
+    args: z.record(z.string(), z.json()).optional().describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args)}),
   },
   execute: (args, context) => invoke(${JSON.stringify(CALL_INTEGRATION_TOOL_TOOL.name)}, args, context),
 }
