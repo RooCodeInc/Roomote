@@ -15,6 +15,7 @@ import {
 import {
   buildFastAgentArtifactCreator,
   findFastAgentSessionForProviderMessage,
+  handOffFastAgentInterruptedTurn,
   persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
   resolveFastAgentSessionImages,
@@ -95,7 +96,9 @@ async function processFastAgentReaction(params: {
   // claim before it runs, so an interruption hands it to the queue, which
   // resumes it with the same reaction input instead of asking the user to
   // react again.
-  const durableTurn = await persistFastAgentInlineHumanTurn({
+  const reactionAdmission: Parameters<
+    typeof persistFastAgentInlineHumanTurn
+  >[0] = {
     parent: { sessionId: session.id, conversation },
     event: {
       type: 'human_follow_up',
@@ -109,7 +112,10 @@ async function processFastAgentReaction(params: {
         : {}),
       input: { type: 'reaction', externalInput: reactionInput },
     },
-  }).catch((error) => {
+  };
+  const durableTurn = await persistFastAgentInlineHumanTurn(
+    reactionAdmission,
+  ).catch((error) => {
     console.error(
       `[SlackWebhook] Failed to persist Fast reaction turn admission: ${error instanceof Error ? error.message : String(error)}`,
     );
@@ -161,7 +167,10 @@ async function processFastAgentReaction(params: {
                   retryAt,
                 ),
             }
-          : {}),
+          : {
+              requestLateDurableAdmission: () =>
+                handOffFastAgentInterruptedTurn(reactionAdmission),
+            }),
         createArtifact: buildFastAgentArtifactCreator(session.id),
         activity: createFastAgentSlackSessionActivity({
           slack: context.slack,

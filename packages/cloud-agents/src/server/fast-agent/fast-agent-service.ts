@@ -118,6 +118,7 @@ import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill
 import {
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+  RESTARTED_ACTIVE_TURN_MESSAGE,
   findFastAgentActiveInferenceRetryNotice,
   markFastAgentDurableTurnDelivered,
   markFastAgentInferenceRetryNoticeInterruption,
@@ -5081,6 +5082,18 @@ export async function answerFastAgentQuestion({
         durableTurnReplayable &&
         Boolean(durableAdmission) &&
         (shutdownInterrupted || lockOwnershipLost);
+      // A restart with no row to resume the turn from: the admission write
+      // failed before it ran. A queue-delivered row is not this case (the
+      // queue re-runs it on its own), nor is a platform event (its
+      // scheduler re-runs it when it never completed). The turn is admitted
+      // late and handed to the queue; only if that fails too is the user
+      // asked to send it again.
+      const restartedWithoutRow =
+        shutdownInterrupted &&
+        !durableAdmission &&
+        !currentDurableHumanFollowUpEventId &&
+        !platformEvent;
+      let handedOffLate = false;
       console.error(
         `[Fast Agent] Turn interrupted (reason=${interruptionReason}, conversation=${canonicalConversationId ?? 'unknown'}, retryNoticeVisible=${Boolean(inferenceRetryReply)}, resumable=${resumable}, error=${formatErrorForLog(terminalError)})`,
       );
@@ -5107,6 +5120,22 @@ export async function answerFastAgentQuestion({
             );
           });
         }
+        if (restartedWithoutRow && adapter.requestLateDurableAdmission) {
+          handedOffLate = await adapter
+            .requestLateDurableAdmission()
+            .catch((admitError) => {
+              console.warn(
+                `[Fast Agent] Late durable admission failed: ${formatErrorForLog(admitError)}`,
+              );
+              return false;
+            });
+          if (handedOffLate) {
+            console.info(
+              `[Fast Agent] Turn ${turnId} admitted late and handed to the queue after a restart (conversation=${canonicalConversationId ?? 'unknown'}).`,
+            );
+          }
+        }
+        const restartedWithoutRecovery = restartedWithoutRow && !handedOffLate;
         // A terminal interruption closeout is only safe once the row can no
         // longer be re-run; if that revocation did not land, post nothing
         // and let recovery own the outcome.
@@ -5116,23 +5145,52 @@ export async function answerFastAgentQuestion({
             : await revokeDurableTurnReplay(
                 `Turn interrupted without replay (${interruptionReason}).`,
               );
-        if (!terminalCloseoutAllowed) {
-          // Resumable turns and unrevoked rows fall through to the rethrow
-          // below without a user-facing closeout.
+        if (!terminalCloseoutAllowed || handedOffLate) {
+          // Resumable turns, late-admitted turns, and unrevoked rows fall
+          // through to the rethrow below without a user-facing closeout; a
+          // visible retry notice stays for the resumed run to inherit.
         } else if (!lockOwnershipLost && inferenceRetryReply) {
           // A visible retry notice must not stay up claiming a retry that
           // will never come: a deliberately cancelled turn, or the rare turn
-          // whose admission write failed and so has no row to resume from.
-          // Every admitted turn resumes instead and never reaches here.
+          // that has no row and could not be admitted late either.
           await replaceInferenceRetryReply(
             {
               purpose: 'closeout',
-              message: INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+              message: restartedWithoutRecovery
+                ? RESTARTED_ACTIVE_TURN_MESSAGE
+                : INTERRUPTED_INFERENCE_RETRY_MESSAGE,
             },
             true,
             undefined,
             interruptionReason,
           );
+        } else if (restartedWithoutRecovery && !isInstructionClosed()) {
+          // Nothing will re-run this turn. Recorded like every other
+          // closeout, so the transcript shows the turn ended here and why.
+          const reply = {
+            purpose: 'closeout' as const,
+            message: RESTARTED_ACTIVE_TURN_MESSAGE,
+          };
+          try {
+            await postRecordedSystemCloseout(reply.message, async () => {
+              const posted =
+                (await surfaceReplyStream.deliver(reply)) ??
+                (await adapter.postReply(reply));
+              diagnostics.recordVisibleReply();
+              await persistAssistantReply({
+                reply,
+                event: allocateCanonicalEvent(
+                  `assistant:${nextAssistantOrdinal++}`,
+                ),
+                platformMessageId: posted?.messageId,
+                interruptionReason,
+              });
+            });
+          } catch (postError) {
+            console.error(
+              `[Fast Agent] Failed to post restart closeout: ${formatErrorForLog(postError)}`,
+            );
+          }
         } else if (
           lockOwnershipLost &&
           canonicalConversationId &&

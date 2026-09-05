@@ -1,5 +1,7 @@
 const mocks = vi.hoisted(() => ({
   acquireTurnLock: vi.fn(),
+  releaseDurableClaim: vi.fn(),
+  wakeNow: vi.fn(),
   enqueueParentEvent: vi.fn(),
   updateWhere: vi.fn(),
   insertOnConflict: vi.fn(),
@@ -9,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
+  releaseFastAgentDurableTurnClaim: mocks.releaseDurableClaim,
   FAST_AGENT_DURABLE_TURN_CLAIM_MS: 15 * 60 * 1000,
 }));
 
@@ -45,11 +48,13 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('./fast-agent-parent-event-queue', () => ({
   enqueueFastAgentParentEvent: mocks.enqueueParentEvent,
+  wakeFastAgentParentEventNow: mocks.wakeNow,
   buildFastAgentParentEventKey: vi.fn(() => 'stable-event-key'),
 }));
 
 import {
   admitFastAgentHumanFollowUp,
+  handOffFastAgentInterruptedTurn,
   persistFastAgentInlineHumanTurn,
 } from './fast-agent-human-follow-up';
 
@@ -144,6 +149,73 @@ describe('persistFastAgentInlineHumanTurn', () => {
       persistFastAgentInlineHumanTurn({ parent, event }),
     ).resolves.toBeNull();
     expect(mocks.updateWhere).not.toHaveBeenCalled();
+  });
+});
+
+describe('handOffFastAgentInterruptedTurn', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.updateWhere.mockResolvedValue(undefined);
+    mocks.insertOnConflict.mockReturnValue({
+      returning: mocks.insertReturning,
+    });
+    mocks.insertReturning.mockResolvedValue([{ id: 'row-1' }]);
+    mocks.releaseDurableClaim.mockResolvedValue(true);
+    mocks.wakeNow.mockResolvedValue(undefined);
+  });
+
+  it('persists the row, releases the claim, and wakes the queue', async () => {
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'inline',
+      deliveredAt: null,
+      discardedAt: null,
+    });
+
+    await expect(
+      handOffFastAgentInterruptedTurn({ parent, event }),
+    ).resolves.toBe(true);
+    expect(mocks.insertOnConflict).toHaveBeenCalledOnce();
+    expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('row-1');
+    expect(mocks.wakeNow).toHaveBeenCalledWith({
+      conversationId: parent.sessionId,
+      eventKey: 'stable-event-key',
+    });
+  });
+
+  it('still reports the hand-off when only the wakeup fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'inline',
+      deliveredAt: null,
+      discardedAt: null,
+    });
+    mocks.wakeNow.mockRejectedValue(new Error('redis down'));
+
+    try {
+      // The row is pending with no claim, so the recovery sweep picks it up.
+      await expect(
+        handOffFastAgentInterruptedTurn({ parent, event }),
+      ).resolves.toBe(true);
+      expect(mocks.releaseDurableClaim).toHaveBeenCalledWith('row-1');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('reports no hand-off when the same message already settled', async () => {
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      deliveredAt: new Date(),
+      discardedAt: null,
+    });
+
+    await expect(
+      handOffFastAgentInterruptedTurn({ parent, event }),
+    ).resolves.toBe(false);
+    expect(mocks.releaseDurableClaim).not.toHaveBeenCalled();
+    expect(mocks.wakeNow).not.toHaveBeenCalled();
   });
 });
 

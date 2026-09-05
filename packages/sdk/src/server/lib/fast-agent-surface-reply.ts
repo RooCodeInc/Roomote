@@ -50,6 +50,7 @@ import {
 } from './fast-agent-reply-replacement';
 import {
   admitFastAgentHumanFollowUp,
+  handOffFastAgentInterruptedTurn,
   persistFastAgentInlineHumanTurn,
 } from './fast-agent-human-follow-up';
 import {
@@ -783,7 +784,16 @@ async function runFastAgentSurfaceReply(
                   retryAt,
                 ),
             }
-          : {}),
+          : {
+              requestLateDurableAdmission: () =>
+                handOffFastAgentInterruptedTurn({
+                  parent: {
+                    sessionId: params.sessionId,
+                    conversation: delivery.conversation,
+                  },
+                  event: buildSurfaceHumanFollowUpEvent(params),
+                }),
+            }),
         createArtifact: buildFastAgentArtifactCreator(params.sessionId),
         ...delivery.adapter,
       },
