@@ -93,6 +93,14 @@ describe('launchPinnedFastSessionTask', () => {
         conversationId: 'conv-1',
       },
     });
+    mocks.findById.mockResolvedValue({
+      id: 'fast-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'conv-1',
+      },
+    });
     mocks.upsertFastAgentMessage.mockResolvedValue({
       initialHumanTurn: true,
     });
@@ -292,6 +300,7 @@ describe('launchPinnedFastSessionTask', () => {
       created: true,
       conversation,
     });
+    mocks.findById.mockResolvedValue({ id: 'fast-bound', conversation });
 
     await launchPinnedFastSessionTask({
       userId: 'user-1',
@@ -309,7 +318,9 @@ describe('launchPinnedFastSessionTask', () => {
       conversation,
       sessionId: 'session-origin',
     });
-    expect(mocks.findById).not.toHaveBeenCalled();
+    expect(mocks.findById).toHaveBeenCalledExactlyOnceWith({
+      id: 'fast-bound',
+    });
     expect(mocks.enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({

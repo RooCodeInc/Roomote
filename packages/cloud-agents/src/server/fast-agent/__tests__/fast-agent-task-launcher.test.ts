@@ -1,5 +1,6 @@
 const mocks = vi.hoisted(() => ({
   enqueueTask: vi.fn(),
+  findById: vi.fn(),
   getTaskUrl: vi.fn(() => 'https://roomote.example/task/task-1'),
 }));
 
@@ -11,9 +12,14 @@ vi.mock('../../task-url', () => ({
   getTaskUrl: mocks.getTaskUrl,
 }));
 
+vi.mock('../fast-agent-conversation-repository', () => ({
+  fastAgentConversationRepository: { findById: mocks.findById },
+}));
+
 import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 
 import {
+  createFastAgentTaskLauncher,
   createFastAgentSlackTaskLauncher,
   createFastAgentWebTaskLauncher,
 } from '../fast-agent-task-launcher';
@@ -21,6 +27,14 @@ import {
 describe('createFastAgentSlackTaskLauncher', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.findById.mockResolvedValue({
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: '100.001',
+        replyTarget: { channelId: 'C123', threadId: '100.001' },
+      },
+    });
     mocks.enqueueTask.mockImplementation(
       async (
         _input: unknown,
@@ -32,6 +46,32 @@ describe('createFastAgentSlackTaskLauncher', () => {
         return { taskId: 'task-1' };
       },
     );
+  });
+
+  it('rejects a missing parent before provider build side effects or enqueue', async () => {
+    mocks.findById.mockResolvedValueOnce(null);
+    const buildTask = vi.fn();
+    const postKickoff = vi.fn();
+    const launchTask = createFastAgentTaskLauncher({
+      userId: 'user-1',
+      surface: 'slack',
+      taskUrlCampaign: 'fast-delegation',
+      buildTask,
+    });
+    await expect(
+      launchTask({
+        prompt: 'Investigate the issue',
+        environmentId: null,
+        parentSessionId: 'missing-parent',
+        postKickoff,
+      }),
+    ).rejects.toThrow('Fast parent session was not found.');
+    expect(mocks.findById).toHaveBeenCalledExactlyOnceWith({
+      id: 'missing-parent',
+    });
+    expect(buildTask).not.toHaveBeenCalled();
+    expect(mocks.enqueueTask).not.toHaveBeenCalled();
+    expect(postKickoff).not.toHaveBeenCalled();
   });
 
   it('launches a communication-isolated child owned by the Fast parent', async () => {
@@ -390,6 +430,13 @@ describe('createFastAgentSlackTaskLauncher', () => {
 describe('createFastAgentWebTaskLauncher', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.findById.mockResolvedValue({
+      conversation: {
+        surface: 'web',
+        workspaceId: 'workspace-1',
+        conversationId: 'conversation-1',
+      },
+    });
     mocks.enqueueTask.mockImplementation(
       async (
         _input: unknown,
