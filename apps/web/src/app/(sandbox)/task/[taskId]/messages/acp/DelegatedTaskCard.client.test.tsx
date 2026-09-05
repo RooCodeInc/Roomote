@@ -28,6 +28,7 @@ describe('DelegatedTaskCard', () => {
           taskPhase: 'running',
           error: null,
         },
+        activityLine: null,
       },
     });
   });
@@ -74,6 +75,40 @@ describe('DelegatedTaskCard', () => {
       { taskId: 'child-1' },
       expect.any(Object),
     );
+  });
+
+  it('shows the latest activity line while the child is working', () => {
+    useQueryMock.mockReturnValue({
+      isPending: false,
+      data: {
+        task: { title: 'Fix checkout' },
+        taskRun: {
+          status: RunStatus.Running,
+          taskPhase: 'running',
+          error: null,
+        },
+        activityLine: 'Running the test suite now.',
+      },
+    });
+
+    render(
+      <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={vi.fn()} />,
+    );
+
+    expect(screen.getByText('Running the test suite now.')).toBeInTheDocument();
+    // The plain status stays visible alongside the activity line.
+    expect(screen.getByText('Working')).toBeInTheDocument();
+  });
+
+  it('falls back to the plain status when no activity exists yet', () => {
+    render(
+      <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={vi.fn()} />,
+    );
+
+    expect(screen.getByText('Working')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Running the test suite now.'),
+    ).not.toBeInTheDocument();
   });
 
   it('updates when the child transitions to a terminal state', () => {
