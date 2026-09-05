@@ -574,7 +574,14 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     {
       displayName: 'GPT-6 Astra',
       modelId: 'gpt-6-astra',
-      providerIds: ['openrouter', 'openai', 'chatgpt'],
+      providerIds: [
+        'openrouter',
+        'vercel',
+        'openai',
+        'opencode',
+        'github-copilot',
+        'chatgpt',
+      ],
     },
     {
       displayName: 'GPT 5.6 Sol',
