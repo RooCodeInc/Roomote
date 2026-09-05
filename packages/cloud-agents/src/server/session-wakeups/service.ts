@@ -1,13 +1,10 @@
 import {
-  buildSessionWakeupPromptSignature,
+  admitSessionWakeup,
   cancelSessionWakeup,
-  countActiveSessionWakeups,
   db,
   deploymentSettings,
   eq,
   getSessionWakeupById,
-  insertSessionWakeup,
-  listActiveSessionWakeups,
   listSessionWakeups,
   type SessionWakeup,
 } from '@roomote/db/server';
@@ -90,13 +87,6 @@ export function toSessionWakeupSummary(
   };
 }
 
-function schedulesMatch(
-  left: SessionWakeup['schedule'],
-  right: SessionWakeup['schedule'],
-): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 export async function createSessionWakeup(
   actor: SessionWakeupActor,
   input: CreateSessionWakeupInput,
@@ -117,31 +107,7 @@ export async function createSessionWakeup(
   const reportPolicy: SessionWakeupReportPolicy =
     input.reportPolicy ?? (recurring ? 'only_when_notable' : 'always');
 
-  // Reuse an equivalent active wakeup instead of stacking duplicates; a model
-  // that retries a create call must not double-schedule.
-  const promptSignature = buildSessionWakeupPromptSignature(prompt);
-  const active = await listActiveSessionWakeups(actor.conversationId);
-  const existing = active.find(
-    (row) =>
-      row.promptSignature === promptSignature &&
-      schedulesMatch(row.schedule, schedule),
-  );
-  if (existing) {
-    return {
-      wakeup: toSessionWakeupSummary(existing),
-      duplicate: true,
-      timeZone,
-    };
-  }
-
-  const activeCount = await countActiveSessionWakeups(actor.conversationId);
-  if (activeCount >= MAX_ACTIVE_SESSION_WAKEUPS) {
-    throw new SessionWakeupValidationError(
-      `This conversation already has ${MAX_ACTIVE_SESSION_WAKEUPS} active wakeups. Cancel one before creating another.`,
-    );
-  }
-
-  const row = await insertSessionWakeup({
+  const result = await admitSessionWakeup({
     conversationId: actor.conversationId,
     createdByUserId: actor.userId,
     name,
@@ -152,12 +118,23 @@ export async function createSessionWakeup(
     until,
     nextRunAt: firstRunAt,
   });
-  enqueueSessionWakeupFireBestEffort({
-    wakeupId: row.id,
-    runAt: firstRunAt.getTime(),
-  });
+  if (result.outcome === 'cap_reached') {
+    throw new SessionWakeupValidationError(
+      `This conversation already has ${MAX_ACTIVE_SESSION_WAKEUPS} active wakeups. Cancel one before creating another.`,
+    );
+  }
+  if (result.outcome === 'created') {
+    enqueueSessionWakeupFireBestEffort({
+      wakeupId: result.wakeup.id,
+      runAt: firstRunAt.getTime(),
+    });
+  }
 
-  return { wakeup: toSessionWakeupSummary(row), duplicate: false, timeZone };
+  return {
+    wakeup: toSessionWakeupSummary(result.wakeup),
+    duplicate: result.outcome === 'duplicate',
+    timeZone,
+  };
 }
 
 export async function listSessionWakeupsForConversation(

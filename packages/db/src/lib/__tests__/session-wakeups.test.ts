@@ -2,9 +2,13 @@
 // next_run_at is load-bearing: it is what keeps a duplicate delayed job, or
 // two workers holding the same job, from firing one occurrence twice.
 
-import { SESSION_WAKEUP_MAX_CONSECUTIVE_FAILURES } from '@roomote/types';
+import {
+  MAX_ACTIVE_SESSION_WAKEUPS,
+  SESSION_WAKEUP_MAX_CONSECUTIVE_FAILURES,
+} from '@roomote/types';
 
 import {
+  admitSessionWakeup,
   cancelSessionWakeup,
   cancelSessionWakeupsForConversation,
   claimSessionWakeupFire,
@@ -60,6 +64,65 @@ afterEach(async () => {
 });
 
 describe('session wakeup helpers', () => {
+  it('deduplicates concurrent recurring creates in one conversation', async () => {
+    const { user, conversation } = await makeConversation();
+    const results = await Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        admitSessionWakeup({
+          conversationId: conversation.id,
+          createdByUserId: user.id,
+          name: `Check ${index}`,
+          prompt: index % 2 ? ' CHECK  PR ' : 'check pr',
+          schedule: { mode: 'interval', everyMinutes: 10 },
+          reportPolicy: 'only_when_notable',
+          maxRuns: null,
+          until: null,
+          nextRunAt: new Date(firstRunAt.getTime() + index),
+        }),
+      ),
+    );
+
+    expect(results.filter((r) => r.outcome === 'created')).toHaveLength(1);
+    expect(results.filter((r) => r.outcome === 'duplicate')).toHaveLength(11);
+    const rows = await listSessionWakeups(conversation.id);
+    expect(rows).toHaveLength(1);
+    for (const result of results) {
+      expect(result).toMatchObject({ wakeup: { id: rows[0]!.id } });
+    }
+  });
+
+  it('caps concurrent distinct creates at ten and still admits duplicates', async () => {
+    const { user, conversation } = await makeConversation();
+    const input = {
+      conversationId: conversation.id,
+      createdByUserId: user.id,
+      name: 'Check PR',
+      prompt: 'check pr',
+      schedule: { mode: 'interval' as const, everyMinutes: 10 },
+      reportPolicy: 'only_when_notable' as const,
+      maxRuns: null,
+      until: null,
+      nextRunAt: firstRunAt,
+    };
+    const results = await Promise.all(
+      Array.from({ length: MAX_ACTIVE_SESSION_WAKEUPS + 5 }, (_, index) =>
+        admitSessionWakeup({ ...input, prompt: `check pr ${index}` }),
+      ),
+    );
+
+    expect(results.filter((r) => r.outcome === 'created')).toHaveLength(
+      MAX_ACTIVE_SESSION_WAKEUPS,
+    );
+    expect(results.filter((r) => r.outcome === 'cap_reached')).toHaveLength(5);
+    expect(await countActiveSessionWakeups(conversation.id)).toBe(
+      MAX_ACTIVE_SESSION_WAKEUPS,
+    );
+    const rows = await listSessionWakeups(conversation.id);
+    expect(
+      await admitSessionWakeup({ ...input, prompt: rows[0]!.prompt }),
+    ).toMatchObject({ outcome: 'duplicate', wakeup: { id: rows[0]!.id } });
+  });
+
   it('claims an occurrence exactly once and advances the row', async () => {
     const { user, conversation } = await makeConversation();
     const row = await makeWakeup(conversation.id, user.id);

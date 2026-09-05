@@ -1,14 +1,16 @@
 import { and, asc, count, desc, eq, lte, sql } from 'drizzle-orm';
 
 import {
+  MAX_ACTIVE_SESSION_WAKEUPS,
   SESSION_WAKEUP_MAX_CONSECUTIVE_FAILURES,
   type SessionWakeupReportPolicy,
   type SessionWakeupSchedule,
 } from '@roomote/types';
 
 import { type DatabaseOrTransaction, db } from '../db';
-import { sessionWakeups } from '../schema';
+import { fastAgentConversations, sessionWakeups } from '../schema';
 import type { SessionWakeup } from '../types';
+import { runInTransactionIfAvailable } from './transaction-utils';
 
 /**
  * Collapse whitespace and case so two prompts that read the same dedupe to
@@ -99,6 +101,41 @@ export type InsertSessionWakeupInput = {
   until: Date | null;
   nextRunAt: Date;
 };
+
+export type AdmitSessionWakeupResult =
+  | { outcome: 'created' | 'duplicate'; wakeup: SessionWakeup }
+  | { outcome: 'cap_reached' };
+
+/** Serialize create admission even when tools run concurrently within a turn. */
+export async function admitSessionWakeup(
+  input: InsertSessionWakeupInput,
+  database: DatabaseOrTransaction = db,
+): Promise<AdmitSessionWakeupResult> {
+  return runInTransactionIfAvailable(database, async (tx) => {
+    const [conversation] = await tx
+      .select({ id: fastAgentConversations.id })
+      .from(fastAgentConversations)
+      .where(eq(fastAgentConversations.id, input.conversationId))
+      .for('update');
+    if (!conversation) {
+      throw new Error(`Conversation ${input.conversationId} does not exist.`);
+    }
+
+    const promptSignature = buildSessionWakeupPromptSignature(input.prompt);
+    const active = await listActiveSessionWakeups(input.conversationId, tx);
+    const existing = active.find(
+      (row) =>
+        row.promptSignature === promptSignature &&
+        JSON.stringify(row.schedule) === JSON.stringify(input.schedule),
+    );
+    if (existing) return { outcome: 'duplicate', wakeup: existing };
+    if (active.length >= MAX_ACTIVE_SESSION_WAKEUPS) {
+      return { outcome: 'cap_reached' };
+    }
+
+    return { outcome: 'created', wakeup: await insertSessionWakeup(input, tx) };
+  });
+}
 
 export async function insertSessionWakeup(
   input: InsertSessionWakeupInput,
