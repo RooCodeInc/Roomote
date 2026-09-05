@@ -240,7 +240,9 @@ export function NewTaskForm({
         tools={
           <SessionModelSwitcher
             model={selectedModelOverrideId ?? ''}
-            onModelChange={setSelectedModelOverrideId}
+            onModelChange={(model) =>
+              setSelectedModelOverrideId(model || undefined)
+            }
             reasoningEffort={selectedReasoningEffort ?? null}
             onReasoningEffortChange={setSelectedReasoningEffort}
             defaultModelId={defaultModelId}
