@@ -55,9 +55,15 @@ vi.mock('@/components/ai-elements', () => ({
     state?: string;
     params?: unknown;
     collapsible?: boolean;
+    iconElement?: ReactNode;
   }) => {
     toolHeaderSpy(props);
-    return <div>{props.action}</div>;
+    return (
+      <div>
+        {props.iconElement}
+        {props.action}
+      </div>
+    );
   },
   ToolContent: ({ children }: { children?: ReactNode }) => (
     <div>{children}</div>
@@ -485,6 +491,37 @@ describe('AcpToolMessage', () => {
       expect.objectContaining({
         icon: Wrench,
       }),
+    );
+  });
+
+  it('shows the referenced task robot for task-message activity', () => {
+    const msg = buildResultMessage('task', {
+      toolName: 'send_task_message',
+      output: JSON.stringify({ success: true, taskId: 'child-42' }),
+    });
+    (
+      msg.data as AcpToolResultUiMessage['data'] & {
+        rawInput: Record<string, unknown>;
+      }
+    ).rawInput = {
+      arguments: { taskId: 'child-42', message: 'Check the tests' },
+    };
+
+    render(<AcpToolMessage msg={msg} />);
+
+    expect(
+      document.querySelector('[data-task-robot-icon]'),
+    ).toBeInTheDocument();
+  });
+
+  it('does not replace generic tool icons with task robots', () => {
+    render(<AcpToolMessage msg={buildMessage('edit')} />);
+
+    expect(
+      document.querySelector('[data-task-robot-icon]'),
+    ).not.toBeInTheDocument();
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ icon: SquarePen, iconElement: undefined }),
     );
   });
 

@@ -6,6 +6,7 @@ import { isExitedRunStatus } from '@roomote/types';
 
 import { ChevronRight, Skeleton } from '@/components/system';
 import { TaskStatusIndicator } from '@/components/sandbox';
+import { TaskRobotIcon } from '@/components/tasks/TaskRobotIcon';
 import { useTRPC } from '@/trpc/client';
 
 export function DelegatedTaskCard({
@@ -44,6 +45,7 @@ export function DelegatedTaskCard({
       onClick={() => onOpen(taskId)}
       aria-label={`View coding task: ${title}`}
     >
+      <TaskRobotIcon taskId={taskId} />
       <span className="min-w-0 flex-1">
         <span className="block text-xs text-muted-foreground group-hover:text-accent-foreground">
           Started coding task

@@ -214,6 +214,9 @@ describe('NestedTaskSidePanel', () => {
 
     expect(screen.getByText('Task:')).toHaveClass('font-semibold');
     expect(screen.getByText('Fix checkout')).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-task-robot-icon]'),
+    ).toBeInTheDocument();
     expect(screen.getByText('Workspace env-1')).toBeInTheDocument();
     expect(screen.getByTestId('live-provider')).toBeInTheDocument();
     expect(screen.getByText('Child transcript')).toBeInTheDocument();
