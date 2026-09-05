@@ -13,6 +13,7 @@
   "globalPassThroughEnv": [
     "APP_ENV",
     "DATABASE_URL",
+    "REDIS_URL",
     "MISE_DATA_DIR",
     "MISE_CACHE_DIR",
     "SKIP_ENV_VALIDATION",
