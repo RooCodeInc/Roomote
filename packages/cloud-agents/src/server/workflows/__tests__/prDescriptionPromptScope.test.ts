@@ -183,6 +183,29 @@ describe('PR description prompt scope', () => {
       );
     }
 
+    for (const skillContent of [
+      createPrSkill,
+      createDraftPrSkill,
+      fixPrSkill,
+    ]) {
+      expect(skillContent).toContain(
+        'read the actual `attemptId` value from `/tmp/roomote-visual-proof-attempt.json`, then call the Roomote MCP tool `mcp__roomote__manage_artifacts` with `action: "list"` and `artifactType: "visual-proof"`',
+      );
+      expect(skillContent).toContain(
+        'Build the expected artifact path prefix by appending that value and a trailing slash to `tmp/capture-visual-proof/`.',
+      );
+      expect(skillContent).toContain(
+        'use those records to recover uploads after a lost child result and refresh their signed URLs',
+      );
+      expect(skillContent).not.toMatch(
+        /(?:&(?:amp;)?lt;|&#0*60;|&#x0*3c;)attemptId(?:&(?:amp;)?gt;|&#0*62;|&#x0*3e;)/i,
+      );
+      expect(skillContent).not.toContain('<attemptId>');
+      expect(skillContent).toContain(
+        'delete `/tmp/roomote-visual-proof-attempt.json`',
+      );
+    }
+
     expect(createDraftPrSkill).toContain(
       'HEAD` to capture the full PR diff for the branch. Use this local git diff for every provider.',
     );

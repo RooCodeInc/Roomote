@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   TaskEventName,
@@ -75,12 +77,14 @@ function createLogger() {
 
 const SETTLEMENT_GRACE_MS = 10_000;
 const VISUAL_PROOF_TIMEOUT_MS = 5_000;
+let harnessSequence = 0;
 
 function createHarness(
   client = new FakeOpenCodeServerClient(),
   options: { visualProofTimeoutMs?: number } = {},
 ) {
   const logger = createLogger();
+  const visualProofAttemptStatePath = `/tmp/roomote-visual-proof-attempt-test-${process.pid}-${harnessSequence++}.json`;
   const harness = new OpenCodeServerHarness({
     client: client as unknown as OpenCodeServerClient,
     workspacePath: '/tmp/workspace',
@@ -89,9 +93,10 @@ function createHarness(
     eventStreamReadyTimeoutMs: 100,
     subagentSettlementGraceMs: SETTLEMENT_GRACE_MS,
     visualProofTimeoutMs: options.visualProofTimeoutMs,
+    visualProofAttemptStatePath,
   });
 
-  return { client, harness, logger };
+  return { client, harness, logger, visualProofAttemptStatePath };
 }
 
 function createSkillToolPart(name: string) {
@@ -938,9 +943,12 @@ describe('OpenCode visual proof deadline', () => {
 
   it('bounds the entire visual proof workflow and resumes with a timeout handoff', async () => {
     const client = new FakeOpenCodeServerClient();
-    const { harness, logger } = createHarness(client, {
-      visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
-    });
+    const { harness, logger, visualProofAttemptStatePath } = createHarness(
+      client,
+      {
+        visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+      },
+    );
 
     try {
       await connectHarness(harness, client);
@@ -971,9 +979,32 @@ describe('OpenCode visual proof deadline', () => {
           ]),
         },
       });
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        request: {
+          parts: expect.arrayContaining([
+            expect.objectContaining({
+              text: expect.stringContaining(
+                "list this task's `visual-proof` artifacts once",
+              ),
+            }),
+          ]),
+        },
+      });
+      const attemptState = JSON.parse(
+        await fs.readFile(visualProofAttemptStatePath, 'utf8'),
+      ) as { attemptId: string; startedAt: string };
+      expect(attemptState.attemptId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(attemptState.startedAt).toBeTruthy();
+      expect(JSON.stringify(client.promptAsync.mock.calls[1]?.[0])).toContain(
+        `tmp/capture-visual-proof/${attemptState.attemptId}/`,
+      );
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('shared 5000ms deadline'),
       );
+      harness.dispose();
+      await expect(
+        fs.readFile(visualProofAttemptStatePath, 'utf8'),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       harness.dispose();
     }
@@ -1009,6 +1040,77 @@ describe('OpenCode visual proof deadline', () => {
       await vi.advanceTimersByTimeAsync(VISUAL_PROOF_TIMEOUT_MS);
 
       expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('clears proof attempt state when the task is cancelled', async () => {
+    const client = new FakeOpenCodeServerClient();
+    const { harness, visualProofAttemptStatePath } = createHarness(client, {
+      visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+    });
+
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part: createSkillToolPart('capture-visual-proof') },
+      });
+
+      await expect(
+        fs.readFile(visualProofAttemptStatePath, 'utf8'),
+      ).resolves.toContain('attemptId');
+
+      harness.sendCommand({ commandName: TaskCommandName.CancelTask });
+
+      await vi.waitFor(async () => {
+        await expect(
+          fs.readFile(visualProofAttemptStatePath, 'utf8'),
+        ).rejects.toMatchObject({ code: 'ENOENT' });
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('clears proof attempt state after a terminal provider error', async () => {
+    const client = new FakeOpenCodeServerClient();
+    const { harness, visualProofAttemptStatePath } = createHarness(client, {
+      visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+    });
+
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part: createSkillToolPart('capture-visual-proof') },
+      });
+
+      await expect(
+        fs.readFile(visualProofAttemptStatePath, 'utf8'),
+      ).resolves.toContain('attemptId');
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'APIError',
+            data: {
+              message: 'Provider rejected the request.',
+              statusCode: 403,
+              isRetryable: false,
+            },
+          },
+        },
+      });
+
+      await expect(
+        fs.readFile(visualProofAttemptStatePath, 'utf8'),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       harness.dispose();
     }
