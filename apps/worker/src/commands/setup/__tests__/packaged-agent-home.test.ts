@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import { activateSkillsFolder } from '../../../run-task/agent-home';
 import { syncPackagedAgentHome } from '../system';
 
 function writeSkill(
@@ -87,6 +88,63 @@ describe('syncPackagedAgentHome', () => {
     expect(fs.lstatSync(path.join(homeDir, '.claude')).isDirectory()).toBe(
       true,
     );
+  });
+
+  it('materializes the shipped implement-changes resource into both coding skill homes', () => {
+    const sourceSkillDir = path.resolve(
+      import.meta.dirname,
+      '../../../../../..',
+      'packages/cloud-agents/src/server/workflows/skills/standard/implement-changes',
+    );
+    const resource = path.join('resources', 'default-workflow.md');
+    const expectedContent = fs.readFileSync(
+      path.join(sourceSkillDir, resource),
+      'utf8',
+    );
+    // Reproduce the release archive's recursive packaged-skills layout.
+    fs.cpSync(
+      sourceSkillDir,
+      path.join(workerDir, '.packaged-skills', 'standard', 'implement-changes'),
+      { recursive: true },
+    );
+
+    syncPackagedAgentHome({ homeDir, workerDir });
+    expect(
+      fs.readFileSync(
+        path.join(
+          homeDir,
+          '.packaged-skills',
+          'standard',
+          'implement-changes',
+          resource,
+        ),
+        'utf8',
+      ),
+    ).toBe(expectedContent);
+
+    const runtimeHomeDir = path.join(testRootDir, 'runtime-home');
+    expect(
+      activateSkillsFolder({
+        homeDir: runtimeHomeDir,
+        sourceHomeDir: homeDir,
+        skillsFolderName: 'standard',
+      }),
+    ).toBe(true);
+    expect(expectedContent.trim().length).toBeGreaterThan(0);
+    for (const agentDirectory of ['.agents', '.claude']) {
+      const installedSkillDir = path.join(
+        runtimeHomeDir,
+        agentDirectory,
+        'skills',
+        'implement-changes',
+      );
+      expect(
+        fs.readFileSync(path.join(installedSkillDir, 'SKILL.md'), 'utf8'),
+      ).toBe(fs.readFileSync(path.join(sourceSkillDir, 'SKILL.md'), 'utf8'));
+      expect(
+        fs.readFileSync(path.join(installedSkillDir, resource), 'utf8'),
+      ).toBe(expectedContent);
+    }
   });
 
   it('preserves installed .agents/skills while refreshing the rest of .agents', () => {

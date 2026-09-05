@@ -306,19 +306,19 @@ describe('PR description prompt scope', () => {
     const implementSkill = readSkill(
       '../skills/standard/implement-changes/SKILL.md',
     );
+    const defaultWorkflow = readSkill(
+      '../skills/standard/implement-changes/resources/default-workflow.md',
+    );
 
-    expect(implementSkill).toContain(
+    expect(defaultWorkflow).toContain(
       'Let the delegated delivery skill own pull request title/body derivation, screenshot and screencast embedding, related-PR links, and any PR metadata refresh using its shared `pr-metadata-update-recipe` block plus the relevant `pr-writing-guide` section instead of duplicating that procedure here.',
     );
     expect(implementSkill).toContain(
       "Let `fix-pr` own the post-push PR metadata refresh using its shared `pr-metadata-update-recipe` block and the `fix-pr` skill's `pr-writing-guide` section.",
     );
-    expect(implementSkill).toContain(
-      'Use a single bracketed type tag such as `[Fix]` or `[Feat]`, then continue with the user-facing description in plain text.',
-    );
-    expect(implementSkill).toContain(
-      '<example type="feat">[Feat] Add bulk-cancel action to task dashboard</example>',
-    );
+    // Delivery skills own the writing guide; the parent must not duplicate it.
+    expect(implementSkill).not.toContain('<pr-writing-guide>');
+    expect(defaultWorkflow).not.toContain('<pr-writing-guide>');
     expect(implementSkill).not.toContain(
       'Apply a `Net PR Changes Only` rule when writing the pull request title and body: base them on the full current PR diff for the branch plus only the conversation context that still matches what actually changed, not just the opening request, latest follow-up, or most recent commit.',
     );

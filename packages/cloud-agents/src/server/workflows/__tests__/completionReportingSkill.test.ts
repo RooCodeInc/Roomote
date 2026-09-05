@@ -9,7 +9,7 @@ describe('Standard completion-reporting skill guidance', () => {
   it('forbids routine validation status blocks in implement-changes', () => {
     const skillPath = path.resolve(
       thisDirPath,
-      '../skills/standard/implement-changes/SKILL.md',
+      '../skills/standard/implement-changes/resources/default-workflow.md',
     );
     const skillContent = fs.readFileSync(skillPath, 'utf8');
 
