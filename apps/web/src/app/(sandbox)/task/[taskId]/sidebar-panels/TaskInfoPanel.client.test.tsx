@@ -1,11 +1,48 @@
-import type { ReactNode } from 'react';
-import { render, screen } from '@testing-library/react';
+import type { ReactElement, ReactNode } from 'react';
+import {
+  act,
+  render as renderComponent,
+  screen,
+  waitFor,
+} from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TaskPayloadKind } from '@roomote/types';
 
-const { useSandboxMessagesMock, useTaskSummaryMock } = vi.hoisted(() => ({
-  useSandboxMessagesMock: vi.fn(),
-  useTaskSummaryMock: vi.fn(),
+const { useSandboxMessagesMock, useTaskSummaryMock, fetchSessionMock } =
+  vi.hoisted(() => ({
+    useSandboxMessagesMock: vi.fn(),
+    useTaskSummaryMock: vi.fn(),
+    fetchSessionMock: vi.fn(),
+  }));
+
+const sessionQueryKey = ['sandboxSession', 'byTaskId', { taskId: 'task-1' }];
+
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({
+    sandboxSession: {
+      byTaskId: {
+        queryOptions: (_input: unknown, options: object) => ({
+          queryKey: sessionQueryKey,
+          queryFn: fetchSessionMock,
+          ...options,
+        }),
+      },
+    },
+  }),
 }));
+
+function render(
+  ui: ReactElement,
+  client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
+  }),
+) {
+  return renderComponent(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+}
 
 vi.mock('../hooks', () => ({
   useSandboxMessages: useSandboxMessagesMock,
@@ -80,6 +117,7 @@ const baseTaskRun = {
 describe('TaskInfoPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    fetchSessionMock.mockResolvedValue(null);
     useSandboxMessagesMock.mockReturnValue({
       messages: [],
       protocol: 'roomote_runtime',
@@ -301,6 +339,63 @@ describe('TaskInfoPanel', () => {
 
     expect(screen.getByText('Inference Cost')).toBeInTheDocument();
     expect(screen.getByText('0.02')).toBeInTheDocument();
+  });
+
+  it('refreshes a fresh cached zero on opening and catches up with later usage writes', async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
+    });
+    const sessionWithCost = (costMicroUsd: number) => ({
+      task: { ...baseTask, inferenceUsage: { eventCount: 2, costMicroUsd } },
+    });
+    client.setQueryData(sessionQueryKey, sessionWithCost(0));
+    fetchSessionMock.mockResolvedValue(sessionWithCost(1_250_000));
+    const panel = (active: boolean) => (
+      <TaskInfoPanel
+        active={active}
+        task={baseTask as never}
+        taskRun={baseTaskRun as never}
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />
+    );
+    const { rerender, unmount } = render(panel(false), client);
+    expect(fetchSessionMock).not.toHaveBeenCalled();
+
+    rerender(panel(true));
+    await waitFor(() => expect(screen.getByText('1.25')).toBeInTheDocument());
+    expect(client.getQueryData(sessionQueryKey)).toEqual(
+      sessionWithCost(1_250_000),
+    );
+
+    vi.useFakeTimers();
+    try {
+      fetchSessionMock.mockResolvedValue(sessionWithCost(1_500_000));
+      // Reopening installs the polling timer under the fake clock.
+      rerender(panel(false));
+      rerender(panel(true));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_100);
+      });
+      expect(screen.getByText('1.50')).toBeInTheDocument();
+
+      fetchSessionMock.mockResolvedValue(sessionWithCost(1_750_000));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_100);
+      });
+      expect(screen.getByText('1.75')).toBeInTheDocument();
+
+      rerender(panel(false));
+      fetchSessionMock.mockClear();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(fetchSessionMock).not.toHaveBeenCalled();
+    } finally {
+      unmount();
+      client.clear();
+      vi.useRealTimers();
+    }
   });
 
   it('shows zero inference cost before usage is recorded', () => {
