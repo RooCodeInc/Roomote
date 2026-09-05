@@ -753,6 +753,7 @@ function createInferenceUsageEvent(
   info: OpenCodeMessageInfo,
   tokenUsage: Record<string, unknown>,
   fallbackAgent?: string,
+  workflowSkill?: string,
 ): HarnessInferenceUsageEvent {
   const messageCreatedAt = openCodeTimestampToDate(info.time?.created);
   const messageCompletedAt = openCodeTimestampToDate(info.time?.completed);
@@ -766,6 +767,7 @@ function createInferenceUsageEvent(
       : {}),
     ...(typeof info.modelID === 'string' ? { modelId: info.modelID } : {}),
     ...(agent ? { agent } : {}),
+    ...(workflowSkill ? { workflowSkill } : {}),
     inputTokens: Number(tokenUsage.inputTokens ?? 0),
     outputTokens: Number(tokenUsage.outputTokens ?? 0),
     reasoningTokens: Number(tokenUsage.reasoningTokens ?? 0),
@@ -5445,7 +5447,14 @@ export class OpenCodeServerHarness
     });
     this.emit(
       'runtimeInferenceUsage',
-      createInferenceUsageEvent(message.info, tokenUsage, options?.agentType),
+      createInferenceUsageEvent(
+        message.info,
+        tokenUsage,
+        options?.agentType,
+        message.info.sessionID === this.sessionId
+          ? (this.activeWorkflowSkill ?? undefined)
+          : undefined,
+      ),
     );
     if (options?.finalizeParentTurn !== false) {
       this.finalizedAssistantTurn = finalized;

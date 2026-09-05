@@ -1266,6 +1266,76 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('attributes primary-session inference usage to the active workflow skill', async () => {
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient());
+    const inferenceUsageEvents: HarnessInferenceUsageEvent[] = [];
+
+    harness.subscribeRuntimeInferenceUsage((event) =>
+      inferenceUsageEvents.push(event),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Implement the change.',
+            visibleInTranscript: true,
+            source: 'web',
+          },
+        }),
+      ).toBe(true);
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'skill_part_usage',
+            sessionID: 'ses_1',
+            messageID: 'msg_skill_usage',
+            type: 'tool',
+            callID: 'skill_call_usage',
+            tool: 'skill',
+            state: {
+              status: 'completed',
+              input: { name: 'implement-changes' },
+              title: 'Load skill',
+            },
+          },
+        },
+      });
+
+      client.message.mockResolvedValueOnce(
+        createFinalAssistantMessage({ messageId: 'msg_skill_usage' }),
+      );
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_skill_usage',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+
+      expect(inferenceUsageEvents).toHaveLength(1);
+      expect(inferenceUsageEvents[0]).toMatchObject({
+        sessionId: 'ses_1',
+        messageId: 'msg_skill_usage',
+        workflowSkill: 'implement-changes',
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('auto-submits one hidden continuation on the build agent after an in-flight plan turn loads implement-changes', async () => {
     const { client, harness } = createHarness(new FakeOpenCodeServerClient());
     const runtimeOutputEvents: AcpMessage[] = [];
