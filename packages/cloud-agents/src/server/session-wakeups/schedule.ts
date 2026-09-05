@@ -244,7 +244,7 @@ const CRON_GAP_SAMPLES = 24;
  * occurrences after `from`. A sample is enough to catch every-minute and
  * every-few-minutes patterns, which are the ones the cap exists for.
  */
-export function estimateCronMinGapMinutes(
+function estimateCronMinGapMinutes(
   schedule: Extract<SessionWakeupSchedule, { mode: 'cron' }>,
   from: Date,
 ): number {

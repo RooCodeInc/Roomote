@@ -33,20 +33,23 @@ const UNIT_MINUTES: Record<string, number> = {
   days: 24 * 60,
 };
 
-const DURATION = String.raw`(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)`;
+// Every pattern below runs on text whose whitespace has already been
+// collapsed to single spaces and whose length is capped by the contract, so
+// the patterns use literal single spaces and stay linear.
+const DURATION = String.raw`(\d+) ?(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)`;
 const DURATION_RE = new RegExp(`^${DURATION}$`, 'i');
-const IN_RE = new RegExp(`^(?:once\\s+)?in\\s+${DURATION}$`, 'i');
-const AT_RE = /^(?:once\s+)?at\s+(\S+)$/i;
+const IN_RE = new RegExp(`^(?:once )?in ${DURATION}$`, 'i');
+const AT_RE = /^(?:once )?at (\S+)$/i;
 const EVERY_RE = new RegExp(
-  `^every\\s+(?:${DURATION}|(minute|hour|day))(?:\\s+(.*))?$`,
+  `^every (?:${DURATION}|(minute|hour|day))(?: (.*))?$`,
   'i',
 );
-const CRON_RE = /^cron\s+(\S+\s+\S+\s+\S+\s+\S+\s+\S+)(?:\s+(.*))?$/i;
+const CRON_RE = /^cron ((?:\S+ ){4}\S+)(?: (.*))?$/i;
 // A timezone token is anything that is not a modifier keyword or number.
-const MODIFIER_START_RE = /^(?:x\s*\d*|\d+|for|until)$/i;
+const MODIFIER_START_RE = /^(?:x ?\d*|\d+|for|until)$/i;
 const COUNT_RE =
-  /^(?:x\s*(\d+)|(\d+)\s*(?:x|times|runs)|for\s+(\d+)\s+(?:runs|times))$/i;
-const UNTIL_RE = /^until\s+(\S+)$/i;
+  /^(?:x ?(\d+)|(\d+) ?(?:x|times|runs)|for (\d+) (?:runs|times))$/i;
+const UNTIL_RE = /^until (\S+)$/i;
 
 function invalid(text: string, detail?: string): SessionWakeupValidationError {
   return new SessionWakeupValidationError(
@@ -73,7 +76,7 @@ function parseModifiers(
 ): { maxRuns: number | null; until: Date | null } {
   let maxRuns: number | null = null;
   let until: Date | null = null;
-  const tokens = (rest ?? '').trim().split(/\s+/).filter(Boolean);
+  const tokens = (rest ?? '').trim().split(' ').filter(Boolean);
   let index = 0;
   while (index < tokens.length) {
     const one = tokens[index]!;
@@ -157,7 +160,7 @@ export function parseSessionWakeupSchedule(
 
   const cronMatch = CRON_RE.exec(text);
   if (cronMatch) {
-    const trailing = (cronMatch[2] ?? '').trim().split(/\s+/).filter(Boolean);
+    const trailing = (cronMatch[2] ?? '').trim().split(' ').filter(Boolean);
     const timezone =
       trailing[0] && !MODIFIER_START_RE.test(trailing[0])
         ? trailing.shift()
