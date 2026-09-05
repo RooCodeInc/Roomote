@@ -1,6 +1,7 @@
 import { OffthreadVideo, staticFile, useCurrentFrame } from 'remotion';
 import timeline from '../props/timeline.json';
 import narration from '../props/narration.json';
+import { Annotations, type Annotation } from './Annotations';
 import type { CaptionStyle } from './presets';
 
 type WordTiming = { text: string; start: number; end: number };
@@ -262,6 +263,22 @@ export const DemoStage: React.FC<{
             <Cursor invScale={invScale} />
           </div>
         ) : null}
+
+        {/* Annotation layer: same page-coordinate space as the cursor and
+            ripple, chrome counter-scaled so it holds constant on-screen
+            size under a preset baseScale. Older timelines have no
+            annotations key and render unchanged. */}
+        <Annotations
+          annotations={
+            ((timeline as { annotations?: Annotation[] }).annotations ??
+              []) as Annotation[]
+          }
+          t={t}
+          baseW={BASE_W}
+          baseH={BASE_H}
+          invScale={invScale}
+          accent={capStyle.accent ?? '#c9f24d'}
+        />
       </div>
       </div>
 

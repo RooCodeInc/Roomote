@@ -120,6 +120,31 @@ describe('feature-demo skill', () => {
     expect(captureRunner).toContain('pushCursorMove(moveStart, moveEnd, c);');
   });
 
+  it('anchors annotations to capture-measured element rects', () => {
+    const captureRunner = fs.readFileSync(
+      path.join(skillDirPath, 'capture/capture.mjs'),
+      'utf8',
+    );
+    const annotationsComponent = fs.readFileSync(
+      path.join(skillDirPath, 'render/src/Annotations.tsx'),
+      'utf8',
+    );
+
+    // Capture measures the anchor (tight content rect, resolved after the
+    // beat's scroll settles) and scopes it to the beat's caption window;
+    // the renderer only draws at capture-emitted rects.
+    expect(captureRunner).toContain('annotations: []');
+    expect(captureRunner).toContain('function tightRect(');
+    expect(captureRunner).toContain('selectNodeContents');
+    expect(captureRunner).toContain("beat.note.style ?? 'spotlight'");
+    // The layer is clipped to the window so a spotlight dim can never touch
+    // the backdrop or the caption band.
+    expect(annotationsComponent).toContain("overflow: 'hidden'");
+    // Documented as a rare, single-per-beat clarity device.
+    expect(skillContent).toContain('ONE `"note"`');
+    expect(skillContent).toContain('not decoration');
+  });
+
   it.each(['focus', 'reset'])('rejects the unsupported %s action', (action) => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'feature-demo-'));
     const scriptPath = path.join(tempDir, 'demo-script.json');
