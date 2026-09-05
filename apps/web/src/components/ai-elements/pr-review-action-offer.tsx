@@ -24,6 +24,7 @@ export function PrReviewActionOffer({
   className,
   showQuestion = false,
   testId = 'pr-review-action-offer',
+  labels = PR_REVIEW_ACTION_LABELS,
 }: {
   offer: PrReviewActionOfferData;
   onAction: (
@@ -32,6 +33,7 @@ export function PrReviewActionOffer({
   className?: string;
   showQuestion?: boolean;
   testId?: string;
+  labels?: Record<PrReviewActionChoice, string>;
 }) {
   const [status, setStatus] = useState(offer.status);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -60,7 +62,7 @@ export function PrReviewActionOffer({
             disabled={isSubmitting}
             onClick={() => submit('yes')}
           >
-            {PR_REVIEW_ACTION_LABELS.yes}
+            {labels.yes}
           </Button>
           <Button
             size="sm"
@@ -68,7 +70,7 @@ export function PrReviewActionOffer({
             disabled={isSubmitting}
             onClick={() => submit('auto')}
           >
-            {PR_REVIEW_ACTION_LABELS.auto}
+            {labels.auto}
           </Button>
           <Button
             size="sm"
@@ -76,7 +78,7 @@ export function PrReviewActionOffer({
             disabled={isSubmitting}
             onClick={() => submit('dismiss')}
           >
-            {PR_REVIEW_ACTION_LABELS.dismiss}
+            {labels.dismiss}
           </Button>
         </div>
       ) : (

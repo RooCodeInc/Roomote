@@ -85,6 +85,7 @@ import {
   OpenSessionTasksPanelContext,
   SessionRunningTaskCountContext,
   SessionTaskStateRevisionContext,
+  SessionReviewTasksContext,
   type SessionArtifactViewerSelection,
 } from './session-task-panel-context';
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
@@ -1074,7 +1075,11 @@ export function SessionWorkspace({
                       <OpenSessionTasksPanelContext.Provider
                         value={openTasksPanel}
                       >
-                        {children}
+                        <SessionReviewTasksContext.Provider
+                          value={sessionTasks}
+                        >
+                          {children}
+                        </SessionReviewTasksContext.Provider>
                       </OpenSessionTasksPanelContext.Provider>
                     </SessionTaskStateRevisionContext.Provider>
                   </SessionRunningTaskCountContext.Provider>

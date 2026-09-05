@@ -696,10 +696,71 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         platformEventTranscriptPayload: {
+          prReview: {
+            url: 'https://github.com/acme/web/pull/42',
+            repository: 'acme/web',
+            number: 42,
+            summary: 'Review feedback remains.',
+            findingCount: null,
+            status: 'feedback',
+          },
           prReviewAction: {
             deliveryId: '22222222-2222-4222-8222-222222222222',
             question: 'Resolve these issues?',
             status: 'pending',
+          },
+        },
+      }),
+    );
+  });
+
+  it('includes approval context without requiring a fix offer', async () => {
+    await deliverFastAgentParentEvent({
+      parent: {
+        sessionId: parent.sessionId,
+        conversation: {
+          surface: 'web',
+          workspaceId: 'user-1',
+          conversationId: 'session-1',
+        },
+      },
+      event: {
+        type: 'pull_request_feedback',
+        feedbackId: 'approved-1',
+        taskId: 'task-1',
+        runId: 42,
+        taskUrl: 'https://roomote.example/task/task-1',
+        reviewTaskId: 'review-42',
+        pullRequest: {
+          provider: 'gitlab',
+          host: 'gitlab.example',
+          repository: 'acme/web',
+          number: 42,
+          title: 'Provider coverage',
+          url: 'https://gitlab.example/acme/web/-/merge_requests/42',
+          status: 'open',
+        },
+        summary: 'No findings remain.',
+        reviewResult: {
+          reviewKind: 'sync',
+          outcome: 'approved',
+          findingCount: 0,
+          approvalStatus: 'approved',
+          headSha: 'abc123',
+        },
+      },
+    });
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformEventTranscriptPayload: {
+          prReview: {
+            reviewTaskId: 'review-42',
+            url: 'https://gitlab.example/acme/web/-/merge_requests/42',
+            repository: 'acme/web',
+            number: 42,
+            summary: 'No findings remain.',
+            findingCount: 0,
+            status: 'approved',
           },
         },
       }),

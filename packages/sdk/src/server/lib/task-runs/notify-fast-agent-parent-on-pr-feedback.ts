@@ -190,6 +190,7 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
           }),
           pullRequest,
           summary: params.summary,
+          ...(params.reviewTaskId ? { reviewTaskId: params.reviewTaskId } : {}),
           ...(params.reviewResult ? { reviewResult: params.reviewResult } : {}),
           ...(params.suggestedActionQuestion
             ? { suggestedActionQuestion: params.suggestedActionQuestion }

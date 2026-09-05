@@ -2,6 +2,7 @@ import {
   buildPrReviewActionCallbackData,
   parsePrReviewActionCallbackData,
   parsePrReviewActionOffer,
+  parseSessionPrReviewUpdate,
 } from '../pr-review-action';
 
 describe('pr review action callback data', () => {
@@ -50,6 +51,32 @@ describe('pr review action callback data', () => {
     });
     expect(
       parsePrReviewActionOffer({ prReviewAction: { status: 'pending' } }),
+    ).toBeNull();
+  });
+
+  it('accepts provider-neutral review context and rejects unsafe or incomplete data', () => {
+    const review = {
+      url: 'https://gitlab.example/team/repo/-/merge_requests/42',
+      repository: 'team/repo',
+      number: 42,
+      summary: 'Missing tests',
+      findingCount: 1,
+      status: 'feedback',
+    };
+    expect(parseSessionPrReviewUpdate({ prReview: review })).toEqual(review);
+    for (const override of [
+      { url: 'javascript:alert(1)' },
+      { number: -1 },
+      { findingCount: -1 },
+      { findingCount: '2' },
+      { status: 'unknown' },
+    ]) {
+      expect(
+        parseSessionPrReviewUpdate({ prReview: { ...review, ...override } }),
+      ).toBeNull();
+    }
+    expect(
+      parseSessionPrReviewUpdate({ prReview: { status: 'approved' } }),
     ).toBeNull();
   });
 });
