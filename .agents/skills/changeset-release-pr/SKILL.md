@@ -35,9 +35,13 @@ Full details: `.changeset/README.md` and `CONTRIBUTING.md#product-releases`.
 
 ### 1. Establish the last release reference point
 
-Cross-check four signals; they should normally agree:
+Fetch the release-bearing refs and tags before checking any boundary signal, then
+cross-check all four signals; they should normally agree:
 
 ```bash
+git fetch --tags origin \
+  refs/heads/main:refs/remotes/origin/main \
+  refs/heads/develop:refs/remotes/origin/develop
 git tag --sort=-creatordate | head -5
 node -p "require('./package.json').version"
 head -10 CHANGELOG.md
