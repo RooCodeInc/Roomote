@@ -55,27 +55,23 @@ export async function deleteTasksCommand(
       .from(taskArtifacts)
       .where(inArray(taskArtifacts.taskId, taskIdsToDelete));
 
-    // Delete S3 objects for these artifacts (best-effort).
+    // Delete S3 objects before removing their retry metadata.
     let s3Result = { deleted: 0, errors: 0 };
 
     if (artifactsToDelete.length > 0) {
-      try {
-        s3Result = await deleteArtifactsBatch(
-          artifactsToDelete.map((artifact) => ({
-            taskId: artifact.taskId!,
-            artifactId: artifact.id,
-            path: artifact.path,
-            version: artifact.version,
-          })),
-        );
+      s3Result = await deleteArtifactsBatch(
+        artifactsToDelete.map((artifact) => ({
+          taskId: artifact.taskId!,
+          artifactId: artifact.id,
+          path: artifact.path,
+          version: artifact.version,
+        })),
+      );
 
-        if (s3Result.errors > 0) {
-          console.warn(
-            `[deleteTasksCommand] S3 deletion had ${s3Result.errors} errors for tasks: ${taskIdsToDelete.join(', ')}`,
-          );
-        }
-      } catch (s3Error) {
-        console.error('[deleteTasksCommand] S3 deletion error:', s3Error);
+      if (s3Result.errors > 0) {
+        throw new Error(
+          `Failed to delete ${s3Result.errors} artifact objects for tasks: ${taskIdsToDelete.join(', ')}`,
+        );
       }
     }
 
