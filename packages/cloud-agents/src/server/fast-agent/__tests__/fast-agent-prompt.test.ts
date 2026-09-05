@@ -369,6 +369,9 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('Do not offer again after a decline');
     expect(prompt).toContain(
+      'the required-check capability above has been verified',
+    );
+    expect(prompt).toContain(
       'create no wakeup until the user explicitly accepts or requests this monitoring',
     );
     expect(prompt).toContain('do not inspect or schedule from them');
@@ -381,6 +384,20 @@ describe('buildFastAgentSystemPrompt', () => {
       'inspect the available integration tool schemas and results',
     );
     expect(prompt).toContain('not CI results or required-check policy');
+    expect(prompt).toContain(
+      'Before offering or scheduling required-check monitoring',
+    );
+    expect(prompt).toContain(
+      'If required-check determination is unavailable, suppress the offer',
+    );
+    expect(prompt).toContain(
+      'Revalidate this capability on acceptance before scheduling',
+    );
+    expect(
+      prompt.indexOf('Before offering or scheduling required-check monitoring'),
+    ).toBeLessThan(
+      prompt.indexOf('Want me to let you know when the required checks pass?'),
+    );
     expect(prompt).toContain(
       'never invent a tool or infer requirements from observed checks',
     );
