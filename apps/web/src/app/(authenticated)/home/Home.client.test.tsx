@@ -20,6 +20,7 @@ let capturedSubmitWithMetaKey: boolean | undefined;
 let capturedDefaultReasoningEffort: string | null | undefined;
 
 const {
+  voiceState,
   mockPush,
   mockToast,
   mockToastError,
@@ -29,6 +30,13 @@ const {
   mockPreparePromptAttachments,
   mockStartFastSession,
 } = vi.hoisted(() => ({
+  voiceState: {
+    enabled: false,
+    active: false,
+    start: vi.fn(),
+    stop: vi.fn(),
+    onUtterance: undefined as ((text: string) => void) | undefined,
+  },
   mockPush: vi.fn(),
   mockToast: vi.fn(),
   mockToastError: vi.fn(),
@@ -91,6 +99,27 @@ vi.mock('@/hooks/task-runs', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useVoiceEnabled', () => ({
+  useVoiceEnabled: () => voiceState.enabled,
+}));
+
+vi.mock('@/hooks/useLiveVoice', () => ({
+  useLiveVoice: ({ onUtterance }: { onUtterance: (text: string) => void }) => {
+    voiceState.onUtterance = onUtterance;
+    return {
+      active: voiceState.active,
+      status: voiceState.active ? 'listening' : 'idle',
+      interimTranscript: '',
+      error: null,
+      start: voiceState.start,
+      stop: voiceState.stop,
+      speak: vi.fn(),
+      stopSpeaking: vi.fn(),
+      interruptions: 0,
+    };
+  },
+}));
+
 vi.mock('@/lib/prompt-attachments', async () => {
   const actual = await vi.importActual<
     typeof import('@/lib/prompt-attachments')
@@ -142,6 +171,8 @@ vi.mock('@/components/tasks', async () => {
       submitDisabledReason,
       submitWithMetaKey,
       tools,
+      voice,
+      banner,
     }: {
       onSubmit: (message: PromptInputMessage) => Promise<void> | void;
       onPromptTextChange?: (value: string) => void;
@@ -150,6 +181,8 @@ vi.mock('@/components/tasks', async () => {
       submitDisabledReason?: string;
       submitWithMetaKey?: boolean;
       tools?: import('react').ReactNode;
+      voice?: { active: boolean; onToggle: () => void };
+      banner?: import('react').ReactNode;
     }) => {
       capturedSubmitWithMetaKey = submitWithMetaKey;
 
@@ -168,10 +201,20 @@ vi.mock('@/components/tasks', async () => {
             }
           }}
         >
+          {banner}
           <button type="button" aria-label="Add attachments">
             +
           </button>
           {tools}
+          {voice ? (
+            <button
+              type="button"
+              aria-label="Voice conversation"
+              onClick={voice.onToggle}
+            >
+              Voice
+            </button>
+          ) : null}
           <div data-testid="prompt-placeholder">{placeholder}</div>
           <textarea
             aria-label="Task prompt"
@@ -222,6 +265,11 @@ vi.mock('@/components/tasks', async () => {
 
 describe('Home', () => {
   beforeEach(() => {
+    voiceState.enabled = false;
+    voiceState.active = false;
+    voiceState.start.mockReset();
+    voiceState.stop.mockReset();
+    voiceState.onUtterance = undefined;
     currentSearchParams = '';
     currentIsAdmin = true;
     currentEnvironments = [
@@ -603,5 +651,37 @@ describe('Home', () => {
     expect(screen.getByTestId('selected-model-id')).toHaveTextContent(
       'openrouter/z-ai/glm-5.2',
     );
+  });
+
+  it('hides the voice conversation button when voice is not configured', async () => {
+    render(<Home initialPlaceholderIndex={0} />);
+    await screen.findByRole('button', { name: 'Submit prompt' });
+    expect(
+      screen.queryByRole('button', { name: 'Voice conversation' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('starts a Fast session from the first spoken utterance and opens it in voice mode', async () => {
+    voiceState.enabled = true;
+    mockStartFastSession.mockResolvedValue({ sessionId: 'fast-session-1' });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Voice conversation' }),
+    );
+    expect(voiceState.start).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      voiceState.onUtterance?.('Summarize open pull requests');
+    });
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: 'Summarize open pull requests',
+        model: undefined,
+      });
+    });
+    expect(voiceState.stop).toHaveBeenCalled();
+    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1?voice=1');
   });
 });

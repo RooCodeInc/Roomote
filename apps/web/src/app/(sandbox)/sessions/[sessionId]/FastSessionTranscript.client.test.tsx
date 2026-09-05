@@ -25,6 +25,8 @@ const {
   openTasksPanel,
   narrationState,
   composerSuggestionState,
+  voiceStatusQuery,
+  liveVoiceState,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
   reviewActionMutate: vi.fn(),
@@ -36,6 +38,35 @@ const {
   composerSuggestionState: {
     data: undefined as { suggestion: string; messageCount: number } | undefined,
   },
+  voiceStatusQuery: vi.fn(),
+  liveVoiceState: {
+    active: false,
+    status: 'idle' as
+      | 'idle'
+      | 'connecting'
+      | 'listening'
+      | 'speaking'
+      | 'error',
+    start: vi.fn(),
+    stop: vi.fn(),
+    speak: vi.fn(),
+    stopSpeaking: vi.fn(),
+    interruptions: 0,
+  },
+}));
+
+vi.mock('@/hooks/useLiveVoice', () => ({
+  useLiveVoice: () => ({
+    active: liveVoiceState.active,
+    status: liveVoiceState.status,
+    interimTranscript: '',
+    error: null,
+    start: liveVoiceState.start,
+    stop: liveVoiceState.stop,
+    speak: liveVoiceState.speak,
+    stopSpeaking: liveVoiceState.stopSpeaking,
+    interruptions: liveVoiceState.interruptions,
+  }),
 }));
 
 vi.mock('@/hooks/useNarrationMode', () => ({
@@ -48,6 +79,9 @@ vi.mock('@/trpc/client', () => ({
       reply: { mutate: replyMutate },
       reviewAction: { mutate: reviewActionMutate },
       updateModelSelection: { mutate: updateModelSelectionMutate },
+    },
+    voice: {
+      status: { query: voiceStatusQuery },
     },
   }),
   useTRPC: () => ({
@@ -198,6 +232,15 @@ beforeEach(() => {
   composerSuggestionState.data = undefined;
   openTaskPanel.mockReset();
   openTasksPanel.mockReset();
+  voiceStatusQuery.mockReset();
+  voiceStatusQuery.mockResolvedValue({ enabled: false });
+  liveVoiceState.active = false;
+  liveVoiceState.status = 'idle';
+  liveVoiceState.start.mockReset();
+  liveVoiceState.stop.mockReset();
+  liveVoiceState.speak.mockReset();
+  liveVoiceState.stopSpeaking.mockReset();
+  liveVoiceState.interruptions = 0;
   vi.stubGlobal('EventSource', FakeEventSource);
 });
 
@@ -1912,5 +1955,371 @@ describe('FastSessionTranscript', () => {
     });
     expect(screen.queryByText('Draft text')).not.toBeInTheDocument();
     expect(screen.getByText('Earlier answer')).toBeInTheDocument();
+  });
+
+  describe('live voice', () => {
+    it('hides the voice toggle until the deployment reports voice enabled', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: false });
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      await waitFor(() => expect(voiceStatusQuery).toHaveBeenCalled());
+      expect(
+        screen.queryByRole('button', { name: /^voice conversation$/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('starts a conversation from the voice toggle when voice is enabled', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      const toggle = await screen.findByRole('button', {
+        name: /^voice conversation$/i,
+      });
+      fireEvent.click(toggle);
+      expect(liveVoiceState.start).toHaveBeenCalledTimes(1);
+      expect(liveVoiceState.stop).not.toHaveBeenCalled();
+    });
+
+    it('cancels a connecting handshake from the toggle', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.status = 'connecting';
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      const toggle = await screen.findByRole('button', {
+        name: /^voice conversation$/i,
+      });
+      fireEvent.click(toggle);
+      expect(liveVoiceState.stop).toHaveBeenCalledTimes(1);
+      expect(liveVoiceState.start).not.toHaveBeenCalled();
+    });
+
+    it('speaks each completed sentence as the reply streams, then the rest on persist', async () => {
+      vi.spyOn(Date, 'now').mockReturnValue(10);
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'assistant-0',
+              role: 'assistant',
+              text: 'Earlier answer',
+              ts: 1,
+            }),
+          ]}
+          canReply
+        />
+      );
+      const { rerender } = render(transcript());
+
+      // Starting the conversation marks earlier replies as already spoken.
+      fireEvent.click(
+        await screen.findByRole('button', { name: /^voice conversation$/i }),
+      );
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      rerender(transcript());
+      expect(liveVoiceState.speak).not.toHaveBeenCalled();
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit(
+          'chunk',
+          chunkEvent('assistant-1:event', 'First sentence. Second', 11),
+        );
+      });
+      // The finished sentence goes out immediately; the open one waits.
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
+      expect(liveVoiceState.speak).toHaveBeenLastCalledWith('First sentence.');
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit(
+          'chunk',
+          chunkEvent('assistant-1:event', ' part is here', 11),
+        );
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
+
+      // The persisted row finalizes the reply under the same id: only the
+      // unspoken remainder is queued.
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'First sentence. Second part is here.',
+              ts: 11,
+            }),
+          ],
+        });
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(2);
+      expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
+        'Second part is here.',
+      );
+
+      // A later message in the same turn is spoken too; nothing is skipped
+      // because an earlier progress message was read first.
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            textMessage({
+              id: 'assistant-2',
+              role: 'assistant',
+              text: 'Here is the result.',
+              ts: 12,
+            }),
+          ],
+        });
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(3);
+      expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
+        'Here is the result.',
+      );
+    });
+
+    it('mutes the rest of a reply the user talked over', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />
+      );
+      const { rerender } = render(transcript());
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit(
+          'chunk',
+          chunkEvent('assistant-1:event', 'Long answer begins. And', 5),
+        );
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
+
+      // The user interrupts mid-reply.
+      liveVoiceState.interruptions = 1;
+      rerender(transcript());
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Long answer begins. And keeps going on.',
+              ts: 5,
+            }),
+          ],
+        });
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
+
+      // The next reply is a fresh one and is spoken.
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            textMessage({
+              id: 'assistant-2',
+              role: 'assistant',
+              text: 'Sure, switching.',
+              ts: 6,
+            }),
+          ],
+        });
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(2);
+      expect(liveVoiceState.speak).toHaveBeenLastCalledWith('Sure, switching.');
+    });
+
+    it('sets the spoken cutoff from server timestamps, not the browser clock', async () => {
+      // Browser clock far ahead of the server-assigned message timestamps.
+      vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'assistant-0',
+              role: 'assistant',
+              text: 'Earlier answer',
+              ts: 1,
+            }),
+          ]}
+          canReply
+        />
+      );
+      const { rerender } = render(transcript());
+      act(() => {
+        FakeEventSource.instances[0]!.emit('session', {
+          conversationResponding: false,
+        });
+      });
+
+      fireEvent.click(
+        await screen.findByRole('button', { name: /^voice conversation$/i }),
+      );
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      rerender(transcript());
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit('session', {
+          conversationResponding: true,
+        });
+      });
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Server-timed reply',
+              ts: 2,
+            }),
+          ],
+        });
+      });
+      act(() => {
+        FakeEventSource.instances[0]!.emit('session', {
+          conversationResponding: false,
+        });
+      });
+
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
+      expect(liveVoiceState.speak).toHaveBeenCalledWith('Server-timed reply');
+    });
+
+    it('stops the voice conversation when a structured input request arrives', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+      expect(liveVoiceState.stop).not.toHaveBeenCalled();
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            {
+              ...textMessage({
+                id: 'request-1',
+                role: 'assistant',
+                text: 'Choose one',
+                ts: 5,
+              }),
+              eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+              payload: {
+                requestId: 'rui:request-1',
+                status: 'pending',
+                sessionId: 'session-1',
+                turnId: 'turn-1',
+                callId: 'call-1',
+                questions: [
+                  {
+                    id: 'choice',
+                    header: 'Choice',
+                    question: 'Choose one',
+                    isOther: false,
+                    isSecret: false,
+                    options: [{ label: 'One', description: 'First choice' }],
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      });
+
+      expect(screen.getByText('Structured input request')).toBeVisible();
+      expect(liveVoiceState.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it('auto-starts voice for a session opened from a spoken prompt and speaks the first reply', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      window.history.replaceState(null, '', '/sessions/session-1?voice=1');
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Hey there',
+              ts: 1,
+            }),
+          ]}
+          canReply
+          autoStartVoice
+        />
+      );
+      const { rerender } = render(transcript());
+
+      await waitFor(() =>
+        expect(liveVoiceState.start).toHaveBeenCalledTimes(1),
+      );
+      // The flag is one-shot: a reload must not restart the conversation.
+      expect(window.location.search).toBe('');
+
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      rerender(transcript());
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Hi! What can I do?',
+              ts: 2,
+            }),
+          ],
+        });
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledWith('Hi! What can I do?');
+    });
+
+    it('does not auto-start voice when the deployment has it disabled', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: false });
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+          autoStartVoice
+        />,
+      );
+      await waitFor(() => expect(voiceStatusQuery).toHaveBeenCalled());
+      expect(liveVoiceState.start).not.toHaveBeenCalled();
+    });
   });
 });

@@ -15,6 +15,7 @@ import {
 } from '@/hooks/useGhostSuggestion';
 import {
   type PromptInputMessage,
+  LiveVoiceButton,
   PromptInput as PromptInputRoot,
   PromptInputActionAddAttachments,
   PromptInputActionMenu,
@@ -37,6 +38,19 @@ import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/Attachments
 export type SessionPromptSubmission = PromptInputMessage & {
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
+};
+
+export type SessionModelSelection = {
+  model: string | null;
+  reasoningEffort: ReasoningEffort | null;
+};
+
+type SessionVoiceControls = {
+  /** Whether the deployment has voice configured at all. */
+  enabled: boolean;
+  /** Whether a voice conversation is currently running. */
+  active: boolean;
+  onToggle: () => void;
 };
 
 function SessionSubmit({
@@ -70,6 +84,8 @@ export function SessionPromptInput({
   initialReasoningEffort = null,
   defaultModelId = null,
   defaultReasoningEffort = null,
+  voice,
+  onModelSelectionChange,
 }: {
   sessionId: string;
   isBusy: boolean;
@@ -89,6 +105,10 @@ export function SessionPromptInput({
   initialReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
   defaultReasoningEffort?: ReasoningEffort | null;
+  voice?: SessionVoiceControls;
+  /** Keeps the parent's view of the picker current, so voice utterances
+   * round-trip the same model selection a typed reply would. */
+  onModelSelectionChange?: (selection: SessionModelSelection) => void;
 }) {
   const trpc = useTRPC();
   const trpcClient = useTRPCClient();
@@ -190,9 +210,14 @@ export function SessionPromptInput({
   const handleModelChange = (nextModel: string) => {
     const previousModel = model;
     setModel(nextModel);
-    void updateModelSelection({ model: nextModel || null }, () =>
-      setModel(previousModel),
-    );
+    onModelSelectionChange?.({ model: nextModel || null, reasoningEffort });
+    void updateModelSelection({ model: nextModel || null }, () => {
+      setModel(previousModel);
+      onModelSelectionChange?.({
+        model: previousModel || null,
+        reasoningEffort,
+      });
+    });
   };
 
   const handleReasoningEffortChange = (
@@ -200,9 +225,17 @@ export function SessionPromptInput({
   ) => {
     const previousReasoningEffort = reasoningEffort;
     setReasoningEffort(nextReasoningEffort);
-    void updateModelSelection({ reasoningEffort: nextReasoningEffort }, () =>
-      setReasoningEffort(previousReasoningEffort),
-    );
+    onModelSelectionChange?.({
+      model: model || null,
+      reasoningEffort: nextReasoningEffort,
+    });
+    void updateModelSelection({ reasoningEffort: nextReasoningEffort }, () => {
+      setReasoningEffort(previousReasoningEffort);
+      onModelSelectionChange?.({
+        model: model || null,
+        reasoningEffort: previousReasoningEffort,
+      });
+    });
   };
 
   const controlsDisabled = isBusy || isUpdatingModelSelection;
@@ -277,6 +310,13 @@ export function SessionPromptInput({
             />
           </PromptInputTools>
           <div className="flex items-center gap-2">
+            {voice?.enabled ? (
+              <LiveVoiceButton
+                active={voice.active}
+                onClick={voice.onToggle}
+                disabled={isBusy && !voice.active}
+              />
+            ) : null}
             <VoiceDictationButton
               isRecording={voiceDictation.isRecording}
               isSupported={voiceDictation.isSupported}

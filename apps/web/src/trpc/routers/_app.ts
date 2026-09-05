@@ -47,6 +47,10 @@ import {
   updateFastSessionModelSelectionInputSchema,
 } from '../commands/fast-sessions/input';
 import {
+  createVoiceRealtimeTokenCommand,
+  getVoiceStatusCommand,
+} from '../commands/voice';
+import {
   getSessionByIdCommand,
   getSessionForTask,
   getSessions,
@@ -2958,6 +2962,13 @@ export const appRouter = createRouter({
           sessionId: input.sessionId,
         }),
       ),
+  }),
+
+  voice: createRouter({
+    status: protectedProcedure.query(() => getVoiceStatusCommand()),
+    createRealtimeToken: protectedProcedure.mutation(() =>
+      createVoiceRealtimeTokenCommand(),
+    ),
   }),
 
   sessions: createRouter({

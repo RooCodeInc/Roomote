@@ -29,6 +29,7 @@ import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
+  LiveVoiceStatusBar,
   Message,
   MessageContent,
   MessageUiOptionsProvider,
@@ -39,8 +40,12 @@ import {
   type SlackMentionScope,
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
+import { useLiveVoice } from '@/hooks/useLiveVoice';
+import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
+import { findSpeakableBoundary } from '@/lib/voice-speech';
 import {
   SessionPromptInput,
+  type SessionModelSelection,
   type SessionPromptSubmission,
 } from './SessionPromptInput';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
@@ -219,6 +224,9 @@ export function pendingResponseReducer(
   };
 }
 
+/** Query param that opens a session straight into a voice conversation. */
+export const VOICE_AUTOSTART_QUERY_PARAM = 'voice';
+
 function ThinkingMessage() {
   return (
     <Message from="assistant" className="chat-reasoning-message">
@@ -286,6 +294,7 @@ export function FastSessionTranscript({
   owner,
   headerExtras,
   timelineExtras,
+  autoStartVoice = false,
 }: {
   sessionId: string;
   initialMessages: FastSessionMessage[];
@@ -300,6 +309,12 @@ export function FastSessionTranscript({
   owner?: TranscriptOwner;
   headerExtras?: ReactNode;
   timelineExtras?: ReactNode;
+  /**
+   * Begin a voice conversation as soon as the page loads: set when the
+   * session was opened from a voice utterance in the new-session composer,
+   * so the first reply is spoken rather than read.
+   */
+  autoStartVoice?: boolean;
 }) {
   const trpcClient = useTRPCClient();
   const openTaskPanel = useOpenSessionTaskPanel();
@@ -739,6 +754,179 @@ export function FastSessionTranscript({
     [sessionId, trpcClient],
   );
 
+  // --- Live voice conversation -------------------------------------------
+
+  const voiceEnabled = useVoiceEnabled();
+  const modelSelectionRef = useRef<SessionModelSelection>({
+    model: sessionModel,
+    reasoningEffort: sessionReasoningEffort,
+  });
+  /** Assistant messages at or before this ts predate the conversation. */
+  const voiceCutoffTsRef = useRef(0);
+  /**
+   * Per assistant message (keyed by transcript id), how many characters of
+   * its text have already been handed to speech. `Infinity` marks a reply
+   * the user interrupted, which stays silent even as more of it arrives.
+   */
+  const spokenCursorsRef = useRef(new Map<string, number>());
+  const pendingUtterancesRef = useRef<string[]>([]);
+  const [utteranceQueueVersion, setUtteranceQueueVersion] = useState(0);
+
+  const enqueueVoiceUtterance = useCallback((text: string) => {
+    pendingUtterancesRef.current.push(text);
+    setUtteranceQueueVersion((version) => version + 1);
+  }, []);
+
+  const liveVoice = useLiveVoice({ onUtterance: enqueueVoiceUtterance });
+
+  // Utterances queue rather than dropping when one lands while the previous
+  // reply is still in flight; the queue drains as each send settles.
+  useEffect(() => {
+    if (isSending) {
+      return;
+    }
+
+    const next = pendingUtterancesRef.current.shift();
+
+    if (next === undefined) {
+      return;
+    }
+
+    void sendReply({
+      text: next,
+      files: [],
+      model: modelSelectionRef.current.model,
+      reasoningEffort: modelSelectionRef.current.reasoningEffort,
+    });
+  }, [isSending, utteranceQueueVersion, sendReply]);
+
+  const agentWorking =
+    isSending ||
+    conversationResponding === true ||
+    pendingResponseState.pendingAfter !== null;
+  const liveVoiceActive = liveVoice.active;
+  const speakRef = useRef(liveVoice.speak);
+  speakRef.current = liveVoice.speak;
+
+  // Speak replies as they arrive rather than after the turn settles: each
+  // completed sentence of a streaming reply is queued the moment it lands,
+  // and whatever remains is queued when the persisted row finalizes it. The
+  // per-message cursor means a persisted row that replaces its streamed
+  // chunks continues where the stream left off instead of repeating.
+  useEffect(() => {
+    if (!liveVoiceActive) {
+      return;
+    }
+
+    for (const message of uiMessages) {
+      if (
+        message.role !== 'assistant' ||
+        message.visibleInTranscript === false ||
+        message.ts <= voiceCutoffTsRef.current ||
+        !message.text ||
+        (message.kind !== 'text' &&
+          message.updateType !== ACP_ENVELOPE_EVENT_TYPES.AssistantMessage)
+      ) {
+        continue;
+      }
+
+      const cursor = spokenCursorsRef.current.get(message.id) ?? 0;
+
+      if (cursor === Infinity) {
+        continue;
+      }
+
+      const boundary = message.partial
+        ? findSpeakableBoundary(message.text, cursor)
+        : message.text.length;
+
+      if (boundary <= cursor) {
+        continue;
+      }
+
+      spokenCursorsRef.current.set(message.id, boundary);
+      speakRef.current(message.text.slice(cursor, boundary).trim());
+    }
+  }, [uiMessages, liveVoiceActive]);
+
+  // Talking over a reply drops the rest of it: every reply known at the
+  // moment of interruption is muted so later chunks of it stay silent.
+  const uiMessagesRef = useRef(uiMessages);
+  uiMessagesRef.current = uiMessages;
+  const liveVoiceInterruptions = liveVoice.interruptions;
+
+  useEffect(() => {
+    if (liveVoiceInterruptions === 0) {
+      return;
+    }
+
+    for (const message of uiMessagesRef.current) {
+      if (message.role === 'assistant') {
+        spokenCursorsRef.current.set(message.id, Infinity);
+      }
+    }
+  }, [liveVoiceInterruptions]);
+
+  const handleVoiceToggle = useCallback(() => {
+    // Toggling while the handshake is still connecting cancels it.
+    if (liveVoice.active || liveVoice.status === 'connecting') {
+      liveVoice.stop();
+      return;
+    }
+
+    // Replies that predate the conversation stay silent. The cutoff comes
+    // from the transcript's own (server-assigned) timestamps rather than the
+    // browser clock, which may run ahead of the server.
+    voiceCutoffTsRef.current = messages.reduce(
+      (latest, message) => Math.max(latest, message.ts),
+      0,
+    );
+    spokenCursorsRef.current.clear();
+    pendingUtterancesRef.current = [];
+    void liveVoice.start();
+  }, [liveVoice, messages]);
+
+  // A session opened from a spoken prompt picks the conversation straight
+  // up: voice starts once the deployment confirms it is configured, with no
+  // cutoff so the reply to that first utterance is spoken. The flag is
+  // dropped from the URL so a reload does not restart the conversation.
+  const autoStartedVoiceRef = useRef(false);
+  const startLiveVoiceRef = useRef(liveVoice.start);
+  startLiveVoiceRef.current = liveVoice.start;
+
+  useEffect(() => {
+    if (!autoStartVoice || !voiceEnabled || autoStartedVoiceRef.current) {
+      return;
+    }
+
+    autoStartedVoiceRef.current = true;
+    voiceCutoffTsRef.current = 0;
+    spokenCursorsRef.current.clear();
+    pendingUtterancesRef.current = [];
+    void startLiveVoiceRef.current();
+
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has(VOICE_AUTOSTART_QUERY_PARAM)) {
+        url.searchParams.delete(VOICE_AUTOSTART_QUERY_PARAM);
+        window.history.replaceState(window.history.state, '', url);
+      }
+    }
+  }, [autoStartVoice, voiceEnabled]);
+
+  // A structured input request replaces the composer (and with it the voice
+  // controls), so end the conversation rather than leaving the microphone
+  // open with no way to stop it.
+  const liveVoiceConnecting = liveVoice.status === 'connecting';
+  const stopLiveVoiceRef = useRef(liveVoice.stop);
+  stopLiveVoiceRef.current = liveVoice.stop;
+
+  useEffect(() => {
+    if (pendingInputRequest && (liveVoiceActive || liveVoiceConnecting)) {
+      stopLiveVoiceRef.current();
+    }
+  }, [pendingInputRequest, liveVoiceActive, liveVoiceConnecting]);
+
   return (
     <MessageUiOptionsProvider
       value={{ displayMode, hidePrReviewActions: true }}
@@ -816,6 +1004,15 @@ export function FastSessionTranscript({
         </Conversation>
         {canReply && !pendingInputRequest ? (
           <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card outline-0 outline-offset-[-2px] outline-accent-foreground transition-[background-color,border-color,outline-width] has-[textarea:focus]:outline-2 @[56rem]:rounded-t-lg">
+            {liveVoice.status !== 'idle' ? (
+              <LiveVoiceStatusBar
+                status={liveVoice.status}
+                interimTranscript={liveVoice.interimTranscript}
+                thinking={agentWorking}
+                error={liveVoice.error}
+                onStop={liveVoice.stop}
+              />
+            ) : null}
             <SessionPromptInput
               sessionId={sessionId}
               isBusy={isSending}
@@ -823,15 +1020,23 @@ export function FastSessionTranscript({
               historyMessageCount={suggestionHistory.messageCount}
               assistantMessageCount={suggestionHistory.assistantCount}
               taskStateRevision={taskStateRevision}
-              agentWorking={
-                isSending ||
-                conversationResponding === true ||
-                pendingResponseState.pendingAfter !== null
-              }
+              agentWorking={agentWorking}
               initialModel={sessionModel}
               initialReasoningEffort={sessionReasoningEffort}
               defaultModelId={defaultModelId}
               defaultReasoningEffort={defaultReasoningEffort}
+              voice={
+                voiceEnabled
+                  ? {
+                      enabled: true,
+                      active: liveVoice.active,
+                      onToggle: handleVoiceToggle,
+                    }
+                  : undefined
+              }
+              onModelSelectionChange={(selection) => {
+                modelSelectionRef.current = selection;
+              }}
             />
             {replyError ? (
               <p className="px-4 pb-2 text-xs text-destructive">{replyError}</p>

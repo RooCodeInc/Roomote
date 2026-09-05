@@ -1,0 +1,49 @@
+---
+title: Voice
+icon: audio-lines
+description: Talk to Fast hands-free with live transcription and spoken replies.
+---
+
+Voice turns a Session into a spoken conversation. Start a voice conversation
+from the session composer and talk naturally: Roomote transcribes your speech
+live, sends each utterance to Fast as an ordinary session message, and reads
+the reply back out loud. You can interrupt a spoken reply just by talking, and
+the transcript stays in the Session like any typed exchange, so you can move
+between voice and text freely.
+
+## Enabling voice
+
+Voice uses OpenAI for live transcription and speech synthesis. It is available
+on any deployment with an OpenAI API key:
+
+- `R_VOICE_OPENAI_API_KEY` dedicates a key to voice (for example to bill it
+  separately from task inference).
+- Without it, voice falls back to the deployment's general `OPENAI_API_KEY`.
+
+When neither key is configured the voice button does not appear. Keys stay on
+the control plane: the browser receives only short-lived, transcription-scoped
+tokens and synthesized audio, never the API key.
+
+## Using voice
+
+1. Select the voice button in a composer: in an open Session, or on the home
+   page and the **New Session** dialog to start a fresh Session by speaking.
+2. Grant microphone access when the browser asks.
+3. Speak. A pause ends your turn and sends it to Fast automatically; the live
+   transcription is shown above the composer while you talk. From the home
+   page or dialog, your first utterance starts the Session and opens it
+   already in voice mode.
+4. Fast's reply is read aloud as it arrives, sentence by sentence. Speak at
+   any time to interrupt the playback and take the next turn.
+5. Select **End** (or the voice button again) to return to typing.
+
+Voice input requires a browser with microphone and WebRTC support, which
+includes current Chrome, Edge, Safari, and Firefox.
+
+## What gets spoken
+
+Replies are cleaned up for listening: code blocks are acknowledged but not
+read character-by-character, links are read by their label, and long replies
+are synthesized in order so playback starts quickly. Work that Fast delegates
+to execution continues to appear in the Session as usual; voice reads the
+conversational replies.

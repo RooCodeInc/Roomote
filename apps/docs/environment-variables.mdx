@@ -367,6 +367,7 @@ as per-task auth tokens or workspace paths.
 | `R_ALLOWED_EMAILS`             | Optional          | Comma-separated email allowlist for deployments that restrict sign-in by email.  |
 | `R_ELEVENLABS_API_KEY`         | Optional          | ElevenLabs API key for narrated feature-demo videos. The key stays on the control plane; sandboxes reach text-to-speech only through an authenticated Roomote endpoint. A key scoped to text-to-speech only is sufficient and recommended. |
 | `R_ELEVENLABS_VOICE_ID`        | Optional          | ElevenLabs voice ID used for feature-demo narration. Required alongside the API key for narration to be available.                                                       |
+| `R_VOICE_OPENAI_API_KEY`       | Optional          | OpenAI key dedicated to the live voice conversation feature (realtime transcription and spoken replies). Falls back to `OPENAI_API_KEY` when unset. The key stays on the control plane; browsers receive only short-lived transcription-scoped tokens and synthesized audio. |
 
 During Microsoft Teams setup, Roomote uses the Microsoft Entra app values for
 the Teams bot by default. Use **Show advanced config** after the Directory
