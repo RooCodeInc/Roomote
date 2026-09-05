@@ -384,11 +384,6 @@ async function buildSetupPlatformEventTurn(
           await import('@roomote/cloud-agents/server')
         ).createFastAgentWebTaskLauncher({
           userId: auth.userId,
-          conversation: {
-            surface: 'web',
-            workspaceId: conversation.workspaceId,
-            conversationId: conversation.conversationId,
-          },
         }),
         postReply: async () => {},
       },

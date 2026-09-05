@@ -172,6 +172,37 @@ describe('createFastAgentSlackTaskLauncher', () => {
     expect(order).toEqual(['kickoff', 'queued']);
   });
 
+  it('uses the persisted automation identity instead of reconstructing it from Slack coordinates', async () => {
+    const conversation = {
+      surface: 'automation',
+      workspaceId: 'automation-workspace',
+      conversationId: 'automation-1',
+    };
+    mocks.findById.mockResolvedValueOnce({ conversation });
+
+    await createFastAgentSlackTaskLauncher({
+      userId: 'user-1',
+      teamId: 'T123',
+      channelId: 'C123',
+      threadTs: '100.001',
+    })({
+      prompt: 'Investigate the report',
+      environmentId: null,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff: vi.fn(),
+    });
+
+    expect(mocks.enqueueTask.mock.calls[0]?.[0]?.task.payload).toMatchObject({
+      communicationProvider: 'slack',
+      communicationChannelId: 'C123',
+      communicationThreadId: '100.001',
+      fastAgentParent: {
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        conversation,
+      },
+    });
+  });
+
   it('supports platform-event launches without a human message ID', async () => {
     const launchTask = createFastAgentSlackTaskLauncher({
       userId: 'user-1',
@@ -455,11 +486,6 @@ describe('createFastAgentWebTaskLauncher', () => {
 
     await createFastAgentWebTaskLauncher({
       userId: 'user-1',
-      conversation: {
-        surface: 'web',
-        workspaceId: 'workspace-1',
-        conversationId: 'conversation-1',
-      },
     })({
       prompt: 'Fix checkout',
       environmentId: null,

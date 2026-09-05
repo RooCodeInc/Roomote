@@ -225,7 +225,6 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         createArtifact,
         launchTask: createFastAgentWebTaskLauncher({
           userId: params.userId,
-          conversation,
         }),
         postReply: async () => {},
       },
