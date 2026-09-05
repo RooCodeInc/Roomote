@@ -4,9 +4,7 @@ import {
 } from '../live-task-card-blocks';
 
 describe('buildSlackLiveTaskCardBlocks', () => {
-  const taskCardBlockId = expect.stringMatching(
-    /^roomote-task-task-1-card-[0-9a-f-]{36}$/,
-  );
+  const taskCardBlockId = 'roomote-task-task-1-card';
 
   it('caps the output so Slack never rejects a settling render', () => {
     const message = 'x'.repeat(SLACK_LIVE_TASK_CARD_MESSAGE_MAX_CHARS + 500);
@@ -127,21 +125,26 @@ describe('buildSlackLiveTaskCardBlocks', () => {
     expect(blocks[0]).not.toHaveProperty('details');
   });
 
-  it('uses a new block id for every message update', () => {
-    const content = {
+  it('keeps the block id stable across message updates', () => {
+    const first = buildSlackLiveTaskCardBlocks({
       taskUpdateId: 'roomote-task-task-1',
       title: 'Fix the button',
       status: 'in_progress' as const,
-    };
-    const first = buildSlackLiveTaskCardBlocks(content).blocks[0] as {
+      details: 'Running the tests.',
+    }).blocks[0] as {
       block_id: string;
     };
-    const second = buildSlackLiveTaskCardBlocks(content).blocks[0] as {
+    const second = buildSlackLiveTaskCardBlocks({
+      taskUpdateId: 'roomote-task-task-1',
+      title: 'Fix the button',
+      status: 'complete' as const,
+      details: 'Running the tests.',
+      output: 'Ready for review.',
+    }).blocks[0] as {
       block_id: string;
     };
 
-    expect(first.block_id).toEqual(taskCardBlockId);
-    expect(second.block_id).toEqual(taskCardBlockId);
-    expect(second.block_id).not.toBe(first.block_id);
+    expect(first.block_id).toBe(taskCardBlockId);
+    expect(second.block_id).toBe(first.block_id);
   });
 });
