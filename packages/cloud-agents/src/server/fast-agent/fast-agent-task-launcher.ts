@@ -17,6 +17,7 @@ import {
 } from '../task-run-queue';
 import { getTaskUrl } from '../task-url';
 import type { LaunchFastAgentTask } from './fast-agent-conversation';
+import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
 
 export type FastAgentTaskLaunchHooks = {
   /**
@@ -67,6 +68,12 @@ export function createFastAgentTaskLauncher(
     parentSessionId,
     postKickoff,
   }) => {
+    const parent = await fastAgentConversationRepository.findById({
+      id: parentSessionId,
+    });
+    if (!parent) {
+      throw new Error('Fast parent session was not found.');
+    }
     const builtTask = await params.buildTask({
       prompt,
       environmentId,
@@ -76,17 +83,20 @@ export function createFastAgentTaskLauncher(
       reasoningEffort,
       parentSessionId,
     });
-    const taskWithLaunchOverrides =
-      branch || launchIdempotencyKey
-        ? {
-            ...builtTask,
-            payload: {
-              ...builtTask.payload,
-              ...(branch ? { branch } : {}),
-              ...(launchIdempotencyKey ? { launchIdempotencyKey } : {}),
-            },
-          }
-        : builtTask;
+    const taskWithLaunchOverrides = {
+      ...builtTask,
+      payload: {
+        ...builtTask.payload,
+        // Bound automation threads retain a logical identity distinct from
+        // their provider reply target. Never reconstruct it from that target.
+        ...buildFastAgentChildTaskMetadata({
+          sessionId: parentSessionId,
+          conversation: parent.conversation,
+        }),
+        ...(branch ? { branch } : {}),
+        ...(launchIdempotencyKey ? { launchIdempotencyKey } : {}),
+      },
+    };
     const task = images?.length
       ? {
           ...taskWithLaunchOverrides,
