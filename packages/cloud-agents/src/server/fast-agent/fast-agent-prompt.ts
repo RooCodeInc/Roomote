@@ -119,6 +119,7 @@ export function buildFastAgentSystemPrompt({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  automationReport = false,
   retryTaskStartAvailable = false,
   allowSilentAmbientReply = false,
   isCurrentUserAdmin = false,
@@ -139,6 +140,9 @@ export function buildFastAgentSystemPrompt({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  /** The delegated task settling in this event ran for a custom automation, so
+   * this closeout is that run's report. */
+  automationReport?: boolean;
   retryTaskStartAvailable?: boolean;
   allowSilentAmbientReply?: boolean;
   isCurrentUserAdmin?: boolean;
@@ -389,12 +393,21 @@ ${
 ${
   platformEventKind === 'automation'
     ? `- Execute the automation prompt now as you would a teammate's request: use integrations directly when they suffice, and delegate a task when repository or workspace work is needed. When the event carries \`preferredEnvironmentId\`, launch delegated tasks in that environment (\`${ALL_REPOSITORIES}\` means every active repository) unless the prompt names a different one; without it, route normally. The configured model is a delegated-task default, not the Fast inference model.
-- When the automation asks for launchable suggested tasks and this is a Slack, Discord, Teams, or Telegram report, put each concrete follow-up in the closeout's \`suggestions\` array. Keep the report summary in \`message\`; do not render suggestion cards or launch instructions as inline prose because the delivery layer adds them.
+`
+    : ''
+}${
+        automationReport
+          ? `- The task settling in this event carried out a custom automation run, and this closeout is that run's report. Judge it by the automation's prompt earlier in this conversation, including whether it asked for launchable suggested tasks.
+`
+          : ''
+      }${
+        platformEventKind === 'automation' || automationReport
+          ? `- When the automation asks for launchable suggested tasks and this is a Slack, Discord, Teams, or Telegram report, put each concrete follow-up in the closeout's \`suggestions\` array. Keep the report summary in \`message\`; do not render suggestion cards or launch instructions as inline prose because the delivery layer adds them.
 - Each suggestion may independently set \`environmentId\` to an exact environment ID listed under All Environments, \`${ALL_REPOSITORIES}\` for all repositories, or \`${FAST_EXECUTION}\` for Fast mode. This target is independent of the automation's own execution environment. Omit \`environmentId\` only when normal workspace routing should choose at launch time; never invent an ID.
 - If launchable suggestions are unavailable on the current surface, keep follow-ups as ordinary report text and do not promise reaction-triggered launching.
 `
-    : ''
-}
+          : ''
+      }
 ${
   platformEventKind === 'setup'
     ? `- For a setup-session-started event, briefly introduce myself and explain the next unmet user need in ordinary language.

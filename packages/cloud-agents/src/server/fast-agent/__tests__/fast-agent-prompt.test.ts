@@ -125,6 +125,25 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(eventPrompt).toContain('unless the prompt names a different one');
   });
 
+  it('offers suggestions on an automation task-settled report only', () => {
+    const settlePrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      automationReport: true,
+    });
+    const plainSettlePrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+    });
+
+    expect(settlePrompt).toContain("this closeout is that run's report");
+    expect(settlePrompt).toContain('`suggestions` array');
+    expect(settlePrompt).not.toContain('Execute the automation prompt now');
+    expect(plainSettlePrompt).not.toContain('`suggestions` array');
+  });
+
   it('omits the release identifier when no version is resolved', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 

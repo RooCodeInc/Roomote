@@ -388,6 +388,35 @@ export function buildEventClientMessageSeed(
   }
 }
 
+/**
+ * Events whose closeout is a custom automation's report: the run's own turn,
+ * and the settle of a task that turn delegated. Both may carry launchable
+ * suggestions.
+ */
+function isFastAutomationReportEvent(
+  event: FastAgentParentEvent,
+): event is Extract<
+  FastAgentParentEvent,
+  { type: 'automation_triggered' | 'task_settled' }
+> {
+  return (
+    event.type === 'automation_triggered' ||
+    (event.type === 'task_settled' && Boolean(event.customAutomationId))
+  );
+}
+
+/** Groups a report's suggestion cards; unique per run occurrence. */
+function buildFastAutomationSuggestionEventId(
+  event: Extract<
+    FastAgentParentEvent,
+    { type: 'automation_triggered' | 'task_settled' }
+  >,
+): string {
+  return event.type === 'automation_triggered'
+    ? event.eventId
+    : `${event.customAutomationId}:task:${event.taskId}`;
+}
+
 function buildPrReviewActionNonce(event: FastAgentParentEvent): string {
   return buildSlackClientMessageId(
     `${buildEventClientMessageSeed(event)}:pr-review-action`,
@@ -408,27 +437,79 @@ type FastAgentParentTurnParams = {
   footerContext: FastSessionReplyFooterContext;
 };
 
-function createFastAgentAutomationTaskLauncher(params: {
-  userId: string;
-  conversation: FastAgentConversation;
+/** The custom automation a Fast conversation is running for, when known. */
+type FastAutomationLaunchContext = {
   automationId: string;
   automationName: string;
+  trigger: 'schedule' | 'manual';
+};
+
+const AUTOMATION_OCCURRENCE_ID_PATTERN =
+  /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):/iu;
+
+/**
+ * Custom automation conversations on Slack, Teams, Telegram, and Discord DMs
+ * are keyed by the run occurrence, `<automationId>:<claimedAt>`. A Discord
+ * channel run is keyed by its thread instead, so only the event can name
+ * the automation there.
+ */
+function parseCustomAutomationIdFromConversationId(
+  conversationId: string,
+): string | undefined {
+  return AUTOMATION_OCCURRENCE_ID_PATTERN.exec(conversationId)?.[1];
+}
+
+async function resolveFastAutomationLaunchContext(params: {
   event: FastAgentParentEvent;
-}): LaunchFastAgentTask {
-  return createFastAgentTaskLauncher({
-    userId: params.userId,
-    surface: 'system',
-    trigger:
-      params.event.type === 'automation_triggered'
-        ? params.event.trigger
-        : 'schedule',
-    taskUrlCampaign: 'fast-automation-delegation',
+  conversation: FastAgentConversation;
+}): Promise<FastAutomationLaunchContext | null> {
+  if (params.event.type === 'automation_triggered') {
+    return {
+      automationId: params.event.automationId,
+      automationName: params.event.automationName,
+      trigger: params.event.trigger,
+    };
+  }
+  const automationId =
+    (params.event.type === 'task_settled'
+      ? params.event.customAutomationId
+      : undefined) ??
+    parseCustomAutomationIdFromConversationId(
+      params.conversation.conversationId,
+    );
+  if (!automationId) {
+    return null;
+  }
+  const automation = await getCustomAutomationById(automationId);
+  return {
+    automationId,
+    automationName: automation?.name ?? 'Custom automation',
+    trigger: 'schedule',
+  };
+}
+
+/**
+ * Launch options that make a delegated task the automation's own work: it
+ * is attributed to the automation (acting as the run's user), carries the
+ * automation id so its settle is a report, and updates the automation's
+ * last-launched task.
+ */
+function buildFastAutomationLaunchOptions(params: {
+  userId: string;
+  automation: FastAutomationLaunchContext;
+}): Pick<
+  Parameters<typeof createFastAgentTaskLauncher>[0],
+  'initiator' | 'trigger' | 'afterKickoff' | 'onQueueFailure'
+> & { payload: { customAutomationId: string } } {
+  const { automationId } = params.automation;
+  return {
+    trigger: params.automation.trigger,
     initiator: {
       kind: 'automation',
       key: 'custom_automation',
       actor: {
-        externalId: params.automationId,
-        displayName: params.automationName,
+        externalId: automationId,
+        displayName: params.automation.automationName,
       },
       actingUserId: params.userId,
     },
@@ -436,7 +517,7 @@ function createFastAgentAutomationTaskLauncher(params: {
       await db
         .update(customAutomations)
         .set({ lastLaunchedTaskId: taskRun.taskId })
-        .where(eq(customAutomations.id, params.automationId));
+        .where(eq(customAutomations.id, automationId));
     },
     onQueueFailure: async (taskRun) => {
       await db
@@ -444,11 +525,38 @@ function createFastAgentAutomationTaskLauncher(params: {
         .set({ lastLaunchedTaskId: null })
         .where(
           and(
-            eq(customAutomations.id, params.automationId),
+            eq(customAutomations.id, automationId),
             eq(customAutomations.lastLaunchedTaskId, taskRun.taskId),
           ),
         );
     },
+    payload: { customAutomationId: automationId },
+  };
+}
+
+function createFastAgentAutomationTaskLauncher(params: {
+  userId: string;
+  conversation: FastAgentConversation;
+  automationId: string;
+  automationName: string;
+  event: FastAgentParentEvent;
+}): LaunchFastAgentTask {
+  const { payload, ...launchOptions } = buildFastAutomationLaunchOptions({
+    userId: params.userId,
+    automation: {
+      automationId: params.automationId,
+      automationName: params.automationName,
+      trigger:
+        params.event.type === 'automation_triggered'
+          ? params.event.trigger
+          : 'schedule',
+    },
+  });
+  return createFastAgentTaskLauncher({
+    userId: params.userId,
+    surface: 'system',
+    taskUrlCampaign: 'fast-automation-delegation',
+    ...launchOptions,
     buildTask: ({
       prompt,
       environmentId,
@@ -460,7 +568,7 @@ function createFastAgentAutomationTaskLauncher(params: {
       payload: {
         repo: ALL_REPOSITORIES,
         description: prompt,
-        customAutomationId: params.automationId,
+        ...payload,
         ...buildFastAgentChildTaskMetadata({
           sessionId: parentSessionId,
           conversation: params.conversation,
@@ -666,6 +774,22 @@ async function createSlackFastAgentParentTurn(
               : {}),
             channelId: conversation.replyTarget.channelId,
             threadTs: threadId!,
+            // A bound automation thread keeps delegating as the automation,
+            // so later launches settle as its reports too.
+            ...(customAutomationId
+              ? {
+                  customAutomationId,
+                  initiator: {
+                    kind: 'automation',
+                    key: 'custom_automation',
+                    actor: {
+                      externalId: customAutomationId,
+                      displayName: automationName,
+                    },
+                    actingUserId: actorUserId,
+                  },
+                }
+              : {}),
           }),
       // A resumed turn edits the retry notice its predecessor posted, so the
       // queue-side adapter needs the same in-place replacement as the
@@ -712,7 +836,7 @@ async function createSlackFastAgentParentTurn(
             : null;
 
         const reportMessage =
-          params.event.type === 'automation_triggered' && !kickoff
+          isFastAutomationReportEvent(params.event) && !kickoff
             ? appendFastAutomationSuggestionInstruction(
                 message,
                 'slack',
@@ -789,14 +913,14 @@ async function createSlackFastAgentParentTurn(
             await releaseRootBindingLock().catch(() => {});
           }
           if (
-            params.event.type === 'automation_triggered' &&
+            isFastAutomationReportEvent(params.event) &&
             suggestions.length > 0
           ) {
             await postFastAutomationSuggestionsToSlack({
               slack,
               channelId: conversation.replyTarget.channelId,
               threadTs: messageTs,
-              eventId: params.event.eventId,
+              eventId: buildFastAutomationSuggestionEventId(params.event),
               createdByUserId: actorUserId,
               suggestions,
             });
@@ -831,14 +955,14 @@ async function createSlackFastAgentParentTurn(
             throw new Error('Slack did not update the Fast automation root.');
           }
           if (
-            params.event.type === 'automation_triggered' &&
+            isFastAutomationReportEvent(params.event) &&
             suggestions.length > 0
           ) {
             await postFastAutomationSuggestionsToSlack({
               slack,
               channelId: conversation.replyTarget.channelId,
               threadTs: rootMessageId,
-              eventId: params.event.eventId,
+              eventId: buildFastAutomationSuggestionEventId(params.event),
               createdByUserId: actorUserId,
               suggestions,
             });
@@ -933,11 +1057,21 @@ export function createFastAgentDiscordTaskLauncher(params: {
   >;
   userId: string;
   conversation: Extract<FastAgentConversation, { surface: 'discord' }>;
+  /** Set when the conversation is a custom automation run. */
+  automation?: FastAutomationLaunchContext | null;
 }): LaunchFastAgentTask {
+  const { payload: automationPayload, ...automationLaunchOptions } =
+    params.automation
+      ? buildFastAutomationLaunchOptions({
+          userId: params.userId,
+          automation: params.automation,
+        })
+      : { payload: {} };
   return createFastAgentTaskLauncher({
     userId: params.userId,
     surface: 'discord',
     taskUrlCampaign: 'fast-delegation',
+    ...automationLaunchOptions,
     buildTask: async ({
       prompt,
       environmentId,
@@ -958,6 +1092,7 @@ export function createFastAgentDiscordTaskLauncher(params: {
         payload: {
           repo: ALL_REPOSITORIES,
           description: prompt,
+          ...automationPayload,
           communicationProvider: 'discord',
           communicationChannelId:
             thread?.parentChannelId ??
@@ -1003,11 +1138,21 @@ export function createFastAgentCommunicationTaskLauncher(params: {
     { surface: 'teams' | 'telegram' }
   >;
   serviceUrl?: string;
+  /** Set when the conversation is a custom automation run. */
+  automation?: FastAutomationLaunchContext | null;
 }): LaunchFastAgentTask {
+  const { payload: automationPayload, ...automationLaunchOptions } =
+    params.automation
+      ? buildFastAutomationLaunchOptions({
+          userId: params.userId,
+          automation: params.automation,
+        })
+      : { payload: {} };
   return createFastAgentTaskLauncher({
     userId: params.userId,
     surface: params.conversation.surface,
     taskUrlCampaign: 'fast-delegation',
+    ...automationLaunchOptions,
     buildTask: ({
       prompt,
       environmentId,
@@ -1019,6 +1164,7 @@ export function createFastAgentCommunicationTaskLauncher(params: {
       payload: {
         repo: ALL_REPOSITORIES,
         description: prompt,
+        ...automationPayload,
         communicationProvider: params.conversation.surface,
         communicationChannelId: params.conversation.replyTarget.channelId,
         ...(params.conversation.replyTarget.threadId
@@ -1116,11 +1262,16 @@ async function createDiscordFastAgentParentTurn(
 
   const actorUserId = requireFastAgentActorUserId(session, params.actorUserId);
   const conversation = session.conversation;
+  const automation = await resolveFastAutomationLaunchContext({
+    event: params.event,
+    conversation,
+  });
   const adapter: FastAgentTurnAdapter = {
     launchTask: createFastAgentDiscordTaskLauncher({
       provider,
       userId: actorUserId,
       conversation,
+      automation,
     }),
     postReply: async ({
       message,
@@ -1220,7 +1371,20 @@ async function createDiscordFastAgentParentTurn(
         sessionId: params.parent.sessionId,
         ...params.footerContext,
       });
-      const bodyText = action ? `${message}\n${action.question}` : message;
+      const settleReport =
+        isFastAutomationReportEvent(params.event) && !kickoff
+          ? params.event
+          : null;
+      const reportMessage = settleReport
+        ? appendFastAutomationSuggestionInstruction(
+            message,
+            'discord',
+            suggestions.length > 0,
+          )
+        : message;
+      const bodyText = action
+        ? `${reportMessage}\n${action.question}`
+        : reportMessage;
       const textWithFooter = `${bodyText}\n\n${footerText}`;
       const posted = await postDiscordFastParentMessageWithFooter({
         provider,
@@ -1271,6 +1435,18 @@ async function createDiscordFastAgentParentTurn(
         conversation,
         messageId: posted.messageId,
       });
+      if (settleReport && suggestions.length > 0) {
+        await postFastAutomationSuggestionsToDiscord({
+          provider,
+          channelId: conversation.replyTarget.channelId,
+          ...(conversation.replyTarget.threadId
+            ? { threadId: conversation.replyTarget.threadId }
+            : {}),
+          eventId: buildFastAutomationSuggestionEventId(settleReport),
+          createdByUserId: actorUserId,
+          suggestions,
+        });
+      }
       if (action) {
         const { superseded } =
           await attachPendingPrReviewActionMessageWithRetirement(
@@ -1346,6 +1522,10 @@ async function createTeamsFastAgentParentTurn(
         userId: actorUserId,
         conversation,
         serviceUrl,
+        automation: await resolveFastAutomationLaunchContext({
+          event: params.event,
+          conversation,
+        }),
       }),
       replaceReply: createTeamsFastReplyReplacer({
         provider,
@@ -1367,7 +1547,7 @@ async function createTeamsFastAgentParentTurn(
           sessionId: params.parent.sessionId,
         });
         const reportMessage =
-          params.event.type === 'automation_triggered' && !kickoff
+          isFastAutomationReportEvent(params.event) && !kickoff
             ? appendFastAutomationSuggestionInstruction(
                 message,
                 'teams',
@@ -1423,7 +1603,7 @@ async function createTeamsFastAgentParentTurn(
           images,
         });
         if (
-          params.event.type === 'automation_triggered' &&
+          isFastAutomationReportEvent(params.event) &&
           !kickoff &&
           suggestions.length > 0
         ) {
@@ -1434,7 +1614,7 @@ async function createTeamsFastAgentParentTurn(
             ...(conversation.replyTarget.threadId
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
-            eventId: params.event.eventId,
+            eventId: buildFastAutomationSuggestionEventId(params.event),
             createdByUserId: actorUserId,
             suggestions,
           });
@@ -1480,6 +1660,10 @@ async function createTelegramFastAgentParentTurn(
       launchTask: createFastAgentCommunicationTaskLauncher({
         userId: actorUserId,
         conversation,
+        automation: await resolveFastAutomationLaunchContext({
+          event: params.event,
+          conversation,
+        }),
       }),
       replaceReply: createTelegramFastReplyReplacer({
         provider,
@@ -1500,7 +1684,7 @@ async function createTelegramFastAgentParentTurn(
           sessionId: params.parent.sessionId,
         });
         const reportMessage =
-          params.event.type === 'automation_triggered' && !kickoff
+          isFastAutomationReportEvent(params.event) && !kickoff
             ? appendFastAutomationSuggestionInstruction(
                 message,
                 'telegram',
@@ -1522,7 +1706,7 @@ async function createTelegramFastAgentParentTurn(
           messageId: posted.lastTextMessageId ?? posted.messageId,
         });
         if (
-          params.event.type === 'automation_triggered' &&
+          isFastAutomationReportEvent(params.event) &&
           !kickoff &&
           suggestions.length > 0
         ) {
@@ -1532,7 +1716,7 @@ async function createTelegramFastAgentParentTurn(
             ...(conversation.replyTarget.threadId
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
-            eventId: params.event.eventId,
+            eventId: buildFastAutomationSuggestionEventId(params.event),
             createdByUserId: actorUserId,
             suggestions,
           });
@@ -2122,6 +2306,9 @@ export async function deliverFastAgentParentEventWithLock(
         (params.event.type === 'automation_triggered'
           ? 'automation'
           : 'delegated_task'),
+      automationReport:
+        params.event.type === 'task_settled' &&
+        Boolean(params.event.customAutomationId),
       ...(params.event.type === 'child_message' &&
       params.event.imageArtifactIds?.length
         ? { defaultImageArtifactIds: params.event.imageArtifactIds }

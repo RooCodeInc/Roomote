@@ -168,6 +168,9 @@ export type FastAgentSlackTaskLauncherParams = {
   initiator?: TaskInitiator;
   /** Opt the child into the native Slack task card in the parent thread. */
   liveTaskStream?: boolean;
+  /** The custom automation this thread runs for; marks the child's settle as
+   * that automation's report. */
+  customAutomationId?: string;
   /**
    * Repository the child runs against when the launch is pinned to a bare
    * repository rather than an environment. Defaults to all repositories.
@@ -205,6 +208,9 @@ export function createFastAgentSlackTaskLauncher(
       payload: {
         repo: params.repoForPayload ?? ALL_REPOSITORIES,
         description: prompt,
+        ...(params.customAutomationId
+          ? { customAutomationId: params.customAutomationId }
+          : {}),
         communicationProvider: 'slack',
         communicationTeamId: params.teamId,
         ...(params.teamDomain
