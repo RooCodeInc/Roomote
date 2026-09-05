@@ -127,6 +127,51 @@ describe('DiscordCommunicationProvider', () => {
     expect(posted?.body).toMatchObject({ flags: 4 });
   });
 
+  it('omits reply references when posting inside a thread', async () => {
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000001';
+    const threadId = '400000000000000002';
+
+    await provider.postMessage({
+      channelId,
+      threadId,
+      replyToMessageId: '400000000000000003',
+      text: 'Thread reply',
+    });
+
+    const posted = server.state.requests.find(
+      (request) =>
+        request.method === 'POST' &&
+        request.path === `/channels/${threadId}/messages`,
+    );
+    expect(posted?.body).not.toHaveProperty('message_reference');
+  });
+
+  it('preserves reply references when posting outside a thread', async () => {
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000001';
+    const replyToMessageId = '400000000000000003';
+
+    await provider.postMessage({
+      channelId,
+      replyToMessageId,
+      text: 'Channel reply',
+    });
+
+    const posted = server.state.requests.find(
+      (request) =>
+        request.method === 'POST' &&
+        request.path === `/channels/${channelId}/messages`,
+    );
+    expect(posted?.body).toMatchObject({
+      message_reference: {
+        message_id: replyToMessageId,
+        channel_id: channelId,
+        fail_if_not_exists: false,
+      },
+    });
+  });
+
   it('reports the text-bearing message when trailing image groups are posted', async () => {
     const { server, provider } = createHarness({
       nonceFactory: vi
