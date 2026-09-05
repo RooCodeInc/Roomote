@@ -1,10 +1,9 @@
 import { CronExpressionParser } from 'cron-parser';
 
 import {
-  SESSION_WAKEUP_MAX_INTERVAL_MINUTES,
   SESSION_WAKEUP_MAX_ONCE_HORIZON_MINUTES,
-  SESSION_WAKEUP_MIN_INTERVAL_MINUTES,
   SESSION_WAKEUP_UNCAPPED_MIN_INTERVAL_MINUTES,
+  sessionWakeupScheduleSchema,
   type SessionWakeupSchedule,
 } from '@roomote/types';
 
@@ -88,8 +87,20 @@ export function normalizeSessionWakeupSchedule(
           'A once schedule needs inMinutes or at.',
         );
       }
+      if (
+        hasDelay &&
+        !sessionWakeupScheduleSchema.safeParse({
+          mode: 'once',
+          at: now.toISOString(),
+          inMinutes: input.inMinutes,
+        }).success
+      ) {
+        throw new SessionWakeupValidationError(
+          'A once delay must be a positive whole number of seconds, at most 30 days out.',
+        );
+      }
       const at = hasDelay
-        ? new Date(now.getTime() + input.inMinutes! * MINUTE_MS)
+        ? new Date(now.getTime() + Math.round(input.inMinutes! * MINUTE_MS))
         : parseIsoDate(input.at!, 'at');
       if (at.getTime() <= now.getTime()) {
         throw new SessionWakeupValidationError(
@@ -114,18 +125,16 @@ export function normalizeSessionWakeupSchedule(
       };
     }
     case 'interval': {
-      if (
-        !Number.isInteger(input.everyMinutes) ||
-        input.everyMinutes < SESSION_WAKEUP_MIN_INTERVAL_MINUTES ||
-        input.everyMinutes > SESSION_WAKEUP_MAX_INTERVAL_MINUTES
-      ) {
+      if (!sessionWakeupScheduleSchema.safeParse(input).success) {
         throw new SessionWakeupValidationError(
-          `everyMinutes must be a whole number between ${SESSION_WAKEUP_MIN_INTERVAL_MINUTES} and ${SESSION_WAKEUP_MAX_INTERVAL_MINUTES}.`,
+          'An interval must be a positive whole number of seconds, at most 7 days.',
         );
       }
       return {
         schedule: { mode: 'interval', everyMinutes: input.everyMinutes },
-        firstRunAt: new Date(now.getTime() + input.everyMinutes * MINUTE_MS),
+        firstRunAt: new Date(
+          now.getTime() + Math.round(input.everyMinutes * MINUTE_MS),
+        ),
       };
     }
     case 'cron': {
@@ -168,7 +177,9 @@ export function computeNextSessionWakeupRunAt(
       return at.getTime() > from.getTime() ? at : null;
     }
     case 'interval':
-      return new Date(from.getTime() + schedule.everyMinutes * MINUTE_MS);
+      return new Date(
+        from.getTime() + Math.round(schedule.everyMinutes * MINUTE_MS),
+      );
     case 'cron':
       return nextCronOccurrence(schedule.expression, schedule.timezone, from);
   }
@@ -274,6 +285,10 @@ function estimateCronMinGapMinutes(
 }
 
 function formatMinutes(minutes: number): string {
+  if (!Number.isInteger(minutes)) {
+    const seconds = Math.round(minutes * 60);
+    return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  }
   if (minutes % (24 * 60) === 0) {
     const days = minutes / (24 * 60);
     return `${days} day${days === 1 ? '' : 's'}`;

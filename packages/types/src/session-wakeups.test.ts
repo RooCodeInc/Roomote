@@ -19,13 +19,26 @@ describe('manage wakeups tool contract', () => {
     expect(
       sessionWakeupScheduleSchema.parse({ ...absolute, inMinutes: 2 }),
     ).toEqual({ ...absolute, inMinutes: 2 });
-    for (const inMinutes of [0, -1, 1.5, 43_201, '2', null]) {
+    for (const inMinutes of [0, -1, 0.025, NaN, Infinity, 43_201, '2', null]) {
       expect(
         sessionWakeupScheduleSchema.safeParse({ ...absolute, inMinutes })
           .success,
       ).toBe(false);
     }
   });
+  it.each([1 / 60, 0.5, 31 / 60, 1, 1.5])(
+    'accepts whole seconds stored as %s minutes',
+    (minutes) => {
+      const once = {
+        mode: 'once',
+        at: '2026-09-04T17:00:30.000Z',
+        inMinutes: minutes,
+      };
+      const interval = { mode: 'interval', everyMinutes: minutes };
+      expect(sessionWakeupScheduleSchema.parse(once)).toEqual(once);
+      expect(sessionWakeupScheduleSchema.parse(interval)).toEqual(interval);
+    },
+  );
   it('keeps every supported action in the shared Zod schema', () => {
     for (const action of MANAGE_WAKEUPS_ACTIONS) {
       expect(manageWakeupsInputSchema.parse({ action })).toEqual({ action });
@@ -39,6 +52,10 @@ describe('manage wakeups tool contract', () => {
     );
     expect(getFastAgentNativeAcpKind('manage_wakeups')).toBe('task');
     expect(MANAGE_WAKEUPS_TOOL.description).toContain('"in 20m"');
+    expect(MANAGE_WAKEUPS_TOOL.description).toContain('"in 30s"');
+    expect(MANAGE_WAKEUPS_TOOL.inputSchema.schedule.description).toContain(
+      '"every 30s x3"',
+    );
     expect(MANAGE_WAKEUPS_TOOL.description).toContain('There is no pause.');
     expect(MANAGE_WAKEUPS_TOOL.description).toContain(
       'Never poll, sleep, or wait',

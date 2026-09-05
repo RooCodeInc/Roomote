@@ -13,6 +13,73 @@ const now = new Date('2026-09-04T17:00:00.000Z');
 const options = { now, defaultTimeZone: 'America/New_York' };
 
 describe('normalizeSessionWakeupSchedule', () => {
+  it.each([1, 10, 30, 31, 59, 61, 90, 299, 300])(
+    'keeps %i seconds exact through first and next runs',
+    (seconds) => {
+      const inMinutes = seconds / 60;
+      const once = normalizeSessionWakeupSchedule(
+        { mode: 'once', inMinutes },
+        options,
+      );
+      const interval = normalizeSessionWakeupSchedule(
+        { mode: 'interval', everyMinutes: inMinutes },
+        options,
+      );
+      expect(once.firstRunAt.getTime()).toBe(now.getTime() + seconds * 1000);
+      expect(interval.firstRunAt).toEqual(once.firstRunAt);
+      expect(computeNextSessionWakeupRunAt(once.schedule, now)).toEqual(
+        once.firstRunAt,
+      );
+      expect(
+        computeNextSessionWakeupRunAt(once.schedule, once.firstRunAt),
+      ).toBeNull();
+      expect(
+        resolveSessionWakeupNextRun({
+          schedule: interval.schedule,
+          firedAt: once.firstRunAt,
+          runCountAfterFire: 1,
+          maxRuns: 2,
+          until: null,
+        })?.getTime(),
+      ).toBe(now.getTime() + seconds * 2000);
+      expect(
+        resolveSessionWakeupNextRun({
+          schedule: interval.schedule,
+          firedAt: once.firstRunAt,
+          runCountAfterFire: 2,
+          maxRuns: 2,
+          until: null,
+        }),
+      ).toBeNull();
+      expect(
+        resolveSessionWakeupNextRun({
+          schedule: interval.schedule,
+          firedAt: once.firstRunAt,
+          runCountAfterFire: 1,
+          maxRuns: null,
+          until: once.firstRunAt,
+        }),
+      ).toBeNull();
+    },
+  );
+
+  it.each([0, -1, NaN, Infinity, 0.001, 0.025, 43_201])(
+    'rejects invalid normalized duration %s',
+    (minutes) => {
+      expect(() =>
+        normalizeSessionWakeupSchedule(
+          { mode: 'once', inMinutes: minutes },
+          options,
+        ),
+      ).toThrow(SessionWakeupValidationError);
+      expect(() =>
+        normalizeSessionWakeupSchedule(
+          { mode: 'interval', everyMinutes: minutes },
+          options,
+        ),
+      ).toThrow(SessionWakeupValidationError);
+    },
+  );
   it('resolves a relative once schedule against now', () => {
     const result = normalizeSessionWakeupSchedule(
       { mode: 'once', inMinutes: 20 },
@@ -206,6 +273,18 @@ describe('validateSessionWakeupCaps', () => {
 
 describe('describeSessionWakeupSchedule', () => {
   it('renders each mode for humans', () => {
+    expect(
+      describeSessionWakeupSchedule({ mode: 'interval', everyMinutes: 0.5 }),
+    ).toBe('every 30 seconds');
+    expect(
+      describeSessionWakeupSchedule({ mode: 'interval', everyMinutes: 1 / 60 }),
+    ).toBe('every 1 second');
+    expect(
+      describeSessionWakeupSchedule({
+        mode: 'interval',
+        everyMinutes: 61 / 60,
+      }),
+    ).toBe('every 61 seconds');
     expect(
       describeSessionWakeupSchedule({ mode: 'interval', everyMinutes: 90 }),
     ).toBe('every 90 minutes');

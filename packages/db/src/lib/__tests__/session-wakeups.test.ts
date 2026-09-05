@@ -64,50 +64,53 @@ afterEach(async () => {
 });
 
 describe('session wakeup helpers', () => {
-  it('deduplicates relative retries with changed resolved times, not distinct delays or prompts', async () => {
-    const { user, conversation } = await makeConversation();
-    const input = {
-      conversationId: conversation.id,
-      createdByUserId: user.id,
-      name: 'Reminder',
-      prompt: 'Check the deploy.',
-      schedule: {
-        mode: 'once' as const,
-        at: firstRunAt.toISOString(),
-        inMinutes: 2,
-      },
-      reportPolicy: 'always' as const,
-      maxRuns: null,
-      until: null,
-      nextRunAt: firstRunAt,
-    };
-    const first = await admitSessionWakeup(input);
-    expect(first.outcome).toBe('created');
-    const later = new Date(firstRunAt.getTime() + 5_000);
-    const retry = {
-      ...input,
-      prompt: ' CHECK  THE DEPLOY. ',
-      schedule: { ...input.schedule, at: later.toISOString() },
-      nextRunAt: later,
-    };
-    expect(await admitSessionWakeup(retry)).toEqual({
-      ...first,
-      outcome: 'duplicate',
-    });
-    const [persisted] = await listSessionWakeups(conversation.id);
-    expect(persisted!.schedule).toEqual(input.schedule);
-    expect(persisted!.nextRunAt).toEqual(firstRunAt);
-    expect(
-      await admitSessionWakeup({
-        ...retry,
-        schedule: { ...retry.schedule, inMinutes: 3 },
-      }),
-    ).toMatchObject({ outcome: 'created' });
-    expect(
-      await admitSessionWakeup({ ...retry, prompt: 'Check another deploy.' }),
-    ).toMatchObject({ outcome: 'created' });
-    expect(await listSessionWakeups(conversation.id)).toHaveLength(3);
-  });
+  it.each([2, 0.5, 31 / 60])(
+    'deduplicates relative retries (%s minutes) with changed resolved times, not distinct delays or prompts',
+    async (inMinutes) => {
+      const { user, conversation } = await makeConversation();
+      const input = {
+        conversationId: conversation.id,
+        createdByUserId: user.id,
+        name: 'Reminder',
+        prompt: 'Check the deploy.',
+        schedule: {
+          mode: 'once' as const,
+          at: firstRunAt.toISOString(),
+          inMinutes,
+        },
+        reportPolicy: 'always' as const,
+        maxRuns: null,
+        until: null,
+        nextRunAt: firstRunAt,
+      };
+      const first = await admitSessionWakeup(input);
+      expect(first.outcome).toBe('created');
+      const later = new Date(firstRunAt.getTime() + 5_000);
+      const retry = {
+        ...input,
+        prompt: ' CHECK  THE DEPLOY. ',
+        schedule: { ...input.schedule, at: later.toISOString() },
+        nextRunAt: later,
+      };
+      expect(await admitSessionWakeup(retry)).toEqual({
+        ...first,
+        outcome: 'duplicate',
+      });
+      const [persisted] = await listSessionWakeups(conversation.id);
+      expect(persisted!.schedule).toEqual(input.schedule);
+      expect(persisted!.nextRunAt).toEqual(firstRunAt);
+      expect(
+        await admitSessionWakeup({
+          ...retry,
+          schedule: { ...retry.schedule, inMinutes: 3 },
+        }),
+      ).toMatchObject({ outcome: 'created' });
+      expect(
+        await admitSessionWakeup({ ...retry, prompt: 'Check another deploy.' }),
+      ).toMatchObject({ outcome: 'created' });
+      expect(await listSessionWakeups(conversation.id)).toHaveLength(3);
+    },
+  );
 
   it('does not infer relative identity from legacy or absolute one-shots', async () => {
     const { user, conversation } = await makeConversation();
@@ -136,6 +139,8 @@ describe('session wakeup helpers', () => {
   });
 
   it.each([
+    { everyMinutes: 0.5, mode: 'interval' as const },
+    { everyMinutes: 31 / 60, mode: 'interval' as const },
     { mode: 'once' as const, at: firstRunAt.toISOString() },
     { mode: 'cron' as const, expression: '*/10 * * * *', timezone: 'UTC' },
   ])(
