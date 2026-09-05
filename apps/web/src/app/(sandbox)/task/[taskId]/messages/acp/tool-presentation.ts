@@ -106,6 +106,7 @@ const COMMUNICATION_TOOL_NAMES = new Set([
 ]);
 const TOOL_ICON_OVERRIDES: Readonly<Partial<Record<string, ToolIconKey>>> = {
   manage_custom_automations: 'task',
+  manage_wakeups: 'task',
   get_about_me: 'roomote',
   describe_video: 'video',
   manage_goal: 'target',

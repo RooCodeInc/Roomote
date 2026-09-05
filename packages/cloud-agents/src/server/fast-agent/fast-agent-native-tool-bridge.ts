@@ -27,6 +27,11 @@ import {
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
   REASONING_EFFORT_VALUES,
+  MANAGE_WAKEUPS_TOOL_DESCRIPTION,
+  SESSION_WAKEUP_NAME_MAX_LENGTH,
+  SESSION_WAKEUP_PROMPT_MAX_LENGTH,
+  SESSION_WAKEUP_SCHEDULE_GRAMMAR,
+  SESSION_WAKEUP_SCHEDULE_MAX_LENGTH,
   type FastAgentSurface,
   FAST_EXECUTION,
 } from '@roomote/types';
@@ -385,6 +390,24 @@ export default {
   description: "Cancel an active task delegated by this Fast conversation.",
   args: { taskId: z.string().nullable().optional() },
   execute: (args, context) => invoke("cancel_task", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: ${JSON.stringify(MANAGE_WAKEUPS_TOOL_DESCRIPTION)},
+  args: {
+    action: z.enum(["create", "list", "get", "cancel"]).describe("create schedules a wakeup; list shows active wakeups in this conversation; get shows one; cancel stops one. Cancel is the only stop action."),
+    wakeupId: z.string().optional().describe("Required for get and cancel. Omit otherwise."),
+    name: z.string().min(3).max(${SESSION_WAKEUP_NAME_MAX_LENGTH}).optional().describe("[create] Short label, e.g. 'Check PR #85 for merge'"),
+    prompt: z.string().min(10).max(${SESSION_WAKEUP_PROMPT_MAX_LENGTH}).optional().describe("[create] What to do when it fires. This conversation stays in context, so keep it short: what to check, what counts as done, what to tell the user."),
+    schedule: z.string().max(${SESSION_WAKEUP_SCHEDULE_MAX_LENGTH}).optional().describe(${JSON.stringify(`[create] ${SESSION_WAKEUP_SCHEDULE_GRAMMAR}`)}),
+    reportPolicy: z.enum(["always", "only_when_notable"]).optional().describe("[create] 'always' replies on every run (default for one-shots); 'only_when_notable' stays silent unless there is news (default for repeating schedules). Omit to use the default."),
+  },
+  execute: (args, context) => invoke("manage_wakeups", args, context),
 }
 `,
 

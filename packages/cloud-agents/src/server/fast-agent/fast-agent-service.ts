@@ -20,6 +20,7 @@ import {
   buildInferenceProviderRecoveryPrompt,
   fastAgentHumanFollowUpEventSchema,
   formatErrorForLog,
+  manageWakeupsInputSchema,
   resolveInferenceProviderRetryDelayMs,
   isMemoryMcpServer,
   truncateAcpOutputText,
@@ -57,6 +58,10 @@ import { z } from 'zod';
 import packageJson from '../../../../../package.json';
 
 import { appendAttachmentTextsToPromptText } from '../../file-attachments';
+import {
+  handleManageWakeupsToolCall,
+  normalizeManageWakeupsArgs,
+} from '../session-wakeups';
 import {
   buildSlackThreadPromptBlocks,
   wrapSlackMessage,
@@ -3394,6 +3399,10 @@ export async function answerFastAgentQuestion({
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
       FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+      // Scheduling or cancelling a wakeup is instant and its own confirmation
+      // follows in the closeout; an acknowledgement first would only add a
+      // second message.
+      FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups,
       // A catalog lookup reads nothing external; the call it prepares for is
       // still gated on the acknowledgement.
       FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools,
@@ -4199,6 +4208,20 @@ export async function answerFastAgentQuestion({
               currentTasks.delete(target.taskId);
             }
             return result;
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups: {
+            const args = manageWakeupsInputSchema.parse(
+              normalizeManageWakeupsArgs(call.args),
+            );
+
+            throwIfTurnCancelled();
+
+            return await handleManageWakeupsToolCall(
+              { conversationId: session.id, userId },
+
+              args,
+            );
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart: {

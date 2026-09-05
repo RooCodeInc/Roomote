@@ -209,6 +209,7 @@ export function buildFastAgentSystemPrompt({
     : '';
   const recurringAutomationGuidance = `## Recurring Work and Automations
 - When an admin explicitly asks for recurring work, recognize a real cadence expression such as "every Monday", "daily", "weekly", "whenever X happens", "from now on", or "on a schedule". Do not treat preference words such as "always use tabs" as a cadence.
+- Reminders and recurring checks that belong to this conversation ("remind me in an hour", "check every 10 minutes until CI is green", "ping me here every weekday at 9") are wakeups, not automations: use "manage_wakeups", which needs no admin. Reach for a custom automation only for deployment-wide recurring work that should run outside this conversation or report to a channel.
 - Draft the automation conversationally with a proposed name, a prompt containing only the work (never the cadence), a validated human-readable schedule, a confirmed destination on the current chat surface, and the appropriate environment. Use \`resolve_schedule\` before creation; if it is ambiguous, ask the resolver's clarification question rather than guessing.
 - Before \`create\`, use \`list\` to check for an equivalent automation. Present the complete summary (name, prompt, schedule, destination, and environment or Fast mode) and ask one explicit confirmation question. Never create, update, enable, or delete silently. After creation, ask whether the user wants to \`run_now\` to test it.
 - If the user is not an admin, do not attempt creation. Explain that an administrator is required and provide a copy-pasteable draft name, prompt, and schedule instead.
@@ -349,6 +350,7 @@ ${reactionGuidance}
 - Use "cancel_task" only when the user explicitly asks to stop an active task.
 - Call a deployment MCP tool when it can answer the request. Fast receives the same actor-authorized remote and deployment-proxied MCP tool catalog as delegated tasks; local stdio servers remain sandbox-only. Servers listed with a tool prefix expose each tool individually with its native JSON schema. On-demand servers are reached through \`find_integration_tools\` (fetch the schema by server id and tool name, or search by keywords) followed by \`call_integration_tool\`; the same acknowledgement, duplicate, and audit rules apply to both paths.
 - Use \`roomote_manage_custom_automations\` for custom automation lifecycle requests. It uses the current user's deployment authorization, is admin-only, and is unavailable to advisor and judge subagents. List before modifying an existing automation, use "list_models" before setting a model override, use update with "enabled" to enable or disable, and use "run_now" rather than "launch_task" to test an automation. Communicate first on a human-authored turn; platform events remain exempt. Delete only when the user explicitly requests it, and after creating an automation ask whether they want to run it now.
+- Use "manage_wakeups" when the user wants a reminder, a delayed follow-up, or a recurring check that reports back into this conversation ("remind me in 20 minutes", "check every 10 minutes until CI is green", "every weekday at 9 ping me with open PRs"). The schedule is one short string: "in 20m" for a reminder, "every 10m" or "every 1m x3" for a repeating check, "cron 0 9 * * 1-5" for a calendar schedule. Send only the fields the action needs. It is scoped to this conversation and available to every participant. Do not use \`roomote_manage_custom_automations\` for conversation-scoped reminders, and never sleep or poll inside a turn instead of scheduling a wakeup. After creating one, confirm the plan and the next run time in one sentence; when the user says stop or cancel, use action "cancel".
 
 ${recurringAutomationGuidance}
 - You may make multiple deployment MCP calls when needed, one at a time. Stop as soon as you have enough evidence and never repeat an identical call.
@@ -359,8 +361,8 @@ ${recurringAutomationGuidance}
 - Select an environment ID only when the target is clear. Otherwise use null to use the deployment default.
 ${
   platformEvent
-    ? `## ${platformEventKind === 'automation' ? 'Automation Platform Event' : platformEventKind === 'setup' ? 'Setup Platform Event' : platformEventKind === 'input_response' ? 'Structured Input Response Event' : 'Delegated Task Platform Event'}
-- The current input is a trusted platform-generated ${platformEventKind === 'automation' ? 'custom automation request' : platformEventKind === 'setup' ? 'setup lifecycle event' : platformEventKind === 'input_response' ? 'structured user-input response' : 'event about a delegated task'}, not a human-authored request.
+    ? `## ${platformEventKind === 'automation' ? 'Automation Platform Event' : platformEventKind === 'setup' ? 'Setup Platform Event' : platformEventKind === 'input_response' ? 'Structured Input Response Event' : platformEventKind === 'scheduled_wakeup' ? 'Scheduled Wakeup Event' : 'Delegated Task Platform Event'}
+- The current input is a trusted platform-generated ${platformEventKind === 'automation' ? 'custom automation request' : platformEventKind === 'setup' ? 'setup lifecycle event' : platformEventKind === 'input_response' ? 'structured user-input response' : platformEventKind === 'scheduled_wakeup' ? 'wakeup this conversation scheduled for itself' : 'event about a delegated task'}, not a human-authored request.
 ${
   platformEventVisibility === 'required'
     ? '- This event requires one user-visible terminal response because it carries user-useful substance. Present its result, changed expectation, required decision, or recovery action; never narrate lifecycle state alone. Use a closeout unless the setup instructions require `request_user_input`. Do not call "ignore_event".'
@@ -375,6 +377,16 @@ ${
 ${
   platformEventKind === 'input_response'
     ? "- The payload contains the user's submitted structured answers. Persist any needed state, continue the interrupted work with those answers, and acknowledge the choice in one closeout. Do not re-ask the same questions."
+    : ''
+}
+${
+  platformEventKind === 'scheduled_wakeup'
+    ? `- The payload is a wakeup you scheduled earlier in this conversation with "manage_wakeups"; its \`prompt\` says what to do now. The conversation history is still in context, so act on the prompt directly rather than treating it as a new request.
+- Do the work the prompt asks for. Use integrations directly when sufficient, and launch a task only when repository or workspace execution is actually required.
+- \`reportPolicy\` governs whether to speak. With "always", finish with one closeout addressed to the user. With "only_when_notable", post a closeout only when there is news, a result, a blocker, or a required decision; otherwise call "ignore_event".
+- When the monitored condition has resolved or the wakeup is no longer relevant, cancel it with "manage_wakeups" (action "cancel", the event's \`wakeupId\`) and say so in the closeout. \`nextRunAt\` is null when this was the final run; a finished wakeup needs no cancel.
+- Do not create another wakeup from a wakeup turn unless the prompt explicitly asks for a different schedule.
+`
     : ''
 }
 ${

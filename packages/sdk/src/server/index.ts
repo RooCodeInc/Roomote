@@ -222,6 +222,15 @@ export {
   type FastAgentParentEventQueueRequest,
 } from './lib/fast-agent-parent-event-queue';
 export {
+  SESSION_WAKEUP_FIRE_JOB_NAME,
+  SESSION_WAKEUP_QUEUE_NAME,
+  SESSION_WAKEUP_RECOVERY_LOOKAHEAD_MS,
+  fireSessionWakeup,
+  recoverPendingSessionWakeups,
+  type FireSessionWakeupResult,
+  type SessionWakeupFireJob,
+} from './lib/session-wakeups';
+export {
   admitFastAgentHumanFollowUp,
   persistFastAgentInlineHumanTurn,
   type FastAgentDurableTurn,

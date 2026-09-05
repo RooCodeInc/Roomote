@@ -30,7 +30,8 @@ export type FastAgentPlatformEventKind =
   | 'delegated_task'
   | 'automation'
   | 'setup'
-  | 'input_response';
+  | 'input_response'
+  | 'scheduled_wakeup';
 
 /** Shared with the durable follow-up event so an admitted reaction resumes as the same input. */
 export type FastAgentReactionExternalInput =
