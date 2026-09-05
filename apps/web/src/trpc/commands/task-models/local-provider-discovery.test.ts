@@ -1,3 +1,6 @@
+import { once } from 'node:events';
+import { createServer } from 'node:http';
+
 import {
   discoverProviderModels,
   getRecommendedLocalProviderModels,
@@ -300,5 +303,67 @@ describe('qualifyProviderModel', () => {
       success: false,
       error: expect.stringContaining('tools are unsupported for this model'),
     });
+  });
+
+  it.each([
+    'data: {"choices":[{"delta":{"content":"ping","tool_calls":[{"function":{"name":"wrong_tool"}}]}}]}\n\n',
+    'data: {"error":{"tool_calls":"ping"}}\n\n',
+    ': {"choices":[{"delta":{"tool_calls":[{"function":{"name":"ping"}}]}}]}\n\n',
+    'data: malformed "tool_calls" "ping"\n\n',
+    'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"pi"}},{"index":1,"function":{"name":"ng"}}]}}]}\n\n',
+  ])('rejects a stream without an actual ping tool call: %s', async (body) => {
+    fetchMock.mockResolvedValue(
+      new Response(body, { headers: { 'content-type': 'text/event-stream' } }),
+    );
+
+    await expect(
+      qualifyProviderModel({
+        provider: 'openai-compatible',
+        baseUrl: 'http://provider.example/v1',
+        modelId: 'test-model',
+      }),
+    ).resolves.toMatchObject({ success: false });
+  });
+
+  it('validates tool calls over HTTP, including fragmented names and multiline SSE data', async () => {
+    vi.unstubAllGlobals();
+    let body = 'data: {"error":{"tool_calls":"ping"}}\r\n\r\n';
+    const requests: Array<{ url?: string; method?: string }> = [];
+    const server = createServer((request, response) => {
+      requests.push({ url: request.url, method: request.method });
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.write(body.slice(0, 17));
+      setImmediate(() => response.end(body.slice(17)));
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string')
+        throw new Error('No TCP address');
+      const qualify = () =>
+        qualifyProviderModel({
+          provider: 'openai-compatible',
+          baseUrl: `http://127.0.0.1:${address.port}/v1`,
+          modelId: 'test-model',
+        });
+
+      await expect(qualify()).resolves.toMatchObject({ success: false });
+      body = [
+        ': keepalive\r\n\r\n',
+        'data: {"choices":[\r\ndata: {"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"pi"}}]}}]}\r\n\r\n',
+        'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"ng"}}]}}]}\r\n\r\n',
+        'data: [DONE]\r\n\r\n',
+      ].join('');
+      await expect(qualify()).resolves.toEqual({ success: true });
+      expect(requests).toEqual([
+        { url: '/v1/chat/completions', method: 'POST' },
+        { url: '/v1/chat/completions', method: 'POST' },
+      ]);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
   });
 });
