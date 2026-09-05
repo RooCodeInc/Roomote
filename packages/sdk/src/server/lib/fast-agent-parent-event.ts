@@ -438,7 +438,7 @@ type FastAgentParentTurnParams = {
 };
 
 /** The custom automation a Fast conversation is running for, when known. */
-export type FastAutomationLaunchContext = {
+type FastAutomationLaunchContext = {
   automationId: string;
   automationName: string;
   trigger: 'schedule' | 'manual';
