@@ -428,6 +428,7 @@ function createFastAgentAutomationTaskLauncher(params: {
         externalId: params.automationId,
         displayName: params.automationName,
       },
+      actingUserId: params.userId,
     },
     afterKickoff: async (taskRun) => {
       await db

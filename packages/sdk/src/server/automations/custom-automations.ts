@@ -900,6 +900,7 @@ async function launchCustomAutomationRow(
               externalId: automation.id,
               displayName: automation.name,
             },
+            actingUserId: automation.createdByUserId,
           },
           workflow: 'standard',
           surface: 'system',
@@ -911,8 +912,14 @@ async function launchCustomAutomationRow(
           },
         },
       );
-      await transcript.recordLaunch(launchResult.taskId);
       launchedTaskId = launchResult.taskId;
+      // The task is already queued; a missing card is a transcript blemish,
+      // not a failed run.
+      await transcript.recordLaunch(launchedTaskId).catch((error: unknown) => {
+        console.warn(
+          `${LOG_PREFIX} Failed to record the launch card for task ${launchedTaskId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
     } catch (error) {
       await reportFastAutomationStartupFailure({
         automation,

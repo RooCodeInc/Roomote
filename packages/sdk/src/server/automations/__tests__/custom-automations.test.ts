@@ -869,6 +869,7 @@ describe('customAutomationsJob', () => {
             externalId: automation.id,
             displayName: automation.name,
           },
+          actingUserId: 'user-1',
         },
         title: automation.name,
         workflow: 'standard',
@@ -970,6 +971,34 @@ describe('customAutomationsJob', () => {
     expect(fastMocks.upsertMessage.mock.invocationCallOrder[0]!).toBeLessThan(
       vi.mocked(enqueueTask).mock.invocationCallOrder[0]!,
     );
+  });
+
+  it('keeps a queued launch successful when the task card cannot be recorded', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fastMocks.upsertMessage.mockImplementation(
+      async ({ message }: { message: { eventId: string } }) => {
+        if (message.eventId.endsWith(':launch')) {
+          throw new Error('transcript unavailable');
+        }
+      },
+    );
+
+    const result = await customAutomationsJob();
+
+    expect(result.launchedTaskId).toBe('task_abc');
+    expect(result.errors).toEqual([]);
+    expect(fastMocks.telegramPostMessage).not.toHaveBeenCalled();
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        status: 'succeeded',
+        lastLaunchedTaskId: 'task_abc',
+      }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to record the launch card'),
+    );
+    warn.mockRestore();
   });
 
   it('fails closed when the Slack report channel is no longer connected', async () => {

@@ -948,6 +948,33 @@ describe('enqueueTask Session linkage', () => {
     ).resolves.toEqual([]);
   });
 
+  it('seeds the acting user from an automation initiator without re-attributing the task', async () => {
+    const userId = await createUser();
+
+    const run = await launchFresh({
+      initiator: {
+        kind: 'automation',
+        key: 'custom_automation',
+        actor: { externalId: 'automation-1', displayName: 'Flaky tests' },
+        actingUserId: userId,
+      },
+      workflow: 'standard',
+      surface: 'system',
+      trigger: 'schedule',
+    });
+
+    const task = await db.query.tasks.findFirst({
+      where: eq(tasks.id, run.taskId),
+    });
+
+    expect(task!.initiatorKind).toBe('automation');
+    expect(task!.initiatorAutomation).toBe('custom_automation');
+    expect(task!.initiatorUserId).toBeNull();
+    expect(task!.actorExternalId).toBe('automation-1');
+    expect(task!.commitAuthorKind).toBe('roomote');
+    expect(run.actingUserId).toBe(userId);
+  });
+
   it('attaches an ownerless automation task to a Fast Session without a human actor', async () => {
     const fastAgentSessionId = crypto.randomUUID();
     await db.insert(fastAgentConversations).values({
