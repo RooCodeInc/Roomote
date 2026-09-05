@@ -4104,6 +4104,59 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('preserves actionable links in readable provider errors', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Start work.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'APIError',
+            data: {
+              message:
+                'This model requires explicit region opt in: https://provider.example/settings/region',
+              statusCode: 403,
+              isRetryable: false,
+              responseBody: '{"type":"error","error":{"type":"RegionError"}}',
+            },
+          },
+        },
+      });
+
+      const errorMessage = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          String(envelope.payload.text ?? '').includes(
+            'The provider returned an error',
+          ),
+      );
+
+      expect(String(errorMessage?.payload.text)).toBe(
+        'The provider returned an error: This model requires explicit region opt in: https://provider.example/settings/region',
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('does not persist credential-shaped provider headers', async () => {
     const { client, harness } = createHarness();
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
