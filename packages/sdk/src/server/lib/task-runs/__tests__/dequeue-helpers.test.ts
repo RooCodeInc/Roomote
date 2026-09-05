@@ -12,6 +12,10 @@ const {
   mockCreateTaskRunBitbucketCredentials,
   mockResolveSandboxModelRuntimeEnv,
   mockTaskRunsFindFirst,
+  mockEnvironmentsFindFirst,
+  mockEnvironmentVariablesSelectWhere,
+  mockResolveDefaultComputeProvider,
+  mockResolveComputeProviderEnvValues,
   mockNotifySourceRunOnSettle,
   mockCaptureTaskSettled,
 } = vi.hoisted(() => ({
@@ -25,6 +29,12 @@ const {
   mockCreateTaskRunBitbucketCredentials: vi.fn(),
   mockResolveSandboxModelRuntimeEnv: vi.fn(),
   mockTaskRunsFindFirst: vi.fn(),
+  mockEnvironmentsFindFirst: vi.fn(),
+  mockEnvironmentVariablesSelectWhere: vi.fn<
+    (...args: unknown[]) => Promise<Array<{ name: string; value: string }>>
+  >(async () => []),
+  mockResolveDefaultComputeProvider: vi.fn(),
+  mockResolveComputeProviderEnvValues: vi.fn(),
   mockNotifySourceRunOnSettle: vi.fn(),
   mockCaptureTaskSettled: vi.fn(),
 }));
@@ -43,15 +53,28 @@ vi.mock('@roomote/db/server', () => ({
       taskRuns: {
         findFirst: (...args: unknown[]) => mockTaskRunsFindFirst(...args),
       },
+      environments: {
+        findFirst: (...args: unknown[]) => mockEnvironmentsFindFirst(...args),
+      },
     },
     select: () => ({
       from: () => ({
-        where: async () => [],
+        where: (...args: unknown[]) =>
+          mockEnvironmentVariablesSelectWhere(...args),
       }),
     }),
     transaction: vi.fn(),
   },
   taskRuns: { id: 'taskRuns.id' },
+  environments: { id: 'environments.id' },
+  environmentVariables: {
+    name: 'environmentVariables.name',
+    value: 'environmentVariables.value',
+  },
+  resolveDefaultComputeProvider: (...args: unknown[]) =>
+    mockResolveDefaultComputeProvider(...args),
+  resolveComputeProviderEnvValues: (...args: unknown[]) =>
+    mockResolveComputeProviderEnvValues(...args),
   repositories: {
     fullName: 'repositories.fullName',
     sourceControlProvider: 'repositories.sourceControlProvider',
@@ -1006,6 +1029,171 @@ describe('fetchResolvedRuntimeEnvVars', () => {
 
     expect(envVars.SANDBOX_OPENROUTER_API_KEY).toBe('sandbox-openrouter-key');
     expect(envVars.MY_APP_CONFIG).toBe('value');
+  });
+
+  it('forwards the deployment compute config for inherit_compute environments', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+    mockEnvironmentsFindFirst.mockResolvedValueOnce({
+      config: { inherit_compute: true },
+    });
+    mockResolveDefaultComputeProvider.mockResolvedValueOnce('modal');
+    mockResolveComputeProviderEnvValues.mockResolvedValueOnce({
+      MODAL_TOKEN_ID: 'ak-id',
+      MODAL_TOKEN_SECRET: 'as-secret',
+      MODAL_BASE_IMAGE_REF: 'ghcr.io/roocodeinc/roomote-worker:develop',
+    });
+
+    const envVars = await fetchResolvedRuntimeEnvVars(
+      {
+        // Stored under its real name: still stripped from the sandbox.
+        MODAL_TOKEN_SECRET: 'stored-secret',
+        MY_APP_CONFIG: 'value',
+      },
+      { nestedDeploymentEnvironmentId: 'env-nested' },
+    );
+
+    expect(envVars).not.toHaveProperty('MODAL_TOKEN_SECRET');
+    expect(envVars.MY_APP_CONFIG).toBe('value');
+    expect(JSON.parse(envVars.R_NESTED_DEPLOYMENT_ENV!)).toEqual({
+      DEFAULT_COMPUTE_PROVIDER: 'modal',
+      MODAL_TOKEN_ID: 'ak-id',
+      MODAL_TOKEN_SECRET: 'as-secret',
+      MODAL_BASE_IMAGE_REF: 'ghcr.io/roocodeinc/roomote-worker:develop',
+    });
+    expect(mockResolveComputeProviderEnvValues).toHaveBeenCalledWith(
+      'modal',
+      expect.objectContaining({ runtimeEnv: expect.any(Object) }),
+    );
+  });
+
+  it('withholds compute config when the environment did not opt in', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+    mockResolveDefaultComputeProvider.mockClear();
+    mockEnvironmentsFindFirst.mockResolvedValueOnce({
+      config: { name: 'Plain' },
+    });
+
+    const envVars = await fetchResolvedRuntimeEnvVars(
+      { MY_APP_CONFIG: 'value' },
+      { nestedDeploymentEnvironmentId: 'env-plain' },
+    );
+
+    expect(envVars).not.toHaveProperty('R_NESTED_DEPLOYMENT_ENV');
+    expect(mockResolveDefaultComputeProvider).not.toHaveBeenCalled();
+  });
+
+  it('withholds compute config when the deployment provider cannot be nested', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+    mockEnvironmentsFindFirst.mockResolvedValueOnce({
+      config: { inherit_compute: true },
+    });
+    mockResolveDefaultComputeProvider.mockResolvedValueOnce('docker');
+    mockResolveComputeProviderEnvValues.mockResolvedValueOnce({});
+
+    const envVars = await fetchResolvedRuntimeEnvVars(
+      { MY_APP_CONFIG: 'value' },
+      { nestedDeploymentEnvironmentId: 'env-docker' },
+    );
+
+    expect(envVars).not.toHaveProperty('R_NESTED_DEPLOYMENT_ENV');
+  });
+
+  it('forwards fully configured source-control providers for inherit_source_control environments', async () => {
+    const githubAppEnv: Record<string, string> = {
+      R_GITHUB_APP_SLUG: 'roomote-test',
+      R_GITHUB_APP_ID: '12345',
+      R_GITHUB_APP_PRIVATE_KEY: 'pem',
+      R_GITHUB_CLIENT_ID: 'Iv1.abc',
+      R_GITHUB_CLIENT_SECRET: 'client-secret',
+      R_GITHUB_WEBHOOK_SECRET: 'webhook-secret',
+    };
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+    mockResolveDefaultComputeProvider.mockClear();
+    mockEnvironmentsFindFirst.mockResolvedValueOnce({
+      config: { inherit_source_control: true },
+    });
+    // The saved deployment env holds the GitHub App plus a half-configured
+    // Gitea provider; only the complete provider is forwarded.
+    mockEnvironmentVariablesSelectWhere.mockResolvedValueOnce([
+      ...Object.entries(githubAppEnv).map(([name, value]) => ({
+        name,
+        value: `enc:${value}`,
+      })),
+      { name: 'GITEA_BASE_URL', value: 'enc:https://gitea.example' },
+    ]);
+    mockDecryptSecrets.mockImplementation(async (value: unknown) =>
+      String(value).replace(/^enc:/, ''),
+    );
+
+    try {
+      const envVars = await fetchResolvedRuntimeEnvVars(
+        {
+          // Stored under its real name: still stripped from the sandbox.
+          R_GITHUB_APP_PRIVATE_KEY: 'stored-pem',
+          MY_APP_CONFIG: 'value',
+        },
+        { nestedDeploymentEnvironmentId: 'env-scm' },
+      );
+
+      expect(envVars).not.toHaveProperty('R_GITHUB_APP_PRIVATE_KEY');
+      expect(JSON.parse(envVars.R_NESTED_DEPLOYMENT_ENV!)).toEqual(
+        githubAppEnv,
+      );
+      expect(mockResolveDefaultComputeProvider).not.toHaveBeenCalled();
+    } finally {
+      mockDecryptSecrets.mockReset();
+    }
+  });
+
+  it('merges compute and source-control forwards when both flags are set', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+    mockEnvironmentsFindFirst.mockResolvedValueOnce({
+      config: { inherit_compute: true, inherit_source_control: true },
+    });
+    mockResolveDefaultComputeProvider.mockResolvedValueOnce('modal');
+    mockResolveComputeProviderEnvValues.mockResolvedValueOnce({
+      MODAL_TOKEN_ID: 'ak-id',
+      MODAL_TOKEN_SECRET: 'as-secret',
+      MODAL_BASE_IMAGE_REF: 'ghcr.io/roocodeinc/roomote-worker:develop',
+    });
+    mockEnvironmentVariablesSelectWhere.mockResolvedValueOnce([
+      { name: 'GITEA_BASE_URL', value: 'https://gitea.example' },
+      { name: 'GITEA_CLIENT_ID', value: 'gitea-client' },
+      { name: 'GITEA_CLIENT_SECRET', value: 'gitea-secret' },
+    ]);
+    mockDecryptSecrets.mockImplementation(async (value: unknown) => value);
+
+    try {
+      const envVars = await fetchResolvedRuntimeEnvVars(
+        { MY_APP_CONFIG: 'value' },
+        { nestedDeploymentEnvironmentId: 'env-both' },
+      );
+
+      expect(JSON.parse(envVars.R_NESTED_DEPLOYMENT_ENV!)).toEqual({
+        DEFAULT_COMPUTE_PROVIDER: 'modal',
+        MODAL_TOKEN_ID: 'ak-id',
+        MODAL_TOKEN_SECRET: 'as-secret',
+        MODAL_BASE_IMAGE_REF: 'ghcr.io/roocodeinc/roomote-worker:develop',
+        GITEA_BASE_URL: 'https://gitea.example',
+        GITEA_CLIENT_ID: 'gitea-client',
+        GITEA_CLIENT_SECRET: 'gitea-secret',
+      });
+    } finally {
+      mockDecryptSecrets.mockReset();
+    }
+  });
+
+  it('strips an operator-stored forwarding value for tasks without an environment', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+    mockEnvironmentsFindFirst.mockClear();
+
+    const envVars = await fetchResolvedRuntimeEnvVars({
+      R_NESTED_DEPLOYMENT_ENV: '{"DEFAULT_COMPUTE_PROVIDER":"modal"}',
+      MY_APP_CONFIG: 'value',
+    });
+
+    expect(envVars).not.toHaveProperty('R_NESTED_DEPLOYMENT_ENV');
+    expect(mockEnvironmentsFindFirst).not.toHaveBeenCalled();
   });
 
   it('mirrors resolved model env to legacy ROOMOTE_* aliases for pre-rename snapshot workers', async () => {

@@ -409,6 +409,27 @@ function getAdvancedItems(config: EnvironmentConfig) {
     );
   }
 
+  if (config.inherit_compute || config.inherit_source_control) {
+    items.push(
+      <div key="inherit_deployment" className="space-y-2">
+        <div className="text-xs text-muted-foreground">Nested deployment</div>
+        {config.inherit_compute ? (
+          <div className="rounded border border-border/70 px-3 py-2 text-sm">
+            Tasks receive this deployment&apos;s compute provider configuration
+            so a nested Roomote instance can spawn its own sandboxes.
+          </div>
+        ) : null}
+        {config.inherit_source_control ? (
+          <div className="rounded border border-border/70 px-3 py-2 text-sm">
+            Tasks receive this deployment&apos;s source-control provider
+            configuration so a nested Roomote instance can reach its
+            repositories.
+          </div>
+        ) : null}
+      </div>,
+    );
+  }
+
   if (config.skills && Object.keys(config.skills).length > 0) {
     items.push(
       <div key="skills" className="space-y-2">

@@ -3,9 +3,15 @@ import {
   DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
+  NESTED_DEPLOYMENT_ENV_VAR_NAME,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
+  NESTED_SOURCE_CONTROL_ENV_VAR_NAMES,
+  buildNestedComputeEnv,
+  buildNestedSourceControlEnv,
+  mergeNestedDeploymentEnv,
+  serializeNestedDeploymentEnv,
   parseInferenceGatewayKeys,
   parseModelProviderEnvKeys,
   RunStatus,
@@ -20,8 +26,12 @@ import {
 import {
   type TaskRun,
   db,
+  environments,
+  environmentVariables,
   taskRuns,
   markTaskStartParallelCountEndedAt,
+  resolveComputeProviderEnvValues,
+  resolveDefaultComputeProvider,
   resolveSandboxModelRuntimeEnv,
   resolveWorkspaceSourceControlProvider,
   resolveWorkspaceSourceControlHost,
@@ -30,9 +40,11 @@ import {
   stringifyDecryptedEnvVarValue,
   syncTaskStateFromRuns,
   eq,
+  inArray,
   sql,
 } from '@roomote/db/server';
 import { captureTaskSettled } from '@roomote/telemetry/server';
+import { Env } from '@roomote/env';
 import { decryptSecrets } from '@roomote/db/encryption';
 import {
   createTaskRunWorkerGitHubTokenWithMetadata,
@@ -263,11 +275,123 @@ function redactModelRuntimeManagedEnvVars(
   );
 }
 
+/**
+ * Resolves deployment env values by name the way the control plane does:
+ * process env first, then the encrypted deployment env in one batched read.
+ */
+async function resolveDeploymentEnvValues(
+  names: readonly string[],
+): Promise<Partial<Record<string, string>>> {
+  const resolved: Partial<Record<string, string>> = {};
+  const missing: string[] = [];
+
+  for (const name of names) {
+    const runtimeValue = (Env as Partial<Record<string, unknown>>)[name];
+    const value =
+      typeof runtimeValue === 'string' ? runtimeValue.trim() : undefined;
+
+    if (value) {
+      resolved[name] = value;
+    } else {
+      missing.push(name);
+    }
+  }
+
+  if (missing.length === 0) {
+    return resolved;
+  }
+
+  const encryptedEnvVars = await db
+    .select({
+      name: environmentVariables.name,
+      value: environmentVariables.value,
+    })
+    .from(environmentVariables)
+    .where(inArray(environmentVariables.name, missing));
+
+  for (const envVar of encryptedEnvVars) {
+    const decryptedValue = await decryptSecrets<string>(envVar.value);
+
+    if (decryptedValue === null) {
+      continue;
+    }
+
+    const value = stringifyDecryptedEnvVarValue(decryptedValue).trim();
+
+    if (value) {
+      resolved[envVar.name] = value;
+    }
+  }
+
+  return resolved;
+}
+
+/**
+ * Resolves the forwarding value for an environment that opted in with
+ * `inherit_compute` and/or `inherit_source_control`: the deployment's default
+ * compute provider with its resolved setup-catalog values, and the fully
+ * configured source-control providers with theirs, serialized under a single
+ * name that the worker expands for the nested Roomote app. Returns null when
+ * the environment did not opt in or nothing resolved to a complete provider.
+ */
+async function resolveNestedDeploymentEnvVar(
+  environmentId: string,
+): Promise<string | null> {
+  const environment = await db.query.environments.findFirst({
+    where: eq(environments.id, environmentId),
+    columns: { config: true },
+  });
+  const inheritCompute = environment?.config?.inherit_compute === true;
+  const inheritSourceControl =
+    environment?.config?.inherit_source_control === true;
+
+  if (!inheritCompute && !inheritSourceControl) {
+    return null;
+  }
+
+  let nestedComputeEnv: Record<string, string> | null = null;
+
+  if (inheritCompute) {
+    const provider = await resolveDefaultComputeProvider();
+    // The validated Env carries the resolved NODE_ENV/APP_ENV and worker
+    // image that the derived Modal base image depends on; the raw process
+    // env does not, and a missing base image ref would drop the forward.
+    nestedComputeEnv = buildNestedComputeEnv({
+      provider,
+      resolvedEnvValues: await resolveComputeProviderEnvValues(provider, {
+        runtimeEnv: Env,
+      }),
+    });
+  }
+
+  const nestedSourceControlEnv = inheritSourceControl
+    ? buildNestedSourceControlEnv({
+        resolvedEnvValues: await resolveDeploymentEnvValues(
+          NESTED_SOURCE_CONTROL_ENV_VAR_NAMES,
+        ),
+      })
+    : null;
+
+  const nestedDeploymentEnv = mergeNestedDeploymentEnv(
+    nestedComputeEnv,
+    nestedSourceControlEnv,
+  );
+
+  return nestedDeploymentEnv
+    ? serializeNestedDeploymentEnv(nestedDeploymentEnv)
+    : null;
+}
+
 export async function fetchResolvedRuntimeEnvVars(
   deploymentEnvVars?: Record<string, string>,
   options?: {
     sourceControlProvider?: SourceControlProvider | SourceControlProvider[];
     includeSandboxOpenRouterApiKey?: boolean;
+    /**
+     * Environment the task runs in. When it opted in with `inherit_compute`,
+     * the result carries NESTED_DEPLOYMENT_ENV_VAR_NAME for the nested app.
+     */
+    nestedDeploymentEnvironmentId?: string;
   },
 ): Promise<Record<string, string>> {
   const envVars =
@@ -288,15 +412,25 @@ export async function fetchResolvedRuntimeEnvVars(
     ),
   );
 
+  const nestedComputeEnvVar = options?.nestedDeploymentEnvironmentId
+    ? await resolveNestedDeploymentEnvVar(options.nestedDeploymentEnvironmentId)
+    : null;
+  const environmentTaskEnvVars = nestedComputeEnvVar
+    ? {
+        ...resolvedEnvVars,
+        [NESTED_DEPLOYMENT_ENV_VAR_NAME]: nestedComputeEnvVar,
+      }
+    : resolvedEnvVars;
+
   if (options?.includeSandboxOpenRouterApiKey) {
-    return resolvedEnvVars;
+    return environmentTaskEnvVars;
   }
 
-  if (!(SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME in resolvedEnvVars)) {
-    return resolvedEnvVars;
+  if (!(SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME in environmentTaskEnvVars)) {
+    return environmentTaskEnvVars;
   }
 
-  const ordinaryTaskEnvVars = { ...resolvedEnvVars };
+  const ordinaryTaskEnvVars = { ...environmentTaskEnvVars };
   delete ordinaryTaskEnvVars[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
   return ordinaryTaskEnvVars;
 }

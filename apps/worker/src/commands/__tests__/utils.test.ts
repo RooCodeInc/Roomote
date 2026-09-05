@@ -146,6 +146,16 @@ describe('injectEnvVars', () => {
     ).toEqual({ FOO: 'bar', R_MODEL: 'openai/nested-model' });
   });
 
+  it('keeps the raw compute forwarding value out of environment shell env', () => {
+    expect(
+      buildEnvironmentShellEnvVars({
+        FOO: 'bar',
+        R_NESTED_DEPLOYMENT_ENV: '{"DEFAULT_COMPUTE_PROVIDER":"modal"}',
+        DEFAULT_COMPUTE_PROVIDER: 'modal',
+      }),
+    ).toEqual({ FOO: 'bar', DEFAULT_COMPUTE_PROVIDER: 'modal' });
+  });
+
   it('writes explicit nested model values over inherited deployment values', async () => {
     await injectEnvVars(
       {

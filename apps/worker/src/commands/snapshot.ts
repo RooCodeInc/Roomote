@@ -80,7 +80,14 @@ export async function snapshot({
 
     // Write source-control tokens under ~/.roomote and set up shell env files
     // so file-backed credential helpers can authenticate git operations.
-    await injectEnvVars(envVars, undefined, { sourceControlToken });
+    // Snapshot setup is always an environment workspace, so the shell file
+    // gets the same projection as task setup: outer model transport stays
+    // out, and the launcher-only nested compute value is expanded by setup
+    // rather than written raw.
+    await injectEnvVars(envVars, undefined, {
+      sourceControlToken,
+      omitInheritedModelRuntimeEnvFromShell: true,
+    });
 
     const environmentConfig = await findRuntimeEnvironmentConfig(environmentId);
     const taskRun = await sdk.taskRuns.findFirstById(runId);

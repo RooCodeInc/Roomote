@@ -113,6 +113,42 @@ describe('snapshot', () => {
     expect(EXPLICIT_SNAPSHOT_TIMEOUT_MS).toBe(10 * 60 * 1_000);
   });
 
+  it('projects snapshot shell env like an environment task and hands the nested compute value to setup', async () => {
+    const nestedComputeEnv = JSON.stringify({
+      DEFAULT_COMPUTE_PROVIDER: 'modal',
+      MODAL_TOKEN_ID: 'ak-id',
+      MODAL_TOKEN_SECRET: 'as-secret',
+    });
+    mockFetchSnapshotEnv.mockResolvedValue({
+      envVars: {
+        PREVIEW_PROXY_BASE_URL: 'https://preview.roomote.run',
+        R_NESTED_DEPLOYMENT_ENV: nestedComputeEnv,
+      },
+      gitHubToken: 'gh-token',
+      taskId: 'task-42',
+    });
+
+    await snapshot({ runId: 42, environmentId: 'env-1', sandboxId: 'sb-1' });
+
+    // The shell projection omits launcher-only values (covered by the
+    // buildEnvironmentShellEnvVars tests); setup expands the raw value into
+    // the nested environment env.
+    expect(mockInjectEnvVars).toHaveBeenCalledWith(
+      expect.objectContaining({ R_NESTED_DEPLOYMENT_ENV: nestedComputeEnv }),
+      undefined,
+      expect.objectContaining({ omitInheritedModelRuntimeEnvFromShell: true }),
+    );
+    expect(mockSetup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace: expect.objectContaining({
+          envVars: expect.objectContaining({
+            R_NESTED_DEPLOYMENT_ENV: nestedComputeEnv,
+          }),
+        }),
+      }),
+    );
+  });
+
   it('treats the failure cleanup status write as a best-effort no-op when it succeeds idempotently', async () => {
     const result = await snapshot({
       runId: 42,
