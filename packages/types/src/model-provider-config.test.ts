@@ -578,6 +578,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'openrouter',
         'vercel',
         'openai',
+        'opencode',
         'github-copilot',
         'chatgpt',
       ],

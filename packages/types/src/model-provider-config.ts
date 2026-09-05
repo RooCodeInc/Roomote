@@ -854,6 +854,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-haiku-4-5': 'opencode/claude-haiku-4-5',
       'claude-opus-5': 'opencode/claude-opus-5',
       'claude-sonnet-5': 'opencode/claude-sonnet-5',
+      'gpt-6-astra': 'opencode/gpt-6-astra',
       'gpt-5-6-sol': 'opencode/gpt-5.6-sol',
       'gpt-5-6-terra': 'opencode/gpt-5.6-terra',
       'gpt-5-6-luna': 'opencode/gpt-5.6-luna',
