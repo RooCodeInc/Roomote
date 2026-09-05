@@ -206,6 +206,9 @@ export function subscribeHarnessCallbacks({
           costSource: event.costSource,
           messageCreatedAt: event.messageCreatedAt ?? null,
           messageCompletedAt: event.messageCompletedAt ?? null,
+          details: event.workflowSkill
+            ? { workflowSkill: event.workflowSkill }
+            : null,
         })
         .then(() => {
           consecutivePersistenceFailures = 0;
