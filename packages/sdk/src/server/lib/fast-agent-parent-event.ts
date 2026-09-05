@@ -57,7 +57,6 @@ import {
   type FastAgentSourceControlReplyTarget,
   type FastAgentParent,
   type PullRequestStatus,
-  type ReasoningEffort,
   type RunStatus,
   type TaskRunErrorCode,
   type SourceControlProvider,
@@ -176,8 +175,6 @@ export type FastAgentParentEvent =
       launchClaimedAt?: string;
       prompt: string;
       trigger: 'schedule' | 'manual';
-      defaultTaskModel?: string;
-      defaultTaskReasoningEffort?: ReasoningEffort;
       /** Environment the automation was configured for; `all` for every repository. */
       preferredEnvironmentId?: string;
       rootMessageId?: string;
@@ -2216,24 +2213,6 @@ export async function deliverFastAgentParentEventWithLock(
       });
       return 'delivered';
     }
-    const defaultTaskModel =
-      params.event.type === 'automation_triggered'
-        ? params.event.defaultTaskModel
-        : undefined;
-    const defaultTaskReasoningEffort =
-      params.event.type === 'automation_triggered'
-        ? params.event.defaultTaskReasoningEffort
-        : undefined;
-    const launchTask =
-      defaultTaskModel || defaultTaskReasoningEffort
-        ? (input: Parameters<LaunchFastAgentTask>[0]) =>
-            parentTurn.adapter.launchTask({
-              ...input,
-              model: input.model ?? defaultTaskModel,
-              reasoningEffort:
-                input.reasoningEffort ?? defaultTaskReasoningEffort,
-            })
-        : parentTurn.adapter.launchTask;
     // The same base URL must reach both the config resolver and the broker:
     // the broker only injects its auth header on deployment-proxy URLs whose
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops
@@ -2329,7 +2308,7 @@ export async function deliverFastAgentParentEventWithLock(
       adapter: {
         createArtifact: buildFastAgentArtifactCreator(params.parent.sessionId),
         ...parentTurn.adapter,
-        launchTask,
+        launchTask: parentTurn.adapter.launchTask,
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId: parentTurn.userId,

@@ -28,6 +28,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   fastAgentConversationSchema,
   type FastAgentConversationOwner,
+  type ReasoningEffort,
 } from '@roomote/types';
 
 import { FAST_RESPONDING_LEASE_MS } from './fast-agent-constants';
@@ -41,6 +42,8 @@ export type FastAgentConversationRecord = {
   userId: string | null;
   owner: FastAgentConversationOwner;
   title: string | null;
+  model: string | null;
+  reasoningEffort: ReasoningEffort | null;
   conversation: FastAgentConversation;
   /**
    * Durable visible history for cold starts and provider retries. OpenCode,
@@ -776,6 +779,8 @@ export interface FastAgentConversationRepository {
     sessionId?: string;
     /** Title to seed only when this call creates the conversation. */
     initialTitle?: string;
+    initialModel?: string;
+    initialReasoningEffort?: ReasoningEffort;
   }): Promise<FastAgentConversationGetOrCreateResult>;
   findById(input: {
     id: string;
@@ -916,6 +921,8 @@ async function loadConversationRecord(
     userId: record.userId,
     owner,
     title: record.title,
+    model: record.model,
+    reasoningEffort: record.reasoningEffort,
     conversation,
     compatibilityMessages: record.compatibilityMessages as ModelMessage[],
     openCodeSessionId: record.openCodeSessionId,
@@ -930,6 +937,8 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
       conversation,
       sessionId,
       initialTitle,
+      initialModel,
+      initialReasoningEffort,
     }) {
       const resolvedOwner =
         owner ?? (userId ? { kind: 'user' as const, userId } : null);
@@ -987,6 +996,8 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
                   ? resolvedOwner.automationKey
                   : null,
               title: initialTitle?.trim() || null,
+              model: initialModel,
+              reasoningEffort: initialReasoningEffort,
               surface: conversation.surface,
               workspaceId: conversation.workspaceId,
               conversationId: conversation.conversationId,

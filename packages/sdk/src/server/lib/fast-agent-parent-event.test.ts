@@ -1426,66 +1426,83 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage).not.toHaveBeenCalled();
   });
 
-  it('delegates a task with the stored automation conversation as its Fast parent', async () => {
-    const automationParent = {
-      sessionId: parent.sessionId,
-      conversation: {
-        surface: 'automation' as const,
-        workspaceId: 'automation-1',
-        conversationId: 'occurrence-1',
-      },
-    };
-    mocks.answerQuestion.mockImplementationOnce(
-      async ({
-        adapter,
-      }: {
-        adapter: {
-          launchTask: typeof mocks.launchTask;
-          resolveMcpServerConfigs: () => Promise<unknown>;
-        };
-      }) => {
-        await adapter.resolveMcpServerConfigs();
-        return adapter.launchTask({
-          prompt: 'Inspect the repository.',
-          environmentId: null,
-          parentSessionId: automationParent.sessionId,
-          postKickoff: vi.fn(),
-        });
-      },
-    );
+  it.each([undefined, 'anthropic/claude-sonnet-5'])(
+    'keeps child model selection independent of the automation session: %s',
+    async (childModel) => {
+      const automationParent = {
+        sessionId: parent.sessionId,
+        conversation: {
+          surface: 'automation' as const,
+          workspaceId: 'automation-1',
+          conversationId: 'occurrence-1',
+        },
+      };
+      mocks.findSession.mockResolvedValueOnce({
+        id: automationParent.sessionId,
+        userId: 'u1',
+        conversation: automationParent.conversation,
+        model: 'openai/gpt-5.6-luna',
+        reasoningEffort: 'high',
+      });
+      mocks.answerQuestion.mockImplementationOnce(
+        async ({
+          adapter,
+        }: {
+          adapter: {
+            launchTask: typeof mocks.launchTask;
+            resolveMcpServerConfigs: () => Promise<unknown>;
+          };
+        }) => {
+          await adapter.resolveMcpServerConfigs();
+          return adapter.launchTask({
+            prompt: 'Inspect the repository.',
+            environmentId: null,
+            ...(childModel
+              ? { model: childModel, reasoningEffort: 'low' }
+              : {}),
+            parentSessionId: automationParent.sessionId,
+            postKickoff: vi.fn(),
+          });
+        },
+      );
 
-    await deliverFastAgentParentEvent({
-      parent: automationParent,
-      event: {
-        type: 'automation_triggered',
-        eventId: 'occurrence-1',
-        automationId: 'automation-1',
-        automationName: 'Weekly scan',
-        prompt: 'Find actionable regressions.',
-        trigger: 'schedule',
-        defaultTaskModel: 'openai/gpt-5.6-luna',
-        defaultTaskReasoningEffort: 'high',
-      },
-    });
+      await deliverFastAgentParentEvent({
+        parent: automationParent,
+        event: {
+          type: 'automation_triggered',
+          eventId: 'occurrence-1',
+          automationId: 'automation-1',
+          automationName: 'Weekly scan',
+          prompt: 'Find actionable regressions.',
+          trigger: 'schedule',
+        },
+      });
 
-    expect(mocks.resolveUserMcpServerConfigs).toHaveBeenCalledWith({
-      userId: 'u1',
-      apiBaseUrl: 'https://roomote.example.com',
-      includeRoomoteMemberTools: true,
-    });
-    expect(mocks.enqueueTask).toHaveBeenCalledWith({
-      task: expect.objectContaining({
-        payload: expect.objectContaining({
-          fastAgentSessionId: automationParent.sessionId,
-          fastAgentParent: automationParent,
-          harnessModelOverrides: {
-            'opencode-server': 'openai/gpt-5.6-luna',
-          },
-          reasoningEffort: 'high',
+      expect(mocks.resolveUserMcpServerConfigs).toHaveBeenCalledWith({
+        userId: 'u1',
+        apiBaseUrl: 'https://roomote.example.com',
+        includeRoomoteMemberTools: true,
+      });
+      expect(mocks.enqueueTask).toHaveBeenCalledWith({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            fastAgentSessionId: automationParent.sessionId,
+            fastAgentParent: automationParent,
+          }),
         }),
-      }),
-    });
-  });
+      });
+      const payload = mocks.enqueueTask.mock.calls[0]![0].task.payload;
+      if (childModel) {
+        expect(payload.harnessModelOverrides).toEqual({
+          'opencode-server': childModel,
+        });
+        expect(payload.reasoningEffort).toBe('low');
+      } else {
+        expect(payload).not.toHaveProperty('harnessModelOverrides');
+        expect(payload).not.toHaveProperty('reasoningEffort');
+      }
+    },
+  );
 
   it('uses a stable delivery key when the same child update is retried', async () => {
     const childEvent = {
