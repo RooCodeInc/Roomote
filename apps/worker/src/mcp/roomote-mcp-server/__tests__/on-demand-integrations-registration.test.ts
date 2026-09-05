@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 
 describe('roomote MCP on-demand integration tool registration', () => {
   const originalEnv = { ...process.env };
@@ -45,6 +46,22 @@ describe('roomote MCP on-demand integration tool registration', () => {
 
   it('exposes integration call args as an object with arbitrary JSON values', async () => {
     process.env.ROOMOTE_ON_DEMAND_MCP_CATALOG_PATH = '/tmp/catalog.json';
+    const integrations = await import('../on-demand-integrations.js');
+    const catalog = {
+      servers: [
+        {
+          name: 'example',
+          displayName: 'Example',
+          url: 'https://example.com/mcp',
+        },
+      ],
+    };
+    vi.spyOn(integrations, 'loadOnDemandMcpCatalog').mockReturnValue(catalog);
+    const dispatch = vi.fn().mockResolvedValue({ content: [] });
+    const call = integrations.callOnDemandIntegrationTool;
+    vi.spyOn(integrations, 'callOnDemandIntegrationTool').mockImplementation(
+      (servers, params) => call(servers, params, dispatch),
+    );
     const { roomoteMcpServer } = await import('../index.js');
     const [clientTransport, serverTransport] =
       InMemoryTransport.createLinkedPair();
@@ -76,6 +93,44 @@ describe('roomote MCP on-demand integration tool registration', () => {
           expect.objectContaining({ type: 'array' }),
         ]),
       );
+
+      // Compile the complete wire schema so broken recursive refs fail too.
+      expect(callTool).toBeDefined();
+      const validate = new AjvJsonSchemaValidator().getValidator(
+        callTool!.inputSchema,
+      );
+      const target = { integrationId: 'example', toolName: 'lookup' };
+      const nestedArgs = {
+        url: 'https://example.com/issues/123',
+        organizationSlug: 'example',
+        filter: { values: [null, false, 0, '', { nested: [{ value: 'ok' }] }] },
+      };
+      for (const args of [nestedArgs, {}, null, undefined]) {
+        const input = { ...target, ...(args === undefined ? {} : { args }) };
+        expect(validate(input).valid).toBe(true);
+        const result = await client.callTool({
+          name: 'call_integration_tool',
+          arguments: input,
+        });
+        expect(result.isError).not.toBe(true);
+        expect(dispatch).toHaveBeenLastCalledWith(
+          catalog.servers[0],
+          target.toolName,
+          args ?? {},
+        );
+      }
+
+      dispatch.mockClear();
+      for (const args of ['not an object', [], 42, true]) {
+        const input = { ...target, args };
+        expect(validate(input).valid).toBe(false);
+        const result = await client.callTool({
+          name: 'call_integration_tool',
+          arguments: input,
+        });
+        expect(result.isError).toBe(true);
+      }
+      expect(dispatch).not.toHaveBeenCalled();
     } finally {
       await client.close();
       await roomoteMcpServer.close();

@@ -4,12 +4,14 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import type { JsonSchemaType } from '@modelcontextprotocol/sdk/validation';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import { FAST_AGENT_NATIVE_TOOL_NAMES } from '@roomote/types';
 
 import { getFastAgentNativeToolRuntime } from '../fast-agent-native-tool-bridge';
 
 /**
- * Guards the JSON schema OpenAI receives for every Fast native tool.
+ * Guards the generated Fast native tool schemas before provider conversion.
  *
  * OpenCode loads each generated tool module with its own zod 4, treats
  * `args` as a record of field schemas (wrapping it in `z.object`), and ships
@@ -17,8 +19,8 @@ import { getFastAgentNativeToolRuntime } from '../fast-agent-native-tool-bridge'
  * bare schema instead of a record (a `z.union`, say) turns into a schema
  * carrying zod internals, which OpenAI rejects with
  * `invalid_function_parameters` on every request, taking down every Fast turn
- * on its models. This test mirrors OpenCode's loading so that shape, and any
- * other construct OpenAI's validator refuses, fails here first.
+ * on its models. This test mirrors OpenCode's Zod loading, not provider-side
+ * normalization or acceptance by a live model endpoint.
  */
 
 // The JSON Schema vocabulary OpenAI's function-parameter validator accepts
@@ -197,7 +199,7 @@ function toOpenCodeJsonSchema(zod: ZodV4, args: unknown) {
   });
 }
 
-describe('Fast native tool schemas as OpenAI receives them', () => {
+describe('Fast native tool schemas before provider conversion', () => {
   let workDir: string;
   let zod: ZodV4;
   let tools: LoadedTool[];
@@ -260,7 +262,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     }
   });
 
-  it('produces a JSON schema OpenAI accepts for every tool', () => {
+  it('produces a JSON schema with supported keywords for every tool', () => {
     const failures: string[] = [];
     for (const tool of tools) {
       let schema: unknown;
@@ -334,6 +336,27 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
         expect.objectContaining({ type: 'array' }),
       ]),
     );
+
+    const validate = new AjvJsonSchemaValidator().getValidator(
+      schema as JsonSchemaType,
+    );
+    const inputSchema = zod.z.object(callTool?.args as Record<string, never>);
+    const target = { integrationId: 'example', toolName: 'lookup' };
+    const nestedArgs = {
+      url: 'https://example.com/issues/123',
+      organizationSlug: 'example',
+      filter: { values: [null, false, 0, '', { nested: [{ value: 'ok' }] }] },
+    };
+    for (const args of [nestedArgs, {}, undefined]) {
+      const input = { ...target, ...(args === undefined ? {} : { args }) };
+      expect(validate(input).valid).toBe(true);
+      expect(inputSchema.parse(input)).toEqual(input);
+    }
+    for (const args of ['not an object', [], 42, true, null]) {
+      const input = { ...target, args };
+      expect(validate(input).valid).toBe(false);
+      expect(inputSchema.safeParse(input).success).toBe(false);
+    }
   });
 
   it('rejects a bare union or object as args, the shape that broke OpenAI models', () => {
