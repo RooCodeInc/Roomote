@@ -64,6 +64,41 @@ afterEach(async () => {
 });
 
 describe('session wakeup helpers', () => {
+  it.each([
+    { mode: 'once' as const, at: firstRunAt.toISOString() },
+    { mode: 'cron' as const, expression: '*/10 * * * *', timezone: 'UTC' },
+  ])(
+    'deduplicates $mode schedules after JSONB reorders keys',
+    async (schedule) => {
+      const { user, conversation } = await makeConversation();
+      const input = {
+        conversationId: conversation.id,
+        createdByUserId: user.id,
+        name: 'Check PR',
+        prompt: 'check pr',
+        schedule,
+        reportPolicy: 'only_when_notable' as const,
+        maxRuns: null,
+        until: null,
+        nextRunAt: firstRunAt,
+      };
+      expect(await admitSessionWakeup(input)).toMatchObject({
+        outcome: 'created',
+      });
+      const [persisted] = await listSessionWakeups(conversation.id);
+      expect(persisted!.schedule).toEqual(schedule);
+      expect(Object.keys(persisted!.schedule)).not.toEqual(
+        Object.keys(schedule),
+      );
+
+      expect(await admitSessionWakeup(input)).toMatchObject({
+        outcome: 'duplicate',
+        wakeup: { id: persisted!.id },
+      });
+      expect(await listSessionWakeups(conversation.id)).toHaveLength(1);
+    },
+  );
+
   it('deduplicates concurrent recurring creates in one conversation', async () => {
     const { user, conversation } = await makeConversation();
     const results = await Promise.all(

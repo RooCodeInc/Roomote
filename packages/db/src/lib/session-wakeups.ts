@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+
 import { and, asc, count, desc, eq, lte, sql } from 'drizzle-orm';
 
 import {
@@ -126,7 +128,7 @@ export async function admitSessionWakeup(
     const existing = active.find(
       (row) =>
         row.promptSignature === promptSignature &&
-        JSON.stringify(row.schedule) === JSON.stringify(input.schedule),
+        isDeepStrictEqual(row.schedule, input.schedule),
     );
     if (existing) return { outcome: 'duplicate', wakeup: existing };
     if (active.length >= MAX_ACTIVE_SESSION_WAKEUPS) {
