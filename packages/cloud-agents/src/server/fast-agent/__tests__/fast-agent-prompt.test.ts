@@ -358,6 +358,126 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('offers pending PR check follow-up once without scheduling before opt-in', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'reliable current evidence shows CI is still pending on an open PR',
+    );
+    expect(prompt).toContain(
+      'Want me to let you know when the required checks pass?',
+    );
+    expect(prompt).toContain('Do not offer again after a decline');
+    expect(prompt).toContain(
+      'the required-check capability above has been verified',
+    );
+    expect(prompt).toContain(
+      'create no wakeup until the user explicitly accepts or requests this monitoring',
+    );
+    expect(prompt).toContain('do not inspect or schedule from them');
+  });
+
+  it('requires authoritative required-check capability rather than inferring green CI', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'inspect the available integration tool schemas and results',
+    );
+    expect(prompt).toContain('not CI results or required-check policy');
+    expect(prompt).toContain(
+      'Before offering or scheduling required-check monitoring',
+    );
+    expect(prompt).toContain(
+      'If required-check determination is unavailable, suppress the offer',
+    );
+    expect(prompt).toContain(
+      'Revalidate this capability on acceptance before scheduling',
+    );
+    expect(
+      prompt.indexOf('Before offering or scheduling required-check monitoring'),
+    ).toBeLessThan(
+      prompt.indexOf('Want me to let you know when the required checks pass?'),
+    );
+    expect(prompt).toContain(
+      'never invent a tool or infer requirements from observed checks',
+    );
+    expect(prompt).toContain(
+      'do not schedule or promise required-check success monitoring',
+    );
+    expect(prompt).toContain('nonempty authoritative required-check set');
+    expect(prompt).toContain(
+      'Empty, unknown, missing, partial, stale or pending check data is not success',
+    );
+    expect(prompt).toContain(
+      'neither mergeability nor all observed checks passing proves required checks passed',
+    );
+  });
+
+  it('pins opt-in monitors to an exact revision with a quiet bounded schedule', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain('schedule "every 10m x12" (at most two hours)');
+    expect(prompt).toContain('reportPolicy "only_when_notable"');
+    expect(prompt).toContain(
+      'same source-control provider, repository, PR and head SHA even if its wording differs',
+    );
+    expect(prompt).toContain(
+      'the required-check evidence source, stop conditions and reporting rules in the stored wakeup prompt',
+    );
+    expect(prompt).toContain('never silently follow a newer revision');
+  });
+
+  it('keeps stop conditions and precise success wording in wakeup continuation turns', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'scheduled_wakeup',
+    });
+
+    expect(prompt).toContain('must first re-read PR state and head SHA');
+    expect(prompt).toContain(
+      'Cancel on a merged or closed PR, a superseded head SHA, or user cancellation',
+    );
+    expect(prompt).toContain(
+      'If the capability becomes unavailable, cancel and explain the blocker once',
+    );
+    expect(prompt).toContain(
+      'Only after revalidating that the PR is still open on the pinned SHA',
+    );
+    expect(prompt).toContain(
+      'Required checks passed for <repository>#<PR> at <head SHA>.',
+    );
+    expect(prompt).toContain(
+      'Never say "ready to merge", imply review approval, or merge from this monitor',
+    );
+    expect(prompt).toContain('Cancel after success');
+    expect(prompt).toContain(
+      'on the final run, stop without renewal and report an unresolved timeout once',
+    );
+    expect(prompt).toContain('a finished wakeup needs no cancel');
+  });
+
+  it('preserves existing event-driven follow-through instead of duplicating notifications', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'List active wakeups first and reuse an equivalent monitor',
+    );
+    expect(prompt).toContain('stay quiet on unchanged results');
+    expect(prompt).toContain(
+      'leave failed-CI reporting and remediation to existing logic',
+    );
+    expect(prompt).toContain(
+      'Do not duplicate task completion, PR review notifications or their retries, merged/closed PR tracking, or failed-CI triage with wakeups',
+    );
+    expect(prompt).toContain(
+      'cancel it when tools are permitted (otherwise at its next wakeup)',
+    );
+    expect(prompt).toContain(
+      'without repeating an already-delivered notification',
+    );
+  });
+
   it('lists on-demand servers by name with their tool names instead of mounting them', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
