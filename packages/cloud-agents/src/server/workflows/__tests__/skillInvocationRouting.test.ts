@@ -27,18 +27,19 @@ describe('packaged skill invocation routing', () => {
     );
 
   it.each(['sentry-triage', 'triage-sentry'])(
-    '%s resolves organization scope through the available integration surface',
+    '%s describes schema-driven Sentry discovery and scoped triage outcomes',
     (skillName) => {
       const skill = readPackagedSkill(skillName);
-      expect(skill).toContain('find_integration_tools');
-      expect(skill).toContain('call_integration_tool');
-      expect(skill).toContain('find_organizations');
-      expect(skill).toContain('organizationSlug');
-      expect(skill).toContain('inside');
-      expect(skill).toContain('`args`');
+      expect(skill).toContain('Discover the available Sentry capabilities');
+      expect(skill).toContain('advertised schemas');
+      expect(skill).toContain('required organization scope');
+      expect(skill).toContain('last 24 hours');
+      expect(skill).toContain('React, Node, and React Native');
       expect(skill).toContain('ambiguity');
       expect(skill).toContain('actual tool error');
-      expect(skill).not.toContain('mcp__sentry__');
+      expect(skill).not.toMatch(
+        /mcp__sentry__|find_integration_tools|call_integration_tool|find_organizations|organizationSlug|`args`/,
+      );
     },
   );
 
