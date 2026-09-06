@@ -243,13 +243,13 @@ async function launchTaskSuggestionTaskFromReaction({
   const cardColumns = {
     id: true as const,
     workItemId: true as const,
-    threadTs: true as const,
     metadata: true as const,
   };
 
   const directCard = await db.query.trackedMessages.findFirst({
     where: and(
       eq(trackedMessages.kind, 'suggestion_card'),
+      eq(trackedMessages.surface, 'slack'),
       eq(trackedMessages.channelId, channelId),
       eq(trackedMessages.messageTs, messageTs),
     ),
@@ -281,6 +281,7 @@ async function launchTaskSuggestionTaskFromReaction({
     const fallbackCard = await db.query.trackedMessages.findFirst({
       where: and(
         eq(trackedMessages.kind, 'suggestion_card'),
+        eq(trackedMessages.surface, 'slack'),
         eq(trackedMessages.workItemId, suggestionIdFromMetadata),
       ),
       columns: cardColumns,
@@ -562,14 +563,9 @@ async function launchTaskSuggestionTaskFromReaction({
   const originSessionId = await resolveSuggestionOriginSessionId(
     workItem.sourceTaskId,
   );
-  let originThread = originSessionId
+  const originThread = originSessionId
     ? await resolveOriginSessionSlackThread({ originSessionId, teamId })
     : null;
-  // An automation Session may not have a Fast conversation yet. Bind its
-  // first suggestion launch to the report thread, not a new top-level post.
-  if (!originThread && suggestionCard.threadTs) {
-    originThread = { channelId, threadTs: suggestionCard.threadTs };
-  }
   try {
     announceChannelId = originThread?.channelId ?? channelId;
     announceMessageTs = await slack.postMessage({
@@ -772,7 +768,13 @@ async function launchTaskSuggestionTaskFromReaction({
     await db
       .update(trackedMessages)
       .set({ threadTs: launchThreadTs, updatedAt: new Date() })
-      .where(eq(trackedMessages.id, suggestionCard.id))
+      .where(
+        and(
+          eq(trackedMessages.id, suggestionCard.id),
+          eq(trackedMessages.surface, 'slack'),
+          eq(trackedMessages.channelId, announceChannelId),
+        ),
+      )
       .catch((error) => {
         apiLogger.warn(
           `${logPrefix} failed to record launched suggestion thread: ${formatErrorForLog(error)}`,

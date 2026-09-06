@@ -933,7 +933,7 @@ describe('enqueueTask Session linkage', () => {
     expect(links[0]?.origin).toBe('direct_launch');
   });
 
-  it('does not create Session links for hidden tasks', async () => {
+  it('creates exactly one hidden canonical Session for a hidden fresh task', async () => {
     const userId = await createUser();
     const run = await launchFresh({
       initiator: { kind: 'user', userId },
@@ -943,9 +943,26 @@ describe('enqueueTask Session linkage', () => {
       visibility: 'hidden',
     });
 
+    const links = await db
+      .select()
+      .from(sessionTasks)
+      .where(eq(sessionTasks.taskId, run.taskId));
+    expect(links).toHaveLength(1);
+    expect(links[0]?.origin).toBe('direct_launch');
+
     await expect(
-      db.select().from(sessionTasks).where(eq(sessionTasks.taskId, run.taskId)),
-    ).resolves.toEqual([]);
+      db.query.sessions.findFirst({
+        where: eq(sessions.id, links[0]!.sessionId),
+      }),
+    ).resolves.toMatchObject({
+      visibility: 'hidden',
+      ownerKind: 'user',
+      ownerUserId: userId,
+      fastConversationId: null,
+    });
+    await expect(
+      db.query.tasks.findFirst({ where: eq(tasks.id, run.taskId) }),
+    ).resolves.toMatchObject({ visibility: 'hidden' });
   });
 
   it('seeds the acting user from an automation initiator without re-attributing the task', async () => {

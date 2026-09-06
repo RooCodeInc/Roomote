@@ -25,7 +25,10 @@ import {
   SlackNotifier,
 } from '@roomote/slack';
 import { SETUP_SUGGESTIONS_THREAD_INTRO_TEXT } from '@roomote/communication/chat-messages';
-import { findEnvironmentForRepo } from '@roomote/cloud-agents/server';
+import {
+  fastAgentConversationRepository,
+  findEnvironmentForRepo,
+} from '@roomote/cloud-agents/server';
 import {
   buildAutomationRootSummaryMessage,
   buildAutomationRootSummaryText,
@@ -54,6 +57,7 @@ import {
   upsertBackgroundAutomationSlackThread,
   workItems,
   getAutomationRuntime,
+  getSessionForTask,
 } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
@@ -173,7 +177,6 @@ type SuggestionCardMessageRow = {
   suggestionType: TaskSuggestionType;
   launchRouting?: 'router';
   messageTs: string;
-  threadTs: string;
   channelId: string;
   workItemId: string;
   suggestionKey: string;
@@ -189,7 +192,6 @@ function registerSlackSuggestionMessageRows(
       surface: 'slack',
       channelId: row.channelId,
       messageTs: row.messageTs,
-      threadTs: row.threadTs,
       workItemId: row.workItemId,
       createdByUserId: row.createdByUserId,
       suggestionType: row.suggestionType,
@@ -785,7 +787,6 @@ async function postTaskSuggestionsThreadToSlack(params: {
       suggestionType: params.suggestionType,
       ...(params.launchRouting ? { launchRouting: params.launchRouting } : {}),
       messageTs,
-      threadTs: rootMessageTs,
       channelId: params.slackChannelId,
       workItemId: suggestion.id,
       suggestionKey: buildSuggestionMessageKey({
@@ -998,6 +999,7 @@ async function postSuggestedTasksSummaryToSlack(params: {
   const [slackInstallation] = await db
     .select({
       id: slackInstallations.id,
+      teamId: slackInstallations.teamId,
       botAccessToken: slackInstallations.botAccessToken,
     })
     .from(slackInstallations)
@@ -1042,7 +1044,7 @@ async function postSuggestedTasksSummaryToSlack(params: {
     return false;
   }
 
-  return await db.transaction(async (tx) => {
+  const publication = await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${buildSuggestedTasksSummaryLockKey(
         {
@@ -1074,7 +1076,7 @@ async function postSuggestedTasksSummaryToSlack(params: {
     );
 
     if (missingSuggestions.length === 0) {
-      return true;
+      return { delivered: true, rootMessageTs: null };
     }
 
     const rootMessage = await buildScheduledSuggestionRootMessage({
@@ -1152,10 +1154,52 @@ async function postSuggestedTasksSummaryToSlack(params: {
     }
 
     // Delivered only when the root message was actually posted/persisted.
-    return Boolean(
-      postResult && postResult.trackedMessages === missingSuggestions.length,
-    );
+    return {
+      delivered: Boolean(
+        postResult && postResult.trackedMessages === missingSuggestions.length,
+      ),
+      rootMessageTs: postResult?.rootMessageTs ?? null,
+    };
   });
+
+  if (publication.rootMessageTs) {
+    try {
+      const session = await getSessionForTask(db, params.sourceTaskId);
+      if (session && !session.fastConversationId) {
+        const owner =
+          session.ownerKind === 'automation' && session.ownerAutomation
+            ? {
+                kind: 'automation' as const,
+                automationKey: session.ownerAutomation,
+              }
+            : session.ownerKind === 'user' && session.ownerUserId
+              ? { kind: 'user' as const, userId: session.ownerUserId }
+              : null;
+        if (owner) {
+          await fastAgentConversationRepository.getOrCreate({
+            sessionId: session.id,
+            owner,
+            conversation: {
+              surface: 'slack',
+              workspaceId: slackInstallation.teamId,
+              conversationId: publication.rootMessageTs,
+              replyTarget: {
+                channelId: channel.channelId,
+                threadId: publication.rootMessageTs,
+              },
+            },
+          });
+        }
+      }
+    } catch (error) {
+      // Delivery already committed; binding failure must not trigger a repost.
+      apiLogger.warn(
+        `[submitTaskSuggestions] Slack report published but Session binding failed for task ${params.sourceTaskId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return publication.delivered;
 }
 
 /**
