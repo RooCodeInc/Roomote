@@ -148,6 +148,48 @@ describe('AcpToolMessage', () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([
+    ['read', 'Read', 'file'],
+    ['apply_patch', 'Edited', ''],
+    ['skill', 'Loaded', 'skill'],
+  ])(
+    'renders semantic %s headers instead of result prose',
+    (toolName, action, object) => {
+      render(
+        <AcpToolMessage
+          msg={buildResultMessage(toolName, {
+            toolName,
+            title: 'Success. Updated the following files: D private/path',
+          })}
+        />,
+      );
+      expect(toolHeaderSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ action, object, state: 'output-available' }),
+      );
+    },
+  );
+
+  it('renders failure language even when a failed patch is still partial', () => {
+    render(
+      <AcpToolMessage
+        msg={{
+          ...buildResultMessage('apply_patch', {
+            toolName: 'apply_patch',
+            status: 'failed',
+          }),
+          partial: true,
+        }}
+      />,
+    );
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'Failed to Edit',
+        object: '',
+        state: 'output-error',
+      }),
+    );
+  });
+
   it('uses SquarePen for edit tool calls', () => {
     render(<AcpToolMessage msg={buildMessage('edit')} />);
 
@@ -429,8 +471,8 @@ describe('AcpToolMessage', () => {
 
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: 'Used',
-        object: 'Ignore Event',
+        action: 'Completed',
+        object: 'Ignore Event call',
         suffix: undefined,
         collapsible: false,
       }),
@@ -541,8 +583,8 @@ describe('AcpToolMessage', () => {
 
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: 'Used',
-        object: 'Manage Artifacts',
+        action: 'Completed',
+        object: 'Manage Artifacts call',
         collapsible: false,
       }),
     );
@@ -578,8 +620,8 @@ describe('AcpToolMessage', () => {
 
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: 'Used',
-        object: 'Show Widget',
+        action: 'Completed',
+        object: 'Show Widget call',
         collapsible: false,
       }),
     );

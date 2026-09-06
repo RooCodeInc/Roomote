@@ -5587,6 +5587,122 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it.each(['completed', 'error'] as const)(
+    'preserves canonical tool identity from running through %s events',
+    async (terminalStatus) => {
+      const { client, harness } = createHarness(undefined, {
+        mcpServerNames: ['roomote'],
+      });
+      const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+      const runtimeOutputEvents: AcpMessage[] = [];
+      harness.subscribeRuntimePersistedEnvelope((envelope) =>
+        persistedEnvelopes.push(envelope),
+      );
+      harness.subscribeRuntimeOutput((event) =>
+        runtimeOutputEvents.push(event),
+      );
+
+      const cases = [
+        { tool: 'read', input: { filePath: 'src/app.ts' } },
+        {
+          tool: 'apply_patch',
+          input: { patchText: '*** Delete File: old.ts' },
+        },
+        { tool: 'skill', input: { name: 'capture-visual-proof' } },
+        { tool: 'bash', input: { command: 'git diff' } },
+        { tool: 'custom_formatter', input: { path: 'src/app.ts' } },
+        { tool: 'mcp:roomote/get_task', input: { taskId: 'task_1' } },
+        { tool: 'roomote_send_chat_reply', input: { message: 'hello' } },
+      ];
+
+      try {
+        await connectHarness(harness, client);
+        for (const { tool, input } of cases) {
+          const callId = `call_${tool}`;
+          for (const status of ['running', terminalStatus] as const) {
+            await client.emit({
+              type: 'message.part.updated',
+              properties: {
+                part: {
+                  id: `part_${tool}`,
+                  sessionID: 'ses_1',
+                  messageID: 'msg_1',
+                  type: 'tool',
+                  callID: callId,
+                  tool,
+                  state: {
+                    status,
+                    input,
+                    title:
+                      status === 'running'
+                        ? 'roomote_send_chat_reply'
+                        : 'Result prose',
+                    ...(status === 'completed'
+                      ? { output: 'Success. Updated files.' }
+                      : {}),
+                    ...(status === 'error' ? { error: 'Tool failed' } : {}),
+                  },
+                },
+              },
+            });
+          }
+
+          const mcpToolName =
+            tool === 'mcp:roomote/get_task'
+              ? 'get_task'
+              : tool === 'roomote_send_chat_reply'
+                ? 'send_chat_reply'
+                : null;
+          const identity = {
+            toolName: mcpToolName ?? tool,
+            isMcp: mcpToolName !== null,
+            mcpToolName,
+            mcpServerName: mcpToolName ? 'roomote' : null,
+            rawInput: input,
+          };
+          const calls = persistedEnvelopes.filter(
+            (event) =>
+              event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall &&
+              event.payload.toolCallId === callId,
+          );
+          const updates = runtimeOutputEvents.filter(
+            (event) =>
+              event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
+              event.payload.toolCallId === callId,
+          );
+          const results = persistedEnvelopes.filter(
+            (event) =>
+              event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult &&
+              event.payload.toolCallId === callId,
+          );
+          expect(calls).toHaveLength(1);
+          expect(updates.length).toBeGreaterThan(0);
+          expect(results).toHaveLength(1);
+          for (const event of [...calls, ...updates, ...results]) {
+            expect(event.payload).toMatchObject(identity);
+            expect(event.payload.serverName ?? null).toBe(
+              mcpToolName ? 'roomote' : null,
+            );
+          }
+          expect(calls[0]?.payload).toMatchObject({
+            status: 'in_progress',
+            title: 'roomote_send_chat_reply',
+          });
+          expect(results[0]?.payload).toMatchObject({
+            status: terminalStatus === 'error' ? 'failed' : 'completed',
+            title: 'Result prose',
+            output:
+              terminalStatus === 'error'
+                ? 'Tool failed'
+                : 'Success. Updated files.',
+          });
+        }
+      } finally {
+        harness.dispose();
+      }
+    },
+  );
+
   it('normalizes OpenCode read, search, and MCP tool categories', async () => {
     const { client, harness } = createHarness(undefined, {
       mcpServerNames: ['roomote'],
