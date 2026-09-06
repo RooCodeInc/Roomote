@@ -95,6 +95,7 @@
     "@types/ioredis-mock": "^8.2.6",
     "@types/node": "^24.10.13",
     "@types/jsdom": "21.1.7",
+    "ajv": "^8.20.0",
     "ioredis-mock": "^8.13.1",
     "vitest": "^4.1.1"
   }
