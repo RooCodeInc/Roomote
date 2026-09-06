@@ -689,6 +689,72 @@ describe('normalizeTranscriptUserText', () => {
 });
 
 describe('extractAcpMcpInvocation', () => {
+  it.each(['read', 'apply_patch', 'skill', 'bash', 'custom_formatter'])(
+    'keeps explicit native %s identity authoritative over titles and arguments',
+    (toolName) => {
+      for (const title of [
+        'roomote_send_chat_reply',
+        'mcp__roomote__send_chat_reply',
+        'roomote_call_integration_tool',
+      ]) {
+        expect(
+          extractAcpMcpInvocation({
+            isMcp: false,
+            toolName,
+            title,
+            mcpServerName: null,
+            mcpToolName: null,
+            rawInput: {
+              server: 'roomote',
+              tool: 'send_chat_reply',
+              integrationId: 'linear',
+              toolName: 'search_issues',
+            },
+          }),
+        ).toBeNull();
+      }
+    },
+  );
+
+  it('preserves explicit MCP metadata even with a native flag', () => {
+    expect(
+      extractAcpMcpInvocation({
+        isMcp: false,
+        toolName: 'read',
+        mcpServerName: 'linear',
+        mcpToolName: 'search_issues',
+        title: 'result prose',
+      }),
+    ).toEqual({ mcpServerName: 'linear', mcpToolName: 'search_issues' });
+  });
+
+  it.each(['call_integration_tool', 'roomote_call_integration_tool'])(
+    'unwraps explicit native transport %s before the native guard',
+    (toolName) => {
+      expect(
+        extractAcpMcpInvocation({
+          isMcp: false,
+          toolName,
+          title: 'result prose',
+          rawInput: { integrationId: 'linear', toolName: 'search_issues' },
+        }),
+      ).toEqual({ mcpServerName: 'linear', mcpToolName: 'search_issues' });
+    },
+  );
+
+  it.each([undefined, '', '   '])(
+    'preserves historical title inference without canonical identity: %s',
+    (toolName) => {
+      expect(
+        extractAcpMcpInvocation({
+          isMcp: false,
+          toolName,
+          title: 'mcp__roomote__send_chat_reply',
+        }),
+      ).toEqual({ mcpServerName: 'roomote', mcpToolName: 'send_chat_reply' });
+    },
+  );
+
   it('presents an on-demand integration call as the integration tool it invoked', () => {
     // Fast native tool event: arguments nested under rawInput.arguments.
     expect(
