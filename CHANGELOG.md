@@ -2,6 +2,18 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.3.2 (2026-09-06)
+
+Roomote 1.3.2 fixes integration tool schema errors that can prevent Fast conversations from responding.
+
+### Highlights
+
+- Keep Fast integration calls working with nested objects, arrays, and other JSON arguments.
+
+### Patch changes
+
+- Fix Fast turns failing with integration tool schema errors while preserving support for nested integration arguments.
+
 ## 1.3.1 (2026-09-05)
 
 Roomote 1.3.1 improves Fast, Live Preview, chat, and MCP coordination while adding focused controls for pull request reviews and custom automations.
@@ -50,6 +62,7 @@ Roomote 1.3 brings every supported entry point into continuous Sessions, expands
 - Create durable artifacts from any Fast turn, open Session and task artifact links or images in the side panel, and use Build This to delegate a plan through its owning Session.
 - Launch Roomote's structured pull-request review directly from a Session and keep automatic reviews attached to the Session that opened the pull request.
 - Add an opt-in Therapist Mode that names the remembered fact that informed a Session or task without exposing internal Memory metadata.
+- Add GPT-6 Astra to the curated model catalog for OpenRouter, OpenAI API, Roomote inference, and ChatGPT subscription, including ChatGPT Fast mode.
 
 ### Patch changes
 
