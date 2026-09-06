@@ -839,9 +839,7 @@ export function CustomAutomationsSection() {
           <p className="text-sm text-muted-foreground">
             {form.targetProvider === 'none'
               ? 'Each run is a Session in the web app and does not post to chat.'
-              : form.targetProvider === 'telegram'
-                ? 'Each run is a Session that reports findings and failures here. Continue it from the web app; chat replies on this provider do not resume it yet.'
-                : 'Each run is a Session that reports findings and failures here, and replies continue it.'}
+              : 'Each run is a Session that reports findings and failures here, and replies continue it.'}
           </p>
         </div>
 
