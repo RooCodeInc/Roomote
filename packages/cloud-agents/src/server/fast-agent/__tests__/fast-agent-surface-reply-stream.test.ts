@@ -103,4 +103,77 @@ describe('createFastAgentSurfaceReplyStreamer', () => {
       streamer.deliver({ purpose: 'closeout', message: 'x' }),
     ).resolves.toBeUndefined();
   });
+
+  it.each(['deliver', 'abort'] as const)(
+    'drains an in-flight %s before terminal close',
+    async (operation) => {
+      const { stream } = fakeStream();
+      let release!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      if (operation === 'deliver')
+        vi.mocked(stream.finish).mockImplementation(async () => {
+          await pending;
+          return { messageId: 'ts-1' };
+        });
+      else vi.mocked(stream.abort).mockImplementation(() => pending);
+      const streamer = createFastAgentSurfaceReplyStreamer({
+        createStream: () => stream,
+        startDelayMs: 1,
+      });
+      streamer.update('Working', true);
+      await vi.advanceTimersByTimeAsync(1);
+      const delivery =
+        operation === 'deliver'
+          ? streamer.deliver({ purpose: 'progress', message: 'Working' })
+          : streamer.abort();
+      await vi.advanceTimersByTimeAsync(0);
+      const closed = vi.fn();
+      const cleanup = streamer.close().then(closed);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(closed).not.toHaveBeenCalled();
+      release();
+      await Promise.all([delivery, cleanup]);
+      expect(closed).toHaveBeenCalledOnce();
+      streamer.update('Late callback', true);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(stream.append).toHaveBeenCalledTimes(1);
+      await streamer.close();
+      expect(stream.abort).toHaveBeenCalledTimes(operation === 'abort' ? 1 : 0);
+    },
+  );
+
+  it('fences queued stream writes when cleanup times out or ownership is lost', async () => {
+    const { stream } = fakeStream();
+    let release!: () => void;
+    vi.mocked(stream.append).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const streamer = createFastAgentSurfaceReplyStreamer({
+      createStream: () => stream,
+      startDelayMs: 1,
+      intervalMs: 1,
+    });
+    streamer.update('Working', true);
+    await vi.advanceTimersByTimeAsync(1);
+    streamer.update('Working more', true);
+    await vi.advanceTimersByTimeAsync(1);
+    const delivery = streamer.deliver({
+      purpose: 'progress',
+      message: 'Working more',
+    });
+    const cleanup = streamer.close();
+    streamer.dispose();
+    release();
+    await Promise.all([delivery, cleanup]);
+    streamer.update('Late', true);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(stream.append).toHaveBeenCalledTimes(1);
+    expect(stream.finish).not.toHaveBeenCalled();
+    expect(stream.abort).not.toHaveBeenCalled();
+  });
 });

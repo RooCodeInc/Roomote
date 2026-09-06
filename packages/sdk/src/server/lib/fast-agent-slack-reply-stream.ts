@@ -78,7 +78,13 @@ export function createSlackFastReplyStream(params: {
       const ts = messageTs;
       if (!ts) return undefined;
       messageTs = null;
-      await params.slack.stopMessageStream({ channel: params.channelId, ts });
+      // Message completion (even a closeout) is not turn completion.
+      // The registered turn activity cleanup owns the final idle transition.
+      await params.slack.stopMessageStream({
+        channel: params.channelId,
+        ts,
+        sessionStatus: 'processing',
+      });
       const quote = params.getQuote?.() ?? null;
       const images = reply.imageArtifactIds?.length
         ? ((await params.resolveImages?.(reply.imageArtifactIds)) ?? [])
@@ -145,7 +151,11 @@ export function createSlackFastReplyStream(params: {
       const ts = messageTs;
       if (!ts) return;
       messageTs = null;
-      await params.slack.stopMessageStream({ channel: params.channelId, ts });
+      await params.slack.stopMessageStream({
+        channel: params.channelId,
+        ts,
+        sessionStatus: 'processing',
+      });
     },
   };
 }
