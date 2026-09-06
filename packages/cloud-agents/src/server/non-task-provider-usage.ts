@@ -1512,31 +1512,8 @@ async function runNonTaskSdkPrompt(
         },
         { signal: abortController.signal },
       );
-      options.onNativeSteerReady?.(async (input) => {
-        const result = await client.session.promptAsync(
-          {
-            sessionID: sessionId,
-            directory: sessionDirectory,
-            messageID: input.messageId,
-            parts: [
-              { type: 'text', text: input.text },
-              ...(input.files ?? []).map((file) => ({
-                type: 'file' as const,
-                mime: file.mime,
-                ...(file.filename ? { filename: file.filename } : {}),
-                url: file.url,
-              })),
-            ],
-          },
-          { signal: abortController.signal },
-        );
-        if (result.error) {
-          throw new NonTaskOpenCodePromptError(
-            result.error,
-            'OpenCode native Fast steer failed',
-          );
-        }
-      });
+      // promptAsync has no owned completion contract. Leave native steering
+      // unavailable so human follow-ups use the durable whole-turn queue.
       let promptResult: Awaited<typeof promptRequest>;
       try {
         promptResult = needsEventMonitor

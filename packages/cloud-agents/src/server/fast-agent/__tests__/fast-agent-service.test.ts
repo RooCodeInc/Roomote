@@ -1052,6 +1052,58 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('leaves pending human rows for whole-turn delivery without a native-ready capability', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getPendingHumanFollowUp.mockResolvedValue([
+        {
+          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+          createdAt: new Date('2026-08-31T12:00:00.000Z'),
+          parent: { sessionId: 'conversation-1' },
+          event: {
+            type: 'human_follow_up',
+            eventId: '100.3',
+            currentMessageId: '100.3',
+            userId: 'user-1',
+            question: 'A question arriving during the answer.',
+          },
+        },
+      ]);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          await vi.advanceTimersByTimeAsync(1_000);
+          await options.onAssistantMessageCompleted?.({
+            id: 'original-answer',
+            sessionId: 'opencode-session-1',
+            createdAtMs: 1,
+            completedAtMs: 2,
+          });
+          options.onNativeSteerClosed?.();
+          await vi.advanceTimersByTimeAsync(1_000);
+          return 'Original answer.';
+        },
+      );
+      const adapter = callbacks();
+      await expect(
+        answerFastAgentQuestion({ ...baseParams, adapter }),
+      ).resolves.toBe('Original answer.');
+      expect(adapter.postReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          purpose: 'closeout',
+          message: 'Original answer.',
+        }),
+      );
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(mocks.nativeSteer).not.toHaveBeenCalled();
+      expect(mocks.getPendingHumanFollowUp).not.toHaveBeenCalled();
+      expect(mocks.updateParentEventWhere).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('injects durable human follow-ups with native steering between tool calls', async () => {
     vi.useFakeTimers();
     try {
