@@ -135,8 +135,6 @@ export type LaunchFastAgentTask = (params: {
       success: true;
       taskId: string;
       taskUrl?: string;
-      /** True when this launch created a new task run rather than reusing one. */
-      created?: boolean;
       /** True when an idempotent surface replay reused a task whose kickoff
        * was already delivered. */
       kickoffDelivered?: boolean;

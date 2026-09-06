@@ -3937,14 +3937,11 @@ export async function answerFastAgentQuestion({
                   taskLinkRendered?: boolean;
                 }
               | undefined;
-            const postTaskLink = async (
-              task: {
-                taskId: string;
-                taskUrl?: string;
-                taskLinkRendered?: boolean;
-              },
-              created?: boolean,
-            ) => {
+            const postTaskLink = async (task: {
+              taskId: string;
+              taskUrl?: string;
+              taskLinkRendered?: boolean;
+            }) => {
               let linkedSession: Awaited<ReturnType<typeof getSessionForTask>> =
                 null;
               try {
@@ -3968,7 +3965,7 @@ export async function answerFastAgentQuestion({
                 await postReply(
                   {
                     purpose: 'progress',
-                    message: `${created === true ? 'Started coding task' : 'Coding task'}: [Open coding task in Roomote](${destinationUrl})`,
+                    message: `[Started coding task](${destinationUrl})`,
                     taskNavigation: true,
                   },
                   true,
@@ -4028,7 +4025,7 @@ export async function answerFastAgentQuestion({
                 visibleUpdatePosted = true;
               }
               if (!result.kickoffDelivered) {
-                await postTaskLink(preparedTaskLink ?? result, result.created);
+                await postTaskLink(preparedTaskLink ?? result);
               }
             }
             return result;

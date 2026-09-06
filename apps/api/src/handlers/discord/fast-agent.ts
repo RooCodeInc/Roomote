@@ -448,7 +448,6 @@ export async function processDiscordFastAgentMessage(
               success: true,
               taskId: started.launchResult.taskId,
               taskUrl: started.taskUrl,
-              created: true,
             };
           }
           return {

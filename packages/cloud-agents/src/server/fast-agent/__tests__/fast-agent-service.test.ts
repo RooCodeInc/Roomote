@@ -7356,8 +7356,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(subagentWrites[1]?.turnSeq).toBe(subagentWrites[0]?.turnSeq);
   });
 
-  it.each([true, false, undefined])('links created=%s', async (created) => {
-    const label = created === true ? 'Started coding task' : 'Coding task';
+  it('posts a streaming acknowledgement before launch and adds only the task link afterward', async () => {
     const order: string[] = [];
     const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
       await postKickoff({
@@ -7369,7 +7368,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         success: true,
         taskId: 'task-1',
         taskUrl: 'https://roomote.example/task-1',
-        ...(created === undefined ? {} : { created }),
       };
     });
     const adapter = callbacks({
@@ -7421,7 +7419,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     expect(adapter.postReply).toHaveBeenNthCalledWith(2, {
       purpose: 'progress',
-      message: `${label}: [Open coding task in Roomote](https://roomote.example/task-1)`,
+      message: '[Started coding task](https://roomote.example/task-1)',
       taskNavigation: true,
     });
     expect(launchTask).toHaveBeenCalledWith(
@@ -7446,9 +7444,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const taskLinkIndex = canonicalWrites.findIndex(
       (message) =>
         message.eventType === 'roomote_runtime.assistant_message' &&
-        JSON.stringify(message.contentBlocks).includes(
-          'Open coding task in Roomote',
-        ),
+        JSON.stringify(message.contentBlocks).includes('Started coding task'),
     );
     const toolResultIndex = canonicalWrites.findIndex(
       (message) =>
@@ -7464,7 +7460,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(canonicalWrites[taskLinkIndex]?.contentBlocks).toEqual([
       {
         type: 'text',
-        text: `${label}: [Open coding task in Roomote](https://roomote.example/task-1)`,
+        text: '[Started coding task](https://roomote.example/task-1)',
       },
     ]);
     expect(toolResultIndex).toBeGreaterThan(taskLinkIndex);
@@ -8028,7 +8024,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledWith({
       purpose: 'progress',
       message:
-        'Coding task: [Open coding task in Roomote](https://roomote.example/sessions/session-discord?utm_source=discord&utm_medium=link&utm_campaign=discord.thread_start&task=task-discord)',
+        '[Started coding task](https://roomote.example/sessions/session-discord?utm_source=discord&utm_medium=link&utm_campaign=discord.thread_start&task=task-discord)',
       taskNavigation: true,
     });
   });
@@ -8061,7 +8057,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     expect(adapter.postReply).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: `Coding task: [Open coding task in Roomote](${taskUrl})`,
+        message: `[Started coding task](${taskUrl})`,
       }),
     );
   });

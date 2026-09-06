@@ -634,14 +634,12 @@ describe('processDiscordFastAgentMessage', () => {
           }) => Promise<unknown>;
         };
       }) =>
-        expect(
-          adapter.launchTask({
-            prompt: 'Update every repository.',
-            environmentId: ALL_REPOSITORIES,
-            parentSessionId: 'session-1',
-            postKickoff: vi.fn().mockResolvedValue(undefined),
-          }),
-        ).resolves.toMatchObject({ success: true, created: true }),
+        adapter.launchTask({
+          prompt: 'Update every repository.',
+          environmentId: ALL_REPOSITORIES,
+          parentSessionId: 'session-1',
+          postKickoff: vi.fn().mockResolvedValue(undefined),
+        }),
     );
 
     await processDiscordFastAgentMessage({
