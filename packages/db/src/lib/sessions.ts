@@ -294,13 +294,13 @@ export async function ensureSessionForFastConversation(
 }
 
 /**
- * Ensures a visible task has one canonical Session inside the caller's
+ * Ensures every task has one canonical Session inside the caller's
  * transaction. The tables are additive and ignored by N-1 application code.
  */
 export async function ensureSessionForTask(
   tx: DatabaseOrTransaction,
   input: EnsureSessionForTaskInput,
-): Promise<Session | null> {
+): Promise<Session> {
   const [task] = await tx
     .select({
       id: tasks.id,
@@ -323,13 +323,9 @@ export async function ensureSessionForTask(
     throw new Error(`Task ${input.taskId} does not exist.`);
   }
 
-  if (task.visibility !== 'visible') {
-    return null;
-  }
-
   const existing = await getSessionForTask(tx, task.id);
   if (existing) {
-    return existing;
+    return promoteSessionForVisibleTask(tx, existing, task.visibility);
   }
 
   // Callers may pass a raw payload conversation id that was never persisted
@@ -428,6 +424,7 @@ export async function ensureSessionForTask(
       await tx.delete(sessions).where(eq(sessions.id, session.id));
     }
 
+    await promoteSessionForVisibleTask(tx, canonical, task.visibility);
     return touchSessionActivity(tx, canonical.id, task.activityAt);
   }
 
@@ -442,13 +439,36 @@ export async function ensureSessionForTask(
       .onConflictDoNothing();
   }
 
+  await promoteSessionForVisibleTask(tx, session, task.visibility);
   return touchSessionActivity(tx, session.id, task.activityAt);
+}
+
+async function promoteSessionForVisibleTask(
+  tx: DatabaseOrTransaction,
+  session: Session,
+  taskVisibility: Session['visibility'],
+): Promise<Session> {
+  if (taskVisibility !== 'visible' || session.visibility === 'visible') {
+    return session;
+  }
+
+  const [updated] = await tx
+    .update(sessions)
+    .set({ visibility: 'visible', updatedAt: new Date() })
+    .where(eq(sessions.id, session.id))
+    .returning();
+
+  if (!updated) {
+    throw new Error(`Session ${session.id} does not exist.`);
+  }
+  return updated;
 }
 
 /**
  * Binds a Fast conversation to a Session that has none yet, so a launch can
  * land in the Session that produced the request instead of opening a new
- * one. Returns null when the Session is missing or already has a
+ * one. An explicit conversation bind makes the Session visible. Returns null
+ * when the Session is missing or already has a
  * conversation; the caller then keeps the conversation's own Session.
  */
 export async function attachFastConversationToSession(
@@ -457,7 +477,11 @@ export async function attachFastConversationToSession(
 ): Promise<Session | null> {
   const [updated] = await tx
     .update(sessions)
-    .set({ fastConversationId: input.fastConversationId })
+    .set({
+      fastConversationId: input.fastConversationId,
+      visibility: 'visible',
+      updatedAt: new Date(),
+    })
     .where(
       and(
         eq(sessions.id, input.sessionId),
@@ -518,12 +542,7 @@ export async function getSessionForFastConversation(
   const [session] = await tx
     .select()
     .from(sessions)
-    .where(
-      and(
-        eq(sessions.fastConversationId, fastConversationId),
-        eq(sessions.visibility, 'visible'),
-      ),
-    )
+    .where(eq(sessions.fastConversationId, fastConversationId))
     .limit(1);
 
   return session ?? null;

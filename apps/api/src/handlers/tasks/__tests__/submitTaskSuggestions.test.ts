@@ -461,6 +461,7 @@ describe('submitTaskSuggestions', () => {
     expect(insertedTrackedMessageValues).toHaveLength(1);
     expect(insertedTrackedMessageValues[0]).toMatchObject({
       channelId: 'C123',
+      threadTs: '111.222',
       metadata: {
         suggestionType: 'suggested_tasks',
         launchRouting: 'router',
@@ -912,6 +913,7 @@ describe('submitTaskSuggestions', () => {
     expect(insertedTrackedMessageValues).toHaveLength(1);
     expect(insertedTrackedMessageValues[0]).toMatchObject({
       createdByUserId: null,
+      threadTs: 'ts-1',
     });
   });
 

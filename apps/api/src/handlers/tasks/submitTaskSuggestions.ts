@@ -173,6 +173,7 @@ type SuggestionCardMessageRow = {
   suggestionType: TaskSuggestionType;
   launchRouting?: 'router';
   messageTs: string;
+  threadTs: string;
   channelId: string;
   workItemId: string;
   suggestionKey: string;
@@ -188,6 +189,7 @@ function registerSlackSuggestionMessageRows(
       surface: 'slack',
       channelId: row.channelId,
       messageTs: row.messageTs,
+      threadTs: row.threadTs,
       workItemId: row.workItemId,
       createdByUserId: row.createdByUserId,
       suggestionType: row.suggestionType,
@@ -783,6 +785,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
       suggestionType: params.suggestionType,
       ...(params.launchRouting ? { launchRouting: params.launchRouting } : {}),
       messageTs,
+      threadTs: rootMessageTs,
       channelId: params.slackChannelId,
       workItemId: suggestion.id,
       suggestionKey: buildSuggestionMessageKey({

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getSessionForTask: vi.fn(),
   sessionsFindFirst: vi.fn(),
   conversationFindById: vi.fn(),
+  conversationGetOrCreate: vi.fn(),
   liveTaskLauncher: vi.fn(),
   launchTask: vi.fn(),
   startFastAgentResponse: vi.fn(),
@@ -119,7 +120,10 @@ vi.mock('@roomote/slack', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   launchPinnedFastSessionTask: mocks.launchPinned,
-  fastAgentConversationRepository: { findById: mocks.conversationFindById },
+  fastAgentConversationRepository: {
+    findById: mocks.conversationFindById,
+    getOrCreate: mocks.conversationGetOrCreate,
+  },
 }));
 
 vi.mock('../helpers/suggestion-workspace.js', () => ({
@@ -166,6 +170,9 @@ import { handleReactionAddedEvent } from './reactions';
 describe('chat reply suggestion reactions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getSessionForTask.mockResolvedValue(null);
+    mocks.sessionsFindFirst.mockResolvedValue(null);
+    mocks.conversationFindById.mockResolvedValue(null);
     mocks.getConfiguration.mockResolvedValue(null);
     workItem.targetRepositoryFullName = 'acme/app';
     workItem.targetEnvironmentId = 'environment-1';
@@ -300,7 +307,14 @@ describe('chat reply suggestion reactions', () => {
     expect(slack.deleteMessage).not.toHaveBeenCalled();
   });
 
-  it('starts a Fast session when Fast is the user default', async () => {
+  it('binds a router-backed suggestion to the automation Session before starting Fast in its report thread', async () => {
+    mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
+    mocks.trackedMessageFindFirst.mockResolvedValue({
+      id: 'tracked-message-1',
+      workItemId: 'work-item-1',
+      threadTs: 'report-thread-ts',
+      metadata: { suggestionType: 'suggested_tasks', launchRouting: 'router' },
+    });
     mocks.lookupSlackUserMapping.mockResolvedValue({
       hasInactiveMapping: false,
       activeMapping: {
@@ -328,12 +342,25 @@ describe('chat reply suggestion reactions', () => {
       },
     });
 
+    expect(mocks.conversationGetOrCreate).toHaveBeenCalledWith({
+      userId: 'user-1',
+      sessionId: 'session-origin',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T1',
+        conversationId: 'report-thread-ts',
+        replyTarget: { channelId: 'C1', threadId: 'report-thread-ts' },
+      },
+    });
+    expect(
+      mocks.conversationGetOrCreate.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.startFastAgentResponse.mock.invocationCallOrder[0]!);
     expect(mocks.startFastAgentResponse).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'user-1',
         event: expect.objectContaining({
           channel: 'C1',
-          thread_ts: 'seeded-thread-ts',
+          thread_ts: 'report-thread-ts',
           agentContext: 'implementation prompt',
         }),
       }),
@@ -419,12 +446,13 @@ describe('chat reply suggestion reactions', () => {
     );
   });
 
-  it('launches a pinned automation suggestion through the owning Session without a Fast turn', async () => {
+  it('binds the automation Session to its report thread when it has no Fast conversation yet', async () => {
     mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
     mocks.sessionsFindFirst.mockResolvedValue(null);
     mocks.trackedMessageFindFirst.mockResolvedValue({
       id: 'tracked-message-1',
       workItemId: 'work-item-1',
+      threadTs: 'report-thread-ts',
       metadata: { suggestionType: 'suggested_tasks' },
     });
     mocks.lookupSlackUserMapping.mockResolvedValue({
@@ -453,6 +481,9 @@ describe('chat reply suggestion reactions', () => {
     });
 
     expect(mocks.resolveWorkspace).toHaveBeenCalled();
+    expect(slack.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'C1', thread_ts: 'report-thread-ts' }),
+    );
     expect(mocks.getSessionForTask).toHaveBeenCalledWith(
       expect.anything(),
       'scan-task-1',
@@ -465,8 +496,8 @@ describe('chat reply suggestion reactions', () => {
         conversation: {
           surface: 'slack',
           workspaceId: 'T1',
-          conversationId: 'seeded-thread-ts',
-          replyTarget: { channelId: 'C1', threadId: 'seeded-thread-ts' },
+          conversationId: 'report-thread-ts',
+          replyTarget: { channelId: 'C1', threadId: 'report-thread-ts' },
         },
         kickoffMessage: 'Started a task in Acme.',
       }),
@@ -476,7 +507,7 @@ describe('chat reply suggestion reactions', () => {
         userId: 'user-1',
         teamId: 'T1',
         channelId: 'C1',
-        threadTs: 'seeded-thread-ts',
+        threadTs: 'report-thread-ts',
         repoForPayload: 'acme/app',
       }),
     );

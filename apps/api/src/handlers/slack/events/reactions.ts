@@ -243,6 +243,7 @@ async function launchTaskSuggestionTaskFromReaction({
   const cardColumns = {
     id: true as const,
     workItemId: true as const,
+    threadTs: true as const,
     metadata: true as const,
   };
 
@@ -561,11 +562,14 @@ async function launchTaskSuggestionTaskFromReaction({
   const originSessionId = await resolveSuggestionOriginSessionId(
     workItem.sourceTaskId,
   );
-  // The Session that produced the suggestion announces the launch in its own
-  // thread; only a suggestion with no Slack-visible origin seeds a new one.
-  const originThread = originSessionId
+  let originThread = originSessionId
     ? await resolveOriginSessionSlackThread({ originSessionId, teamId })
     : null;
+  // An automation Session may not have a Fast conversation yet. Bind its
+  // first suggestion launch to the report thread, not a new top-level post.
+  if (!originThread && suggestionCard.threadTs) {
+    originThread = { channelId, threadTs: suggestionCard.threadTs };
+  }
   try {
     announceChannelId = originThread?.channelId ?? channelId;
     announceMessageTs = await slack.postMessage({
@@ -613,6 +617,21 @@ async function launchTaskSuggestionTaskFromReaction({
         if (launchMode === 'fast') {
           if (!activeUserMapping) {
             return { accepted: false, reason: 'Fast mode is unavailable.' };
+          }
+          if (originSessionId) {
+            await fastAgentConversationRepository.getOrCreate({
+              userId: activeUserMapping.userId,
+              sessionId: originSessionId,
+              conversation: {
+                surface: 'slack',
+                workspaceId: teamId,
+                conversationId: launchThreadTs,
+                replyTarget: {
+                  channelId: announceChannelId,
+                  threadId: launchThreadTs,
+                },
+              },
+            });
           }
           const fastStart = await startFastAgentResponse({
             event: {
