@@ -274,6 +274,7 @@ vi.mock('@roomote/redis', () => ({
 }));
 
 vi.mock('../fast-agent-turn-lock', () => ({
+  registerFastAgentTurnActivity: vi.fn(() => vi.fn()),
   FastAgentTurnLockLostError: class extends Error {
     constructor() {
       super('Fast conversation lock ownership was lost.');
@@ -313,6 +314,7 @@ import {
 import {
   FastAgentProcessShutdownError,
   FastAgentTurnLockLostError,
+  registerFastAgentTurnActivity,
 } from '../fast-agent-turn-lock';
 import { FAST_RESPONDING_LEASE_RENEW_MS } from '../fast-agent-constants';
 
@@ -2571,6 +2573,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const activity = {
       start: vi.fn(),
       settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
     };
 
     await answerFastAgentQuestion({
@@ -2583,6 +2586,98 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(activity.start.mock.invocationCallOrder[0]).toBeLessThan(
       activity.settle.mock.invocationCallOrder[0]!,
     );
+    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: false });
+  });
+
+  it.each(['cancel', 'shutdown', 'lost'] as const)(
+    'cleans up activity on %s before stuck inference finishes',
+    async (reason) => {
+      const controller = new AbortController();
+      const interruption =
+        reason === 'lost'
+          ? new FastAgentTurnLockLostError()
+          : reason === 'shutdown'
+            ? new FastAgentProcessShutdownError('SIGTERM')
+            : new Error('cancelled');
+      let finishInference!: () => void;
+      mocks.generateText.mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          finishInference = resolve;
+        });
+        throw interruption;
+      });
+      const activity = {
+        start: vi.fn(),
+        settle: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn().mockResolvedValue(undefined),
+      };
+      const result = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ activity }),
+        signal: controller.signal,
+      });
+      const rejected = expect(result).rejects.toBe(interruption);
+      await vi.waitFor(() => expect(finishInference).toBeTypeOf('function'));
+      controller.abort(interruption);
+      if (reason === 'lost') {
+        expect(activity.dispose).toHaveBeenCalled();
+        expect(activity.settle).not.toHaveBeenCalled();
+      } else {
+        expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: false });
+      }
+      finishInference();
+      await rejected;
+    },
+  );
+
+  it('binds activity to the original lock when inference has a derived signal, then unregisters', async () => {
+    const lock = new AbortController();
+    const inference = new AbortController();
+    const unregister = vi.fn();
+    vi.mocked(registerFastAgentTurnActivity).mockReturnValueOnce(unregister);
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks({ activity }),
+      signal: inference.signal,
+      turnLockSignal: lock.signal,
+    });
+    expect(registerFastAgentTurnActivity).toHaveBeenCalledWith(
+      lock.signal,
+      expect.objectContaining({
+        settle: expect.any(Function),
+        dispose: expect.any(Function),
+      }),
+    );
+    expect(
+      vi.mocked(registerFastAgentTurnActivity).mock.invocationCallOrder.at(-1),
+    ).toBeLessThan(activity.start.mock.invocationCallOrder[0]!);
+    expect(unregister).toHaveBeenCalledOnce();
+  });
+
+  it('disposes instead of starting when setup enters an already-aborted turn', async () => {
+    const controller = new AbortController();
+    const lost = new FastAgentTurnLockLostError();
+    controller.abort(lost);
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ activity }),
+        signal: controller.signal,
+      }),
+    ).rejects.toBe(lost);
+    expect(activity.start).not.toHaveBeenCalled();
+    expect(activity.dispose).toHaveBeenCalled();
+    expect(activity.settle).not.toHaveBeenCalled();
   });
 
   it('measures receipt to delivery and excludes assistant persistence', async () => {
@@ -3941,6 +4036,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   it('stops a lock-lost turn without posting a stale error closeout', async () => {
     const controller = new AbortController();
     const lockLost = new FastAgentTurnLockLostError();
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
         expect(options.signal).toBeInstanceOf(AbortSignal);
@@ -3958,7 +4058,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         throw lockLost;
       },
     );
-    const adapter = callbacks();
+    const adapter = callbacks({ activity });
 
     await expect(
       answerFastAgentQuestion({
@@ -3974,6 +4074,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.reconcileRetryNotices).toHaveBeenCalledOnce();
     // No retry notice existed, so there is no orphan to attribute.
     expect(mocks.markRetryNoticeInterruption).not.toHaveBeenCalled();
+    expect(activity.dispose).toHaveBeenCalled();
+    expect(activity.settle).not.toHaveBeenCalled();
   });
 
   it('leaves a visible retry notice for the successor when lock loss cancels backoff', async () => {
@@ -5308,10 +5410,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         .mockRejectedValueOnce(new Error('TypeError: fetch failed'));
       const requestDurableRetry = vi.fn().mockResolvedValue(undefined);
       const postReply = vi.fn().mockResolvedValue(undefined);
+      const activity = {
+        start: vi.fn(),
+        settle: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn().mockResolvedValue(undefined),
+      };
 
       const result = answerFastAgentQuestion({
         ...baseParams,
-        adapter: callbacks({ postReply, requestDurableRetry }),
+        adapter: callbacks({ postReply, requestDurableRetry, activity }),
         durableAdmission,
       });
       result.catch(() => undefined);
@@ -5324,6 +5431,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       // The first retry was a short in-process wait; the second left the
       // process as a park.
       expect(mocks.generateText).toHaveBeenCalledTimes(2);
+      expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: true });
       expect(mocks.scheduleDurableRetry).toHaveBeenCalledOnce();
       const [rowId, schedule] = mocks.scheduleDurableRetry.mock.calls[0]!;
       expect(rowId).toBe('durable-row-1');
@@ -9638,6 +9746,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const activity = {
       start: vi.fn(),
       settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
     };
 
     await expect(

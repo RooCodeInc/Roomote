@@ -32,6 +32,14 @@ export function createFastAgentSlackSessionActivity({
   let processingSucceeded = false;
   let titleUpdate = Promise.resolve();
   let settled = false;
+  let disposed = false;
+  let settlement: Promise<void> | undefined;
+  let disposal: Promise<void> | undefined;
+
+  const cancelProcessingTimer = () => {
+    clearTimeout(processingTimer);
+    processingTimer = undefined;
+  };
 
   const queueTitleSync = (reportedTitle?: string) => {
     const title = sessionTitle;
@@ -53,7 +61,7 @@ export function createFastAgentSlackSessionActivity({
 
   return {
     start() {
-      if (processingTimer || processingUpdate || settled) return;
+      if (processingTimer || processingUpdate || settled || disposed) return;
 
       processingTimer = setTimeout(() => {
         processingTimer = undefined;
@@ -67,49 +75,75 @@ export function createFastAgentSlackSessionActivity({
           if (response.ok) {
             await queueTitleSync(response.title);
           }
-        })();
+        })().catch((error) => {
+          console.warn(
+            '[Fast Agent] Failed to start Slack session activity:',
+            error,
+          );
+        });
       }, delayMs);
       processingTimer.unref?.();
     },
-    async settle() {
-      if (settled) return;
+    settle({ keepProcessing = false } = {}) {
+      if (settlement) return settlement;
       settled = true;
-
-      if (processingTimer) {
-        clearTimeout(processingTimer);
-        processingTimer = undefined;
-      }
-      if (!processingUpdate) {
-        // Create the session during settlement; late titles must not reset a newer turn's status.
-        const response = await slack.setAgentSessionStatus({
-          channel,
-          threadTs,
-          status: 'active',
-        });
-        processingSucceeded = response.ok;
-        if (response.ok) {
-          await queueTitleSync(response.title);
+      cancelProcessingTimer();
+      settlement = (async () => {
+        if (disposed) return;
+        if (!processingUpdate) {
+          // Create the session during settlement; late titles must not reset a newer turn's status.
+          const response = await slack.setAgentSessionStatus({
+            channel,
+            threadTs,
+            status: keepProcessing ? 'processing' : 'active',
+          });
+          processingSucceeded = response.ok;
+          if (response.ok) {
+            await queueTitleSync(response.title);
+          }
+          return;
         }
-        return;
-      }
 
-      try {
-        await processingUpdate;
-        await queueTitleSync();
-      } finally {
-        await slack.setAgentSessionStatus({
-          channel,
-          threadTs,
-          status: 'active',
-        });
-      }
+        try {
+          await processingUpdate;
+          await queueTitleSync();
+        } finally {
+          if (!disposed && !keepProcessing)
+            await slack.setAgentSessionStatus({
+              channel,
+              threadTs,
+              status: 'active',
+            });
+        }
+      })();
+      return settlement;
+    },
+    dispose() {
+      disposed = true;
+      cancelProcessingTimer();
+      disposal ??= Promise.allSettled([processingUpdate, settlement]).then(
+        () => undefined,
+      );
+      return disposal;
     },
     updateTitle(title) {
       sessionTitle = normalizeSlackAgentSessionTitle(title);
       if (processingUpdate) {
-        void processingUpdate.then(() => queueTitleSync());
+        void processingUpdate
+          .then(() => queueTitleSync())
+          .catch((error) => {
+            console.warn(
+              '[Fast Agent] Failed to sync Slack session title:',
+              error,
+            );
+          });
       } else if (settled) {
-        void queueTitleSync();
+        void queueTitleSync().catch((error) => {
+          console.warn(
+            '[Fast Agent] Failed to sync Slack session title:',
+            error,
+          );
+        });
       }
     },
   };

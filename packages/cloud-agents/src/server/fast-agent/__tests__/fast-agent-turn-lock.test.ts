@@ -14,7 +14,16 @@ import {
   FastAgentTurnLockLostError,
   markFastAgentShutdownCloseoutPending,
   markFastAgentShutdownCloseoutSettled,
+  registerFastAgentTurnActivity,
 } from '../fast-agent-turn-lock';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 describe('Fast conversation turn locking', () => {
   beforeEach(() => {
@@ -203,6 +212,177 @@ describe('Fast conversation turn locking', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it.each(['release', 'abort', 'shutdown'] as const)(
+    'drains activity before %s releases Redis, independently of inference',
+    async (mode) => {
+      const releaseRedisLock = Object.assign(
+        vi.fn().mockResolvedValue(undefined),
+        {
+          renewDetailed: vi.fn().mockResolvedValue('renewed'),
+        },
+      );
+      acquireRedisLockMock.mockResolvedValue(releaseRedisLock);
+      const lock = (await acquireFastAgentTurnLock({
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'workspace-1',
+          conversationId: 'conversation-1',
+          replyTarget: { channelId: 'channel-1', threadId: 'conversation-1' },
+        },
+      }))!;
+      const cleanup = deferred<void>();
+      const activity = {
+        settle: vi.fn(() => cleanup.promise),
+        dispose: vi.fn().mockResolvedValue(undefined),
+      };
+      registerFastAgentTurnActivity(lock.signal, activity);
+      if (mode === 'shutdown')
+        markFastAgentShutdownCloseoutPending(lock.signal);
+      const releasing =
+        mode === 'release'
+          ? lock()
+          : mode === 'abort'
+            ? lock.abort(new Error('cancelled'))
+            : lock.abortForShutdown(
+                new FastAgentProcessShutdownError('SIGTERM'),
+              );
+      if (mode === 'shutdown') {
+        expect(releaseRedisLock).not.toHaveBeenCalled();
+        markFastAgentShutdownCloseoutSettled(lock.signal);
+        await Promise.resolve();
+      }
+      expect(activity.settle).toHaveBeenCalledOnce();
+      expect(releaseRedisLock).not.toHaveBeenCalled();
+      let duplicateFinished = false;
+      const duplicate = lock().then(() => {
+        duplicateFinished = true;
+      });
+      await Promise.resolve();
+      expect(duplicateFinished).toBe(false);
+      cleanup.resolve();
+      await Promise.all([releasing, duplicate]);
+      expect(releaseRedisLock).toHaveBeenCalledOnce();
+      expect(activity.dispose.mock.invocationCallOrder[0]).toBeLessThan(
+        releaseRedisLock.mock.invocationCallOrder[0]!,
+      );
+    },
+  );
+
+  it('fences a stuck cleanup at its deadline and disposes late registrations after release', async () => {
+    vi.useFakeTimers();
+    try {
+      const releaseRedisLock = Object.assign(
+        vi.fn().mockResolvedValue(undefined),
+        { renewDetailed: vi.fn().mockResolvedValue('renewed') },
+      );
+      acquireRedisLockMock.mockResolvedValue(releaseRedisLock);
+      const lock = (await acquireFastAgentTurnLock({
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'w',
+          conversationId: 'c',
+          replyTarget: { channelId: 'c' },
+        },
+      }))!;
+      const activity = {
+        settle: vi.fn(() => new Promise<void>(() => {})),
+        dispose: vi.fn().mockResolvedValue(undefined),
+      };
+      registerFastAgentTurnActivity(lock.signal, activity);
+      const aborting = lock.abort();
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(releaseRedisLock).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await aborting;
+      expect(activity.dispose).toHaveBeenCalledOnce();
+      expect(releaseRedisLock).toHaveBeenCalledOnce();
+      const late = {
+        settle: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn().mockResolvedValue(undefined),
+      };
+      registerFastAgentTurnActivity(lock.signal, late);
+      expect(late.dispose).toHaveBeenCalledOnce();
+      expect(late.settle).not.toHaveBeenCalled();
+      await lock();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([false, true])(
+    'disposes on renewal loss even after an earlier abort (%s)',
+    async (alreadyAborted) => {
+      vi.useFakeTimers();
+      try {
+        const renewal = deferred<'lost'>();
+        const releaseRedisLock = Object.assign(
+          vi.fn().mockResolvedValue(undefined),
+          { renewDetailed: vi.fn(() => renewal.promise) },
+        );
+        acquireRedisLockMock.mockResolvedValue(releaseRedisLock);
+        const lock = (await acquireFastAgentTurnLock({
+          conversation: {
+            surface: 'discord',
+            workspaceId: 'w',
+            conversationId: 'c',
+            replyTarget: { channelId: 'c' },
+          },
+        }))!;
+        const cleanup = deferred<void>();
+        const activity = {
+          settle: vi.fn(() => cleanup.promise),
+          dispose: vi.fn().mockResolvedValue(undefined),
+        };
+        registerFastAgentTurnActivity(lock.signal, activity);
+        await vi.advanceTimersByTimeAsync(200_000);
+        const aborting = alreadyAborted
+          ? lock.abort(new Error('cancelled'))
+          : undefined;
+        renewal.resolve('lost');
+        await vi.advanceTimersByTimeAsync(0);
+        expect(activity.dispose).toHaveBeenCalledOnce();
+        if (!alreadyAborted) expect(activity.settle).not.toHaveBeenCalled();
+        cleanup.resolve();
+        await aborting;
+        await lock();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('unregisters each completed invocation when a queue reuses its lock', async () => {
+    const releaseRedisLock = Object.assign(
+      vi.fn().mockResolvedValue(undefined),
+      { renewDetailed: vi.fn().mockResolvedValue('renewed') },
+    );
+    acquireRedisLockMock.mockResolvedValue(releaseRedisLock);
+    const lock = (await acquireFastAgentTurnLock({
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'w',
+        conversationId: 'c',
+        replyTarget: { channelId: 'c' },
+      },
+    }))!;
+    const first = {
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    const unregister = registerFastAgentTurnActivity(lock.signal, first);
+    unregister?.();
+    const next = {
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    registerFastAgentTurnActivity(lock.signal, next);
+    unregister?.();
+    await lock.abort();
+    expect(first.settle).not.toHaveBeenCalled();
+    expect(next.settle).toHaveBeenCalledOnce();
+    await lock();
   });
 
   it('releases pre-answer locks while waiting for active answer closeout during shutdown', async () => {

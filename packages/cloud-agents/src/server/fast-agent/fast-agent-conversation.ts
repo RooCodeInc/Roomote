@@ -148,7 +148,10 @@ export type RetryFastAgentTaskStart = () => Promise<
 
 export type FastAgentTurnActivity = {
   start: () => void;
-  settle: () => Promise<void>;
+  /** Idempotent; concurrent calls share completion and the first options win. */
+  settle: (options?: { keepProcessing?: boolean }) => Promise<void>;
+  /** Synchronously cancel delayed starts and fence new status writes, then drain issued writes. */
+  dispose: () => Promise<void>;
   updateTitle?: (title: string | null) => void;
 };
 

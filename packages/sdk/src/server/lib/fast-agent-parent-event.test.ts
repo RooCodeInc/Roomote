@@ -2801,11 +2801,15 @@ describe('deliverFastAgentParentEvent', () => {
       async ({
         adapter,
         signal,
+        turnLockSignal,
       }: {
         adapter: { postReply: (reply: unknown) => Promise<unknown> };
         signal: AbortSignal;
+        turnLockSignal: AbortSignal;
       }) => {
         expect(signal.aborted).toBe(false);
+        expect(turnLockSignal).toBe(mocks.releaseTurnLock.signal);
+        expect(signal).not.toBe(turnLockSignal);
         await adapter.postReply({
           purpose: 'closeout',
           message: 'Time to check the deploy.',
