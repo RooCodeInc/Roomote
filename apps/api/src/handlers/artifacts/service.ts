@@ -6,6 +6,7 @@ import {
   and,
   asc,
   desc,
+  getTaskArtifactByPath,
 } from '@roomote/db/server';
 import {
   type TaskArtifactType,
@@ -48,34 +49,7 @@ export async function getArtifactByPath(input: {
   version?: number;
   auth: ArtifactAuthContext;
 }) {
-  const whereConditions = [
-    eq(taskArtifacts.taskId, input.taskId),
-    eq(taskArtifacts.path, input.path),
-  ];
-
-  if (input.version !== undefined) {
-    whereConditions.push(eq(taskArtifacts.version, input.version));
-  } else {
-    whereConditions.push(eq(taskArtifacts.uploaded, true));
-  }
-
-  const result = await db
-    .select()
-    .from(taskArtifacts)
-    .innerJoin(tasks, eq(taskArtifacts.taskId, tasks.id))
-    .where(and(...whereConditions))
-    .orderBy(desc(taskArtifacts.version))
-    .limit(1);
-
-  if (result.length === 0) {
-    return null;
-  }
-
-  const row = result[0]!;
-  return {
-    ...row.task_artifacts,
-    task: row.tasks,
-  };
+  return getTaskArtifactByPath(input);
 }
 
 /**

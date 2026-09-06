@@ -36,6 +36,7 @@ export { alias } from 'drizzle-orm/pg-core';
 
 export * from './index';
 export * from './db';
+export * from './lib/artifacts';
 
 export * from './lib/map-raw-row';
 export * from './lib/legacy-task-inference-usage';
