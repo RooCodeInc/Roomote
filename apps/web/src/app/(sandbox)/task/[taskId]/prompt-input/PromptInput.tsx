@@ -810,8 +810,9 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         >
           <AttachmentsDisplay />
           <PromptInputBody>
-            <div className="relative">
+            <div className="flex items-start">
               <PromptInputTextarea
+                className="min-w-0 flex-1"
                 ref={textareaRef}
                 value={prompt}
                 onChange={handleChange}
@@ -839,7 +840,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
                       aria-label="Insert suggested message"
                       onPointerDown={(event) => event.preventDefault()}
                       onClick={acceptGhostSuggestion}
-                      className="absolute right-4 top-4 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
+                      className="mt-4 mr-4 shrink-0 whitespace-nowrap rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
                     >
                       Tab to accept
                     </button>

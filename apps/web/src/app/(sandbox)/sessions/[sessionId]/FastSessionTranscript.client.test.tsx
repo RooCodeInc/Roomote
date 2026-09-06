@@ -1524,6 +1524,73 @@ describe('FastSessionTranscript', () => {
     });
   });
 
+  it.each(['Tab', 'Escape', 'mouse', 'touch'])(
+    'preserves focus-only hints and %s interaction for a long suggestion',
+    (action) => {
+      const suggestion =
+        'Implement the marker fix and add regression coverage.';
+      composerSuggestionState.data = { suggestion, messageCount: 2 };
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Question',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Answer',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />,
+      );
+      const input = screen.getByPlaceholderText(suggestion);
+      act(() => input.blur());
+      expect(
+        screen.queryByRole('button', { name: 'Insert suggested message' }),
+      ).not.toBeInTheDocument();
+      act(() => input.focus());
+      const hint = screen.getByRole('button', {
+        name: 'Insert suggested message',
+      });
+      expect(hint).toHaveTextContent('Tab to accept');
+      expect(input).toHaveAccessibleDescription(
+        `Suggested message: ${suggestion}. Press Tab to accept or Escape to dismiss.`,
+      );
+      act(() => input.blur());
+      expect(hint).not.toBeInTheDocument();
+      act(() => input.focus());
+
+      if (action === 'mouse' || action === 'touch') {
+        const focusedHint = screen.getByRole('button', {
+          name: 'Insert suggested message',
+        });
+        expect(
+          fireEvent.pointerDown(focusedHint, {
+            pointerType: action,
+            cancelable: true,
+          }),
+        ).toBe(false);
+        expect(input).toHaveFocus();
+        fireEvent.click(focusedHint);
+      } else {
+        fireEvent.keyDown(input, { key: action, code: action });
+      }
+
+      expect(input).toHaveValue(action === 'Escape' ? '' : suggestion);
+      expect(input).toHaveFocus();
+      expect(
+        screen.queryByRole('button', { name: 'Insert suggested message' }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
   it('keeps a later suggestion hint hidden after a successful send remounts the composer', async () => {
     composerSuggestionState.data = {
       suggestion: 'Accept the first suggestion',
