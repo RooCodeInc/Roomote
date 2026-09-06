@@ -2,6 +2,47 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.4.0 (2026-09-06)
+
+Roomote 1.4 adds conversation-scoped reminders, Session-owned automations, and more model choices while improving task visibility and everyday reliability.
+
+### Highlights
+
+- Schedule reminders and recurring checks directly in a Fast Session, with results returning to the same conversation.
+- Keep custom automation reports, delegated work, and accepted suggestions together in one Session; review report destinations and environment preferences when upgrading.
+- Choose GPT-6 Astra through Vercel AI Gateway, GitHub Copilot, or OpenCode Zen, and inspect richer task handoffs and tool receipts.
+- Preserve follow-ups, Slack working indicators, and completed artifact uploads while improving Discord replies and mobile layouts.
+
+### Minor changes
+
+- Enable GPT-6 Astra through Vercel AI Gateway, GitHub Copilot, or OpenCode Zen alongside existing providers, subject to the connected account's model access. Existing model defaults remain unchanged.
+- Expand Session tool exchanges to inspect image questions and results, instructions sent to delegated tasks, and incoming task reports, with task links for following the conversation between participants.
+- OpenCode subagents can make one further nested delegation or consultation, allowing depth-two assistance while preserving each role's existing tool permissions.
+- Custom automations now run through Sessions, report delegated results together with actionable suggestions, and keep accepted suggestions in their originating Session and report thread. Configured environments are delegation preferences rather than guaranteed sandbox launches. Configure a report destination for chat delivery; otherwise results remain in the web Session without an owner-DM fallback. Runs use the creator's credentials, automations without a creator need an admin to re-save them, and Run now reports queued rather than a launched task ID.
+- Ask a Fast Session for a reminder or recurring check, including whole-second delays, and receive results in the same conversation. One-shot reminders reply when they fire; recurring checks stay quiet without news and stop when their condition resolves. Wakeups require no administrator, are limited to ten per Session, and are cancelled when the Session is archived; delivery is best effort rather than an exact-time guarantee.
+
+### Patch changes
+
+- Automation avatars no longer show glaring white backgrounds in dark mode, while retaining their light-mode appearance.
+- Azure sandboxes enable idle suspension by default and refresh the policy when reused, resumed, or restored. The policy follows the configured timeout, normally five hours; an explicit zero retains the opt-out.
+- Web transcripts hide newly marked runtime navigation messages already represented by task cards while preserving ordinary conversation links.
+- Previously uploaded artifacts remain available when a replacement upload is interrupted; unversioned task and Session lookups return the latest completed upload while explicit-version reads retain their existing behavior.
+- Completed visual proof is no longer reported as timed out while subsequent review or pull request delivery continues.
+- USD costs use consistent thousands separators, and Task Info refreshes inference costs when opened and while visible instead of leaving stale totals on screen.
+- Device-code connections can recover after a failed authorization dialog is closed and reopened, including GitHub Copilot, ChatGPT, and xAI connections.
+- Discord automation threads accept directed follow-ups without another mention, thread replies avoid invalid inline reply references, and coding-task links clearly identify newly started work.
+- Honor custom automation model and reasoning overrides for the Fast session across initial and resumed turns, without applying them to delegated coding tasks.
+- Fast retains follow-up messages sent during response closeout for the next turn, while reactions and platform events no longer discard parked questions or turn their retry notices into false interruptions.
+- Merge announcements recover uniquely matched signed pull request screenshot URLs after redaction so images remain available without relaxing safe-fetch restrictions.
+- Session board cards and long labels stay within mobile layouts, composer suggestion hints no longer overlap typed text, and Automations uses more of the available screen width.
+- Pull request feedback triage uses its configured queue retries after preparation failures instead of unnecessarily waiting for scheduled recovery.
+- Provider qualification verifies the requested structured tool call, rejecting misleading response text while accepting fragmented streamed function names.
+- Review handoffs resolve the acting user or human owner when messaging linked tasks instead of failing solely because the token lacks user context.
+- Sentry triage uses the requested accessible organization, projects, and time scope rather than assuming internal project names or implicit defaults, and asks for clarification when the scope is ambiguous.
+- New Sessions start correctly after resetting the model picker to Default.
+- Delayed titles from earlier Fast turns no longer clear the working indicator for a newer Slack turn.
+- Streamed output preserves UTF-8 characters split across chunks instead of replacing multibyte characters with corrupted text.
+
 ## 1.3.1 (2026-09-05)
 
 Roomote 1.3.1 improves Fast, Live Preview, chat, and MCP coordination while adding focused controls for pull request reviews and custom automations.

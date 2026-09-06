@@ -139,11 +139,15 @@ teammates can start from the report. Asking only for a summary or list of action
 items keeps those actions as report text. Launchable suggestions require a chat
 report destination. Each suggestion can select its own named environment,
 **All repositories**, or **Fast** target, so one report can offer follow-ups for
-different workspaces and execution modes. Runs scoped to **All repositories**
-pin each suggestion to a concrete repository, then start it in a matching named
-environment when one is available. Those runs prepare every active repository,
-so they can take longer in large deployments. Use a named environment when the
-automation only needs a specific repository set.
+different workspaces and execution modes. Repository-specific suggestions from
+**All repositories** runs start in a matching named environment when one is
+available. Choosing **All repositories** is a delegation preference, not a
+request to prepare every repository on every run. Use a named environment when
+the automation only needs a specific repository set.
+
+Suggestions can accompany the Session's report after a delegated task finishes,
+not just its initial response. Accepting one keeps the follow-up in the
+originating Session and report thread, so earlier findings remain in context.
 
 Admins can also choose **Custom schedule** and enter either a standard
 five-field cron expression or a natural-language schedule such as “weekdays at
@@ -154,8 +158,8 @@ Custom schedules do not support seconds or cron macros.
 Every run is a Session. On each due tick, Roomote opens a Session for the run
 and hands it the prompt exactly as if a teammate had typed it. The Session
 answers from integrations when that is enough, and delegates a normal task when
-repository or workspace work is needed, launching it in the preferred
-environment when one is set. Delegated tasks report back to the Session, and
+repository or workspace work is needed, using the preferred environment as a
+routing hint when one is set. Delegated tasks report back to the Session, and
 the Session is what talks to the report destination.
 
 Runs deliver to every custom-automation report destination: Slack, Discord,
@@ -169,21 +173,21 @@ the active provider installation, conversation, and linked user before
 resuming. Runs with no report destination remain stored Sessions and do not
 post to chat.
 
-Runs execute as the automation's creator. An automation whose creator no longer
-exists fails until an administrator re-saves it.
+Runs execute as the automation's creator. An automation without a creator
+cannot run until an administrator re-saves it.
 
 A run can skip or fail before execution when its configuration or launch state
-prevents it from starting. A failure always reaches the report destination: a
-run that cannot start, or whose delegated task fails, posts one short note
-there, so a broken automation is noticed rather than silently skipped.
+prevents it from starting. When the report destination is reachable, startup or
+delegated-task failures are reported there. If the destination is disconnected
+or cannot be resolved, check the automation's latest run error in the dashboard.
 When a report destination is set, Roomote uses that conversation for actionable
 or important findings, meaningful completed results, blockers, and questions
 that need input. Routine success, healthy status, and no-change results stay
 silent unless the automation prompt explicitly asks for a report in those
 cases. The first message starts a thread, later updates continue that same
-thread, and you can reply there to talk to the task. There is no progress
+thread, and you can reply there to continue the Session. There is no progress
 chatter in between. Without a destination, the run happens silently and its
-results appear only in the task view.
+results remain in its stored web Session, including any delegated task cards.
 
 Unless the prompt asks for a different presentation, custom automation reports
 lead with the result, stay concise, and use short Markdown headings and bullets
@@ -205,9 +209,24 @@ are not accepted.
 
 Use **Run now** on an enabled automation to test it immediately. Each card has
 its own run state, so starting one custom automation does not prevent you from
-running another. A queued result confirms that Roomote accepted the run, not
-that it completed; follow its task, Session, or configured report destination
-for the final result.
+running another. A queued result confirms that Roomote accepted a Session turn,
+not that a coding task launched or the work completed. A task ID is not promised
+at this point; follow the Session or configured report destination for the final
+result and any delegated tasks.
+
+### Upgrading to 1.4
+
+Existing custom automations now use this Session-first flow. Review prompts
+that assumed a sandbox would always start: specify the repository work you need,
+and check the preferred environment. Their model override now controls Fast;
+delegated coding tasks use an explicitly selected model or the deployment coding
+default instead.
+
+Set an explicit report destination if you want chat delivery. Without one, the
+run stays in a stored web Session rather than falling back to the owner's direct messages.
+Existing automations with a creator do not need to be re-saved just to upgrade;
+only creatorless automations require an administrator to re-save them before
+they can run. Use **Run now** to verify the prompt, routing, and destination.
 
 The deployment cap is 25 custom automations.
 

@@ -96,6 +96,13 @@ generated title that updates as the Session evolves. Replies appear as the
 model writes them, then settle into the saved message once the reply is
 delivered.
 
+Expand a tool receipt to inspect the request and result, including messages sent
+to delegated tasks, reports received from them, and image-inspection questions
+and answers. Task-message receipts link to the source or destination task by
+title, with its ID as a fallback. Details are sanitized for display; internal
+event metadata is not exposed. A running receipt may show its input before a
+result arrives.
+
 Fast sessions can also render presentational widgets such as status cards,
 tables, and plans directly in the transcript. Widget HTML is sanitized and
 sandboxed in the web view. Chat surfaces receive a concise text preview and a

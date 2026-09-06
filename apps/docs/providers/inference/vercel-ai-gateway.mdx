@@ -1,6 +1,6 @@
 ---
 title: Vercel AI Gateway
-icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/vercel.svg'
+icon: 'https://api.iconify.design/simple-icons:vercel.svg?color=currentColor'
 description: Route Roomote model calls through Vercel AI Gateway.
 ---
 
@@ -25,6 +25,10 @@ AI_GATEWAY_API_KEY=...
 Roomote exposes supported models under the `vercel/<vendor>/<model>` prefix and
 adds a recommended cross-vendor set. Apply the recommended mapping or choose
 models individually for each role.
+
+GPT-6 Astra is available as `vercel/openai/gpt-6-astra`. Enable it in
+**Settings > Models** and select it for the work you want it to handle; existing
+defaults stay unchanged. Your Vercel gateway must allow access to that model.
 
 ## Cost behavior
 
