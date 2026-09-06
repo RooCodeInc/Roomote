@@ -528,6 +528,7 @@ export const prReviewNotificationJob = async (
 
   const deliveryStartedAt = Date.now();
   const telemetry = createPrReviewNotificationTelemetry(events.length);
+  let preparationCompleted = false;
 
   try {
     const delivery = await preparePrReviewNotificationDelivery({
@@ -536,6 +537,7 @@ export const prReviewNotificationJob = async (
       events,
       telemetry,
     });
+    preparationCompleted = true;
 
     logPrReviewNotificationTriage({
       data,
@@ -1171,11 +1173,22 @@ ${delivery.text}`;
       telemetry,
     });
 
-    // Put the drained events back so a retried job can deliver them.
+    // BullMQ retries carry the same token. Releasing it here makes that retry
+    // look superseded and forces preparation to wait for the scheduled drain.
+    if (
+      !preparationCompleted &&
+      data.ownershipVersion === 'canonical' &&
+      data.deliveryState === 'claimed' &&
+      job.attemptsMade + 1 < Math.max(job.opts.attempts ?? 1, 1)
+    ) {
+      throw error;
+    }
+
+    // Exhausted retries and failures after preparation need a fresh durable claim.
     try {
       await requeuePendingPrReviewActivity({ target, events });
     } catch {
-      // Best effort; the events are lost if Redis is unavailable too.
+      // Best effort; lease expiry remains the recovery backstop.
     }
 
     throw error;
