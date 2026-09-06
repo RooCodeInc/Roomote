@@ -2481,6 +2481,7 @@ export async function answerFastAgentQuestion({
             ? { imageArtifactIds: reply.imageArtifactIds }
             : {}),
           ...(reply.kickoff ? { kickoff: true } : {}),
+          ...(reply.taskNavigation ? { taskNavigation: true } : {}),
         },
         source: conversation.surface,
         nativeSessionId: nativeMessage?.sessionId ?? activeOpenCodeSessionId,
@@ -3965,6 +3966,7 @@ export async function answerFastAgentQuestion({
                   {
                     purpose: 'progress',
                     message: `[Open in Roomote](${destinationUrl})`,
+                    taskNavigation: true,
                   },
                   true,
                 );
