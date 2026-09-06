@@ -1,11 +1,14 @@
 import type { AcpToolResultPayload } from '@roomote/types';
 
-import { resolveToolPresentation } from '../tool-presentation';
+import {
+  resolveToolPresentation,
+  summarizeToolGroup,
+} from '../tool-presentation';
 import { resolveToolPresentationPolicy } from '../tool-presentation-policy';
 import type { AcpToolResultUiMessage } from '../types';
 
 function toolData(
-  overrides: Partial<AcpToolResultPayload> = {},
+  overrides: Partial<AcpToolResultPayload> & { rawInput?: unknown } = {},
 ): AcpToolResultPayload {
   return {
     toolCallId: 'call-1',
@@ -267,7 +270,7 @@ describe('tool presentation resolver', () => {
     ).toMatchObject({ verb: 'Failed to Start', object: 'coding task' });
   });
 
-  it('sanitizes native fallback titles without using them for identity', () => {
+  it('never uses native fallback titles for headers or identity', () => {
     expect(
       resolveToolPresentation(
         toolData({
@@ -276,11 +279,182 @@ describe('tool presentation resolver', () => {
         }),
       ),
     ).toMatchObject({
-      displayName: 'Read RooCodeInc/Roomote/apps/web/package.json',
-      object: 'Read RooCodeInc/Roomote/apps/web/package.json',
+      displayName: 'Tool',
+      verb: 'Completed',
+      object: 'tool call',
       identity: { toolName: null },
       groupKey: 'kind:tool',
     });
+  });
+
+  it.each([
+    [
+      'read',
+      { filePath: '/sandbox/repos/project/src/app.ts' },
+      'Reading',
+      'Read',
+      'Failed to Read',
+      'project/src/app.ts',
+    ],
+    [
+      'read_file',
+      { file_path: 'src/app.ts' },
+      'Reading',
+      'Read',
+      'Failed to Read',
+      'src/app.ts',
+    ],
+    [
+      'spill_read',
+      { path: 'src/app.ts' },
+      'Reading',
+      'Read',
+      'Failed to Read',
+      'src/app.ts',
+    ],
+    [
+      'apply_patch',
+      { patchText: '*** Delete File: a\n*** Delete File: b' },
+      'Editing',
+      'Edited',
+      'Failed to Edit',
+      '',
+    ],
+    [
+      'skill',
+      { name: 'capture-visual-proof' },
+      'Loading',
+      'Loaded',
+      'Failed to Load',
+      'skill capture-visual-proof',
+    ],
+    [
+      'load_skill',
+      { name: 'capture-visual-proof' },
+      'Loading',
+      'Loaded',
+      'Failed to Load',
+      'skill capture-visual-proof',
+    ],
+  ] as const)(
+    'presents native %s in all phases',
+    (toolName, rawInput, running, completed, failed, object) => {
+      for (const [status, verb] of [
+        ['in_progress', running],
+        ['completed', completed],
+        ['failed', failed],
+      ] as const) {
+        const data = {
+          ...toolData({ toolName }),
+          rawInput,
+          status,
+          title: 'Success. Updated the following files: D /sandbox/repos/a',
+        };
+        expect(resolveToolPresentation(data)).toMatchObject({ verb, object });
+        expect(resolveToolPresentation(data, true).verb).toBe(
+          status === 'failed' ? failed : running,
+        );
+      }
+    },
+  );
+
+  it.each([
+    ['read', 'Read', 'file', 'read'],
+    ['apply_patch', 'Edited', '', 'edit'],
+    ['skill', 'Loaded', 'skill', 'generic'],
+  ])(
+    'presents historical %s without inventing identity',
+    (kind, verb, object, category) => {
+      expect(
+        resolveToolPresentation(
+          toolData({ kind, title: 'Loaded skill: arbitrary output' }),
+        ),
+      ).toMatchObject({
+        verb,
+        object,
+        category,
+        identity: { toolName: null },
+        groupKey: `kind:${kind}`,
+      });
+    },
+  );
+
+  it('uses stored arguments for historical reads and nested skill calls', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          kind: 'read',
+          rawInput: { filePath: '/sandbox/repos/project/a.ts' },
+        }),
+      ).object,
+    ).toBe('project/a.ts');
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'skill',
+          rawInput: { arguments: { name: '  capture-visual-proof\n' } },
+        }),
+      ).object,
+    ).toBe('skill capture-visual-proof');
+  });
+
+  it('sanitizes before truncating paths and handles malformed arguments', () => {
+    const filePath = `/sandbox/repos/${'a'.repeat(100)}`;
+    expect(
+      resolveToolPresentation(
+        toolData({ toolName: 'read', rawInput: { filePath } }),
+      ).object,
+    ).toBe(`${'a'.repeat(77)}...`);
+    for (const rawInput of [
+      null,
+      [],
+      'bad',
+      { filePath: 42, file_path: ' ', path: null },
+    ]) {
+      expect(
+        resolveToolPresentation(toolData({ toolName: 'read', rawInput }))
+          .object,
+      ).toBe('file');
+    }
+  });
+
+  it('keeps canonical identity ahead of historical kind and safe unknown language', () => {
+    for (const [status, verb] of [
+      ['in_progress', 'Running'],
+      ['completed', 'Completed'],
+      ['failed', 'Failed'],
+    ] as const) {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            toolName: 'custom_formatter',
+            kind: 'read',
+            status,
+            title: 'Success. output',
+          }),
+        ),
+      ).toMatchObject({ verb, object: 'Custom Formatter call' });
+    }
+    expect(
+      resolveToolPresentation(
+        toolData({ isMcp: true, toolName: 'read', mcpServerName: 'example' }),
+      ),
+    ).toMatchObject({ object: 'Read call', providerLabel: 'Example' });
+  });
+
+  it('counts edit calls rather than assuming each patch changes one file', () => {
+    expect(summarizeToolGroup('edit', 2, 'Apply Patch')).toEqual({
+      action: 'Edited',
+      objectSummary: '2 edits',
+    });
+    expect(
+      summarizeToolGroup(
+        'generic',
+        2,
+        resolveToolPresentation(toolData({ title: 'Success. output' }))
+          .displayName,
+      ),
+    ).toEqual({ action: 'Used', objectSummary: '2 tool calls' });
   });
 });
 

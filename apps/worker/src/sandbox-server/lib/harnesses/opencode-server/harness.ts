@@ -1474,6 +1474,7 @@ function normalizeOpenCodeToolPart(
     ...(context.messageId ? { turnId: context.messageId } : {}),
     toolCallId,
     kind,
+    toolName: mcpInvocation.isMcp ? mcpInvocation.mcpToolName : toolName,
     title,
     status,
     isExecute,
@@ -1493,7 +1494,6 @@ function normalizeOpenCodeToolPart(
     ...(mcpInvocation.isMcp
       ? {
           serverName: mcpInvocation.mcpServerName,
-          toolName: mcpInvocation.mcpToolName,
         }
       : {}),
     ...(knownMcpServerNames.length > 0

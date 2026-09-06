@@ -42,6 +42,7 @@ Roomote 1.4 adds conversation-scoped reminders, Session-owned automations, and m
 - New Sessions start correctly after resetting the model picker to Default.
 - Delayed titles from earlier Fast turns no longer clear the working indicator for a newer Slack turn.
 - Streamed output preserves UTF-8 characters split across chunks instead of replacing multibyte characters with corrupted text.
+- Native tool activity shows clear read, edit, and skill-loading labels instead of treating result text as a tool name. Labels stay consistent across live updates, saved conversations, and expanded groups, and grouped edits count edits rather than files.
 
 ## 1.3.1 (2026-09-05)
 
