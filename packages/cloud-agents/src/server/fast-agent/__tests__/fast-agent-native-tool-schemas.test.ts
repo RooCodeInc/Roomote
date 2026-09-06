@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { FAST_AGENT_NATIVE_TOOL_NAMES } from '@roomote/types';
+import {
+  CALL_INTEGRATION_TOOL_TOOL,
+  FAST_AGENT_NATIVE_TOOL_NAMES,
+} from '@roomote/types';
+import { z } from 'zod';
 
 import { getFastAgentNativeToolRuntime } from '../fast-agent-native-tool-bridge';
 
@@ -224,7 +228,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     );
     await writeFile(
       join(workDir, 'roomote-fast-tool-bridge.js'),
-      'export const invoke = async () => ({ title: "", output: "", metadata: {} });\n',
+      'export const invoke = async (name, args) => ({ name, args });\n',
     );
     await cp(sourceToolsDir, join(workDir, 'tools'), { recursive: true });
     zod = await import(pathToFileURL(zodV4Entry).href);
@@ -334,6 +338,35 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
         expect.objectContaining({ type: 'array' }),
       ]),
     );
+  });
+
+  it('preserves required Sentry organization scope through generated tool execution and server parsing', async () => {
+    const callTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
+    )!;
+    const request = {
+      integrationId: 'sentry',
+      toolName: 'search_issues',
+      args: {
+        organizationSlug: 'example-org',
+        query: 'lastSeen:-24h',
+        projectSlugOrId: 'example-project',
+      },
+    };
+    const parsed = zod.z
+      .object(callTool.args as Record<string, never>)
+      .parse(request);
+    const execute = callTool.execute as (
+      args: unknown,
+      context: unknown,
+    ) => Promise<{ name: string; args: unknown }>;
+    const forwarded = await execute(parsed, {});
+    expect(forwarded.name).toBe(
+      FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
+    );
+    expect(
+      z.object(CALL_INTEGRATION_TOOL_TOOL.inputSchema).parse(forwarded.args),
+    ).toEqual(request);
   });
 
   it('rejects a bare union or object as args, the shape that broke OpenAI models', () => {

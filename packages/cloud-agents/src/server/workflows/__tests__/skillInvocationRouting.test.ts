@@ -26,6 +26,22 @@ describe('packaged skill invocation routing', () => {
       'utf8',
     );
 
+  it.each(['sentry-triage', 'triage-sentry'])(
+    '%s resolves organization scope through the available integration surface',
+    (skillName) => {
+      const skill = readPackagedSkill(skillName);
+      expect(skill).toContain('find_integration_tools');
+      expect(skill).toContain('call_integration_tool');
+      expect(skill).toContain('find_organizations');
+      expect(skill).toContain('organizationSlug');
+      expect(skill).toContain('inside');
+      expect(skill).toContain('`args`');
+      expect(skill).toContain('ambiguity');
+      expect(skill).toContain('actual tool error');
+      expect(skill).not.toContain('mcp__sentry__');
+    },
+  );
+
   const listBacktickMarkdownReferences = (
     content: string,
     directoryNames: string[],
