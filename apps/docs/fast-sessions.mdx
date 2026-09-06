@@ -169,6 +169,22 @@ resolves, Fast tells you and cancels the wakeup itself. You can also ask Fast to
 list or cancel wakeups at any time; archiving a Session cancels all of its
 wakeups.
 
+Fast can proactively offer a follow-up when an ongoing process has a concrete
+unresolved outcome worth checking and it has verified that available tools can
+check it. The offer names the outcome, evidence source, timing, and stop bound.
+Fast waits for your acceptance before scheduling; an explicit request to monitor
+already gives that permission. Before scheduling, it rechecks access and reuses
+an equivalent active check rather than duplicating monitoring or notifications.
+
+For ongoing-process monitoring, Fast uses a one-shot check or sets a finite run
+count or end time on a recurring schedule at any cadence, without automatic
+renewal. It stops earlier if the outcome resolves, the check becomes irrelevant,
+or it loses the capability to verify the outcome. Missing evidence or reaching
+the bound without evidence of resolution is not success. This is how Fast is
+instructed to manage monitors, not a scheduler restriction on every recurring
+wakeup: explicitly requested recurring reminders or reports can remain unbounded
+where the scheduling limits below allow it.
+
 Wakeups belong to the conversation and do not require an administrator. A
 Session may hold up to ten active wakeups, intervals range from one second to
 seven days, and recurring wakeups can be bounded by a run count or an end time.

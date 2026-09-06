@@ -1,4 +1,13 @@
-import { db, taskArtifacts, tasks, eq, and, desc } from '@roomote/db/server';
+import {
+  db,
+  taskArtifacts,
+  tasks,
+  eq,
+  and,
+  desc,
+  getTaskArtifactByPath,
+  getSessionArtifactByPath,
+} from '@roomote/db/server';
 import {
   type TaskArtifactType,
   validateTaskArtifactPath,
@@ -69,33 +78,8 @@ export async function getArtifactByPath({
   version?: number;
   auth: ArtifactAuth;
 }) {
-  const whereConditions = [
-    eq(taskArtifacts.taskId, taskId),
-    eq(taskArtifacts.path, path),
-  ];
-
-  // If version is specified, filter by that version
-  if (version !== undefined) {
-    whereConditions.push(eq(taskArtifacts.version, version));
-  } else {
-    whereConditions.push(eq(taskArtifacts.uploaded, true));
-  }
-
-  const result = await db
-    .select()
-    .from(taskArtifacts)
-    .innerJoin(tasks, eq(taskArtifacts.taskId, tasks.id))
-    .where(and(...whereConditions))
-    .orderBy(desc(taskArtifacts.version))
-    .limit(1);
-
-  if (result.length === 0) return null;
-
-  const row = result[0]!;
-  return {
-    ...withTypedArtifactType(row.task_artifacts),
-    task: row.tasks,
-  };
+  const artifact = await getTaskArtifactByPath({ taskId, path, version });
+  return artifact ? withTypedArtifactType(artifact) : null;
 }
 
 export async function getArtifactBySessionPath({
@@ -109,21 +93,7 @@ export async function getArtifactBySessionPath({
   version?: number;
   auth: ArtifactAuth;
 }) {
-  const whereConditions = [
-    eq(taskArtifacts.sessionId, sessionId),
-    eq(taskArtifacts.path, path),
-  ];
-  if (version !== undefined) {
-    whereConditions.push(eq(taskArtifacts.version, version));
-  } else {
-    whereConditions.push(eq(taskArtifacts.uploaded, true));
-  }
-  const [artifact] = await db
-    .select()
-    .from(taskArtifacts)
-    .where(and(...whereConditions))
-    .orderBy(desc(taskArtifacts.version))
-    .limit(1);
+  const artifact = await getSessionArtifactByPath({ sessionId, path, version });
   return artifact ? withTypedArtifactType(artifact) : null;
 }
 

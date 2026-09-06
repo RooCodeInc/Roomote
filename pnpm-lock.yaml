@@ -1207,6 +1207,9 @@ importers:
       '@types/node':
         specifier: ^24.10.13
         version: 24.12.4
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
       ioredis-mock:
         specifier: ^8.13.1
         version: 8.13.1(@types/ioredis-mock@8.2.6(ioredis@5.10.1))(ioredis@5.10.1)

@@ -65,6 +65,33 @@ describe('manage wakeups tool contract', () => {
     );
   });
 
+  it('requires finite ongoing-process monitoring in both tool and schedule guidance', () => {
+    const description = MANAGE_WAKEUPS_TOOL.description;
+    const schedule = MANAGE_WAKEUPS_TOOL.inputSchema.schedule.description;
+
+    expect(description).toContain(
+      'Ongoing-process monitors must use a one-shot or a recurring schedule with "x<count>" or "until <ISO date-time>"',
+    );
+    expect(description).toContain('"every 10m x12"');
+    expect(description).toContain('"cron 0 9 * * 1-5 x5"');
+    expect(description).toContain(
+      'Stop monitoring at the agreed finite bound without automatic renewal',
+    );
+    expect(description).toContain(
+      'Reaching the bound without evidence of resolution is not success',
+    );
+    expect(description).not.toContain('A monitor keeps running until');
+    expect(description).not.toContain('optionally with');
+    expect(schedule).toContain(
+      'always include "x<count>" or "until <ISO 8601>" on recurring schedules, regardless of cadence',
+    );
+    for (const guidance of [description, schedule]) {
+      expect(guidance).toContain(
+        'explicitly requested recurring reminders or reports, not ongoing-process monitors',
+      );
+    }
+  });
+
   it('takes the schedule as one string and nothing else schedule-shaped', () => {
     expect(Object.keys(MANAGE_WAKEUPS_TOOL.inputSchema).sort()).toEqual([
       'action',

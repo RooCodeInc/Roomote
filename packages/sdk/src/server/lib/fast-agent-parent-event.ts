@@ -2339,6 +2339,7 @@ export async function deliverFastAgentParentEventWithLock(
         buildEventClientMessageSeed(params.event),
       apiBaseUrl,
       signal: turnSignal,
+      turnLockSignal: turnLock.signal,
       ...(humanFollowUp?.senderDisplayName
         ? { senderDisplayName: humanFollowUp.senderDisplayName }
         : {}),

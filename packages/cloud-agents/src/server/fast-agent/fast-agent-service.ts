@@ -168,6 +168,7 @@ import {
   FastAgentTurnLockLostError,
   markFastAgentShutdownCloseoutPending,
   markFastAgentShutdownCloseoutSettled,
+  registerFastAgentTurnActivity,
 } from './fast-agent-turn-lock';
 import {
   captureFastAgentInferenceAttemptOutcome,
@@ -1563,6 +1564,7 @@ export async function answerFastAgentQuestion({
   activeTasks = [],
   adapter,
   signal,
+  turnLockSignal = signal,
   model,
   reasoningEffort,
   turnSource = 'human',
@@ -1596,6 +1598,8 @@ export async function answerFastAgentQuestion({
   activeTasks?: FastAgentActiveTask[];
   adapter: FastAgentTurnAdapter;
   signal?: AbortSignal;
+  /** Original lock signal when inference uses a derived cancellation signal. */
+  turnLockSignal?: AbortSignal;
   /** Explicit turn overrides; undefined uses stored session settings,
    * while null uses deployment defaults. */
   model?: string | null;
@@ -2778,8 +2782,40 @@ export async function answerFastAgentQuestion({
     return true;
   };
 
+  const finishActivity = () => {
+    const lost =
+      turnLockSignal?.reason instanceof FastAgentTurnLockLostError ||
+      signal?.reason instanceof FastAgentTurnLockLostError;
+    return (
+      lost
+        ? adapter.activity?.dispose()
+        : adapter.activity?.settle({ keepProcessing: durableTurnDeferred })
+    )?.catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to settle surface activity: ${formatErrorForLog(error)}`,
+      );
+    });
+  };
+  const unregisterActivity =
+    turnLockSignal && adapter.activity
+      ? registerFastAgentTurnActivity(turnLockSignal, {
+          settle: async () => {
+            await finishActivity();
+          },
+          dispose: () => adapter.activity!.dispose(),
+        })
+      : undefined;
+  const abortActivity = () => {
+    void finishActivity();
+  };
+  signal?.addEventListener('abort', abortActivity, { once: true });
   try {
-    adapter.activity?.start();
+    if (signal?.aborted || turnLockSignal?.aborted) {
+      // Setup can finish after an abort already released the lock.
+      await adapter.activity?.dispose();
+    } else {
+      adapter.activity?.start();
+    }
   } catch (error) {
     console.warn(
       `[Fast Agent] Failed to start surface activity: ${formatErrorForLog(error)}`,
@@ -5269,11 +5305,9 @@ export async function answerFastAgentQuestion({
     // Slack stops showing it as still writing; its text stays.
     await surfaceReplyStream.abort();
     await replyStream.dispose();
-    await adapter.activity?.settle().catch((error) => {
-      console.warn(
-        `[Fast Agent] Failed to settle surface activity: ${formatErrorForLog(error)}`,
-      );
-    });
+    await finishActivity();
+    signal?.removeEventListener('abort', abortActivity);
+    unregisterActivity?.();
     diagnostics.finish();
   }
 }

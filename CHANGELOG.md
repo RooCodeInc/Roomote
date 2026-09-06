@@ -8,7 +8,7 @@ Roomote 1.4 adds conversation-scoped reminders, Session-owned automations, and m
 
 ### Highlights
 
-- Schedule reminders and recurring checks directly in a Fast Session, with results returning to the same conversation.
+- Schedule reminders and bounded monitoring directly in a Fast Session, with results returning to the same conversation.
 - Keep custom automation reports, delegated work, and accepted suggestions together in one Session; review report destinations and environment preferences when upgrading.
 - Choose GPT-6 Astra through Vercel AI Gateway, GitHub Copilot, or OpenCode Zen, and inspect richer task handoffs and tool receipts.
 - Preserve follow-ups, Slack working indicators, and completed artifact uploads while improving Discord replies and mobile layouts.
@@ -19,7 +19,7 @@ Roomote 1.4 adds conversation-scoped reminders, Session-owned automations, and m
 - Expand Session tool exchanges to inspect image questions and results, instructions sent to delegated tasks, and incoming task reports, with task links for following the conversation between participants.
 - OpenCode subagents can make one further nested delegation or consultation, allowing depth-two assistance while preserving each role's existing tool permissions.
 - Custom automations now run through Sessions, report delegated results together with actionable suggestions, and keep accepted suggestions in their originating Session and report thread. Configured environments are delegation preferences rather than guaranteed sandbox launches. Configure a report destination for chat delivery; otherwise results remain in the web Session without an owner-DM fallback. Runs use the creator's credentials, automations without a creator need an admin to re-save them, and Run now reports queued rather than a launched task ID.
-- Ask a Fast Session for a reminder or recurring check, including whole-second delays, and receive results in the same conversation. One-shot reminders reply when they fire; recurring checks stay quiet without news and stop when their condition resolves. Wakeups require no administrator, are limited to ten per Session, and are cancelled when the Session is archived; delivery is best effort rather than an exact-time guarantee.
+- Ask a Fast Session for a reminder or recurring check, including whole-second delays, and receive results in the same conversation. Fast can also offer a specific, bounded follow-up when it can verify an outstanding outcome, scheduling it only after you accept; explicit monitoring requests need no additional opt-in. Ongoing-process monitoring stays quiet without news and stops at the agreed bound or earlier when resolved or no longer actionable. Wakeups require no administrator, are limited to ten per Session, and are cancelled when the Session is archived; delivery is best effort rather than an exact-time guarantee.
 
 ### Patch changes
 
@@ -40,9 +40,22 @@ Roomote 1.4 adds conversation-scoped reminders, Session-owned automations, and m
 - Review handoffs resolve the acting user or human owner when messaging linked tasks instead of failing solely because the token lacks user context.
 - Sentry triage uses the requested accessible organization, projects, and time scope rather than assuming internal project names or implicit defaults, and asks for clarification when the scope is ambiguous.
 - New Sessions start correctly after resetting the model picker to Default.
-- Delayed titles from earlier Fast turns no longer clear the working indicator for a newer Slack turn.
+- Keep Slack's working indicator aligned with the active Session turn, including durable retry waits, and prevent late titles or stale turn cleanup from clearing a newer turn's indicator. Background delegated tasks retain their separate activity indicators.
 - Streamed output preserves UTF-8 characters split across chunks instead of replacing multibyte characters with corrupted text.
-- Native tool activity shows clear read, edit, and skill-loading labels instead of treating result text as a tool name. Labels stay consistent across live updates, saved conversations, and expanded groups, and grouped edits count edits rather than files.
+- Native tool activity shows clear read, edit, and skill-loading labels instead of treating result text as a tool name. Edit receipts identify a filename or file count, with consistent wording across running, completed, failed, and expanded activity. Grouped edit headers continue counting edit calls rather than distinct files.
+- Correct Telegram custom automation setup guidance to explain that chat replies continue the automation Session, matching existing behavior.
+
+## 1.3.2 (2026-09-06)
+
+Roomote 1.3.2 fixes integration tool schema errors that can prevent Fast conversations from responding.
+
+### Highlights
+
+- Keep Fast integration calls working with nested objects, arrays, and other JSON arguments.
+
+### Patch changes
+
+- Fix Fast turns failing with integration tool schema errors while preserving support for nested integration arguments.
 
 ## 1.3.1 (2026-09-05)
 
@@ -92,6 +105,7 @@ Roomote 1.3 brings every supported entry point into continuous Sessions, expands
 - Create durable artifacts from any Fast turn, open Session and task artifact links or images in the side panel, and use Build This to delegate a plan through its owning Session.
 - Launch Roomote's structured pull-request review directly from a Session and keep automatic reviews attached to the Session that opened the pull request.
 - Add an opt-in Therapist Mode that names the remembered fact that informed a Session or task without exposing internal Memory metadata.
+- Add GPT-6 Astra to the curated model catalog for OpenRouter, OpenAI API, Roomote inference, and ChatGPT subscription, including ChatGPT Fast mode.
 
 ### Patch changes
 
