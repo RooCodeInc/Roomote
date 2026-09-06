@@ -34,19 +34,13 @@ vi.mock('@/hooks/useUser', () => ({
   }),
 }));
 
-vi.mock('@/lib', () => ({
+vi.mock('@/lib', async () => ({
   getUserDisplayName: (
     user?: { name?: string | null; email?: string | null } | null,
   ) => user?.name?.trim() || user?.email?.split('@')[0] || null,
   stripHtmlTags: (value: string) => value,
   stripMarkdown: (value: string) => value,
-  formatInferenceCost: (costMicroUsd: number | null | undefined) => {
-    const normalized = Math.max(0, Number(costMicroUsd ?? 0));
-    if (!Number.isFinite(normalized) || normalized === 0) {
-      return '0.00';
-    }
-    return (normalized / 1_000_000).toFixed(2);
-  },
+  formatInferenceCost: (await import('@/lib/formatters')).formatInferenceCost,
 }));
 
 vi.mock('@/components/system', () => ({
@@ -348,50 +342,69 @@ describe('TaskCard', () => {
     expect(routerPushMock).toHaveBeenCalledWith('/task/task-1');
   });
 
-  it('renders the inference cost in the metadata row when present', () => {
-    render(
-      <TaskCard
-        task={createTask({
-          inferenceUsage: { eventCount: 4, costMicroUsd: 1_500_000 },
-        })}
-        filterState={{
-          hasSpecificUserFilter: false,
-        }}
-      />,
-    );
+  it.each([
+    [5_000, '0.01'],
+    [1_500_000, '1.50'],
+    [999_990_000, '999.99'],
+    [1_000_000_000, '1,000.00'],
+    [1_234_560_000, '1,234.56'],
+    [1_234_567_890_000, '1,234,567.89'],
+  ])(
+    'renders %s micro-USD as %s in the metadata row',
+    (costMicroUsd, label) => {
+      render(
+        <TaskCard
+          task={createTask({
+            inferenceUsage: { eventCount: 4, costMicroUsd },
+          })}
+          filterState={{
+            hasSpecificUserFilter: false,
+          }}
+        />,
+      );
 
-    expect(screen.getByText('1.50')).toBeInTheDocument();
-  });
+      expect(screen.getByText(label)).toBeInTheDocument();
+    },
+  );
 
-  it('does not render an inference cost when usage is zero or missing', () => {
-    render(
-      <TaskCard
-        task={createTask({
-          inferenceUsage: { eventCount: 0, costMicroUsd: 0 },
-        })}
-        filterState={{
-          hasSpecificUserFilter: false,
-        }}
-      />,
-    );
+  it.each([0, -1, NaN, Infinity, -Infinity, undefined])(
+    'does not render zero, invalid or missing usage (%s)',
+    (costMicroUsd) => {
+      render(
+        <TaskCard
+          task={createTask({
+            inferenceUsage:
+              costMicroUsd === undefined
+                ? undefined
+                : { eventCount: 0, costMicroUsd },
+          })}
+          filterState={{
+            hasSpecificUserFilter: false,
+          }}
+        />,
+      );
 
-    expect(screen.queryByText('0.00')).not.toBeInTheDocument();
-  });
+      expect(screen.queryByText('0.00')).not.toBeInTheDocument();
+    },
+  );
 
-  it('does not render a sub-cent inference cost that rounds to 0.00', () => {
-    render(
-      <TaskCard
-        task={createTask({
-          inferenceUsage: { eventCount: 1, costMicroUsd: 1_500 },
-        })}
-        filterState={{
-          hasSpecificUserFilter: false,
-        }}
-      />,
-    );
+  it.each([1_500, 4_999])(
+    'does not render %s micro-USD that rounds to 0.00',
+    (costMicroUsd) => {
+      render(
+        <TaskCard
+          task={createTask({
+            inferenceUsage: { eventCount: 1, costMicroUsd },
+          })}
+          filterState={{
+            hasSpecificUserFilter: false,
+          }}
+        />,
+      );
 
-    expect(screen.queryByText('0.00')).not.toBeInTheDocument();
-  });
+      expect(screen.queryByText('0.00')).not.toBeInTheDocument();
+    },
+  );
 
   it('renders the model after the PR badge when a PR exists', () => {
     const baseTask = createTask();
