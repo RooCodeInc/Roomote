@@ -3965,7 +3965,7 @@ export async function answerFastAgentQuestion({
                 await postReply(
                   {
                     purpose: 'progress',
-                    message: `[Open in Roomote](${destinationUrl})`,
+                    message: `[Started coding task](${destinationUrl})`,
                     taskNavigation: true,
                   },
                   true,
