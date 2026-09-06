@@ -56,7 +56,7 @@ export async function getArtifactById({
 
 /**
  * Get an artifact by task ID and path.
- * If version is not specified, returns the latest version.
+ * If version is not specified, returns the latest uploaded version.
  */
 export async function getArtifactByPath({
   taskId,
@@ -77,6 +77,8 @@ export async function getArtifactByPath({
   // If version is specified, filter by that version
   if (version !== undefined) {
     whereConditions.push(eq(taskArtifacts.version, version));
+  } else {
+    whereConditions.push(eq(taskArtifacts.uploaded, true));
   }
 
   const result = await db
@@ -113,6 +115,8 @@ export async function getArtifactBySessionPath({
   ];
   if (version !== undefined) {
     whereConditions.push(eq(taskArtifacts.version, version));
+  } else {
+    whereConditions.push(eq(taskArtifacts.uploaded, true));
   }
   const [artifact] = await db
     .select()
