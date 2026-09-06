@@ -7419,7 +7419,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     expect(adapter.postReply).toHaveBeenNthCalledWith(2, {
       purpose: 'progress',
-      message: '[Open in Roomote](https://roomote.example/task-1)',
+      message:
+        'Coding task: [Open coding task in Roomote](https://roomote.example/task-1)',
       taskNavigation: true,
     });
     expect(launchTask).toHaveBeenCalledWith(
@@ -7444,7 +7445,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const taskLinkIndex = canonicalWrites.findIndex(
       (message) =>
         message.eventType === 'roomote_runtime.assistant_message' &&
-        JSON.stringify(message.contentBlocks).includes('Open in Roomote'),
+        JSON.stringify(message.contentBlocks).includes(
+          'Open coding task in Roomote',
+        ),
     );
     const toolResultIndex = canonicalWrites.findIndex(
       (message) =>
@@ -7460,7 +7463,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(canonicalWrites[taskLinkIndex]?.contentBlocks).toEqual([
       {
         type: 'text',
-        text: '[Open in Roomote](https://roomote.example/task-1)',
+        text: 'Coding task: [Open coding task in Roomote](https://roomote.example/task-1)',
       },
     ]);
     expect(toolResultIndex).toBeGreaterThan(taskLinkIndex);
@@ -7823,10 +7826,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
   it('reports a launch failure through the normal conversation closeout', async () => {
     const adapter = callbacks({
-      launchTask: vi.fn(async () => ({
-        success: false as const,
-        error: 'No task capacity is available.',
-      })),
+      launchTask: vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
+        await postKickoff({
+          taskId: 'task-1',
+          taskUrl: 'https://roomote.example/task-1',
+        });
+        return {
+          success: false,
+          error: 'No task capacity is available.',
+        };
+      }),
     });
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -7863,6 +7872,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       message:
         'I could not start the checkout work because no task capacity is available.',
     });
+    expect(adapter.postReply).toHaveBeenCalledTimes(2);
   });
 
   it('allows a corrected launch after rejecting an unavailable model', async () => {
@@ -8017,7 +8027,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledWith({
       purpose: 'progress',
       message:
-        '[Open in Roomote](https://roomote.example/sessions/session-discord?utm_source=discord&utm_medium=link&utm_campaign=discord.thread_start&task=task-discord)',
+        'Coding task: [Open coding task in Roomote](https://roomote.example/sessions/session-discord?utm_source=discord&utm_medium=link&utm_campaign=discord.thread_start&task=task-discord)',
       taskNavigation: true,
     });
   });
@@ -8050,7 +8060,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     expect(adapter.postReply).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: `[Open in Roomote](${taskUrl})`,
+        message: `Coding task: [Open coding task in Roomote](${taskUrl})`,
       }),
     );
   });
