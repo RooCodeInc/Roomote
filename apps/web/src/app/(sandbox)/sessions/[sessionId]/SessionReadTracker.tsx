@@ -4,7 +4,6 @@ import { useEffect } from 'react';
 
 import { useMarkSessionRead } from '@/hooks/useMarkSessionRead';
 import { useRecentSessions } from '@/hooks/useRecentSessions';
-import { useSessionPresence } from '@/hooks/useSessionPresence';
 import { useTelemetry } from '@/hooks/useTelemetry';
 
 export function SessionReadTracker({ sessionId }: { sessionId: string }) {
@@ -12,7 +11,6 @@ export function SessionReadTracker({ sessionId }: { sessionId: string }) {
   const { capture } = useTelemetry();
 
   useMarkSessionRead(sessionId);
-  useSessionPresence(sessionId);
 
   useEffect(() => {
     recordVisit(sessionId);
