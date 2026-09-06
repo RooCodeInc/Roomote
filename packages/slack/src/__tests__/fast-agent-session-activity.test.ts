@@ -48,7 +48,7 @@ describe('createFastAgentSlackSessionActivity', () => {
     };
   }
 
-  it('skips Slack activity when the turn settles before the delay', async () => {
+  it('initializes an idle Slack session when the turn settles before the delay', async () => {
     vi.useFakeTimers();
     const { activity, setAgentSessionStatus, syncTitle } = createActivity({});
 
@@ -56,7 +56,11 @@ describe('createFastAgentSlackSessionActivity', () => {
     await activity.settle();
     await vi.runAllTimersAsync();
 
-    expect(setAgentSessionStatus).not.toHaveBeenCalled();
+    expect(setAgentSessionStatus).toHaveBeenCalledExactlyOnceWith({
+      channel: 'C123',
+      threadTs: '100.001',
+      status: 'active',
+    });
     expect(syncTitle).not.toHaveBeenCalled();
   });
 
@@ -194,6 +198,39 @@ describe('createFastAgentSlackSessionActivity', () => {
     const resolver = syncTitle.mock.calls[0]![0].resolveTitle;
     await expect(resolver?.()).resolves.toBe('Newer persisted title');
   });
+
+  it.each([undefined, 'Initial title'])(
+    'does not clear a newer turn status when a short turn receives a late title (%s)',
+    async (title) => {
+      vi.useFakeTimers();
+      const first = createActivity({ title });
+      first.activity.start();
+      await first.activity.settle();
+
+      const second = createActivity({
+        setAgentSessionStatus: first.setAgentSessionStatus,
+      });
+      second.activity.start();
+      await vi.advanceTimersByTimeAsync(FAST_AGENT_SLACK_PROCESSING_DELAY_MS);
+
+      first.activity.updateTitle?.('Late title');
+      await vi.runAllTimersAsync();
+
+      expect(
+        first.setAgentSessionStatus.mock.calls.map(([input]) => input.status),
+      ).toEqual(['active', 'processing']);
+      expect(first.syncTitle).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Late title' }),
+      );
+
+      await second.activity.settle();
+      expect(first.setAgentSessionStatus).toHaveBeenLastCalledWith({
+        channel: 'C123',
+        threadTs: '100.001',
+        status: 'active',
+      });
+    },
+  );
 
   it('waits for title synchronization before active cleanup', async () => {
     vi.useFakeTimers();
