@@ -314,10 +314,29 @@ async function resolveSelectedPullRequestImage(params: {
   );
   if (!image) return null;
 
-  const mediaType = await params.getMediaType(image.url);
+  // The model sees redacted signatures; restore only an unambiguous original
+  // image reference after checking that its redacted form was in the prompt.
+  const originalUrls = new Set<string>();
+  for (const pattern of [MARKDOWN_IMAGE_PATTERN, HTML_IMAGE_PATTERN]) {
+    for (const match of params.body.matchAll(pattern)) {
+      if (!findPullRequestBodyImage(redactSecrets(match[0]), image.url))
+        continue;
+      const url = normalizeAnonymousImageUrl(
+        pattern === MARKDOWN_IMAGE_PATTERN
+          ? (match[2] ?? match[3] ?? '')
+          : getHtmlImageAttribute(match[0], 'src'),
+      );
+      if (url) originalUrls.add(url);
+    }
+  }
+  if (originalUrls.size !== 1) return null;
+  const [url] = originalUrls;
+  if (!url) return null;
+
+  const mediaType = await params.getMediaType(url);
   return mediaType &&
     SUPPORTED_SLACK_IMAGE_MEDIA_TYPES.has(mediaType.toLowerCase())
-    ? image
+    ? { ...image, url }
     : null;
 }
 

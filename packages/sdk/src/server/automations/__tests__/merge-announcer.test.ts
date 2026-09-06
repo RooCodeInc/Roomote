@@ -284,6 +284,98 @@ describe('handleMergeAnnouncerPush', () => {
     expect(dependencies.getAnonymousMediaType).toHaveBeenCalledWith(imageUrl);
   });
 
+  it.each(['Markdown', 'HTML'])(
+    'restores a signed %s image without exposing its signature to the model',
+    async (format) => {
+      const { dependencies, postMessage } = createDependencies();
+      const signature = 'abcdef12'.repeat(8);
+      const imageUrl = `https://cdn.example.com/api/artifacts/screenshot/raw?sig=${signature}&ts=1788599339`;
+      const selectedUrl = imageUrl.replace(signature, 'abcdef12…[redacted]');
+      dependencies.generateAnnouncement.mockResolvedValue({
+        summary: 'Updates settings.',
+        imageUrl: selectedUrl,
+      });
+      const body =
+        format === 'Markdown'
+          ? `![Screenshot](${imageUrl})`
+          : `<img alt="Screenshot" src="${imageUrl.replace('&', '&amp;')}">`;
+
+      await handleMergeAnnouncerPush(
+        createPayload({
+          pullRequest: {
+            number: 7,
+            url: 'https://github.com/acme/widgets/pull/7',
+            title: 'Update settings',
+            body,
+            changedFileCount: 1,
+            additions: 10,
+            deletions: 2,
+          },
+        }),
+        dependencies,
+      );
+
+      expect(
+        dependencies.generateAnnouncement.mock.calls[0]?.[0],
+      ).not.toContain(signature);
+      expect(dependencies.generateAnnouncement.mock.calls[0]?.[0]).toContain(
+        'abcdef12…[redacted]',
+      );
+      expect(
+        dependencies.getAnonymousMediaType,
+      ).toHaveBeenCalledExactlyOnceWith(imageUrl);
+      expect(
+        postMessage.mock.calls[0]?.[0]?.blocks?.[0]?.child_blocks,
+      ).toContainEqual({
+        type: 'image',
+        image_url: imageUrl,
+        alt_text: 'Screenshot',
+      });
+    },
+  );
+
+  it.each(['ambiguous', 'unshown original', 'truncated'])(
+    'does not fetch a signed image with %s selection',
+    async (scenario) => {
+      const { dependencies, postMessage } = createDependencies();
+      const signature = 'abcdef12'.repeat(8);
+      const imageUrl = `https://cdn.example.com/screenshot?sig=${signature}`;
+      const selectedUrl = imageUrl.replace(signature, 'abcdef12…[redacted]');
+      let body = `![Screenshot](${imageUrl})`;
+      if (scenario === 'ambiguous')
+        body += `\n![Other](${imageUrl.replace(signature, `abcdef12${'b'.repeat(56)}`)})`;
+      if (scenario === 'truncated')
+        body = `${'description '.repeat(400)}${body}`;
+      dependencies.generateAnnouncement.mockResolvedValue({
+        summary: 'Updates settings.',
+        imageUrl: scenario === 'unshown original' ? imageUrl : selectedUrl,
+      });
+
+      await handleMergeAnnouncerPush(
+        createPayload({
+          pullRequest: {
+            number: 7,
+            url: 'https://github.com/acme/widgets/pull/7',
+            title: 'Update settings',
+            body,
+            changedFileCount: 1,
+            additions: 10,
+            deletions: 2,
+          },
+        }),
+        dependencies,
+      );
+
+      expect(dependencies.getAnonymousMediaType).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledOnce();
+      expect(
+        postMessage.mock.calls[0]?.[0]?.blocks?.[0]?.child_blocks?.some(
+          (block: { type?: string }) => block.type === 'image',
+        ),
+      ).toBe(false);
+    },
+  );
+
   it('accepts a model-selected HTML image reference', async () => {
     const { dependencies, postMessage } = createDependencies();
     const imageUrl = 'https://cdn.example.com/settings.png';
