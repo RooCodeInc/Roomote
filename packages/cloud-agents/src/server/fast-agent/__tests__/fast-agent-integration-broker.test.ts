@@ -42,6 +42,11 @@ import {
   clearFastAgentIntegrationToolCache,
   listFastAgentIntegrations as listFastAgentIntegrationsWithResolver,
 } from '../fast-agent-integration-broker';
+import {
+  CALL_INTEGRATION_TOOL_TOOL,
+  matchIntegrationTools,
+} from '@roomote/types';
+import { z } from 'zod';
 
 const auditContext = {
   userId: 'user-1',
@@ -85,6 +90,75 @@ describe('fast-agent integration broker', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('discovers and forwards required Sentry organization scope without injecting a default', async () => {
+    mocks.configuredServers = {
+      sentry: { url: 'https://api.example.com/api/mcp/sentry', headers: {} },
+    };
+    const inputSchema = {
+      type: 'object',
+      properties: {
+        organizationSlug: { type: 'string' },
+        query: { type: 'string' },
+      },
+      required: ['organizationSlug', 'query'],
+    };
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'search_issues', inputSchema },
+    ]);
+    mocks.callMcpTool.mockImplementation(async ({ args }) => {
+      z.object({
+        organizationSlug: z.string().min(1),
+        query: z.string(),
+      }).parse(args);
+      return { issues: [] };
+    });
+    const available = await listFastAgentIntegrations(auditContext);
+    const {
+      tools: [tool],
+    } = matchIntegrationTools(
+      available.flatMap((integration) =>
+        integration.tools.map((entry) => ({
+          ...entry,
+          integrationId: integration.id,
+        })),
+      ),
+      { integrationId: 'sentry', toolName: 'search_issues' },
+    );
+    expect(tool?.inputSchema).toEqual(inputSchema);
+    const args = { organizationSlug: 'example-org', query: 'lastSeen:-24h' };
+    const request = z.object(CALL_INTEGRATION_TOOL_TOOL.inputSchema).parse({
+      integrationId: tool!.integrationId,
+      toolName: tool!.name,
+      args,
+    });
+    await expect(
+      callFastAgentIntegration(auditContext, available, {
+        ...request,
+        args: request.args!,
+      }),
+    ).resolves.toEqual({ issues: [] });
+    expect(mocks.callMcpTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'https://api.example.com/api/mcp/sentry',
+        headers: { Authorization: 'Bearer control-plane-token' },
+        args,
+      }),
+    );
+    await expect(
+      callFastAgentIntegration(auditContext, available, {
+        ...request,
+        args: { query: args.query },
+      }),
+    ).rejects.toThrow();
+    expect(mocks.callMcpTool).toHaveBeenLastCalledWith(
+      expect.objectContaining({ args: { query: args.query } }),
+    );
+    await expect(
+      callFastAgentIntegration(auditContext, [], { ...request, args }),
+    ).rejects.toThrow('not available');
+    expect(mocks.callMcpTool).toHaveBeenCalledTimes(2);
   });
 
   it('exposes the deployment GitHub App through its read-only router MCP', async () => {
