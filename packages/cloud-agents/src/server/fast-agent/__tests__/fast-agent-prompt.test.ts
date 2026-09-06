@@ -358,6 +358,68 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('gates ongoing-process offers on an unresolved outcome and verification capability', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'ongoing process has a concrete unresolved outcome',
+    );
+    expect(prompt).toContain('Verify capability before offering');
+    expect(prompt).toContain(
+      'if unavailable or uncertain, do not promise monitoring',
+    );
+    expect(prompt).toContain('outcome, evidence source, timing and stop bound');
+    expect(prompt).toContain('with confirmed deployment and telemetry access');
+    expect(prompt).toContain(
+      'Never imply a release or process started or completed without evidence',
+    );
+  });
+
+  it('requires consent for offers but preserves direct explicit monitoring requests', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain('create no wakeup until the user accepts');
+    expect(prompt).toContain(
+      'Explicit user monitoring requests already authorize scheduling',
+    );
+    expect(prompt).toContain('do not require another opt-in');
+    expect(prompt).toContain('revalidate capability and list active wakeups');
+    expect(prompt).toContain('finite schedule and stop condition');
+    expect(prompt).toContain('without automatic renewal');
+    expect(prompt).toContain('Missing evidence is not success');
+    expect(prompt).toContain(
+      'Use "manage_wakeups" when the user wants a reminder',
+    );
+  });
+
+  it('keeps monitoring quiet, nonduplicative and subject to platform-event restrictions', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'scheduled_wakeup',
+    });
+
+    expect(prompt).toContain('"only_when_notable" for monitoring');
+    expect(prompt).toContain('stay quiet on unchanged results');
+    expect(prompt).toContain(
+      'duplicate existing task, PR lifecycle/review, or other notifications and monitors',
+    );
+    expect(prompt).toContain(
+      'Offer at most once for the same unresolved outcome',
+    );
+    expect(prompt).toContain('do not repeat an ignored or declined offer');
+    expect(prompt).toContain(
+      'Do not make proactive offers on automation or scheduled-wakeup turns',
+    );
+    expect(prompt).toContain(
+      'Presentation-only events remain presentation-only',
+    );
+    expect(prompt).toContain('do not inspect or schedule from them');
+    expect(prompt).toContain(
+      'not an offer to save work as a deployment automation',
+    );
+  });
+
   it('lists on-demand servers by name with their tool names instead of mounting them', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
