@@ -346,6 +346,31 @@ function userInputResponseMessage(params: {
 }
 
 describe('buildAcpRenderBlocks', () => {
+  it('shows patch filenames and counts consistently inside expanded groups', () => {
+    const messages = [
+      '*** Update File: /sandbox/repos/project/app.ts',
+      '*** Delete File: old.ts\n*** Add File: new.ts',
+      null,
+    ].map((patchText, ts) =>
+      explorationToolMessage({
+        id: `patch-${ts}`,
+        ts,
+        kind: 'apply_patch',
+        mcp: false,
+        title: 'Success. Updated the following files: D not-a-target.ts',
+        payload: { toolName: 'apply_patch', rawInput: { patchText } },
+      }),
+    );
+    expect(buildAcpRenderBlocks(messages)[0]).toMatchObject({
+      kind: 'tool_group',
+      objectSummary: '3 edits',
+      items: [
+        { objectLabel: 'Edited project/app.ts' },
+        { objectLabel: 'Edited 2 files' },
+        { objectLabel: 'Edited' },
+      ],
+    });
+  });
   it.each([
     ['apply_patch', 'Edited', '2 edits'],
     ['skill', 'Loaded skill capture-visual-proof', '2 skill calls'],

@@ -318,7 +318,7 @@ describe('tool presentation resolver', () => {
       'Editing',
       'Edited',
       'Failed to Edit',
-      '',
+      '2 files',
     ],
     [
       'skill',
@@ -440,6 +440,99 @@ describe('tool presentation resolver', () => {
         toolData({ isMcp: true, toolName: 'read', mcpServerName: 'example' }),
       ),
     ).toMatchObject({ object: 'Read call', providerLabel: 'Example' });
+  });
+
+  it.each([
+    [
+      '*** Begin Patch\n*** Update File: /sandbox/repos/project/src/app.ts\n@@\n-old\n+new\n*** End Patch',
+      'project/src/app.ts',
+    ],
+    ['*** Add File: new.ts\n+content', 'new.ts'],
+    ['*** Delete File: old.ts', 'old.ts'],
+    ['*** Update File: old.ts\n*** Move to: new.ts\n@@\n-a\n+b', 'new.ts'],
+    [
+      '*** Update File: same.ts\n@@\n-a\n+b\n*** Update File: same.ts\n@@\n-c\n+d',
+      'same.ts',
+    ],
+    ['*** Delete File: old.ts\r\n*** Add File: new.ts\r\n+content', '2 files'],
+    [
+      '*** Update File: real.ts\n@@\n+*** Add File: not-a-target.ts\n-*** Delete File: also-not-a-target.ts',
+      'real.ts',
+    ],
+    ['Success. Updated the following files: D output-only.ts', ''],
+    ['*** Update File:   \n', ''],
+  ])(
+    'derives patch targets only from input operation headers',
+    (patchText, object) => {
+      for (const [status, verb] of [
+        ['in_progress', 'Editing'],
+        ['completed', 'Edited'],
+        ['failed', 'Failed to Edit'],
+      ] as const) {
+        const data = toolData({
+          kind: 'apply_patch',
+          status,
+          rawInput: { patchText },
+          title: 'wrong.ts',
+          output: 'Success. Updated wrong.ts',
+        });
+        expect(resolveToolPresentation(data)).toMatchObject({ verb, object });
+        expect(data.output).toBe('Success. Updated wrong.ts');
+      }
+    },
+  );
+
+  it('uses structured native edit paths and nested patch arguments', () => {
+    for (const key of ['filePath', 'file_path', 'path']) {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            toolName: 'edit',
+            rawInput: { [key]: '/sandbox/repos/project/file.ts' },
+          }),
+        ),
+      ).toMatchObject({ verb: 'Edited', object: 'project/file.ts' });
+    }
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'apply_patch',
+          rawInput: { arguments: { patchText: '*** Delete File: old.ts' } },
+        }),
+      ).object,
+    ).toBe('old.ts');
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'apply_patch',
+          rawInput: {
+            patchText: `*** Update File: /sandbox/repos/${'a'.repeat(100)}`,
+          },
+        }),
+      ).object,
+    ).toBe(`${'a'.repeat(77)}...`);
+  });
+
+  it.each([
+    undefined,
+    null,
+    'invalid',
+    [],
+    { patchText: 3 },
+    { filePath: false },
+  ])('keeps unavailable edit targets safe', (rawInput) => {
+    for (const toolName of ['apply_patch', 'edit']) {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            toolName,
+            rawInput,
+            title: 'fake.ts',
+            output: 'D fake.ts',
+          }),
+        ),
+      ).toMatchObject({ verb: 'Edited', object: '' });
+    }
   });
 
   it('counts edit calls rather than assuming each patch changes one file', () => {

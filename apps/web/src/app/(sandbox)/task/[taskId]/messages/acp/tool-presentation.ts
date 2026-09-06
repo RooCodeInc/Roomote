@@ -426,11 +426,39 @@ function resolveReceiptLanguage(
       object: name ? `skill ${name}` : 'skill',
     };
   }
-  if (nativeToolName === 'apply_patch')
+  if (nativeToolName === 'apply_patch' || nativeToolName === 'edit') {
+    const paths = new Set<string>();
+    if (
+      nativeToolName === 'apply_patch' &&
+      typeof args?.patchText === 'string'
+    ) {
+      // Only operation headers in the input identify files, never result prose
+      // or prefixed hunk contents. A move names the destination of one edit.
+      for (const match of args.patchText.matchAll(
+        /^\*\*\* (Add|Update|Delete) File: ([^\r\n]+)(?:\r?\n\*\*\* Move to: ([^\r\n]+))?/gm,
+      )) {
+        const path = (
+          match[1] === 'Update' ? (match[3] ?? match[2]!) : match[2]!
+        ).trim();
+        if (path) paths.add(path);
+      }
+    }
+    const path = paths.values().next().value;
     return {
       verb: byPhase('Editing', 'Edited', 'Failed to Edit'),
-      object: '',
+      object:
+        paths.size > 1
+          ? `${paths.size} files`
+          : path
+            ? (stringArgument({ path }, 'path', true) ?? '')
+            : nativeToolName === 'edit'
+              ? (stringArgument(args, 'filePath', true) ??
+                stringArgument(args, 'file_path', true) ??
+                stringArgument(args, 'path', true) ??
+                '')
+              : '',
     };
+  }
   if (
     nativeToolName === 'read' ||
     nativeToolName === 'read_file' ||
