@@ -482,6 +482,38 @@ describe('tool presentation resolver', () => {
     },
   );
 
+  it.each(['Add', 'Update', 'Delete'])(
+    'distinguishes space-prefixed context from a real %s operation after an update hunk',
+    (operation) => {
+      // OpenCode v1.18.10 parseUpdateFileChunks stops at an unprefixed ***;
+      // unchanged context starts with a space, including header-like content.
+      const prefix =
+        '*** Begin Patch\n*** Update File: real.ts\n@@\n-old\n+new\n';
+      const header = `*** ${operation} File: example.ts`;
+      const suffix =
+        operation === 'Add'
+          ? '\n+content'
+          : operation === 'Update'
+            ? '\n@@\n-a\n+b'
+            : '';
+      const present = (patchText: string) =>
+        resolveToolPresentation(
+          toolData({
+            toolName: 'apply_patch',
+            rawInput: { patchText },
+          }),
+        );
+
+      expect(present(`${prefix} ${header}\n*** End Patch`)).toMatchObject({
+        verb: 'Edited',
+        object: 'real.ts',
+      });
+      expect(
+        present(`${prefix}${header}${suffix}\n*** End Patch`),
+      ).toMatchObject({ verb: 'Edited', object: '2 files' });
+    },
+  );
+
   it('uses structured native edit paths and nested patch arguments', () => {
     for (const key of ['filePath', 'file_path', 'path']) {
       expect(
