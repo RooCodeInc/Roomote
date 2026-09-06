@@ -253,6 +253,7 @@ function buildRestrictedNonTaskConfig(
   }
 
   return {
+    subagent_depth: 2,
     agent: PROMPT_ONLY_SUBAGENTS,
     plugin: [getOpenCodeIdentityPluginUrl()],
     permission: { ...NON_TASK_TOOL_PERMISSION_DENIALS, task: 'allow' },
