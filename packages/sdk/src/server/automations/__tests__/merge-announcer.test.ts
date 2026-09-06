@@ -289,7 +289,7 @@ describe('handleMergeAnnouncerPush', () => {
     async (format) => {
       const { dependencies, postMessage } = createDependencies();
       const signature = 'abcdef12'.repeat(8);
-      const imageUrl = `https://cdn.example.com/api/artifacts/screenshot/raw?sig=${signature}&ts=1788599339`;
+      const imageUrl = `https://cdn.example.com/api/artifacts/screenshot/raw?sig=${signature}&ts=1788599339&version=1`;
       const selectedUrl = imageUrl.replace(signature, 'abcdef12…[redacted]');
       dependencies.generateAnnouncement.mockResolvedValue({
         summary: 'Updates settings.',
@@ -298,7 +298,7 @@ describe('handleMergeAnnouncerPush', () => {
       const body =
         format === 'Markdown'
           ? `![Screenshot](${imageUrl})`
-          : `<img alt="Screenshot" src="${imageUrl.replace('&', '&amp;')}">`;
+          : `<img alt="Screenshot" src="${imageUrl.replaceAll('&', '&amp;')}">`;
 
       await handleMergeAnnouncerPush(
         createPayload({
@@ -334,7 +334,7 @@ describe('handleMergeAnnouncerPush', () => {
     },
   );
 
-  it.each(['ambiguous', 'unshown original', 'truncated'])(
+  it.each(['ambiguous', 'unshown original', 'truncated', 'oversized raw body'])(
     'does not fetch a signed image with %s selection',
     async (scenario) => {
       const { dependencies, postMessage } = createDependencies();
@@ -346,6 +346,8 @@ describe('handleMergeAnnouncerPush', () => {
         body += `\n![Other](${imageUrl.replace(signature, `abcdef12${'b'.repeat(56)}`)})`;
       if (scenario === 'truncated')
         body = `${'description '.repeat(400)}${body}`;
+      if (scenario === 'oversized raw body')
+        body += `\nAPI_TOKEN=${'x'.repeat(16_000)}`;
       dependencies.generateAnnouncement.mockResolvedValue({
         summary: 'Updates settings.',
         imageUrl: scenario === 'unshown original' ? imageUrl : selectedUrl,
