@@ -153,7 +153,12 @@ export function createFastAgentTaskLauncher(
       };
     }
 
-    return { success: true, taskId: launch.taskId, taskUrl };
+    return {
+      success: true,
+      taskId: launch.taskId,
+      taskUrl,
+      created: preparedTaskRun !== undefined,
+    };
   };
 }
 

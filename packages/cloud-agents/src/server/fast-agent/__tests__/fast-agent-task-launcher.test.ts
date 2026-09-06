@@ -115,6 +115,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
       success: true,
       taskId: 'task-1',
       taskUrl: 'https://roomote.example/task/task-1',
+      created: true,
     });
     expect(mocks.enqueueTask).toHaveBeenCalledWith(
       {
@@ -170,6 +171,32 @@ describe('createFastAgentSlackTaskLauncher', () => {
       mocks.enqueueTask.mock.calls[0]?.[0]?.task.payload,
     ).not.toHaveProperty('images');
     expect(order).toEqual(['kickoff', 'queued']);
+  });
+
+  it('reports reuse when enqueue skips the new-run callback', async () => {
+    mocks.enqueueTask.mockResolvedValueOnce({ taskId: 'task-existing' });
+    const postKickoff = vi.fn();
+    const launchTask = createFastAgentSlackTaskLauncher({
+      userId: 'user-1',
+      teamId: 'T123',
+      channelId: 'C123',
+      threadTs: '100.001',
+    });
+
+    await expect(
+      launchTask({
+        prompt: 'Investigate the issue',
+        environmentId: null,
+        parentSessionId: 'session-1',
+        postKickoff,
+      }),
+    ).resolves.toEqual({
+      success: true,
+      taskId: 'task-existing',
+      taskUrl: undefined,
+      created: false,
+    });
+    expect(postKickoff).not.toHaveBeenCalled();
   });
 
   it('uses the persisted automation identity instead of reconstructing it from Slack coordinates', async () => {

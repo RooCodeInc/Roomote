@@ -7356,7 +7356,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(subagentWrites[1]?.turnSeq).toBe(subagentWrites[0]?.turnSeq);
   });
 
-  it('posts a streaming acknowledgement before launch and adds only the task link afterward', async () => {
+  it.each([true, false, undefined])('links created=%s', async (created) => {
+    const label = created === true ? 'Started coding task' : 'Coding task';
     const order: string[] = [];
     const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
       await postKickoff({
@@ -7368,6 +7369,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         success: true,
         taskId: 'task-1',
         taskUrl: 'https://roomote.example/task-1',
+        ...(created === undefined ? {} : { created }),
       };
     });
     const adapter = callbacks({
@@ -7419,8 +7421,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     expect(adapter.postReply).toHaveBeenNthCalledWith(2, {
       purpose: 'progress',
-      message:
-        'Coding task: [Open coding task in Roomote](https://roomote.example/task-1)',
+      message: `${label}: [Open coding task in Roomote](https://roomote.example/task-1)`,
       taskNavigation: true,
     });
     expect(launchTask).toHaveBeenCalledWith(
@@ -7463,7 +7464,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(canonicalWrites[taskLinkIndex]?.contentBlocks).toEqual([
       {
         type: 'text',
-        text: 'Coding task: [Open coding task in Roomote](https://roomote.example/task-1)',
+        text: `${label}: [Open coding task in Roomote](https://roomote.example/task-1)`,
       },
     ]);
     expect(toolResultIndex).toBeGreaterThan(taskLinkIndex);
