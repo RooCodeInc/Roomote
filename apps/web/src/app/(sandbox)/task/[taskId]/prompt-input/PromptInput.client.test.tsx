@@ -1281,7 +1281,9 @@ describe('PromptInput', () => {
 });
 
 describe('PromptInput ghost suggestion', () => {
-  function renderConnectedComposer() {
+  function renderConnectedComposer(
+    suggestion = 'Add a regression test for that',
+  ) {
     useSandboxTaskPhaseMock.mockReturnValue('waiting_for_prompt');
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
@@ -1307,7 +1309,7 @@ describe('PromptInput ghost suggestion', () => {
       ],
     });
     useQueryMock.mockReturnValue({
-      data: { suggestion: 'Add a regression test for that', messageCount: 6 },
+      data: { suggestion, messageCount: 6 },
     });
 
     render(
@@ -1318,7 +1320,7 @@ describe('PromptInput ghost suggestion', () => {
       />,
     );
 
-    return screen.getByPlaceholderText('Add a regression test for that');
+    return screen.getByPlaceholderText(suggestion);
   }
 
   it('renders the suggestion as ghost placeholder text when the composer is empty', () => {
@@ -1355,16 +1357,28 @@ describe('PromptInput ghost suggestion', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('accepts the focused suggestion when its hint is clicked', () => {
-    const textarea = renderConnectedComposer();
-    fireEvent.focus(textarea);
+  it.each(['mouse', 'touch'])(
+    'accepts a long suggestion without losing focus on %s pointer down',
+    (pointerType) => {
+      const suggestion =
+        'Implement the marker fix and add regression coverage.';
+      const textarea = renderConnectedComposer(suggestion);
+      act(() => textarea.focus());
+      const hint = screen.getByRole('button', {
+        name: 'Insert suggested message',
+      });
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Insert suggested message' }),
-    );
+      expect(
+        fireEvent.pointerDown(hint, { pointerType, cancelable: true }),
+      ).toBe(false);
+      expect(textarea).toHaveFocus();
+      fireEvent.click(hint);
 
-    expect(textarea).toHaveValue('Add a regression test for that');
-  });
+      expect(textarea).toHaveValue(suggestion);
+      expect(textarea).toHaveFocus();
+      expect(hint).not.toBeInTheDocument();
+    },
+  );
 
   it('dismisses the suggestion with Escape and does not re-show it', () => {
     const textarea = renderConnectedComposer();
