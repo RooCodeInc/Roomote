@@ -70,6 +70,8 @@ export type FastAgentReply = {
    * short of a visible, durable post (including deliberate suppression) as a
    * failure so the launch gate never opens without its kickoff. */
   kickoff?: boolean;
+  /** Runtime-only navigation; web already exposes the delegated task card. */
+  taskNavigation?: boolean;
 };
 
 export type FastAgentReplyHandle = {

@@ -7420,6 +7420,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenNthCalledWith(2, {
       purpose: 'progress',
       message: '[Open in Roomote](https://roomote.example/task-1)',
+      taskNavigation: true,
     });
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -7452,6 +7453,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     expect(toolCallIndex).toBeGreaterThanOrEqual(0);
     expect(taskLinkIndex).toBeGreaterThan(toolCallIndex);
+    expect(canonicalWrites[taskLinkIndex]?.payload).toMatchObject({
+      purpose: 'progress',
+      taskNavigation: true,
+    });
+    expect(canonicalWrites[taskLinkIndex]?.contentBlocks).toEqual([
+      {
+        type: 'text',
+        text: '[Open in Roomote](https://roomote.example/task-1)',
+      },
+    ]);
     expect(toolResultIndex).toBeGreaterThan(taskLinkIndex);
     expect(canonicalWrites[toolResultIndex]?.turnSeq).toBe(
       canonicalWrites[toolCallIndex]?.turnSeq,
@@ -8007,6 +8018,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       purpose: 'progress',
       message:
         '[Open in Roomote](https://roomote.example/sessions/session-discord?utm_source=discord&utm_medium=link&utm_campaign=discord.thread_start&task=task-discord)',
+      taskNavigation: true,
     });
   });
 
