@@ -60,10 +60,11 @@ export const TaskCard = ({
     PRODUCT_NAME;
   const activityAt = task.activityAt ?? task.timestamp;
   const activityDate = new Date(activityAt * 1000);
-  const inferenceCostLabel = formatInferenceCost(
-    task.inferenceUsage?.costMicroUsd,
-  );
-  const hasInferenceCost = Number(inferenceCostLabel) > 0;
+  const inferenceCostMicroUsd = task.inferenceUsage?.costMicroUsd ?? 0;
+  const inferenceCostLabel = formatInferenceCost(inferenceCostMicroUsd);
+  // Half a cent is the smallest cost that rounds above zero at two decimals.
+  const hasInferenceCost =
+    Number.isFinite(inferenceCostMicroUsd) && inferenceCostMicroUsd >= 5_000;
 
   return (
     <div
