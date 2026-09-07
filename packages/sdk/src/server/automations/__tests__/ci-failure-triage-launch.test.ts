@@ -102,6 +102,7 @@ vi.mock('@roomote/db/server', () => ({
     select: mockDbSelect,
   },
   eq: vi.fn((left: unknown, right: unknown) => [left, right]),
+  and: vi.fn((...args: unknown[]) => args),
   getAutomationRuntime: mockGetAutomationRuntime,
   recordAutomationRunOutcome: mockRecordAutomationRunOutcome,
   upsertBackgroundAutomationSlackThread:
@@ -109,6 +110,7 @@ vi.mock('@roomote/db/server', () => ({
   slackInstallations: {
     botAccessToken: 'slackInstallations.botAccessToken',
     isActive: 'slackInstallations.isActive',
+    teamId: 'slackInstallations.teamId',
   },
 }));
 
@@ -215,6 +217,7 @@ vi.mock('../../lib/automation-result-metadata', () => ({
 }));
 
 import { TaskPayloadKind } from '@roomote/types';
+import { eq, slackInstallations } from '@roomote/db/server';
 
 import { launchCiFailureTriageForFailedRun } from '../ci-failure-triage-launch';
 
@@ -384,6 +387,21 @@ describe('launchCiFailureTriageForFailedRun', () => {
         taskId: 'task-scan-1',
       }),
     );
+  });
+
+  it('scopes the announcement token to the resolved manager channel owner', async () => {
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      teamId: 'T-B',
+      source: 'manager_channel',
+    });
+    await launchCiFailureTriageForFailedRun(failedRun);
+    expect(eq).toHaveBeenCalledWith(slackInstallations.teamId, 'T-B');
+    expect(mockBuildDestinationTaskPayloadFields).toHaveBeenCalledWith(
+      expect.objectContaining({ teamId: 'T-B' }),
+    );
+    expect(mockPostMessage).toHaveBeenCalled();
   });
 
   it('still launches without a thread when the announcement fails', async () => {

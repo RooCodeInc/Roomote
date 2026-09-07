@@ -109,6 +109,52 @@ function dependencies(params: {
 }
 
 describe('provider usage limit automation', () => {
+  it('uses the destination owner token rather than the first active installation', async () => {
+    const deps = dependencies({});
+    deps.overrides.getSlackBotToken
+      .mockResolvedValueOnce('xoxb-a')
+      .mockResolvedValueOnce('xoxb-b');
+    const createNotifier = vi.fn(() => ({ postMessage: deps.postMessage }));
+    const result = await providerUsageLimitJob(
+      {},
+      {
+        ...deps.overrides,
+        createNotifier,
+        resolveDestination: vi.fn().mockResolvedValue({
+          provider: 'slack',
+          channelId: 'C-MANAGER',
+          teamId: 'T-B',
+          source: 'manager_channel',
+        }),
+      },
+    );
+    expect(deps.overrides.getSlackBotToken).toHaveBeenLastCalledWith('T-B');
+    expect(createNotifier).toHaveBeenCalledWith('xoxb-b');
+    expect(result.completed).toBe(true);
+  });
+
+  it('does not claim thresholds or record outcomes when the selected owner is unavailable', async () => {
+    const deps = dependencies({});
+    deps.overrides.getSlackBotToken
+      .mockResolvedValueOnce('xoxb-a')
+      .mockResolvedValueOnce(null);
+    await providerUsageLimitJob(
+      {},
+      {
+        ...deps.overrides,
+        resolveDestination: vi.fn().mockResolvedValue({
+          provider: 'slack',
+          channelId: 'C-MANAGER',
+          teamId: 'T-B',
+          source: 'manager_channel',
+        }),
+      },
+    );
+    expect(deps.redis.set).not.toHaveBeenCalled();
+    expect(deps.recordOutcome).not.toHaveBeenCalled();
+    expect(deps.postMessage).not.toHaveBeenCalled();
+  });
+
   it('derives weekly periods from Monday UTC', () => {
     expect(
       getProviderUsageLimitPeriodId(

@@ -15,7 +15,6 @@ import {
   buildDestinationTaskPayloadFields,
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
-  type ResolvedAutomationDestination,
 } from './destination';
 import {
   getActiveRepositoryFullNames,
@@ -131,16 +130,6 @@ async function countOpenSuggestions(): Promise<number> {
   return result?.openSuggestionCount ?? 0;
 }
 
-function resolveDispatchChannelId(
-  destination: ResolvedAutomationDestination | null,
-  slackChannelId: string | null,
-): string | null {
-  if (destination) {
-    return destination.channelId;
-  }
-  return slackChannelId;
-}
-
 export async function suggesterJob(
   opts: AutomationRunOpts = {},
 ): Promise<AutomationJobResult> {
@@ -168,10 +157,7 @@ export async function suggesterJob(
           runtime,
           slackConnected: deployment.slackBotToken !== null,
         }));
-      const channelId = resolveDispatchChannelId(
-        destination,
-        runtime.slackChannelId,
-      );
+      const channelId = destination?.channelId;
 
       if (!frequency || frequency === 'off' || !(frequency in WINDOW_DAYS)) {
         result.skippedReason = 'Automation is disabled.';
@@ -184,6 +170,15 @@ export async function suggesterJob(
           `${LOG_PREFIX} Skipping deployment: suggester destination not configured`,
         );
         result.skippedReason = 'Suggester destination is not configured.';
+        skipped++;
+        continue;
+      }
+
+      if (
+        destination?.provider === 'slack' &&
+        destination.teamId &&
+        destination.teamId !== deployment.slackTeamId
+      ) {
         skipped++;
         continue;
       }
