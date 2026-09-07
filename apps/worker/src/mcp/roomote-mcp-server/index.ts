@@ -1467,8 +1467,7 @@ if (
   const lifecycleToolName = reportsToParentSession
     ? 'report_to_parent_session'
     : 'send_chat_reply';
-  const supportsChatReplySuggestions =
-    process.env.ROOMOTE_AUTOMATION_TASK === 'true';
+  const supportsChatReplySuggestions = !reportsToParentSession;
   const usesPinnedSuggestionContract =
     process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan;
   const chatReplySuggestionSchema = usesPinnedSuggestionContract
@@ -1527,7 +1526,7 @@ if (
       ? 'Use the modern Slack Markdown contract from the Slack instructions; tables, headings, blockquotes, and fenced code blocks are allowed when they make the reply clearer.'
       : 'Use Markdown when it makes the reply clearer.';
   const chatReplySuggestionGuidance = supportsChatReplySuggestions
-    ? 'Use the optional suggestions parameter when the automation prompt explicitly asks for task suggestions, launchable follow-ups, or help taking concrete actions. Do not infer suggested-task intent from a request that only asks for a summary or action-item list. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. '
+    ? 'Use the optional suggestions parameter for relevant, concrete follow-up tasks that Roomote can take on. Suggestions are optional, not required on every reply, and are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. '
     : '';
   const chatReplyDescription = reportsToParentSession
     ? 'Session-internal: reports lifecycle information privately to the parent Session, which owns any user-visible reply. The report may be a complete engineering handoff and is never posted directly to the user. The kickoff already acknowledged the request, so do not send another generic ack. Use progress to pass concrete findings, blockers, meaningful work milestones, required input, or a brief note after roughly 10 minutes of silence. Describe the work itself without labeling the message as a progress update or using policy vocabulary such as phase transition, checkpoint, lifecycle, or user-facing. Use closeout for the final result or blocker and clarification when user input is needed. Ack and progress keep the coding task active.'
@@ -1566,7 +1565,7 @@ if (
           .describe(
             'Optional already-uploaded artifact IDs for images to attach. A reply must not claim an image or screenshot is attached, shown, or included unless the matching imageArtifactIds or imagePaths are supplied. If attachment delivery fails, provide an accessible artifact viewer link and say that the image could not be attached.',
           ),
-        ...(supportsChatReplySuggestions && !reportsToParentSession
+        ...(supportsChatReplySuggestions
           ? {
               suggestions: z
                 .array(chatReplySuggestionSchema)
@@ -1580,8 +1579,8 @@ if (
                 .optional()
                 .describe(
                   usesPinnedSuggestionContract
-                    ? `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation when the automation prompt explicitly asks for task suggestions. This scheduled suggestion workflow must include its verified target repository and may include implementation metadata used when the task is started.`
-                    : `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation when the automation prompt explicitly asks for task suggestions. Use only for high-confidence tasks not explicitly identified in the conversation as already underway. For org-wide runs, include the concrete targetRepositoryFullName so Roomote can route the task to the appropriate environment when it is started.`,
+                    ? `Optional list of 1 to 10 relevant, concrete follow-up tasks to post inside the originating ${chatReplySurfaceLabel} conversation. This scheduled suggestion workflow must include its verified target repository and may include implementation metadata used when the task is started.`
+                    : `Optional list of 1 to 10 relevant, concrete follow-up tasks to post inside the originating ${chatReplySurfaceLabel} conversation. Use only for high-confidence tasks not explicitly identified in the conversation as already underway. For org-wide runs, include the concrete targetRepositoryFullName so Roomote can route the task to the appropriate environment when it is started.`,
                 ),
             }
           : {}),

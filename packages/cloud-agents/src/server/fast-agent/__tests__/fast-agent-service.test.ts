@@ -7627,9 +7627,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(launchTask.mock.calls[0]?.[0]).not.toHaveProperty('images');
   });
 
-  it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
-    'passes structured suggestions through a %s automation closeout',
-    async (surface) => {
+  it.each(
+    (['slack', 'discord', 'teams', 'telegram'] as const).flatMap((surface) =>
+      (
+        ['human', 'automation', 'delegated_task', 'scheduled_wakeup'] as const
+      ).map((event) => ({ surface, event })),
+    ),
+  )(
+    'passes structured suggestions through a $surface $event closeout',
+    async ({ surface, event }) => {
       const adapter = callbacks();
       const suggestions = [
         {
@@ -7656,8 +7662,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ...baseParams,
         conversation: { ...baseParams.conversation, surface },
         adapter,
-        turnSource: 'platform_event',
-        platformEventKind: 'automation',
+        turnSource: event === 'human' ? 'human' : 'platform_event',
+        platformEventKind: event === 'human' ? undefined : event,
         platformEventVisibility: 'required',
       });
 
@@ -7669,43 +7675,47 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
-  it('rejects a suggestion target outside the authorized environment catalog', async () => {
-    const adapter = callbacks();
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await expect(
-          invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'closeout',
-            message: 'Found a follow-up.',
-            suggestions: [
-              {
-                title: 'Inspect the issue',
-                brief: 'Trace the failing path.',
-                environmentId: 'invented-environment',
-              },
-            ],
-          }),
-        ).resolves.toEqual({
-          success: false,
-          error: 'A suggested task selected an environment that was not found.',
-        });
-        return '';
-      },
-    );
+  it.each(['human', 'platform_event'] as const)(
+    'rejects an unauthorized suggestion target on a %s turn',
+    async (turnSource) => {
+      const adapter = callbacks();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await expect(
+            invokeTool(nativeToolNames.sendChatReply, {
+              purpose: 'closeout',
+              message: 'Found a follow-up.',
+              suggestions: [
+                {
+                  title: 'Inspect the issue',
+                  brief: 'Trace the failing path.',
+                  environmentId: 'invented-environment',
+                },
+              ],
+            }),
+          ).resolves.toEqual({
+            success: false,
+            error:
+              'A suggested task selected an environment that was not found.',
+          });
+          return '';
+        },
+      );
 
-    await answerFastAgentQuestion({
-      ...baseParams,
-      adapter,
-      turnSource: 'platform_event',
-      platformEventKind: 'automation',
-      platformEventVisibility: 'required',
-    });
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        turnSource,
+        platformEventKind: 'automation',
+        platformEventVisibility: 'required',
+      });
 
-    expect(adapter.postReply).not.toHaveBeenCalledWith(
-      expect.objectContaining({ suggestions: expect.any(Array) }),
-    );
-  });
+      expect(adapter.postReply).not.toHaveBeenCalledWith(
+        expect.objectContaining({ suggestions: expect.any(Array) }),
+      );
+    },
+  );
 
   it('passes structured suggestions through an automation task-settled closeout', async () => {
     const adapter = callbacks();
@@ -7741,51 +7751,89 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('rejects structured suggestions outside automation reports', async () => {
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await expect(
-          invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'closeout',
-            message: 'Try this next.',
-            suggestions: [{ title: 'Follow up', brief: 'Inspect the issue.' }],
-          }),
-        ).resolves.toEqual({
-          success: false,
-          error:
-            'Launchable suggestions are available only on chat automation closeouts.',
-        });
-        return '';
-      },
-    );
+  it.each([
+    'web',
+    'automation',
+    'linear',
+    'github',
+    'gitlab',
+    'bitbucket',
+    'ado',
+    'gitea',
+  ] as const)(
+    'rejects structured suggestions on the %s surface',
+    async (surface) => {
+      const adapter = callbacks();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await expect(
+            invokeTool(nativeToolNames.sendChatReply, {
+              purpose: 'closeout',
+              message: 'Try this next.',
+              suggestions: [
+                { title: 'Follow up', brief: 'Inspect the issue.' },
+              ],
+            }),
+          ).resolves.toEqual({
+            success: false,
+            error:
+              'Launchable suggestions are available only on Slack, Discord, Teams, or Telegram closeouts.',
+          });
+          return '';
+        },
+      );
 
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
-  });
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: { ...baseParams.conversation, surface },
+        adapter,
+      });
+      expect(adapter.postReply).not.toHaveBeenCalledWith(
+        expect.objectContaining({ suggestions: expect.any(Array) }),
+      );
+    },
+  );
 
-  it('rejects structured suggestions on an automation clarification', async () => {
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await expect(
-          invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'clarification',
-            message: 'Which follow-up should run?',
-            suggestions: [{ title: 'Follow up', brief: 'Inspect the issue.' }],
-          }),
-        ).resolves.toMatchObject({ success: false });
-        return '';
-      },
-    );
+  it.each(
+    (['ack', 'progress', 'clarification'] as const).flatMap((purpose) =>
+      (['human', 'platform_event'] as const).map((turnSource) => ({
+        purpose,
+        turnSource,
+      })),
+    ),
+  )(
+    'rejects structured suggestions on a $turnSource $purpose reply',
+    async ({ purpose, turnSource }) => {
+      const adapter = callbacks();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await expect(
+            invokeTool(nativeToolNames.sendChatReply, {
+              purpose,
+              message: 'Which follow-up should run?',
+              suggestions: [
+                { title: 'Follow up', brief: 'Inspect the issue.' },
+              ],
+            }),
+          ).resolves.toMatchObject({ success: false });
+          return '';
+        },
+      );
 
-    await answerFastAgentQuestion({
-      ...baseParams,
-      adapter: callbacks(),
-      turnSource: 'platform_event',
-      platformEventKind: 'automation',
-      platformEventVisibility: 'required',
-    });
-  });
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        turnSource,
+        platformEventKind: 'automation',
+        platformEventVisibility: 'required',
+      });
+      expect(adapter.postReply).not.toHaveBeenCalledWith(
+        expect.objectContaining({ suggestions: expect.any(Array) }),
+      );
+    },
+  );
 
   it('launches two tasks, keeps the turn open, messages a child, and posts a closeout', async () => {
     let taskNumber = 0;
@@ -9525,90 +9573,142 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
-  it('edits one retry notice through recovery and the final reply', async () => {
-    vi.useFakeTimers();
-    try {
-      // Retry-After beyond the silent window makes both waits user-visible.
-      const rateLimitError = new Error('429 Too Many Requests') as Error & {
-        providerError: unknown;
-      };
-      rateLimitError.providerError = {
-        data: { responseHeaders: { 'retry-after': '45' } },
-      };
-      mocks.generateText
-        .mockRejectedValueOnce(rateLimitError)
-        .mockRejectedValueOnce(rateLimitError)
-        .mockImplementationOnce(async (_params, _session, options) => {
-          await options.onSessionReady('opencode-session-1');
-          await invokeTool(nativeToolNames.sendChatReply, {
+  it.each(['none', 'success', 'failure'] as const)(
+    'edits one retry notice through recovery and the final reply (suggestions=%s)',
+    async (suggestionDelivery) => {
+      const suggestions =
+        suggestionDelivery !== 'none'
+          ? [
+              {
+                title: 'Investigate retries',
+                brief: 'Find the cause of rate limits.',
+              },
+            ]
+          : undefined;
+      vi.useFakeTimers();
+      try {
+        // Retry-After beyond the silent window makes both waits user-visible.
+        const rateLimitError = new Error('429 Too Many Requests') as Error & {
+          providerError: unknown;
+        };
+        rateLimitError.providerError = {
+          data: { responseHeaders: { 'retry-after': '45' } },
+        };
+        mocks.generateText
+          .mockRejectedValueOnce(rateLimitError)
+          .mockRejectedValueOnce(rateLimitError)
+          .mockImplementationOnce(async (_params, _session, options) => {
+            await options.onSessionReady('opencode-session-1');
+            const reply = {
+              purpose: 'closeout',
+              message: 'Connection restored.',
+              ...(suggestions ? { suggestions } : {}),
+            };
+            await expect(
+              invokeTool(nativeToolNames.sendChatReply, reply),
+            ).resolves.toEqual({
+              success: true,
+              delivered: true,
+              closed: true,
+              ...(suggestionDelivery === 'failure'
+                ? {
+                    suggestionsDelivered: false,
+                    warning:
+                      'The reply was delivered, but suggested task cards could not be posted. Do not resend the reply.',
+                  }
+                : {}),
+            });
+            await expect(
+              invokeTool(nativeToolNames.sendChatReply, reply),
+            ).resolves.toMatchObject({ success: false });
+            return '';
+          });
+        const postReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
+        if (suggestionDelivery === 'failure') {
+          postReply
+            .mockResolvedValueOnce({ messageId: 'retry-1' })
+            .mockRejectedValue(new Error('Suggestion post failed'));
+        }
+        const replaceReply = vi
+          .fn()
+          .mockResolvedValue({ messageId: 'retry-1' });
+        const adapter = callbacks({ postReply, replaceReply });
+
+        const resultPromise = answerFastAgentQuestion({
+          ...baseParams,
+          adapter,
+        });
+        await vi.runAllTimersAsync();
+
+        await expect(resultPromise).resolves.toBe('Connection restored.');
+        expect(postReply).toHaveBeenCalledTimes(suggestions ? 2 : 1);
+        expect(replaceReply).toHaveBeenCalledTimes(2);
+        if (suggestions) {
+          expect(postReply).toHaveBeenLastCalledWith({
+            purpose: 'closeout',
+            message: 'Suggested next steps:',
+            suggestions,
+          });
+        }
+        expect(postReply).toHaveBeenCalledWith(
+          expect.objectContaining({
+            purpose: 'progress',
+            message: expect.stringContaining('attempt 1/3'),
+          }),
+        );
+        expect(replaceReply).toHaveBeenNthCalledWith(
+          1,
+          { messageId: 'retry-1' },
+          expect.objectContaining({
+            purpose: 'progress',
+            message: expect.stringContaining('attempt 2/3'),
+          }),
+        );
+        expect(replaceReply).toHaveBeenLastCalledWith(
+          { messageId: 'retry-1' },
+          {
             purpose: 'closeout',
             message: 'Connection restored.',
-          });
-          return '';
+            ...(suggestions ? { suggestions } : {}),
+          },
+        );
+        expect(mocks.appendVisibleMessages).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            messages: expect.arrayContaining([
+              expect.objectContaining({
+                role: 'assistant',
+                content: [{ type: 'text', text: 'Connection restored.' }],
+              }),
+            ]),
+          }),
+        );
+        expect(
+          JSON.stringify(mocks.appendVisibleMessages.mock.lastCall),
+        ).not.toContain('Retrying in');
+        const retryWrites = mocks.upsertMessage.mock.calls
+          .map(([input]) => input.message)
+          .filter((message) => message.eventId === '100.2:retry-notice:0');
+        expect(retryWrites.length).toBeGreaterThan(1);
+        expect(
+          new Set(retryWrites.map((message) => message.eventId)).size,
+        ).toBe(1);
+        expect(retryWrites.at(-1)?.contentBlocks).toEqual([
+          { type: 'text', text: 'Connection restored.' },
+        ]);
+        expect(retryWrites[0]?.metadata).toMatchObject({
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
         });
-      const postReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
-      const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
-      const adapter = callbacks({ postReply, replaceReply });
-
-      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
-      await vi.runAllTimersAsync();
-
-      await expect(resultPromise).resolves.toBe('Connection restored.');
-      expect(postReply).toHaveBeenCalledOnce();
-      expect(postReply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          purpose: 'progress',
-          message: expect.stringContaining('attempt 1/3'),
-        }),
-      );
-      expect(replaceReply).toHaveBeenNthCalledWith(
-        1,
-        { messageId: 'retry-1' },
-        expect.objectContaining({
-          purpose: 'progress',
-          message: expect.stringContaining('attempt 2/3'),
-        }),
-      );
-      expect(replaceReply).toHaveBeenLastCalledWith(
-        { messageId: 'retry-1' },
-        { purpose: 'closeout', message: 'Connection restored.' },
-      );
-      expect(mocks.appendVisibleMessages).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          messages: expect.arrayContaining([
-            expect.objectContaining({
-              role: 'assistant',
-              content: [{ type: 'text', text: 'Connection restored.' }],
-            }),
-          ]),
-        }),
-      );
-      expect(
-        JSON.stringify(mocks.appendVisibleMessages.mock.lastCall),
-      ).not.toContain('Retrying in');
-      const retryWrites = mocks.upsertMessage.mock.calls
-        .map(([input]) => input.message)
-        .filter((message) => message.eventId === '100.2:retry-notice:0');
-      expect(retryWrites.length).toBeGreaterThan(1);
-      expect(new Set(retryWrites.map((message) => message.eventId)).size).toBe(
-        1,
-      );
-      expect(retryWrites.at(-1)?.contentBlocks).toEqual([
-        { type: 'text', text: 'Connection restored.' },
-      ]);
-      expect(retryWrites[0]?.metadata).toMatchObject({
-        inferenceRetryNotice: true,
-        inferenceRetryActive: true,
-      });
-      expect(retryWrites.at(-1)?.metadata).toMatchObject({
-        purpose: 'closeout',
-        inferenceRetryNotice: true,
-        inferenceRetryActive: false,
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+        expect(retryWrites.at(-1)?.metadata).toMatchObject({
+          purpose: 'closeout',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: false,
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('replaces the retry notice with the terminal provider failure', async () => {
     vi.useFakeTimers();
@@ -9977,69 +10077,116 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(persistedAssistantRows().at(-1)?.eventId).toBe(streamed[0]![0]);
     });
 
-    it('streams a long reply into the surface and delivers through the stream', async () => {
-      const streamCalls: string[] = [];
-      const activity = {
-        start: vi.fn(),
-        settle: vi.fn().mockResolvedValue(undefined),
-        dispose: vi.fn().mockResolvedValue(undefined),
-      };
-      const createReplyStream = vi.fn(() => ({
-        append: vi.fn(async (text: string) => {
-          streamCalls.push(`append:${text}`);
-        }),
-        finish: vi.fn(async (reply: { message: string }) => {
-          streamCalls.push(`finish:${reply.message}`);
-          return { messageId: 'slack-ts-1' };
-        }),
-        abort: vi.fn(async () => {
-          streamCalls.push('abort');
-        }),
-      }));
-      const postReply = vi.fn().mockResolvedValue({ messageId: 'posted' });
-      const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
-      mocks.generateText.mockImplementation(
-        async (_params, _session, options) => {
-          await options.onSessionReady('opencode-session-1');
-          options.onAssistantTextUpdated?.({
-            messageId: 'assistant-message-1',
-            partId: 'text-1',
-            text: 'Looking at',
-            completed: false,
-          });
-          await tick();
-          options.onAssistantTextUpdated?.({
-            messageId: 'assistant-message-1',
-            partId: 'text-1',
-            text: 'Looking at the deploy history.',
-            completed: true,
-          });
-          await tick();
-          await invokeTool(nativeToolNames.sendChatReply, {
+    it.each(['none', 'success', 'failure'] as const)(
+      'streams a long reply into the surface and delivers through the stream (suggestions=%s)',
+      async (suggestionDelivery) => {
+        const suggestions =
+          suggestionDelivery === 'none'
+            ? undefined
+            : [
+                {
+                  title: 'Investigate deploys',
+                  brief: 'Check recent deploy failures.',
+                },
+              ];
+        const streamCalls: string[] = [];
+        const activity = {
+          start: vi.fn(),
+          settle: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn().mockResolvedValue(undefined),
+        };
+        const createReplyStream = vi.fn(() => ({
+          append: vi.fn(async (text: string) => {
+            streamCalls.push(`append:${text}`);
+          }),
+          finish: vi.fn(async (reply: { message: string }) => {
+            streamCalls.push(`finish:${reply.message}`);
+            return { messageId: 'slack-ts-1' };
+          }),
+          abort: vi.fn(async () => {
+            streamCalls.push('abort');
+          }),
+        }));
+        const postReply = vi.fn().mockResolvedValue({ messageId: 'posted' });
+        if (suggestionDelivery === 'failure') {
+          postReply.mockRejectedValue(new Error('Suggestion post failed'));
+        }
+        const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+        mocks.generateText.mockImplementation(
+          async (_params, _session, options) => {
+            await options.onSessionReady('opencode-session-1');
+            options.onAssistantTextUpdated?.({
+              messageId: 'assistant-message-1',
+              partId: 'text-1',
+              text: 'Looking at',
+              completed: false,
+            });
+            await tick();
+            options.onAssistantTextUpdated?.({
+              messageId: 'assistant-message-1',
+              partId: 'text-1',
+              text: 'Looking at the deploy history.',
+              completed: true,
+            });
+            await tick();
+            await expect(
+              invokeTool(nativeToolNames.sendChatReply, {
+                purpose: 'closeout',
+                ...(suggestions ? { suggestions } : {}),
+              }),
+            ).resolves.toEqual({
+              success: true,
+              delivered: true,
+              closed: true,
+              ...(suggestionDelivery === 'failure'
+                ? {
+                    suggestionsDelivered: false,
+                    warning:
+                      'The reply was delivered, but suggested task cards could not be posted. Do not resend the reply.',
+                  }
+                : {}),
+            });
+            if (suggestions) {
+              await expect(
+                invokeTool(nativeToolNames.sendChatReply, {
+                  purpose: 'closeout',
+                  message: 'Looking at the deploy history.',
+                  suggestions,
+                }),
+              ).resolves.toMatchObject({ success: false });
+            }
+            expect(activity.settle).not.toHaveBeenCalled();
+            return 'Looking at the deploy history.';
+          },
+        );
+
+        const answer = await answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ postReply, createReplyStream, activity }),
+        });
+        expect(answer).toBe('Looking at the deploy history.');
+
+        expect(createReplyStream).toHaveBeenCalledTimes(1);
+        expect(activity.settle).toHaveBeenCalledOnce();
+        expect(streamCalls).toEqual([
+          'append:Looking at',
+          'append: the deploy history.',
+          'finish:Looking at the deploy history.',
+        ]);
+        if (suggestions) {
+          expect(postReply).toHaveBeenCalledExactlyOnceWith({
             purpose: 'closeout',
+            message: 'Suggested next steps:',
+            suggestions,
           });
-          expect(activity.settle).not.toHaveBeenCalled();
-          return 'Looking at the deploy history.';
-        },
-      );
-
-      await answerFastAgentQuestion({
-        ...baseParams,
-        adapter: callbacks({ postReply, createReplyStream, activity }),
-      });
-
-      expect(createReplyStream).toHaveBeenCalledTimes(1);
-      expect(activity.settle).toHaveBeenCalledOnce();
-      expect(streamCalls).toEqual([
-        'append:Looking at',
-        'append: the deploy history.',
-        'finish:Looking at the deploy history.',
-      ]);
-      expect(postReply).not.toHaveBeenCalled();
-      expect(persistedAssistantRows().at(-1)?.metadata).toMatchObject({
-        platformMessageId: 'slack-ts-1',
-      });
-    });
+        } else {
+          expect(postReply).not.toHaveBeenCalled();
+        }
+        expect(persistedAssistantRows().at(-1)?.metadata).toMatchObject({
+          platformMessageId: 'slack-ts-1',
+        });
+      },
+    );
 
     it('keeps turn activity alive after a streamed ack while a dispatched integration tool is pending', async () => {
       const activity = {

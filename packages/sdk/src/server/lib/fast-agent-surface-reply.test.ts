@@ -1,4 +1,11 @@
 const mocks = vi.hoisted(() => ({
+  createDiscordProvider: vi.fn(),
+  discordPostMessage: vi.fn(),
+  postSlackSuggestions: vi.fn(),
+  postDiscordSuggestions: vi.fn(),
+  postTeamsSuggestions: vi.fn(),
+  postTelegramSuggestions: vi.fn(),
+  requireOrigin: vi.fn(async () => 'canonical-session'),
   createTeamsProvider: vi.fn(),
   teamsPostMessage: vi.fn(),
   teamsUpdateMessage: vi.fn(),
@@ -19,6 +26,29 @@ const mocks = vi.hoisted(() => ({
   buildSourceControlDelivery: vi.fn(),
   sourceControlPostComment: vi.fn(),
   createConversationArtifact: vi.fn(),
+}));
+
+vi.mock('./fast-automation-suggestions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./fast-automation-suggestions')>()),
+  requireFastSuggestionOriginSessionId: mocks.requireOrigin,
+  postFastAutomationSuggestionsToSlack: mocks.postSlackSuggestions,
+  postFastAutomationSuggestionsToDiscord: mocks.postDiscordSuggestions,
+  postFastAutomationSuggestionsToTeams: mocks.postTeamsSuggestions,
+  postFastAutomationSuggestionsToTelegram: mocks.postTelegramSuggestions,
+}));
+
+vi.mock('./discord-communication', () => ({
+  createDiscordCommunicationProviderFromRuntimeCredentials:
+    mocks.createDiscordProvider,
+}));
+
+vi.mock('@roomote/redis', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/redis')>()),
+  getRedis: () => ({
+    set: async () => 'OK',
+    get: async () => null,
+    eval: async () => 1,
+  }),
 }));
 
 vi.mock('./artifacts/create-session-artifact', () => ({
@@ -105,6 +135,7 @@ async function createConversation(input: {
     | 'web'
     | 'automation'
     | 'slack'
+    | 'discord'
     | 'teams'
     | 'telegram'
     | 'linear'
@@ -131,6 +162,14 @@ async function createConversation(input: {
 describe('buildFastAgentSurfaceReplyDelivery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.discordPostMessage.mockResolvedValue({
+      channelId: 'channel-1',
+      messageId: 'discord-message-1',
+    });
+    mocks.createDiscordProvider.mockResolvedValue({
+      postMessage: mocks.discordPostMessage,
+      editMessage: vi.fn(),
+    });
     mocks.teamsPostMessage.mockResolvedValue({
       provider: 'teams',
       channelId: 'teams-channel-1',
@@ -182,6 +221,70 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       delivery!.adapter.postReply({ purpose: 'closeout', message: 'hi' }),
     ).resolves.toBeUndefined();
   });
+
+  it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
+    'publishes ordinary %s suggestions with canonical origin and the inbound turn key',
+    async (surface) => {
+      const user = await userFactory.create();
+      const conversation = await createConversation({
+        userId: user.id,
+        surface,
+        replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+      });
+      if (surface === 'slack') {
+        await db.insert(slackInstallations).values({
+          teamId: conversation.workspaceId,
+          teamName: 'Test',
+          appId: 'app-1',
+          scopes: 'chat:write',
+          botAccessToken: 'test-token',
+          botUserId: 'bot-1',
+          installedByUserId: user.id,
+        });
+      }
+      const delivery = await buildFastAgentSurfaceReplyDelivery({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Sender',
+        question: 'Next steps?',
+        currentMessageId: 'inbound-1',
+      });
+      const suggestions = [
+        {
+          title: 'Check retries',
+          brief: 'Verify the retry path.',
+          environmentId: '__all_repositories__',
+        },
+      ];
+      await delivery!.adapter.postReply({
+        purpose: 'closeout',
+        message: 'A next step.',
+        suggestions,
+      });
+      const publish = {
+        slack: mocks.postSlackSuggestions,
+        discord: mocks.postDiscordSuggestions,
+        teams: mocks.postTeamsSuggestions,
+        telegram: mocks.postTelegramSuggestions,
+      }[surface];
+      expect(mocks.requireOrigin).toHaveBeenCalledWith(conversation.id);
+      expect(publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          originSessionId: 'canonical-session',
+          channelId: 'channel-1',
+          ...(surface === 'slack'
+            ? { threadTs: 'thread-1' }
+            : { threadId: 'thread-1' }),
+          eventId: `fast:${conversation.id}:inbound-1`,
+          createdByUserId: user.id,
+          suggestions,
+          ...(surface === 'teams'
+            ? { serviceUrl: 'https://smba.example.com/amer/' }
+            : {}),
+        }),
+      );
+    },
+  );
 
   it('lets web follow-up turns create artifacts in the Session', async () => {
     const user = await userFactory.create();

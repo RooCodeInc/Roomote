@@ -409,16 +409,17 @@ function isFastAutomationReportEvent(
   );
 }
 
-/** Groups a report's suggestion cards; unique per run occurrence. */
-function buildFastAutomationSuggestionEventId(
-  event: Extract<
-    FastAgentParentEvent,
-    { type: 'automation_triggered' | 'task_settled' }
-  >,
+/** Preserve automation keys and match inline human-turn keys on replay. */
+function buildFastSuggestionEventId(
+  event: FastAgentParentEvent,
+  sessionId: string,
 ): string {
-  return event.type === 'automation_triggered'
-    ? event.eventId
-    : `${event.customAutomationId}:task:${event.taskId}`;
+  if (isFastAutomationReportEvent(event)) {
+    return event.type === 'automation_triggered'
+      ? event.eventId
+      : `${event.customAutomationId}:task:${event.taskId}`;
+  }
+  return `fast:${sessionId}:${event.type === 'human_follow_up' ? (event.currentMessageId ?? event.eventId) : buildEventClientMessageSeed(event)}`;
 }
 
 function buildPrReviewActionNonce(event: FastAgentParentEvent): string {
@@ -838,14 +839,13 @@ async function createSlackFastAgentParentTurn(
               }
             : null;
 
-        const reportMessage =
-          isFastAutomationReportEvent(params.event) && !kickoff
-            ? appendFastAutomationSuggestionInstruction(
-                message,
-                'slack',
-                suggestions.length > 0,
-              )
-            : message;
+        const reportMessage = !kickoff
+          ? appendFastAutomationSuggestionInstruction(
+              message,
+              'slack',
+              suggestions.length > 0,
+            )
+          : message;
         const contentBlocks = [
           { type: 'markdown' as const, text: reportMessage },
           ...images.map((image) => ({
@@ -926,7 +926,7 @@ async function createSlackFastAgentParentTurn(
               slack,
               channelId: conversation.replyTarget.channelId,
               threadTs: messageTs,
-              eventId: buildFastAutomationSuggestionEventId(params.event),
+              eventId: buildFastSuggestionEventId(params.event, session.id),
               createdByUserId: actorUserId,
               suggestions,
             });
@@ -971,7 +971,7 @@ async function createSlackFastAgentParentTurn(
               slack,
               channelId: conversation.replyTarget.channelId,
               threadTs: rootMessageId,
-              eventId: buildFastAutomationSuggestionEventId(params.event),
+              eventId: buildFastSuggestionEventId(params.event, session.id),
               createdByUserId: actorUserId,
               suggestions,
             });
@@ -1003,15 +1003,15 @@ async function createSlackFastAgentParentTurn(
           slack,
           channel: conversation.replyTarget.channelId,
           threadTs: threadId!,
-          text: action ? `${message}\n${action.question}` : message,
+          text: action ? `${reportMessage}\n${action.question}` : reportMessage,
           bodyBlocks: action
             ? buildSlackPrReviewActionBlocks({
-                text: message,
+                text: reportMessage,
                 question: action.question,
                 nonce: action.nonce,
               })
             : [
-                { type: 'markdown', text: message },
+                { type: 'markdown', text: reportMessage },
                 ...images.map((image) => ({
                   type: 'image' as const,
                   image_url: image.url,
@@ -1048,8 +1048,20 @@ async function createSlackFastAgentParentTurn(
           }
         }
         params.onReplyPosted();
-        // The handle lets the turn edit this message later (a retry notice
-        // becoming the answer), including from a run the queue resumes.
+        if (!kickoff && suggestions.length > 0) {
+          await postFastAutomationSuggestionsToSlack({
+            originSessionId: await requireFastSuggestionOriginSessionId(
+              session.id,
+            ),
+            slack,
+            channelId: conversation.replyTarget.channelId,
+            threadTs: threadId!,
+            eventId: buildFastSuggestionEventId(params.event, session.id),
+            createdByUserId: actorUserId,
+            suggestions,
+          });
+        }
+        // The handle lets a resumed turn replace its retry notice with the answer.
         return { messageId: messageTs };
       },
     },
@@ -1383,10 +1395,7 @@ async function createDiscordFastAgentParentTurn(
         sessionId: params.parent.sessionId,
         ...params.footerContext,
       });
-      const settleReport =
-        isFastAutomationReportEvent(params.event) && !kickoff
-          ? params.event
-          : null;
+      const settleReport = !kickoff ? params.event : null;
       const reportMessage = settleReport
         ? appendFastAutomationSuggestionInstruction(
             message,
@@ -1457,7 +1466,7 @@ async function createDiscordFastAgentParentTurn(
           ...(conversation.replyTarget.threadId
             ? { threadId: conversation.replyTarget.threadId }
             : {}),
-          eventId: buildFastAutomationSuggestionEventId(settleReport),
+          eventId: buildFastSuggestionEventId(settleReport, session.id),
           createdByUserId: actorUserId,
           suggestions,
         });
@@ -1561,14 +1570,13 @@ async function createTeamsFastAgentParentTurn(
           event: params.event,
           sessionId: params.parent.sessionId,
         });
-        const reportMessage =
-          isFastAutomationReportEvent(params.event) && !kickoff
-            ? appendFastAutomationSuggestionInstruction(
-                message,
-                'teams',
-                suggestions.length > 0,
-              )
-            : message;
+        const reportMessage = !kickoff
+          ? appendFastAutomationSuggestionInstruction(
+              message,
+              'teams',
+              suggestions.length > 0,
+            )
+          : message;
         const text = `${reportMessage}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: params.parent.sessionId, ...params.footerContext })}`;
         if (
           params.event.type === 'automation_triggered' &&
@@ -1620,11 +1628,7 @@ async function createTeamsFastAgentParentTurn(
           textFormat: 'markdown',
           images,
         });
-        if (
-          isFastAutomationReportEvent(params.event) &&
-          !kickoff &&
-          suggestions.length > 0
-        ) {
+        if (!kickoff && suggestions.length > 0) {
           await postFastAutomationSuggestionsToTeams({
             originSessionId: await requireFastSuggestionOriginSessionId(
               session.id,
@@ -1635,7 +1639,7 @@ async function createTeamsFastAgentParentTurn(
             ...(conversation.replyTarget.threadId
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
-            eventId: buildFastAutomationSuggestionEventId(params.event),
+            eventId: buildFastSuggestionEventId(params.event, session.id),
             createdByUserId: actorUserId,
             suggestions,
           });
@@ -1704,14 +1708,13 @@ async function createTelegramFastAgentParentTurn(
           event: params.event,
           sessionId: params.parent.sessionId,
         });
-        const reportMessage =
-          isFastAutomationReportEvent(params.event) && !kickoff
-            ? appendFastAutomationSuggestionInstruction(
-                message,
-                'telegram',
-                suggestions.length > 0,
-              )
-            : message;
+        const reportMessage = !kickoff
+          ? appendFastAutomationSuggestionInstruction(
+              message,
+              'telegram',
+              suggestions.length > 0,
+            )
+          : message;
         const posted = await provider.postMessage({
           channelId: conversation.replyTarget.channelId,
           ...(conversation.replyTarget.threadId
@@ -1726,11 +1729,7 @@ async function createTelegramFastAgentParentTurn(
           conversation,
           messageId: posted.lastTextMessageId ?? posted.messageId,
         });
-        if (
-          isFastAutomationReportEvent(params.event) &&
-          !kickoff &&
-          suggestions.length > 0
-        ) {
+        if (!kickoff && suggestions.length > 0) {
           await postFastAutomationSuggestionsToTelegram({
             originSessionId: await requireFastSuggestionOriginSessionId(
               session.id,
@@ -1740,7 +1739,7 @@ async function createTelegramFastAgentParentTurn(
             ...(conversation.replyTarget.threadId
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
-            eventId: buildFastAutomationSuggestionEventId(params.event),
+            eventId: buildFastSuggestionEventId(params.event, session.id),
             createdByUserId: actorUserId,
             suggestions,
           });

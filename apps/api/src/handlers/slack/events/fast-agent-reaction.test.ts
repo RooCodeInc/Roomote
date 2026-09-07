@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   releaseLock: vi.fn(),
   wakeParentEventAt: vi.fn(),
   wakeParentEventNow: vi.fn(),
+  postSuggestions: vi.fn(),
+  requireOrigin: vi.fn(async () => 'canonical-session-1'),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -35,6 +37,13 @@ vi.mock('@roomote/communication', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  appendFastAutomationSuggestionInstruction: (
+    text: string,
+    _surface: string,
+    hasSuggestions: boolean,
+  ) => (hasSuggestions ? `${text}\nStart below` : text),
+  postFastAutomationSuggestionsToSlack: mocks.postSuggestions,
+  requireFastSuggestionOriginSessionId: mocks.requireOrigin,
   buildFastAgentArtifactCreator: vi.fn(() => mocks.createArtifact),
   findFastAgentSessionForProviderMessage: mocks.findSession,
   persistFastAgentInlineHumanTurn: mocks.persistAdmission,
@@ -223,6 +232,57 @@ describe('Fast Slack reaction input', () => {
     );
     expect(mocks.postThreadMessage).not.toHaveBeenCalled();
   });
+
+  it.each(['posted', 'suppressed'])(
+    'publishes reaction suggestions only for visible replies: %s',
+    async (status) => {
+      const suggestions = [
+        {
+          title: 'Fix it',
+          brief: 'Investigate',
+          environmentId: '__all_repositories__',
+        },
+      ];
+      mocks.postThreadMessage.mockResolvedValueOnce(
+        status === 'posted' ? { messageId: '103.000' } : status,
+      );
+      mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
+        await adapter.postReply({ message: 'Next steps', suggestions });
+        return '';
+      });
+      const slack = {
+        getMessage: vi.fn(async () => ({ text: 'Help', thread_ts: '100.000' })),
+        normalizeIncomingText: vi.fn(async () => '@alice'),
+      };
+      await maybeRouteFastAgentReaction({
+        context: {
+          teamId: 'T1',
+          slackInstallation: { botUserId: 'UROOMOTE' },
+          slack,
+        } as never,
+        event: {
+          type: 'reaction_added',
+          user: 'UALICE',
+          reaction: 'heart',
+          item: { type: 'message', channel: 'C1', ts: '101.000' },
+          event_ts: '102.000',
+        },
+      });
+      await vi.waitFor(() => expect(mocks.releaseLock).toHaveBeenCalled());
+      if (status === 'posted') {
+        expect(mocks.requireOrigin).toHaveBeenCalledWith('session-1');
+        expect(mocks.postSuggestions).toHaveBeenCalledWith({
+          originSessionId: 'canonical-session-1',
+          slack,
+          channelId: 'C1',
+          threadTs: '100.000',
+          eventId: 'fast:session-1:slack-reaction:102.000',
+          createdByUserId: 'user-1',
+          suggestions,
+        });
+      } else expect(mocks.postSuggestions).not.toHaveBeenCalled();
+    },
+  );
 
   it('attaches a selected Session image in a reaction-triggered reply', async () => {
     mocks.resolveSessionImages.mockResolvedValueOnce([

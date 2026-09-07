@@ -270,7 +270,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Deliver a user-visible reply. Write the reply as ordinary assistant text first, then call this with its purpose; the text you wrote since your last reply is delivered. Fast automation reports may attach launchable suggested tasks on Slack or Discord.",
+  description: "Deliver a user-visible reply. Write the reply as ordinary assistant text first, then call this with its purpose; the text you wrote since your last reply is delivered. Closeouts may optionally attach useful concrete launchable suggested tasks on Slack, Discord, Teams, or Telegram.",
   args: {
     message: z.string().min(1).optional().describe("Markdown reply text. Omit to deliver the assistant text written since the last reply; pass it only when the reply was not written as text."),
     purpose: z.enum(["ack", "progress", "closeout", "clarification"]),
@@ -279,7 +279,7 @@ export default {
       title: z.string().min(1).max(140),
       brief: z.string().min(1).max(2000),
       environmentId: z.string().min(1).optional().describe(${JSON.stringify(`Exact environment ID from the system prompt, "${ALL_REPOSITORIES}" for all repositories, or "${FAST_EXECUTION}" for Fast mode. Omit to use normal workspace routing.`)}),
-    })).max(10).optional().describe("Launchable follow-ups for a Slack or Discord automation report only"),
+    })).max(10).optional().describe("Optional concrete launchable follow-ups for a Slack, Discord, Teams, or Telegram closeout only"),
   },
   execute: (args, context) => invoke("send_chat_reply", args, context),
 }

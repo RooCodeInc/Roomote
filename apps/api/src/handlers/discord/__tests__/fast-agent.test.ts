@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   resolveSuggestionConversation: vi.fn(),
   resolveChannel: vi.fn(),
   getSession: vi.fn(),
+  postSuggestions: vi.fn(),
+  requireOrigin: vi.fn(async () => 'canonical-session-1'),
 }));
 
 vi.mock('../../tasks/suggestion-launch.js', () => ({
@@ -41,6 +43,13 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  appendFastAutomationSuggestionInstruction: (
+    text: string,
+    _surface: string,
+    hasSuggestions: boolean,
+  ) => (hasSuggestions ? `${text}\nStart below` : text),
+  postFastAutomationSuggestionsToDiscord: mocks.postSuggestions,
+  requireFastSuggestionOriginSessionId: mocks.requireOrigin,
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
   createFastAgentConversationArtifact: mocks.createConversationArtifact,
   persistFastAgentInlineHumanTurn: vi.fn(async () => null),
@@ -365,6 +374,60 @@ describe('processDiscordFastAgentMessage', () => {
     expect(onAccepted).toHaveBeenCalledWith(abort);
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
   });
+
+  it.each([true, false])(
+    'publishes ordinary suggestions after successful delivery: %s',
+    async (withSuggestions) => {
+      const suggestions = withSuggestions
+        ? [{ title: 'Fix it', brief: 'Investigate', environmentId: '__fast__' }]
+        : [];
+      mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
+        await adapter.postReply({ message: 'Next steps', suggestions });
+        return '';
+      });
+      const provider = { editMessage: vi.fn() };
+      await processDiscordFastAgentMessage({
+        eventId: 'event-1',
+        anchorMessageId: 'human-message-1',
+        question: 'Help',
+        sender: { id: 'discord-user-1', username: 'user' } as never,
+        senderUserId: 'user-1',
+        provider: provider as never,
+        applicationId: 'app-1',
+        channel: {
+          channelId: 'thread-1',
+          parentChannelId: 'channel-1',
+          guildId: 'guild-1',
+          isThread: true,
+        } as never,
+        metadata: {
+          communicationChannelId: 'channel-1',
+          communicationThreadId: 'thread-1',
+        } as never,
+        conversationId: 'thread-1',
+      });
+      if (withSuggestions) {
+        expect(mocks.requireOrigin).toHaveBeenCalledWith('fast-session-1');
+        expect(mocks.postSuggestions).toHaveBeenCalledWith({
+          originSessionId: 'canonical-session-1',
+          provider,
+          channelId: 'channel-1',
+          threadId: 'thread-1',
+          eventId: 'fast:fast-session-1:human-message-1',
+          createdByUserId: 'user-1',
+          suggestions,
+        });
+        expect(mocks.reply).toHaveBeenCalledWith(
+          expect.objectContaining({
+            text: expect.stringContaining('Next steps\nStart below'),
+          }),
+        );
+      } else {
+        expect(mocks.postSuggestions).not.toHaveBeenCalled();
+        expect(mocks.requireOrigin).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it('replaces a Fast retry notice in place', async () => {
     const provider = {

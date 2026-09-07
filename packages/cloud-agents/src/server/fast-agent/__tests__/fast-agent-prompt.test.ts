@@ -225,7 +225,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(eventPrompt).toContain('unless the prompt names a different one');
   });
 
-  it('offers suggestions on an automation task-settled report only', () => {
+  it('preserves automation report context without restricting suggestions to it', () => {
     const settlePrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       turnSource: 'platform_event',
@@ -241,7 +241,30 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(settlePrompt).toContain("this closeout is that run's report");
     expect(settlePrompt).toContain('`suggestions` array');
     expect(settlePrompt).not.toContain('Execute the automation prompt now');
-    expect(plainSettlePrompt).not.toContain('`suggestions` array');
+    expect(plainSettlePrompt).toContain('`suggestions` array');
+    expect(plainSettlePrompt).not.toContain(
+      "this closeout is that run's report",
+    );
+  });
+
+  it.each([
+    'human',
+    'automation',
+    'delegated_task',
+    'scheduled_wakeup',
+  ] as const)('offers optional concrete follow-ups on %s turns', (event) => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: event === 'human' ? 'human' : 'platform_event',
+      platformEventKind: event === 'human' ? undefined : event,
+    });
+    expect(prompt).toContain("closeout's `suggestions` array");
+    expect(prompt).toContain('Slack, Discord, Teams, or Telegram');
+    expect(prompt).toContain(
+      'do not add suggestions to every reply or invent work',
+    );
+    expect(prompt).toContain('never invent an ID');
+    expect(prompt).toContain('do not promise reaction-triggered launching');
   });
 
   it('omits the release identifier when no version is resolved', () => {
