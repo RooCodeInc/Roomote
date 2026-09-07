@@ -525,7 +525,12 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     await this.callBotApi('setWebhook', {
       url: input.url,
       secret_token: input.secretToken,
-      allowed_updates: ['message', 'callback_query', 'message_reaction'],
+      allowed_updates: [
+        'message',
+        'callback_query',
+        'message_reaction',
+        'managed_bot',
+      ],
     });
   }
 
@@ -535,6 +540,10 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       commands: [
         { command: 'start', description: 'Show welcome and command help' },
         { command: 'new', description: 'Start a fresh task' },
+        {
+          command: 'sessionbot',
+          description: 'Create a bot for this existing Session',
+        },
       ],
     });
   }

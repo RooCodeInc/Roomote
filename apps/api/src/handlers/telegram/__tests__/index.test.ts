@@ -42,6 +42,8 @@ const {
   findFastReplySessionMock,
   getFastSessionMock,
   isFastProviderMessageMock,
+  managedBotRouteMock,
+  managedBotCandidateMock,
 } = vi.hoisted(() => ({
   addReactionMock: vi.fn(),
   answerCallbackQueryMock: vi.fn(),
@@ -88,6 +90,8 @@ const {
   findFastReplySessionMock: vi.fn(),
   getFastSessionMock: vi.fn(),
   isFastProviderMessageMock: vi.fn(),
+  managedBotRouteMock: vi.fn(),
+  managedBotCandidateMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -108,6 +112,8 @@ vi.mock('@roomote/redis', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  getTelegramManagedBotRoute: managedBotRouteMock,
+  recordTelegramManagedBotCandidate: managedBotCandidateMock,
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
   asc: vi.fn((column: unknown) => ({ asc: column })),
   setTrustedRunActingUser: setTrustedRunActingUserMock,
@@ -373,6 +379,57 @@ function mockTelegramLinkedSender(userId = 'launch-owner-1') {
 }
 
 describe('Telegram webhook handler', () => {
+  it('authenticates native managed_bot events with the main secret before recording candidates', async () => {
+    const body = {
+      update_id: 321,
+      managed_bot: {
+        user: { id: 111, is_bot: false },
+        bot: { id: 888, is_bot: true, username: 'session_test_bot' },
+      },
+    };
+    const rejected = await createApp().request('/telegram', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-telegram-bot-api-secret-token': 'child-secret',
+      },
+      body: JSON.stringify(body),
+    });
+    expect(rejected.status).toBe(401);
+    expect(managedBotCandidateMock).not.toHaveBeenCalled();
+    const accepted = await postTelegramUpdate(body);
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toEqual({
+      ok: true,
+      managedBotHandled: true,
+    });
+    expect(managedBotCandidateMock).toHaveBeenCalledWith({
+      ownerTelegramUserId: '111',
+      botId: '888',
+      botUsername: 'session_test_bot',
+      managementUpdateId: 321,
+    });
+    expect(queueFastReplyMock).not.toHaveBeenCalled();
+    expect(getFastSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('mounts managed children separately and never admits the main secret on that route', async () => {
+    managedBotRouteMock.mockResolvedValue({ webhookSecret: 'child-secret' });
+    const response = await createApp().request('/telegram/managed/888', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-telegram-bot-api-secret-token': 'secret',
+      },
+      body: JSON.stringify(createTelegramUpdate()),
+    });
+    expect(response.status).toBe(401);
+    expect(managedBotRouteMock).toHaveBeenCalledWith('888');
+    expect(taskRunsFindFirstMock).not.toHaveBeenCalled();
+    expect(queueFastReplyMock).not.toHaveBeenCalled();
+    expect(answerCallbackQueryMock).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     appendAccountLinkHelpTextMock.mockImplementation(
@@ -397,6 +454,8 @@ describe('Telegram webhook handler', () => {
     findFastReplySessionMock.mockResolvedValue(null);
     getFastSessionMock.mockResolvedValue({ id: 'fast-session-default' });
     isFastProviderMessageMock.mockResolvedValue(false);
+    managedBotRouteMock.mockResolvedValue(null);
+    managedBotCandidateMock.mockResolvedValue(null);
 
     envMock.R_APP_URL = 'https://app.example.com';
     envMock.R_TELEGRAM_BOT_TOKEN = 'bot-token';

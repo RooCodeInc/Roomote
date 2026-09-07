@@ -269,3 +269,13 @@ export type {
   SessionBackfillPhase,
 } from './schema';
 export type { AutomationWorkItemDisposition } from '@roomote/types';
+export {
+  beginTelegramManagedBotPairing,
+  recordTelegramManagedBotCandidate,
+  selectTelegramManagedBotCandidate,
+  provisionTelegramManagedBot,
+  getTelegramManagedBotRoute,
+  activateTelegramManagedBot,
+  disconnectTelegramManagedBot,
+  resolveTelegramManagedBotCredentials,
+} from './lib/telegram-managed-bots';

@@ -1,9 +1,14 @@
-import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import {
+  RunStatus,
+  TaskPayloadKind,
+  buildFastAgentChildTaskMetadata,
+} from '@roomote/types';
 import { tasks, type TaskRun, type Task } from '@roomote/db/server';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockFindFirstRun = vi.fn();
+const mockFindFastSession = vi.fn();
 const mockFindManyRuns = vi.fn();
 const mockFindFirstTask = vi.fn();
 const mockFindManyTaskPullRequests = vi.fn();
@@ -182,6 +187,9 @@ const mockFinalizeGithubPrReviewComment = vi.fn().mockResolvedValue({
 });
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  fastAgentConversationRepository: {
+    findById: (...args: unknown[]) => mockFindFastSession(...args),
+  },
   enqueueTask: vi.fn(),
   releaseTaskRun: vi.fn().mockResolvedValue(undefined),
   getTaskUrl: vi.fn().mockReturnValue('https://example.com/task'),
@@ -2161,6 +2169,15 @@ describe('finishRun', () => {
   });
 
   describe('Telegram task notifications', () => {
+    const parent = {
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-main',
+        conversationId: 'old-chat',
+        replyTarget: { channelId: 'old-chat', threadId: 'old-topic' },
+      },
+    };
     const telegramPayload = {
       repo: 'owner/repo',
       communicationProvider: 'telegram',
@@ -2170,6 +2187,14 @@ describe('finishRun', () => {
     } as unknown as TaskRun['payload'];
 
     beforeEach(() => {
+      mockFindFastSession.mockResolvedValue({
+        id: parent.sessionId,
+        conversation: {
+          ...parent.conversation,
+          workspaceId: 'telegram-bot:123',
+          replyTarget: { channelId: 'owner-chat', threadId: 'current-topic' },
+        },
+      });
       mockCreateTelegramCommunicationProvider.mockResolvedValue({
         postMessage: mockTelegramPostMessage,
       });
@@ -2190,7 +2215,88 @@ describe('finishRun', () => {
         text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n**Error details:** The provider returned an error: API key is invalid.\n\n[Open the task](https://example.com/task)",
         textFormat: 'markdown',
       });
+      expect(mockCreateTelegramCommunicationProvider).toHaveBeenCalledWith();
+      expect(mockFindFastSession).not.toHaveBeenCalled();
     });
+
+    it.each(['current-topic', undefined])(
+      'rebases a pre-activation child onto the current Session route (%s)',
+      async (threadId) => {
+        mockFindFastSession.mockResolvedValue({
+          id: parent.sessionId,
+          conversation: {
+            ...parent.conversation,
+            workspaceId: 'telegram-bot:123',
+            replyTarget: { channelId: 'owner-chat', threadId },
+          },
+        });
+        mockFindFirstRun.mockResolvedValue(
+          makeRun({
+            payload: {
+              ...telegramPayload,
+              ...buildFastAgentChildTaskMetadata(parent),
+            },
+          }),
+        );
+
+        await finishRun({ id: 1, status: RunStatus.Failed });
+
+        expect(mockFindFastSession).toHaveBeenCalledWith({
+          id: parent.sessionId,
+          fallbackConversation: parent.conversation,
+        });
+        expect(
+          mockCreateTelegramCommunicationProvider,
+        ).toHaveBeenCalledExactlyOnceWith({
+          workspaceId: 'telegram-bot:123',
+          sessionId: parent.sessionId,
+        });
+        expect(mockTelegramPostMessage).toHaveBeenCalledExactlyOnceWith({
+          channelId: 'owner-chat',
+          ...(threadId ? { threadId } : {}),
+          text: expect.any(String),
+          textFormat: 'markdown',
+        });
+      },
+    );
+
+    it.each(['missing', 'changed', 'revoked'])(
+      'fails closed for a %s Fast parent',
+      async (state) => {
+        mockFindFirstRun.mockResolvedValue(
+          makeRun({
+            payload: {
+              ...telegramPayload,
+              ...buildFastAgentChildTaskMetadata(parent),
+            },
+          }),
+        );
+        if (state === 'missing') mockFindFastSession.mockResolvedValue(null);
+        if (state === 'changed')
+          mockFindFastSession.mockResolvedValue({
+            id: parent.sessionId,
+            conversation: { ...parent.conversation, surface: 'slack' },
+          });
+        if (state === 'revoked')
+          mockCreateTelegramCommunicationProvider.mockResolvedValue(null);
+
+        await finishRun({ id: 1, status: RunStatus.Failed });
+
+        expect(mockTelegramPostMessage).not.toHaveBeenCalled();
+        if (state === 'revoked') {
+          expect(
+            mockCreateTelegramCommunicationProvider,
+          ).toHaveBeenCalledExactlyOnceWith({
+            workspaceId: 'telegram-bot:123',
+            sessionId: parent.sessionId,
+          });
+        } else {
+          expect(
+            mockCreateTelegramCommunicationProvider,
+          ).not.toHaveBeenCalled();
+        }
+      },
+    );
   });
 
   describe('GitHub PR review checks', () => {

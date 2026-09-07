@@ -19,7 +19,7 @@ Use `<public-url>` below for your stable public Roomote URL.
 Message `@BotFather` in Telegram and create or select a bot. In the Roomote UI
 (**Settings > Communications > Telegram**), enter the bot token, then save.
 Roomote reads the bot identity from Telegram, generates a webhook secret,
-registers the Bot API webhook, and adds `/start` and `/new` to the bot's command
+registers the Bot API webhook, and adds `/start`, `/new`, and `/sessionbot` to the bot's command
 menu for you.
 
 In BotFather, open **Bot Settings > Threaded Mode** and enable it. Roomote will
@@ -65,8 +65,8 @@ header, and outbound replies use `R_TELEGRAM_BOT_TOKEN`.
 
 When you save Telegram credentials in Roomote, the webhook is registered
 automatically at `<public-url>/api/webhooks/telegram` with the managed secret
-token and `allowed_updates` including `message`, `callback_query`, and
-`message_reaction`. Roomote uses newly added 👍 reactions on suggested-task
+token and `allowed_updates` including `message`, `callback_query`,
+`message_reaction`, and `managed_bot`. Roomote uses newly added 👍 reactions on suggested-task
 messages to launch the selected task and user-attributed reactions on Roomote
 Fast replies as conversation input. Roomote does not request
 `message_reaction_count`: those aggregate updates do not identify the reacting
@@ -84,7 +84,7 @@ curl -sS "https://api.telegram.org/bot${R_TELEGRAM_BOT_TOKEN}/setWebhook" \
   -d '{
     "url": "<public-url>/api/webhooks/telegram",
     "secret_token": "<random-secret>",
-    "allowed_updates": ["message", "callback_query", "message_reaction"]
+    "allowed_updates": ["message", "callback_query", "message_reaction", "managed_bot"]
   }'
 ```
 
@@ -130,6 +130,55 @@ Photos are passed to Fast or the task as image input. Supported text documents
 are downloaded server-side and their extracted content is added to the request;
 voice and audio messages are transcribed when supported. The bot token is never
 included in the prompt or attachment URL.
+
+## Dedicated session bots
+
+A dedicated bot can continue one existing private Telegram Fast Session. This
+does not create a second Session or require a separate Cloud pairing service.
+Your deployment's main Telegram bot manages the new bot.
+
+### Operator prerequisites
+
+Enable **Bot Management Mode** for the main bot in `@BotFather`. Keep the
+deployment's public HTTPS URL stable, and use **Repair** in Roomote's Telegram
+settings after upgrading so the main webhook includes `managed_bot` updates.
+Do not replace the main bot token with a session bot token. Roomote obtains the
+child token through Telegram and stores it encrypted with a separate webhook
+secret. Existing deployments do not need a new credential for this feature.
+
+### Connect an existing Session
+
+1. Link your Telegram account and start a private conversation with the main bot.
+2. Send `/sessionbot` in that Session's topic or as a reply to its Fast answer.
+   In a private chat without topics, it selects that chat's existing Session.
+3. Choose **Yes, create bot** and confirm Telegram's native creation flow. The
+   suggested name and username are editable.
+4. Check the returned bot username and Session identifier, then explicitly
+   confirm that pair. Telegram does not return the creation request identifier,
+   so Roomote does not bind a bot just because its name or owner matches.
+5. Choose **Open session bot** within five minutes and start the child bot with
+   the same linked Telegram account. Wait for the connection confirmation.
+
+Only one creation request per owner can be pending for 15 minutes. Repeating
+`/sessionbot` acknowledges the existing request rather than silently replacing
+it. Once a bot is selected, its original confirmation button can retry setup or
+reopen the same unexpired activation link. Activation waits until the Session
+is idle with no pending work; retry the link before it expires if it is busy.
+Telegram may require additional confirmation steps; there is no fixed tap count.
+
+Messages, supported attachments, and background task results use the dedicated
+bot and continue the same durable Session. Only its linked owner's private chat
+is accepted. Groups, other users, reactions, and action buttons are not supported
+in this first version. Reply in text to request an action; `/new` does not create
+another Session in a dedicated bot. Use the web continuation link for the full
+Session interface.
+
+Send `/disconnect` to stop child-bot delivery without deleting the Session or
+its history. The Session remains available in Roomote's web app, and delivery
+does not fall back to the main bot. Requests already sent to Telegram may finish.
+Reconnecting a disconnected Session, reusing an expired or revoked bot, and
+automatic recovery after a Telegram token or owner change are not supported in
+this version. Such changes disable the binding; use the web Session to continue.
 
 ## Local URL changes
 

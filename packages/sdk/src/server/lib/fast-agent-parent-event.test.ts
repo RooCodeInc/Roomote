@@ -1711,6 +1711,48 @@ describe('deliverFastAgentParentEvent', () => {
     },
   );
 
+  it('loads the activated child route for a background event queued through the main bot', async () => {
+    const conversation = {
+      surface: 'telegram' as const,
+      workspaceId: 'telegram-bot:456',
+      conversationId: 'old-main-conversation',
+      replyTarget: { channelId: '789' },
+    };
+    mocks.findSession.mockResolvedValue({
+      id: parent.sessionId,
+      userId: 'u1',
+      conversation,
+      compatibilityMessages: [],
+      openCodeSessionId: null,
+    });
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          ...conversation,
+          workspaceId: '789',
+          replyTarget: { channelId: '789', threadId: 'old-topic' },
+        },
+      },
+      event,
+    });
+    expect(mocks.createTelegramProvider).toHaveBeenCalledWith({
+      workspaceId: 'telegram-bot:456',
+      sessionId: parent.sessionId,
+    });
+    expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '789',
+        images: expect.arrayContaining([
+          expect.objectContaining({ contentType: 'image/png' }),
+        ]),
+      }),
+    );
+    expect(mocks.telegramPostMessage.mock.calls[0]![0]).not.toHaveProperty(
+      'threadId',
+    );
+  });
+
   it('updates the Teams automation root instead of posting a duplicate report', async () => {
     await deliverFastAgentParentEvent({
       parent: {

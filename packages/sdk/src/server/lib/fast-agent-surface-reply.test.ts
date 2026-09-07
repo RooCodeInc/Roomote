@@ -511,6 +511,15 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       post: mocks.telegramPostMessage,
       replace: mocks.telegramEditMessage,
     },
+    {
+      surface: 'telegram' as const,
+      workspaceId: 'telegram-bot:456',
+      channelId: '789',
+      threadId: undefined,
+      currentMessageId: '123',
+      post: mocks.telegramPostMessage,
+      replace: mocks.telegramEditMessage,
+    },
   ])(
     'serves $surface sessions with provider-backed reply and replacement adapters',
     async ({
@@ -546,6 +555,12 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         purpose: 'closeout',
         message: 'Done',
       });
+      if (surface === 'telegram') {
+        expect(mocks.createTelegramProvider).toHaveBeenCalledWith({
+          workspaceId,
+          sessionId: conversation!.id,
+        });
+      }
       const binding = await db.query.fastAgentProviderMessages.findFirst({
         where: and(
           eq(fastAgentProviderMessages.provider, surface),

@@ -107,6 +107,10 @@ import {
   verifyTelegramWebhookSecret,
 } from './webhook-gate.js';
 import { appendAccountLinkHelpText } from '../account-link-help.js';
+import {
+  handleTelegramManagedBotUpdate,
+  telegramManagedBots,
+} from './managed-bots.js';
 
 // Deep-link payload used by the group "link account" button: tapping
 // https://t.me/<bot>?start=link opens the bot's DM with "/start link".
@@ -119,6 +123,8 @@ type TelegramWebhookVariables = {
 export const telegram = new Hono<{
   Variables: TelegramWebhookVariables;
 }>();
+
+telegram.route('/managed', telegramManagedBots);
 
 telegram.onError(async (error, c) => {
   const claimedUpdateId = c.get('claimedUpdateId');
@@ -162,6 +168,9 @@ telegram.post('/', async (c) => {
   }
 
   const update = parsed.data;
+  if (await handleTelegramManagedBotUpdate(update)) {
+    return c.json({ ok: true, managedBotHandled: true });
+  }
   const messageReaction = getTelegramUpdateMessageReaction(update);
 
   if (messageReaction) {

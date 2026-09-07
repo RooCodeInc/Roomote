@@ -20,7 +20,7 @@ import {
 } from '@roomote/communication/chat-messages';
 import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
-import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../telegram-communication';
+import { resolveTelegramTaskRunRouting } from './telegram-task-run-routing';
 import { Env, isBrainConfigured } from '@roomote/env';
 import {
   type TaskRun,
@@ -1009,25 +1009,15 @@ async function sendTelegramFailureNotification(
   run: FinishedRun,
   error?: string,
 ): Promise<void> {
-  const provider =
-    await createTelegramCommunicationProviderFromRuntimeCredentials();
-  if (!provider) {
+  const routing = await resolveTelegramTaskRunRouting(run.payload);
+  if (!routing) {
     console.warn(
-      `[finishRun] Telegram bot credentials are not configured, skipping Telegram failure notification for run ${run.id}`,
+      `[finishRun] Telegram routing or credentials are unavailable, skipping Telegram failure notification for run ${run.id}`,
     );
     return;
   }
 
-  const channelId = getCommunicationChannelFromTaskPayload(run.payload);
-  if (!channelId) {
-    console.warn(
-      `[finishRun] Missing Telegram channel metadata for run ${run.id}, skipping Telegram failure notification`,
-    );
-    return;
-  }
-
-  const threadId = getCommunicationThreadIdFromTaskPayload(run.payload);
-  const messageId = getCommunicationMessageIdFromTaskPayload(run.payload);
+  const { provider, channelId, threadId, messageId } = routing;
   const failureText = hasReachedTaskRuntime(run)
     ? TASK_RUNTIME_FAILURE_TEXT
     : TASK_STARTUP_FAILURE_TEXT;
