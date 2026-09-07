@@ -19,6 +19,7 @@ import {
 } from '@/lib/server/fast-sessions';
 import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { WorkspaceHeader } from '@/components/layout';
+import { SessionViewers } from '@/components/sessions/SessionViewers';
 
 import { findDeploymentSetupSessionId } from '@/trpc/commands/setup/setup-session';
 import { FastSessionTranscript } from './FastSessionTranscript';
@@ -186,12 +187,15 @@ export default async function SessionDetailPage({
             <>
               <WorkspaceHeader
                 className="py-4"
-                contentClassName={SESSION_HEADER_CONTENT_CLASS_NAME}
+                contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-nowrap`}
+                actions={<SessionViewers sessionId={unifiedSession.id} />}
               >
-                <h1 className={SESSION_HEADER_TITLE_CLASS_NAME}>
-                  {unifiedSession.title}
-                </h1>
-                <SessionHeaderPullRequests />
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                  <h1 className={SESSION_HEADER_TITLE_CLASS_NAME}>
+                    {unifiedSession.title}
+                  </h1>
+                  <SessionHeaderPullRequests />
+                </div>
               </WorkspaceHeader>
               <SessionTaskTimeline
                 sessionId={unifiedSession.id}

@@ -2,12 +2,14 @@ import { cn } from '@/lib/utils';
 
 type WorkspaceHeaderProps = React.ComponentProps<'header'> & {
   contentClassName?: string;
+  actions?: React.ReactNode;
 };
 
 export function WorkspaceHeader({
   children,
   className,
   contentClassName,
+  actions,
   ...props
 }: WorkspaceHeaderProps) {
   return (
@@ -25,6 +27,7 @@ export function WorkspaceHeader({
         )}
       >
         {children}
+        {actions}
       </div>
     </header>
   );

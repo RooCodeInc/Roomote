@@ -16,6 +16,8 @@ import {
 } from './FastSessionTranscript';
 import { SessionRunningTaskCountContext } from './session-task-panel-context';
 
+vi.mock('@/hooks/useSessionViewers', () => ({ useSessionViewers: () => [] }));
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => '/sessions/session-1',
@@ -1914,13 +1916,9 @@ describe('FastSessionTranscript', () => {
     const heading = screen.getByRole('heading', {
       name: 'Short session title',
     });
-    expect(heading).toHaveClass('max-w-full', 'flex-[0_1_auto]');
-    expect(heading.parentElement).toHaveClass(
-      'flex-row',
-      'flex-wrap',
-      'items-center',
+    expect(heading.closest('header')).toContainElement(
+      screen.getByRole('link', { name: 'widgets#42' }),
     );
-    expect(heading.parentElement?.className).not.toContain('@[480px]');
   });
 
   it('hides the reply composer for non-web sessions', () => {

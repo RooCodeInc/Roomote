@@ -3,6 +3,7 @@ import type { Redis } from 'ioredis';
 import {
   disconnectSessionPresence,
   isSessionUserPresent,
+  listSessionPresentUserIds,
   refreshSessionPresence,
   SESSION_PRESENCE_LEASE_MS,
 } from '../session-presence';
@@ -22,6 +23,12 @@ class PresenceRedis {
         return chain;
       },
       pexpire: () => chain,
+      zrem: (key: string, member: string) => {
+        operations.push(() => {
+          void this.zrem(key, member);
+        });
+        return chain;
+      },
       exec: async () => {
         operations.forEach((operation) => operation());
         return [];
@@ -57,6 +64,12 @@ class PresenceRedis {
   async zcard(key: string) {
     return this.sets.get(key)?.size ?? 0;
   }
+
+  async zrangebyscore(key: string, min: string, _max: string) {
+    return [...(this.sets.get(key) ?? [])]
+      .filter(([, score]) => score > Number(min.slice(1)))
+      .map(([member]) => member);
+  }
 }
 
 const identity = { sessionId: 'session-1', userId: 'user-1' };
@@ -66,6 +79,62 @@ describe('Session presence leases', () => {
 
   beforeEach(() => {
     redis = new PresenceRedis() as unknown as Redis;
+  });
+
+  it('lists distinct viewers across tabs and excludes expired leases at the deadline', async () => {
+    await refreshSessionPresence(
+      { ...identity, clientId: 'tab-1' },
+      { now: 1_000, redis },
+    );
+    await refreshSessionPresence(
+      { ...identity, clientId: 'tab-2' },
+      { now: 2_000, redis },
+    );
+    await refreshSessionPresence(
+      { ...identity, userId: 'user-2', clientId: 'tab-1' },
+      { now: 1_000, redis },
+    );
+    await expect(
+      listSessionPresentUserIds(identity.sessionId, { now: 2_000, redis }),
+    ).resolves.toEqual(['user-1', 'user-2']);
+    await expect(
+      listSessionPresentUserIds(identity.sessionId, { now: 31_000, redis }),
+    ).resolves.toEqual(['user-1']);
+    await expect(
+      listSessionPresentUserIds(identity.sessionId, { now: 32_000, redis }),
+    ).resolves.toEqual([]);
+  });
+
+  it('refreshes indexed leases and isolates disconnects between tabs, users, and sessions', async () => {
+    const lease = { ...identity, clientId: 'tab-1' };
+    await refreshSessionPresence(lease, { now: 1_000, redis });
+    await refreshSessionPresence(lease, { now: 20_000, redis });
+    await refreshSessionPresence(
+      { ...lease, clientId: 'tab-2' },
+      { now: 20_000, redis },
+    );
+    await refreshSessionPresence(
+      { ...lease, userId: 'user-2' },
+      { now: 20_000, redis },
+    );
+    await refreshSessionPresence(
+      { ...lease, sessionId: 'session-2' },
+      { now: 20_000, redis },
+    );
+    await disconnectSessionPresence({ ...lease, clientId: 'tab-2' }, { redis });
+    await expect(
+      listSessionPresentUserIds(identity.sessionId, { now: 35_000, redis }),
+    ).resolves.toEqual(['user-1', 'user-2']);
+    await disconnectSessionPresence(lease, { redis });
+    await expect(
+      listSessionPresentUserIds(identity.sessionId, { now: 35_000, redis }),
+    ).resolves.toEqual(['user-2']);
+    await expect(
+      listSessionPresentUserIds('session-2', { now: 35_000, redis }),
+    ).resolves.toEqual(['user-1']);
+    await expect(
+      listSessionPresentUserIds('missing', { now: 35_000, redis }),
+    ).resolves.toEqual([]);
   });
 
   it('activates presence and expires it after the lease deadline', async () => {

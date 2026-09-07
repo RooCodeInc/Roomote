@@ -39,6 +39,7 @@ import {
   type SlackMentionScope,
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
+import { SessionViewers } from '@/components/sessions/SessionViewers';
 import {
   SessionPromptInput,
   type SessionPromptSubmission,
@@ -739,24 +740,27 @@ export function FastSessionTranscript({
       <SlackMentionProvider scope={slackMentionScope}>
         <WorkspaceHeader
           className="py-3.25"
-          contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-col !items-stretch !gap-1`}
+          contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-row !flex-nowrap`}
+          actions={<SessionViewers sessionId={sessionId} />}
         >
-          <h1 className={`ph-no-capture ${SESSION_HEADER_TITLE_CLASS_NAME}`}>
-            {title ?? fallbackTitle}
-          </h1>
-          {(effectiveSessionModel || headerExtras) && (
-            <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-              {effectiveSessionModel ? (
-                <ModelBadge
-                  model={effectiveSessionModel}
-                  displayName={getTaskModelDisplayName(effectiveSessionModel)}
-                  showIcon={false}
-                  iconClassName="text-muted-foreground"
-                />
-              ) : null}
-              {headerExtras}
-            </div>
-          )}
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <h1 className={`ph-no-capture ${SESSION_HEADER_TITLE_CLASS_NAME}`}>
+              {title ?? fallbackTitle}
+            </h1>
+            {(effectiveSessionModel || headerExtras) && (
+              <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                {effectiveSessionModel ? (
+                  <ModelBadge
+                    model={effectiveSessionModel}
+                    displayName={getTaskModelDisplayName(effectiveSessionModel)}
+                    showIcon={false}
+                    iconClassName="text-muted-foreground"
+                  />
+                ) : null}
+                {headerExtras}
+              </div>
+            )}
+          </div>
         </WorkspaceHeader>
         <Conversation className="min-h-0 flex-1" initial="instant">
           <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4 pt-0">

@@ -58,15 +58,18 @@ vi.mock('@/components/layout', () => ({
   WorkspaceHeader: ({
     children,
     contentClassName,
+    actions,
   }: {
     children: ReactNode;
     contentClassName?: string;
+    actions?: ReactNode;
   }) => (
     <header
       data-testid="workspace-header"
       data-content-class-name={contentClassName}
     >
       {children}
+      {actions}
     </header>
   ),
   WorkspaceSurface: ({ children }: { children: ReactNode }) => (
@@ -87,6 +90,11 @@ vi.mock('./SessionWorkspace', () => ({
 }));
 vi.mock('./SessionReadTracker', () => ({
   SessionReadTracker: () => null,
+}));
+vi.mock('@/components/sessions/SessionViewers', () => ({
+  SessionViewers: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid="session-viewers" data-session-id={sessionId} />
+  ),
 }));
 
 import SessionDetailPage, { generateMetadata } from './page';
@@ -390,8 +398,9 @@ describe('Session detail page', () => {
     expect(html).toContain(
       'Task-only session with a title that wraps on narrow screens',
     );
+    expect(html).toContain('data-testid="session-viewers"');
     expect(html).toContain(
-      'data-content-class-name="flex-row flex-wrap items-center gap-2 pr-12 @[600px]:gap-3 @[600px]:pr-4"',
+      'data-session-id="6a1f8f1e-0000-4000-8000-000000000004"',
     );
     expect(html).toContain(
       'class="min-w-0 max-w-full flex-[0_1_auto] cursor-default break-words text-sm font-medium @[600px]:truncate"',
