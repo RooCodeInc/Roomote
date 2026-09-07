@@ -112,6 +112,9 @@ export async function POST(request: NextRequest) {
       session,
     );
     if (rotation.status !== 'ok') return oauthError('invalid_grant');
+    // Only a successful, bound refresh counts as client activity. Reuse the
+    // atomic admission logic without extending the refresh session's lifetime.
+    await promoteRemoteMcpOAuthClient(session.clientId, session.userId);
     return tokenResponse(accessToken, rotation.refreshToken);
   }
 

@@ -3,8 +3,10 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { getRedis } from '@roomote/redis';
 
 const PENDING_CLIENT_TTL_SECONDS = 60 * 60;
-const ACTIVE_CLIENT_TTL_SECONDS = 30 * 24 * 60 * 60;
-const REFRESH_SESSION_TTL_SECONDS = ACTIVE_CLIENT_TTL_SECONDS;
+// Client identity outlives its tokens so reauthorization can reuse registration.
+// Successful code exchanges and refreshes renew this bounded inactivity window.
+const ACTIVE_CLIENT_TTL_SECONDS = 90 * 24 * 60 * 60;
+const REFRESH_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 const AUTHORIZATION_CODE_TTL_SECONDS = 5 * 60;
 const CONSENT_TOKEN_TTL_SECONDS = 10 * 60;
 const REGISTRATION_RATE_LIMIT_WINDOW_SECONDS = 60 * 60;
