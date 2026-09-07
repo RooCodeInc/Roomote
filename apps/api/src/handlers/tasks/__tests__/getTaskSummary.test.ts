@@ -9,6 +9,7 @@ const {
   andMock,
   eqMock,
   mockEnvironmentFindFirst,
+  mockMessageFindFirst,
   mockGetLatestTaskRunsByTaskIds,
   mockListArtifactsByTask,
   mockSelect,
@@ -20,6 +21,7 @@ const {
   andMock: vi.fn((...args) => ({ type: 'and', args })),
   eqMock: vi.fn((...args) => ({ type: 'eq', args })),
   mockEnvironmentFindFirst: vi.fn(),
+  mockMessageFindFirst: vi.fn(),
   mockGetLatestTaskRunsByTaskIds: vi.fn(),
   mockListArtifactsByTask: vi.fn(),
   mockSelect: vi.fn(),
@@ -57,12 +59,15 @@ vi.mock('@roomote/env', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   and: andMock,
+  desc: vi.fn((column) => ({ desc: column })),
+  sql: vi.fn((strings, ...values) => ({ strings: [...strings], values })),
   db: {
     select: mockSelect,
     query: {
       environments: {
         findFirst: mockEnvironmentFindFirst,
       },
+      taskMessages: { findFirst: mockMessageFindFirst },
     },
   },
   environments: {
@@ -70,6 +75,15 @@ vi.mock('@roomote/db/server', () => ({
   },
   eq: eqMock,
   tasks: { id: 'tasks.id', orgId: 'tasks.orgId' },
+  taskMessages: {
+    taskId: 'taskMessages.taskId',
+    protocol: 'taskMessages.protocol',
+    eventType: 'taskMessages.eventType',
+    metadata: 'taskMessages.metadata',
+    ts: 'taskMessages.ts',
+    createdAt: 'taskMessages.createdAt',
+    id: 'taskMessages.id',
+  },
 }));
 
 function createApp(authContext?: AuthTokenContext) {
@@ -138,6 +152,7 @@ describe('getTaskSummary', () => {
       name: 'Onboarding Sandbox',
     });
     mockListArtifactsByTask.mockResolvedValue([]);
+    mockMessageFindFirst.mockResolvedValue(undefined);
   });
 
   it('returns the latest task run error in the summary payload', async () => {
@@ -151,7 +166,74 @@ describe('getTaskSummary', () => {
       taskRunStatus: 'failed',
       taskRunError: 'Sandbox startup timed out',
       environmentSetupState: 'failed',
+      summary: null,
     });
+  });
+
+  it('includes the stored assistant narrative, with secrets redacted, in the result', async () => {
+    mockMessageFindFirst.mockResolvedValueOnce({
+      eventType: 'roomote_runtime.assistant_message',
+      contentBlocks: [
+        {
+          type: 'text',
+          text: 'Fixed the retry race.\nTests pass. token=secret-value',
+        },
+      ],
+      metadata: null,
+    });
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/task-1/summary',
+    );
+    const body = await response.json();
+    expect(body.summary).toContain('Fixed the retry race.\nTests pass.');
+    expect(body.summary).not.toContain('secret-value');
+    expect(mockMessageFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          type: 'and',
+          args: expect.arrayContaining([
+            { type: 'eq', args: ['taskMessages.taskId', 'task-1'] },
+            {
+              type: 'eq',
+              args: [
+                'taskMessages.eventType',
+                'roomote_runtime.assistant_message',
+              ],
+            },
+            {
+              strings: [
+                'coalesce(',
+                " ->> 'visibleInTranscript', 'true') <> 'false'",
+              ],
+              values: ['taskMessages.metadata'],
+            },
+          ]),
+        },
+        orderBy: [
+          { desc: 'taskMessages.ts' },
+          { desc: 'taskMessages.createdAt' },
+          { desc: 'taskMessages.id' },
+        ],
+      }),
+    );
+  });
+
+  it.each([
+    {
+      contentBlocks: [{ type: 'text', text: 'private narrative' }],
+      metadata: { visibleInTranscript: false },
+    },
+    { contentBlocks: [{ type: 'text', text: '  ' }], metadata: null },
+    { contentBlocks: [], metadata: null },
+  ])('returns null for hidden or missing narrative', async (message) => {
+    mockMessageFindFirst.mockResolvedValueOnce({
+      eventType: 'roomote_runtime.assistant_message',
+      ...message,
+    });
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/task-1/summary',
+    );
+    await expect(response.json()).resolves.toMatchObject({ summary: null });
   });
 
   it('adds the hidden-task-history condition to the summary query', async () => {
@@ -222,6 +304,7 @@ describe('getTaskSummary', () => {
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: 'Task not found' });
     expect(mockListArtifactsByTask).not.toHaveBeenCalled();
+    expect(mockMessageFindFirst).not.toHaveBeenCalled();
   });
 
   it('includes the linked environment id and name from the latest task run payload', async () => {

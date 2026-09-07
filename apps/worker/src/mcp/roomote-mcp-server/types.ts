@@ -57,6 +57,7 @@ export interface TaskSearchResponse {
 export interface TaskSummaryResponse {
   id: string;
   title: string | null;
+  summary?: string | null;
   mode: string | null;
   completed: boolean;
   repositoryName: string | null;

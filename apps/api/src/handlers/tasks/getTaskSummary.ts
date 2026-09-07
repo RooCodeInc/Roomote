@@ -1,7 +1,23 @@
 import type { Context } from 'hono';
 
-import { and, db, environments, eq, tasks } from '@roomote/db/server';
-import { getLinkedEnvironmentIdFromPayload } from '@roomote/types';
+import {
+  and,
+  db,
+  desc,
+  environments,
+  eq,
+  sql,
+  taskMessages,
+  tasks,
+} from '@roomote/db/server';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  getLinkedEnvironmentIdFromPayload,
+  getTextFromContentBlocks,
+  resolveAcpTranscriptVisibility,
+} from '@roomote/types';
+import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { Env } from '@roomote/env';
 
 import type { Variables } from '../../types';
@@ -58,15 +74,39 @@ export async function getTaskSummary(
     const linkedEnvironmentId = getLinkedEnvironmentIdFromPayload(
       latestRun?.payload,
     );
-    const [linkedEnvironment, artifacts] = await Promise.all([
-      linkedEnvironmentId
-        ? db.query.environments.findFirst({
-            where: eq(environments.id, linkedEnvironmentId),
-            columns: { id: true, name: true },
-          })
-        : null,
-      listArtifactsByTask({ taskId: task.id, auth: {} }),
-    ]);
+    const [linkedEnvironment, artifacts, latestAssistantMessage] =
+      await Promise.all([
+        linkedEnvironmentId
+          ? db.query.environments.findFirst({
+              where: eq(environments.id, linkedEnvironmentId),
+              columns: { id: true, name: true },
+            })
+          : null,
+        listArtifactsByTask({ taskId: task.id, auth: {} }),
+        db.query.taskMessages.findFirst({
+          where: and(
+            eq(taskMessages.taskId, task.id),
+            eq(taskMessages.protocol, ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL),
+            eq(
+              taskMessages.eventType,
+              ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+            ),
+            sql`coalesce(${taskMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+          ),
+          orderBy: [
+            desc(taskMessages.ts),
+            desc(taskMessages.createdAt),
+            desc(taskMessages.id),
+          ],
+          columns: { eventType: true, contentBlocks: true, metadata: true },
+        }),
+      ]);
+    // Capture the last visible agent narrative, not a newly generated summary.
+    const summary =
+      latestAssistantMessage &&
+      resolveAcpTranscriptVisibility(latestAssistantMessage)
+        ? getTextFromContentBlocks(latestAssistantMessage.contentBlocks)?.trim()
+        : null;
     const imageArtifacts = artifacts
       .filter((artifact) => artifact.contentType.startsWith('image/'))
       .map((artifact) => ({
@@ -85,6 +125,7 @@ export async function getTaskSummary(
     return c.json({
       id: task.id,
       title: task.title,
+      summary: summary ? redactSecrets(summary) : null,
       mode: task.mode,
       completed: task.state === 'completed',
       state: task.state,

@@ -16,6 +16,7 @@ describe('handleGetTaskSummary', () => {
     vi.mocked(tasksApiClient.getTaskSummary).mockResolvedValueOnce({
       id: 'task-1',
       title: 'Fix bug',
+      summary: 'Fixed the retry race.\nRegression tests pass.',
       mode: 'code',
       completed: false,
       repositoryName: 'owner/repo',
@@ -38,6 +39,9 @@ describe('handleGetTaskSummary', () => {
     expect(text).toContain('Mode: code');
     expect(text).toContain('Harness: OpenCode');
     expect(text).toContain('Repository: owner/repo');
+    expect(text).toContain(
+      'Summary: Fixed the retry race.\nRegression tests pass.',
+    );
     expect(text).not.toContain('Task Run Status:');
     expect(text).not.toContain('Task Run ID:');
     expect(text).not.toContain('Model:');
@@ -69,6 +73,7 @@ describe('handleGetTaskSummary', () => {
       'Linked Environment: Onboarding Sandbox',
     );
     expect(result.content[0]?.text).toContain('Linked Environment ID: env-123');
+    expect(result.content[0]?.text).not.toContain('Summary:');
   });
 
   it('surfaces stable image artifact IDs and viewer links', async () => {
